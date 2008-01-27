@@ -1,0 +1,9 @@
+
+Docs:
+    http://www.oracle.com/pls/db102/homepage
+
+
+Manually rollback an in-dispute transaction:
+    select local_tran_id, state from DBA_2PC_PENDING;
+    rollback force '$local_tran_id';
+

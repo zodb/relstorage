@@ -1,0 +1,75 @@
+
+relstorage 0.9
+
+- Renamed to reflect expanding database support.
+
+- Support for Oracle added.
+
+- Major overhaul with many scalability and reliability improvements,
+  particularly in the area of packing.
+
+- Moved to svn.zope.org and switched to ZPL 2.1 (required for projects
+  on svn.zope.org.)
+
+
+PGStorage 0.4
+
+- Began using the PostgreSQL LISTEN and NOTIFY statements as a shortcut
+  for invalidation polling.
+
+- Removed the commit_order code.  The commit_order idea was intended to
+  allow concurrent commits, but that idea is a little too ambitious while
+  other more important ideas are being tested.  Something like it may
+  come later.
+
+- Improved connection management: only one database connection is
+  held continuously open per storage instance.
+
+- Reconnect to the database automatically.
+
+- Removed test mode.
+
+- Switched from using a ZODB.Connection subclass to a ZODB patch.  The
+  Connection class changes in subtle ways too often to subclass reliably;
+  a patch is much safer.
+
+- PostgreSQL 8.1 is now a dependency because PGStorage uses two phase commit.
+
+- Fixed an undo bug.  Symptom: attempting to examine the undo log revealed
+  broken pickles.  Cause: the extension field was not being wrapped in
+  psycopg2.Binary upon insert.  Solution: used psycopg2.Binary.
+  Unfortunately, this doesn't fix existing transactions people have
+  committed.  If anyone has any data to keep, fixing the old transactions
+  should be easy.
+
+- Moved from a private CVS repository to Sourceforge.
+  See http://pgstorage.sourceforge.net .  Also switched to the MIT license.
+
+- David Pratt added a basic getSize() implementation so that the Zope
+  management interface displays an estimate of the size of the database.
+
+- Turned PGStorage into a top-level package.  Python generally makes
+  top-level packages easier to install.
+
+
+PGStorage 0.3
+
+- Made compatible with Zope 3, although an undo bug apparently remains.
+
+
+PGStorage 0.2
+
+- Fixed concurrent commits, which were generating deadlocks.  Fixed by
+  adding a special table, "commit_lock", which is used for
+  synchronizing increments of commit_seq (but only at final commit.)
+  If you are upgrading from version 0.1, you need to change your
+  database using the 'psql' prompt:
+
+    create table commit_lock ();
+
+- Added speed tests and an OpenDocument spreadsheet comparing
+  FileStorage / ZEO with PGStorage.  PGStorage wins at reading objects
+  and writing a lot of small transactions, while FileStorage / ZEO
+  wins at writing big transactions.  Interestingly, they tie when
+  writing a RAM disk.
+

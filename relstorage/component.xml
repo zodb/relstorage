@@ -1,0 +1,64 @@
+<?xml version="1.0"?>
+
+<!-- RelStorage configuration via ZConfig -->
+
+<component prefix="relstorage.config">
+
+  <import package="ZODB"/>
+  <abstracttype name="relstorage.adapter"/>
+
+  <sectiontype name="relstorage" implements="ZODB.storage"
+      datatype=".RelStorageFactory">
+    <section type="relstorage.adapter" name="*" attribute="adapter"/>
+    <key name="name" default="RelStorage"/>
+    <key name="create" datatype="boolean" default="true">
+      <description>
+        Flag that indicates whether the storage should be initialized if
+        it does not already exist.
+      </description>
+    </key>
+    <key name="read-only" datatype="boolean" default="false">
+      <description>
+        If true, only reads may be executed against the storage.  Note
+        that the "pack" operation is not considered a write operation
+        and is still allowed on a read-only filestorage.
+      </description>
+    </key>
+  </sectiontype>
+
+  <sectiontype name="postgresql" implements="relstorage.adapter"
+    datatype=".PostgreSQLAdapterFactory">
+    <key name="dsn" datatype="string" required="no" default="">
+      <description>
+        The PostgreSQL data source name.  For example:
+
+        dsn dbname='template1' user='user' host='localhost' password='pass'
+
+        If dsn is omitted, the adapter will connect to a local database with
+        no password.  Both the user and database name will match the
+        name of the owner of the current process.
+      </description>
+    </key>
+  </sectiontype>
+
+  <sectiontype name="oracle" implements="relstorage.adapter"
+    datatype=".OracleAdapterFactory">
+    <key name="user" datatype="string" required="yes">
+      <description>
+        The Oracle account name
+      </description>
+    </key>
+    <key name="password" datatype="string" required="yes">
+      <description>
+        The Oracle account password
+      </description>
+    </key>
+    <key name="dsn" datatype="string" required="yes">
+      <description>
+        The Oracle data source name.  The Oracle client library will
+        normally expect to find the DSN in /etc/oratab.
+      </description>
+    </key>
+  </sectiontype>
+
+</component>

@@ -1,0 +1,804 @@
+##############################################################################
+#
+# Copyright (c) 2008 Zope Corporation and Contributors.
+# All Rights Reserved.
+#
+# This software is subject to the provisions of the Zope Public License,
+# Version 2.1 (ZPL).  A copy of the ZPL should accompany this distribution.
+# THIS SOFTWARE IS PROVIDED "AS IS" AND ANY AND ALL EXPRESS OR IMPLIED
+# WARRANTIES ARE DISCLAIMED, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+# WARRANTIES OF TITLE, MERCHANTABILITY, AGAINST INFRINGEMENT, AND FITNESS
+# FOR A PARTICULAR PURPOSE.
+#
+##############################################################################
+"""The core of RelStorage, a ZODB storage for relational databases.
+
+Stores pickles in the database.
+"""
+
+import base64
+import cPickle
+import logging
+import md5
+import os
+import time
+import weakref
+from ZODB.utils import p64, u64, z64
+from ZODB.BaseStorage import BaseStorage
+from ZODB import ConflictResolution, POSException
+from persistent.TimeStamp import TimeStamp
+
+from autotemp import AutoTemporaryFile
+
+log = logging.getLogger("relstorage")
+
+# Set the RELSTORAGE_ABORT_EARLY environment variable when debugging
+# a failure revealed by the ZODB test suite.  The test suite often fails
+# to call tpc_abort in the event of an error, leading to deadlocks.
+# The variable causes RelStorage to abort failed transactions
+# early rather than wait for an explicit abort.
+abort_early = os.environ.get('RELSTORAGE_ABORT_EARLY')
+
+
+class RelStorage(BaseStorage,
+                ConflictResolution.ConflictResolvingStorage):
+    """Storage to a relational database, based on invalidation polling"""
+
+    def __init__(self, adapter, name='RelStorage', create=True,
+            read_only=False):
+        self._adapter = adapter
+        self._name = name
+        self._is_read_only = read_only
+
+        # load_conn and load_cursor are always open
+        self._load_conn = None
+        self._load_cursor = None
+        self._load_started = False
+        self._open_load_connection()
+        # store_conn and store_cursor are open only during commit
+        self._store_conn = None
+        self._store_cursor = None
+
+        if create:
+            self._adapter.prepare_schema()
+
+        BaseStorage.__init__(self, name)
+
+        self._tid = None
+        self._ltid = None
+
+        # _tbuf is a temporary file that contains pickles of data to be
+        # committed.  _pickler writes pickles to that file.  _stored_oids
+        # is a list of integer OIDs to be stored.
+        self._tbuf = None
+        self._pickler = None
+        self._stored_oids = None
+
+        # _prepared_txn is the name of the transaction to commit in the
+        # second phase.
+        self._prepared_txn = None
+
+        # _instances is a list of weak references to storage instances bound
+        # to the same database.
+        self._instances = []
+
+        # _closed is True after self.close() is called.  Since close()
+        # can be called from another thread, access to self._closed should
+        # be inside a _lock_acquire()/_lock_release() block.
+        self._closed = False
+
+    def _open_load_connection(self):
+        """Open the load connection to the database.  Return nothing."""
+        conn, cursor = self._adapter.open_for_load()
+        self._drop_load_connection()
+        self._load_conn, self._load_cursor = conn, cursor
+        self._load_started = True
+
+    def _drop_load_connection(self):
+        conn, cursor = self._load_conn, self._load_cursor
+        self._load_conn, self._load_cursor = None, None
+        self._adapter.close(conn, cursor)
+
+    def _drop_store_connection(self):
+        conn, cursor = self._store_conn, self._store_cursor
+        self._store_conn, self._store_cursor = None, None
+        self._adapter.close(conn, cursor)
+
+    def _rollback_load_connection(self):
+        if self._load_conn is not None:
+            self._load_started = False
+            self._load_conn.rollback()
+
+    def _start_load(self):
+        if self._load_cursor is None:
+            self._open_load_connection()
+        else:
+            self._adapter.restart_load(self._load_cursor)
+            self._load_started = True
+
+    def _zap(self):
+        """Clear all objects out of the database.
+
+        Used by the test suite.
+        """
+        self._adapter.zap()
+        self._rollback_load_connection()
+
+    def close(self):
+        """Close the connections to the database."""
+        self._lock_acquire()
+        try:
+            self._closed = True
+            self._drop_load_connection()
+            self._drop_store_connection()
+            for wref in self._instances:
+                instance = wref()
+                if instance is not None:
+                    instance.close()
+        finally:
+            self._lock_release()
+
+    def bind_connection(self, zodb_conn):
+        """Get a connection-bound storage instance.
+
+        Connections have their own storage instances so that
+        the database can provide the MVCC semantics rather than ZODB.
+        """
+        res = BoundRelStorage(self, zodb_conn)
+        self._instances.append(weakref.ref(res))
+        return res
+
+    def connection_closing(self):
+        """Release resources."""
+        self._rollback_load_connection()
+
+    def __len__(self):
+        return self._adapter.get_object_count()
+
+    def getSize(self):
+        """Return database size in bytes"""
+        return self._adapter.get_db_size()
+
+    def load(self, oid, version):
+        self._lock_acquire()
+        try:
+            if not self._load_started:
+                self._start_load()
+            cursor = self._load_cursor
+            state, tid_int = self._adapter.load_current(cursor, u64(oid))
+        finally:
+            self._lock_release()
+        if tid_int is not None:
+            if state:
+                state = str(state)
+            if not state:
+                # This can happen if something attempts to load
+                # an object whose creation has been undone.
+                raise KeyError(oid)
+            return state, p64(tid_int)
+        else:
+            raise KeyError(oid)
+
+    def loadEx(self, oid, version):
+        # Since we don't support versions, just tack the empty version
+        # string onto load's result.
+        return self.load(oid, version) + ("",)
+
+    def loadSerial(self, oid, serial):
+        """Load a specific revision of an object"""
+        self._lock_acquire()
+        try:
+            if self._store_cursor is not None:
+                # Allow loading data from later transactions
+                # for conflict resolution.
+                cursor = self._store_cursor
+            else:
+                if not self._load_started:
+                    self._start_load()
+                cursor = self._load_cursor
+            state = self._adapter.load_revision(cursor, u64(oid), u64(serial))
+            if state is not None:
+                state = str(state)
+                if not state:
+                    raise POSKeyError(oid)
+                return state
+            else:
+                raise KeyError(oid)
+        finally:
+            self._lock_release()
+
+    def loadBefore(self, oid, tid):
+        """Return the most recent revision of oid before tid committed."""
+        oid_int = u64(oid)
+
+        self._lock_acquire()
+        try:
+            if self._store_cursor is not None:
+                # Allow loading data from later transactions
+                # for conflict resolution.
+                cursor = self._store_cursor
+            else:
+                if not self._load_started:
+                    self._start_load()
+                cursor = self._load_cursor
+            if not self._adapter.exists(cursor, u64(oid)):
+                raise KeyError(oid)
+
+            state, start_tid = self._adapter.load_before(
+                cursor, oid_int, u64(tid))
+            if start_tid is not None:
+                end_int = self._adapter.get_object_tid_after(
+                    cursor, oid_int, start_tid)
+                if end_int is not None:
+                    end = p64(end_int)
+                else:
+                    end = None
+                if state is not None:
+                    state = str(state)
+                return state, p64(start_tid), end
+            else:
+                return None
+        finally:
+            self._lock_release()
+
+
+    def store(self, oid, serial, data, version, transaction):
+        if self._is_read_only:
+            raise POSException.ReadOnlyError()
+        if transaction is not self._transaction:
+            raise POSException.StorageTransactionError(self, transaction)
+        if version:
+            raise POSException.Unsupported("Versions aren't supported")
+
+        # If self._prepared_txn is not None, that means something is
+        # attempting to store objects after the vote phase has finished.
+        # That should not happen, should it?
+        assert self._prepared_txn is None
+        md5sum = md5.new(data).hexdigest()
+
+        self._lock_acquire()
+        try:
+            # buffer the stores
+            if self._tbuf is None:
+                self._tbuf = AutoTemporaryFile()
+                self._pickler = cPickle.Pickler(
+                    self._tbuf, cPickle.HIGHEST_PROTOCOL)
+                self._stored_oids = []
+
+            self._pickler.dump((oid, serial, md5sum, data))
+            self._stored_oids.append(u64(oid))
+            return None
+        finally:
+            self._lock_release()
+
+    def tpc_begin(self, transaction, tid=None, status=' '):
+        if self._is_read_only:
+            raise POSException.ReadOnlyError()
+        self._lock_acquire()
+        try:
+            if self._transaction is transaction:
+                return
+            self._lock_release()
+            self._commit_lock_acquire()
+            self._lock_acquire()
+            self._transaction = transaction
+            self._clear_temp()
+
+            user = transaction.user
+            desc = transaction.description
+            ext = transaction._extension
+            if ext:
+                ext = cPickle.dumps(ext, 1)
+            else:
+                ext = ""
+            self._ude = user, desc, ext
+            self._tstatus = status
+
+            if tid is not None:
+                # get the commit lock and add the transaction now
+                adapter = self._adapter
+                conn, cursor = adapter.open_for_commit()
+                self._store_conn, self._store_cursor = conn, cursor
+                tid_int = u64(tid)
+                try:
+                    adapter.add_transaction(cursor, tid_int, user, desc, ext)
+                except:
+                    self._drop_store_connection()
+                    raise
+            # else choose the tid later
+            self._tid = tid
+
+        finally:
+            self._lock_release()
+
+    def _prepare_tid(self):
+        """Choose a tid for the current transaction.
+
+        This should be done as late in the commit as possible, since
+        it must hold an exclusive commit lock.
+        """
+        if self._tid is not None:
+            return
+        if self._transaction is None:
+            raise POSException.StorageError("No transaction in progress")
+
+        adapter = self._adapter
+        conn, cursor = adapter.open_for_commit()
+        self._store_conn, self._store_cursor = conn, cursor
+        user, desc, ext = self._ude
+
+        attempt = 1
+        while True:
+            try:
+                # Choose a transaction ID.
+                # Base the transaction ID on the database time,
+                # while ensuring that the tid of this transaction
+                # is greater than any existing tid.
+                last_tid, now = adapter.get_tid_and_time(cursor)
+                stamp = TimeStamp(*(time.gmtime(now)[:5] + (now % 60,)))
+                stamp = stamp.laterThan(TimeStamp(p64(last_tid)))
+                tid = repr(stamp)
+
+                tid_int = u64(tid)
+                adapter.add_transaction(cursor, tid_int, user, desc, ext)
+                self._tid = tid
+                break
+
+            except POSException.ConflictError:
+                if attempt < 3:
+                    # A concurrent transaction claimed the tid.
+                    # Rollback and try again.
+                    adapter.restart_commit(cursor)
+                    attempt += 1
+                else:
+                    self._drop_store_connection()
+                    raise
+            except:
+                self._drop_store_connection()
+                raise
+
+
+    def _clear_temp(self):
+        # It is assumed that self._lock_acquire was called before this
+        # method was called.
+        self._prepared_txn = None
+        tbuf = self._tbuf
+        if tbuf is not None:
+            self._tbuf = None
+            self._pickler = None
+            self._stored_oids = None
+            tbuf.close()
+
+
+    def _send_stored(self):
+        """Send the buffered pickles to the database.
+
+        Returns a list of (oid, tid) to be received by
+        Connection._handle_serial().
+        """
+        cursor = self._store_cursor
+        adapter = self._adapter
+        tid_int = u64(self._tid)
+        self._pickler = None  # Don't allow any more store operations
+        self._tbuf.seek(0)
+        unpickler = cPickle.Unpickler(self._tbuf)
+
+        serials = []  # [(oid, serial)]
+        prev_tids = adapter.get_object_tids(cursor, self._stored_oids)
+
+        while True:
+            try:
+                oid, serial, md5sum, data = unpickler.load()
+            except EOFError:
+                break
+            oid_int = u64(oid)
+            if not serial:
+                serial = z64
+
+            prev_tid_int = prev_tids.get(oid_int)
+            if prev_tid_int is None:
+                prev_tid_int = 0
+                prev_tid = z64
+            else:
+                prev_tid = p64(prev_tid_int)
+                if prev_tid != serial:
+                    # conflict detected
+                    rdata = self.tryToResolveConflict(
+                        oid, prev_tid, serial, data)
+                    if rdata is None:
+                        raise POSException.ConflictError(
+                            oid=oid, serials=(prev_tid, serial), data=data)
+                    else:
+                        data = rdata
+                        md5sum = md5.new(data).hexdigest()
+
+            self._adapter.store(
+                cursor, oid_int, tid_int, prev_tid_int, md5sum, data)
+
+            if prev_tid and serial != prev_tid:
+                serials.append((oid, ConflictResolution.ResolvedSerial))
+            else:
+                serials.append((oid, self._tid))
+
+        return serials
+
+
+    def _vote(self):
+        """Prepare the transaction for final commit."""
+        # This method initiates a two-phase commit process,
+        # saving the name of the prepared transaction in self._prepared_txn.
+
+        # It is assumed that self._lock_acquire was called before this
+        # method was called.
+
+        if self._prepared_txn is not None:
+            # the vote phase has already completed
+            return
+
+        self._prepare_tid()
+        tid_int = u64(self._tid)
+        cursor = self._store_cursor
+        assert cursor is not None
+
+        if self._tbuf is not None:
+            serials = self._send_stored()
+        else:
+            serials = []
+
+        self._adapter.update_current(cursor, tid_int)
+        self._prepared_txn = self._adapter.commit_phase1(cursor, tid_int)
+        # From the point of view of self._store_cursor,
+        # it now looks like the transaction has been rolled back.
+
+        return serials
+
+
+    def tpc_vote(self, transaction):
+        self._lock_acquire()
+        try:
+            if transaction is not self._transaction:
+                return
+            try:
+                return self._vote()
+            except:
+                if abort_early:
+                    # abort early to avoid lockups while running the
+                    # somewhat brittle ZODB test suite
+                    self.tpc_abort(transaction)
+                raise
+        finally:
+            self._lock_release()
+
+
+    def _finish(self, tid, user, desc, ext):
+        """Commit the transaction."""
+        # It is assumed that self._lock_acquire was called before this
+        # method was called.
+        assert self._tid is not None
+        self._rollback_load_connection()
+        txn = self._prepared_txn
+        assert txn is not None
+        self._adapter.commit_phase2(self._store_cursor, txn)
+        self._drop_store_connection()
+        self._prepared_txn = None
+        self._ltid = self._tid
+        self._tid = None
+
+    def _abort(self):
+        # the lock is held here
+        self._rollback_load_connection()
+        if self._store_cursor is not None:
+            self._adapter.abort(self._store_cursor, self._prepared_txn)
+        self._prepared_txn = None
+        self._drop_store_connection()
+        self._tid = None
+
+    def lastTransaction(self):
+        return self._ltid
+
+    def new_oid(self):
+        if self._is_read_only:
+            raise POSException.ReadOnlyError()
+        self._lock_acquire()
+        try:
+            cursor = self._load_cursor
+            if cursor is None:
+                self._open_load_connection()
+                cursor = self._load_cursor
+            oid_int = self._adapter.new_oid(cursor)
+            return p64(oid_int)
+        finally:
+            self._lock_release()
+
+    def supportsUndo(self):
+        return True
+
+    def supportsTransactionalUndo(self):
+        return True
+
+    def undoLog(self, first=0, last=-20, filter=None):
+        if last < 0:
+            last = first - last
+
+        # use a private connection to ensure the most current results
+        adapter = self._adapter
+        conn, cursor = adapter.open()
+        try:
+            rows = adapter.iter_transactions(cursor)
+            i = 0
+            res = []
+            for tid_int, user, desc, ext in rows:
+                tid = p64(tid_int)
+                d = {'id': base64.encodestring(tid)[:-1],
+                     'time': TimeStamp(tid).timeTime(),
+                     'user_name': user,
+                     'description': desc}
+                if ext:
+                    ext = str(ext)
+                if ext:
+                    d.update(cPickle.loads(ext))
+                if filter is None or filter(d):
+                    if i >= first:
+                        res.append(d)
+                    i += 1
+                    if i >= last:
+                        break
+            return res
+
+        finally:
+            adapter.close(conn, cursor)
+
+    def history(self, oid, version=None, size=1, filter=None):
+        self._lock_acquire()
+        try:
+            cursor = self._load_cursor
+            oid_int = u64(oid)
+            try:
+                rows = self._adapter.iter_object_history(cursor, oid_int)
+            except KeyError:
+                raise KeyError(oid)
+
+            res = []
+            for tid_int, username, description, extension, length in rows:
+                tid = p64(tid_int)
+                if extension:
+                    d = loads(extension)
+                else:
+                    d = {}
+                d.update({"time": TimeStamp(tid).timeTime(),
+                          "user_name": username,
+                          "description": description,
+                          "tid": tid,
+                          "version": '',
+                          "size": length,
+                          })
+                if filter is None or filter(d):
+                    res.append(d)
+                    if size is not None and len(res) >= size:
+                        break
+            return res
+        finally:
+            self._lock_release()
+
+
+    def undo(self, transaction_id, transaction):
+        """Undo a transaction identified by transaction_id.
+
+        Do so by writing new data that reverses the action taken by
+        the transaction.
+        """
+
+        if self._is_read_only:
+            raise POSException.ReadOnlyError()
+        if transaction is not self._transaction:
+            raise POSException.StorageTransactionError(self, transaction)
+
+        undo_tid = base64.decodestring(transaction_id + '\n')
+        assert len(undo_tid) == 8
+        undo_tid_int = u64(undo_tid)
+
+        self._lock_acquire()
+        try:
+            self._prepare_tid()
+            self_tid_int = u64(self._tid)
+            cursor = self._store_cursor
+            assert cursor is not None
+            adapter = self._adapter
+
+            adapter.verify_undoable(cursor, undo_tid_int)
+            oid_ints = adapter.undo(cursor, undo_tid_int, self_tid_int)
+            oids = [p64(oid_int) for oid_int in oid_ints]
+
+            # Update the current object pointers immediately, so that
+            # subsequent undo operations within this transaction will see
+            # the new current objects.
+            adapter.update_current(cursor, self_tid_int)
+
+            return self._tid, oids
+
+        finally:
+            self._lock_release()
+
+
+    def pack(self, t, referencesf):
+        if self._is_read_only:
+            raise POSException.ReadOnlyError()
+
+        pack_point = repr(TimeStamp(*time.gmtime(t)[:5]+(t%60,)))
+        pack_point_int = u64(pack_point)
+
+        def get_references(state):
+            """Return the set of OIDs the given state refers to."""
+            refs = set()
+            if state:
+                for oid in referencesf(str(state)):
+                    refs.add(u64(oid))
+            return refs
+
+        # Use a private connection (lock_conn and lock_cursor) to
+        # hold the pack lock, while using a second private connection
+        # (conn and cursor) to decide exactly what to pack.
+        # Close the second connection.  Then, with the lock still held,
+        # perform the pack in a third connection opened by the adapter.
+        # This structure is designed to maximize the scalability
+        # of packing and minimize conflicts with concurrent writes.
+        # A consequence of this structure is that the adapter must
+        # not choke on transactions that may have been added between
+        # pre_pack and pack.
+        adapter = self._adapter
+        lock_conn, lock_cursor = adapter.open()
+        try:
+            adapter.hold_pack_lock(lock_cursor)
+
+            conn, cursor = adapter.open()
+            try:
+                try:
+                    # Find the latest commit before or at the pack time.
+                    tid_int = adapter.choose_pack_transaction(
+                        cursor, pack_point_int)
+                    if tid_int is None:
+                        # Nothing needs to be packed.
+                        # TODO: log the fact that nothing needs to be packed.
+                        return
+
+                    # In pre_pack, the adapter fills tables with information
+                    # about what to pack.  The adapter should not actually
+                    # pack anything yet.
+                    adapter.pre_pack(cursor, tid_int, get_references)
+                except:
+                    conn.rollback()
+                    raise
+                else:
+                    conn.commit()
+            finally:
+                adapter.close(conn, cursor)
+
+            # Now pack.  The adapter makes its own connection just for the
+            # pack operation, possibly using a special transaction mode
+            # and connection flags.
+            adapter.pack(tid_int)
+            self._after_pack()
+
+        finally:
+            lock_conn.rollback()
+            adapter.close(lock_conn, lock_cursor)
+
+
+    def _after_pack(self):
+        """Reset the transaction state after packing."""
+        # The tests depend on this.
+        self._rollback_load_connection()
+
+
+class BoundRelStorage(RelStorage):
+    """Storage to a database, bound to a particular ZODB.Connection."""
+
+    # The propagate_invalidations flag, set to a false value, tells
+    # the Connection not to propagate object invalidations across
+    # connections, since that ZODB feature is detrimental when the
+    # storage provides its own MVCC.
+    propagate_invalidations = False
+
+    def __init__(self, parent, zodb_conn):
+        # self._conn = conn
+        RelStorage.__init__(self, adapter=parent._adapter, name=parent._name,
+            read_only=parent._is_read_only, create=False)
+        # _prev_polled_tid contains the tid at the previous poll
+        self._prev_polled_tid = None
+        self._showed_disconnect = False
+
+    def poll_invalidations(self, retry=True):
+        """Looks for OIDs of objects that changed since _prev_polled_tid
+
+        Returns {oid: 1}, or None if all objects need to be invalidated
+        because prev_polled_tid is not in the database (presumably it
+        has been packed).
+        """
+        self._lock_acquire()
+        try:
+            if self._closed:
+                return {}
+            try:
+                self._rollback_load_connection()
+                self._start_load()
+                conn = self._load_conn
+                cursor = self._load_cursor
+
+                # Ignore changes made by the last transaction committed
+                # by this connection.
+                ignore_tid = None
+                if self._ltid is not None:
+                    ignore_tid = u64(self._ltid)
+
+                # get a list of changed OIDs and the most recent tid
+                oid_ints, new_polled_tid = self._adapter.poll_invalidations(
+                    conn, cursor, self._prev_polled_tid, ignore_tid)
+                self._prev_polled_tid = new_polled_tid
+
+                if oid_ints is None:
+                    oids = None
+                else:
+                    oids = {}
+                    for oid_int in oid_ints:
+                        oids[p64(oid_int)] = 1
+                return oids
+            except POSException.StorageError:
+                # disconnected
+                if not retry:
+                    raise
+                if not self._showed_disconnect:
+                    log.warning("Lost connection in %s", repr(self))
+                    self._showed_disconnect = True
+                self._open_load_connection()
+                log.info("Reconnected in %s", repr(self))
+                self._showed_disconnect = False
+                return self.poll_invalidations(retry=False)
+        finally:
+            self._lock_release()
+
+    def _after_pack(self):
+        # Disable transaction reset after packing.  The connection
+        # should call sync() to see the new state.
+        pass
+
+
+# very basic test... ought to be moved or deleted.
+def test():
+    import transaction
+    import pprint
+    from ZODB.DB import DB
+    from persistent.mapping import PersistentMapping
+    from relstorage.adapters.postgresql import PostgreSQLAdapter
+
+    adapter = PostgreSQLAdapter(params='dbname=relstoragetest')
+    storage = RelStorage(adapter)
+    db = DB(storage)
+
+    if True:
+        for i in range(100):
+            c = db.open()
+            c.root()['foo'] = PersistentMapping()
+            transaction.get().note('added %d' % i)
+            transaction.commit()
+            c.close()
+            print 'wrote', i
+
+        # undo 2 transactions, then redo them and undo the first again.
+        for i in range(2):
+            log = db.undoLog()
+            db.undo(log[0]['id'])
+            db.undo(log[1]['id'])
+            transaction.get().note('undone! (%d)' % i)
+            transaction.commit()
+            print 'undid', i
+
+    pprint.pprint(db.undoLog())
+    db.pack(time.time() - 0.1)
+    pprint.pprint(db.undoLog())
+    db.close()
+
+
+if __name__ == '__main__':
+    import logging
+    logging.basicConfig()
+    test()
