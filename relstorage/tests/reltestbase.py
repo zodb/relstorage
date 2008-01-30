@@ -189,6 +189,15 @@ class RelStorageTests(
         finally:
             self._storage = root_storage
 
+    def check16KObject(self):
+        # Store 16 * 1024 bytes in an object, then retrieve it
+        data = 'a 16 byte string' * 1024
+        oid = self._storage.new_oid()
+        self._dostoreNP(oid, data=data)
+        got, serialno = self._storage.load(oid, '')
+        self.assertEqual(len(got), len(data))
+        self.assertEqual(got, data)
+
     def check16MObject(self):
         # Store 16 * 1024 * 1024 bytes in an object, then retrieve it
         data = 'a 16 byte string' * (1024 * 1024)

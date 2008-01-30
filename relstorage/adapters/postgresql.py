@@ -32,8 +32,9 @@ log = logging.getLogger("relstorage.postgresql")
 class PostgreSQLAdapter(object):
     """PostgreSQL adapter for RelStorage."""
 
-    def __init__(self, dsn=''):
+    def __init__(self, dsn='', twophase=False):
         self._dsn = dsn
+        self._twophase = twophase
 
     def create_schema(self, cursor):
         """Create the database tables."""
@@ -155,8 +156,11 @@ class PostgreSQLAdapter(object):
         try:
             try:
                 cursor.execute("""
-                TRUNCATE object_refs_added, object_ref, current_object,
-                    object_state, transaction;
+                DELETE FROM object_refs_added;
+                DELETE FROM object_ref;
+                DELETE FROM current_object;
+                DELETE FROM object_state;
+                DELETE FROM transaction;
                 -- Create a special transaction to represent object creation.
                 INSERT INTO transaction (tid, username, description)
                     VALUES (0, '', '');
@@ -171,7 +175,8 @@ class PostgreSQLAdapter(object):
             self.close(conn, cursor)
 
 
-    def open(self, isolation=psycopg2.extensions.ISOLATION_LEVEL_SERIALIZABLE):
+    def open(self,
+            isolation=psycopg2.extensions.ISOLATION_LEVEL_READ_COMMITTED):
         """Open a database connection and return (conn, cursor)."""
         try:
             conn = psycopg2.connect(self._dsn)
@@ -199,8 +204,16 @@ class PostgreSQLAdapter(object):
 
         Returns (conn, cursor).
         """
-        conn, cursor = self.open()
-        cursor.execute("LISTEN invalidate")
+        conn, cursor = self.open(
+            psycopg2.extensions.ISOLATION_LEVEL_SERIALIZABLE)
+        stmt = """
+        PREPARE get_latest_tid AS
+        SELECT tid
+        FROM transaction
+        ORDER BY tid DESC
+        LIMIT 1
+        """
+        cursor.execute(stmt)
         return conn, cursor
 
     def restart_load(self, cursor):
@@ -217,10 +230,8 @@ class PostgreSQLAdapter(object):
         """Returns the approximate size of the database in bytes"""
         conn, cursor = self.open()
         try:
-            cursor.execute("SELECT SUM(relpages) FROM pg_class")
-            # A relative page on postgres is 8K
-            relpages = cursor.fetchone()[0]
-            return relpages * 8 * 1024
+            cursor.execute("SELECT pg_database_size(current_database())")
+            return cursor.fetchone()[0]
         finally:
             self.close(conn, cursor)
 
@@ -315,51 +326,69 @@ class PostgreSQLAdapter(object):
         else:
             return None
 
-    def get_object_tids(self, cursor, oids):
-        """Returns a map containing the current tid for each oid in a list.
-
-        OIDs that do not exist are not included.
-        """
-        # query in chunks to avoid running into a maximum query length
-        chunk_size = 512
-        res = {}
-        for i in xrange(0, len(oids), chunk_size):
-            chunk = oids[i : i + chunk_size]
-            oid_str = ','.join(str(oid) for oid in chunk)
-            stmt = """
-            SELECT zoid, tid FROM current_object WHERE zoid IN (%s)
-            """ % oid_str
-            cursor.execute(stmt)
-            res.update(dict(iter(cursor)))
-        return res
-
-    def open_for_commit(self):
+    def open_for_store(self):
         """Open and initialize a connection for storing objects.
 
         Returns (conn, cursor).
         """
-        # psycopg2 doesn't support prepared transactions, so
-        # tell psycopg2 to use the autocommit isolation level, but covertly
-        # switch to the serializable isolation level.
-        conn, cursor = self.open(
-            isolation=psycopg2.extensions.ISOLATION_LEVEL_AUTOCOMMIT
-            )
-        cursor.execute("""
-        BEGIN ISOLATION LEVEL SERIALIZABLE;
-        LOCK commit_lock IN EXCLUSIVE MODE
-        """)
-        return conn, cursor
+        conn, cursor = self.open()
+        try:
+            if self._twophase:
+                # PostgreSQL does not allow two phase transactions
+                # to use temporary tables. :-(
+                stmt = """
+                CREATE TABLE temp_store (
+                    zoid        BIGINT NOT NULL,
+                    prev_tid    BIGINT NOT NULL,
+                    md5         CHAR(32),
+                    state       BYTEA
+                );
+                CREATE UNIQUE INDEX temp_store_zoid ON temp_store (zoid)
+                """
+            else:
+                stmt = """
+                CREATE TEMPORARY TABLE temp_store (
+                    zoid        BIGINT NOT NULL,
+                    prev_tid    BIGINT NOT NULL,
+                    md5         CHAR(32),
+                    state       BYTEA
+                ) ON COMMIT DROP;
+                CREATE UNIQUE INDEX temp_store_zoid ON temp_store (zoid)
+                """
+            cursor.execute(stmt)
+            return conn, cursor
+        except:
+            self.close(conn, cursor)
+            raise
+
+    def store_temp(self, cursor, oid, prev_tid, md5sum, data):
+        """Store an object."""
+        stmt = """
+        INSERT INTO temp_store (zoid, prev_tid, md5, state)
+        VALUES (%s, %s, %s, decode(%s, 'base64'))
+        """
+        cursor.execute(stmt, (oid, prev_tid, md5sum, encodestring(data)))
+
+    def replace_temp(self, cursor, oid, prev_tid, md5sum, data):
+        """Replace an object in the temporary table."""
+        stmt = """
+        UPDATE temp_store SET
+            prev_tid = %s,
+            md5 = %s,
+            state = decode(%s, 'base64')
+        WHERE zoid = %s
+        """
+        cursor.execute(stmt, (prev_tid, md5sum, encodestring(data), oid))
+
+    def start_commit(self, cursor):
+        """Prepare to commit."""
+        cursor.execute("SAVEPOINT start_commit")
+        cursor.execute("LOCK TABLE commit_lock IN EXCLUSIVE MODE")
 
     def restart_commit(self, cursor):
-        """Rollback the commit and start over.
-
-        The cursor must be the type created by open_for_commit().
-        """
-        cursor.execute("""
-        ROLLBACK;
-        BEGIN ISOLATION LEVEL SERIALIZABLE;
-        LOCK commit_lock IN EXCLUSIVE MODE
-        """)
+        """Rollback the attempt to commit and start over."""
+        cursor.execute("ROLLBACK TO SAVEPOINT start_commit")
+        cursor.execute("LOCK TABLE commit_lock IN EXCLUSIVE MODE")
 
     def get_tid_and_time(self, cursor):
         """Returns the most recent tid and the current database time.
@@ -391,51 +420,66 @@ class PostgreSQLAdapter(object):
         except psycopg2.IntegrityError, e:
             raise ConflictError(e)
 
-    def store(self, cursor, oid, tid, prev_tid, md5sum, data):
-        """Store an object.  May raise ConflictError."""
+    def detect_conflict(self, cursor):
+        """Find one conflict in the data about to be committed.
+
+        If there is a conflict, returns (oid, prev_tid, attempted_prev_tid,
+        attempted_data).  If there is no conflict, returns None.
+        """
+        stmt = """
+        SELECT temp_store.zoid, current_object.tid, temp_store.prev_tid,
+            encode(temp_store.state, 'base64')
+        FROM temp_store
+            JOIN current_object ON (temp_store.zoid = current_object.zoid)
+        WHERE temp_store.prev_tid != current_object.tid
+        LIMIT 1
+        """
+        cursor.execute(stmt)
+        if cursor.rowcount:
+            oid, prev_tid, attempted_prev_tid, data = cursor.fetchone()
+            return oid, prev_tid, attempted_prev_tid, decodestring(data)
+        return None
+
+    def move_from_temp(self, cursor, tid):
+        """Moved the temporarily stored objects to permanent storage.
+
+        Returns the list of oids stored.
+        """
         stmt = """
         INSERT INTO object_state (zoid, tid, prev_tid, md5, state)
-        VALUES (%s, %s, %s, %s, decode(%s, 'base64'))
+        SELECT zoid, %s, prev_tid, md5, state
+        FROM temp_store
         """
-        try:
-            cursor.execute(stmt, (
-                oid, tid, prev_tid, md5sum, encodestring(data)))
-        except psycopg2.ProgrammingError, e:
-            # This can happen if another thread is currently packing
-            # and prev_tid refers to a transaction being packed.
-            if 'concurrent update' in e.args[0]:
-                raise ConflictError(e)
-            else:
-                raise
+        cursor.execute(stmt, (tid,))
+
+        stmt = """
+        SELECT zoid FROM temp_store
+        """
+        cursor.execute(stmt)
+        return [oid for (oid,) in cursor]
 
     def update_current(self, cursor, tid):
         """Update the current object pointers.
 
         tid is the integer tid of the transaction being committed.
         """
-        try:
-            cursor.execute("""
-            -- Insert objects created in this transaction into current_object.
-            INSERT INTO current_object (zoid, tid)
-            SELECT zoid, tid FROM object_state
-            WHERE tid = %(tid)s
-                AND prev_tid = 0;
+        cursor.execute("""
+        -- Insert objects created in this transaction into current_object.
+        INSERT INTO current_object (zoid, tid)
+        SELECT zoid, tid FROM object_state
+        WHERE tid = %(tid)s
+            AND prev_tid = 0;
 
-            -- Change existing objects.  To avoid deadlocks,
-            -- update in OID order.
-            UPDATE current_object SET tid = %(tid)s
-            WHERE zoid IN (
-                SELECT zoid FROM object_state
-                WHERE tid = %(tid)s
-                    AND prev_tid != 0
-                ORDER BY zoid
-            )
-            """, {'tid': tid})
-        except psycopg2.ProgrammingError, e:
-            if 'concurrent update' in e.args[0]:
-                raise ConflictError(e)
-            else:
-                raise
+        -- Change existing objects.  To avoid deadlocks,
+        -- update in OID order.
+        UPDATE current_object SET tid = %(tid)s
+        WHERE zoid IN (
+            SELECT zoid FROM object_state
+            WHERE tid = %(tid)s
+                AND prev_tid != 0
+            ORDER BY zoid
+        )
+        """, {'tid': tid})
 
     def commit_phase1(self, cursor, tid):
         """Begin a commit.  Returns the transaction name.
@@ -444,27 +488,33 @@ class PostgreSQLAdapter(object):
         meaning that if commit_phase2() would raise any error, the error
         should be raised in commit_phase1() instead.
         """
-        try:
+        if self._twophase:
             txn = 'T%d' % tid
-            stmt = "NOTIFY invalidate; PREPARE TRANSACTION %s"
+            stmt = """
+            DROP TABLE temp_store;
+            PREPARE TRANSACTION %s
+            """
             cursor.execute(stmt, (txn,))
+            cursor.connection.set_isolation_level(
+                psycopg2.extensions.ISOLATION_LEVEL_AUTOCOMMIT)
             return txn
-        except psycopg2.ProgrammingError, e:
-            if 'concurrent update' in e.args[0]:
-                raise ConflictError(e)
-            else:
-                raise
+        else:
+            return '-'
 
     def commit_phase2(self, cursor, txn):
         """Final transaction commit."""
-        cursor.execute('COMMIT PREPARED %s', (txn,))
+        if self._twophase:
+            cursor.execute('COMMIT PREPARED %s', (txn,))
+        else:
+            cursor.connection.commit()
 
     def abort(self, cursor, txn=None):
         """Abort the commit.  If txn is not None, phase 1 is also aborted."""
-        if txn is not None:
-            cursor.execute('ROLLBACK PREPARED %s', (txn,))
+        if self._twophase:
+            if txn is not None:
+                cursor.execute('ROLLBACK PREPARED %s', (txn,))
         else:
-            cursor.execute('ROLLBACK')
+            cursor.connection.rollback()
 
     def new_oid(self, cursor):
         """Return a new, unused OID."""
@@ -827,8 +877,7 @@ class PostgreSQLAdapter(object):
         """Pack.  Requires populated pack tables."""
 
         # Read committed mode is sufficient.
-        conn, cursor = self.open(
-            isolation=psycopg2.extensions.ISOLATION_LEVEL_READ_COMMITTED)
+        conn, cursor = self.open()
         try:
             try:
 
@@ -926,20 +975,8 @@ class PostgreSQLAdapter(object):
         if the database has disconnected.
         """
         try:
-            if prev_polled_tid is not None:
-                if not cursor.isready():
-                    # No invalidate notifications arrived.
-                    return (), prev_polled_tid
-                del conn.notifies[:]
-
             # find out the tid of the most recent transaction.
-            stmt = """
-            SELECT tid
-            FROM transaction
-            ORDER BY tid desc
-            LIMIT 1
-            """
-            cursor.execute(stmt)
+            cursor.execute("EXECUTE get_latest_tid")
             # Expect the transaction table to always have at least one row.
             assert cursor.rowcount == 1
             new_polled_tid = cursor.fetchone()[0]

@@ -14,12 +14,9 @@
 """Oracle adapter for RelStorage."""
 
 import logging
-import os
 import re
-import socket
 import thread
 import time
-import traceback
 import cx_Oracle
 from ZODB.POSException import ConflictError, StorageError, UndoError
 
@@ -29,11 +26,10 @@ log = logging.getLogger("relstorage.oracle")
 class OracleAdapter(object):
     """Oracle adapter for RelStorage."""
 
-    def __init__(self, user, password, dsn,
-            arraysize=64, max_connect_attempts=3):
+    def __init__(self, user, password, dsn, twophase=False, arraysize=64):
         self._params = (user, password, dsn)
+        self._twophase = twophase
         self._arraysize = arraysize
-        self._max_connect_attempts = max_connect_attempts
 
     def create_schema(self, cursor):
         """Create the database tables."""
@@ -76,6 +72,14 @@ class OracleAdapter(object):
             tid         NUMBER(20) NOT NULL,
             FOREIGN KEY (zoid, tid) REFERENCES object_state
         );
+
+        -- States that will soon be stored
+        CREATE GLOBAL TEMPORARY TABLE temp_store (
+            zoid        NUMBER(20) NOT NULL PRIMARY KEY,
+            prev_tid    NUMBER(20) NOT NULL,
+            md5         CHAR(32),
+            state       BLOB
+        ) ON COMMIT DELETE ROWS;
 
         -- During packing, an exclusive lock is held on pack_lock.
         CREATE TABLE pack_lock (dummy CHAR);
@@ -202,25 +206,12 @@ class OracleAdapter(object):
             self.close(conn, cursor)
 
 
-    def open(self, transaction_mode="ISOLATION LEVEL SERIALIZABLE",
+    def open(self, transaction_mode="ISOLATION LEVEL READ COMMITTED",
             twophase=False):
         """Open a database connection and return (conn, cursor)."""
         try:
-            attempt = 1
-            while True:
-                try:
-                    kw = {'twophase': twophase}  #, 'threaded': True}
-                    conn = cx_Oracle.connect(*self._params, **kw)
-                    break
-                except cx_Oracle.DatabaseError, e:
-                    log.warning("Connection failed: %s", e)
-                    attempt += 1
-                    if attempt > self._max_connect_attempts:
-                        raise
-                    else:
-                        # Pause, then try to connect again
-                        time.sleep(2**(attempt - 1))
-
+            kw = {'twophase': twophase}  #, 'threaded': True}
+            conn = cx_Oracle.connect(*self._params, **kw)
             cursor = conn.cursor()
             cursor.arraysize = self._arraysize
             if transaction_mode:
@@ -228,7 +219,7 @@ class OracleAdapter(object):
             return conn, cursor
 
         except cx_Oracle.OperationalError:
-            log.debug("Unable to connect in %s", repr(self))
+            log.error("Unable to connect to DSN %s", self._params[2])
             raise
 
     def close(self, conn, cursor):
@@ -362,48 +353,59 @@ class OracleAdapter(object):
         else:
             return None
 
-    def get_object_tids(self, cursor, oids):
-        """Returns a map containing the current tid for each oid in a list.
-
-        OIDs that do not exist are not included.
-        """
-        # query in chunks to avoid running into a maximum query length
-        chunk_size = 512
-        res = {}
-        for i in xrange(0, len(oids), chunk_size):
-            chunk = oids[i : i + chunk_size]
-            oid_str = ','.join(str(oid) for oid in chunk)
-            stmt = """
-            SELECT zoid, tid FROM current_object WHERE zoid IN (%s)
-            """ % oid_str
-            cursor.execute(stmt)
-            res.update(dict(iter(cursor)))
-        return res
-
-    def open_for_commit(self, cursor=None):
+    def open_for_store(self):
         """Open and initialize a connection for storing objects.
 
         Returns (conn, cursor).
         """
-        if cursor is None:
+        if self._twophase:
             conn, cursor = self.open(transaction_mode=None, twophase=True)
+            try:
+                stmt = """
+                SELECT SYS_CONTEXT('USERENV', 'SID') FROM DUAL
+                """
+                cursor.execute(stmt)
+                xid = str(cursor.fetchone()[0])
+                conn.begin(0, xid, '0')
+            except:
+                self.close(conn, cursor)
+                raise
         else:
-            conn = cursor.connection
-        # Use an xid that is unique to this Oracle connection, assuming
-        # the hostname is unique within the Oracle cluster.  The xid
-        # can have up to 64 bytes.
-        xid = '%s-%d-%d' % (socket.gethostname(), os.getpid(), id(conn))
-        conn.begin(0, xid, '0')
-        cursor.execute("LOCK TABLE commit_lock IN EXCLUSIVE MODE")
+            conn, cursor = self.open()
         return conn, cursor
 
-    def restart_commit(self, cursor):
-        """Rollback the commit and start over.
-
-        The cursor must be the type created by open_for_commit().
+    def store_temp(self, cursor, oid, prev_tid, md5sum, data):
+        """Store an object in the temporary table."""
+        cursor.setinputsizes(data=cx_Oracle.BLOB)
+        stmt = """
+        INSERT INTO temp_store (zoid, prev_tid, md5, state)
+        VALUES (:oid, :prev_tid, :md5sum, :data)
         """
-        cursor.connection.rollback()
-        self.open_for_commit(cursor)
+        cursor.execute(stmt, oid=oid, prev_tid=prev_tid,
+            md5sum=md5sum, data=cx_Oracle.Binary(data))
+
+    def replace_temp(self, cursor, oid, prev_tid, md5sum, data):
+        """Replace an object in the temporary table."""
+        cursor.setinputsizes(data=cx_Oracle.BLOB)
+        stmt = """
+        UPDATE temp_store SET
+            prev_tid = :prev_tid,
+            md5 = :md5sum,
+            state = :data
+        WHERE zoid = :oid
+        """
+        cursor.execute(stmt, oid=oid, prev_tid=prev_tid,
+            md5sum=md5sum, data=cx_Oracle.Binary(data))
+
+    def start_commit(self, cursor):
+        """Prepare to commit."""
+        cursor.execute("SAVEPOINT start_commit")
+        cursor.execute("LOCK TABLE commit_lock IN EXCLUSIVE MODE")
+
+    def restart_commit(self, cursor):
+        """Rollback the attempt to commit and start over."""
+        cursor.execute("ROLLBACK TO SAVEPOINT start_commit")
+        cursor.execute("LOCK TABLE commit_lock IN EXCLUSIVE MODE")
 
     def _parse_dsinterval(self, s):
         """Convert an Oracle dsinterval (as a string) to a float."""
@@ -443,54 +445,66 @@ class OracleAdapter(object):
         except cx_Oracle.IntegrityError:
             raise ConflictError
 
-    def store(self, cursor, oid, tid, prev_tid, md5sum, data):
-        """Store an object.  May raise ConflictError."""
-        try:
-            cursor.setinputsizes(data=cx_Oracle.BLOB)
-            stmt = """
-            INSERT INTO object_state (zoid, tid, prev_tid, md5, state)
-            VALUES (:oid, :tid, :prev_tid, :md5sum, :data)
-            """
-            cursor.execute(stmt, oid=oid, tid=tid, prev_tid=prev_tid,
-                md5sum=md5sum, data=cx_Oracle.Binary(data))
-        except cx_Oracle.ProgrammingError, e:
-            # This can happen if another thread is currently packing
-            # and prev_tid refers to a transaction being packed.
-            if 'concurrent' in e.args[0]:
-                raise ConflictError(e)
-            else:
-                raise
+    def detect_conflict(self, cursor):
+        """Find one conflict in the data about to be committed.
+
+        If there is a conflict, returns (oid, prev_tid, attempted_prev_tid,
+        attempted_data).  If there is no conflict, returns None.
+        """
+        stmt = """
+        SELECT temp_store.zoid, current_object.tid, temp_store.prev_tid,
+            temp_store.state
+        FROM temp_store
+            JOIN current_object ON (temp_store.zoid = current_object.zoid)
+        WHERE temp_store.prev_tid != current_object.tid
+        """
+        cursor.execute(stmt)
+        for oid, prev_tid, attempted_prev_tid, data in cursor:
+            return oid, prev_tid, attempted_prev_tid, data.read()
+        return None
+
+    def move_from_temp(self, cursor, tid):
+        """Moved the temporarily stored objects to permanent storage.
+
+        Returns the list of oids stored.
+        """
+        stmt = """
+        INSERT INTO object_state (zoid, tid, prev_tid, md5, state)
+        SELECT zoid, :tid, prev_tid, md5, state
+        FROM temp_store
+        """
+        cursor.execute(stmt, tid=tid)
+
+        stmt = """
+        SELECT zoid FROM temp_store
+        """
+        cursor.execute(stmt)
+        return [oid for (oid,) in cursor]
 
     def update_current(self, cursor, tid):
         """Update the current object pointers.
 
         tid is the integer tid of the transaction being committed.
         """
-        try:
-            # Insert objects created in this transaction into current_object.
-            stmt = """
-            INSERT INTO current_object (zoid, tid)
-            SELECT zoid, tid FROM object_state
-            WHERE tid = :1
-                AND prev_tid = 0
-            """
-            cursor.execute(stmt, (tid,))
+        # Insert objects created in this transaction into current_object.
+        stmt = """
+        INSERT INTO current_object (zoid, tid)
+        SELECT zoid, tid FROM object_state
+        WHERE tid = :1
+            AND prev_tid = 0
+        """
+        cursor.execute(stmt, (tid,))
 
-            # Change existing objects.
-            stmt = """
-            UPDATE current_object SET tid = :1
-            WHERE zoid IN (
-                SELECT zoid FROM object_state
-                WHERE tid = :1
-                    AND prev_tid != 0
-            )
-            """
-            cursor.execute(stmt, (tid,))
-        except cx_Oracle.ProgrammingError, e:
-            if 'concurrent' in e.args[0]:
-                raise ConflictError(e)
-            else:
-                raise
+        # Change existing objects.
+        stmt = """
+        UPDATE current_object SET tid = :1
+        WHERE zoid IN (
+            SELECT zoid FROM object_state
+            WHERE tid = :1
+                AND prev_tid != 0
+        )
+        """
+        cursor.execute(stmt, (tid,))
 
     def commit_phase1(self, cursor, tid):
         """Begin a commit.  Returns the transaction name.
@@ -499,14 +513,9 @@ class OracleAdapter(object):
         meaning that if commit_phase2() would raise any error, the error
         should be raised in commit_phase1() instead.
         """
-        try:
+        if self._twophase:
             cursor.connection.prepare()
-            return '-'  # the transaction name is not important
-        except cx_Oracle.ProgrammingError, e:
-            if 'concurrent' in e.args[0]:
-                raise ConflictError(e)
-            else:
-                raise
+        return '-'
 
     def commit_phase2(self, cursor, txn):
         """Final transaction commit."""
@@ -866,7 +875,7 @@ class OracleAdapter(object):
         """Pack.  Requires populated pack tables."""
 
         # Read committed mode is sufficient.
-        conn, cursor = self.open('ISOLATION LEVEL READ COMMITTED')
+        conn, cursor = self.open()
         try:
             try:
 
@@ -967,8 +976,7 @@ class OracleAdapter(object):
             # find out the tid of the most recent transaction.
             stmt = "SELECT MAX(tid) FROM transaction"
             cursor.execute(stmt)
-            rows = cursor.fetchall()
-            new_polled_tid = rows[0][0]
+            new_polled_tid = list(cursor)[0][0]
 
             if prev_polled_tid is None:
                 # This is the first time the connection has polled.

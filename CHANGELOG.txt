@@ -11,6 +11,29 @@ relstorage 0.9
 - Moved to svn.zope.org and switched to ZPL 2.1 (required for projects
   on svn.zope.org.)
 
+- Made two-phase commit optional in both Oracle and PostgreSQL.  They
+  both use commit_lock in such a way that the commit is not likely to
+  fail in the second phase.
+
+- Switched most database transaction isolation levels from serializable
+  to read committed.  It turns out that commit_lock already provides
+  the serializability guarantees we need, so it is safe to take advantage
+  of the potential speed gains.  The one major exception is the load
+  connection, which requires an unchanging view of the database.
+
+- Stored objects are now buffered in a database table rather than a file.
+
+- Stopped using the LISTEN and NOTIFY statements in PostgreSQL since
+  they are not reliable enough.
+
+- Started using a prepared statement in PostgreSQL for getting the
+  newest transaction ID quickly.
+
+- Removed the code in the Oracle adapter for retrying connection attempts.
+  (It is better to just reconfigure Oracle.)
+
+
+
 
 PGStorage 0.4
 

@@ -28,8 +28,6 @@ from ZODB.BaseStorage import BaseStorage
 from ZODB import ConflictResolution, POSException
 from persistent.TimeStamp import TimeStamp
 
-from autotemp import AutoTemporaryFile
-
 log = logging.getLogger("relstorage")
 
 # Set the RELSTORAGE_ABORT_EARLY environment variable when debugging
@@ -50,7 +48,10 @@ class RelStorage(BaseStorage,
         self._name = name
         self._is_read_only = read_only
 
-        # load_conn and load_cursor are always open
+        if create:
+            self._adapter.prepare_schema()
+
+        # load_conn and load_cursor are usually open
         self._load_conn = None
         self._load_cursor = None
         self._load_started = False
@@ -59,20 +60,10 @@ class RelStorage(BaseStorage,
         self._store_conn = None
         self._store_cursor = None
 
-        if create:
-            self._adapter.prepare_schema()
-
         BaseStorage.__init__(self, name)
 
         self._tid = None
         self._ltid = None
-
-        # _tbuf is a temporary file that contains pickles of data to be
-        # committed.  _pickler writes pickles to that file.  _stored_oids
-        # is a list of integer OIDs to be stored.
-        self._tbuf = None
-        self._pickler = None
-        self._stored_oids = None
 
         # _prepared_txn is the name of the transaction to commit in the
         # second phase.
@@ -256,20 +247,23 @@ class RelStorage(BaseStorage,
         assert self._prepared_txn is None
         md5sum = md5.new(data).hexdigest()
 
+        adapter = self._adapter
+        cursor = self._store_cursor
+        assert cursor is not None
+        oid_int = u64(oid)
+        if serial:
+            prev_tid_int = u64(serial)
+        else:
+            prev_tid_int = 0
+
         self._lock_acquire()
         try:
-            # buffer the stores
-            if self._tbuf is None:
-                self._tbuf = AutoTemporaryFile()
-                self._pickler = cPickle.Pickler(
-                    self._tbuf, cPickle.HIGHEST_PROTOCOL)
-                self._stored_oids = []
-
-            self._pickler.dump((oid, serial, md5sum, data))
-            self._stored_oids.append(u64(oid))
+            # save the data in a temporary table
+            adapter.store_temp(cursor, oid_int, prev_tid_int, md5sum, data)
             return None
         finally:
             self._lock_release()
+
 
     def tpc_begin(self, transaction, tid=None, status=' '):
         if self._is_read_only:
@@ -294,11 +288,13 @@ class RelStorage(BaseStorage,
             self._ude = user, desc, ext
             self._tstatus = status
 
+            adapter = self._adapter
+            conn, cursor = adapter.open_for_store()
+            self._store_conn, self._store_cursor = conn, cursor
+
             if tid is not None:
                 # get the commit lock and add the transaction now
-                adapter = self._adapter
-                conn, cursor = adapter.open_for_commit()
-                self._store_conn, self._store_cursor = conn, cursor
+                adapter.start_commit(cursor)
                 tid_int = u64(tid)
                 try:
                     adapter.add_transaction(cursor, tid_int, user, desc, ext)
@@ -323,12 +319,13 @@ class RelStorage(BaseStorage,
             raise POSException.StorageError("No transaction in progress")
 
         adapter = self._adapter
-        conn, cursor = adapter.open_for_commit()
-        self._store_conn, self._store_cursor = conn, cursor
+        cursor = self._store_cursor
+        adapter.start_commit(cursor)
         user, desc, ext = self._ude
 
         attempt = 1
         while True:
+            # get the commit lock
             try:
                 # Choose a transaction ID.
                 # Base the transaction ID on the database time,
@@ -362,63 +359,53 @@ class RelStorage(BaseStorage,
         # It is assumed that self._lock_acquire was called before this
         # method was called.
         self._prepared_txn = None
-        tbuf = self._tbuf
-        if tbuf is not None:
-            self._tbuf = None
-            self._pickler = None
-            self._stored_oids = None
-            tbuf.close()
 
 
-    def _send_stored(self):
-        """Send the buffered pickles to the database.
+    def _finish_store(self):
+        """Move stored objects from the temporary table to final storage.
 
         Returns a list of (oid, tid) to be received by
         Connection._handle_serial().
         """
+        assert self._tid is not None
         cursor = self._store_cursor
         adapter = self._adapter
-        tid_int = u64(self._tid)
-        self._pickler = None  # Don't allow any more store operations
-        self._tbuf.seek(0)
-        unpickler = cPickle.Unpickler(self._tbuf)
 
-        serials = []  # [(oid, serial)]
-        prev_tids = adapter.get_object_tids(cursor, self._stored_oids)
-
+        # List conflicting changes.
+        # Try to resolve the conflicts.
+        resolved = set()  # a set of OIDs
         while True:
-            try:
-                oid, serial, md5sum, data = unpickler.load()
-            except EOFError:
+            conflict = adapter.detect_conflict(cursor)
+            if conflict is None:
                 break
-            oid_int = u64(oid)
-            if not serial:
-                serial = z64
 
-            prev_tid_int = prev_tids.get(oid_int)
-            if prev_tid_int is None:
-                prev_tid_int = 0
-                prev_tid = z64
+            oid_int, prev_tid_int, serial_int, data = conflict
+            oid = p64(oid_int)
+            prev_tid = p64(prev_tid_int)
+            serial = p64(serial_int)
+
+            rdata = self.tryToResolveConflict(oid, prev_tid, serial, data)
+            if rdata is None:
+                raise POSException.ConflictError(
+                    oid=oid, serials=(prev_tid, serial), data=data)
             else:
-                prev_tid = p64(prev_tid_int)
-                if prev_tid != serial:
-                    # conflict detected
-                    rdata = self.tryToResolveConflict(
-                        oid, prev_tid, serial, data)
-                    if rdata is None:
-                        raise POSException.ConflictError(
-                            oid=oid, serials=(prev_tid, serial), data=data)
-                    else:
-                        data = rdata
-                        md5sum = md5.new(data).hexdigest()
+                data = rdata
+                md5sum = md5.new(data).hexdigest()
+                self._adapter.replace_temp(
+                    cursor, oid_int, prev_tid_int, md5sum, data)
+                resolved.add(oid)
 
-            self._adapter.store(
-                cursor, oid_int, tid_int, prev_tid_int, md5sum, data)
-
-            if prev_tid and serial != prev_tid:
-                serials.append((oid, ConflictResolution.ResolvedSerial))
+        # Move the data
+        tid_int = u64(self._tid)
+        serials = []
+        oid_ints = adapter.move_from_temp(cursor, tid_int)
+        for oid_int in oid_ints:
+            oid = p64(oid_int)
+            if oid in resolved:
+                serial = ConflictResolution.ResolvedSerial
             else:
-                serials.append((oid, self._tid))
+                serial = self._tid
+            serials.append((oid, serial))
 
         return serials
 
@@ -440,11 +427,7 @@ class RelStorage(BaseStorage,
         cursor = self._store_cursor
         assert cursor is not None
 
-        if self._tbuf is not None:
-            serials = self._send_stored()
-        else:
-            serials = []
-
+        serials = self._finish_store()
         self._adapter.update_current(cursor, tid_int)
         self._prepared_txn = self._adapter.commit_phase1(cursor, tid_int)
         # From the point of view of self._store_cursor,
@@ -700,7 +683,7 @@ class BoundRelStorage(RelStorage):
     propagate_invalidations = False
 
     def __init__(self, parent, zodb_conn):
-        # self._conn = conn
+        # self._zodb_conn = zodb_conn
         RelStorage.__init__(self, adapter=parent._adapter, name=parent._name,
             read_only=parent._is_read_only, create=False)
         # _prev_polled_tid contains the tid at the previous poll
