@@ -430,8 +430,6 @@ class RelStorage(BaseStorage,
         serials = self._finish_store()
         self._adapter.update_current(cursor, tid_int)
         self._prepared_txn = self._adapter.commit_phase1(cursor, tid_int)
-        # From the point of view of self._store_cursor,
-        # it now looks like the transaction has been rolled back.
 
         return serials
 
@@ -576,7 +574,8 @@ class RelStorage(BaseStorage,
     def undo(self, transaction_id, transaction):
         """Undo a transaction identified by transaction_id.
 
-        Do so by writing new data that reverses the action taken by
+        transaction_id is the base 64 encoding of an 8 byte tid.
+        Undo by writing new data that reverses the action taken by
         the transaction.
         """
 
@@ -718,9 +717,10 @@ class BoundRelStorage(RelStorage):
 
                 # Ignore changes made by the last transaction committed
                 # by this connection.
-                ignore_tid = None
                 if self._ltid is not None:
                     ignore_tid = u64(self._ltid)
+                else:
+                    ignore_tid = None
 
                 # get a list of changed OIDs and the most recent tid
                 oid_ints, new_polled_tid = self._adapter.poll_invalidations(
@@ -749,48 +749,7 @@ class BoundRelStorage(RelStorage):
             self._lock_release()
 
     def _after_pack(self):
-        # Disable transaction reset after packing.  The connection
-        # should call sync() to see the new state.
+        # Override transaction reset after packing.  If the connection
+        # wants to see the new state, it should call sync().
         pass
 
-
-# very basic test... ought to be moved or deleted.
-def test():
-    import transaction
-    import pprint
-    from ZODB.DB import DB
-    from persistent.mapping import PersistentMapping
-    from relstorage.adapters.postgresql import PostgreSQLAdapter
-
-    adapter = PostgreSQLAdapter(params='dbname=relstoragetest')
-    storage = RelStorage(adapter)
-    db = DB(storage)
-
-    if True:
-        for i in range(100):
-            c = db.open()
-            c.root()['foo'] = PersistentMapping()
-            transaction.get().note('added %d' % i)
-            transaction.commit()
-            c.close()
-            print 'wrote', i
-
-        # undo 2 transactions, then redo them and undo the first again.
-        for i in range(2):
-            log = db.undoLog()
-            db.undo(log[0]['id'])
-            db.undo(log[1]['id'])
-            transaction.get().note('undone! (%d)' % i)
-            transaction.commit()
-            print 'undid', i
-
-    pprint.pprint(db.undoLog())
-    db.pack(time.time() - 0.1)
-    pprint.pprint(db.undoLog())
-    db.close()
-
-
-if __name__ == '__main__':
-    import logging
-    logging.basicConfig()
-    test()
