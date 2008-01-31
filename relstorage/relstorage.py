@@ -493,6 +493,15 @@ class RelStorage(BaseStorage,
         finally:
             self._lock_release()
 
+    def cleanup(self):
+        pass
+
+    def supportsVersions(self):
+        return False
+
+    def modifiedInVersion(self, oid):
+        return ''
+
     def supportsUndo(self):
         return True
 
