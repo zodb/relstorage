@@ -353,6 +353,15 @@ class OracleAdapter(object):
         else:
             return None
 
+    def _set_xid(self, cursor):
+        """Set up a distributed transaction"""
+        stmt = """
+        SELECT SYS_CONTEXT('USERENV', 'SID') FROM DUAL
+        """
+        cursor.execute(stmt)
+        xid = str(cursor.fetchone()[0])
+        cursor.connection.begin(0, xid, '0')
+
     def open_for_store(self):
         """Open and initialize a connection for storing objects.
 
@@ -361,18 +370,22 @@ class OracleAdapter(object):
         if self._twophase:
             conn, cursor = self.open(transaction_mode=None, twophase=True)
             try:
-                stmt = """
-                SELECT SYS_CONTEXT('USERENV', 'SID') FROM DUAL
-                """
-                cursor.execute(stmt)
-                xid = str(cursor.fetchone()[0])
-                conn.begin(0, xid, '0')
+                self._set_xid(cursor)
             except:
                 self.close(conn, cursor)
                 raise
         else:
             conn, cursor = self.open()
         return conn, cursor
+
+    def restart_store(self, cursor):
+        """Reuse a store connection."""
+        try:
+            cursor.connection.rollback()
+            if self._twophase:
+                self._set_xid(cursor)
+        except (cx_Oracle.OperationalError, cx_Oracle.InterfaceError):
+            raise StorageError("database disconnected")
 
     def store_temp(self, cursor, oid, prev_tid, md5sum, data):
         """Store an object in the temporary table."""
@@ -399,13 +412,17 @@ class OracleAdapter(object):
 
     def start_commit(self, cursor):
         """Prepare to commit."""
-        cursor.execute("SAVEPOINT start_commit")
+        # Hold commit_lock to prevent concurrent commits
+        # (for as short a time as possible).
+        # Lock current_object in share mode to ensure conflict
+        # detection has the most current data.
         cursor.execute("LOCK TABLE commit_lock IN EXCLUSIVE MODE")
+        cursor.execute("LOCK TABLE current_object IN SHARE MODE")
+        cursor.execute("SAVEPOINT start_commit")
 
     def restart_commit(self, cursor):
         """Rollback the attempt to commit and start over."""
         cursor.execute("ROLLBACK TO SAVEPOINT start_commit")
-        cursor.execute("LOCK TABLE commit_lock IN EXCLUSIVE MODE")
 
     def _parse_dsinterval(self, s):
         """Convert an Oracle dsinterval (as a string) to a float."""
@@ -542,7 +559,7 @@ class OracleAdapter(object):
         FROM transaction
         WHERE packed = 'N'
             AND tid != 0
-        ORDER BY tid desc
+        ORDER BY tid DESC
         """
         cursor.execute(stmt)
         return iter(cursor)
@@ -568,7 +585,7 @@ class OracleAdapter(object):
             JOIN object_state USING (tid)
         WHERE zoid = :1
             AND packed = 'N'
-        ORDER BY tid desc
+        ORDER BY tid DESC
         """
         cursor.execute(stmt, (oid,))
         return iter(cursor)

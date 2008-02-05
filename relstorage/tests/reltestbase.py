@@ -206,3 +206,16 @@ class RelStorageTests(
         got, serialno = self._storage.load(oid, '')
         self.assertEqual(len(got), len(data))
         self.assertEqual(got, data)
+
+    def checkMultipleStores(self):
+        # Verify a connection can commit multiple transactions
+        db = DB(self._storage)
+        try:
+            c1 = db.open()
+            r1 = c1.root()
+            r1['alpha'] = 1
+            transaction.commit()
+            r1['alpha'] = 2
+            transaction.commit()
+        finally:
+            db.close()

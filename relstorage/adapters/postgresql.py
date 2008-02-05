@@ -291,7 +291,7 @@ class PostgreSQLAdapter(object):
         FROM object_state
         WHERE zoid = %s
             AND tid < %s
-        ORDER BY tid desc
+        ORDER BY tid DESC
         LIMIT 1
         """, (oid, tid))
         if cursor.rowcount:
@@ -326,6 +326,32 @@ class PostgreSQLAdapter(object):
         else:
             return None
 
+    def _make_temp_table(self, cursor):
+        """Create the temporary table for storing objects"""
+        if self._twophase:
+            # PostgreSQL does not allow two phase transactions
+            # to use temporary tables. :-(
+            stmt = """
+            CREATE TABLE temp_store (
+                zoid        BIGINT NOT NULL,
+                prev_tid    BIGINT NOT NULL,
+                md5         CHAR(32),
+                state       BYTEA
+            );
+            CREATE UNIQUE INDEX temp_store_zoid ON temp_store (zoid)
+            """
+        else:
+            stmt = """
+            CREATE TEMPORARY TABLE temp_store (
+                zoid        BIGINT NOT NULL,
+                prev_tid    BIGINT NOT NULL,
+                md5         CHAR(32),
+                state       BYTEA
+            ) ON COMMIT DROP;
+            CREATE UNIQUE INDEX temp_store_zoid ON temp_store (zoid)
+            """
+        cursor.execute(stmt)
+
     def open_for_store(self):
         """Open and initialize a connection for storing objects.
 
@@ -333,36 +359,25 @@ class PostgreSQLAdapter(object):
         """
         conn, cursor = self.open()
         try:
-            if self._twophase:
-                # PostgreSQL does not allow two phase transactions
-                # to use temporary tables. :-(
-                stmt = """
-                CREATE TABLE temp_store (
-                    zoid        BIGINT NOT NULL,
-                    prev_tid    BIGINT NOT NULL,
-                    md5         CHAR(32),
-                    state       BYTEA
-                );
-                CREATE UNIQUE INDEX temp_store_zoid ON temp_store (zoid)
-                """
-            else:
-                stmt = """
-                CREATE TEMPORARY TABLE temp_store (
-                    zoid        BIGINT NOT NULL,
-                    prev_tid    BIGINT NOT NULL,
-                    md5         CHAR(32),
-                    state       BYTEA
-                ) ON COMMIT DROP;
-                CREATE UNIQUE INDEX temp_store_zoid ON temp_store (zoid)
-                """
-            cursor.execute(stmt)
+            self._make_temp_table(cursor)
             return conn, cursor
         except:
             self.close(conn, cursor)
             raise
 
+    def restart_store(self, cursor):
+        """Reuse a store connection."""
+        try:
+            cursor.connection.rollback()
+            if self._twophase:
+                cursor.connection.set_isolation_level(
+                    psycopg2.extensions.ISOLATION_LEVEL_READ_COMMITTED)
+            self._make_temp_table(cursor)
+        except (psycopg2.OperationalError, psycopg2.InterfaceError):
+            raise StorageError("database disconnected")
+
     def store_temp(self, cursor, oid, prev_tid, md5sum, data):
-        """Store an object."""
+        """Store an object in the temporary table."""
         stmt = """
         INSERT INTO temp_store (zoid, prev_tid, md5, state)
         VALUES (%s, %s, %s, decode(%s, 'base64'))
@@ -382,13 +397,19 @@ class PostgreSQLAdapter(object):
 
     def start_commit(self, cursor):
         """Prepare to commit."""
+        # Hold commit_lock to prevent concurrent commits
+        # (for as short a time as possible).
+        # Lock current_object in share mode to ensure conflict
+        # detection has the most current data.
+        cursor.execute("""
+        LOCK TABLE commit_lock IN EXCLUSIVE MODE;
+        LOCK TABLE current_object IN SHARE MODE
+        """)
         cursor.execute("SAVEPOINT start_commit")
-        cursor.execute("LOCK TABLE commit_lock IN EXCLUSIVE MODE")
 
     def restart_commit(self, cursor):
-        """Rollback the attempt to commit and start over."""
+        """Rollback the attempt to commit and start again."""
         cursor.execute("ROLLBACK TO SAVEPOINT start_commit")
-        cursor.execute("LOCK TABLE commit_lock IN EXCLUSIVE MODE")
 
     def get_tid_and_time(self, cursor):
         """Returns the most recent tid and the current database time.
@@ -533,7 +554,7 @@ class PostgreSQLAdapter(object):
         FROM transaction
         WHERE packed = FALSE
             AND tid != 0
-        ORDER BY tid desc
+        ORDER BY tid DESC
         """
         cursor.execute(stmt)
         return iter(cursor)
@@ -559,7 +580,7 @@ class PostgreSQLAdapter(object):
             JOIN object_state USING (tid)
         WHERE zoid = %s
             AND packed = FALSE
-        ORDER BY tid desc
+        ORDER BY tid DESC
         """
         cursor.execute(stmt, (oid,))
         return iter(cursor)
@@ -692,7 +713,7 @@ class PostgreSQLAdapter(object):
         FROM transaction
         WHERE tid > 0 AND tid <= %s
             AND packed = FALSE
-        ORDER BY tid desc
+        ORDER BY tid DESC
         LIMIT 1
         """
         cursor.execute(stmt, (pack_point,))

@@ -51,12 +51,13 @@ class RelStorage(BaseStorage,
         if create:
             self._adapter.prepare_schema()
 
-        # load_conn and load_cursor are usually open
+        # load_conn and load_cursor are open most of the time.
         self._load_conn = None
         self._load_cursor = None
         self._load_started = False
         self._open_load_connection()
-        # store_conn and store_cursor are open only during commit
+        # store_conn and store_cursor are open during commit,
+        # but not necessarily open at other times.
         self._store_conn = None
         self._store_cursor = None
 
@@ -289,8 +290,18 @@ class RelStorage(BaseStorage,
             self._tstatus = status
 
             adapter = self._adapter
-            conn, cursor = adapter.open_for_store()
-            self._store_conn, self._store_cursor = conn, cursor
+            cursor = self._store_cursor
+            if cursor is not None:
+                # Store cursor is still open, so try to use it again.
+                try:
+                    adapter.restart_store(cursor)
+                except POSException.StorageError:
+                    cursor = None
+                    log.exception("Store connection failed; retrying")
+                    self._drop_store_connection()
+            if cursor is None:
+                conn, cursor = adapter.open_for_store()
+                self._store_conn, self._store_cursor = conn, cursor
 
             if tid is not None:
                 # get the commit lock and add the transaction now
@@ -371,7 +382,7 @@ class RelStorage(BaseStorage,
         cursor = self._store_cursor
         adapter = self._adapter
 
-        # List conflicting changes.
+        # Detect conflicting changes.
         # Try to resolve the conflicts.
         resolved = set()  # a set of OIDs
         while True:
@@ -386,16 +397,18 @@ class RelStorage(BaseStorage,
 
             rdata = self.tryToResolveConflict(oid, prev_tid, serial, data)
             if rdata is None:
+                # unresolvable; kill the whole transaction
                 raise POSException.ConflictError(
                     oid=oid, serials=(prev_tid, serial), data=data)
             else:
+                # resolved
                 data = rdata
                 md5sum = md5.new(data).hexdigest()
                 self._adapter.replace_temp(
                     cursor, oid_int, prev_tid_int, md5sum, data)
                 resolved.add(oid)
 
-        # Move the data
+        # Move the new states into the permanent table
         tid_int = u64(self._tid)
         serials = []
         oid_ints = adapter.move_from_temp(cursor, tid_int)
@@ -460,7 +473,6 @@ class RelStorage(BaseStorage,
         txn = self._prepared_txn
         assert txn is not None
         self._adapter.commit_phase2(self._store_cursor, txn)
-        self._drop_store_connection()
         self._prepared_txn = None
         self._ltid = self._tid
         self._tid = None
@@ -471,7 +483,6 @@ class RelStorage(BaseStorage,
         if self._store_cursor is not None:
             self._adapter.abort(self._store_cursor, self._prepared_txn)
         self._prepared_txn = None
-        self._drop_store_connection()
         self._tid = None
 
     def lastTransaction(self):
