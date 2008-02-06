@@ -32,7 +32,7 @@ relstorage 0.9
 - Removed the code in the Oracle adapter for retrying connection attempts.
   (It is better to just reconfigure Oracle.)
 
-
+- Added support for MySQL.  (Version 5.0 is probably the minimum.)
 
 
 PGStorage 0.4

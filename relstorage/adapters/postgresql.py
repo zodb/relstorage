@@ -162,8 +162,8 @@ class PostgreSQLAdapter(object):
                 DELETE FROM object_state;
                 DELETE FROM transaction;
                 -- Create a special transaction to represent object creation.
-                INSERT INTO transaction (tid, username, description)
-                    VALUES (0, '', '');
+                INSERT INTO transaction (tid, username, description) VALUES
+                    (0, 'system', 'special transaction for object creation');
                 ALTER SEQUENCE zoid_seq START WITH 1;
                 """)
             except:
@@ -399,17 +399,13 @@ class PostgreSQLAdapter(object):
         """Prepare to commit."""
         # Hold commit_lock to prevent concurrent commits
         # (for as short a time as possible).
-        # Lock current_object in share mode to ensure conflict
-        # detection has the most current data.
+        # Lock transaction and current_object in share mode to ensure
+        # conflict detection has the most current data.
         cursor.execute("""
         LOCK TABLE commit_lock IN EXCLUSIVE MODE;
+        LOCK TABLE transaction IN SHARE MODE;
         LOCK TABLE current_object IN SHARE MODE
         """)
-        cursor.execute("SAVEPOINT start_commit")
-
-    def restart_commit(self, cursor):
-        """Rollback the attempt to commit and start again."""
-        cursor.execute("ROLLBACK TO SAVEPOINT start_commit")
 
     def get_tid_and_time(self, cursor):
         """Returns the most recent tid and the current database time.
@@ -599,6 +595,11 @@ class PostgreSQLAdapter(object):
         except psycopg2.DatabaseError:
             raise StorageError('A pack or undo operation is in progress')
 
+    def release_pack_lock(self, cursor):
+        """Release the pack lock."""
+        # No action needed
+        pass
+
 
     def verify_undoable(self, cursor, undo_tid):
         """Raise UndoError if it is not safe to undo the specified txn."""
@@ -703,34 +704,54 @@ class PostgreSQLAdapter(object):
         return [oid_int for (oid_int,) in cursor]
 
 
-    def choose_pack_transaction(self, cursor, pack_point):
+    def choose_pack_transaction(self, pack_point):
         """Return the transaction before or at the specified pack time.
 
         Returns None if there is nothing to pack.
         """
-        stmt = """
-        SELECT tid
-        FROM transaction
-        WHERE tid > 0 AND tid <= %s
-            AND packed = FALSE
-        ORDER BY tid DESC
-        LIMIT 1
-        """
-        cursor.execute(stmt, (pack_point,))
-        if not cursor.rowcount:
-            # Nothing needs to be packed.
-            return None
-        assert cursor.rowcount == 1
-        return cursor.fetchone()[0]
+        conn, cursor = self.open()
+        try:
+            stmt = """
+            SELECT tid
+            FROM transaction
+            WHERE tid > 0 AND tid <= %s
+                AND packed = FALSE
+            ORDER BY tid DESC
+            LIMIT 1
+            """
+            cursor.execute(stmt, (pack_point,))
+            if not cursor.rowcount:
+                # Nothing needs to be packed.
+                return None
+            assert cursor.rowcount == 1
+            return cursor.fetchone()[0]
+        finally:
+            self.close(conn, cursor)
 
 
-    def pre_pack(self, cursor, pack_tid, get_references):
+    def pre_pack(self, pack_tid, get_references):
         """Decide what to pack.
 
         tid specifies the most recent transaction to pack.
 
         get_references is a function that accepts a pickled state and
         returns a set of OIDs that state refers to.
+        """
+        conn, cursor = self.open()
+        try:
+            try:
+                self._pre_pack_cursor(cursor, pack_tid, get_references)
+            except:
+                conn.rollback()
+                raise
+            else:
+                conn.commit()
+        finally:
+            self.close(conn, cursor)
+
+
+    def _pre_pack_cursor(self, cursor, pack_tid, get_references):
+        """pre_pack implementation.
         """
         # Fill object_ref with references from object states
         # in transactions that will not be packed.
@@ -901,6 +922,8 @@ class PostgreSQLAdapter(object):
         conn, cursor = self.open()
         try:
             try:
+                # hold the commit lock for a moment to prevent deadlocks.
+                cursor.execute("LOCK TABLE commit_lock IN EXCLUSIVE MODE")
 
                 for table in ('object_ref', 'current_object', 'object_state'):
 

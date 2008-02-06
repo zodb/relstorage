@@ -33,17 +33,19 @@ from ZODB.DB import DB
 from ZODB.Connection import Connection
 
 from relstorage.relstorage import RelStorage
+from relstorage.adapters.mysql import MySQLAdapter
 from relstorage.adapters.postgresql import PostgreSQLAdapter
 from relstorage.adapters.oracle import OracleAdapter
 from relstorage.tests.testoracle import getOracleParams
 
 debug = False
 txn_count = 10
-object_counts = [10000]  # [1, 100, 10000]
+object_counts = [100]  # [1, 100, 10000]
 concurrency_levels = range(1, 16, 2)
 contenders = [
     ('ZEO + FileStorage', 'zeofs_test'),
     ('PostgreSQLAdapter', 'postgres_test'),
+    ('MySQLAdapter', 'mysql_test'),
     ('OracleAdapter', 'oracle_test'),
     ]
 repetitions = 3
@@ -202,6 +204,14 @@ class SpeedTest:
         def make_storage():
             return RelStorage(adapter)
         return self.run_tests(make_storage)
+
+    def mysql_test(self):
+        adapter = MySQLAdapter(db='relstoragetest')
+        adapter.zap()
+        def make_storage():
+            return RelStorage(adapter)
+        return self.run_tests(make_storage)
+
 
 
 def distribute(func, param_iter):

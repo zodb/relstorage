@@ -11,39 +11,70 @@
 # FOR A PARTICULAR PURPOSE.
 #
 ##############################################################################
-"""Oracle adapter for RelStorage."""
+"""MySQL adapter for RelStorage.
+
+Connection parameters supported by MySQLdb:
+
+host
+    string, host to connect
+user
+    string, user to connect as
+passwd
+    string, password to use
+db
+    string, database to use
+port
+    integer, TCP/IP port to connect to
+unix_socket
+    string, location of unix_socket (UNIX-ish only)
+conv
+    mapping, maps MySQL FIELD_TYPE.* to Python functions which convert a
+    string to the appropriate Python type
+connect_timeout
+    number of seconds to wait before the connection attempt fails.
+compress
+    if set, gzip compression is enabled
+named_pipe
+    if set, connect to server via named pipe (Windows only)
+init_command
+    command which is run once the connection is created
+read_default_file
+    see the MySQL documentation for mysql_options()
+read_default_group
+    see the MySQL documentation for mysql_options()
+client_flag
+    client flags from MySQLdb.constants.CLIENT
+load_infile
+    int, non-zero enables LOAD LOCAL INFILE, zero disables
+"""
 
 import logging
-import re
-import thread
+import MySQLdb
 import time
-import cx_Oracle
 from ZODB.POSException import ConflictError, StorageError, UndoError
 
-log = logging.getLogger("relstorage.oracle")
+log = logging.getLogger("relstorage.mysql")
+
+commit_lock_timeout = 30
 
 
-class OracleAdapter(object):
-    """Oracle adapter for RelStorage."""
+class MySQLAdapter(object):
+    """MySQL adapter for RelStorage."""
 
-    def __init__(self, user, password, dsn, twophase=False, arraysize=64):
-        self._params = (user, password, dsn)
-        self._twophase = twophase
-        self._arraysize = arraysize
+    def __init__(self, **params):
+        self._params = params
 
     def create_schema(self, cursor):
         """Create the database tables."""
         stmt = """
-        CREATE TABLE commit_lock (dummy CHAR);
-
         -- The list of all transactions in the database
         CREATE TABLE transaction (
-            tid         NUMBER(20) NOT NULL PRIMARY KEY,
-            packed      CHAR DEFAULT 'N' CHECK (packed IN ('N', 'Y')),
-            username    VARCHAR2(255) NOT NULL,
-            description VARCHAR2(4000) NOT NULL,
-            extension   RAW(2000)
-        );
+            tid         BIGINT NOT NULL PRIMARY KEY,
+            packed      BOOLEAN NOT NULL DEFAULT FALSE,
+            username    VARCHAR(255) NOT NULL,
+            description TEXT NOT NULL,
+            extension   BLOB
+        ) ENGINE = InnoDB;
 
         -- Create a special transaction to represent object creation.  This
         -- row is often referenced by object_state.prev_tid, but never by
@@ -51,38 +82,31 @@ class OracleAdapter(object):
         INSERT INTO transaction (tid, username, description)
             VALUES (0, 'system', 'special transaction for object creation');
 
-        CREATE SEQUENCE zoid_seq;
+        -- All OIDs allocated in the database.  Note that this table
+        -- is purposely non-transactional.
+        CREATE TABLE new_oid (
+            zoid        BIGINT NOT NULL PRIMARY KEY AUTO_INCREMENT
+        ) ENGINE = MyISAM;
 
-        -- All object states in all transactions.
-        -- md5 and state can be null to represent object uncreation.
+        -- All object states in all transactions.  Note that md5 and state
+        -- can be null to represent object uncreation.
         CREATE TABLE object_state (
-            zoid        NUMBER(20) NOT NULL,
-            tid         NUMBER(20) NOT NULL REFERENCES transaction
-                        CHECK (tid > 0),
+            zoid        BIGINT NOT NULL,
+            tid         BIGINT NOT NULL REFERENCES transaction,
             PRIMARY KEY (zoid, tid),
-            prev_tid    NUMBER(20) NOT NULL REFERENCES transaction,
+            prev_tid    BIGINT NOT NULL REFERENCES transaction,
             md5         CHAR(32),
-            state       BLOB
-        );
+            state       LONGBLOB,
+            CHECK (tid > 0)
+        ) ENGINE = InnoDB;
         CREATE INDEX object_state_tid ON object_state (tid);
 
         -- Pointers to the current object state
         CREATE TABLE current_object (
-            zoid        NUMBER(20) NOT NULL PRIMARY KEY,
-            tid         NUMBER(20) NOT NULL,
-            FOREIGN KEY (zoid, tid) REFERENCES object_state
-        );
-
-        -- States that will soon be stored
-        CREATE GLOBAL TEMPORARY TABLE temp_store (
-            zoid        NUMBER(20) NOT NULL PRIMARY KEY,
-            prev_tid    NUMBER(20) NOT NULL,
-            md5         CHAR(32),
-            state       BLOB
-        ) ON COMMIT DELETE ROWS;
-
-        -- During packing, an exclusive lock is held on pack_lock.
-        CREATE TABLE pack_lock (dummy CHAR);
+            zoid        BIGINT NOT NULL PRIMARY KEY,
+            tid         BIGINT NOT NULL,
+            FOREIGN KEY (zoid, tid) REFERENCES object_state (zoid, tid)
+        ) ENGINE = InnoDB;
 
         -- A list of referenced OIDs from each object_state.
         -- This table is populated as needed during packing.
@@ -91,10 +115,10 @@ class OracleAdapter(object):
         -- are never modified once committed, and rows are removed
         -- from object_state only by packing.
         CREATE TABLE object_ref (
-            zoid        NUMBER(20) NOT NULL,
-            tid         NUMBER(20) NOT NULL,
-            to_zoid     NUMBER(20) NOT NULL
-        );
+            zoid        BIGINT NOT NULL,
+            tid         BIGINT NOT NULL,
+            to_zoid     BIGINT NOT NULL
+        ) ENGINE = MyISAM;
         CREATE INDEX object_ref_from ON object_ref (zoid);
         CREATE INDEX object_ref_tid ON object_ref (tid);
         CREATE INDEX object_ref_to ON object_ref (to_zoid);
@@ -108,8 +132,8 @@ class OracleAdapter(object):
         -- rows are removed from the transaction table only by
         -- packing.
         CREATE TABLE object_refs_added (
-            tid         NUMBER(20) NOT NULL PRIMARY KEY
-        );
+            tid         BIGINT NOT NULL PRIMARY KEY
+        ) ENGINE = MyISAM;
 
         -- Temporary state during packing:
         -- The list of objects to pack.  If keep is 'N',
@@ -120,10 +144,10 @@ class OracleAdapter(object):
         -- The keep_tid field specifies which revision to keep within
         -- the list of packable transactions.
         CREATE TABLE pack_object (
-            zoid        NUMBER(20) NOT NULL PRIMARY KEY,
-            keep        CHAR NOT NULL CHECK (keep IN ('N', 'Y')),
-            keep_tid    NUMBER(20)
-        );
+            zoid        BIGINT NOT NULL PRIMARY KEY,
+            keep        BOOLEAN NOT NULL,
+            keep_tid    BIGINT
+        ) ENGINE = MyISAM;
         CREATE INDEX pack_object_keep_zoid ON pack_object (keep, zoid);
         """
         self._run_script(cursor, stmt)
@@ -162,10 +186,8 @@ class OracleAdapter(object):
         conn, cursor = self.open()
         try:
             try:
-                cursor.execute("""
-                SELECT 1 FROM USER_TABLES WHERE TABLE_NAME = 'OBJECT_STATE'
-                """)
-                if not cursor.fetchall():
+                cursor.execute("SHOW TABLES LIKE 'object_state'")
+                if not cursor.rowcount:
                     self.create_schema(cursor)
             except:
                 conn.rollback()
@@ -189,12 +211,11 @@ class OracleAdapter(object):
                 DELETE FROM object_ref;
                 DELETE FROM current_object;
                 DELETE FROM object_state;
+                TRUNCATE new_oid;
                 DELETE FROM transaction;
                 -- Create a transaction to represent object creation.
                 INSERT INTO transaction (tid, username, description) VALUES
                     (0, 'system', 'special transaction for object creation');
-                DROP SEQUENCE zoid_seq;
-                CREATE SEQUENCE zoid_seq;
                 """
                 self._run_script(cursor, stmt)
             except:
@@ -206,30 +227,30 @@ class OracleAdapter(object):
             self.close(conn, cursor)
 
 
-    def open(self, transaction_mode="ISOLATION LEVEL READ COMMITTED",
-            twophase=False):
+    def open(self, transaction_mode="ISOLATION LEVEL READ COMMITTED"):
         """Open a database connection and return (conn, cursor)."""
         try:
-            kw = {'twophase': twophase}  #, 'threaded': True}
-            conn = cx_Oracle.connect(*self._params, **kw)
+            conn = MySQLdb.connect(**self._params)
             cursor = conn.cursor()
-            cursor.arraysize = self._arraysize
+            cursor.arraysize = 64
             if transaction_mode:
-                cursor.execute("SET TRANSACTION %s" % transaction_mode)
+                conn.autocommit(True)
+                cursor.execute("SET SESSION TRANSACTION %s" % transaction_mode)
+                conn.autocommit(False)
             return conn, cursor
-
-        except cx_Oracle.OperationalError:
-            log.error("Unable to connect to DSN %s", self._params[2])
+        except MySQLdb.OperationalError:
+            log.debug("Unable to connect in %s", repr(self))
             raise
 
     def close(self, conn, cursor):
-        """Close both a cursor and connection, ignoring certain errors."""
+        """Close a connection and cursor, ignoring certain errors.
+        """
         for obj in (cursor, conn):
             if obj is not None:
                 try:
                     obj.close()
-                except (cx_Oracle.InterfaceError,
-                        cx_Oracle.OperationalError):
+                except (MySQLdb.InterfaceError,
+                        MySQLdb.OperationalError):
                     pass
 
     def open_for_load(self):
@@ -237,38 +258,21 @@ class OracleAdapter(object):
 
         Returns (conn, cursor).
         """
-        return self.open('READ ONLY')
+        return self.open("ISOLATION LEVEL REPEATABLE READ")
 
     def restart_load(self, cursor):
         """After a rollback, reinitialize a connection for loading objects."""
-        cursor.execute("SET TRANSACTION READ ONLY")
+        # No re-init necessary
+        pass
 
     def get_object_count(self):
         """Returns the number of objects in the database"""
-        # The tests expect an exact number, but the code below generates
-        # an estimate, so this is disabled for now.
-        if True:
-            return 0
-        else:
-            conn, cursor = self.open('READ ONLY')
-            try:
-                cursor.execute("""
-                SELECT NUM_ROWS
-                FROM USER_TABLES
-                WHERE TABLE_NAME = 'CURRENT_OBJECT'
-                """)
-                res = cursor.fetchone()[0]
-                if res is None:
-                    res = 0
-                else:
-                    res = int(res)
-                return res
-            finally:
-                self.close(conn, cursor)
+        # do later
+        return 0
 
     def get_db_size(self):
         """Returns the approximate size of the database in bytes"""
-        # May not be possible without access to the dba_* objects
+        # do later
         return 0
 
     def load_current(self, cursor, oid):
@@ -280,14 +284,13 @@ class OracleAdapter(object):
         SELECT state, tid
         FROM current_object
             JOIN object_state USING(zoid, tid)
-        WHERE zoid = :1
+        WHERE zoid = %s
         """, (oid,))
-        for state, tid in cursor:
-            if state is not None:
-                state = state.read()
-            # else this object's creation has been undone
-            return state, tid
-        return None, None
+        if cursor.rowcount:
+            assert cursor.rowcount == 1
+            return cursor.fetchone()
+        else:
+            return None, None
 
     def load_revision(self, cursor, oid, tid):
         """Returns the pickle for an object on a particular transaction.
@@ -297,42 +300,38 @@ class OracleAdapter(object):
         cursor.execute("""
         SELECT state
         FROM object_state
-        WHERE zoid = :1
-            AND tid = :2
+        WHERE zoid = %s
+            AND tid = %s
         """, (oid, tid))
-        for (state,) in cursor:
-            if state is not None:
-                return state.read()
+        if cursor.rowcount:
+            assert cursor.rowcount == 1
+            (state,) = cursor.fetchone()
+            return state
         return None
 
     def exists(self, cursor, oid):
         """Returns a true value if the given object exists."""
-        cursor.execute("SELECT 1 FROM current_object WHERE zoid = :1", (oid,))
-        return len(list(cursor))
+        cursor.execute("SELECT 1 FROM current_object WHERE zoid = %s", (oid,))
+        return cursor.rowcount
 
     def load_before(self, cursor, oid, tid):
         """Returns the pickle and tid of an object before transaction tid.
 
         Returns (None, None) if no earlier state exists.
         """
-        stmt = """
+        cursor.execute("""
         SELECT state, tid
         FROM object_state
-        WHERE zoid = :oid
-            AND tid = (
-                SELECT MAX(tid)
-                FROM object_state
-                WHERE zoid = :oid
-                    AND tid < :tid
-            )
-        """
-        cursor.execute(stmt, {'oid': oid, 'tid': tid})
-        for state, tid in cursor:
-            if state is not None:
-                state = state.read()
-            # else this object's creation has been undone
-            return state, tid
-        return None, None
+        WHERE zoid = %s
+            AND tid < %s
+        ORDER BY tid DESC
+        LIMIT 1
+        """, (oid, tid))
+        if cursor.rowcount:
+            assert cursor.rowcount == 1
+            return cursor.fetchone()
+        else:
+            return None, None
 
     def get_object_tid_after(self, cursor, oid, tid):
         """Returns the tid of the next change after an object revision.
@@ -340,123 +339,116 @@ class OracleAdapter(object):
         Returns None if no later state exists.
         """
         stmt = """
-        SELECT MIN(tid)
+        SELECT tid
         FROM object_state
-        WHERE zoid = :1
-            AND tid > :2
+        WHERE zoid = %s
+            AND tid > %s
+        ORDER BY tid
+        LIMIT 1
         """
         cursor.execute(stmt, (oid, tid))
-        rows = cursor.fetchall()
-        if rows:
-            assert len(rows) == 1
-            return rows[0][0]
+        if cursor.rowcount:
+            assert cursor.rowcount == 1
+            return cursor.fetchone()[0]
         else:
             return None
 
-    def _set_xid(self, cursor):
-        """Set up a distributed transaction"""
+    def _make_temp_table(self, cursor):
+        """Create the temporary table for storing objects"""
         stmt = """
-        SELECT SYS_CONTEXT('USERENV', 'SID') FROM DUAL
+        CREATE TEMPORARY TABLE temp_store (
+            zoid        BIGINT NOT NULL PRIMARY KEY,
+            prev_tid    BIGINT NOT NULL,
+            md5         CHAR(32),
+            state       LONGBLOB
+        ) ENGINE MyISAM
         """
         cursor.execute(stmt)
-        xid = str(cursor.fetchone()[0])
-        cursor.connection.begin(0, xid, '0')
 
     def open_for_store(self):
         """Open and initialize a connection for storing objects.
 
         Returns (conn, cursor).
         """
-        if self._twophase:
-            conn, cursor = self.open(transaction_mode=None, twophase=True)
-            try:
-                self._set_xid(cursor)
-            except:
-                self.close(conn, cursor)
-                raise
-        else:
-            conn, cursor = self.open()
-        return conn, cursor
+        conn, cursor = self.open()
+        try:
+            self._make_temp_table(cursor)
+            return conn, cursor
+        except:
+            self.close(conn, cursor)
+            raise
 
     def restart_store(self, cursor):
         """Reuse a store connection."""
         try:
             cursor.connection.rollback()
-            if self._twophase:
-                self._set_xid(cursor)
-        except (cx_Oracle.OperationalError, cx_Oracle.InterfaceError):
+            cursor.execute("TRUNCATE temp_store")
+        except (MySQLdb.OperationalError, MySQLdb.InterfaceError):
             raise StorageError("database disconnected")
 
     def store_temp(self, cursor, oid, prev_tid, md5sum, data):
         """Store an object in the temporary table."""
-        cursor.setinputsizes(data=cx_Oracle.BLOB)
         stmt = """
         INSERT INTO temp_store (zoid, prev_tid, md5, state)
-        VALUES (:oid, :prev_tid, :md5sum, :data)
+        VALUES (%s, %s, %s, %s)
         """
-        cursor.execute(stmt, oid=oid, prev_tid=prev_tid,
-            md5sum=md5sum, data=cx_Oracle.Binary(data))
+        cursor.execute(stmt, (oid, prev_tid, md5sum, MySQLdb.Binary(data)))
 
     def replace_temp(self, cursor, oid, prev_tid, md5sum, data):
         """Replace an object in the temporary table."""
-        cursor.setinputsizes(data=cx_Oracle.BLOB)
         stmt = """
         UPDATE temp_store SET
-            prev_tid = :prev_tid,
-            md5 = :md5sum,
-            state = :data
-        WHERE zoid = :oid
+            prev_tid = %s,
+            md5 = %s,
+            state = %s
+        WHERE zoid = %s
         """
-        cursor.execute(stmt, oid=oid, prev_tid=prev_tid,
-            md5sum=md5sum, data=cx_Oracle.Binary(data))
+        cursor.execute(stmt, (prev_tid, md5sum, MySQLdb.Binary(data), oid))
 
     def start_commit(self, cursor):
         """Prepare to commit."""
-        # Hold commit_lock to prevent concurrent commits
-        # (for as short a time as possible).
-        # Lock transaction and current_object in share mode to ensure
-        # conflict detection has the most current data.
-        cursor.execute("LOCK TABLE commit_lock IN EXCLUSIVE MODE")
-        cursor.execute("LOCK TABLE transaction IN SHARE MODE")
-        cursor.execute("LOCK TABLE current_object IN SHARE MODE")
-
-    def _parse_dsinterval(self, s):
-        """Convert an Oracle dsinterval (as a string) to a float."""
-        mo = re.match(r'([+-]\d+) (\d+):(\d+):([0-9.]+)', s)
-        if not mo:
-            raise ValueError(s)
-        day, hour, min, sec = [float(v) for v in mo.groups()]
-        return day * 86400 + hour * 3600 + min * 60 + sec
+        # Hold commit_lock to prevent concurrent commits.
+        cursor.execute("SELECT GET_LOCK('relstorage.commit', %s)",
+            (commit_lock_timeout,))
+        locked = cursor.fetchone()[0]
+        if not locked:
+            raise StorageError("Unable to acquire commit lock")
 
     def get_tid_and_time(self, cursor):
         """Returns the most recent tid and the current database time.
 
         The database time is the number of seconds since the epoch.
         """
+        # Lock in share mode to ensure the data being read is up to date.
         cursor.execute("""
-        SELECT MAX(tid), TO_CHAR(TO_DSINTERVAL(SYSTIMESTAMP - TO_TIMESTAMP_TZ(
-            '1970-01-01 00:00:00 +00:00','YYYY-MM-DD HH24:MI:SS TZH:TZM')))
+        SELECT tid, UNIX_TIMESTAMP()
         FROM transaction
+        ORDER BY tid DESC
+        LIMIT 1
+        LOCK IN SHARE MODE
         """)
-        tid, now = cursor.fetchone()
-        return tid, self._parse_dsinterval(now)
+        assert cursor.rowcount == 1
+        tid, timestamp = cursor.fetchone()
+        # MySQL does not provide timestamps with more than one second
+        # precision.  To provide more precision, if the system time is
+        # within one minute of the MySQL time, use the system time instead.
+        now = time.time()
+        if abs(now - timestamp) <= 60.0:
+            timestamp = now
+        return tid, timestamp
 
     def add_transaction(self, cursor, tid, username, description, extension):
         """Add a transaction.
 
         Raises ConflictError if the given tid has already been used.
         """
-        try:
-            stmt = """
-            INSERT INTO transaction
-                (tid, username, description, extension)
-            VALUES (:1, :2, :3, :4)
-            """
-            cursor.execute(stmt, (
-                tid, username or '-', description or '-',
-                cx_Oracle.Binary(extension)))
-        except cx_Oracle.IntegrityError:
-            raise ConflictError
+        stmt = """
+        INSERT INTO transaction
+            (tid, username, description, extension)
+        VALUES (%s, %s, %s, %s)
+        """
+        cursor.execute(stmt, (
+            tid, username, description, MySQLdb.Binary(extension)))
 
     def detect_conflict(self, cursor):
         """Find one conflict in the data about to be committed.
@@ -464,16 +456,19 @@ class OracleAdapter(object):
         If there is a conflict, returns (oid, prev_tid, attempted_prev_tid,
         attempted_data).  If there is no conflict, returns None.
         """
+        # Lock in share mode to ensure the data being read is up to date.
         stmt = """
         SELECT temp_store.zoid, current_object.tid, temp_store.prev_tid,
             temp_store.state
         FROM temp_store
             JOIN current_object ON (temp_store.zoid = current_object.zoid)
         WHERE temp_store.prev_tid != current_object.tid
+        LIMIT 1
+        LOCK IN SHARE MODE
         """
         cursor.execute(stmt)
-        for oid, prev_tid, attempted_prev_tid, data in cursor:
-            return oid, prev_tid, attempted_prev_tid, data.read()
+        if cursor.rowcount:
+            return cursor.fetchone()
         return None
 
     def move_from_temp(self, cursor, tid):
@@ -483,10 +478,10 @@ class OracleAdapter(object):
         """
         stmt = """
         INSERT INTO object_state (zoid, tid, prev_tid, md5, state)
-        SELECT zoid, :tid, prev_tid, md5, state
+        SELECT zoid, %s, prev_tid, md5, state
         FROM temp_store
         """
-        cursor.execute(stmt, tid=tid)
+        cursor.execute(stmt, (tid,))
 
         stmt = """
         SELECT zoid FROM temp_store
@@ -499,25 +494,11 @@ class OracleAdapter(object):
 
         tid is the integer tid of the transaction being committed.
         """
-        # Insert objects created in this transaction into current_object.
-        stmt = """
-        INSERT INTO current_object (zoid, tid)
+        cursor.execute("""
+        REPLACE INTO current_object (zoid, tid)
         SELECT zoid, tid FROM object_state
-        WHERE tid = :1
-            AND prev_tid = 0
-        """
-        cursor.execute(stmt, (tid,))
-
-        # Change existing objects.
-        stmt = """
-        UPDATE current_object SET tid = :1
-        WHERE zoid IN (
-            SELECT zoid FROM object_state
-            WHERE tid = :1
-                AND prev_tid != 0
-        )
-        """
-        cursor.execute(stmt, (tid,))
+        WHERE tid = %s
+        """, (tid,))
 
     def commit_phase1(self, cursor, tid):
         """Begin a commit.  Returns the transaction name.
@@ -526,23 +507,28 @@ class OracleAdapter(object):
         meaning that if commit_phase2() would raise any error, the error
         should be raised in commit_phase1() instead.
         """
-        if self._twophase:
-            cursor.connection.prepare()
         return '-'
 
     def commit_phase2(self, cursor, txn):
         """Final transaction commit."""
         cursor.connection.commit()
+        cursor.execute("SELECT RELEASE_LOCK('relstorage.commit')")
 
     def abort(self, cursor, txn=None):
         """Abort the commit.  If txn is not None, phase 1 is also aborted."""
         cursor.connection.rollback()
+        cursor.execute("SELECT RELEASE_LOCK('relstorage.commit')")
 
     def new_oid(self, cursor):
         """Return a new, unused OID."""
-        stmt = "SELECT zoid_seq.nextval FROM DUAL"
+        stmt = "INSERT INTO new_oid VALUES ()"
         cursor.execute(stmt)
-        return cursor.fetchone()[0]
+        oid = cursor.connection.insert_id()
+        if oid % 100 == 0:
+            # Clean out previously generated OIDs.
+            stmt = "DELETE FROM new_oid WHERE zoid < %s"
+            cursor.execute(stmt, (oid,))
+        return oid
 
 
     def iter_transactions(self, cursor):
@@ -553,7 +539,7 @@ class OracleAdapter(object):
         stmt = """
         SELECT tid, username, description, extension
         FROM transaction
-        WHERE packed = 'N'
+        WHERE packed = FALSE
             AND tid != 0
         ORDER BY tid DESC
         """
@@ -569,18 +555,18 @@ class OracleAdapter(object):
         for each modification.
         """
         stmt = """
-        SELECT 1 FROM current_object WHERE zoid = :1
+        SELECT 1 FROM current_object WHERE zoid = %s
         """
         cursor.execute(stmt, (oid,))
-        if not cursor.fetchall():
+        if not cursor.rowcount:
             raise KeyError(oid)
 
         stmt = """
-        SELECT tid, username, description, extension, LENGTH(state)
+        SELECT tid, username, description, extension, OCTET_LENGTH(state)
         FROM transaction
             JOIN object_state USING (tid)
-        WHERE zoid = :1
-            AND packed = 'N'
+        WHERE zoid = %s
+            AND packed = FALSE
         ORDER BY tid DESC
         """
         cursor.execute(stmt, (oid,))
@@ -592,30 +578,26 @@ class OracleAdapter(object):
 
         Raise an exception if packing or undo is already in progress.
         """
-        stmt = """
-        LOCK TABLE pack_lock IN EXCLUSIVE MODE NOWAIT
-        """
-        try:
-            cursor.execute(stmt)
-        except cx_Oracle.DatabaseError:
+        stmt = "SELECT GET_LOCK('relstorage.pack', 0)"
+        cursor.execute(stmt)
+        res = cursor.fetchone()[0]
+        if not res:
             raise StorageError('A pack or undo operation is in progress')
 
     def release_pack_lock(self, cursor):
         """Release the pack lock."""
-        # No action needed
-        pass
+        stmt = "SELECT RELEASE_LOCK('relstorage.pack')"
+        cursor.execute(stmt)
 
 
     def verify_undoable(self, cursor, undo_tid):
         """Raise UndoError if it is not safe to undo the specified txn."""
         stmt = """
-        SELECT 1 FROM transaction WHERE tid = :1 AND packed = 'N'
+        SELECT 1 FROM transaction WHERE tid = %s AND packed = FALSE
         """
         cursor.execute(stmt, (undo_tid,))
-        if not cursor.fetchall():
+        if not cursor.rowcount:
             raise UndoError("Transaction not found or packed")
-
-        self.hold_pack_lock(cursor)
 
         # Rule: we can undo an object if the object's state in the
         # transaction to undo matches the object's current state.
@@ -627,11 +609,12 @@ class OracleAdapter(object):
             JOIN object_state cur_os ON (prev_os.zoid = cur_os.zoid)
             JOIN current_object ON (cur_os.zoid = current_object.zoid
                 AND cur_os.tid = current_object.tid)
-        WHERE prev_os.tid = :1
+        WHERE prev_os.tid = %s
             AND cur_os.md5 != prev_os.md5
+        LIMIT 1
         """
         cursor.execute(stmt, (undo_tid,))
-        if cursor.fetchmany():
+        if cursor.rowcount:
             raise UndoError(
                 "Some data were modified by a later transaction")
 
@@ -640,12 +623,12 @@ class OracleAdapter(object):
         stmt = """
         SELECT 1
         FROM object_state
-        WHERE tid = :1
+        WHERE tid = %s
             AND zoid = 0
             AND prev_tid = 0
         """
         cursor.execute(stmt, (undo_tid,))
-        if cursor.fetchall():
+        if cursor.rowcount:
             raise UndoError("Can't undo the creation of the root object")
 
 
@@ -657,45 +640,47 @@ class OracleAdapter(object):
 
         Returns the list of OIDs undone.
         """
-        # Update records produced by earlier undo operations
-        # within this transaction.  Change the state, but not
-        # prev_tid, since prev_tid is still correct.
-        # Table names: 'undoing' refers to the transaction being
-        # undone and 'prev' refers to the object state identified
-        # by undoing.prev_tid.
         stmt = """
-        UPDATE object_state SET (md5, state) = (
-            SELECT prev.md5, prev.state
-            FROM object_state undoing
-                LEFT JOIN object_state prev
-                ON (prev.zoid = undoing.zoid
-                    AND prev.tid = undoing.prev_tid)
-            WHERE undoing.tid = :undo_tid
-                AND undoing.zoid = object_state.zoid
-        )
-        WHERE tid = :self_tid
-            AND zoid IN (
-                SELECT zoid FROM object_state WHERE tid = :undo_tid);
+        CREATE TEMPORARY TABLE temp_undo_state (
+            zoid BIGINT NOT NULL PRIMARY KEY,
+            md5 CHAR(32),
+            state LONGBLOB
+        );
 
-        -- Add new undo records.
-
-        INSERT INTO object_state (zoid, tid, prev_tid, md5, state)
-        SELECT undoing.zoid, :self_tid, current_object.tid,
-            prev.md5, prev.state
+        -- Put the state to revert to in temp_undo_state.
+        -- Some of the states can be null, indicating object uncreation.
+        INSERT INTO temp_undo_state
+        SELECT undoing.zoid, prev.md5, prev.state
         FROM object_state undoing
-            JOIN current_object ON (current_object.zoid = undoing.zoid)
             LEFT JOIN object_state prev
                 ON (prev.zoid = undoing.zoid
                     AND prev.tid = undoing.prev_tid)
-        WHERE undoing.tid = :undo_tid
-            AND undoing.zoid NOT IN (
-                SELECT zoid FROM object_state WHERE tid = :self_tid);
+        WHERE undoing.tid = %(undo_tid)s;
+
+        -- Update records produced by earlier undo operations
+        -- within this transaction.  Change the state, but not
+        -- prev_tid, since prev_tid is still correct.
+        UPDATE object_state
+        JOIN temp_undo_state USING (zoid)
+        SET object_state.md5 = temp_undo_state.md5,
+            object_state.state = temp_undo_state.state
+        WHERE tid = %(self_tid)s;
+
+        -- Add new undo records.
+        INSERT INTO object_state (zoid, tid, prev_tid, md5, state)
+        SELECT zoid, %(self_tid)s, tid, md5, state
+        FROM temp_undo_state
+            JOIN current_object USING (zoid)
+        WHERE zoid NOT IN (
+            SELECT zoid FROM object_state WHERE tid = %(self_tid)s);
+
+        DROP TABLE temp_undo_state;
         """
         self._run_script(cursor, stmt,
             {'undo_tid': undo_tid, 'self_tid': self_tid})
 
         # List the changed OIDs.
-        stmt = "SELECT zoid FROM object_state WHERE tid = :1"
+        stmt = "SELECT zoid FROM object_state WHERE tid = %s"
         cursor.execute(stmt, (undo_tid,))
         return [oid_int for (oid_int,) in cursor]
 
@@ -708,18 +693,19 @@ class OracleAdapter(object):
         conn, cursor = self.open()
         try:
             stmt = """
-            SELECT MAX(tid)
+            SELECT tid
             FROM transaction
-            WHERE tid > 0
-                AND tid <= :1
-                AND packed = 'N'
+            WHERE tid > 0 AND tid <= %s
+                AND packed = FALSE
+            ORDER BY tid DESC
+            LIMIT 1
             """
             cursor.execute(stmt, (pack_point,))
-            rows = cursor.fetchall()
-            if not rows:
+            if not cursor.rowcount:
                 # Nothing needs to be packed.
                 return None
-            return rows[0][0]
+            assert cursor.rowcount == 1
+            return cursor.fetchone()[0]
         finally:
             self.close(conn, cursor)
 
@@ -732,15 +718,12 @@ class OracleAdapter(object):
         get_references is a function that accepts a pickled state and
         returns a set of OIDs that state refers to.
         """
-        conn, cursor = self.open()
+        conn, cursor = self.open(transaction_mode=None)
         try:
-            try:
-                self._pre_pack_cursor(cursor, pack_tid, get_references)
-            except:
-                conn.rollback()
-                raise
-            else:
-                conn.commit()
+            # This phase of packing works best with transactions
+            # disabled.  It changes no user-facing data.
+            conn.autocommit(True)
+            self._pre_pack_cursor(cursor, pack_tid, get_references)
         finally:
             self.close(conn, cursor)
 
@@ -748,39 +731,41 @@ class OracleAdapter(object):
     def _pre_pack_cursor(self, cursor, pack_tid, get_references):
         """pre_pack implementation.
         """
+        # Fill object_ref with references from object states
+        # in transactions that will not be packed.
         self._fill_nonpacked_refs(cursor, pack_tid, get_references)
 
-        args = {'pack_tid': pack_tid}
-
         # Ensure the temporary pack_object table is clear.
-        cursor.execute("DELETE FROM pack_object")
+        cursor.execute("TRUNCATE pack_object")
+
+        args = {'pack_tid': pack_tid}
 
         # Fill the pack_object table with OIDs that either will be
         # removed (if nothing references the OID) or whose history will
         # be cut.
         stmt = """
         INSERT INTO pack_object (zoid, keep)
-        SELECT DISTINCT zoid, 'N'
+        SELECT DISTINCT zoid, false
         FROM object_state
-        WHERE tid <= :pack_tid
+        WHERE tid <= %(pack_tid)s
         """
         cursor.execute(stmt, args)
 
         # If the root object is in pack_object, keep it.
         stmt = """
-        UPDATE pack_object SET keep = 'Y'
+        UPDATE pack_object SET keep = true
         WHERE zoid = 0
         """
         cursor.execute(stmt)
 
         # Keep objects that have been revised since pack_tid.
         stmt = """
-        UPDATE pack_object SET keep = 'Y'
-        WHERE keep = 'N'
+        UPDATE pack_object SET keep = true
+        WHERE keep = false
             AND zoid IN (
                 SELECT zoid
                 FROM current_object
-                WHERE tid > :pack_tid
+                WHERE tid > %(pack_tid)s
             )
         """
         cursor.execute(stmt, args)
@@ -788,12 +773,12 @@ class OracleAdapter(object):
         # Keep objects that are still referenced by object states in
         # transactions that will not be packed.
         stmt = """
-        UPDATE pack_object SET keep = 'Y'
-        WHERE keep = 'N'
+        UPDATE pack_object SET keep = true
+        WHERE keep = false
             AND zoid IN (
                 SELECT to_zoid
                 FROM object_ref
-                WHERE tid > :pack_tid
+                WHERE tid > %(pack_tid)s
             )
         """
         cursor.execute(stmt, args)
@@ -810,27 +795,31 @@ class OracleAdapter(object):
             # references.
             stmt = """
             UPDATE pack_object SET keep_tid = (
-                    SELECT MAX(tid)
+                    SELECT tid
                     FROM object_state
                     WHERE zoid = pack_object.zoid
                         AND tid > 0
-                        AND tid <= :pack_tid
+                        AND tid <= %(pack_tid)s
+                    ORDER BY tid DESC
+                    LIMIT 1
                 )
-            WHERE keep = 'Y' AND keep_tid IS NULL
+            WHERE keep = true AND keep_tid IS NULL
             """
             cursor.execute(stmt, args)
 
             self._fill_pack_object_refs(cursor, get_references)
 
             stmt = """
-            UPDATE pack_object SET keep = 'Y'
-            WHERE keep = 'N'
+            UPDATE pack_object SET keep = true
+            WHERE keep = false
                 AND zoid IN (
-                    SELECT DISTINCT to_zoid
-                    FROM object_ref
-                        JOIN pack_object parent ON (
-                            object_ref.zoid = parent.zoid)
-                    WHERE parent.keep = 'Y'
+                    SELECT to_zoid FROM (
+                        SELECT DISTINCT to_zoid
+                        FROM object_ref
+                            JOIN pack_object parent ON (
+                                object_ref.zoid = parent.zoid)
+                        WHERE parent.keep = true
+                    ) AS all_references
                 )
             """
             cursor.execute(stmt)
@@ -844,7 +833,7 @@ class OracleAdapter(object):
         stmt = """
         SELECT DISTINCT tid
         FROM object_state
-        WHERE tid > :1
+        WHERE tid > %s
             AND NOT EXISTS (
                 SELECT 1
                 FROM object_refs_added
@@ -879,30 +868,28 @@ class OracleAdapter(object):
         stmt = """
         SELECT zoid, state
         FROM object_state
-        WHERE tid = :1
+        WHERE tid = %s
         """
         cursor.execute(stmt, (tid,))
 
         to_add = []  # [(from_oid, tid, to_oid)]
-        for from_oid, state_file in cursor:
-            if state_file is not None:
-                state = state_file.read()
-                if state is not None:
-                    to_oids = get_references(state)
-                    for to_oid in to_oids:
-                        to_add.append((from_oid, tid, to_oid))
+        for from_oid, state in cursor:
+            if state:
+                to_oids = get_references(state)
+                for to_oid in to_oids:
+                    to_add.append((from_oid, tid, to_oid))
 
         if to_add:
             stmt = """
             INSERT INTO object_ref (zoid, tid, to_zoid)
-            VALUES (:1, :2, :3)
+            VALUES (%s, %s, %s)
             """
             cursor.executemany(stmt, to_add)
 
         # The references have been computed for this transaction.
         stmt = """
         INSERT INTO object_refs_added (tid)
-        VALUES (:1)
+        VALUES (%s)
         """
         cursor.execute(stmt, (tid,))
 
@@ -913,33 +900,38 @@ class OracleAdapter(object):
         # Read committed mode is sufficient.
         conn, cursor = self.open()
         try:
+            # Pause concurrent commits.
+            cursor.execute("SELECT GET_LOCK('relstorage.commit', %s)",
+                (commit_lock_timeout,))
+            locked = cursor.fetchone()[0]
+            if not locked:
+                raise StorageError("Unable to acquire commit lock")
+
             try:
-                # hold the commit lock for a moment to prevent deadlocks.
-                cursor.execute("LOCK TABLE commit_lock IN EXCLUSIVE MODE")
 
                 for table in ('object_ref', 'current_object', 'object_state'):
 
                     # Remove objects that are in pack_object and have keep
-                    # set to 'N'.
+                    # set to false.
                     stmt = """
                     DELETE FROM %s
                     WHERE zoid IN (
                             SELECT zoid
                             FROM pack_object
-                            WHERE keep = 'N'
+                            WHERE keep = false
                         )
                     """ % table
                     cursor.execute(stmt)
 
                     if table != 'current_object':
                         # Cut the history of objects in pack_object that
-                        # have keep set to 'Y'.
+                        # have keep set to true.
                         stmt = """
                         DELETE FROM %s
                         WHERE zoid IN (
                                 SELECT zoid
                                 FROM pack_object
-                                WHERE keep = 'Y'
+                                WHERE keep = true
                             )
                             AND tid < (
                                 SELECT keep_tid
@@ -952,14 +944,14 @@ class OracleAdapter(object):
                 stmt = """
                 -- Terminate prev_tid chains
                 UPDATE object_state SET prev_tid = 0
-                WHERE tid <= :tid
+                WHERE tid <= %(tid)s
                     AND prev_tid != 0;
 
                 -- For each tid to be removed, delete the corresponding row in
                 -- object_refs_added.
                 DELETE FROM object_refs_added
                 WHERE tid > 0
-                    AND tid <= :tid
+                    AND tid <= %(tid)s
                     AND NOT EXISTS (
                         SELECT 1
                         FROM object_state
@@ -969,7 +961,7 @@ class OracleAdapter(object):
                 -- Delete transactions no longer used.
                 DELETE FROM transaction
                 WHERE tid > 0
-                    AND tid <= :tid
+                    AND tid <= %(tid)s
                     AND NOT EXISTS (
                         SELECT 1
                         FROM object_state
@@ -977,15 +969,15 @@ class OracleAdapter(object):
                     );
 
                 -- Mark the remaining packable transactions as packed
-                UPDATE transaction SET packed = 'Y'
+                UPDATE transaction SET packed = true
                 WHERE tid > 0
-                    AND tid <= :tid
-                    AND packed = 'N'
+                    AND tid <= %(tid)s
+                    AND packed = false
                 """
                 self._run_script(cursor, stmt, {'tid': pack_tid})
 
                 # Clean up
-                cursor.execute("DELETE FROM pack_object")
+                cursor.execute("TRUNCATE pack_object")
 
             except:
                 conn.rollback()
@@ -1012,9 +1004,11 @@ class OracleAdapter(object):
         """
         try:
             # find out the tid of the most recent transaction.
-            stmt = "SELECT MAX(tid) FROM transaction"
+            stmt = "SELECT tid FROM transaction ORDER BY tid DESC LIMIT 1"
             cursor.execute(stmt)
-            new_polled_tid = list(cursor)[0][0]
+            # Expect the transaction table to always have at least one row.
+            assert cursor.rowcount == 1
+            new_polled_tid = cursor.fetchone()[0]
 
             if prev_polled_tid is None:
                 # This is the first time the connection has polled.
@@ -1024,10 +1018,9 @@ class OracleAdapter(object):
                 # No transactions have been committed since prev_polled_tid.
                 return (), new_polled_tid
 
-            stmt = "SELECT 1 FROM transaction WHERE tid = :1"
+            stmt = "SELECT 1 FROM transaction WHERE tid = %s"
             cursor.execute(stmt, (prev_polled_tid,))
-            rows = cursor.fetchall()
-            if not rows:
+            if not cursor.rowcount:
                 # Transaction not found; perhaps it has been packed.
                 # The connection cache needs to be cleared.
                 return None, new_polled_tid
@@ -1037,7 +1030,7 @@ class OracleAdapter(object):
             SELECT DISTINCT zoid
             FROM object_state
                 JOIN transaction USING (tid)
-            WHERE tid > :1
+            WHERE tid > %s
             """
             if ignore_tid is not None:
                 stmt += " AND tid != %d" % ignore_tid
@@ -1046,6 +1039,6 @@ class OracleAdapter(object):
 
             return oids, new_polled_tid
 
-        except (cx_Oracle.OperationalError, cx_Oracle.InterfaceError):
+        except (MySQLdb.OperationalError, MySQLdb.InterfaceError):
             raise StorageError("database disconnected")
 

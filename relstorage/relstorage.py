@@ -334,36 +334,18 @@ class RelStorage(BaseStorage,
         adapter.start_commit(cursor)
         user, desc, ext = self._ude
 
-        attempt = 1
-        while True:
-            # get the commit lock
-            try:
-                # Choose a transaction ID.
-                # Base the transaction ID on the database time,
-                # while ensuring that the tid of this transaction
-                # is greater than any existing tid.
-                last_tid, now = adapter.get_tid_and_time(cursor)
-                stamp = TimeStamp(*(time.gmtime(now)[:5] + (now % 60,)))
-                stamp = stamp.laterThan(TimeStamp(p64(last_tid)))
-                tid = repr(stamp)
+        # Choose a transaction ID.
+        # Base the transaction ID on the database time,
+        # while ensuring that the tid of this transaction
+        # is greater than any existing tid.
+        last_tid, now = adapter.get_tid_and_time(cursor)
+        stamp = TimeStamp(*(time.gmtime(now)[:5] + (now % 60,)))
+        stamp = stamp.laterThan(TimeStamp(p64(last_tid)))
+        tid = repr(stamp)
 
-                tid_int = u64(tid)
-                adapter.add_transaction(cursor, tid_int, user, desc, ext)
-                self._tid = tid
-                break
-
-            except POSException.ConflictError:
-                if attempt < 3:
-                    # A concurrent transaction claimed the tid.
-                    # Rollback and try again.
-                    adapter.restart_commit(cursor)
-                    attempt += 1
-                else:
-                    self._drop_store_connection()
-                    raise
-            except:
-                self._drop_store_connection()
-                raise
+        tid_int = u64(tid)
+        adapter.add_transaction(cursor, tid_int, user, desc, ext)
+        self._tid = tid
 
 
     def _clear_temp(self):
@@ -601,23 +583,31 @@ class RelStorage(BaseStorage,
 
         self._lock_acquire()
         try:
-            self._prepare_tid()
-            self_tid_int = u64(self._tid)
+            adapter = self._adapter
             cursor = self._store_cursor
             assert cursor is not None
-            adapter = self._adapter
 
-            adapter.verify_undoable(cursor, undo_tid_int)
-            oid_ints = adapter.undo(cursor, undo_tid_int, self_tid_int)
-            oids = [p64(oid_int) for oid_int in oid_ints]
+            adapter.hold_pack_lock(cursor)
+            try:
+                # Note that _prepare_tid acquires the commit lock.
+                # The commit lock must be acquired after the pack lock
+                # because the database adapters also acquire in that
+                # order during packing.
+                self._prepare_tid()
+                adapter.verify_undoable(cursor, undo_tid_int)
 
-            # Update the current object pointers immediately, so that
-            # subsequent undo operations within this transaction will see
-            # the new current objects.
-            adapter.update_current(cursor, self_tid_int)
+                self_tid_int = u64(self._tid)
+                oid_ints = adapter.undo(cursor, undo_tid_int, self_tid_int)
+                oids = [p64(oid_int) for oid_int in oid_ints]
 
-            return self._tid, oids
+                # Update the current object pointers immediately, so that
+                # subsequent undo operations within this transaction will see
+                # the new current objects.
+                adapter.update_current(cursor, self_tid_int)
 
+                return self._tid, oids
+            finally:
+                adapter.release_pack_lock(cursor)
         finally:
             self._lock_release()
 
@@ -638,49 +628,30 @@ class RelStorage(BaseStorage,
             return refs
 
         # Use a private connection (lock_conn and lock_cursor) to
-        # hold the pack lock, while using a second private connection
-        # (conn and cursor) to decide exactly what to pack.
-        # Close the second connection.  Then, with the lock still held,
-        # perform the pack in a third connection opened by the adapter.
-        # This structure is designed to maximize the scalability
-        # of packing and minimize conflicts with concurrent writes.
-        # A consequence of this structure is that the adapter must
-        # not choke on transactions that may have been added between
-        # pre_pack and pack.
+        # hold the pack lock.  Have the adapter open temporary
+        # connections to do the actual work, allowing the adapter
+        # to use special transaction modes for packing.
         adapter = self._adapter
         lock_conn, lock_cursor = adapter.open()
         try:
             adapter.hold_pack_lock(lock_cursor)
-
-            conn, cursor = adapter.open()
             try:
-                try:
-                    # Find the latest commit before or at the pack time.
-                    tid_int = adapter.choose_pack_transaction(
-                        cursor, pack_point_int)
-                    if tid_int is None:
-                        # Nothing needs to be packed.
-                        # TODO: log the fact that nothing needs to be packed.
-                        return
+                # Find the latest commit before or at the pack time.
+                tid_int = adapter.choose_pack_transaction(pack_point_int)
+                if tid_int is None:
+                    # Nothing needs to be packed.
+                    return
 
-                    # In pre_pack, the adapter fills tables with information
-                    # about what to pack.  The adapter should not actually
-                    # pack anything yet.
-                    adapter.pre_pack(cursor, tid_int, get_references)
-                except:
-                    conn.rollback()
-                    raise
-                else:
-                    conn.commit()
+                # In pre_pack, the adapter fills tables with
+                # information about what to pack.  The adapter
+                # should not actually pack anything yet.
+                adapter.pre_pack(tid_int, get_references)
+
+                # Now pack.
+                adapter.pack(tid_int)
+                self._after_pack()
             finally:
-                adapter.close(conn, cursor)
-
-            # Now pack.  The adapter makes its own connection just for the
-            # pack operation, possibly using a special transaction mode
-            # and connection flags.
-            adapter.pack(tid_int)
-            self._after_pack()
-
+                adapter.release_pack_lock(lock_cursor)
         finally:
             lock_conn.rollback()
             adapter.close(lock_conn, lock_cursor)
