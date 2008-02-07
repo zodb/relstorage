@@ -22,7 +22,7 @@ from relstorage.adapters.postgresql import PostgreSQLAdapter
 
 class PostgreSQLTests(RelStorageTests):
     def make_adapter(self):
-        return PostgreSQLAdapter()
+        return PostgreSQLAdapter('dbname=relstoragetest')
 
 def test_suite():
     suite = unittest.TestSuite()

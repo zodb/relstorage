@@ -10,7 +10,7 @@
   <sectiontype name="relstorage" implements="ZODB.storage"
       datatype=".RelStorageFactory">
     <section type="relstorage.adapter" name="*" attribute="adapter"/>
-    <key name="name" default="RelStorage"/>
+    <key name="name" datatype="string" required="no"/>
     <key name="create" datatype="boolean" default="true">
       <description>
         Flag that indicates whether the storage should be initialized if
@@ -59,6 +59,77 @@
         normally expect to find the DSN in /etc/oratab.
       </description>
     </key>
+  </sectiontype>
+
+  <sectiontype name="mysql" implements="relstorage.adapter"
+    datatype=".MySQLAdapterFactory">
+
+    <key name="host" datatype="string" required="no">
+      <description>
+        host to connect
+      </description>
+    </key>
+
+    <key name="user" datatype="string" required="no">
+      <description>
+        user to connect as
+      </description>
+    </key>
+
+    <key name="passwd" datatype="string" required="no">
+      <description>
+        password to use
+      </description>
+    </key>
+
+    <key name="db" datatype="string" required="no">
+      <description>
+        database to use
+      </description>
+    </key>
+
+    <key name="port" datatype="integer" required="no">
+      <description>
+        TCP/IP port to connect to
+      </description>
+    </key>
+
+    <key name="unix_socket" datatype="string" required="no">
+      <description>
+        location of unix_socket (UNIX-ish only)
+      </description>
+    </key>
+
+    <key name="connect_timeout" datatype="integer" required="no">
+      <description>
+        number of seconds to wait before the connection attempt fails.
+      </description>
+    </key>
+
+    <key name="compress" datatype="boolean" required="no">
+      <description>
+        if set, gzip compression is enabled
+      </description>
+    </key>
+
+    <key name="named_pipe" datatype="boolean" required="no">
+      <description>
+        if set, connect to server via named pipe (Windows only)
+      </description>
+    </key>
+
+    <key name="read_default_file" datatype="string" required="no">
+      <description>
+        see the MySQL documentation for mysql_options()
+      </description>
+    </key>
+
+    <key name="read_default_group" datatype="string" required="no">
+      <description>
+        see the MySQL documentation for mysql_options()
+      </description>
+    </key>
+
   </sectiontype>
 
 </component>

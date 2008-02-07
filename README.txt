@@ -29,3 +29,15 @@ For Oracle, use this in etc/zope.conf:
   </relstorage>
 </zodb_db>
 
+
+For MySQL, use this in etc/zope.conf:
+
+%import relstorage
+<zodb_db main>
+  <relstorage>
+    <mysql>
+      db zodb
+    </mysql>
+  </relstorage>
+  mount-point /
+</zodb_db>

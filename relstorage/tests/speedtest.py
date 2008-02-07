@@ -33,14 +33,10 @@ from ZODB.DB import DB
 from ZODB.Connection import Connection
 
 from relstorage.relstorage import RelStorage
-from relstorage.adapters.mysql import MySQLAdapter
-from relstorage.adapters.postgresql import PostgreSQLAdapter
-from relstorage.adapters.oracle import OracleAdapter
-from relstorage.tests.testoracle import getOracleParams
 
 debug = False
 txn_count = 10
-object_counts = [100]  # [1, 100, 10000]
+object_counts = [10000]  # [1, 100, 10000]
 concurrency_levels = range(1, 16, 2)
 contenders = [
     ('ZEO + FileStorage', 'zeofs_test'),
@@ -80,11 +76,46 @@ def run_in_child(wait, func, *args, **kw):
     return pid
 
 
+class ZEOServerRunner(object):
+
+    def __init__(self):
+        self.dir = tempfile.mkdtemp()
+        self.store_fn = os.path.join(self.dir, 'storage')
+        self.sock_fn = os.path.join(self.dir, 'sock')
+        self.pid = None
+
+    def run(self):
+        from ZODB.FileStorage import FileStorage
+        from ZEO.StorageServer import StorageServer
+
+        fs = FileStorage(self.store_fn, create=True)
+        ss = StorageServer(self.sock_fn, {'1': fs})
+
+        import ThreadedAsync.LoopCallback
+        ThreadedAsync.LoopCallback.loop()
+
+    def start(self):
+        self.pid = run_in_child(False, self.run)
+        # parent
+        sys.stderr.write('Waiting for ZEO server to start...')
+        while not os.path.exists(self.sock_fn):
+            sys.stderr.write('.')
+            sys.stderr.flush()
+            time.sleep(0.1)
+        sys.stderr.write(' started.\n')
+        sys.stderr.flush()
+
+    def stop(self):
+        os.kill(self.pid, signal.SIGTERM)
+        shutil.rmtree(self.dir)
+
+
 class SpeedTest:
 
-    def __init__(self, concurrency, objects_per_txn):
+    def __init__(self, concurrency, objects_per_txn, zeo_runner):
         self.concurrency = concurrency
         self.data_to_store = dict((n, 1) for n in range(objects_per_txn))
+        self.zeo_runner = zeo_runner
 
     def populate(self, make_storage):
         # initialize the database
@@ -92,6 +123,13 @@ class SpeedTest:
         db = DB(storage)
         conn = db.open()
         root = conn.root()
+
+        # clear the database
+        root['speedtest'] = None
+        transaction.commit()
+        db.pack()
+
+        # put a tree in the database
         root['speedtest'] = t = IOBTree()
         for i in range(self.concurrency):
             t[i] = IOBTree()
@@ -149,55 +187,23 @@ class SpeedTest:
         count = float(self.concurrency * txn_count)
         return (sum(write_times) / count, sum(read_times) / count)
 
-    def run_zeo_server(self, store_fn, sock_fn):
-        from ZODB.FileStorage import FileStorage
-        from ZEO.StorageServer import StorageServer
-
-        fs = FileStorage(store_fn, create=True)
-        ss = StorageServer(sock_fn, {'1': fs})
-
-        import ThreadedAsync.LoopCallback
-        ThreadedAsync.LoopCallback.loop()
-
-    def start_zeo_server(self, store_fn, sock_fn):
-        pid = run_in_child(False, self.run_zeo_server, store_fn, sock_fn)
-        # parent
-        if debug:
-            sys.stderr.write('Waiting for ZEO server to start...')
-        while not os.path.exists(sock_fn):
-            if debug:
-                sys.stderr.write('.')
-                sys.stderr.flush()
-            time.sleep(0.1)
-        if debug:
-            sys.stderr.write(' started.\n')
-            sys.stderr.flush()
-        return pid
-
     def zeofs_test(self):
-        dir = tempfile.mkdtemp()
-        try:
-            store_fn = os.path.join(dir, 'storage')
-            sock_fn = os.path.join(dir, 'sock')
-            zeo_pid = self.start_zeo_server(store_fn, sock_fn)
-            try:
-                def make_storage():
-                    from ZEO.ClientStorage import ClientStorage
-                    return ClientStorage(sock_fn)
-                return self.run_tests(make_storage)
-            finally:
-                os.kill(zeo_pid, signal.SIGTERM)
-        finally:
-            shutil.rmtree(dir)
+        def make_storage():
+            from ZEO.ClientStorage import ClientStorage
+            return ClientStorage(self.zeo_runner.sock_fn)
+        return self.run_tests(make_storage)
 
     def postgres_test(self):
-        adapter = PostgreSQLAdapter()
+        from relstorage.adapters.postgresql import PostgreSQLAdapter
+        adapter = PostgreSQLAdapter('dbname=relstoragetest')
         adapter.zap()
         def make_storage():
             return RelStorage(adapter)
         return self.run_tests(make_storage)
 
     def oracle_test(self):
+        from relstorage.adapters.oracle import OracleAdapter
+        from relstorage.tests.testoracle import getOracleParams
         user, password, dsn = getOracleParams()
         adapter = OracleAdapter(user, password, dsn)
         adapter.zap()
@@ -206,12 +212,12 @@ class SpeedTest:
         return self.run_tests(make_storage)
 
     def mysql_test(self):
+        from relstorage.adapters.mysql import MySQLAdapter
         adapter = MySQLAdapter(db='relstoragetest')
         adapter.zap()
         def make_storage():
             return RelStorage(adapter)
         return self.run_tests(make_storage)
-
 
 
 def distribute(func, param_iter):
@@ -289,6 +295,8 @@ def distribute(func, param_iter):
 
 
 def main():
+    zeo_runner = ZEOServerRunner()
+    zeo_runner.start()
 
     # results: {(objects_per_txn, concurrency, contender, direction): [time]}}
     results = {}
@@ -303,7 +311,7 @@ def main():
     try:
         for objects_per_txn in object_counts:
             for concurrency in concurrency_levels:
-                test = SpeedTest(concurrency, objects_per_txn)
+                test = SpeedTest(concurrency, objects_per_txn, zeo_runner)
                 for contender_name, method_name in contenders:
                     print >> sys.stderr, (
                         'Testing %s with objects_per_txn=%d and concurrency=%d'
@@ -332,6 +340,8 @@ def main():
     # The finally clause causes test results to print even if the tests
     # stop early.
     finally:
+        zeo_runner.stop()
+
         # show the results in CSV format
         print >> sys.stderr, (
             'Average time per transaction in seconds.  Best of 3.')

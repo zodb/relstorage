@@ -125,6 +125,12 @@ class OracleAdapter(object):
             keep_tid    NUMBER(20)
         );
         CREATE INDEX pack_object_keep_zoid ON pack_object (keep, zoid);
+
+        -- Temporary state during packing: a list of objects
+        -- whose references need to be examined.
+        CREATE GLOBAL TEMPORARY TABLE temp_pack_visit (
+            zoid        NUMBER(20) NOT NULL PRIMARY KEY
+        );
         """
         self._run_script(cursor, stmt)
 
@@ -805,6 +811,18 @@ class OracleAdapter(object):
         # repeatedly until all references have been satisfied.
         while True:
 
+            # Make a list of all parent objects that still need
+            # to be visited.
+            cursor.execute("DELETE FROM temp_pack_visit")
+            stmt = """
+            INSERT INTO temp_pack_visit (zoid)
+            SELECT zoid
+            FROM pack_object
+            WHERE keep = 'Y'
+                AND keep_tid IS NULL
+            """
+            cursor.execute(stmt)
+
             # Set keep_tid for all pack_object rows with keep = 'Y'.
             # This must be done before _fill_pack_object_refs examines
             # references.
@@ -816,21 +834,22 @@ class OracleAdapter(object):
                         AND tid > 0
                         AND tid <= :pack_tid
                 )
-            WHERE keep = 'Y' AND keep_tid IS NULL
+            WHERE keep = 'Y'
+                AND keep_tid IS NULL
             """
             cursor.execute(stmt, args)
 
             self._fill_pack_object_refs(cursor, get_references)
 
+            # Visit the children of all parent objects that were
+            # just visited.
             stmt = """
             UPDATE pack_object SET keep = 'Y'
             WHERE keep = 'N'
                 AND zoid IN (
                     SELECT DISTINCT to_zoid
                     FROM object_ref
-                        JOIN pack_object parent ON (
-                            object_ref.zoid = parent.zoid)
-                    WHERE parent.keep = 'Y'
+                        JOIN temp_pack_visit USING (zoid)
                 )
             """
             cursor.execute(stmt)

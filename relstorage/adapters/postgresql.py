@@ -805,12 +805,33 @@ class PostgreSQLAdapter(object):
         """
         cursor.execute(stmt, args)
 
+        # Create a small workspace
+        stmt = """
+        CREATE TEMPORARY TABLE temp_pack_visit (
+            zoid BIGINT NOT NULL
+        );
+        CREATE UNIQUE INDEX temp_pack_visit_zoid ON temp_pack_visit (zoid)
+        """
+        cursor.execute(stmt)
+
         # Each of the packable objects to be kept might
         # refer to other objects.  If some of those references
         # include objects currently set to be removed, keep
         # those objects as well.  Do this
         # repeatedly until all references have been satisfied.
         while True:
+
+            # Make a list of all parent objects that still need
+            # to be visited.
+            stmt = """
+            TRUNCATE temp_pack_visit;
+            INSERT INTO temp_pack_visit (zoid)
+            SELECT zoid
+            FROM pack_object
+            WHERE keep = true
+                AND keep_tid IS NULL
+            """
+            cursor.execute(stmt)
 
             # Set keep_tid for all pack_object rows with keep = 'Y'.
             # This must be done before _fill_pack_object_refs examines
@@ -831,15 +852,15 @@ class PostgreSQLAdapter(object):
 
             self._fill_pack_object_refs(cursor, get_references)
 
+            # Visit the children of all parent objects that were
+            # just visited.
             stmt = """
             UPDATE pack_object SET keep = true
             WHERE keep = false
                 AND zoid IN (
                     SELECT DISTINCT to_zoid
                     FROM object_ref
-                        JOIN pack_object parent ON (
-                            object_ref.zoid = parent.zoid)
-                    WHERE parent.keep = true
+                        JOIN temp_pack_visit USING (zoid)
                 )
             """
             cursor.execute(stmt)

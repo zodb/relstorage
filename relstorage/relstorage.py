@@ -42,8 +42,11 @@ class RelStorage(BaseStorage,
                 ConflictResolution.ConflictResolvingStorage):
     """Storage to a relational database, based on invalidation polling"""
 
-    def __init__(self, adapter, name='RelStorage', create=True,
+    def __init__(self, adapter, name=None, create=True,
             read_only=False):
+        if name is None:
+            name = 'RelStorage on %s' % adapter.__class__.__name__
+
         self._adapter = adapter
         self._name = name
         self._is_read_only = read_only

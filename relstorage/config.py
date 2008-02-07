@@ -39,3 +39,14 @@ class OracleAdapterFactory(BaseConfig):
         config = self.config
         return OracleAdapter(config.user, config.password, config.dsn)
 
+
+class MySQLAdapterFactory(BaseConfig):
+    def open(self):
+        from adapters.mysql import MySQLAdapter
+        options = {}
+        for key in self.config.getSectionAttributes():
+            value = getattr(self.config, key)
+            if value is not None:
+                options[key] = value
+        return MySQLAdapter(**options)
+

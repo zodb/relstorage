@@ -783,12 +783,32 @@ class MySQLAdapter(object):
         """
         cursor.execute(stmt, args)
 
+        # Create a small workspace
+        stmt = """
+        CREATE TEMPORARY TABLE temp_pack_visit (
+            zoid BIGINT NOT NULL PRIMARY KEY
+        )
+        """
+        cursor.execute(stmt)
+
         # Each of the packable objects to be kept might
         # refer to other objects.  If some of those references
         # include objects currently set to be removed, keep
         # those objects as well.  Do this
         # repeatedly until all references have been satisfied.
         while True:
+
+            # Make a list of all parent objects that still need
+            # to be visited.
+            cursor.execute("DELETE FROM temp_pack_visit")
+            stmt = """
+            INSERT INTO temp_pack_visit (zoid)
+            SELECT zoid
+            FROM pack_object
+            WHERE keep = true
+                AND keep_tid IS NULL
+            """
+            cursor.execute(stmt)
 
             # Set keep_tid for all pack_object rows with keep = 'Y'.
             # This must be done before _fill_pack_object_refs examines
@@ -803,23 +823,22 @@ class MySQLAdapter(object):
                     ORDER BY tid DESC
                     LIMIT 1
                 )
-            WHERE keep = true AND keep_tid IS NULL
+            WHERE keep = true
+                AND keep_tid IS NULL
             """
             cursor.execute(stmt, args)
 
             self._fill_pack_object_refs(cursor, get_references)
 
+            # Visit the children of all parent objects that were
+            # just visited.
             stmt = """
             UPDATE pack_object SET keep = true
             WHERE keep = false
                 AND zoid IN (
-                    SELECT to_zoid FROM (
-                        SELECT DISTINCT to_zoid
-                        FROM object_ref
-                            JOIN pack_object parent ON (
-                                object_ref.zoid = parent.zoid)
-                        WHERE parent.keep = true
-                    ) AS all_references
+                    SELECT DISTINCT to_zoid
+                    FROM object_ref
+                        JOIN temp_pack_visit USING (zoid)
                 )
             """
             cursor.execute(stmt)
