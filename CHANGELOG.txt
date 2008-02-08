@@ -34,6 +34,10 @@ relstorage 0.9
 
 - Added support for MySQL.  (Version 5.0 is probably the minimum.)
 
+- Added the poll_interval option.  It reduces the frequency of database
+  polls, but it also increases the potential for conflict errors on
+  servers with high write volume.
+
 
 PGStorage 0.4
 

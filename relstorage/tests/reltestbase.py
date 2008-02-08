@@ -219,3 +219,44 @@ class RelStorageTests(
             transaction.commit()
         finally:
             db.close()
+
+    def checkPollInterval(self):
+        # Verify the poll_interval parameter causes RelStorage to
+        # delay invalidation polling.
+        self._storage._poll_interval = 3600 
+        db = DB(self._storage)
+        try:
+            c1 = db.open()
+            r1 = c1.root()
+            r1['alpha'] = 1
+            transaction.commit()
+
+            c2 = db.open()
+            r2 = c2.root()
+            self.assertEqual(r2['alpha'], 1)
+
+            r1['alpha'] = 2
+            # commit c1 without triggering c2.afterCompletion().
+            storage = c1._storage
+            t = transaction.Transaction()
+            storage.tpc_begin(t)
+            c1.commit(t)
+            storage.tpc_vote(t)
+            storage.tpc_finish(t)
+
+            # c2 should not see the change yet
+            r2 = c2.root()
+            self.assertEqual(r2['alpha'], 1)
+
+            # expire the poll timer and verify c2 sees the change
+            c2._storage._poll_at -= 3601
+            c2._flush_invalidations()
+            r2 = c2.root()
+            self.assertEqual(r2['alpha'], 2)
+
+            transaction.abort()
+            c2.close()
+            c1.close()
+
+        finally:
+            db.close()

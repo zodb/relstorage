@@ -43,13 +43,14 @@ class RelStorage(BaseStorage,
     """Storage to a relational database, based on invalidation polling"""
 
     def __init__(self, adapter, name=None, create=True,
-            read_only=False):
+            read_only=False, poll_interval=0):
         if name is None:
             name = 'RelStorage on %s' % adapter.__class__.__name__
 
         self._adapter = adapter
         self._name = name
         self._is_read_only = read_only
+        self._poll_interval = poll_interval
 
         if create:
             self._adapter.prepare_schema()
@@ -57,7 +58,7 @@ class RelStorage(BaseStorage,
         # load_conn and load_cursor are open most of the time.
         self._load_conn = None
         self._load_cursor = None
-        self._load_started = False
+        self._load_transaction_open = False
         self._open_load_connection()
         # store_conn and store_cursor are open during commit,
         # but not necessarily open at other times.
@@ -87,7 +88,7 @@ class RelStorage(BaseStorage,
         conn, cursor = self._adapter.open_for_load()
         self._drop_load_connection()
         self._load_conn, self._load_cursor = conn, cursor
-        self._load_started = True
+        self._load_transaction_open = True
 
     def _drop_load_connection(self):
         conn, cursor = self._load_conn, self._load_cursor
@@ -101,15 +102,15 @@ class RelStorage(BaseStorage,
 
     def _rollback_load_connection(self):
         if self._load_conn is not None:
-            self._load_started = False
             self._load_conn.rollback()
+            self._load_transaction_open = False
 
     def _start_load(self):
         if self._load_cursor is None:
             self._open_load_connection()
         else:
             self._adapter.restart_load(self._load_cursor)
-            self._load_started = True
+            self._load_transaction_open = True
 
     def _zap(self):
         """Clear all objects out of the database.
@@ -157,7 +158,7 @@ class RelStorage(BaseStorage,
     def load(self, oid, version):
         self._lock_acquire()
         try:
-            if not self._load_started:
+            if not self._load_transaction_open:
                 self._start_load()
             cursor = self._load_cursor
             state, tid_int = self._adapter.load_current(cursor, u64(oid))
@@ -188,7 +189,7 @@ class RelStorage(BaseStorage,
                 # for conflict resolution.
                 cursor = self._store_cursor
             else:
-                if not self._load_started:
+                if not self._load_transaction_open:
                     self._start_load()
                 cursor = self._load_cursor
             state = self._adapter.load_revision(cursor, u64(oid), u64(serial))
@@ -213,7 +214,7 @@ class RelStorage(BaseStorage,
                 # for conflict resolution.
                 cursor = self._store_cursor
             else:
-                if not self._load_started:
+                if not self._load_transaction_open:
                     self._start_load()
                 cursor = self._load_cursor
             if not self._adapter.exists(cursor, u64(oid)):
@@ -678,10 +679,28 @@ class BoundRelStorage(RelStorage):
     def __init__(self, parent, zodb_conn):
         # self._zodb_conn = zodb_conn
         RelStorage.__init__(self, adapter=parent._adapter, name=parent._name,
-            read_only=parent._is_read_only, create=False)
+            create=False, read_only=parent._is_read_only,
+            poll_interval=parent._poll_interval)
         # _prev_polled_tid contains the tid at the previous poll
         self._prev_polled_tid = None
         self._showed_disconnect = False
+        self._poll_at = 0
+
+    def connection_closing(self):
+        """Release resources."""
+        if not self._poll_interval:
+            self._rollback_load_connection()
+        # else keep the load transaction open so that it's possible
+        # to ignore the next poll.
+
+    def sync(self):
+        """Process pending invalidations regardless of poll interval"""
+        self._lock_acquire()
+        try:
+            if self._load_transaction_open:
+                self._rollback_load_connection()
+        finally:
+            self._lock_release()
 
     def poll_invalidations(self, retry=True):
         """Looks for OIDs of objects that changed since _prev_polled_tid
@@ -694,6 +713,17 @@ class BoundRelStorage(RelStorage):
         try:
             if self._closed:
                 return {}
+
+            if self._poll_interval:
+                now = time.time()
+                if self._load_transaction_open and now < self._poll_at:
+                    # It's not yet time to poll again.  The previous load
+                    # transaction is still open, so it's safe to
+                    # ignore this poll.
+                    return {}
+                # else poll now after resetting the timeout
+                self._poll_at = now + self._poll_interval
+
             try:
                 self._rollback_load_connection()
                 self._start_load()
@@ -721,6 +751,7 @@ class BoundRelStorage(RelStorage):
                 return oids
             except POSException.StorageError:
                 # disconnected
+                self._poll_at = 0
                 if not retry:
                     raise
                 if not self._showed_disconnect:

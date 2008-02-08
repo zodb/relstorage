@@ -24,7 +24,7 @@ class RelStorageFactory(BaseConfig):
         config = self.config
         adapter = config.adapter.open()
         return RelStorage(adapter, name=config.name, create=config.create,
-            read_only=config.read_only)
+            read_only=config.read_only, poll_interval=config.poll_interval)
 
 
 class PostgreSQLAdapterFactory(BaseConfig):
