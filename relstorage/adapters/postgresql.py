@@ -18,7 +18,9 @@ import logging
 import psycopg2, psycopg2.extensions
 from ZODB.POSException import ConflictError, StorageError, UndoError
 
-log = logging.getLogger("relstorage.postgresql")
+from common import Adapter
+
+log = logging.getLogger("relstorage.adapters.postgresql")
 
 
 # Notes about adapters:
@@ -29,7 +31,7 @@ log = logging.getLogger("relstorage.postgresql")
 # All OID and TID values are integers, not binary strings, except as noted.
 
 
-class PostgreSQLAdapter(object):
+class PostgreSQLAdapter(Adapter):
     """PostgreSQL adapter for RelStorage."""
 
     def __init__(self, dsn='', twophase=False):
@@ -184,7 +186,7 @@ class PostgreSQLAdapter(object):
             cursor = conn.cursor()
             cursor.arraysize = 64
         except psycopg2.OperationalError:
-            log.debug("Unable to connect in %s", repr(self))
+            log.warning("Unable to connect in %s", repr(self))
             raise
         return conn, cursor
 

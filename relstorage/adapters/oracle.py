@@ -20,10 +20,12 @@ import time
 import cx_Oracle
 from ZODB.POSException import ConflictError, StorageError, UndoError
 
-log = logging.getLogger("relstorage.oracle")
+from common import Adapter
+
+log = logging.getLogger("relstorage.adapters.oracle")
 
 
-class OracleAdapter(object):
+class OracleAdapter(Adapter):
     """Oracle adapter for RelStorage."""
 
     def __init__(self, user, password, dsn, twophase=False, arraysize=64):
@@ -135,34 +137,6 @@ class OracleAdapter(object):
         self._run_script(cursor, stmt)
 
 
-    def _run_script(self, cursor, script, params=()):
-        """Execute a series of statements in the database."""
-        lines = []
-        for line in script.split('\n'):
-            line = line.strip()
-            if not line or line.startswith('--'):
-                continue
-            if line.endswith(';'):
-                line = line[:-1]
-                lines.append(line)
-                stmt = '\n'.join(lines)
-                try:
-                    cursor.execute(stmt, params)
-                except:
-                    log.warning("script statement failed: %s", stmt)
-                    raise
-                lines = []
-            else:
-                lines.append(line)
-        if lines:
-            try:
-                stmt = '\n'.join(lines)
-                cursor.execute(stmt, params)
-            except:
-                log.warning("script statement failed: %s", stmt)
-                raise
-
-
     def prepare_schema(self):
         """Create the database schema if it does not already exist."""
         conn, cursor = self.open()
@@ -225,7 +199,7 @@ class OracleAdapter(object):
             return conn, cursor
 
         except cx_Oracle.OperationalError:
-            log.error("Unable to connect to DSN %s", self._params[2])
+            log.warning("Unable to connect to DSN %s", self._params[2])
             raise
 
     def close(self, conn, cursor):

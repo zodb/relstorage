@@ -53,12 +53,14 @@ import MySQLdb
 import time
 from ZODB.POSException import ConflictError, StorageError, UndoError
 
-log = logging.getLogger("relstorage.mysql")
+from common import Adapter
+
+log = logging.getLogger("relstorage.adapters.mysql")
 
 commit_lock_timeout = 30
 
 
-class MySQLAdapter(object):
+class MySQLAdapter(Adapter):
     """MySQL adapter for RelStorage."""
 
     def __init__(self, **params):
@@ -153,34 +155,6 @@ class MySQLAdapter(object):
         self._run_script(cursor, stmt)
 
 
-    def _run_script(self, cursor, script, params=()):
-        """Execute a series of statements in the database."""
-        lines = []
-        for line in script.split('\n'):
-            line = line.strip()
-            if not line or line.startswith('--'):
-                continue
-            if line.endswith(';'):
-                line = line[:-1]
-                lines.append(line)
-                stmt = '\n'.join(lines)
-                try:
-                    cursor.execute(stmt, params)
-                except:
-                    log.warning("script statement failed: %s", stmt)
-                    raise
-                lines = []
-            else:
-                lines.append(line)
-        if lines:
-            try:
-                stmt = '\n'.join(lines)
-                cursor.execute(stmt, params)
-            except:
-                log.warning("script statement failed: %s", stmt)
-                raise
-
-
     def prepare_schema(self):
         """Create the database schema if it does not already exist."""
         conn, cursor = self.open()
@@ -239,7 +213,7 @@ class MySQLAdapter(object):
                 conn.autocommit(False)
             return conn, cursor
         except MySQLdb.OperationalError:
-            log.debug("Unable to connect in %s", repr(self))
+            log.warning("Unable to connect in %s", repr(self))
             raise
 
     def close(self, conn, cursor):
@@ -647,7 +621,7 @@ class MySQLAdapter(object):
             state LONGBLOB
         );
 
-        -- Put the state to revert to in temp_undo_state.
+        -- Copy the states to revert to into temp_undo_state.
         -- Some of the states can be null, indicating object uncreation.
         INSERT INTO temp_undo_state
         SELECT undoing.zoid, prev.md5, prev.state
