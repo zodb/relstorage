@@ -16,7 +16,7 @@
 from base64 import decodestring, encodestring
 import logging
 import psycopg2, psycopg2.extensions
-from ZODB.POSException import ConflictError, StorageError, UndoError
+from ZODB.POSException import StorageError
 
 from common import Adapter
 
@@ -424,20 +424,14 @@ class PostgreSQLAdapter(Adapter):
         return cursor.fetchone()
 
     def add_transaction(self, cursor, tid, username, description, extension):
-        """Add a transaction.
-
-        Raises ConflictError if the given tid has already been used.
+        """Add a transaction."""
+        stmt = """
+        INSERT INTO transaction
+            (tid, username, description, extension)
+        VALUES (%s, %s, %s, decode(%s, 'base64'))
         """
-        try:
-            stmt = """
-            INSERT INTO transaction
-                (tid, username, description, extension)
-            VALUES (%s, %s, %s, decode(%s, 'base64'))
-            """
-            cursor.execute(stmt, (
-                tid, username, description, encodestring(extension)))
-        except psycopg2.IntegrityError, e:
-            raise ConflictError(e)
+        cursor.execute(stmt, (
+            tid, username, description, encodestring(extension)))
 
     def detect_conflict(self, cursor):
         """Find one conflict in the data about to be committed.
@@ -559,107 +553,6 @@ class PostgreSQLAdapter(Adapter):
         """Release the pack lock."""
         # No action needed
         pass
-
-
-    def verify_undoable(self, cursor, undo_tid):
-        """Raise UndoError if it is not safe to undo the specified txn."""
-        stmt = """
-        SELECT 1 FROM transaction WHERE tid = %s AND packed = FALSE
-        """
-        cursor.execute(stmt, (undo_tid,))
-        if not cursor.rowcount:
-            raise UndoError("Transaction not found or packed")
-
-        # Rule: we can undo an object if the object's state in the
-        # transaction to undo matches the object's current state.
-        # If any object in the transaction does not fit that rule,
-        # refuse to undo.
-        stmt = """
-        SELECT prev_os.zoid, current_object.tid
-        FROM object_state prev_os
-            JOIN object_state cur_os ON (prev_os.zoid = cur_os.zoid)
-            JOIN current_object ON (cur_os.zoid = current_object.zoid
-                AND cur_os.tid = current_object.tid)
-        WHERE prev_os.tid = %s
-            AND cur_os.md5 != prev_os.md5
-        LIMIT 1
-        """
-        cursor.execute(stmt, (undo_tid,))
-        if cursor.rowcount:
-            raise UndoError(
-                "Some data were modified by a later transaction")
-
-        # Rule: don't allow the creation of the root object to
-        # be undone.  It's hard to get it back.
-        stmt = """
-        SELECT 1
-        FROM object_state
-        WHERE tid = %s
-            AND zoid = 0
-            AND prev_tid = 0
-        """
-        cursor.execute(stmt, (undo_tid,))
-        if cursor.rowcount:
-            raise UndoError("Can't undo the creation of the root object")
-
-
-    def undo(self, cursor, undo_tid, self_tid):
-        """Undo a transaction.
-
-        Parameters: "undo_tid", the integer tid of the transaction to undo,
-        and "self_tid", the integer tid of the current transaction.
-
-        Returns the list of OIDs undone.
-        """
-        # Update records produced by earlier undo operations
-        # within this transaction.  Change the state, but not
-        # prev_tid, since prev_tid is still correct.
-        # Table names: 'undoing' refers to the transaction being
-        # undone and 'prev' refers to the object state identified
-        # by undoing.prev_tid.
-        stmt = """
-        UPDATE object_state SET state = (
-            SELECT prev.state
-            FROM object_state undoing
-                LEFT JOIN object_state prev
-                ON (prev.zoid = undoing.zoid
-                    AND prev.tid = undoing.prev_tid)
-            WHERE undoing.tid = %(undo_tid)s
-                AND undoing.zoid = object_state.zoid
-        ),
-        md5 = (
-            SELECT prev.md5
-            FROM object_state undoing
-                LEFT JOIN object_state prev
-                ON (prev.zoid = undoing.zoid
-                    AND prev.tid = undoing.prev_tid)
-            WHERE undoing.tid = %(undo_tid)s
-                AND undoing.zoid = object_state.zoid
-        )
-        WHERE tid = %(self_tid)s
-            AND zoid IN (
-                SELECT zoid FROM object_state WHERE tid = %(undo_tid)s);
-
-        -- Add new undo records.
-
-        INSERT INTO object_state (zoid, tid, prev_tid, md5, state)
-        SELECT undoing.zoid, %(self_tid)s, current_object.tid,
-            prev.md5, prev.state
-        FROM object_state undoing
-            JOIN current_object USING (zoid)
-            LEFT JOIN object_state prev
-                ON (prev.zoid = undoing.zoid
-                    AND prev.tid = undoing.prev_tid)
-        WHERE undoing.tid = %(undo_tid)s
-            AND undoing.zoid NOT IN (
-                SELECT zoid FROM object_state WHERE tid = %(self_tid)s);
-
-        -- List the changed OIDs.
-
-        SELECT zoid FROM object_state WHERE tid = %(undo_tid)s
-        """
-        cursor.execute(stmt, {'undo_tid': undo_tid, 'self_tid': self_tid})
-        return [oid_int for (oid_int,) in cursor]
 
 
     def poll_invalidations(self, conn, cursor, prev_polled_tid, ignore_tid):

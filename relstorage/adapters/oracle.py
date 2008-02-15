@@ -18,7 +18,7 @@ import re
 import thread
 import time
 import cx_Oracle
-from ZODB.POSException import ConflictError, StorageError, UndoError
+from ZODB.POSException import StorageError
 
 from common import Adapter
 
@@ -55,6 +55,10 @@ class OracleAdapter(Adapter):
                 AND tid <= %(tid)s
                 AND packed = 'N'
             """,
+
+        'create_temp_pack_visit': None,
+        'create_temp_undo': None,
+        'reset_temp_undo': "DELETE FROM temp_undo",
     }
 
     def __init__(self, user, password, dsn, twophase=False, arraysize=64):
@@ -189,6 +193,13 @@ class OracleAdapter(Adapter):
         -- whose references need to be examined.
         CREATE GLOBAL TEMPORARY TABLE temp_pack_visit (
             zoid        NUMBER(20) NOT NULL PRIMARY KEY
+        );
+
+        -- Temporary state during undo: a list of objects
+        -- to be undone and the tid of the undone state.
+        CREATE GLOBAL TEMPORARY TABLE temp_undo (
+            zoid        NUMBER(20) NOT NULL PRIMARY KEY,
+            prev_tid    NUMBER(20) NOT NULL
         );
         """
         self._run_script(cursor, stmt)
@@ -479,21 +490,15 @@ class OracleAdapter(Adapter):
         return tid, self._parse_dsinterval(now)
 
     def add_transaction(self, cursor, tid, username, description, extension):
-        """Add a transaction.
-
-        Raises ConflictError if the given tid has already been used.
+        """Add a transaction."""
+        stmt = """
+        INSERT INTO transaction
+            (tid, username, description, extension)
+        VALUES (:1, :2, :3, :4)
         """
-        try:
-            stmt = """
-            INSERT INTO transaction
-                (tid, username, description, extension)
-            VALUES (:1, :2, :3, :4)
-            """
-            cursor.execute(stmt, (
-                tid, username or '-', description or '-',
-                cx_Oracle.Binary(extension)))
-        except cx_Oracle.IntegrityError:
-            raise ConflictError
+        cursor.execute(stmt, (
+            tid, username or '-', description or '-',
+            cx_Oracle.Binary(extension)))
 
     def detect_conflict(self, cursor):
         """Find one conflict in the data about to be committed.
@@ -598,109 +603,6 @@ class OracleAdapter(Adapter):
     def release_pack_lock(self, cursor):
         """Release the pack lock."""
         # No action needed
-        pass
-
-
-    def verify_undoable(self, cursor, undo_tid):
-        """Raise UndoError if it is not safe to undo the specified txn."""
-        stmt = """
-        SELECT 1 FROM transaction WHERE tid = :1 AND packed = 'N'
-        """
-        cursor.execute(stmt, (undo_tid,))
-        if not cursor.fetchall():
-            raise UndoError("Transaction not found or packed")
-
-        # Rule: we can undo an object if the object's state in the
-        # transaction to undo matches the object's current state.
-        # If any object in the transaction does not fit that rule,
-        # refuse to undo.
-        stmt = """
-        SELECT prev_os.zoid, current_object.tid
-        FROM object_state prev_os
-            JOIN object_state cur_os ON (prev_os.zoid = cur_os.zoid)
-            JOIN current_object ON (cur_os.zoid = current_object.zoid
-                AND cur_os.tid = current_object.tid)
-        WHERE prev_os.tid = :1
-            AND cur_os.md5 != prev_os.md5
-        """
-        cursor.execute(stmt, (undo_tid,))
-        if cursor.fetchmany():
-            raise UndoError(
-                "Some data were modified by a later transaction")
-
-        # Rule: don't allow the creation of the root object to
-        # be undone.  It's hard to get it back.
-        stmt = """
-        SELECT 1
-        FROM object_state
-        WHERE tid = :1
-            AND zoid = 0
-            AND prev_tid = 0
-        """
-        cursor.execute(stmt, (undo_tid,))
-        if cursor.fetchall():
-            raise UndoError("Can't undo the creation of the root object")
-
-
-    def undo(self, cursor, undo_tid, self_tid):
-        """Undo a transaction.
-
-        Parameters: "undo_tid", the integer tid of the transaction to undo,
-        and "self_tid", the integer tid of the current transaction.
-
-        Returns the list of OIDs undone.
-        """
-        # Update records produced by earlier undo operations
-        # within this transaction.  Change the state, but not
-        # prev_tid, since prev_tid is still correct.
-        # Table names: 'undoing' refers to the transaction being
-        # undone and 'prev' refers to the object state identified
-        # by undoing.prev_tid.
-        stmt = """
-        UPDATE object_state SET (md5, state) = (
-            SELECT prev.md5, prev.state
-            FROM object_state undoing
-                LEFT JOIN object_state prev
-                ON (prev.zoid = undoing.zoid
-                    AND prev.tid = undoing.prev_tid)
-            WHERE undoing.tid = %(undo_tid)s
-                AND undoing.zoid = object_state.zoid
-        )
-        WHERE tid = %(self_tid)s
-            AND zoid IN (
-                SELECT zoid FROM object_state WHERE tid = %(undo_tid)s);
-
-        -- Add new undo records.
-
-        INSERT INTO object_state (zoid, tid, prev_tid, md5, state)
-        SELECT undoing.zoid, %(self_tid)s, current_object.tid,
-            prev.md5, prev.state
-        FROM object_state undoing
-            JOIN current_object ON (current_object.zoid = undoing.zoid)
-            LEFT JOIN object_state prev
-                ON (prev.zoid = undoing.zoid
-                    AND prev.tid = undoing.prev_tid)
-        WHERE undoing.tid = %(undo_tid)s
-            AND undoing.zoid NOT IN (
-                SELECT zoid FROM object_state WHERE tid = %(self_tid)s);
-
-        -- List the changed OIDs.
-
-        SELECT zoid FROM object_state WHERE tid = %(undo_tid)s
-        """
-        self._run_script(cursor, stmt,
-            {'undo_tid': undo_tid, 'self_tid': self_tid})
-
-        return [oid_int for (oid_int,) in cursor]
-
-
-    def _create_temp_pack_visit(self, cursor):
-        """Create a workspace for listing objects to visit.
-
-        This overrides the method by the same name in common.Adapter.
-        """
-        # The temp_pack_visit table is a global temporary table,
-        # so it does not need to be created here.
         pass
 
 

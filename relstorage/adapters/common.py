@@ -13,6 +13,8 @@
 ##############################################################################
 """Code common to most adapters."""
 
+from ZODB.POSException import UndoError
+
 import logging
 
 log = logging.getLogger("relstorage.adapters.common")
@@ -58,6 +60,23 @@ class Adapter(object):
             ORDER BY tid DESC
             LIMIT 1
             """,
+
+        'create_temp_pack_visit': """
+            CREATE TEMPORARY TABLE temp_pack_visit (
+                zoid BIGINT NOT NULL
+            );
+            CREATE UNIQUE INDEX temp_pack_visit_zoid ON temp_pack_visit (zoid)
+            """,
+
+        'create_temp_undo': """
+            CREATE TEMPORARY TABLE temp_undo (
+                zoid BIGINT NOT NULL,
+                prev_tid BIGINT NOT NULL
+            );
+            CREATE UNIQUE INDEX temp_undo_zoid ON temp_undo (zoid)
+            """,
+
+        'reset_temp_undo': "DROP TABLE temp_undo",
     }
 
 
@@ -141,6 +160,112 @@ class Adapter(object):
         """
         self._run_script_stmt(cursor, stmt, {'oid': oid})
         return iter(cursor)
+
+
+    def verify_undoable(self, cursor, undo_tid):
+        """Raise UndoError if it is not safe to undo the specified txn."""
+        stmt = """
+        SELECT 1 FROM transaction
+        WHERE tid = %(undo_tid)s
+            AND packed = %(FALSE)s
+        """
+        self._run_script_stmt(cursor, stmt, {'undo_tid': undo_tid})
+        if not cursor.fetchall():
+            raise UndoError("Transaction not found or packed")
+
+        # Rule: we can undo an object if the object's state in the
+        # transaction to undo matches the object's current state.
+        # If any object in the transaction does not fit that rule,
+        # refuse to undo.
+        stmt = """
+        SELECT prev_os.zoid, current_object.tid
+        FROM object_state prev_os
+            JOIN object_state cur_os ON (prev_os.zoid = cur_os.zoid)
+            JOIN current_object ON (cur_os.zoid = current_object.zoid
+                AND cur_os.tid = current_object.tid)
+        WHERE prev_os.tid = %(undo_tid)s
+            AND cur_os.md5 != prev_os.md5
+        """
+        self._run_script_stmt(cursor, stmt, {'undo_tid': undo_tid})
+        if cursor.fetchmany():
+            raise UndoError(
+                "Some data were modified by a later transaction")
+
+        # Rule: don't allow the creation of the root object to
+        # be undone.  It's hard to get it back.
+        stmt = """
+        SELECT 1
+        FROM object_state
+        WHERE tid = %(undo_tid)s
+            AND zoid = 0
+            AND prev_tid = 0
+        """
+        self._run_script_stmt(cursor, stmt, {'undo_tid': undo_tid})
+        if cursor.fetchall():
+            raise UndoError("Can't undo the creation of the root object")
+
+
+    def undo(self, cursor, undo_tid, self_tid):
+        """Undo a transaction.
+
+        Parameters: "undo_tid", the integer tid of the transaction to undo,
+        and "self_tid", the integer tid of the current transaction.
+
+        Returns the list of OIDs undone.
+        """
+        stmt = self._scripts['create_temp_undo']
+        if stmt:
+            self._run_script(cursor, stmt)
+
+        stmt = """
+        DELETE FROM temp_undo;
+
+        -- Put into temp_undo the list of objects to be undone and
+        -- the tid of the transaction that has the undone state.
+        INSERT INTO temp_undo (zoid, prev_tid)
+        SELECT zoid, prev_tid
+        FROM object_state
+        WHERE tid = %(undo_tid)s;
+
+        -- Override previous undo operations within this transaction
+        -- by resetting the current_object pointer and deleting
+        -- copied states from object_state.
+        UPDATE current_object
+        SET tid = (
+                SELECT prev_tid
+                FROM object_state
+                WHERE zoid = current_object.zoid
+                    AND tid = %(self_tid)s
+            )
+        WHERE zoid IN (SELECT zoid FROM temp_undo)
+            AND tid = %(self_tid)s;
+
+        DELETE FROM object_state
+        WHERE zoid IN (SELECT zoid FROM temp_undo)
+            AND tid = %(self_tid)s;
+
+        -- Add new undo records.
+        INSERT INTO object_state (zoid, tid, prev_tid, md5, state)
+        SELECT temp_undo.zoid, %(self_tid)s, current_object.tid,
+            prev.md5, prev.state
+        FROM temp_undo
+            JOIN current_object ON (temp_undo.zoid = current_object.zoid)
+            LEFT JOIN object_state prev
+                ON (prev.zoid = temp_undo.zoid
+                    AND prev.tid = temp_undo.prev_tid);
+
+        -- List the changed OIDs.
+        SELECT zoid FROM object_state WHERE tid = %(undo_tid)s
+        """
+        self._run_script(cursor, stmt,
+            {'undo_tid': undo_tid, 'self_tid': self_tid})
+        res = [oid_int for (oid_int,) in cursor]
+
+        stmt = self._scripts['reset_temp_undo']
+        if stmt:
+            self._run_script(cursor, stmt)
+
+        return res
 
 
     def choose_pack_transaction(self, pack_point):
@@ -258,7 +383,9 @@ class Adapter(object):
         """
         self._run_script(cursor, stmt, {'pack_tid': pack_tid})
 
-        self._create_temp_pack_visit(cursor)
+        stmt = self._scripts['create_temp_pack_visit']
+        if stmt:
+            self._run_script(cursor, stmt)
 
         # Each of the packable objects to be kept might
         # refer to other objects.  If some of those references
@@ -305,20 +432,6 @@ class Adapter(object):
             if not cursor.rowcount:
                 # No new references detected.
                 break
-
-
-    def _create_temp_pack_visit(self, cursor):
-        """Create a workspace for listing objects to visit.
-
-        Subclasses can override this.
-        """
-        stmt = """
-        CREATE TEMPORARY TABLE temp_pack_visit (
-            zoid BIGINT NOT NULL
-        );
-        CREATE UNIQUE INDEX temp_pack_visit_zoid ON temp_pack_visit (zoid)
-        """
-        self._run_script(cursor, stmt)
 
 
     def _fill_nonpacked_refs(self, cursor, pack_tid, get_references):

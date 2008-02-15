@@ -51,7 +51,7 @@ load_infile
 import logging
 import MySQLdb
 import time
-from ZODB.POSException import ConflictError, StorageError, UndoError
+from ZODB.POSException import StorageError
 
 from common import Adapter
 
@@ -412,10 +412,7 @@ class MySQLAdapter(Adapter):
         return tid, timestamp
 
     def add_transaction(self, cursor, tid, username, description, extension):
-        """Add a transaction.
-
-        Raises ConflictError if the given tid has already been used.
-        """
+        """Add a transaction."""
         stmt = """
         INSERT INTO transaction
             (tid, username, description, extension)
@@ -523,101 +520,6 @@ class MySQLAdapter(Adapter):
         cursor.execute(stmt)
 
 
-    def verify_undoable(self, cursor, undo_tid):
-        """Raise UndoError if it is not safe to undo the specified txn."""
-        stmt = """
-        SELECT 1 FROM transaction WHERE tid = %s AND packed = FALSE
-        """
-        cursor.execute(stmt, (undo_tid,))
-        if not cursor.rowcount:
-            raise UndoError("Transaction not found or packed")
-
-        # Rule: we can undo an object if the object's state in the
-        # transaction to undo matches the object's current state.
-        # If any object in the transaction does not fit that rule,
-        # refuse to undo.
-        stmt = """
-        SELECT prev_os.zoid, current_object.tid
-        FROM object_state prev_os
-            JOIN object_state cur_os ON (prev_os.zoid = cur_os.zoid)
-            JOIN current_object ON (cur_os.zoid = current_object.zoid
-                AND cur_os.tid = current_object.tid)
-        WHERE prev_os.tid = %s
-            AND cur_os.md5 != prev_os.md5
-        LIMIT 1
-        """
-        cursor.execute(stmt, (undo_tid,))
-        if cursor.rowcount:
-            raise UndoError(
-                "Some data were modified by a later transaction")
-
-        # Rule: don't allow the creation of the root object to
-        # be undone.  It's hard to get it back.
-        stmt = """
-        SELECT 1
-        FROM object_state
-        WHERE tid = %s
-            AND zoid = 0
-            AND prev_tid = 0
-        """
-        cursor.execute(stmt, (undo_tid,))
-        if cursor.rowcount:
-            raise UndoError("Can't undo the creation of the root object")
-
-
-    def undo(self, cursor, undo_tid, self_tid):
-        """Undo a transaction.
-
-        Parameters: "undo_tid", the integer tid of the transaction to undo,
-        and "self_tid", the integer tid of the current transaction.
-
-        Returns the list of OIDs undone.
-        """
-        stmt = """
-        CREATE TEMPORARY TABLE temp_undo_state (
-            zoid BIGINT NOT NULL PRIMARY KEY,
-            md5 CHAR(32),
-            state LONGBLOB
-        );
-
-        -- Copy the states to revert to into temp_undo_state.
-        -- Some of the states can be null, indicating object uncreation.
-        INSERT INTO temp_undo_state
-        SELECT undoing.zoid, prev.md5, prev.state
-        FROM object_state undoing
-            LEFT JOIN object_state prev
-                ON (prev.zoid = undoing.zoid
-                    AND prev.tid = undoing.prev_tid)
-        WHERE undoing.tid = %(undo_tid)s;
-
-        -- Update records produced by earlier undo operations
-        -- within this transaction.  Change the state, but not
-        -- prev_tid, since prev_tid is still correct.
-        UPDATE object_state
-        JOIN temp_undo_state USING (zoid)
-        SET object_state.md5 = temp_undo_state.md5,
-            object_state.state = temp_undo_state.state
-        WHERE tid = %(self_tid)s;
-
-        -- Add new undo records.
-        INSERT INTO object_state (zoid, tid, prev_tid, md5, state)
-        SELECT zoid, %(self_tid)s, tid, md5, state
-        FROM temp_undo_state
-            JOIN current_object USING (zoid)
-        WHERE zoid NOT IN (
-            SELECT zoid FROM object_state WHERE tid = %(self_tid)s);
-
-        DROP TABLE temp_undo_state;
-        """
-        self._run_script(cursor, stmt,
-            {'undo_tid': undo_tid, 'self_tid': self_tid})
-
-        # List the changed OIDs.
-        stmt = "SELECT zoid FROM object_state WHERE tid = %s"
-        cursor.execute(stmt, (undo_tid,))
-        return [oid_int for (oid_int,) in cursor]
-
-
     def pre_pack(self, pack_tid, get_references, gc=True):
         """Decide what to pack.
 
@@ -634,19 +536,6 @@ class MySQLAdapter(Adapter):
                 self._pre_pack_without_gc(cursor, pack_tid)
         finally:
             self.close(conn, cursor)
-
-
-    def _create_temp_pack_visit(self, cursor):
-        """Create a workspace for listing objects to visit.
-
-        This overrides the method by the same name in common.Adapter.
-        """
-        stmt = """
-        CREATE TEMPORARY TABLE temp_pack_visit (
-            zoid BIGINT NOT NULL PRIMARY KEY
-        )
-        """
-        cursor.execute(stmt)
 
 
     def _hold_commit_lock(self, cursor):
