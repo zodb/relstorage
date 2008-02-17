@@ -16,17 +16,28 @@
 import logging
 import unittest
 
-from reltestbase import RelStorageTests
+import reltestbase
 from relstorage.adapters.mysql import MySQLAdapter
 
 
-class MySQLTests(RelStorageTests):
+class UseMySQLAdapter:
     def make_adapter(self):
         return MySQLAdapter(db='relstoragetest')
 
+class MySQLTests(UseMySQLAdapter, reltestbase.RelStorageTests):
+    pass
+
+class MySQLToFile(UseMySQLAdapter, reltestbase.ToFileStorage):
+    pass
+
+class FileToMySQL(UseMySQLAdapter, reltestbase.FromFileStorage):
+    pass
+
+
 def test_suite():
     suite = unittest.TestSuite()
-    suite.addTest(unittest.makeSuite(MySQLTests, "check"))
+    for klass in [MySQLTests, MySQLToFile, FileToMySQL]:
+        suite.addTest(unittest.makeSuite(klass, "check"))
     return suite
 
 if __name__=='__main__':

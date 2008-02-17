@@ -38,6 +38,8 @@ class Adapter(object):
         'pack_tid':     '%(pack_tid)s',
         'undo_tid':     '%(undo_tid)s',
         'self_tid':     '%(self_tid)s',
+        'min_tid':      '%(min_tid)s',
+        'max_tid':      '%(max_tid)s',
     }
 
     _scripts = {
@@ -121,8 +123,9 @@ class Adapter(object):
 
 
     def iter_transactions(self, cursor):
-        """Iterate over the transaction log.
+        """Iterate over the transaction log, newest first.
 
+        Skips packed transactions.
         Yields (tid, username, description, extension) for each transaction.
         """
         stmt = """
@@ -133,6 +136,30 @@ class Adapter(object):
         ORDER BY tid DESC
         """
         self._run_script_stmt(cursor, stmt)
+        return iter(cursor)
+
+
+    def iter_transactions_range(self, cursor, start=None, stop=None):
+        """Iterate over the transactions in the given range, oldest first.
+
+        Includes packed transactions.
+        Yields (tid, packed, username, description, extension)
+            for each transaction.
+        """
+        stmt = """
+        SELECT tid,
+            CASE WHEN packed = %(TRUE)s THEN 1 ELSE 0 END,
+            username, description, extension
+        FROM transaction
+        WHERE tid >= 0
+        """
+        if start is not None:
+            stmt += " AND tid >= %(min_tid)s"
+        if stop is not None:
+            stmt += " AND tid <= %(max_tid)s"
+        stmt += " ORDER BY tid"
+        self._run_script_stmt(cursor, stmt,
+            {'min_tid': start, 'max_tid': stop})
         return iter(cursor)
 
 
@@ -160,6 +187,25 @@ class Adapter(object):
         """
         self._run_script_stmt(cursor, stmt, {'oid': oid})
         return iter(cursor)
+
+
+    def iter_objects(self, cursor, tid):
+        """Iterate over object states in a transaction.
+
+        Yields (oid, prev_tid, state) for each object state.
+        """
+        stmt = """
+        SELECT zoid, state
+        FROM object_state
+        WHERE tid = %(tid)s
+        ORDER BY zoid
+        """
+        self._run_script_stmt(cursor, stmt, {'tid': tid})
+        for oid, state in cursor:
+            if hasattr(state, 'read'):
+                # Oracle
+                state = state.read()
+            yield oid, state
 
 
     def verify_undoable(self, cursor, undo_tid):
@@ -255,11 +301,11 @@ class Adapter(object):
                     AND prev.tid = temp_undo.prev_tid);
 
         -- List the changed OIDs.
-        SELECT zoid FROM object_state WHERE tid = %(undo_tid)s
+        SELECT zoid FROM temp_undo
         """
         self._run_script(cursor, stmt,
             {'undo_tid': undo_tid, 'self_tid': self_tid})
-        res = [oid_int for (oid_int,) in cursor]
+        res = [oid for (oid,) in cursor]
 
         stmt = self._scripts['reset_temp_undo']
         if stmt:
@@ -495,7 +541,7 @@ class Adapter(object):
         add_rows = []  # [(from_oid, tid, to_oid)]
         for from_oid, state in cursor:
             if hasattr(state, 'read'):
-                # cx_Oracle detail
+                # Oracle
                 state = state.read()
             if state:
                 to_oids = get_references(str(state))

@@ -37,6 +37,8 @@ class OracleAdapter(Adapter):
         'pack_tid':     ':pack_tid',
         'undo_tid':     ':undo_tid',
         'self_tid':     ':self_tid',
+        'min_tid':      ':min_tid',
+        'max_tid':      ':max_tid',
     }
 
     _scripts = {
@@ -103,8 +105,8 @@ class OracleAdapter(Adapter):
         CREATE TABLE transaction (
             tid         NUMBER(20) NOT NULL PRIMARY KEY,
             packed      CHAR DEFAULT 'N' CHECK (packed IN ('N', 'Y')),
-            username    VARCHAR2(255) NOT NULL,
-            description VARCHAR2(4000) NOT NULL,
+            username    VARCHAR2(255),
+            description VARCHAR2(4000),
             extension   RAW(2000)
         );
 
@@ -458,6 +460,22 @@ class OracleAdapter(Adapter):
         cursor.execute(stmt, oid=oid, prev_tid=prev_tid,
             md5sum=md5sum, data=cx_Oracle.Binary(data))
 
+    def restore(self, cursor, oid, tid, md5sum, data):
+        """Store an object directly, without conflict detection.
+
+        Used for copying transactions into this database.
+        """
+        cursor.setinputsizes(data=cx_Oracle.BLOB)
+        stmt = """
+        INSERT INTO object_state (zoid, tid, prev_tid, md5, state)
+        VALUES (:oid, :tid,
+            COALESCE((SELECT tid FROM current_object WHERE zoid = :oid), 0),
+            :md5sum, :data)
+        """
+        if data is not None:
+            data = cx_Oracle.Binary(data)
+        cursor.execute(stmt, oid=oid, tid=tid, md5sum=md5sum, data=data)
+
     def start_commit(self, cursor):
         """Prepare to commit."""
         # Hold commit_lock to prevent concurrent commits
@@ -489,15 +507,16 @@ class OracleAdapter(Adapter):
         tid, now = cursor.fetchone()
         return tid, self._parse_dsinterval(now)
 
-    def add_transaction(self, cursor, tid, username, description, extension):
+    def add_transaction(self, cursor, tid, username, description, extension,
+            packed=False):
         """Add a transaction."""
         stmt = """
         INSERT INTO transaction
-            (tid, username, description, extension)
-        VALUES (:1, :2, :3, :4)
+            (tid, packed, username, description, extension)
+        VALUES (:1, :2, :3, :4, :5)
         """
         cursor.execute(stmt, (
-            tid, username or '-', description or '-',
+            tid, packed and 'Y' or 'N', username, description,
             cx_Oracle.Binary(extension)))
 
     def detect_conflict(self, cursor):

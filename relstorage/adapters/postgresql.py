@@ -397,6 +397,21 @@ class PostgreSQLAdapter(Adapter):
         """
         cursor.execute(stmt, (prev_tid, md5sum, encodestring(data), oid))
 
+    def restore(self, cursor, oid, tid, md5sum, data):
+        """Store an object directly, without conflict detection.
+
+        Used for copying transactions into this database.
+        """
+        stmt = """
+        INSERT INTO object_state (zoid, tid, prev_tid, md5, state)
+        VALUES (%s, %s,
+            COALESCE((SELECT tid FROM current_object WHERE zoid = %s), 0),
+            %s, decode(%s, 'base64'))
+        """
+        if data is not None:
+            data = encodestring(data)
+        cursor.execute(stmt, (oid, tid, oid, md5sum, data))
+
     def start_commit(self, cursor):
         """Prepare to commit."""
         # Hold commit_lock to prevent concurrent commits
@@ -423,15 +438,16 @@ class PostgreSQLAdapter(Adapter):
         assert cursor.rowcount == 1
         return cursor.fetchone()
 
-    def add_transaction(self, cursor, tid, username, description, extension):
+    def add_transaction(self, cursor, tid, username, description, extension,
+            packed=False):
         """Add a transaction."""
         stmt = """
         INSERT INTO transaction
-            (tid, username, description, extension)
-        VALUES (%s, %s, %s, decode(%s, 'base64'))
+            (tid, packed, username, description, extension)
+        VALUES (%s, %s, %s, %s, decode(%s, 'base64'))
         """
         cursor.execute(stmt, (
-            tid, username, description, encodestring(extension)))
+            tid, packed, username, description, encodestring(extension)))
 
     def detect_conflict(self, cursor):
         """Find one conflict in the data about to be committed.

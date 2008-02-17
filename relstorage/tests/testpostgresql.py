@@ -16,17 +16,28 @@
 import logging
 import unittest
 
-from reltestbase import RelStorageTests
+import reltestbase
 from relstorage.adapters.postgresql import PostgreSQLAdapter
 
 
-class PostgreSQLTests(RelStorageTests):
+class UsePostgreSQLAdapter:
     def make_adapter(self):
         return PostgreSQLAdapter('dbname=relstoragetest')
 
+class PostgreSQLTests(UsePostgreSQLAdapter, reltestbase.RelStorageTests):
+    pass
+
+class PGToFile(UsePostgreSQLAdapter, reltestbase.ToFileStorage):
+    pass
+
+class FileToPG(UsePostgreSQLAdapter, reltestbase.FromFileStorage):
+    pass
+
+
 def test_suite():
     suite = unittest.TestSuite()
-    suite.addTest(unittest.makeSuite(PostgreSQLTests, "check"))
+    for klass in [PostgreSQLTests, PGToFile, FileToPG]:
+        suite.addTest(unittest.makeSuite(klass, "check"))
     return suite
 
 if __name__=='__main__':

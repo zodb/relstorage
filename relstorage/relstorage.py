@@ -270,6 +270,39 @@ class RelStorage(BaseStorage,
             self._lock_release()
 
 
+    def restore(self, oid, serial, data, version, prev_txn, transaction):
+        # Like store(), but used for importing transactions.  See the
+        # comments in FileStorage.restore().  The prev_txn optimization
+        # is not used.
+        if self._is_read_only:
+            raise POSException.ReadOnlyError()
+        if transaction is not self._transaction:
+            raise POSException.StorageTransactionError(self, transaction)
+        if version:
+            raise POSException.Unsupported("Versions aren't supported")
+
+        assert self._tid is not None
+        assert self._prepared_txn is None
+        if data is not None:
+            md5sum = md5.new(data).hexdigest()
+        else:
+            # George Bailey object
+            md5sum = None
+
+        adapter = self._adapter
+        cursor = self._store_cursor
+        assert cursor is not None
+        oid_int = u64(oid)
+        tid_int = u64(serial)
+
+        self._lock_acquire()
+        try:
+            # save the data.  Note that md5sum and data can be None.
+            adapter.restore(cursor, oid_int, tid_int, md5sum, data)
+        finally:
+            self._lock_release()
+
+
     def tpc_begin(self, transaction, tid=None, status=' '):
         if self._is_read_only:
             raise POSException.ReadOnlyError()
@@ -309,10 +342,12 @@ class RelStorage(BaseStorage,
 
             if tid is not None:
                 # get the commit lock and add the transaction now
+                packed = (status == 'p')
                 adapter.start_commit(cursor)
                 tid_int = u64(tid)
                 try:
-                    adapter.add_transaction(cursor, tid_int, user, desc, ext)
+                    adapter.add_transaction(
+                        cursor, tid_int, user, desc, ext, packed)
                 except:
                     self._drop_store_connection()
                     raise
@@ -518,8 +553,8 @@ class RelStorage(BaseStorage,
                 tid = p64(tid_int)
                 d = {'id': base64.encodestring(tid)[:-1],
                      'time': TimeStamp(tid).timeTime(),
-                     'user_name': user,
-                     'description': desc}
+                     'user_name': user or '',
+                     'description': desc or ''}
                 if ext:
                     ext = str(ext)
                 if ext:
@@ -553,8 +588,8 @@ class RelStorage(BaseStorage,
                 else:
                     d = {}
                 d.update({"time": TimeStamp(tid).timeTime(),
-                          "user_name": username,
-                          "description": description,
+                          "user_name": username or '',
+                          "description": description or '',
                           "tid": tid,
                           "version": '',
                           "size": length,
@@ -666,6 +701,9 @@ class RelStorage(BaseStorage,
         # The tests depend on this.
         self._rollback_load_connection()
 
+    def iterator(self, start=None, stop=None):
+        return TransactionIterator(self._adapter, start, stop)
+
 
 class BoundRelStorage(RelStorage):
     """Storage to a database, bound to a particular ZODB.Connection."""
@@ -768,4 +806,94 @@ class BoundRelStorage(RelStorage):
         # Override transaction reset after packing.  If the connection
         # wants to see the new state, it should call sync().
         pass
+
+
+class TransactionIterator(object):
+    """Iterate over the transactions in a RelStorage instance."""
+
+    def __init__(self, adapter, start, stop):
+        self._adapter = adapter
+        self._conn, self._cursor = self._adapter.open_for_load()
+        self._closed = False
+
+        if start is not None:
+            start_int = u64(start)
+        else:
+            start_int = 1
+        if stop is not None:
+            stop_int = u64(stop)
+        else:
+            stop_int = None
+
+        # _transactions: [(tid, packed, username, description, extension)]
+        self._transactions = list(adapter.iter_transactions_range(
+            self._cursor, start_int, stop_int))
+        self._index = 0
+
+    def close(self):
+        self._adapter.close(self._conn, self._cursor)
+        self._closed = True
+
+    def iterator(self):
+        return self
+
+    def __len__(self):
+        return len(self._transactions)
+
+    def __getitem__(self, n):
+        self._index = n
+        return self.next()
+
+    def next(self):
+        if self._closed:
+            raise IOError("TransactionIterator already closed")
+        params = self._transactions[self._index]
+        res = RecordIterator(self, *params)
+        self._index += 1
+        return res
+
+
+class RecordIterator(object):
+    """Iterate over the objects in a transaction."""
+    def __init__(self, trans_iter, tid_int, packed, user, desc, ext):
+        self.tid = p64(tid_int)
+        self.status = packed and 'p' or ' '
+        self.user = user or ''
+        self.description = desc or ''
+        if ext:
+            self._extension = cPickle.loads(ext)
+        else:
+            self._extension = {}
+
+        cursor = trans_iter._cursor
+        adapter = trans_iter._adapter
+        self._records = list(adapter.iter_objects(cursor, tid_int))
+        self._index = 0
+
+    def __len__(self):
+        return len(self._records)
+
+    def __getitem__(self, n):
+        self._index = n
+        return self.next()
+
+    def next(self):
+        params = self._records[self._index]
+        res = Record(self.tid, *params)
+        self._index += 1
+        return res
+
+
+class Record(object):
+    """An object state in a transaction"""
+    version = ''
+    data_txn = None
+
+    def __init__(self, tid, oid_int, data):
+        self.tid = tid
+        self.oid = p64(oid_int)
+        if data is not None:
+            self.data = str(data)
+        else:
+            self.data = None
 

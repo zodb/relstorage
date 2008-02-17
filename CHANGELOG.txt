@@ -24,7 +24,7 @@ relstorage 0.9
 - Stored objects are now buffered in a database table rather than a file.
 
 - Stopped using the LISTEN and NOTIFY statements in PostgreSQL since
-  they are not reliable enough.
+  they are not strictly transactional in the sense we require.
 
 - Started using a prepared statement in PostgreSQL for getting the
   newest transaction ID quickly.
@@ -37,6 +37,9 @@ relstorage 0.9
 - Added the poll_interval option.  It reduces the frequency of database
   polls, but it also increases the potential for conflict errors on
   servers with high write volume.
+
+- Implemented the storage iterator protocol, making it possible to copy
+  transactions to and from FileStorage and other RelStorage instances.
 
 
 PGStorage 0.4

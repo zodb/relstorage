@@ -18,7 +18,7 @@ import os
 import re
 import unittest
 
-from reltestbase import RelStorageTests
+import reltestbase
 from relstorage.adapters.oracle import OracleAdapter
 
 
@@ -38,17 +38,27 @@ def getOracleParams():
     return user, password, dsn
 
 
-class OracleTests(RelStorageTests):
+class UseOracleAdapter:
     def make_adapter(self):
         user, password, dsn = getOracleParams()
         return OracleAdapter(user, password, dsn)
 
+class OracleTests(UseOracleAdapter, reltestbase.RelStorageTests):
+    pass
+
+class OracleToFile(UseOracleAdapter, reltestbase.ToFileStorage):
+    pass
+
+class FileToOracle(UseOracleAdapter, reltestbase.FromFileStorage):
+    pass
+
+
 def test_suite():
     suite = unittest.TestSuite()
-    suite.addTest(unittest.makeSuite(OracleTests, "check"))
+    for klass in [OracleTests, OracleToFile, FileToOracle]:
+        suite.addTest(unittest.makeSuite(klass, "check"))
     return suite
 
 if __name__=='__main__':
     logging.basicConfig()
     unittest.main(defaultTest="test_suite")
-
