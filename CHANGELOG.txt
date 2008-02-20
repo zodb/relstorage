@@ -41,6 +41,9 @@ relstorage 0.9
 - Implemented the storage iterator protocol, making it possible to copy
   transactions to and from FileStorage and other RelStorage instances.
 
+- Fixed a bug that caused OIDs to be reused after importing objects.
+  Added a corresponding test.
+
 
 PGStorage 0.4
 

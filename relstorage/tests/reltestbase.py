@@ -44,7 +44,7 @@ class BaseRelStorageTests(StorageTestBase.StorageTestBase):
 
     def setUp(self):
         self.open(create=1)
-        self._storage._zap()
+        self._storage.zap_all()
 
     def tearDown(self):
         self._storage.close()
@@ -202,6 +202,16 @@ class RelStorageTests(
         got, serialno = self._storage.load(oid, '')
         self.assertEqual(len(got), len(data))
         self.assertEqual(got, data)
+
+    def checkPreventOIDOverlap(self):
+        # Store an object with a particular OID, then verify that
+        # OID is not reused.
+        data = 'mydata'
+        oid1 = '\0' * 7 + '\x0f'
+        self._dostoreNP(oid1, data=data)
+        oid2 = self._storage.new_oid()
+        self.assert_(oid1 < oid2, 'old OID %r should be less than new OID %r'
+            % (oid1, oid2))
 
     def check16MObject(self):
         # Store 16 * 1024 * 1024 bytes in an object, then retrieve it
@@ -410,7 +420,7 @@ for name, attr in RecoveryStorage.RecoveryStorage.__dict__.items():
 class ToFileStorage(BaseRelStorageTests, RecoveryStorageSubset):
     def setUp(self):
         self.open(create=1)
-        self._storage._zap()
+        self._storage.zap_all()
         self._dst = FileStorage("Dest.fs", create=True)
 
     def tearDown(self):
@@ -426,7 +436,7 @@ class ToFileStorage(BaseRelStorageTests, RecoveryStorageSubset):
 class FromFileStorage(BaseRelStorageTests, RecoveryStorageSubset):
     def setUp(self):
         self.open(create=1)
-        self._storage._zap()
+        self._storage.zap_all()
         self._dst = self._storage
         self._storage = FileStorage("Source.fs", create=True)
 

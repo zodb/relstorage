@@ -149,11 +149,8 @@ class PostgreSQLAdapter(Adapter):
             self.close(conn, cursor)
 
 
-    def zap(self):
-        """Clear all data out of the database.
-
-        Used by the test suite.
-        """
+    def zap_all(self):
+        """Clear all data out of the database."""
         conn, cursor = self.open()
         try:
             try:
@@ -509,6 +506,15 @@ class PostgreSQLAdapter(Adapter):
             ORDER BY zoid
         )
         """, {'tid': tid})
+
+    def set_min_oid(self, cursor, oid):
+        """Ensure the next OID is at least the given OID."""
+        cursor.execute("""
+        SELECT CASE WHEN %s > nextval('zoid_seq')
+            THEN setval('zoid_seq', %s)
+            ELSE 0
+            END
+        """, (oid, oid))
 
     def commit_phase1(self, cursor, tid):
         """Begin a commit.  Returns the transaction name.

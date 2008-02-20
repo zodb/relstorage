@@ -196,7 +196,7 @@ class SpeedTest:
     def postgres_test(self):
         from relstorage.adapters.postgresql import PostgreSQLAdapter
         adapter = PostgreSQLAdapter('dbname=relstoragetest')
-        adapter.zap()
+        adapter.zap_all()
         def make_storage():
             return RelStorage(adapter)
         return self.run_tests(make_storage)
@@ -206,7 +206,7 @@ class SpeedTest:
         from relstorage.tests.testoracle import getOracleParams
         user, password, dsn = getOracleParams()
         adapter = OracleAdapter(user, password, dsn)
-        adapter.zap()
+        adapter.zap_all()
         def make_storage():
             return RelStorage(adapter)
         return self.run_tests(make_storage)
@@ -214,7 +214,7 @@ class SpeedTest:
     def mysql_test(self):
         from relstorage.adapters.mysql import MySQLAdapter
         adapter = MySQLAdapter(db='relstoragetest')
-        adapter.zap()
+        adapter.zap_all()
         def make_storage():
             return RelStorage(adapter)
         return self.run_tests(make_storage)

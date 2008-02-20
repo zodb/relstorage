@@ -83,6 +83,14 @@ class RelStorage(BaseStorage,
         # be inside a _lock_acquire()/_lock_release() block.
         self._closed = False
 
+        # _max_stored_oid is the highest OID stored by the current
+        # transaction
+        self._max_stored_oid = 0
+
+        # _max_new_oid is the highest OID provided by new_oid()
+        self._max_new_oid = 0
+
+
     def _open_load_connection(self):
         """Open the load connection to the database.  Return nothing."""
         conn, cursor = self._adapter.open_for_load()
@@ -112,12 +120,12 @@ class RelStorage(BaseStorage,
             self._adapter.restart_load(self._load_cursor)
             self._load_transaction_open = True
 
-    def _zap(self):
-        """Clear all objects out of the database.
+    def zap_all(self):
+        """Clear all objects and transactions out of the database.
 
-        Used by the test suite.
+        Used by the test suite and migration scripts.
         """
-        self._adapter.zap()
+        self._adapter.zap_all()
         self._rollback_load_connection()
 
     def close(self):
@@ -263,6 +271,7 @@ class RelStorage(BaseStorage,
 
         self._lock_acquire()
         try:
+            self._max_stored_oid = max(self._max_stored_oid, oid_int)
             # save the data in a temporary table
             adapter.store_temp(cursor, oid_int, prev_tid_int, md5sum, data)
             return None
@@ -297,6 +306,7 @@ class RelStorage(BaseStorage,
 
         self._lock_acquire()
         try:
+            self._max_stored_oid = max(self._max_stored_oid, oid_int)
             # save the data.  Note that md5sum and data can be None.
             adapter.restore(cursor, oid_int, tid_int, md5sum, data)
         finally:
@@ -391,6 +401,7 @@ class RelStorage(BaseStorage,
         # It is assumed that self._lock_acquire was called before this
         # method was called.
         self._prepared_txn = None
+        self._max_stored_oid = 0
 
 
     def _finish_store(self):
@@ -456,10 +467,14 @@ class RelStorage(BaseStorage,
             # the vote phase has already completed
             return
 
-        self._prepare_tid()
-        tid_int = u64(self._tid)
         cursor = self._store_cursor
         assert cursor is not None
+
+        if self._max_stored_oid > self._max_new_oid:
+            self._adapter.set_min_oid(cursor, self._max_stored_oid + 1)
+
+        self._prepare_tid()
+        tid_int = u64(self._tid)
 
         serials = self._finish_store()
         self._adapter.update_current(cursor, tid_int)
@@ -519,6 +534,7 @@ class RelStorage(BaseStorage,
                 self._open_load_connection()
                 cursor = self._load_cursor
             oid_int = self._adapter.new_oid(cursor)
+            self._max_new_oid = max(self._max_new_oid, oid_int)
             return p64(oid_int)
         finally:
             self._lock_release()

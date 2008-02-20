@@ -172,11 +172,8 @@ class MySQLAdapter(Adapter):
             self.close(conn, cursor)
 
 
-    def zap(self):
-        """Clear all data out of the database.
-
-        Used by the test suite.
-        """
+    def zap_all(self):
+        """Clear all data out of the database."""
         conn, cursor = self.open()
         try:
             try:
@@ -486,6 +483,10 @@ class MySQLAdapter(Adapter):
         SELECT zoid, tid FROM object_state
         WHERE tid = %s
         """, (tid,))
+
+    def set_min_oid(self, cursor, oid):
+        """Ensure the next OID is at least the given OID."""
+        cursor.execute("REPLACE INTO new_oid VALUES(%s)", (oid,))
 
     def commit_phase1(self, cursor, tid):
         """Begin a commit.  Returns the transaction name.
