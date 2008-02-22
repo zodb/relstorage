@@ -105,8 +105,8 @@ class OracleAdapter(Adapter):
         CREATE TABLE transaction (
             tid         NUMBER(20) NOT NULL PRIMARY KEY,
             packed      CHAR DEFAULT 'N' CHECK (packed IN ('N', 'Y')),
-            username    VARCHAR2(255),
-            description VARCHAR2(4000),
+            username    NVARCHAR2(255),
+            description NVARCHAR2(2000),
             extension   RAW(2000)
         );
 
@@ -512,9 +512,10 @@ class OracleAdapter(Adapter):
             (tid, packed, username, description, extension)
         VALUES (:1, :2, :3, :4, :5)
         """
+        encoding = cursor.connection.encoding
         cursor.execute(stmt, (
-            tid, packed and 'Y' or 'N', username, description,
-            cx_Oracle.Binary(extension)))
+            tid, packed and 'Y' or 'N', username.encode(encoding),
+            description.encode(encoding), cx_Oracle.Binary(extension)))
 
     def detect_conflict(self, cursor):
         """Find one conflict in the data about to be committed.
@@ -618,11 +619,30 @@ class OracleAdapter(Adapter):
         """Abort the commit.  If txn is not None, phase 1 is also aborted."""
         cursor.connection.rollback()
 
+
     def new_oid(self, cursor):
         """Return a new, unused OID."""
         stmt = "SELECT zoid_seq.nextval FROM DUAL"
         cursor.execute(stmt)
         return cursor.fetchone()[0]
+
+
+    def _transaction_iterator(self, cursor):
+        """Iterate over a list of transactions returned from the database.
+
+        Each row begins with (tid, username, description, extension)
+        and may have other columns.
+
+        This overrides the default implementation.
+        """
+        encoding = cursor.connection.encoding
+        for row in cursor:
+            tid, username, description = row[:3]
+            if username is not None:
+                username = username.decode(encoding)
+            if description is not None:
+                description = description.decode(encoding)
+            yield (tid, username, description) + tuple(row[3:])
 
 
     def hold_pack_lock(self, cursor):
@@ -720,4 +740,3 @@ class TrackingMap:
     def __getitem__(self, key):
         self.used.add(key)
         return self.source[key]
-
