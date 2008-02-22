@@ -1,6 +1,8 @@
 
-To make Zope store in RelStorage, first patch ZODB/Connection.py using the
-provided patch.  The patch is for Zope 2.10.5.  Then modify etc/zope.conf.
+See http://wiki.zope.org/ZODB/RelStorage .
+
+To make Zope store in RelStorage, first patch ZODB using the provided
+patch.  The patch is for Zope 2.10.5.  Then modify etc/zope.conf.
 
 
 For PostgreSQL, use this in etc/zope.conf:
