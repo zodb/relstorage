@@ -1,0 +1,2 @@
+include MANIFEST.in *.txt *.py *.patch
+recursive-include relstorage *.py *.xml

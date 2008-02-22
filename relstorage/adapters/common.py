@@ -20,6 +20,14 @@ import logging
 log = logging.getLogger("relstorage.adapters.common")
 
 
+# Notes about adapters:
+#
+# An adapter must not hold a connection, cursor, or database state, because
+# RelStorage opens multiple concurrent connections using a single adapter
+# instance.
+# Within the context of an adapter, all OID and TID values are integers,
+# not binary strings, except as noted.
+
 class Adapter(object):
     """Common code for a database adapter.
 
@@ -122,6 +130,18 @@ class Adapter(object):
             self._run_script_stmt(cursor, stmt, params)
 
 
+    def _transaction_iterator(self, cursor):
+        """Iterate over a list of transactions returned from the database.
+
+        Each row begins with (tid, username, description, extension)
+        and may have other columns.
+
+        The default implementation returns the cursor unmodified.
+        Subclasses can override this.
+        """
+        return cursor
+
+
     def iter_transactions(self, cursor):
         """Iterate over the transaction log, newest first.
 
@@ -136,7 +156,7 @@ class Adapter(object):
         ORDER BY tid DESC
         """
         self._run_script_stmt(cursor, stmt)
-        return iter(cursor)
+        return self._transaction_iterator(cursor)
 
 
     def iter_transactions_range(self, cursor, start=None, stop=None):
@@ -144,12 +164,11 @@ class Adapter(object):
 
         Includes packed transactions.
         Yields (tid, packed, username, description, extension)
-            for each transaction.
+        for each transaction.
         """
         stmt = """
-        SELECT tid,
-            CASE WHEN packed = %(TRUE)s THEN 1 ELSE 0 END,
-            username, description, extension
+        SELECT tid, username, description, extension,
+            CASE WHEN packed = %(TRUE)s THEN 1 ELSE 0 END
         FROM transaction
         WHERE tid >= 0
         """
@@ -160,7 +179,7 @@ class Adapter(object):
         stmt += " ORDER BY tid"
         self._run_script_stmt(cursor, stmt,
             {'min_tid': start, 'max_tid': stop})
-        return iter(cursor)
+        return self._transaction_iterator(cursor)
 
 
     def iter_object_history(self, cursor, oid):
@@ -186,7 +205,7 @@ class Adapter(object):
         ORDER BY tid DESC
         """
         self._run_script_stmt(cursor, stmt, {'oid': oid})
-        return iter(cursor)
+        return self._transaction_iterator(cursor)
 
 
     def iter_objects(self, cursor, tid):
@@ -332,7 +351,7 @@ class Adapter(object):
             self.close(conn, cursor)
 
 
-    def pre_pack(self, pack_tid, get_references, gc=True):
+    def pre_pack(self, pack_tid, get_references, gc):
         """Decide what to pack.
 
         Subclasses may override this.

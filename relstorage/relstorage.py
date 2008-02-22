@@ -43,7 +43,7 @@ class RelStorage(BaseStorage,
     """Storage to a relational database, based on invalidation polling"""
 
     def __init__(self, adapter, name=None, create=True,
-            read_only=False, poll_interval=0):
+            read_only=False, poll_interval=0, pack_gc=True):
         if name is None:
             name = 'RelStorage on %s' % adapter.__class__.__name__
 
@@ -51,6 +51,7 @@ class RelStorage(BaseStorage,
         self._name = name
         self._is_read_only = read_only
         self._poll_interval = poll_interval
+        self._pack_gc = pack_gc
 
         if create:
             self._adapter.prepare_schema()
@@ -83,6 +84,14 @@ class RelStorage(BaseStorage,
         # be inside a _lock_acquire()/_lock_release() block.
         self._closed = False
 
+        # _max_stored_oid is the highest OID stored by the current
+        # transaction
+        self._max_stored_oid = 0
+
+        # _max_new_oid is the highest OID provided by new_oid()
+        self._max_new_oid = 0
+
+
     def _open_load_connection(self):
         """Open the load connection to the database.  Return nothing."""
         conn, cursor = self._adapter.open_for_load()
@@ -112,12 +121,12 @@ class RelStorage(BaseStorage,
             self._adapter.restart_load(self._load_cursor)
             self._load_transaction_open = True
 
-    def _zap(self):
-        """Clear all objects out of the database.
+    def zap_all(self):
+        """Clear all objects and transactions out of the database.
 
-        Used by the test suite.
+        Used by the test suite and migration scripts.
         """
-        self._adapter.zap()
+        self._adapter.zap_all()
         self._rollback_load_connection()
 
     def close(self):
@@ -263,6 +272,7 @@ class RelStorage(BaseStorage,
 
         self._lock_acquire()
         try:
+            self._max_stored_oid = max(self._max_stored_oid, oid_int)
             # save the data in a temporary table
             adapter.store_temp(cursor, oid_int, prev_tid_int, md5sum, data)
             return None
@@ -297,6 +307,7 @@ class RelStorage(BaseStorage,
 
         self._lock_acquire()
         try:
+            self._max_stored_oid = max(self._max_stored_oid, oid_int)
             # save the data.  Note that md5sum and data can be None.
             adapter.restore(cursor, oid_int, tid_int, md5sum, data)
         finally:
@@ -391,6 +402,7 @@ class RelStorage(BaseStorage,
         # It is assumed that self._lock_acquire was called before this
         # method was called.
         self._prepared_txn = None
+        self._max_stored_oid = 0
 
 
     def _finish_store(self):
@@ -456,10 +468,14 @@ class RelStorage(BaseStorage,
             # the vote phase has already completed
             return
 
-        self._prepare_tid()
-        tid_int = u64(self._tid)
         cursor = self._store_cursor
         assert cursor is not None
+
+        if self._max_stored_oid > self._max_new_oid:
+            self._adapter.set_min_oid(cursor, self._max_stored_oid + 1)
+
+        self._prepare_tid()
+        tid_int = u64(self._tid)
 
         serials = self._finish_store()
         self._adapter.update_current(cursor, tid_int)
@@ -519,6 +535,7 @@ class RelStorage(BaseStorage,
                 self._open_load_connection()
                 cursor = self._load_cursor
             oid_int = self._adapter.new_oid(cursor)
+            self._max_new_oid = max(self._max_new_oid, oid_int)
             return p64(oid_int)
         finally:
             self._lock_release()
@@ -651,6 +668,22 @@ class RelStorage(BaseStorage,
             self._lock_release()
 
 
+    def set_pack_gc(self, pack_gc):
+        """Configures whether garbage collection during packing is enabled.
+
+        Garbage collection is enabled by default.  If GC is disabled,
+        packing keeps at least one revision of every object.
+        With GC disabled, the pack code does not need to follow object
+        references, making packing conceivably much faster.
+        However, some of that benefit may be lost due to an ever
+        increasing number of unused objects.
+
+        Disabling garbage collection is also a hack that ensures
+        inter-database references never break.
+        """
+        self._pack_gc = pack_gc
+
+
     def pack(self, t, referencesf):
         if self._is_read_only:
             raise POSException.ReadOnlyError()
@@ -684,7 +717,7 @@ class RelStorage(BaseStorage,
                 # In pre_pack, the adapter fills tables with
                 # information about what to pack.  The adapter
                 # should not actually pack anything yet.
-                adapter.pre_pack(tid_int, get_references)
+                adapter.pre_pack(tid_int, get_references, self._pack_gc)
 
                 # Now pack.
                 adapter.pack(tid_int)
@@ -718,7 +751,7 @@ class BoundRelStorage(RelStorage):
         # self._zodb_conn = zodb_conn
         RelStorage.__init__(self, adapter=parent._adapter, name=parent._name,
             create=False, read_only=parent._is_read_only,
-            poll_interval=parent._poll_interval)
+            poll_interval=parent._poll_interval, pack_gc=parent._pack_gc)
         # _prev_polled_tid contains the tid at the previous poll
         self._prev_polled_tid = None
         self._showed_disconnect = False
@@ -825,7 +858,7 @@ class TransactionIterator(object):
         else:
             stop_int = None
 
-        # _transactions: [(tid, packed, username, description, extension)]
+        # _transactions: [(tid, username, description, extension, packed)]
         self._transactions = list(adapter.iter_transactions_range(
             self._cursor, start_int, stop_int))
         self._index = 0
@@ -855,7 +888,7 @@ class TransactionIterator(object):
 
 class RecordIterator(object):
     """Iterate over the objects in a transaction."""
-    def __init__(self, trans_iter, tid_int, packed, user, desc, ext):
+    def __init__(self, trans_iter, tid_int, user, desc, ext, packed):
         self.tid = p64(tid_int)
         self.status = packed and 'p' or ' '
         self.user = user or ''

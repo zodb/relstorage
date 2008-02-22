@@ -22,13 +22,7 @@ from common import Adapter
 
 log = logging.getLogger("relstorage.adapters.postgresql")
 
-
-# Notes about adapters:
-#
-# An adapter must not hold a connection, cursor, or database state, because
-# RelStorage opens multiple concurrent connections using a single adapter
-# instance.
-# All OID and TID values are integers, not binary strings, except as noted.
+psycopg2.extensions.register_type(psycopg2.extensions.UNICODE)
 
 
 class PostgreSQLAdapter(Adapter):
@@ -149,11 +143,8 @@ class PostgreSQLAdapter(Adapter):
             self.close(conn, cursor)
 
 
-    def zap(self):
-        """Clear all data out of the database.
-
-        Used by the test suite.
-        """
+    def zap_all(self):
+        """Clear all data out of the database."""
         conn, cursor = self.open()
         try:
             try:
@@ -182,6 +173,7 @@ class PostgreSQLAdapter(Adapter):
         """Open a database connection and return (conn, cursor)."""
         try:
             conn = psycopg2.connect(self._dsn)
+            conn.set_client_encoding('UNICODE')
             conn.set_isolation_level(isolation)
             cursor = conn.cursor()
             cursor.arraysize = 64
@@ -509,6 +501,15 @@ class PostgreSQLAdapter(Adapter):
             ORDER BY zoid
         )
         """, {'tid': tid})
+
+    def set_min_oid(self, cursor, oid):
+        """Ensure the next OID is at least the given OID."""
+        cursor.execute("""
+        SELECT CASE WHEN %s > nextval('zoid_seq')
+            THEN setval('zoid_seq', %s)
+            ELSE 0
+            END
+        """, (oid, oid))
 
     def commit_phase1(self, cursor, tid):
         """Begin a commit.  Returns the transaction name.

@@ -1,15 +1,14 @@
 
-relstorage 0.9
+RelStorage 1.0 beta
 
 - Renamed to reflect expanding database support.
 
-- Support for Oracle added.
+- Added support for Oracle 10g.
 
 - Major overhaul with many scalability and reliability improvements,
   particularly in the area of packing.
 
-- Moved to svn.zope.org and switched to ZPL 2.1 (required for projects
-  on svn.zope.org.)
+- Moved to svn.zope.org and switched to ZPL 2.1.
 
 - Made two-phase commit optional in both Oracle and PostgreSQL.  They
   both use commit_lock in such a way that the commit is not likely to
@@ -32,7 +31,7 @@ relstorage 0.9
 - Removed the code in the Oracle adapter for retrying connection attempts.
   (It is better to just reconfigure Oracle.)
 
-- Added support for MySQL.  (Version 5.0 is probably the minimum.)
+- Added support for MySQL 5.0.
 
 - Added the poll_interval option.  It reduces the frequency of database
   polls, but it also increases the potential for conflict errors on
@@ -40,6 +39,15 @@ relstorage 0.9
 
 - Implemented the storage iterator protocol, making it possible to copy
   transactions to and from FileStorage and other RelStorage instances.
+
+- Fixed a bug that caused OIDs to be reused after importing transactions.
+  Added a corresponding test.
+
+- Made it possible to disable garbage collection during packing.
+  Exposed the option in zope.conf.
+
+- Valery Suhomlinov discovered a problem with non-ASCII data in transaction
+  metadata.  The problem has been fixed for all supported databases.
 
 
 PGStorage 0.4

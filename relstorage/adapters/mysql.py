@@ -64,7 +64,9 @@ class MySQLAdapter(Adapter):
     """MySQL adapter for RelStorage."""
 
     def __init__(self, **params):
-        self._params = params
+        self._params = params.copy()
+        self._params['use_unicode'] = True
+        self._params['charset'] = 'utf8'
 
     def create_schema(self, cursor):
         """Create the database tables."""
@@ -76,7 +78,7 @@ class MySQLAdapter(Adapter):
             username    VARCHAR(255) NOT NULL,
             description TEXT NOT NULL,
             extension   BLOB
-        ) ENGINE = InnoDB;
+        ) ENGINE = InnoDB CHARACTER SET utf8;
 
         -- Create a special transaction to represent object creation.  This
         -- row is often referenced by object_state.prev_tid, but never by
@@ -97,7 +99,7 @@ class MySQLAdapter(Adapter):
             tid         BIGINT NOT NULL REFERENCES transaction,
             PRIMARY KEY (zoid, tid),
             prev_tid    BIGINT NOT NULL REFERENCES transaction,
-            md5         CHAR(32),
+            md5         CHAR(32) CHARACTER SET ascii,
             state       LONGBLOB,
             CHECK (tid > 0)
         ) ENGINE = InnoDB;
@@ -172,11 +174,8 @@ class MySQLAdapter(Adapter):
             self.close(conn, cursor)
 
 
-    def zap(self):
-        """Clear all data out of the database.
-
-        Used by the test suite.
-        """
+    def zap_all(self):
+        """Clear all data out of the database."""
         conn, cursor = self.open()
         try:
             try:
@@ -487,6 +486,10 @@ class MySQLAdapter(Adapter):
         WHERE tid = %s
         """, (tid,))
 
+    def set_min_oid(self, cursor, oid):
+        """Ensure the next OID is at least the given OID."""
+        cursor.execute("REPLACE INTO new_oid VALUES(%s)", (oid,))
+
     def commit_phase1(self, cursor, tid):
         """Begin a commit.  Returns the transaction name.
 
@@ -536,7 +539,7 @@ class MySQLAdapter(Adapter):
         cursor.execute(stmt)
 
 
-    def pre_pack(self, pack_tid, get_references, gc=True):
+    def pre_pack(self, pack_tid, get_references, gc):
         """Decide what to pack.
 
         This overrides the method by the same name in common.Adapter.

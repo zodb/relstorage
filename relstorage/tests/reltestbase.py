@@ -13,6 +13,7 @@
 ##############################################################################
 """A foundation for relstorage adapter tests"""
 
+import time
 import unittest
 from relstorage.relstorage import RelStorage
 
@@ -30,6 +31,7 @@ from ZODB.tests import StorageTestBase, BasicStorage, \
 
 from ZODB.tests.MinPO import MinPO
 from ZODB.tests.StorageTestBase import zodb_unpickle, zodb_pickle
+from ZODB.serialize import referencesf
 
 
 class BaseRelStorageTests(StorageTestBase.StorageTestBase):
@@ -44,7 +46,7 @@ class BaseRelStorageTests(StorageTestBase.StorageTestBase):
 
     def setUp(self):
         self.open(create=1)
-        self._storage._zap()
+        self._storage.zap_all()
 
     def tearDown(self):
         self._storage.close()
@@ -202,6 +204,16 @@ class RelStorageTests(
         got, serialno = self._storage.load(oid, '')
         self.assertEqual(len(got), len(data))
         self.assertEqual(got, data)
+
+    def checkPreventOIDOverlap(self):
+        # Store an object with a particular OID, then verify that
+        # OID is not reused.
+        data = 'mydata'
+        oid1 = '\0' * 7 + '\x0f'
+        self._dostoreNP(oid1, data=data)
+        oid2 = self._storage.new_oid()
+        self.assert_(oid1 < oid2, 'old OID %r should be less than new OID %r'
+            % (oid1, oid2))
 
     def check16MObject(self):
         # Store 16 * 1024 * 1024 bytes in an object, then retrieve it
@@ -361,6 +373,62 @@ class RelStorageTests(
 
         self.assertRaises(IndexError, iter.__getitem__, offset)
 
+    def checkNonASCIITransactionMetadata(self):
+        # Verify the database stores and retrieves non-ASCII text
+        # in transaction metadata.
+        db = DB(self._storage)
+        try:
+            c1 = db.open()
+            r1 = c1.root()
+            r1['alpha'] = 1
+            user = u"\u65e5\u672c\u8e86"
+            transaction.get().setUser(user)
+            transaction.commit()
+            r1['alpha'] = 2
+            desc = u"Japanese: \u65e5\u672c\u8e86"
+            transaction.get().note(desc)
+            transaction.commit()
+
+            info = self._storage.undoInfo()
+            self.assertEqual(info[0]['description'], desc)
+            self.assertEqual(info[1]['user_name'], '/ ' + user)
+        finally:
+            db.close()
+
+    def checkPackGC(self, gc_enabled=True):
+        db = DB(self._storage)
+        try:
+            c1 = db.open()
+            r1 = c1.root()
+            r1['alpha'] = PersistentMapping()
+            transaction.commit()
+
+            oid = r1['alpha']._p_oid
+            r1['alpha'] = None
+            transaction.commit()
+
+            # The object should still exist
+            self._storage.load(oid, '')
+
+            # Pack
+            now = packtime = time.time()
+            while packtime <= now:
+                packtime = time.time()
+            self._storage.pack(packtime, referencesf)
+
+            if gc_enabled:
+                # The object should now be gone
+                self.assertRaises(KeyError, self._storage.load, oid, '')
+            else:
+                # The object should still exist
+                self._storage.load(oid, '')
+        finally:
+            db.close()
+
+    def checkPackGCDisabled(self):
+        self._storage.set_pack_gc(False)
+        self.checkPackGC(gc_enabled=False)
+
 
 class IteratorDeepCompareUnordered:
     # Like IteratorDeepCompare, but compensates for OID order
@@ -410,7 +478,7 @@ for name, attr in RecoveryStorage.RecoveryStorage.__dict__.items():
 class ToFileStorage(BaseRelStorageTests, RecoveryStorageSubset):
     def setUp(self):
         self.open(create=1)
-        self._storage._zap()
+        self._storage.zap_all()
         self._dst = FileStorage("Dest.fs", create=True)
 
     def tearDown(self):
@@ -426,7 +494,7 @@ class ToFileStorage(BaseRelStorageTests, RecoveryStorageSubset):
 class FromFileStorage(BaseRelStorageTests, RecoveryStorageSubset):
     def setUp(self):
         self.open(create=1)
-        self._storage._zap()
+        self._storage.zap_all()
         self._dst = self._storage
         self._storage = FileStorage("Source.fs", create=True)
 
