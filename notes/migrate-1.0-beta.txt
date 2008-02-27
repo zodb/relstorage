@@ -1,13 +1,19 @@
 1.0 Beta Migration
 
+Use one of the following scripts to migrate from RelStorage 1.0 beta to
+RelStorage 1.0.  Alter the scripts to match the Python default encoding.
+For example, if 'import sys; print sys.getdefaultencoding()' says the
+encoding is "iso-8859-1", change all occurrences of 'UTF-8' or 'UTF8'
+to 'ISO-8859-1'.
 
-PostgreSQL 8.3:
+
+PostgreSQL 8.3 (using the psql command):
 
     ALTER TABLE transaction
         ALTER username TYPE BYTEA USING (convert_to(username, 'UTF-8')),
         ALTER description TYPE BYTEA USING (convert_to(description, 'UTF-8'));
 
-PostgreSQL 8.2 and below:
+PostgreSQL 8.2 and below (using the psql command):
 
     ALTER TABLE transaction
         ALTER username TYPE BYTEA USING
@@ -15,13 +21,13 @@ PostgreSQL 8.2 and below:
         ALTER description TYPE BYTEA USING
             (decode(replace(convert(description, 'UTF-8'), '\\', '\\\\'), 'escape'));
 
-MySQL:
+MySQL (using the mysql command):
 
     ALTER TABLE transaction
         MODIFY username BLOB NOT NULL,
         MODIFY description BLOB NOT NULL;
 
-Oracle:
+Oracle (using the sqlplus command):
 
     ALTER TABLE transaction ADD (
         new_username    RAW(255),

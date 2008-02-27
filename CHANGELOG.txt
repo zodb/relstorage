@@ -1,5 +1,12 @@
 
-RelStorage 1.0 beta 1
+RelStorage 1.0
+
+- The previous fix for non-ASCII characters was incorrect.  Now transaction
+  metadata is stored as raw bytes.  A schema migration is required; see
+  notes/migrate-1.0-beta.txt.
+
+
+RelStorage 1.0 beta
 
 - Renamed to reflect expanding database support.
 
