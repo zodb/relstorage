@@ -27,7 +27,7 @@ A small patch to ZODB is required.  See the patch files distributed
 with RelStorage.
 """
 
-VERSION = "1.0-beta1"
+VERSION = "1.0c1"
 
 classifiers = """\
 Development Status :: 4 - Beta
@@ -40,8 +40,22 @@ Operating System :: Microsoft :: Windows
 Operating System :: Unix
 """
 
-
-from distutils.core import setup
+try:
+    from setuptools import setup
+except ImportError:
+    from distutils import setup
+    setuptools_args = {}
+else:
+    setuptools_args = dict(
+        zip_safe=False,  # otherwise ZConfig can't see component.xml
+        install_requires=['ZODB3>=3.7.0'],
+        extras_require={
+            'mysql':      ['MySQL-python>=1.2.2'],
+            'postgresql': ['psycopg2>=2.0'],
+            'oracle':     ['cx_Oracle>=4.3.1'],
+            },
+        test_suite='relstorage.tests.alltests.make_suite',
+    )
 
 doclines = __doc__.split("\n")
 
@@ -60,4 +74,5 @@ setup(
     description=doclines[0],
     classifiers=filter(None, classifiers.split("\n")),
     long_description = "\n".join(doclines[2:]),
+    **setuptools_args
     )
