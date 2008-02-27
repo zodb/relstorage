@@ -135,11 +135,18 @@ class Adapter(object):
 
         Each row begins with (tid, username, description, extension)
         and may have other columns.
-
-        The default implementation returns the cursor unmodified.
-        Subclasses can override this.
         """
-        return cursor
+        for row in cursor:
+            tid, username, description = row[:3]
+            if username is None:
+                username = ''
+            else:
+                username = str(username)
+            if description is None:
+                description = ''
+            else:
+                description = str(description)
+            yield (tid, username, description) + tuple(row[3:])
 
 
     def iter_transactions(self, cursor):

@@ -75,10 +75,10 @@ class MySQLAdapter(Adapter):
         CREATE TABLE transaction (
             tid         BIGINT NOT NULL PRIMARY KEY,
             packed      BOOLEAN NOT NULL DEFAULT FALSE,
-            username    VARCHAR(255) NOT NULL,
-            description TEXT NOT NULL,
+            username    BLOB NOT NULL,
+            description BLOB NOT NULL,
             extension   BLOB
-        ) ENGINE = InnoDB CHARACTER SET utf8;
+        ) ENGINE = InnoDB;
 
         -- Create a special transaction to represent object creation.  This
         -- row is often referenced by object_state.prev_tid, but never by
@@ -434,7 +434,8 @@ class MySQLAdapter(Adapter):
         VALUES (%s, %s, %s, %s, %s)
         """
         cursor.execute(stmt, (
-            tid, packed, username, description, MySQLdb.Binary(extension)))
+            tid, packed, MySQLdb.Binary(username),
+            MySQLdb.Binary(description), MySQLdb.Binary(extension)))
 
     def detect_conflict(self, cursor):
         """Find one conflict in the data about to be committed.

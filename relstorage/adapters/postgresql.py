@@ -41,8 +41,8 @@ class PostgreSQLAdapter(Adapter):
         CREATE TABLE transaction (
             tid         BIGINT NOT NULL PRIMARY KEY,
             packed      BOOLEAN NOT NULL DEFAULT FALSE,
-            username    VARCHAR(255) NOT NULL,
-            description TEXT NOT NULL,
+            username    BYTEA NOT NULL,
+            description BYTEA NOT NULL,
             extension   BYTEA
         );
 
@@ -436,10 +436,12 @@ class PostgreSQLAdapter(Adapter):
         stmt = """
         INSERT INTO transaction
             (tid, packed, username, description, extension)
-        VALUES (%s, %s, %s, %s, decode(%s, 'base64'))
+        VALUES (%s, %s,
+            decode(%s, 'base64'), decode(%s, 'base64'), decode(%s, 'base64'))
         """
-        cursor.execute(stmt, (
-            tid, packed, username, description, encodestring(extension)))
+        cursor.execute(stmt, (tid, packed,
+            encodestring(username), encodestring(description),
+            encodestring(extension)))
 
     def detect_conflict(self, cursor):
         """Find one conflict in the data about to be committed.

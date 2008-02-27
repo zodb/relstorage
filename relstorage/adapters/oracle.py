@@ -105,8 +105,8 @@ class OracleAdapter(Adapter):
         CREATE TABLE transaction (
             tid         NUMBER(20) NOT NULL PRIMARY KEY,
             packed      CHAR DEFAULT 'N' CHECK (packed IN ('N', 'Y')),
-            username    NVARCHAR2(255),
-            description NVARCHAR2(2000),
+            username    RAW(500),
+            description RAW(2000),
             extension   RAW(2000)
         );
 
@@ -114,7 +114,10 @@ class OracleAdapter(Adapter):
         -- row is often referenced by object_state.prev_tid, but never by
         -- object_state.tid.
         INSERT INTO transaction (tid, username, description)
-            VALUES (0, 'system', 'special transaction for object creation');
+            VALUES (0,
+            UTL_I18N.STRING_TO_RAW('system', 'US7ASCII'),
+            UTL_I18N.STRING_TO_RAW(
+                'special transaction for object creation', 'US7ASCII'));
 
         CREATE SEQUENCE zoid_seq;
 
@@ -239,7 +242,9 @@ class OracleAdapter(Adapter):
                 DELETE FROM transaction;
                 -- Create a transaction to represent object creation.
                 INSERT INTO transaction (tid, username, description) VALUES
-                    (0, 'system', 'special transaction for object creation');
+                    (0, UTL_I18N.STRING_TO_RAW('system', 'US7ASCII'),
+                    UTL_I18N.STRING_TO_RAW(
+                    'special transaction for object creation', 'US7ASCII'));
                 DROP SEQUENCE zoid_seq;
                 CREATE SEQUENCE zoid_seq;
                 """
@@ -514,8 +519,8 @@ class OracleAdapter(Adapter):
         """
         encoding = cursor.connection.encoding
         cursor.execute(stmt, (
-            tid, packed and 'Y' or 'N', username.encode(encoding),
-            description.encode(encoding), cx_Oracle.Binary(extension)))
+            tid, packed and 'Y' or 'N', cx_Oracle.Binary(username),
+            cx_Oracle.Binary(description), cx_Oracle.Binary(extension)))
 
     def detect_conflict(self, cursor):
         """Find one conflict in the data about to be committed.
@@ -625,24 +630,6 @@ class OracleAdapter(Adapter):
         stmt = "SELECT zoid_seq.nextval FROM DUAL"
         cursor.execute(stmt)
         return cursor.fetchone()[0]
-
-
-    def _transaction_iterator(self, cursor):
-        """Iterate over a list of transactions returned from the database.
-
-        Each row begins with (tid, username, description, extension)
-        and may have other columns.
-
-        This overrides the default implementation.
-        """
-        encoding = cursor.connection.encoding
-        for row in cursor:
-            tid, username, description = row[:3]
-            if username is not None:
-                username = username.decode(encoding)
-            if description is not None:
-                description = description.decode(encoding)
-            yield (tid, username, description) + tuple(row[3:])
 
 
     def hold_pack_lock(self, cursor):

@@ -327,8 +327,8 @@ class RelStorage(BaseStorage,
             self._transaction = transaction
             self._clear_temp()
 
-            user = transaction.user
-            desc = transaction.description
+            user = str(transaction.user)
+            desc = str(transaction.description)
             ext = transaction._extension
             if ext:
                 ext = cPickle.dumps(ext, 1)

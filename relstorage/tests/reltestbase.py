@@ -376,22 +376,22 @@ class RelStorageTests(
     def checkNonASCIITransactionMetadata(self):
         # Verify the database stores and retrieves non-ASCII text
         # in transaction metadata.
+        ugly_string = ''.join(chr(c) for c in range(256))
+
         db = DB(self._storage)
         try:
             c1 = db.open()
             r1 = c1.root()
             r1['alpha'] = 1
-            user = u"\u65e5\u672c\u8e86"
-            transaction.get().setUser(user)
+            transaction.get().setUser(ugly_string)
             transaction.commit()
             r1['alpha'] = 2
-            desc = u"Japanese: \u65e5\u672c\u8e86"
-            transaction.get().note(desc)
+            transaction.get().note(ugly_string)
             transaction.commit()
 
             info = self._storage.undoInfo()
-            self.assertEqual(info[0]['description'], desc)
-            self.assertEqual(info[1]['user_name'], '/ ' + user)
+            self.assertEqual(info[0]['description'], ugly_string)
+            self.assertEqual(info[1]['user_name'], '/ ' + ugly_string)
         finally:
             db.close()
 
