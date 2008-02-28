@@ -69,6 +69,7 @@ setup(
     package_data={
         'relstorage': ['component.xml'],
     },
+    scripts=['scripts/zodbconvert.py'],
     license="ZPL 2.1",
     platforms=["any"],
     description=doclines[0],
