@@ -1,6 +1,6 @@
 
 
-RelStorage 1.0 (not yet released)
+RelStorage 1.0
 
 - Added a utility for converting between storages called zodbconvert.
 
