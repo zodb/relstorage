@@ -27,10 +27,10 @@ A small patch to ZODB is required.  See the patch files distributed
 with RelStorage.
 """
 
-VERSION = "1.0c1"
+VERSION = "1.0"
 
 classifiers = """\
-Development Status :: 4 - Beta
+Development Status :: 5 - Production/Stable
 Intended Audience :: Developers
 License :: OSI Approved :: Zope Public License
 Programming Language :: Python
@@ -69,6 +69,7 @@ setup(
     package_data={
         'relstorage': ['component.xml'],
     },
+    scripts=['scripts/zodbconvert.py'],
     license="ZPL 2.1",
     platforms=["any"],
     description=doclines[0],

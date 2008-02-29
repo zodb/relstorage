@@ -1,4 +1,10 @@
 
+
+RelStorage 1.0
+
+- Added a utility for converting between storages called zodbconvert.
+
+
 RelStorage 1.0c1
 
 - The previous fix for non-ASCII characters was incorrect.  Now transaction
