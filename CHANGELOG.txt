@@ -1,4 +1,10 @@
 
+Bugs fixed after RelStorage 1.0
+
+- The speedtest script failed if run on a test database that has no tables.
+  Now the script creates the tables if needed.  Thanks to Flavio Coelho
+  for discovering this.
+
 
 RelStorage 1.0
 
