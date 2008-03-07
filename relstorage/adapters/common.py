@@ -679,3 +679,51 @@ class Adapter(object):
 
         finally:
             self.close(conn, cursor)
+
+
+    def poll_invalidations(self, conn, cursor, prev_polled_tid, ignore_tid):
+        """Polls for new transactions.
+
+        conn and cursor must have been created previously by open_for_load().
+        prev_polled_tid is the tid returned at the last poll, or None
+        if this is the first poll.  If ignore_tid is not None, changes
+        committed in that transaction will not be included in the list
+        of changed OIDs.
+
+        Returns (changed_oids, new_polled_tid).
+        """
+        # find out the tid of the most recent transaction.
+        cursor.execute(self._poll_query)
+        new_polled_tid = cursor.fetchone()[0]
+
+        if prev_polled_tid is None:
+            # This is the first time the connection has polled.
+            return None, new_polled_tid
+
+        if new_polled_tid == prev_polled_tid:
+            # No transactions have been committed since prev_polled_tid.
+            return (), new_polled_tid
+
+        stmt = "SELECT 1 FROM transaction WHERE tid = %(tid)s"
+        cursor.execute(stmt % self._script_vars, {'tid': prev_polled_tid})
+        rows = cursor.fetchall()
+        if not rows:
+            # Transaction not found; perhaps it has been packed.
+            # The connection cache needs to be cleared.
+            return None, new_polled_tid
+
+        # Get the list of changed OIDs and return it.
+        stmt = """
+        SELECT DISTINCT zoid
+        FROM object_state
+        WHERE tid > %(tid)s
+        """
+        if ignore_tid is None:
+            cursor.execute(stmt % self._script_vars, {'tid': prev_polled_tid})
+        else:
+            stmt += " AND tid != %(self_tid)s"
+            cursor.execute(stmt % self._script_vars,
+                {'tid': prev_polled_tid, 'self_tid': ignore_tid})
+        oids = [oid for (oid,) in cursor]
+
+        return oids, new_polled_tid

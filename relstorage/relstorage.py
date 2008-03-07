@@ -100,26 +100,71 @@ class RelStorage(BaseStorage,
         self._load_transaction_open = True
 
     def _drop_load_connection(self):
+        """Unconditionally drop the load connection"""
         conn, cursor = self._load_conn, self._load_cursor
         self._load_conn, self._load_cursor = None, None
         self._adapter.close(conn, cursor)
+        self._load_transaction_open = False
+
+    def _rollback_load_connection(self):
+        if self._load_conn is not None:
+            try:
+                self._load_conn.rollback()
+            except:
+                self._drop_load_connection()
+                raise
+            self._load_transaction_open = False
+
+    def _restart_load(self):
+        """Restart the load connection, creating a new connection if needed"""
+        if self._load_cursor is None:
+            self._open_load_connection()
+        else:
+            try:
+                self._adapter.restart_load(self._load_cursor)
+            except POSException.StorageError, e:
+                log.warning("Reconnecting load_conn: %s", e)
+                self._drop_load_connection()
+                try:
+                    self._open_load_connection()
+                except:
+                    log.exception("Reconnect failed.")
+                    raise
+                else:
+                    log.info("Reconnected.")
+            self._load_transaction_open = True
+
+
+    def _open_store_connection(self):
+        """Open the store connection to the database.  Return nothing."""
+        conn, cursor = self._adapter.open_for_store()
+        self._drop_store_connection()
+        self._store_conn, self._store_cursor = conn, cursor
 
     def _drop_store_connection(self):
+        """Unconditionally drop the store connection"""
         conn, cursor = self._store_conn, self._store_cursor
         self._store_conn, self._store_cursor = None, None
         self._adapter.close(conn, cursor)
 
-    def _rollback_load_connection(self):
-        if self._load_conn is not None:
-            self._load_conn.rollback()
-            self._load_transaction_open = False
-
-    def _start_load(self):
-        if self._load_cursor is None:
-            self._open_load_connection()
+    def _restart_store(self):
+        """Restart the store connection, creating a new connection if needed"""
+        if self._store_cursor is None:
+            self._open_store_connection()
         else:
-            self._adapter.restart_load(self._load_cursor)
-            self._load_transaction_open = True
+            try:
+                self._adapter.restart_store(self._store_cursor)
+            except POSException.StorageError, e:
+                log.warning("Reconnecting store_conn: %s", e)
+                self._drop_store_connection()
+                try:
+                    self._open_store_connection()
+                except:
+                    log.exception("Reconnect failed.")
+                    raise
+                else:
+                    log.info("Reconnected.")
+
 
     def zap_all(self):
         """Clear all objects and transactions out of the database.
@@ -155,6 +200,7 @@ class RelStorage(BaseStorage,
 
     def connection_closing(self):
         """Release resources."""
+        # Note that this is overridden in BoundRelStorage.
         self._rollback_load_connection()
 
     def __len__(self):
@@ -168,7 +214,7 @@ class RelStorage(BaseStorage,
         self._lock_acquire()
         try:
             if not self._load_transaction_open:
-                self._start_load()
+                self._restart_load()
             cursor = self._load_cursor
             state, tid_int = self._adapter.load_current(cursor, u64(oid))
         finally:
@@ -199,7 +245,7 @@ class RelStorage(BaseStorage,
                 cursor = self._store_cursor
             else:
                 if not self._load_transaction_open:
-                    self._start_load()
+                    self._restart_load()
                 cursor = self._load_cursor
             state = self._adapter.load_revision(cursor, u64(oid), u64(serial))
             if state is not None:
@@ -224,7 +270,7 @@ class RelStorage(BaseStorage,
                 cursor = self._store_cursor
             else:
                 if not self._load_transaction_open:
-                    self._start_load()
+                    self._restart_load()
                 cursor = self._load_cursor
             if not self._adapter.exists(cursor, u64(oid)):
                 raise KeyError(oid)
@@ -338,21 +384,11 @@ class RelStorage(BaseStorage,
             self._tstatus = status
 
             adapter = self._adapter
-            cursor = self._store_cursor
-            if cursor is not None:
-                # Store cursor is still open, so try to use it again.
-                try:
-                    adapter.restart_store(cursor)
-                except POSException.StorageError:
-                    cursor = None
-                    log.exception("Store connection failed; retrying")
-                    self._drop_store_connection()
-            if cursor is None:
-                conn, cursor = adapter.open_for_store()
-                self._store_conn, self._store_cursor = conn, cursor
+            self._restart_store()
 
             if tid is not None:
                 # get the commit lock and add the transaction now
+                cursor = self._store_cursor
                 packed = (status == 'p')
                 adapter.start_commit(cursor)
                 tid_int = u64(tid)
@@ -754,7 +790,6 @@ class BoundRelStorage(RelStorage):
             poll_interval=parent._poll_interval, pack_gc=parent._pack_gc)
         # _prev_polled_tid contains the tid at the previous poll
         self._prev_polled_tid = None
-        self._showed_disconnect = False
         self._poll_at = 0
 
     def connection_closing(self):
@@ -773,7 +808,7 @@ class BoundRelStorage(RelStorage):
         finally:
             self._lock_release()
 
-    def poll_invalidations(self, retry=True):
+    def poll_invalidations(self):
         """Looks for OIDs of objects that changed since _prev_polled_tid
 
         Returns {oid: 1}, or None if all objects need to be invalidated
@@ -795,43 +830,29 @@ class BoundRelStorage(RelStorage):
                 # else poll now after resetting the timeout
                 self._poll_at = now + self._poll_interval
 
-            try:
-                self._rollback_load_connection()
-                self._start_load()
-                conn = self._load_conn
-                cursor = self._load_cursor
+            self._restart_load()
+            conn = self._load_conn
+            cursor = self._load_cursor
 
-                # Ignore changes made by the last transaction committed
-                # by this connection.
-                if self._ltid is not None:
-                    ignore_tid = u64(self._ltid)
-                else:
-                    ignore_tid = None
+            # Ignore changes made by the last transaction committed
+            # by this connection.
+            if self._ltid is not None:
+                ignore_tid = u64(self._ltid)
+            else:
+                ignore_tid = None
 
-                # get a list of changed OIDs and the most recent tid
-                oid_ints, new_polled_tid = self._adapter.poll_invalidations(
-                    conn, cursor, self._prev_polled_tid, ignore_tid)
-                self._prev_polled_tid = new_polled_tid
+            # get a list of changed OIDs and the most recent tid
+            oid_ints, new_polled_tid = self._adapter.poll_invalidations(
+                conn, cursor, self._prev_polled_tid, ignore_tid)
+            self._prev_polled_tid = new_polled_tid
 
-                if oid_ints is None:
-                    oids = None
-                else:
-                    oids = {}
-                    for oid_int in oid_ints:
-                        oids[p64(oid_int)] = 1
-                return oids
-            except POSException.StorageError:
-                # disconnected
-                self._poll_at = 0
-                if not retry:
-                    raise
-                if not self._showed_disconnect:
-                    log.warning("Lost connection in %s", repr(self))
-                    self._showed_disconnect = True
-                self._open_load_connection()
-                log.info("Reconnected in %s", repr(self))
-                self._showed_disconnect = False
-                return self.poll_invalidations(retry=False)
+            if oid_ints is None:
+                oids = None
+            else:
+                oids = {}
+                for oid_int in oid_ints:
+                    oids[p64(oid_int)] = 1
+            return oids
         finally:
             self._lock_release()
 

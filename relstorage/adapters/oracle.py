@@ -270,8 +270,8 @@ class OracleAdapter(Adapter):
                 cursor.execute("SET TRANSACTION %s" % transaction_mode)
             return conn, cursor
 
-        except cx_Oracle.OperationalError:
-            log.warning("Unable to connect to DSN %s", self._params[2])
+        except cx_Oracle.OperationalError, e:
+            log.warning("Unable to connect: %s", e)
             raise
 
     def close(self, conn, cursor):
@@ -292,8 +292,12 @@ class OracleAdapter(Adapter):
         return self.open('READ ONLY')
 
     def restart_load(self, cursor):
-        """After a rollback, reinitialize a connection for loading objects."""
-        cursor.execute("SET TRANSACTION READ ONLY")
+        """Reinitialize a connection for loading objects."""
+        try:
+            cursor.connection.rollback()
+            cursor.execute("SET TRANSACTION READ ONLY")
+        except (cx_Oracle.OperationalError, cx_Oracle.InterfaceError), e:
+            raise StorageError(e)
 
     def get_object_count(self):
         """Returns the number of objects in the database"""
@@ -436,8 +440,8 @@ class OracleAdapter(Adapter):
             cursor.connection.rollback()
             if self._twophase:
                 self._set_xid(cursor)
-        except (cx_Oracle.OperationalError, cx_Oracle.InterfaceError):
-            raise StorageError("database disconnected")
+        except (cx_Oracle.OperationalError, cx_Oracle.InterfaceError), e:
+            raise StorageError(e)
 
     def store_temp(self, cursor, oid, prev_tid, md5sum, data):
         """Store an object in the temporary table."""
@@ -665,56 +669,7 @@ class OracleAdapter(Adapter):
         cursor.executemany(stmt, add_rows)
 
 
-    def poll_invalidations(self, conn, cursor, prev_polled_tid, ignore_tid):
-        """Polls for new transactions.
-
-        conn and cursor must have been created previously by open_for_load().
-        prev_polled_tid is the tid returned at the last poll, or None
-        if this is the first poll.  If ignore_tid is not None, changes
-        committed in that transaction will not be included in the list
-        of changed OIDs.
-
-        Returns (changed_oids, new_polled_tid).  Raises StorageError
-        if the database has disconnected.
-        """
-        try:
-            # find out the tid of the most recent transaction.
-            stmt = "SELECT MAX(tid) FROM transaction"
-            cursor.execute(stmt)
-            new_polled_tid = list(cursor)[0][0]
-
-            if prev_polled_tid is None:
-                # This is the first time the connection has polled.
-                return None, new_polled_tid
-
-            if new_polled_tid == prev_polled_tid:
-                # No transactions have been committed since prev_polled_tid.
-                return (), new_polled_tid
-
-            stmt = "SELECT 1 FROM transaction WHERE tid = :1"
-            cursor.execute(stmt, (prev_polled_tid,))
-            rows = cursor.fetchall()
-            if not rows:
-                # Transaction not found; perhaps it has been packed.
-                # The connection cache needs to be cleared.
-                return None, new_polled_tid
-
-            # Get the list of changed OIDs and return it.
-            stmt = """
-            SELECT DISTINCT zoid
-            FROM object_state
-                JOIN transaction USING (tid)
-            WHERE tid > :1
-            """
-            if ignore_tid is not None:
-                stmt += " AND tid != %d" % ignore_tid
-            cursor.execute(stmt, (prev_polled_tid,))
-            oids = [oid for (oid,) in cursor]
-
-            return oids, new_polled_tid
-
-        except (cx_Oracle.OperationalError, cx_Oracle.InterfaceError):
-            raise StorageError("database disconnected")
+    _poll_query = "SELECT MAX(tid) FROM transaction"
 
 
 class TrackingMap:

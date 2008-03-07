@@ -211,8 +211,8 @@ class MySQLAdapter(Adapter):
                 cursor.execute("SET SESSION TRANSACTION %s" % transaction_mode)
                 conn.autocommit(False)
             return conn, cursor
-        except MySQLdb.OperationalError:
-            log.warning("Unable to connect in %s", repr(self))
+        except MySQLdb.OperationalError, e:
+            log.warning("Unable to connect: %s", e)
             raise
 
     def close(self, conn, cursor):
@@ -223,7 +223,8 @@ class MySQLAdapter(Adapter):
                 try:
                     obj.close()
                 except (MySQLdb.InterfaceError,
-                        MySQLdb.OperationalError):
+                        MySQLdb.OperationalError,
+                        MySQLdb.ProgrammingError):
                     pass
 
     def open_for_load(self):
@@ -234,9 +235,11 @@ class MySQLAdapter(Adapter):
         return self.open("ISOLATION LEVEL REPEATABLE READ")
 
     def restart_load(self, cursor):
-        """After a rollback, reinitialize a connection for loading objects."""
-        # No re-init necessary
-        pass
+        """Reinitialize a connection for loading objects."""
+        try:
+            cursor.connection.rollback()
+        except (MySQLdb.OperationalError, MySQLdb.InterfaceError), e:
+            raise StorageError(e)
 
     def get_object_count(self):
         """Returns the number of objects in the database"""
@@ -356,8 +359,8 @@ class MySQLAdapter(Adapter):
         try:
             cursor.connection.rollback()
             cursor.execute("TRUNCATE temp_store")
-        except (MySQLdb.OperationalError, MySQLdb.InterfaceError):
-            raise StorageError("database disconnected")
+        except (MySQLdb.OperationalError, MySQLdb.InterfaceError), e:
+            raise StorageError(e)
 
     def store_temp(self, cursor, oid, prev_tid, md5sum, data):
         """Store an object in the temporary table."""
@@ -570,55 +573,4 @@ class MySQLAdapter(Adapter):
             raise StorageError("Unable to acquire commit lock")
 
 
-    def poll_invalidations(self, conn, cursor, prev_polled_tid, ignore_tid):
-        """Polls for new transactions.
-
-        conn and cursor must have been created previously by open_for_load().
-        prev_polled_tid is the tid returned at the last poll, or None
-        if this is the first poll.  If ignore_tid is not None, changes
-        committed in that transaction will not be included in the list
-        of changed OIDs.
-
-        Returns (changed_oids, new_polled_tid).  Raises StorageError
-        if the database has disconnected.
-        """
-        try:
-            # find out the tid of the most recent transaction.
-            stmt = "SELECT tid FROM transaction ORDER BY tid DESC LIMIT 1"
-            cursor.execute(stmt)
-            # Expect the transaction table to always have at least one row.
-            assert cursor.rowcount == 1
-            new_polled_tid = cursor.fetchone()[0]
-
-            if prev_polled_tid is None:
-                # This is the first time the connection has polled.
-                return None, new_polled_tid
-
-            if new_polled_tid == prev_polled_tid:
-                # No transactions have been committed since prev_polled_tid.
-                return (), new_polled_tid
-
-            stmt = "SELECT 1 FROM transaction WHERE tid = %s"
-            cursor.execute(stmt, (prev_polled_tid,))
-            if not cursor.rowcount:
-                # Transaction not found; perhaps it has been packed.
-                # The connection cache needs to be cleared.
-                return None, new_polled_tid
-
-            # Get the list of changed OIDs and return it.
-            stmt = """
-            SELECT DISTINCT zoid
-            FROM object_state
-                JOIN transaction USING (tid)
-            WHERE tid > %s
-            """
-            if ignore_tid is not None:
-                stmt += " AND tid != %d" % ignore_tid
-            cursor.execute(stmt, (prev_polled_tid,))
-            oids = [oid for (oid,) in cursor]
-
-            return oids, new_polled_tid
-
-        except (MySQLdb.OperationalError, MySQLdb.InterfaceError):
-            raise StorageError("database disconnected")
-
+    _poll_query = "SELECT tid FROM transaction ORDER BY tid DESC LIMIT 1"

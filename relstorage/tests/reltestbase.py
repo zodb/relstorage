@@ -237,6 +237,26 @@ class RelStorageTests(
         finally:
             db.close()
 
+    def checkAutoReconnect(self):
+        # Verify auto-reconnect
+        db = DB(self._storage)
+        try:
+            c1 = db.open()
+            r = c1.root()
+            r['alpha'] = 1
+            transaction.commit()
+            c1.close()
+
+            c1._storage._load_conn.close()
+
+            c2 = db.open()
+            self.assert_(c2 is c1)
+            r = c2.root()
+            self.assertEqual(r['alpha'], 1)
+            c2.close()
+        finally:
+            db.close()
+
     def checkPollInterval(self):
         # Verify the poll_interval parameter causes RelStorage to
         # delay invalidation polling.

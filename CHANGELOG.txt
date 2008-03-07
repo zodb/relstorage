@@ -5,6 +5,15 @@ Bugs fixed after RelStorage 1.0
   Now the script creates the tables if needed.  Thanks to Flavio Coelho
   for discovering this.
 
+- Reworked the auto-reconnect logic so that applications never see
+  temporary database disconnects if possible.  Thanks to Rigel Di Scala
+  for pointing out this issue.
+
+- Improved the log messages explaining database connection failures.
+
+- Moved poll_invalidations to the common adapter base class, reducing the
+  amount of code to maintain.
+
 
 RelStorage 1.0
 
