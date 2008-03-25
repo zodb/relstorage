@@ -43,7 +43,7 @@ Operating System :: Unix
 try:
     from setuptools import setup
 except ImportError:
-    from distutils import setup
+    from distutils.core import setup
     setuptools_args = {}
 else:
     setuptools_args = dict(
