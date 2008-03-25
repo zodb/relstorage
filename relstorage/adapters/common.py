@@ -137,7 +137,7 @@ class Adapter(object):
         and may have other columns.
         """
         for row in cursor:
-            tid, username, description = row[:3]
+            tid, username, description, ext = row[:4]
             if username is None:
                 username = ''
             else:
@@ -146,7 +146,11 @@ class Adapter(object):
                 description = ''
             else:
                 description = str(description)
-            yield (tid, username, description) + tuple(row[3:])
+            if ext is None:
+                ext = ''
+            else:
+                ext = str(ext)
+            yield (tid, username, description, ext) + tuple(row[4:])
 
 
     def iter_transactions(self, cursor):

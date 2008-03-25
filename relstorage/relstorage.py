@@ -609,8 +609,6 @@ class RelStorage(BaseStorage,
                      'user_name': user or '',
                      'description': desc or ''}
                 if ext:
-                    ext = str(ext)
-                if ext:
                     d.update(cPickle.loads(ext))
                 if filter is None or filter(d):
                     if i >= first:
