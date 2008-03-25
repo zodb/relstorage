@@ -1,3 +1,11 @@
+Next release
+
+- Fixed the use of setup.py without setuptools.  Thanks Chris Withers.
+
+- Fixed type coercion of the transaction extension field.  This fixes
+  an issue with converting databases.  Thanks to Kevin Smith for
+  discovering this.
+
 
 RelStorage 1.0.1
 
