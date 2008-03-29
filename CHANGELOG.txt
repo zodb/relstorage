@@ -6,6 +6,11 @@ Next release
   an issue with converting databases.  Thanks to Kevin Smith for
   discovering this.
 
+- Added logging to the pack code to help diagnose performance issues.
+
+- Additions to the object_ref table are now periodically committed
+  during pre_pack so that the work is not lost if pre_pack fails.
+
 
 RelStorage 1.0.1
 

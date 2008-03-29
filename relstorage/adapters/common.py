@@ -362,10 +362,17 @@ class Adapter(object):
             self.close(conn, cursor)
 
 
-    def pre_pack(self, pack_tid, get_references, gc):
-        """Decide what to pack.
+    def open_for_pre_pack(self):
+        """Open a connection to be used for the pre-pack phase.
+        Returns (conn, cursor).
 
         Subclasses may override this.
+        """
+        return self.open()
+
+
+    def pre_pack(self, pack_tid, get_references, gc):
+        """Decide what to pack.
 
         tid specifies the most recent transaction to pack.
 
@@ -377,23 +384,29 @@ class Adapter(object):
         even if nothing refers to it.  Packing with gc disabled can be
         much faster.
         """
-        conn, cursor = self.open()
+        conn, cursor = self.open_for_pre_pack()
         try:
             try:
                 if gc:
-                    self._pre_pack_with_gc(cursor, pack_tid, get_references)
+                    log.info("pre_pack: start with gc enabled")
+                    self._pre_pack_with_gc(
+                        conn, cursor, pack_tid, get_references)
                 else:
-                    self._pre_pack_without_gc(cursor, pack_tid)
+                    log.info("pre_pack: start without gc")
+                    self._pre_pack_without_gc(
+                        conn, cursor, pack_tid)
             except:
+                log.exception("pre_pack: failed")
                 conn.rollback()
                 raise
             else:
+                log.info("pre_pack: finished successfully")
                 conn.commit()
         finally:
             self.close(conn, cursor)
 
 
-    def _pre_pack_without_gc(self, cursor, pack_tid):
+    def _pre_pack_without_gc(self, conn, cursor, pack_tid):
         """Determine what to pack, without garbage collection.
 
         With garbage collection disabled, there is no need to follow
@@ -401,6 +414,8 @@ class Adapter(object):
         """
         # Fill the pack_object table with OIDs, but configure them
         # all to be kept by setting keep and keep_tid.
+        log.debug("pre_pack: populating pack_object")
+        subselect = self._scripts['select_keep_tid']
         stmt = """
         DELETE FROM pack_object;
 
@@ -409,20 +424,20 @@ class Adapter(object):
         FROM object_state
         WHERE tid <= %(pack_tid)s;
 
-        UPDATE pack_object SET keep_tid = (@select_keep_tid@)
+        UPDATE pack_object SET keep_tid = (""" + subselect + """)
         """
-        stmt = stmt.replace(
-            '@select_keep_tid@', self._scripts['select_keep_tid'])
         self._run_script(cursor, stmt, {'pack_tid': pack_tid})
 
 
-    def _pre_pack_with_gc(self, cursor, pack_tid, get_references):
+    def _pre_pack_with_gc(self, conn, cursor, pack_tid, get_references):
         """Determine what to pack, with garbage collection.
         """
+        log.info("pre_pack: following references after the pack point")
         # Fill object_ref with references from object states
         # in transactions that will not be packed.
-        self._fill_nonpacked_refs(cursor, pack_tid, get_references)
+        self._fill_nonpacked_refs(conn, cursor, pack_tid, get_references)
 
+        log.debug("pre_pack: populating pack_object")
         # Fill the pack_object table with OIDs that either will be
         # removed (if nothing references the OID) or whose history will
         # be cut.
@@ -468,13 +483,17 @@ class Adapter(object):
         # include objects currently set to be removed, keep
         # those objects as well.  Do this
         # repeatedly until all references have been satisfied.
+        pass_num = 1
         while True:
+            log.info("pre_pack: following references before the pack point, "
+                "pass %d", pass_num)
 
             # Make a list of all parent objects that still need
             # to be visited.  Then set keep_tid for all pack_object
             # rows with keep = true.
             # keep_tid must be set before _fill_pack_object_refs examines
             # references.
+            subselect = self._scripts['select_keep_tid']
             stmt = """
             DELETE FROM temp_pack_visit;
 
@@ -484,14 +503,17 @@ class Adapter(object):
             WHERE keep = %(TRUE)s
                 AND keep_tid IS NULL;
 
-            UPDATE pack_object SET keep_tid = (@select_keep_tid@)
-            WHERE keep = %(TRUE)s AND keep_tid IS NULL
-            """
-            stmt = stmt.replace(
-                '@select_keep_tid@', self._scripts['select_keep_tid'])
-            self._run_script(cursor, stmt, {'pack_tid': pack_tid})
+            UPDATE pack_object SET keep_tid = (""" + subselect + """)
+            WHERE keep = %(TRUE)s AND keep_tid IS NULL;
 
-            self._fill_pack_object_refs(cursor, get_references)
+            SELECT COUNT(1) FROM temp_pack_visit
+            """
+            self._run_script(cursor, stmt, {'pack_tid': pack_tid})
+            visit_count = cursor.fetchone()[0]
+            log.debug("pre_pack: checking references from %d object(s)",
+                visit_count)
+
+            self._fill_pack_object_refs(conn, cursor, get_references)
 
             # Visit the children of all parent objects that were
             # just visited.
@@ -505,12 +527,18 @@ class Adapter(object):
                 )
             """
             self._run_script_stmt(cursor, stmt)
-            if not cursor.rowcount:
+            found_count = cursor.rowcount
+
+            log.info("pre_pack: found %d more referenced object(s) in "
+                "pass %d", found_count, pass_num)
+            if not found_count:
                 # No new references detected.
                 break
+            else:
+                pass_num += 1
 
 
-    def _fill_nonpacked_refs(self, cursor, pack_tid, get_references):
+    def _fill_nonpacked_refs(self, conn, cursor, pack_tid, get_references):
         """Fill object_ref for all transactions that will not be packed."""
         stmt = """
         SELECT DISTINCT tid
@@ -523,11 +551,11 @@ class Adapter(object):
             )
         """
         self._run_script_stmt(cursor, stmt, {'pack_tid': pack_tid})
-        for (tid,) in cursor.fetchall():
-            self._add_refs_for_tid(cursor, tid, get_references)
+        tids = [tid for (tid,) in cursor]
+        self._add_refs_for_tids(conn, cursor, tids, get_references)
 
 
-    def _fill_pack_object_refs(self, cursor, get_references):
+    def _fill_pack_object_refs(self, conn, cursor, get_references):
         """Fill object_ref for all pack_object rows that have keep_tid."""
         stmt = """
         SELECT DISTINCT keep_tid
@@ -540,8 +568,8 @@ class Adapter(object):
             )
         """
         cursor.execute(stmt)
-        for (tid,) in cursor.fetchall():
-            self._add_refs_for_tid(cursor, tid, get_references)
+        tids = [tid for (tid,) in cursor]
+        self._add_refs_for_tids(conn, cursor, tids, get_references)
 
 
     def _add_object_ref_rows(self, cursor, add_rows):
@@ -560,7 +588,12 @@ class Adapter(object):
 
     def _add_refs_for_tid(self, cursor, tid, get_references):
         """Fill object_refs with all states for a transaction.
+
+        Returns the number of references added.
         """
+        log.debug("pre_pack: transaction %d: computing references ", tid)
+        from_count = 0
+
         stmt = """
         SELECT zoid, state
         FROM object_state
@@ -574,6 +607,7 @@ class Adapter(object):
                 # Oracle
                 state = state.read()
             if state:
+                from_count += 1
                 to_oids = get_references(str(state))
                 for to_oid in to_oids:
                     add_rows.append((from_oid, tid, to_oid))
@@ -588,6 +622,25 @@ class Adapter(object):
         """
         self._run_script_stmt(cursor, stmt, {'tid': tid})
 
+        to_count = len(add_rows)
+        log.debug("pre_pack: transaction %d: has %d reference(s) "
+            "from %d object(s)", tid, to_count, from_count)
+        return to_count
+
+
+    def _add_refs_for_tids(self, conn, cursor, tids, get_references):
+        """Fill object_refs with all states for multiple transactions."""
+        if tids:
+            added = 0
+            log.info("pre_pack: examining all references from objects in %d "
+                "transaction(s)" % len(tids))
+            for tid in tids:
+                added += self._add_refs_for_tid(cursor, tid, get_references)
+                if added >= 1000:
+                    # save the work done so far
+                    conn.commit()
+                    added = 0
+
 
     def _hold_commit_lock(self, cursor):
         """Hold the commit lock for packing"""
@@ -601,26 +654,61 @@ class Adapter(object):
         conn, cursor = self.open()
         try:
             try:
+                log.info("pack: start, pack_tid = %d", pack_tid)
+
+                stmt = """
+                select COUNT(1)
+                FROM transaction
+                WHERE tid > 0
+                    AND tid <= %(pack_tid)s
+                """
+                self._run_script_stmt(cursor, stmt, {'pack_tid': pack_tid})
+                transaction_count = cursor.fetchone()[0]
+
+                stmt = """
+                SELECT COUNT(1)
+                FROM pack_object
+                WHERE keep = %(FALSE)s
+                """
+                self._run_script_stmt(cursor, stmt)
+                delete_count = cursor.fetchone()[0]
+
+                stmt = """
+                SELECT COUNT(1)
+                FROM pack_object
+                WHERE keep = %(TRUE)s
+                """
+                self._run_script_stmt(cursor, stmt)
+                trim_count = cursor.fetchone()[0]
+
+                log.info(
+                    "pack: will pack %d transaction(s), delete %s object(s),"
+                        " and trim %s old object(s)",
+                        transaction_count, delete_count, trim_count)
+
                 # hold the commit lock for a moment to prevent deadlocks.
                 self._hold_commit_lock(cursor)
 
                 for table in ('object_ref', 'current_object', 'object_state'):
 
-                    # Remove objects that are in pack_object and have keep
-                    # set to false.
-                    stmt = """
-                    DELETE FROM %s
-                    WHERE zoid IN (
-                            SELECT zoid
-                            FROM pack_object
-                            WHERE keep = %%(FALSE)s
-                        )
-                    """ % table
-                    self._run_script_stmt(cursor, stmt)
+                    if delete_count > 0:
+                        # Remove objects that are in pack_object and have keep
+                        # set to false.
+                        log.debug("pack: deleting objects from %s", table)
+                        stmt = """
+                        DELETE FROM %s
+                        WHERE zoid IN (
+                                SELECT zoid
+                                FROM pack_object
+                                WHERE keep = %%(FALSE)s
+                            )
+                        """ % table
+                        self._run_script_stmt(cursor, stmt)
 
-                    if table != 'current_object':
+                    if trim_count > 0 and table != 'current_object':
                         # Cut the history of objects in pack_object that
                         # have keep set to true.
+                        log.debug("pack: trimming objects in %s", table)
                         stmt = """
                         DELETE FROM %s
                         WHERE zoid IN (
@@ -636,14 +724,18 @@ class Adapter(object):
                         """ % (table, table)
                         self._run_script_stmt(cursor, stmt)
 
+                log.debug("pack: terminating prev_tid chains")
                 stmt = """
-                -- Terminate prev_tid chains
                 UPDATE object_state SET prev_tid = 0
                 WHERE tid <= %(pack_tid)s
-                    AND prev_tid != 0;
+                    AND prev_tid != 0
+                """
+                self._run_script_stmt(cursor, stmt, {'pack_tid': pack_tid})
 
-                -- For each tid to be removed, delete the corresponding row in
-                -- object_refs_added.
+                # For each tid to be removed, delete the corresponding row in
+                # object_refs_added.
+                log.debug("pack: deleting from object_refs_added")
+                stmt = """
                 DELETE FROM object_refs_added
                 WHERE tid > 0
                     AND tid <= %(pack_tid)s
@@ -651,9 +743,12 @@ class Adapter(object):
                         SELECT 1
                         FROM object_state
                         WHERE tid = object_refs_added.tid
-                    );
+                    )
+                """
+                self._run_script_stmt(cursor, stmt, {'pack_tid': pack_tid})
 
-                -- Delete transactions no longer used.
+                log.debug("pack: deleting transactions")
+                stmt = """
                 DELETE FROM transaction
                 WHERE tid > 0
                     AND tid <= %(pack_tid)s
@@ -661,24 +756,29 @@ class Adapter(object):
                         SELECT 1
                         FROM object_state
                         WHERE tid = transaction.tid
-                    );
+                    )
+                """
+                self._run_script_stmt(cursor, stmt, {'pack_tid': pack_tid})
 
-                -- Mark the remaining packable transactions as packed
+                log.debug("pack: marking transactions as packed")
+                stmt = """
                 UPDATE transaction SET packed = %(TRUE)s
                 WHERE tid > 0
                     AND tid <= %(pack_tid)s
-                    AND packed = %(FALSE)s;
-
-                -- Clean up.
-                DELETE FROM pack_object;
+                    AND packed = %(FALSE)s
                 """
-                self._run_script(cursor, stmt, {'pack_tid': pack_tid})
+                self._run_script_stmt(cursor, stmt, {'pack_tid': pack_tid})
+
+                log.debug("pack: clearing pack_object")
+                cursor.execute("DELETE FROM pack_object")
 
             except:
+                log.exception("pack: failed")
                 conn.rollback()
                 raise
 
             else:
+                log.info("pack: finished successfully")
                 conn.commit()
 
         finally:

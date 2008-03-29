@@ -543,8 +543,9 @@ class MySQLAdapter(Adapter):
         cursor.execute(stmt)
 
 
-    def pre_pack(self, pack_tid, get_references, gc):
-        """Decide what to pack.
+    def open_for_pre_pack(self):
+        """Open a connection to be used for the pre-pack phase.
+        Returns (conn, cursor).
 
         This overrides the method by the same name in common.Adapter.
         """
@@ -553,12 +554,10 @@ class MySQLAdapter(Adapter):
             # This phase of packing works best with transactions
             # disabled.  It changes no user-facing data.
             conn.autocommit(True)
-            if gc:
-                self._pre_pack_with_gc(cursor, pack_tid, get_references)
-            else:
-                self._pre_pack_without_gc(cursor, pack_tid)
-        finally:
+            return conn, cursor
+        except:
             self.close(conn, cursor)
+            raise
 
 
     def _hold_commit_lock(self, cursor):
