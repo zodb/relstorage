@@ -657,7 +657,7 @@ class Adapter(object):
                 log.info("pack: start, pack_tid = %d", pack_tid)
 
                 stmt = """
-                select COUNT(1)
+                SELECT COUNT(1)
                 FROM transaction
                 WHERE tid > 0
                     AND tid <= %(pack_tid)s
