@@ -661,7 +661,7 @@ class Adapter(object):
         pass
 
 
-    def pack(self, pack_tid, max_batch_time=1.0, delay_time=1.0):
+    def pack(self, pack_tid, batch_timeout=2.0, min_delay=2.0, max_delay=15.0):
         """Pack.  Requires populated pack tables."""
 
         # Read committed mode is sufficient.
@@ -676,6 +676,7 @@ class Adapter(object):
                 """
                 self._run_script_stmt(cursor, stmt, {'pack_tid': pack_tid})
                 tids = [tid for (tid,) in cursor]
+                tids.sort()  # oldest first
 
                 stmt = """
                 SELECT COUNT(1)
@@ -701,20 +702,25 @@ class Adapter(object):
                 # Hold the commit lock while packing to prevent deadlocks.
                 # Pack in small batches of transactions in order to minimize
                 # the interruption of concurrent write operations.
-                expiration = time.time() + max_batch_time
+                start = time.time()
                 self._hold_commit_lock(cursor)
                 for tid in tids:
                     self._pack_transaction(cursor, pack_tid, tid)
-                    if time.time() > expiration:
+                    elapsed = time.time() - start
+                    if elapsed >= batch_timeout:
                         # commit the work done so far and release the
                         # commit lock for a short time
                         conn.commit()
                         self._release_commit_lock(cursor)
-                        if delay_time > 0:
-                            log.debug('pack: sleeping %d seconds', delay_time)
-                            time.sleep(delay_time)
+                        # Add a delay that matches the amount of time
+                        # spent with the commit lock held, within limits.
+                        # This targets a 50% duty cycle.
+                        delay = max(min_delay, min(max_delay, elapsed))
+                        if delay > 0:
+                            log.debug('pack: sleeping %.4g second(s)', delay)
+                            time.sleep(delay)
                         self._hold_commit_lock(cursor)
-                        expiration = time.time() + max_batch_time
+                        start = time.time()
 
                 log.debug("pack: clearing pack_object")
                 cursor.execute("DELETE FROM pack_object")
