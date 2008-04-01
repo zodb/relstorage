@@ -742,38 +742,34 @@ class Adapter(object):
         """Pack one transaction.  Requires populated pack tables."""
         log.debug("pack: transaction %d: packing", tid)
         deleted = 0
-        for table in ('object_ref', 'current_object', 'object_state'):
+        for _table in ('object_ref', 'current_object', 'object_state'):
             # Remove objects that are in pack_object and have keep
             # set to false.
             stmt = """
-            DELETE FROM %s
-            WHERE tid = %%(tid)s
+            DELETE FROM _table
+            WHERE tid = %(tid)s
                 AND zoid IN (
                     SELECT zoid
                     FROM pack_object
-                    WHERE keep = %%(FALSE)s
+                    WHERE keep = %(FALSE)s
                 )
-            """ % table
+            """.replace('_table', _table)
             self._run_script_stmt(cursor, stmt, {'tid': tid})
             deleted += cursor.rowcount
 
-            if table != 'current_object':
+            if _table != 'current_object':
                 # Cut the history of objects in pack_object that
                 # have keep set to true.
                 stmt = """
-                DELETE FROM %s
-                WHERE tid = %%(tid)s
+                DELETE FROM _table
+                WHERE tid = %(tid)s
                     AND zoid IN (
                         SELECT zoid
                         FROM pack_object
-                        WHERE keep = %%(TRUE)s
+                        WHERE keep = %(TRUE)s
+                            AND keep_tid != %(tid)s
                     )
-                    AND tid < (
-                        SELECT keep_tid
-                        FROM pack_object
-                        WHERE zoid = %s.zoid
-                    )
-                """ % (table, table)
+                """.replace('_table', _table)
                 self._run_script_stmt(cursor, stmt, {'tid': tid})
                 deleted += cursor.rowcount
 
@@ -795,6 +791,7 @@ class Adapter(object):
             stmt = """
             UPDATE transaction SET packed = %(TRUE)s
             WHERE tid = %(tid)s
+                AND packed = %(FALSE)s
             """
             self._run_script_stmt(cursor, stmt, {'tid': tid})
 

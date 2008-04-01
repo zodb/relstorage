@@ -118,7 +118,10 @@ class PostgreSQLAdapter(Adapter):
             keep        BOOLEAN NOT NULL,
             keep_tid    BIGINT
         );
-        CREATE INDEX pack_object_keep_zoid ON pack_object (keep, zoid);
+        CREATE INDEX pack_object_keep_false ON pack_object (zoid)
+            WHERE keep = false;
+        CREATE INDEX pack_object_keep_true ON pack_object (zoid, keep_tid)
+            WHERE keep = true;
         """
         cursor.execute(stmt)
 
