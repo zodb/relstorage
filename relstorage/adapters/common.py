@@ -16,6 +16,7 @@
 from ZODB.POSException import UndoError
 
 import logging
+import time
 
 log = logging.getLogger("relstorage.adapters.common")
 
@@ -87,6 +88,13 @@ class Adapter(object):
             """,
 
         'reset_temp_undo': "DROP TABLE temp_undo",
+
+        'transaction_has_data': """
+            SELECT tid
+            FROM object_state
+            WHERE tid = %(tid)s
+            LIMIT 1
+            """,
     }
 
 
@@ -647,23 +655,27 @@ class Adapter(object):
         cursor.execute("LOCK TABLE commit_lock IN EXCLUSIVE MODE")
 
 
-    def pack(self, pack_tid):
+    def _release_commit_lock(self, cursor):
+        """Release the commit lock during packing"""
+        # no action needed
+        pass
+
+
+    def pack(self, pack_tid, max_batch_time=1.0, delay_time=1.0):
         """Pack.  Requires populated pack tables."""
 
         # Read committed mode is sufficient.
         conn, cursor = self.open()
         try:
             try:
-                log.info("pack: start, pack_tid = %d", pack_tid)
-
                 stmt = """
-                SELECT COUNT(1)
+                SELECT tid
                 FROM transaction
                 WHERE tid > 0
                     AND tid <= %(pack_tid)s
                 """
                 self._run_script_stmt(cursor, stmt, {'pack_tid': pack_tid})
-                transaction_count = cursor.fetchone()[0]
+                tids = [tid for (tid,) in cursor]
 
                 stmt = """
                 SELECT COUNT(1)
@@ -684,90 +696,25 @@ class Adapter(object):
                 log.info(
                     "pack: will pack %d transaction(s), delete %s object(s),"
                         " and trim %s old object(s)",
-                        transaction_count, delete_count, trim_count)
+                        len(tids), delete_count, trim_count)
 
-                # hold the commit lock for a moment to prevent deadlocks.
+                # Hold the commit lock while packing to prevent deadlocks.
+                # Pack in small batches of transactions in order to minimize
+                # the interruption of concurrent write operations.
+                expiration = time.time() + max_batch_time
                 self._hold_commit_lock(cursor)
-
-                for table in ('object_ref', 'current_object', 'object_state'):
-
-                    if delete_count > 0:
-                        # Remove objects that are in pack_object and have keep
-                        # set to false.
-                        log.debug("pack: deleting objects from %s", table)
-                        stmt = """
-                        DELETE FROM %s
-                        WHERE zoid IN (
-                                SELECT zoid
-                                FROM pack_object
-                                WHERE keep = %%(FALSE)s
-                            )
-                        """ % table
-                        self._run_script_stmt(cursor, stmt)
-
-                    if trim_count > 0 and table != 'current_object':
-                        # Cut the history of objects in pack_object that
-                        # have keep set to true.
-                        log.debug("pack: trimming objects in %s", table)
-                        stmt = """
-                        DELETE FROM %s
-                        WHERE zoid IN (
-                                SELECT zoid
-                                FROM pack_object
-                                WHERE keep = %%(TRUE)s
-                            )
-                            AND tid < (
-                                SELECT keep_tid
-                                FROM pack_object
-                                WHERE zoid = %s.zoid
-                            )
-                        """ % (table, table)
-                        self._run_script_stmt(cursor, stmt)
-
-                log.debug("pack: terminating prev_tid chains")
-                stmt = """
-                UPDATE object_state SET prev_tid = 0
-                WHERE tid <= %(pack_tid)s
-                    AND prev_tid != 0
-                """
-                self._run_script_stmt(cursor, stmt, {'pack_tid': pack_tid})
-
-                # For each tid to be removed, delete the corresponding row in
-                # object_refs_added.
-                log.debug("pack: deleting from object_refs_added")
-                stmt = """
-                DELETE FROM object_refs_added
-                WHERE tid > 0
-                    AND tid <= %(pack_tid)s
-                    AND NOT EXISTS (
-                        SELECT 1
-                        FROM object_state
-                        WHERE tid = object_refs_added.tid
-                    )
-                """
-                self._run_script_stmt(cursor, stmt, {'pack_tid': pack_tid})
-
-                log.debug("pack: deleting transactions")
-                stmt = """
-                DELETE FROM transaction
-                WHERE tid > 0
-                    AND tid <= %(pack_tid)s
-                    AND NOT EXISTS (
-                        SELECT 1
-                        FROM object_state
-                        WHERE tid = transaction.tid
-                    )
-                """
-                self._run_script_stmt(cursor, stmt, {'pack_tid': pack_tid})
-
-                log.debug("pack: marking transactions as packed")
-                stmt = """
-                UPDATE transaction SET packed = %(TRUE)s
-                WHERE tid > 0
-                    AND tid <= %(pack_tid)s
-                    AND packed = %(FALSE)s
-                """
-                self._run_script_stmt(cursor, stmt, {'pack_tid': pack_tid})
+                for tid in tids:
+                    self._pack_transaction(cursor, pack_tid, tid)
+                    if time.time() > expiration:
+                        # commit the work done so far and release the
+                        # commit lock for a short time
+                        conn.commit()
+                        self._release_commit_lock(cursor)
+                        if delay_time > 0:
+                            log.debug('pack: sleeping %d seconds', delay_time)
+                            time.sleep(delay_time)
+                        self._hold_commit_lock(cursor)
+                        expiration = time.time() + max_batch_time
 
                 log.debug("pack: clearing pack_object")
                 cursor.execute("DELETE FROM pack_object")
@@ -783,6 +730,79 @@ class Adapter(object):
 
         finally:
             self.close(conn, cursor)
+
+
+    def _pack_transaction(self, cursor, pack_tid, tid):
+        """Pack one transaction.  Requires populated pack tables."""
+        log.debug("pack: transaction %d: packing", tid)
+        deleted = 0
+        for table in ('object_ref', 'current_object', 'object_state'):
+            # Remove objects that are in pack_object and have keep
+            # set to false.
+            stmt = """
+            DELETE FROM %s
+            WHERE tid = %%(tid)s
+                AND zoid IN (
+                    SELECT zoid
+                    FROM pack_object
+                    WHERE keep = %%(FALSE)s
+                )
+            """ % table
+            self._run_script_stmt(cursor, stmt, {'tid': tid})
+            deleted += cursor.rowcount
+
+            if table != 'current_object':
+                # Cut the history of objects in pack_object that
+                # have keep set to true.
+                stmt = """
+                DELETE FROM %s
+                WHERE tid = %%(tid)s
+                    AND zoid IN (
+                        SELECT zoid
+                        FROM pack_object
+                        WHERE keep = %%(TRUE)s
+                    )
+                    AND tid < (
+                        SELECT keep_tid
+                        FROM pack_object
+                        WHERE zoid = %s.zoid
+                    )
+                """ % (table, table)
+                self._run_script_stmt(cursor, stmt, {'tid': tid})
+                deleted += cursor.rowcount
+
+        # Terminate prev_tid chains
+        stmt = """
+        UPDATE object_state SET prev_tid = 0
+        WHERE prev_tid = %(tid)s
+            AND tid <= %(pack_tid)s
+        """
+        self._run_script_stmt(cursor, stmt,
+            {'pack_tid': pack_tid, 'tid': tid})
+
+        # Find out whether the transaction can be removed
+        stmt = self._scripts['transaction_has_data']
+        self._run_script_stmt(cursor, stmt, {'tid': tid})
+        has_data = list(cursor)
+
+        if has_data:
+            stmt = """
+            UPDATE transaction SET packed = %(TRUE)s
+            WHERE tid = %(tid)s
+            """
+            self._run_script_stmt(cursor, stmt, {'tid': tid})
+
+        else:
+            stmt = """
+            DELETE FROM object_refs_added
+            WHERE tid = %(tid)s;
+            DELETE FROM transaction
+            WHERE tid = %(tid)s
+            """
+            self._run_script(cursor, stmt, {'tid': tid})
+            deleted += cursor.rowcount
+
+        log.debug("pack: transaction %d: removed %d row(s)", tid, deleted)
 
 
     def poll_invalidations(self, conn, cursor, prev_polled_tid, ignore_tid):

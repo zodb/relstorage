@@ -61,6 +61,12 @@ class OracleAdapter(Adapter):
         'create_temp_pack_visit': None,
         'create_temp_undo': None,
         'reset_temp_undo': "DELETE FROM temp_undo",
+
+        'transaction_has_data': """
+            SELECT DISTINCT tid
+            FROM object_state
+            WHERE tid = %(tid)s
+            """,
     }
 
     def __init__(self, user, password, dsn, twophase=False, arraysize=64):
@@ -133,6 +139,7 @@ class OracleAdapter(Adapter):
             state       BLOB
         );
         CREATE INDEX object_state_tid ON object_state (tid);
+        CREATE INDEX object_state_prev_tid ON object_state (prev_tid);
 
         -- Pointers to the current object state
         CREATE TABLE current_object (

@@ -1,0 +1,9 @@
+
+Migrating from version 1.0.1
+
+Create a new index on the object_state table.  The new pack code will
+probably crawl if this index is missing.  This statement works in all 3
+supported databases:
+
+  CREATE INDEX object_state_prev_tid ON object_state (prev_tid);
+

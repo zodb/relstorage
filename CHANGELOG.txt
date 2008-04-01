@@ -11,6 +11,10 @@ Next release
 - Additions to the object_ref table are now periodically committed
   during pre_pack so that the work is not lost if pre_pack fails.
 
+- Modified the pack code to pack one transaction at a time and
+  release the commit lock frequently.  This should help large pack
+  operations.
+
 
 RelStorage 1.0.1
 

@@ -66,6 +66,7 @@ class PostgreSQLAdapter(Adapter):
             state       BYTEA
         );
         CREATE INDEX object_state_tid ON object_state (tid);
+        CREATE INDEX object_state_prev_tid ON object_state (prev_tid);
 
         -- Pointers to the current object state
         CREATE TABLE current_object (

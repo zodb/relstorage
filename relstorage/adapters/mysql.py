@@ -104,6 +104,7 @@ class MySQLAdapter(Adapter):
             CHECK (tid > 0)
         ) ENGINE = InnoDB;
         CREATE INDEX object_state_tid ON object_state (tid);
+        CREATE INDEX object_state_prev_tid ON object_state (prev_tid);
 
         -- Pointers to the current object state
         CREATE TABLE current_object (
@@ -570,6 +571,15 @@ class MySQLAdapter(Adapter):
         locked = cursor.fetchone()[0]
         if not locked:
             raise StorageError("Unable to acquire commit lock")
+
+
+    def _release_commit_lock(self, cursor):
+        """Release the commit lock.  This is used during packing.
+
+        This overrides the method by the same name in common.Adapter.
+        """
+        stmt = "SELECT RELEASE_LOCK('relstorage.commit')"
+        cursor.execute(stmt)
 
 
     _poll_query = "SELECT tid FROM transaction ORDER BY tid DESC LIMIT 1"
