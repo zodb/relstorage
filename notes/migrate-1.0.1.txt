@@ -1,17 +1,32 @@
 
 Migrating from version 1.0.1
 
-Create a new index on the object_state table.  The new iterative pack code
-will operate slowly without this index.  The following statement works in
-all 3 supported databases:
+PostgreSQL:
 
     CREATE INDEX object_state_prev_tid ON object_state (prev_tid);
-
-Also, for PostgreSQL only, apply this pack optimization:
 
     DROP INDEX pack_object_keep_zoid;
     CREATE INDEX pack_object_keep_false ON pack_object (zoid)
         WHERE keep = false;
     CREATE INDEX pack_object_keep_true ON pack_object (zoid, keep_tid)
         WHERE keep = true;
+
+    ALTER TABLE transaction ADD COLUMN empty BOOLEAN NOT NULL DEFAULT FALSE;
+
+    CREATE INDEX current_object_tid ON current_object (tid);
+
+    ALTER TABLE object_ref PRIMARY KEY (tid, zoid, to_zoid);
+    DROP INDEX object_ref_from;
+    DROP INDEX object_ref_tid;
+    DROP INDEX object_ref_to;
+
+    CREATE TABLE pack_state (
+        tid         BIGINT NOT NULL,
+        zoid        BIGINT NOT NULL,
+        PRIMARY KEY (tid, zoid)
+    );
+
+    CREATE TABLE pack_state_tid (
+        tid         BIGINT NOT NULL PRIMARY KEY
+    );
 

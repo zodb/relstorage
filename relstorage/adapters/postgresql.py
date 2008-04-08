@@ -41,6 +41,7 @@ class PostgreSQLAdapter(Adapter):
         CREATE TABLE transaction (
             tid         BIGINT NOT NULL PRIMARY KEY,
             packed      BOOLEAN NOT NULL DEFAULT FALSE,
+            empty       BOOLEAN NOT NULL DEFAULT FALSE,
             username    BYTEA NOT NULL,
             description BYTEA NOT NULL,
             extension   BYTEA
@@ -74,6 +75,7 @@ class PostgreSQLAdapter(Adapter):
             tid         BIGINT NOT NULL,
             FOREIGN KEY (zoid, tid) REFERENCES object_state
         );
+        CREATE INDEX current_object_tid ON current_object (tid);
 
         -- During packing, an exclusive lock is held on pack_lock.
         CREATE TABLE pack_lock ();
@@ -87,11 +89,9 @@ class PostgreSQLAdapter(Adapter):
         CREATE TABLE object_ref (
             zoid        BIGINT NOT NULL,
             tid         BIGINT NOT NULL,
-            to_zoid     BIGINT NOT NULL
+            to_zoid     BIGINT NOT NULL,
+            PRIMARY KEY (tid, zoid, to_zoid)
         );
-        CREATE INDEX object_ref_from ON object_ref (zoid);
-        CREATE INDEX object_ref_tid ON object_ref (tid);
-        CREATE INDEX object_ref_to ON object_ref (to_zoid);
 
         -- The object_refs_added table tracks whether object_refs has
         -- been populated for all states in a given transaction.
@@ -122,6 +122,19 @@ class PostgreSQLAdapter(Adapter):
             WHERE keep = false;
         CREATE INDEX pack_object_keep_true ON pack_object (zoid, keep_tid)
             WHERE keep = true;
+
+        -- Temporary state during packing: the list of object states to pack.
+        CREATE TABLE pack_state (
+            tid         BIGINT NOT NULL,
+            zoid        BIGINT NOT NULL,
+            PRIMARY KEY (tid, zoid)
+        );
+
+        -- Temporary state during packing: the list of transactions that
+        -- have at least one object state to pack.
+        CREATE TABLE pack_state_tid (
+            tid         BIGINT NOT NULL PRIMARY KEY
+        );
         """
         cursor.execute(stmt)
 

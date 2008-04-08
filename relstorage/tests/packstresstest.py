@@ -40,8 +40,6 @@ if 0:
     print 'size:'
     print d.getSize()
 
-    import pdb; pdb.set_trace()
-
 print 'packing...'
 d.pack()
 
