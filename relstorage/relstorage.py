@@ -33,7 +33,7 @@ log = logging.getLogger("relstorage")
 # Set the RELSTORAGE_ABORT_EARLY environment variable when debugging
 # a failure revealed by the ZODB test suite.  The test suite often fails
 # to call tpc_abort in the event of an error, leading to deadlocks.
-# The variable causes RelStorage to abort failed transactions
+# This variable causes RelStorage to abort failed transactions
 # early rather than wait for an explicit abort.
 abort_early = os.environ.get('RELSTORAGE_ABORT_EARLY')
 

@@ -2,7 +2,6 @@
 import logging
 
 from ZODB.DB import DB
-from relstorage.adapters.postgresql import PostgreSQLAdapter
 from relstorage.relstorage import RelStorage
 import transaction
 from persistent.mapping import PersistentMapping
@@ -11,7 +10,13 @@ import random
 logging.basicConfig()
 logging.getLogger().setLevel(logging.DEBUG)
 
-a = PostgreSQLAdapter(dsn="dbname='packtest'")
+if 1:
+    from relstorage.adapters.mysql import MySQLAdapter
+    a = MySQLAdapter(db='packtest')
+else:
+    from relstorage.adapters.postgresql import PostgreSQLAdapter
+    a = PostgreSQLAdapter(dsn="dbname='packtest'")
+
 s = RelStorage(a)
 d = DB(s)
 c = d.open()
@@ -19,7 +24,7 @@ c = d.open()
 print 'size:'
 print d.getSize()
 
-if 0:
+if 1:
     print 'initializing...'
     container = PersistentMapping()
     c.root()['container'] = container
