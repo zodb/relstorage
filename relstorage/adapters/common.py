@@ -20,6 +20,8 @@ import time
 
 log = logging.getLogger("relstorage.adapters.common")
 
+verify_sane_database = False
+
 
 # Notes about adapters:
 #
@@ -560,12 +562,25 @@ class Adapter(object):
                 AND keep_tid IS NULL;
 
             UPDATE pack_object SET keep_tid = (""" + subselect + """)
-            WHERE keep = %(TRUE)s AND keep_tid IS NULL;
-
-            SELECT COUNT(1) FROM temp_pack_visit
+            WHERE keep = %(TRUE)s
+                AND keep_tid IS NULL
             """
             self._run_script(cursor, stmt, {'pack_tid': pack_tid})
             visit_count = cursor.fetchone()[0]
+
+            if verify_sane_database:
+                # Verify the update actually worked.
+                # MySQL 5.1.23 fails this test; 5.1.24 passes.
+                stmt = """
+                SELECT 1
+                FROM pack_object
+                WHERE keep = %(TRUE)s AND keep_tid IS NULL
+                """
+                self._run_script_stmt(cursor, stmt)
+                if list(cursor):
+                    raise AssertionError(
+                        "database failed to update pack_object")
+
             log.debug("pre_pack: checking references from %d object(s)",
                 visit_count)
 
@@ -709,7 +724,7 @@ class Adapter(object):
         pass
 
 
-    def pack(self, pack_tid, batch_timeout=5.0, min_delay=5.0,
+    def pack(self, pack_tid, batch_timeout=5.0, delay_ratio=1.0,
             max_delay=20.0):
         """Pack.  Requires populated pack tables."""
 
@@ -738,19 +753,17 @@ class Adapter(object):
                 # the interruption of concurrent write operations.
                 start = time.time()
                 self._hold_commit_lock(cursor)
-                for tid, packed, has_states_to_remove in tid_rows:
+                for tid, packed, has_removable in tid_rows:
                     self._pack_transaction(
-                        cursor, pack_tid, tid, packed, has_states_to_remove)
+                        cursor, pack_tid, tid, packed, has_removable)
                     if time.time() >= start + batch_timeout:
                         # commit the work done so far and release the
                         # commit lock for a short time
                         conn.commit()
                         self._release_commit_lock(cursor)
-                        # Add a delay that matches the amount of time
-                        # spent with the commit lock held, within limits.
-                        # This targets a 50% duty cycle.
+                        # Add a delay.
                         elapsed = time.time() - start
-                        delay = max(min_delay, min(max_delay, elapsed))
+                        delay = min(max_delay, elapsed * delay_ratio)
                         if delay > 0:
                             log.debug('pack: sleeping %.4g second(s)', delay)
                             time.sleep(delay)
@@ -773,12 +786,12 @@ class Adapter(object):
 
 
     def _pack_transaction(self, cursor, pack_tid, tid, packed,
-            has_states_to_remove):
+            has_removable):
         """Pack one transaction.  Requires populated pack tables."""
         log.debug("pack: transaction %d: packing", tid)
         counters = {}
 
-        if has_states_to_remove:
+        if has_removable:
             for _table in ('current_object', 'object_state'):
                 stmt = """
                 DELETE FROM _table
