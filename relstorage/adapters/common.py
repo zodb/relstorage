@@ -566,7 +566,7 @@ class Adapter(object):
                 AND keep_tid IS NULL
             """
             self._run_script(cursor, stmt, {'pack_tid': pack_tid})
-            visit_count = cursor.fetchone()[0]
+            visit_count = cursor.rowcount
 
             if verify_sane_database:
                 # Verify the update actually worked.
