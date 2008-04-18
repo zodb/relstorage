@@ -77,9 +77,6 @@ class PostgreSQLAdapter(Adapter):
         );
         CREATE INDEX current_object_tid ON current_object (tid);
 
-        -- During packing, an exclusive lock is held on pack_lock.
-        CREATE TABLE pack_lock ();
-
         -- A list of referenced OIDs from each object_state.
         -- This table is populated as needed during packing.
         -- To prevent unnecessary table locking, it does not use
@@ -579,17 +576,15 @@ class PostgreSQLAdapter(Adapter):
 
         Raise an exception if packing or undo is already in progress.
         """
-        stmt = """
-        LOCK pack_lock IN EXCLUSIVE MODE NOWAIT
-        """
-        try:
-            cursor.execute(stmt)
-        except psycopg2.DatabaseError:
+        stmt = "SELECT pg_try_advisory_lock(1)"
+        cursor.execute(stmt)
+        locked = cursor.fetchone()[0]
+        if not locked:
             raise StorageError('A pack or undo operation is in progress')
 
     def release_pack_lock(self, cursor):
         """Release the pack lock."""
-        # No action needed
-        pass
+        stmt = "SELECT pg_advisory_unlock(1)"
+        cursor.execute(stmt)
 
     _poll_query = "EXECUTE get_latest_tid"
