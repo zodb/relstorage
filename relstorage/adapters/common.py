@@ -20,6 +20,8 @@ import time
 
 log = logging.getLogger("relstorage.adapters.common")
 
+verify_sane_database = False
+
 
 # Notes about adapters:
 #
@@ -512,12 +514,25 @@ class Adapter(object):
                 AND keep_tid IS NULL;
 
             UPDATE pack_object SET keep_tid = (""" + subselect + """)
-            WHERE keep = %(TRUE)s AND keep_tid IS NULL;
-
-            SELECT COUNT(1) FROM temp_pack_visit
+            WHERE keep = %(TRUE)s
+                AND keep_tid IS NULL
             """
             self._run_script(cursor, stmt, {'pack_tid': pack_tid})
-            visit_count = cursor.fetchone()[0]
+            visit_count = cursor.rowcount
+
+            if verify_sane_database:
+                # Verify the update actually worked.
+                # MySQL 5.1.23 fails this test; 5.1.24 passes.
+                stmt = """
+                SELECT 1
+                FROM pack_object
+                WHERE keep = %(TRUE)s AND keep_tid IS NULL
+                """
+                self._run_script_stmt(cursor, stmt)
+                if list(cursor):
+                    raise AssertionError(
+                        "database failed to update pack_object")
+
             log.debug("pre_pack: checking references from %d object(s)",
                 visit_count)
 
