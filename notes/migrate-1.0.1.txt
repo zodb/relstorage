@@ -55,3 +55,25 @@ MySQL:
         tid         BIGINT NOT NULL PRIMARY KEY
     ) ENGINE = MyISAM;
 
+Oracle:
+
+    CREATE INDEX object_state_prev_tid ON object_state (prev_tid);
+
+    ALTER TABLE transaction ADD empty CHAR DEFAULT 'N' CHECK (empty IN ('N', 'Y'));
+
+    CREATE INDEX current_object_tid ON current_object (tid);
+
+    ALTER TABLE object_ref ADD PRIMARY KEY (tid, zoid, to_zoid);
+    DROP INDEX object_ref_from;
+    DROP INDEX object_ref_tid;
+    DROP INDEX object_ref_to;
+
+    CREATE TABLE pack_state (
+        tid         NUMBER(20) NOT NULL,
+        zoid        NUMBER(20) NOT NULL,
+        PRIMARY KEY (tid, zoid)
+    );
+
+    CREATE TABLE pack_state_tid (
+        tid         NUMBER(20) NOT NULL PRIMARY KEY
+    );
