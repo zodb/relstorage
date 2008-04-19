@@ -737,7 +737,8 @@ class Adapter(object):
                     CASE WHEN packed = %(TRUE)s THEN 1 ELSE 0 END,
                     CASE WHEN pack_state_tid.tid IS NOT NULL THEN 1 ELSE 0 END
                 FROM transaction
-                    LEFT JOIN pack_state_tid USING (tid)
+                    LEFT JOIN pack_state_tid ON (
+                        transaction.tid = pack_state_tid.tid)
                 WHERE transaction.tid > 0
                     AND transaction.tid <= %(pack_tid)s
                     AND (packed = %(FALSE)s OR pack_state_tid.tid IS NOT NULL)
