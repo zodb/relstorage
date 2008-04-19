@@ -32,6 +32,7 @@ class OracleAdapter(Adapter):
         'TRUE':         "'Y'",
         'FALSE':        "'N'",
         'OCTET_LENGTH': 'LENGTH',
+        'TRUNCATE':     'TRUNCATE TABLE',
         'oid':          ':oid',
         'tid':          ':tid',
         'pack_tid':     ':pack_tid',
@@ -111,6 +112,7 @@ class OracleAdapter(Adapter):
         CREATE TABLE transaction (
             tid         NUMBER(20) NOT NULL PRIMARY KEY,
             packed      CHAR DEFAULT 'N' CHECK (packed IN ('N', 'Y')),
+            empty       CHAR DEFAULT 'N' CHECK (empty IN ('N', 'Y')),
             username    RAW(500),
             description RAW(2000),
             extension   RAW(2000)
@@ -147,6 +149,7 @@ class OracleAdapter(Adapter):
             tid         NUMBER(20) NOT NULL,
             FOREIGN KEY (zoid, tid) REFERENCES object_state
         );
+        CREATE INDEX current_object_tid ON current_object (tid);
 
         -- States that will soon be stored
         CREATE GLOBAL TEMPORARY TABLE temp_store (
@@ -168,11 +171,9 @@ class OracleAdapter(Adapter):
         CREATE TABLE object_ref (
             zoid        NUMBER(20) NOT NULL,
             tid         NUMBER(20) NOT NULL,
-            to_zoid     NUMBER(20) NOT NULL
+            to_zoid     NUMBER(20) NOT NULL,
+            PRIMARY KEY (tid, zoid, to_zoid)
         );
-        CREATE INDEX object_ref_from ON object_ref (zoid);
-        CREATE INDEX object_ref_tid ON object_ref (tid);
-        CREATE INDEX object_ref_to ON object_ref (to_zoid);
 
         -- The object_refs_added table tracks whether object_refs has
         -- been populated for all states in a given transaction.
@@ -200,6 +201,19 @@ class OracleAdapter(Adapter):
             keep_tid    NUMBER(20)
         );
         CREATE INDEX pack_object_keep_zoid ON pack_object (keep, zoid);
+
+        -- Temporary state during packing: the list of object states to pack.
+        CREATE TABLE pack_state (
+            tid         NUMBER(20) NOT NULL,
+            zoid        NUMBER(20) NOT NULL,
+            PRIMARY KEY (tid, zoid)
+        );
+
+        -- Temporary state during packing: the list of transactions that
+        -- have at least one object state to pack.
+        CREATE TABLE pack_state_tid (
+            tid         NUMBER(20) NOT NULL PRIMARY KEY
+        );
 
         -- Temporary state during packing: a list of objects
         -- whose references need to be examined.
