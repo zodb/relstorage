@@ -75,6 +75,7 @@ class MySQLAdapter(Adapter):
         CREATE TABLE transaction (
             tid         BIGINT NOT NULL PRIMARY KEY,
             packed      BOOLEAN NOT NULL DEFAULT FALSE,
+            empty       BOOLEAN NOT NULL DEFAULT FALSE,
             username    BLOB NOT NULL,
             description BLOB NOT NULL,
             extension   BLOB
@@ -122,11 +123,9 @@ class MySQLAdapter(Adapter):
         CREATE TABLE object_ref (
             zoid        BIGINT NOT NULL,
             tid         BIGINT NOT NULL,
-            to_zoid     BIGINT NOT NULL
+            to_zoid     BIGINT NOT NULL,
+            PRIMARY KEY (tid, zoid, to_zoid)
         ) ENGINE = MyISAM;
-        CREATE INDEX object_ref_from ON object_ref (zoid);
-        CREATE INDEX object_ref_tid ON object_ref (tid);
-        CREATE INDEX object_ref_to ON object_ref (to_zoid);
 
         -- The object_refs_added table tracks whether object_refs has
         -- been populated for all states in a given transaction.
@@ -154,6 +153,19 @@ class MySQLAdapter(Adapter):
             keep_tid    BIGINT
         ) ENGINE = MyISAM;
         CREATE INDEX pack_object_keep_zoid ON pack_object (keep, zoid);
+
+        -- Temporary state during packing: the list of object states to pack.
+        CREATE TABLE pack_state (
+            tid         BIGINT NOT NULL,
+            zoid        BIGINT NOT NULL,
+            PRIMARY KEY (tid, zoid)
+        ) ENGINE = MyISAM;
+
+        -- Temporary state during packing: the list of transactions that
+        -- have at least one object state to pack.
+        CREATE TABLE pack_state_tid (
+            tid         BIGINT NOT NULL PRIMARY KEY
+        ) ENGINE = MyISAM;
         """
         self._run_script(cursor, stmt)
 

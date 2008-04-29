@@ -47,6 +47,8 @@ def storage_has_data(storage):
 
 
 def main():
+    logging.basicConfig()
+
     parser = optparse.OptionParser(description=__doc__,
         usage="%prog [options] config_file")
     parser.add_option(
@@ -106,6 +108,5 @@ def main():
 
 
 if __name__ == '__main__':
-    logging.basicConfig()
     main()
 
