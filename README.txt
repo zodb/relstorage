@@ -4,8 +4,8 @@ Overview
 ========
 
   RelStorage is a storage implementation for ZODB that stores pickles in a
-relational database.  PostgreSQL 8.1 and above (via psycopg2), MySQL 5.0 and
-above (via MySQLdb), and Oracle 10g (via cx_Oracle) are currently supported.
+relational database.  PostgreSQL 8.1 and above (via psycopg2), MySQL 5.0.x (via
+MySQLdb), and Oracle 10g (via cx_Oracle) are currently supported.
 
   RelStorage replaces the PGStorage project.
 
@@ -13,47 +13,54 @@ above (via MySQLdb), and Oracle 10g (via cx_Oracle) are currently supported.
 
      http://wiki.zope.org/ZODB/RelStorage         (wiki)
      http://shane.willowrise.com/                 (blog)
-     http://www.zope.org/Members/shane/RelStorage (downloads)
-     http://pypi.python.org/pypi/RelStorage       (PyPI entry)
+     http://pypi.python.org/pypi/RelStorage       (PyPI entry and downloads)
 
 
-Highlights
-==========
+Features
+========
 
   * It is a drop-in replacement for FileStorage and ZEO.
-  * Designed for high volume sites: Any number of load-balanced Zope instances
-    can share the same database. This is similar to ZEO, but RelStorage does
-    not require ZEO.
+  * There is a simple way to convert FileStorage to RelStorage and back again. 
+You can also convert a RelStorage instance to a different relational database.
+  * Designed for high volume sites: multiple ZODB instances can share the same
+database. This is similar to ZEO, but RelStorage does not require ZEO.
   * According to some tests, RelStorage handles high concurrency better than
-    the standard combination of ZEO and FileStorage.
+the standard combination of ZEO and FileStorage.
+  * Whereas FileStorage takes longer to start as the database grows due to an
+in-memory index of all objects, RelStorage starts quickly regardless of
+database size.
   * Supports undo and packing.
-  * Open source (ZPL 2.1)
+  * Free, open source (ZPL 2.1)
 
 
 Installation in Zope
 ====================
 
-  Get the latest release here:
+  You can install RelStorage using easy_install::
 
-    http://www.zope.org/Members/shane/RelStorage
+    easy_install RelStorage
 
-  Before you can use relstorage, ZODB must have the invalidation polling patch
-applied.  Two versions of the patch are included in the downloadable package:
-one for ZODB 3.7.1 (which is part of Zope 2.10.5) and one for ZODB 3.8.0 (which
-is part of Zope 2.11).  The patch has no effect on ZODB except when using
-RelStorage.  Hopefully, a future release of ZODB will include the feature.
-
-  Place the relstorage package in the lib/python directory of either the
+  If you are not using easy_install (part of the setuptools package), you can
+get the latest release at PyPI (http://pypi.python.org/pypi/RelStorage), then
+place the relstorage package in the lib/python directory of either the
 SOFTWARE_HOME or the INSTANCE_HOME.  You can do this with the following
 command::
 
     python2.4 setup.py install --install-lib=${INSTANCE_HOME}/lib/python
 
+  Before you can use RelStorage, ZODB must have the invalidation polling patch
+applied.  Get it from Subversion (http://svn.zope.org/relstorage/trunk/). 
+There are two versions of the patch: one for ZODB 3.7.1 (which is part of Zope
+2.10.5) and one for ZODB 3.8.0 (which is part of Zope 2.11).  The patch has no
+effect on ZODB except when using RelStorage.  Hopefully, a future release of
+ZODB will include the feature.
+
   You need the Python database adapter that corresponds with your database. 
 Install psycopg2, MySQLdb 1.2.2+, or cx_Oracle 4.3+.  Note that Debian Etch
 ships MySQLdb 1.2.1, but that version has a bug in BLOB handling that manifests
 itself only with certain character set configurations.  MySQLdb 1.2.2 fixes the
-bug.
+bug.  Also, MySQL 5.1.23 has major bugs that lead to loss of data when packing,
+so MySQL 5.1 is not recommended at this time.
 
   Finally, modify etc/zope.conf of your Zope instance.  Remove the main mount
 point and add one of the following blocks.  For PostgreSQL::
@@ -97,33 +104,47 @@ point and add one of the following blocks.  For PostgreSQL::
      </relstorage>
     </zodb_db>
 
-
 Migrating from FileStorage
 ==========================
 
-  It is fairly easy for any Python coder to migrate a FileStorage instance to
-RelStorage while retaining all transactions and object history.  Use a script
-similar to the following. Note that it first blindly deletes all data from the
-destination database.  **Make backups** and proceed with caution! ::
+  You can convert a FileStorage instance to RelStorage and back using a utility
+called ZODBConvert.  See http://wiki.zope.org/ZODB/ZODBConvert .
 
-    source_db = '/zope/var/Data.fs'
 
-    from ZODB import DB
-    from ZODB.FileStorage import FileStorage
-    from relstorage.relstorage import RelStorage
-    from relstorage.adapters.mysql import MySQLAdapter
+Migrating from PGStorage
+========================
 
-    src = FileStorage(source_db, read_only=True)
-    adapter = MySQLAdapter(db='zodb')
-    dst = RelStorage(adapter)
+  The following script migrates your database from PGStorage to RelStorage 1.0
+beta:
 
-    # remove all objects and history from the destination database
-    dst.zap_all()
-    # copy all transactions from the source database
-    dst.copyTransactionsFrom(src)
+    migrate.sql_
 
-    src.close()
-    dst.close()
+    .. _migrate.sql:
+http://svn.zope.org/*checkout*/relstorage/trunk/notes/migrate.sql
+
+  After you do this, you still need to migrate from 1.0 beta to the latest
+release.
+
+
+Migrating to a new version of RelStorage
+========================================
+
+  Sometimes RelStorage needs a schema modification along with a software
+upgrade.  Hopefully, this will not often be necessary.
+
+  To migrate from version 1.0 beta to version 1.0c1, see:
+
+    migrate-1.0-beta.txt_
+
+    .. _migrate-1.0-beta.txt:
+http://svn.zope.org/*checkout*/relstorage/trunk/notes/migrate-1.0-beta.txt
+
+  To migrate from version 1.0.1 to version 1.1b1, see:
+
+    migrate-1.0.1.txt_
+
+    .. _migrate-1.0.1.txt:
+http://svn.zope.org/*checkout*/relstorage/branches/1.1/notes/migrate-1.0.1.txt
 
 
 Optional Features
@@ -132,40 +153,38 @@ Optional Features
   poll-interval
 
     This option is useful if you need to reduce database traffic.  If set,
-    RelStorage will poll the database for changes less often.  A setting of
-    1 to 5 seconds should be sufficient for most systems.  Fractional seconds
-    are allowed.
+RelStorage will poll the database for changes less often.  A setting of 1 to 5
+seconds should be sufficient for most systems.  Fractional seconds are allowed.
 
     While this setting should not affect database integrity, it increases the
-    probability of basing transactions on stale data, leading to conflicts.
-    Thus a nonzero setting can hurt the performance of servers with high write
-    volume.
+probability of basing transactions on stale data, leading to conflicts.  Thus a
+nonzero setting can hurt the performance of servers with high write volume.
 
-    To enable this feature, add a line similar "poll-interval 2" inside a
-    <relstorage> section of zope.conf.
+    To enable this feature, add a line similar to "poll-interval 2" inside a
+<relstorage> section of zope.conf.
 
   pack-gc
 
     If pack-gc is false, pack operations do not perform garbage collection. 
-    Garbage collection is enabled by default.
+Garbage collection is enabled by default.
 
     If garbage collection is disabled, pack operations keep at least one
-    revision of every object.  With garbage collection disabled, the pack
-    code does not need to follow object references, making packing conceivably
-    much faster.  However, some of that benefit may be lost due to an ever
-    increasing number of unused objects.
+revision of every object.  With garbage collection disabled, the pack code does
+not need to follow object references, making packing conceivably much faster. 
+However, some of that benefit may be lost due to an ever increasing number of
+unused objects.
 
     Disabling garbage collection is also a hack that ensures inter-database
-    references never break.
+references never break.
 
     To disable garbage collection, add the line "pack-gc no" inside a
-    <relstorage> section of zope.conf.
+<relstorage> section of zope.conf.
 
 
 Development
 ===========
 
-  You can checked out from Subversion using the following command::
+  You can checkout from Subversion using the following command::
 
     svn co svn://svn.zope.org/repos/main/relstorage/trunk RelStorage
 
@@ -173,25 +192,18 @@ Development
 
     http://svn.zope.org/relstorage/trunk/
 
+  The best place to discuss development of RelStorage is on the zodb-dev
+mailing list.
 
-Roadmap
-=======
-
-  * RelStorage currently passes all ZODB tests with all three supported
-    databases.
-  * A release is planned for the end of February 2008.
-  * The current focus is on making RelStorage easier to install and configure.
-  * Ask questions about RelStorage here on the wiki or on the zodb-dev mailing
-    list.
 
 
 Probable FAQs
-=============
+==============
 
   Q: How can I help?
 
     A: The best way to help is to test and to provide database-specific
-expertise.
+expertise.  Ask questions about RelStorage on the zodb-dev mailing list.
 
   Q: Can I perform SQL queries on the data in the database?
 
@@ -218,4 +230,3 @@ numerous support options.
 
     A: In theory, yes.  With RelStorage, you can use the replication features
 native to your database.  However, this capability has not yet been tested.
-
