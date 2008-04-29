@@ -1,6 +1,7 @@
-Next release
 
-- Fixed the use of setup.py without setuptools.  Thanks Chris Withers.
+RelStorage 1.1b1
+
+- Fixed the use of setup.py without setuptools.  Thanks to Chris Withers.
 
 - Fixed type coercion of the transaction extension field.  This fixes
   an issue with converting databases.  Thanks to Kevin Smith for
@@ -14,6 +15,9 @@ Next release
 - Modified the pack code to pack one transaction at a time and
   release the commit lock frequently.  This should help large pack
   operations.
+
+- Fixed buildout-based installation of the zodbconvert script.  Thanks to
+  Jim Fulton.
 
 
 RelStorage 1.0.1

@@ -10,12 +10,21 @@ import random
 logging.basicConfig()
 logging.getLogger().setLevel(logging.DEBUG)
 
-if 1:
+use = 'oracle'
+
+if use == 'mysql':
     from relstorage.adapters.mysql import MySQLAdapter
     a = MySQLAdapter(db='packtest')
-else:
+elif use == 'postgresql':
     from relstorage.adapters.postgresql import PostgreSQLAdapter
     a = PostgreSQLAdapter(dsn="dbname='packtest'")
+elif use == 'oracle':
+    from relstorage.adapters.oracle import OracleAdapter
+    from relstorage.tests.testoracle import getOracleParams
+    user, password, dsn = getOracleParams()
+    a = OracleAdapter(user, password, dsn)
+else:
+    raise AssertionError("which database?")
 
 s = RelStorage(a)
 d = DB(s)
@@ -34,7 +43,7 @@ if 1:
     transaction.commit()
 
     print 'generating transactions...'
-    for trans in range(10000):
+    for trans in range(100):
         print trans
         sources = (random.randint(0, container_size - 1) for j in range(100))
         for source in sources:

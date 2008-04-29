@@ -27,7 +27,7 @@ A small patch to ZODB is required.  See the patch files distributed
 with RelStorage.
 """
 
-VERSION = "1.0.2dev"
+VERSION = "1.1b1"
 
 classifiers = """\
 Development Status :: 5 - Production/Stable
@@ -44,7 +44,9 @@ try:
     from setuptools import setup
 except ImportError:
     from distutils.core import setup
-    setuptools_args = {}
+    setuptools_args = dict(
+        scripts=['relstorage/zodbconvert.py'],
+    )
 else:
     setuptools_args = dict(
         zip_safe=False,  # otherwise ZConfig can't see component.xml
@@ -54,6 +56,9 @@ else:
             'postgresql': ['psycopg2>=2.0'],
             'oracle':     ['cx_Oracle>=4.3.1'],
             },
+        entry_points = {'console_scripts': [
+            'zodbconvert = relstorage.zodbconvert:main',
+            ]},
         test_suite='relstorage.tests.alltests.make_suite',
     )
 
@@ -69,7 +74,6 @@ setup(
     package_data={
         'relstorage': ['component.xml'],
     },
-    scripts=['scripts/zodbconvert.py'],
     license="ZPL 2.1",
     platforms=["any"],
     description=doclines[0],
