@@ -411,12 +411,7 @@ class MySQLAdapter(Adapter):
 
     def start_commit(self, cursor):
         """Prepare to commit."""
-        # Hold commit_lock to prevent concurrent commits.
-        cursor.execute("SELECT GET_LOCK('relstorage.commit', %s)",
-            (commit_lock_timeout,))
-        locked = cursor.fetchone()[0]
-        if not locked:
-            raise StorageError("Unable to acquire commit lock")
+        self._hold_commit_lock(cursor)
 
     def get_tid_and_time(self, cursor):
         """Returns the most recent tid and the current database time.
@@ -519,12 +514,12 @@ class MySQLAdapter(Adapter):
     def commit_phase2(self, cursor, txn):
         """Final transaction commit."""
         cursor.connection.commit()
-        cursor.execute("SELECT RELEASE_LOCK('relstorage.commit')")
+        self._release_commit_lock(cursor)
 
     def abort(self, cursor, txn=None):
         """Abort the commit.  If txn is not None, phase 1 is also aborted."""
         cursor.connection.rollback()
-        cursor.execute("SELECT RELEASE_LOCK('relstorage.commit')")
+        self._release_commit_lock(cursor)
 
     def new_oid(self, cursor):
         """Return a new, unused OID."""
@@ -543,7 +538,7 @@ class MySQLAdapter(Adapter):
 
         Raise an exception if packing or undo is already in progress.
         """
-        stmt = "SELECT GET_LOCK('relstorage.pack', 0)"
+        stmt = "SELECT GET_LOCK(CONCAT(DATABASE(), '.pack'), 0)"
         cursor.execute(stmt)
         res = cursor.fetchone()[0]
         if not res:
@@ -552,7 +547,7 @@ class MySQLAdapter(Adapter):
 
     def release_pack_lock(self, cursor):
         """Release the pack lock."""
-        stmt = "SELECT RELEASE_LOCK('relstorage.pack')"
+        stmt = "SELECT RELEASE_LOCK(CONCAT(DATABASE(), '.pack'))"
         cursor.execute(stmt)
 
 
@@ -574,11 +569,11 @@ class MySQLAdapter(Adapter):
 
 
     def _hold_commit_lock(self, cursor):
-        """Hold the commit lock for packing.
+        """Hold the commit lock.
 
         This overrides the method by the same name in common.Adapter.
         """
-        cursor.execute("SELECT GET_LOCK('relstorage.commit', %s)",
+        cursor.execute("SELECT GET_LOCK(CONCAT(DATABASE(), '.commit'), %s)",
             (commit_lock_timeout,))
         locked = cursor.fetchone()[0]
         if not locked:
@@ -586,12 +581,11 @@ class MySQLAdapter(Adapter):
 
 
     def _release_commit_lock(self, cursor):
-        """Release the commit lock.  This is used during packing.
+        """Release the commit lock.
 
         This overrides the method by the same name in common.Adapter.
         """
-        stmt = "SELECT RELEASE_LOCK('relstorage.commit')"
-        cursor.execute(stmt)
+        cursor.execute("SELECT RELEASE_LOCK(CONCAT(DATABASE(), '.commit'))")
 
 
     _poll_query = "SELECT tid FROM transaction ORDER BY tid DESC LIMIT 1"
