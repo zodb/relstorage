@@ -16,6 +16,7 @@
 from base64 import decodestring, encodestring
 import logging
 import psycopg2, psycopg2.extensions
+import re
 from ZODB.POSException import StorageError
 
 from common import Adapter
@@ -135,6 +136,9 @@ class PostgreSQLAdapter(Adapter):
         """
         cursor.execute(stmt)
 
+        if not self._pg_has_advisory_locks(cursor):
+            cursor.execute("CREATE TABLE pack_lock ()")
+
 
     def prepare_schema(self):
         """Create the database schema if it does not already exist."""
@@ -206,6 +210,20 @@ class PostgreSQLAdapter(Adapter):
                 except (psycopg2.InterfaceError,
                         psycopg2.OperationalError):
                     pass
+
+    def _pg_version(self, cursor):
+        """Return the (major, minor) version of PostgreSQL"""
+        cursor.execute("SELECT version()")
+        v = cursor.fetchone()[0]
+        m = re.search(r"([0-9]+)[.]([0-9]+)", v)
+        if m is None:
+            raise AssertionError("Unable to detect PostgreSQL version: " + v)
+        else:
+            return int(m.group(1)), int(m.group(2))
+
+    def _pg_has_advisory_locks(self, cursor):
+        """Return true if this version of PostgreSQL supports advisory locks"""
+        return self._pg_version(cursor) >= (8, 2)
 
     def open_for_load(self):
         """Open and initialize a connection for loading objects.
@@ -570,21 +588,27 @@ class PostgreSQLAdapter(Adapter):
         cursor.execute(stmt)
         return cursor.fetchone()[0]
 
-
     def hold_pack_lock(self, cursor):
         """Try to acquire the pack lock.
 
         Raise an exception if packing or undo is already in progress.
         """
-        stmt = "SELECT pg_try_advisory_lock(1)"
-        cursor.execute(stmt)
-        locked = cursor.fetchone()[0]
-        if not locked:
-            raise StorageError('A pack or undo operation is in progress')
+        if self._pg_has_advisory_locks(cursor):
+            cursor.execute("SELECT pg_try_advisory_lock(1)")
+            locked = cursor.fetchone()[0]
+            if not locked:
+                raise StorageError('A pack or undo operation is in progress')
+        else:
+            # b/w compat
+            try:
+                cursor.execute("LOCK pack_lock IN EXCLUSIVE MODE NOWAIT")
+            except psycopg2.DatabaseError:
+                raise StorageError('A pack or undo operation is in progress')
 
     def release_pack_lock(self, cursor):
         """Release the pack lock."""
-        stmt = "SELECT pg_advisory_unlock(1)"
-        cursor.execute(stmt)
+        if self._pg_has_advisory_locks(cursor):
+            cursor.execute("SELECT pg_advisory_unlock(1)")
+        # else no action needed since the lock will be released at txn commit
 
     _poll_query = "EXECUTE get_latest_tid"
