@@ -68,6 +68,9 @@ class OracleAdapter(Adapter):
             FROM object_state
             WHERE tid = %(tid)s
             """,
+
+        'prepack_follow_child_refs':
+            Adapter._scripts['prepack_follow_child_refs'],
     }
 
     def __init__(self, user, password, dsn, twophase=False, arraysize=64):
