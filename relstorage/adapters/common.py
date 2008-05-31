@@ -98,6 +98,16 @@ class Adapter(object):
             WHERE tid = %(tid)s
             LIMIT 1
             """,
+
+        'prepack_follow_child_refs': """
+            UPDATE pack_object SET keep = %(TRUE)s
+            WHERE keep = %(FALSE)s
+                AND zoid IN (
+                    SELECT DISTINCT to_zoid
+                    FROM object_ref
+                        JOIN temp_pack_visit USING (zoid)
+                )
+            """,
     }
 
 
@@ -490,6 +500,10 @@ class Adapter(object):
     def _pre_pack_with_gc(self, conn, cursor, pack_tid, get_references):
         """Determine what to pack, with garbage collection.
         """
+        stmt = self._scripts['create_temp_pack_visit']
+        if stmt:
+            self._run_script(cursor, stmt)
+
         log.info("pre_pack: following references after the pack point")
         # Fill object_ref with references from object states
         # in transactions that will not be packed.
@@ -513,33 +527,27 @@ class Adapter(object):
 
         -- Keep objects that have been revised since pack_tid.
         UPDATE pack_object SET keep = %(TRUE)s
-        WHERE keep = %(FALSE)s
-            AND zoid IN (
-                SELECT zoid
-                FROM current_object
-                WHERE tid > %(pack_tid)s
-            );
+        WHERE zoid IN (
+            SELECT zoid
+            FROM current_object
+            WHERE tid > %(pack_tid)s
+        );
 
         -- Keep objects that are still referenced by object states in
         -- transactions that will not be packed.
         UPDATE pack_object SET keep = %(TRUE)s
-        WHERE keep = %(FALSE)s
-            AND zoid IN (
-                SELECT to_zoid
-                FROM object_ref
-                WHERE tid > %(pack_tid)s
-            );
+        WHERE zoid IN (
+            SELECT to_zoid
+            FROM object_ref
+            WHERE tid > %(pack_tid)s
+        );
         """
         self._run_script(cursor, stmt, {'pack_tid': pack_tid})
 
-        stmt = self._scripts['create_temp_pack_visit']
-        if stmt:
-            self._run_script(cursor, stmt)
-
         # Each of the packable objects to be kept might
         # refer to other objects.  If some of those references
-        # include objects currently set to be removed, keep
-        # those objects as well.  Do this
+        # include objects currently set to be removed, mark
+        # the referenced objects to be kept as well.  Do this
         # repeatedly until all references have been satisfied.
         pass_num = 1
         while True:
@@ -588,16 +596,8 @@ class Adapter(object):
 
             # Visit the children of all parent objects that were
             # just visited.
-            stmt = """
-            UPDATE pack_object SET keep = %(TRUE)s
-            WHERE keep = %(FALSE)s
-                AND zoid IN (
-                    SELECT DISTINCT to_zoid
-                    FROM object_ref
-                        JOIN temp_pack_visit USING (zoid)
-                )
-            """
-            self._run_script_stmt(cursor, stmt)
+            stmt = self._scripts['prepack_follow_child_refs']
+            self._run_script(cursor, stmt)
             found_count = cursor.rowcount
 
             log.debug("pre_pack: found %d more referenced object(s) in "

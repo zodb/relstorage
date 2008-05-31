@@ -63,6 +63,22 @@ commit_lock_timeout = 30
 class MySQLAdapter(Adapter):
     """MySQL adapter for RelStorage."""
 
+    _scripts = Adapter._scripts.copy()
+    # work around a MySQL performance bug
+    # See: http://mail.zope.org/pipermail/zodb-dev/2008-May/011880.html
+    #      http://bugs.mysql.com/bug.php?id=28257
+    _scripts['prepack_follow_child_refs'] = """
+    UPDATE pack_object SET keep = %(TRUE)s
+    WHERE keep = %(FALSE)s
+        AND zoid IN (
+            SELECT * FROM (
+                SELECT DISTINCT to_zoid
+                FROM object_ref
+                    JOIN temp_pack_visit USING (zoid)
+            ) AS child_zoids
+        )
+    """
+
     def __init__(self, **params):
         self._params = params.copy()
         self._params['use_unicode'] = True

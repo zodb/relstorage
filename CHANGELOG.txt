@@ -7,6 +7,10 @@ RelStorage 1.1b2
 - In the PostgreSQL adapter, made the pack lock fall back to table locking
   rather than advisory locks for PostgreSQL 8.1.
 
+- Changed a query for following object references (used during packing)
+  to work around a MySQL performance bug.  Thanks to Anton Stonor for
+  discovering this.
+
 
 RelStorage 1.1b1
 
