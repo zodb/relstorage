@@ -1,5 +1,5 @@
 
-Migrating from version 1.0.1 to version 1.1b1
+Migrating from version 1.0.1 to version 1.1b2
 
 PostgreSQL:
 
