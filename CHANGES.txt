@@ -1,4 +1,12 @@
 
+RelStorage 1.1c1
+
+- Added optional memcache integration.  This is useful when the connection
+  to the relational database has high latency.
+
+- Made it possible to set the pack and memcache options in zope.conf.
+
+
 RelStorage 1.1b2
 
 - Made the MySQL locks database-specific rather than server-wide.  This is

@@ -351,6 +351,20 @@ class OracleAdapter(Adapter):
         # May not be possible without access to the dba_* objects
         return 0
 
+    def get_current_tid(self, cursor, oid):
+        """Returns the current integer tid for an object.
+
+        oid is an integer.  Returns None if object does not exist.
+        """
+        cursor.execute("""
+        SELECT tid
+        FROM current_object
+        WHERE zoid = :1
+        """, (oid,))
+        for (tid,) in cursor:
+            return tid
+        return None
+
     def load_current(self, cursor, oid):
         """Returns the current pickle and integer tid for an object.
 

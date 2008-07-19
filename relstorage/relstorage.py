@@ -43,15 +43,17 @@ class RelStorage(BaseStorage,
     """Storage to a relational database, based on invalidation polling"""
 
     def __init__(self, adapter, name=None, create=True,
-            read_only=False, poll_interval=0, pack_gc=True):
+            read_only=False, options=None):
         if name is None:
             name = 'RelStorage on %s' % adapter.__class__.__name__
 
         self._adapter = adapter
         self._name = name
         self._is_read_only = read_only
-        self._poll_interval = poll_interval
-        self._pack_gc = pack_gc
+        if options is None:
+            options = Options()
+        self._options = options
+        self._cache_client = None
 
         if create:
             self._adapter.prepare_schema()
@@ -90,6 +92,17 @@ class RelStorage(BaseStorage,
 
         # _max_new_oid is the highest OID provided by new_oid()
         self._max_new_oid = 0
+
+        # set _cache_client
+        if options.cache_servers:
+            module_name = options.cache_module_name
+            module = __import__(module_name, {}, {}, ['Client'])
+            servers = options.cache_servers
+            if isinstance(servers, basestring):
+                servers = servers.split()
+            self._cache_client = module.Client(servers)
+        else:
+            self._cache_client = None
 
 
     def _open_load_connection(self):
@@ -173,6 +186,9 @@ class RelStorage(BaseStorage,
         """
         self._adapter.zap_all()
         self._rollback_load_connection()
+        cache = self._cache_client
+        if cache is not None:
+            cache.flush_all()
 
     def close(self):
         """Close the connections to the database."""
@@ -210,15 +226,49 @@ class RelStorage(BaseStorage,
         """Return database size in bytes"""
         return self._adapter.get_db_size()
 
+    def _get_oid_cache_key(self, oid_int):
+        """Return the cache key for finding the current tid.
+
+        This is overridden by BoundRelStorage.
+        """
+        return None
+
     def load(self, oid, version):
+        oid_int = u64(oid)
+        cache = self._cache_client
+
         self._lock_acquire()
         try:
             if not self._load_transaction_open:
                 self._restart_load()
             cursor = self._load_cursor
-            state, tid_int = self._adapter.load_current(cursor, u64(oid))
+            if cache is None:
+                state, tid_int = self._adapter.load_current(cursor, oid_int)
+            else:
+                # get tid_int from the cache or the database
+                cachekey = self._get_oid_cache_key(oid_int)
+                if cachekey:
+                    tid_int = cache.get(cachekey)
+                if not cachekey or not tid_int:
+                    tid_int = self._adapter.get_current_tid(
+                        cursor, oid_int)
+                if tid_int is None:
+                    raise KeyError(oid)
+                if cachekey:
+                    cache.set(cachekey, tid_int)
+
+                # get state from the cache or the database
+                cachekey = 'state:%d:%d' % (oid_int, tid_int)
+                state = cache.get(cachekey)
+                if not state:
+                    state = self._adapter.load_revision(
+                        cursor, oid_int, tid_int)
+                    if state:
+                        state = str(state)
+                        cache.set(cachekey, state)
         finally:
             self._lock_release()
+
         if tid_int is not None:
             if state:
                 state = str(state)
@@ -237,6 +287,15 @@ class RelStorage(BaseStorage,
 
     def loadSerial(self, oid, serial):
         """Load a specific revision of an object"""
+        oid_int = u64(oid)
+        tid_int = u64(serial)
+        cache = self._cache_client
+        if cache is not None:
+            cachekey = 'state:%d:%d' % (oid_int, tid_int)
+            state = cache.get(cachekey)
+            if state:
+                return state
+
         self._lock_acquire()
         try:
             if self._store_cursor is not None:
@@ -247,16 +306,19 @@ class RelStorage(BaseStorage,
                 if not self._load_transaction_open:
                     self._restart_load()
                 cursor = self._load_cursor
-            state = self._adapter.load_revision(cursor, u64(oid), u64(serial))
-            if state is not None:
-                state = str(state)
-                if not state:
-                    raise POSKeyError(oid)
-                return state
-            else:
-                raise KeyError(oid)
+            state = self._adapter.load_revision(cursor, oid_int, tid_int)
         finally:
             self._lock_release()
+
+        if state is not None:
+            state = str(state)
+            if not state:
+                raise POSKeyError(oid)
+            if cache is not None:
+                cache.set(cachekey, state)
+            return state
+        else:
+            raise KeyError(oid)
 
     def loadBefore(self, oid, tid):
         """Return the most recent revision of oid before tid committed."""
@@ -702,22 +764,6 @@ class RelStorage(BaseStorage,
             self._lock_release()
 
 
-    def set_pack_gc(self, pack_gc):
-        """Configures whether garbage collection during packing is enabled.
-
-        Garbage collection is enabled by default.  If GC is disabled,
-        packing keeps at least one revision of every object.
-        With GC disabled, the pack code does not need to follow object
-        references, making packing conceivably much faster.
-        However, some of that benefit may be lost due to an ever
-        increasing number of unused objects.
-
-        Disabling garbage collection is also a hack that ensures
-        inter-database references never break.
-        """
-        self._pack_gc = pack_gc
-
-
     def pack(self, t, referencesf):
         if self._is_read_only:
             raise POSException.ReadOnlyError()
@@ -751,10 +797,10 @@ class RelStorage(BaseStorage,
                 # In pre_pack, the adapter fills tables with
                 # information about what to pack.  The adapter
                 # should not actually pack anything yet.
-                adapter.pre_pack(tid_int, get_references, self._pack_gc)
+                adapter.pre_pack(tid_int, get_references, self._options)
 
                 # Now pack.
-                adapter.pack(tid_int)
+                adapter.pack(tid_int, self._options)
                 self._after_pack()
             finally:
                 adapter.release_pack_lock(lock_cursor)
@@ -785,14 +831,20 @@ class BoundRelStorage(RelStorage):
         # self._zodb_conn = zodb_conn
         RelStorage.__init__(self, adapter=parent._adapter, name=parent._name,
             create=False, read_only=parent._is_read_only,
-            poll_interval=parent._poll_interval, pack_gc=parent._pack_gc)
+            options=parent._options)
         # _prev_polled_tid contains the tid at the previous poll
         self._prev_polled_tid = None
         self._poll_at = 0
 
+    def _get_oid_cache_key(self, oid_int):
+        my_tid = self._prev_polled_tid
+        if my_tid is None:
+            return None
+        return 'tid:%d:%d' % (oid_int, my_tid)
+
     def connection_closing(self):
         """Release resources."""
-        if not self._poll_interval:
+        if not self._options.poll_interval:
             self._rollback_load_connection()
         # else keep the load transaction open so that it's possible
         # to ignore the next poll.
@@ -818,7 +870,7 @@ class BoundRelStorage(RelStorage):
             if self._closed:
                 return {}
 
-            if self._poll_interval:
+            if self._options.poll_interval:
                 now = time.time()
                 if self._load_transaction_open and now < self._poll_at:
                     # It's not yet time to poll again.  The previous load
@@ -826,7 +878,7 @@ class BoundRelStorage(RelStorage):
                     # ignore this poll.
                     return {}
                 # else poll now after resetting the timeout
-                self._poll_at = now + self._poll_interval
+                self._poll_at = now + self._options.poll_interval
 
             self._restart_load()
             conn = self._load_conn
@@ -949,3 +1001,14 @@ class Record(object):
         else:
             self.data = None
 
+
+class Options:
+    """Options for tuning RelStorage."""
+    def __init__(self):
+        self.poll_interval = 0
+        self.pack_gc = True
+        self.pack_batch_timeout = 5.0
+        self.pack_duty_cycle = 0.5
+        self.pack_max_delay = 20.0
+        self.cache_servers = ()  # ['127.0.0.1:11211']
+        self.cache_module_name = 'memcache'

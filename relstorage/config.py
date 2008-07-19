@@ -15,7 +15,7 @@
 
 from ZODB.config import BaseConfig
 
-from relstorage import RelStorage
+from relstorage import RelStorage, Options
 
 
 class RelStorageFactory(BaseConfig):
@@ -23,9 +23,13 @@ class RelStorageFactory(BaseConfig):
     def open(self):
         config = self.config
         adapter = config.adapter.open()
+        options = Options()
+        for key in options.__dict__.keys():
+            value = getattr(config, key, None)
+            if value is not None:
+                setattr(options, key, value)
         return RelStorage(adapter, name=config.name, create=config.create,
-            read_only=config.read_only, poll_interval=config.poll_interval,
-            pack_gc=config.pack_gc)
+            read_only=config.read_only, options=options)
 
 
 class PostgreSQLAdapterFactory(BaseConfig):
