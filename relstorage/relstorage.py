@@ -233,6 +233,34 @@ class RelStorage(BaseStorage,
         """
         return None
 
+    def _log_keyerror(self, oid_int, reason):
+        """Log just before raising KeyError in load().
+
+        KeyErrors in load() are generally not supposed to happen,
+        so this is a good place to gather information.
+        """
+        cursor = self._load_cursor
+        adapter = self._adapter
+        msg = ["Storage KeyError on oid %d: %s" % (oid_int, reason)]
+        rows = adapter.iter_transactions(cursor)
+        row = None
+        for row in rows:
+            # just get the first row
+            break
+        if not row:
+            msg.append("No transactions exist")
+        else:
+            msg.append("Current transaction is %d" % row[0])
+
+        rows = adapter.iter_object_history(cursor, oid_int)
+        tids = []
+        for row in rows:
+            tids.append(row[0])
+            if len(tids) >= 10:
+                break
+        msg.append("Recent object tids: %s" % repr(tids))
+        log.warning('; '.join(msg))
+
     def load(self, oid, version):
         oid_int = u64(oid)
         cache = self._cache_client
@@ -252,10 +280,11 @@ class RelStorage(BaseStorage,
                 if not cachekey or not tid_int:
                     tid_int = self._adapter.get_current_tid(
                         cursor, oid_int)
+                    if cachekey and tid_int is not None:
+                        cache.set(cachekey, tid_int)
                 if tid_int is None:
+                    self._log_keyerror(oid_int, "no tid found(1)")
                     raise KeyError(oid)
-                if cachekey:
-                    cache.set(cachekey, tid_int)
 
                 # get state from the cache or the database
                 cachekey = 'state:%d:%d' % (oid_int, tid_int)
@@ -275,9 +304,11 @@ class RelStorage(BaseStorage,
             if not state:
                 # This can happen if something attempts to load
                 # an object whose creation has been undone.
+                self._log_keyerror(oid_int, "creation has been undone")
                 raise KeyError(oid)
             return state, p64(tid_int)
         else:
+            self._log_keyerror(oid_int, "no tid found(2)")
             raise KeyError(oid)
 
     def loadEx(self, oid, version):
