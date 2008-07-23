@@ -6,6 +6,8 @@ RelStorage 1.1c1
 
 - Made it possible to set the pack and memcache options in zope.conf.
 
+- Log more info when a KeyError occurs within RelStorage.
+
 
 RelStorage 1.1b2
 
