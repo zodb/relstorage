@@ -922,8 +922,8 @@ class Adapter(object):
 
         # Get the list of changed OIDs and return it.
         stmt = """
-        SELECT zoid
-        FROM current_object
+        SELECT DISTINCT zoid
+        FROM object_state
         WHERE tid > %(tid)s
         """
         if ignore_tid is None:
