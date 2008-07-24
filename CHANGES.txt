@@ -1,6 +1,15 @@
 
 RelStorage 1.1c1
 
+- Use DROP TABLE IF EXISTS instead of TRUNCATE to clear 'temp_store' because:
+
+  - TRUNCATE has one page of caveats in the MySQL documentation.
+  - TEMPORARY TABLEs have half a page of caveats when it comes to
+    replication.
+  - The end result is that 'temp_store' may not exist on the
+    replication slave at the exact same time(s) it exists on the
+    master.
+
 - Added optional memcache integration.  This is useful when the connection
   to the relational database has high latency.
 

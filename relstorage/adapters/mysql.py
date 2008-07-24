@@ -398,11 +398,19 @@ class MySQLAdapter(Adapter):
             self.close(conn, cursor)
             raise
 
+    def _restart_temp_table(self, cursor):
+        """Restart the temporary table for storing objects"""
+        stmt = """
+        DROP TEMPORARY TABLE IF EXISTS temp_store
+        """
+        cursor.execute(stmt)
+        self._make_temp_table(cursor)
+
     def restart_store(self, cursor):
         """Reuse a store connection."""
         try:
             cursor.connection.rollback()
-            cursor.execute("TRUNCATE temp_store")
+            self._restart_temp_table(cursor)
         except (MySQLdb.OperationalError, MySQLdb.InterfaceError), e:
             raise StorageError(e)
 
