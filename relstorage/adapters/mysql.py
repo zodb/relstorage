@@ -63,6 +63,22 @@ commit_lock_timeout = 30
 class MySQLAdapter(Adapter):
     """MySQL adapter for RelStorage."""
 
+    _scripts = Adapter._scripts.copy()
+    # work around a MySQL performance bug
+    # See: http://mail.zope.org/pipermail/zodb-dev/2008-May/011880.html
+    #      http://bugs.mysql.com/bug.php?id=28257
+    _scripts['prepack_follow_child_refs'] = """
+    UPDATE pack_object SET keep = %(TRUE)s
+    WHERE keep = %(FALSE)s
+        AND zoid IN (
+            SELECT * FROM (
+                SELECT DISTINCT to_zoid
+                FROM object_ref
+                    JOIN temp_pack_visit USING (zoid)
+            ) AS child_zoids
+        )
+    """
+
     def __init__(self, **params):
         self._params = params.copy()
         self._params['use_unicode'] = True
@@ -264,6 +280,21 @@ class MySQLAdapter(Adapter):
         # do later
         return 0
 
+    def get_current_tid(self, cursor, oid):
+        """Returns the current integer tid for an object.
+
+        oid is an integer.  Returns None if object does not exist.
+        """
+        cursor.execute("""
+        SELECT tid
+        FROM current_object
+        WHERE zoid = %s
+        """, (oid,))
+        if cursor.rowcount:
+            assert cursor.rowcount == 1
+            return cursor.fetchone()[0]
+        return None
+
     def load_current(self, cursor, oid):
         """Returns the current pickle and integer tid for an object.
 
@@ -367,11 +398,19 @@ class MySQLAdapter(Adapter):
             self.close(conn, cursor)
             raise
 
+    def _restart_temp_table(self, cursor):
+        """Restart the temporary table for storing objects"""
+        stmt = """
+        DROP TEMPORARY TABLE IF EXISTS temp_store
+        """
+        cursor.execute(stmt)
+        self._make_temp_table(cursor)
+
     def restart_store(self, cursor):
         """Reuse a store connection."""
         try:
             cursor.connection.rollback()
-            cursor.execute("TRUNCATE temp_store")
+            self._restart_temp_table(cursor)
         except (MySQLdb.OperationalError, MySQLdb.InterfaceError), e:
             raise StorageError(e)
 

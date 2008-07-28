@@ -1,7 +1,8 @@
-diff -r 34747fbd09ec Connection.py
---- a/Connection.py	Tue Nov 20 21:57:31 2007 -0700
-+++ b/Connection.py	Fri Jan 11 21:19:00 2008 -0700
-@@ -75,8 +75,14 @@ class Connection(ExportImport, object):
+Index: Connection.py
+===================================================================
+--- Connection.py	(revision 87280)
++++ Connection.py	(working copy)
+@@ -75,8 +75,14 @@
          """Create a new Connection."""
  
          self._db = db
@@ -18,7 +19,7 @@ diff -r 34747fbd09ec Connection.py
          self._savepoint_storage = None
  
          self.transaction_manager = self._synch = self._mvcc = None
-@@ -170,6 +176,12 @@ class Connection(ExportImport, object):
+@@ -170,6 +176,12 @@
          # Multi-database support
          self.connections = {self._db.database_name: self}
  
@@ -31,7 +32,7 @@ diff -r 34747fbd09ec Connection.py
  
      def add(self, obj):
          """Add a new object 'obj' to the database and assign it an oid."""
-@@ -267,6 +279,11 @@ class Connection(ExportImport, object):
+@@ -267,6 +279,11 @@
              self.transaction_manager.unregisterSynch(self)
              self._synch = None
  
@@ -43,7 +44,7 @@ diff -r 34747fbd09ec Connection.py
          if primary:
              for connection in self.connections.values():
                  if connection is not self:
-@@ -295,6 +312,10 @@ class Connection(ExportImport, object):
+@@ -295,6 +312,10 @@
  
      def invalidate(self, tid, oids):
          """Notify the Connection that transaction 'tid' invalidated oids."""
@@ -54,7 +55,7 @@ diff -r 34747fbd09ec Connection.py
          self._inv_lock.acquire()
          try:
              if self._txn_time is None:
-@@ -438,8 +459,23 @@ class Connection(ExportImport, object):
+@@ -438,8 +459,23 @@
          self._registered_objects = []
          self._creating.clear()
  
@@ -78,10 +79,11 @@ diff -r 34747fbd09ec Connection.py
          self._inv_lock.acquire()
          try:
              # Non-ghostifiable objects may need to read when they are
-diff -r 34747fbd09ec DB.py
---- a/DB.py	Tue Nov 20 21:57:31 2007 -0700
-+++ b/DB.py	Wed Nov 28 18:33:12 2007 -0700
-@@ -260,6 +260,10 @@ class DB(object):
+Index: DB.py
+===================================================================
+--- DB.py	(revision 87280)
++++ DB.py	(working copy)
+@@ -260,6 +260,10 @@
              storage.store(z64, None, file.getvalue(), '', t)
              storage.tpc_vote(t)
              storage.tpc_finish(t)

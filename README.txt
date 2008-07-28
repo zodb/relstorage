@@ -139,7 +139,7 @@ upgrade.  Hopefully, this will not often be necessary.
     .. _migrate-1.0-beta.txt:
 http://svn.zope.org/*checkout*/relstorage/trunk/notes/migrate-1.0-beta.txt
 
-  To migrate from version 1.0.1 to version 1.1b1, see:
+  To migrate from version 1.0.1 to version 1.1, see:
 
     migrate-1.0.1.txt_
 
@@ -150,36 +150,84 @@ http://svn.zope.org/*checkout*/relstorage/branches/1.1/notes/migrate-1.0.1.txt
 Optional Features
 =================
 
-  poll-interval
+    Specify these options in zope.conf.
 
-    This option is useful if you need to reduce database traffic.  If set,
-RelStorage will poll the database for changes less often.  A setting of 1 to 5
-seconds should be sufficient for most systems.  Fractional seconds are allowed.
+    poll-interval
 
-    While this setting should not affect database integrity, it increases the
-probability of basing transactions on stale data, leading to conflicts.  Thus a
-nonzero setting can hurt the performance of servers with high write volume.
+        Defer polling the database for the specified maximum time interval.
+        Set to 0 (the default) to always poll.  Fractional seconds are
+        allowed.
 
-    To enable this feature, add a line similar to "poll-interval 2" inside a
-<relstorage> section of zope.conf.
+        Use this to lighten the database load on servers with high read
+        volume and low write volume.  A setting of 1-5 seconds is sufficient
+        for most systems.
 
-  pack-gc
+        While this setting should not affect database integrity,
+        it increases the probability of basing transactions on stale data,
+        leading to conflicts.  Thus a nonzero setting can hurt
+        the performance of servers with high write volume.
 
-    If pack-gc is false, pack operations do not perform garbage collection. 
-Garbage collection is enabled by default.
+    pack-gc
 
-    If garbage collection is disabled, pack operations keep at least one
-revision of every object.  With garbage collection disabled, the pack code does
-not need to follow object references, making packing conceivably much faster. 
-However, some of that benefit may be lost due to an ever increasing number of
-unused objects.
+        If pack-gc is false, pack operations do not perform
+        garbage collection.  Garbage collection is enabled by default.
 
-    Disabling garbage collection is also a hack that ensures inter-database
-references never break.
+        If garbage collection is disabled, pack operations keep at least one
+        revision of every object.  With garbage collection disabled, the
+        pack code does not need to follow object references, making
+        packing conceivably much faster.  However, some of that benefit
+        may be lost due to an ever increasing number of unused objects.
 
-    To disable garbage collection, add the line "pack-gc no" inside a
-<relstorage> section of zope.conf.
+        Disabling garbage collection is also a hack that ensures
+        inter-database references never break.
 
+    pack-batch-timeout
+
+        Packing occurs in batches of transactions; this specifies the
+        timeout in seconds for each batch.  Note that some database
+        configurations have unpredictable I/O performance
+        and might stall much longer than the timeout.
+        The default timeout is 5.0 seconds.
+
+    pack-duty-cycle
+
+        After each batch, the pack code pauses for a time to
+        allow concurrent transactions to commit.  The pack-duty-cycle
+        specifies what fraction of time should be spent on packing.
+        For example, if the duty cycle is 0.75, then 75% of the time
+        will be spent packing: a 6 second pack batch
+        will be followed by a 2 second delay.  The duty cycle should
+        be greater than 0.0 and less than or equal to 1.0.  Specify
+        1.0 for no delay between batches.
+
+        The default is 0.5.  Raise it to finish packing faster; lower it
+        to reduce the effect of packing on transaction commit performance.
+
+    pack-max-delay
+
+        This specifies a maximum delay between pack batches.  Sometimes
+        the database takes an extra long time to finish a pack batch; at
+        those times it is useful to cap the delay imposed by the
+        pack-duty-cycle.  The default is 20 seconds.
+
+    cache-servers
+
+        Specifies a list of memcache servers.  Enabling memcache integration
+        is useful if the connection to the relational database has high
+        latency and the connection to memcache has significantly lower
+        latency.  On the other hand, if the connection to the relational
+        database already has low latency, memcache integration may actually
+        hurt overall performance.
+
+        Provide a list of host:port pairs, separated by whitespace.
+        "127.0.0.1:11211" is a common setting.  The default is to disable
+        memcache integration.
+
+    cache-module-name
+
+        Specifies which Python memcache module to use.  The default is
+        "memcache", a pure Python module.  An alternative module is
+        "cmemcache".  This setting has no effect unless cache-servers is set.
 
 Development
 ===========

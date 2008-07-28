@@ -260,7 +260,7 @@ class RelStorageTests(
     def checkPollInterval(self):
         # Verify the poll_interval parameter causes RelStorage to
         # delay invalidation polling.
-        self._storage._poll_interval = 3600 
+        self._storage._poll_interval = 3600
         db = DB(self._storage)
         try:
             c1 = db.open()
@@ -446,7 +446,7 @@ class RelStorageTests(
             db.close()
 
     def checkPackGCDisabled(self):
-        self._storage.set_pack_gc(False)
+        self._storage._options.pack_gc = False
         self.checkPackGC(gc_enabled=False)
 
 
@@ -526,5 +526,3 @@ class FromFileStorage(BaseRelStorageTests, RecoveryStorageSubset):
 
     def new_dest(self):
         return self._dst
-
-

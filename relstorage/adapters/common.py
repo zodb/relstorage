@@ -98,6 +98,16 @@ class Adapter(object):
             WHERE tid = %(tid)s
             LIMIT 1
             """,
+
+        'prepack_follow_child_refs': """
+            UPDATE pack_object SET keep = %(TRUE)s
+            WHERE keep = %(FALSE)s
+                AND zoid IN (
+                    SELECT DISTINCT to_zoid
+                    FROM object_ref
+                        JOIN temp_pack_visit USING (zoid)
+                )
+            """,
     }
 
 
@@ -382,7 +392,7 @@ class Adapter(object):
         return self.open()
 
 
-    def pre_pack(self, pack_tid, get_references, gc):
+    def pre_pack(self, pack_tid, get_references, options):
         """Decide what to pack.
 
         tid specifies the most recent transaction to pack.
@@ -390,15 +400,16 @@ class Adapter(object):
         get_references is a function that accepts a pickled state and
         returns a set of OIDs that state refers to.
 
-        gc is a boolean indicating whether to run garbage collection.
-        If gc is false, at least one revision of every object is kept,
-        even if nothing refers to it.  Packing with gc disabled can be
+        options is an instance of relstorage.Options.
+        The options.pack_gc flag indicates whether to run garbage collection.
+        If pack_gc is false, at least one revision of every object is kept,
+        even if nothing refers to it.  Packing with pack_gc disabled can be
         much faster.
         """
         conn, cursor = self.open_for_pre_pack()
         try:
             try:
-                if gc:
+                if options.pack_gc:
                     log.info("pre_pack: start with gc enabled")
                     self._pre_pack_with_gc(
                         conn, cursor, pack_tid, get_references)
@@ -413,7 +424,8 @@ class Adapter(object):
                 self._run_script_stmt(cursor, stmt)
                 to_remove = 0
 
-                if gc:
+                if options.pack_gc:
+                    # Pack objects with the keep flag set to false.
                     stmt = """
                     INSERT INTO pack_state (tid, zoid)
                     SELECT tid, zoid
@@ -427,6 +439,7 @@ class Adapter(object):
                         pack_tid})
                     to_remove += cursor.rowcount
 
+                # Pack object states with the keep flag set to true.
                 stmt = """
                 INSERT INTO pack_state (tid, zoid)
                 SELECT tid, zoid
@@ -490,6 +503,10 @@ class Adapter(object):
     def _pre_pack_with_gc(self, conn, cursor, pack_tid, get_references):
         """Determine what to pack, with garbage collection.
         """
+        stmt = self._scripts['create_temp_pack_visit']
+        if stmt:
+            self._run_script(cursor, stmt)
+
         log.info("pre_pack: following references after the pack point")
         # Fill object_ref with references from object states
         # in transactions that will not be packed.
@@ -513,33 +530,27 @@ class Adapter(object):
 
         -- Keep objects that have been revised since pack_tid.
         UPDATE pack_object SET keep = %(TRUE)s
-        WHERE keep = %(FALSE)s
-            AND zoid IN (
-                SELECT zoid
-                FROM current_object
-                WHERE tid > %(pack_tid)s
-            );
+        WHERE zoid IN (
+            SELECT zoid
+            FROM current_object
+            WHERE tid > %(pack_tid)s
+        );
 
         -- Keep objects that are still referenced by object states in
         -- transactions that will not be packed.
         UPDATE pack_object SET keep = %(TRUE)s
-        WHERE keep = %(FALSE)s
-            AND zoid IN (
-                SELECT to_zoid
-                FROM object_ref
-                WHERE tid > %(pack_tid)s
-            );
+        WHERE zoid IN (
+            SELECT to_zoid
+            FROM object_ref
+            WHERE tid > %(pack_tid)s
+        );
         """
         self._run_script(cursor, stmt, {'pack_tid': pack_tid})
 
-        stmt = self._scripts['create_temp_pack_visit']
-        if stmt:
-            self._run_script(cursor, stmt)
-
         # Each of the packable objects to be kept might
         # refer to other objects.  If some of those references
-        # include objects currently set to be removed, keep
-        # those objects as well.  Do this
+        # include objects currently set to be removed, mark
+        # the referenced objects to be kept as well.  Do this
         # repeatedly until all references have been satisfied.
         pass_num = 1
         while True:
@@ -588,16 +599,8 @@ class Adapter(object):
 
             # Visit the children of all parent objects that were
             # just visited.
-            stmt = """
-            UPDATE pack_object SET keep = %(TRUE)s
-            WHERE keep = %(FALSE)s
-                AND zoid IN (
-                    SELECT DISTINCT to_zoid
-                    FROM object_ref
-                        JOIN temp_pack_visit USING (zoid)
-                )
-            """
-            self._run_script_stmt(cursor, stmt)
+            stmt = self._scripts['prepack_follow_child_refs']
+            self._run_script(cursor, stmt)
             found_count = cursor.rowcount
 
             log.debug("pre_pack: found %d more referenced object(s) in "
@@ -724,8 +727,7 @@ class Adapter(object):
         pass
 
 
-    def pack(self, pack_tid, batch_timeout=5.0, delay_ratio=1.0,
-            max_delay=20.0):
+    def pack(self, pack_tid, options):
         """Pack.  Requires populated pack tables."""
 
         # Read committed mode is sufficient.
@@ -757,17 +759,21 @@ class Adapter(object):
                 for tid, packed, has_removable in tid_rows:
                     self._pack_transaction(
                         cursor, pack_tid, tid, packed, has_removable)
-                    if time.time() >= start + batch_timeout:
+                    if time.time() >= start + options.pack_batch_timeout:
                         # commit the work done so far and release the
                         # commit lock for a short time
                         conn.commit()
                         self._release_commit_lock(cursor)
-                        # Add a delay.
+                        # Add a delay based on the configured duty cycle.
                         elapsed = time.time() - start
-                        delay = min(max_delay, elapsed * delay_ratio)
-                        if delay > 0:
-                            log.debug('pack: sleeping %.4g second(s)', delay)
-                            time.sleep(delay)
+                        duty_cycle = options.pack_duty_cycle
+                        if duty_cycle > 0.0 and duty_cycle < 1.0:
+                            delay = min(options.pack_max_delay,
+                                elapsed * (1.0 / duty_cycle - 1.0))
+                            if delay > 0:
+                                log.debug('pack: sleeping %.4g second(s)',
+                                    delay)
+                                time.sleep(delay)
                         self._hold_commit_lock(cursor)
                         start = time.time()
 
@@ -916,8 +922,8 @@ class Adapter(object):
 
         # Get the list of changed OIDs and return it.
         stmt = """
-        SELECT DISTINCT zoid
-        FROM object_state
+        SELECT zoid
+        FROM current_object
         WHERE tid > %(tid)s
         """
         if ignore_tid is None:
