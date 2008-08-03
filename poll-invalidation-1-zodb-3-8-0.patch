@@ -1,7 +1,8 @@
-diff -r 72bf2fd94b66 src/ZODB/Connection.py
---- a/src/ZODB/Connection.py	Wed Jan 30 23:23:05 2008 -0700
-+++ b/src/ZODB/Connection.py	Wed Jan 30 23:38:51 2008 -0700
-@@ -90,8 +90,15 @@ class Connection(ExportImport, object):
+Index: Connection.py
+===================================================================
+--- Connection.py	(revision 87666)
++++ Connection.py	(working copy)
+@@ -90,8 +90,15 @@
          self.connections = {self._db.database_name: self}
  
          self._version = version
@@ -19,7 +20,7 @@ diff -r 72bf2fd94b66 src/ZODB/Connection.py
          self._savepoint_storage = None
  
          # Do we need to join a txn manager?
-@@ -151,6 +158,12 @@ class Connection(ExportImport, object):
+@@ -151,6 +158,12 @@
          # in the cache on abort and in other connections on finish.
          self._modified = []
  
@@ -32,7 +33,7 @@ diff -r 72bf2fd94b66 src/ZODB/Connection.py
  
          # _invalidated queues invalidate messages delivered from the DB
          # _inv_lock prevents one thread from modifying the set while
-@@ -297,6 +310,11 @@ class Connection(ExportImport, object):
+@@ -297,6 +310,11 @@
          if self._opened:
              self.transaction_manager.unregisterSynch(self)
  
@@ -44,7 +45,7 @@ diff -r 72bf2fd94b66 src/ZODB/Connection.py
          if primary:
              for connection in self.connections.values():
                  if connection is not self:
-@@ -328,6 +346,10 @@ class Connection(ExportImport, object):
+@@ -328,6 +346,10 @@
  
      def invalidate(self, tid, oids):
          """Notify the Connection that transaction 'tid' invalidated oids."""
@@ -55,7 +56,7 @@ diff -r 72bf2fd94b66 src/ZODB/Connection.py
          self._inv_lock.acquire()
          try:
              if self._txn_time is None:
-@@ -469,8 +491,23 @@ class Connection(ExportImport, object):
+@@ -469,8 +491,23 @@
          self._registered_objects = []
          self._creating.clear()
  
@@ -79,10 +80,11 @@ diff -r 72bf2fd94b66 src/ZODB/Connection.py
          self._inv_lock.acquire()
          try:
              # Non-ghostifiable objects may need to read when they are
-diff -r 72bf2fd94b66 src/ZODB/DB.py
---- a/src/ZODB/DB.py	Wed Jan 30 23:23:05 2008 -0700
-+++ b/src/ZODB/DB.py	Wed Jan 30 23:38:51 2008 -0700
-@@ -284,6 +284,10 @@ class DB(object):
+Index: DB.py
+===================================================================
+--- DB.py	(revision 87666)
++++ DB.py	(working copy)
+@@ -284,6 +284,10 @@
              storage.store(z64, None, file.getvalue(), '', t)
              storage.tpc_vote(t)
              storage.tpc_finish(t)
