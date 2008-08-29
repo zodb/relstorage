@@ -23,6 +23,66 @@ from ZODB.POSException import StorageError
 from common import Adapter
 
 log = logging.getLogger("relstorage.adapters.oracle")
+use_inline_lobs = (cx_Oracle.version >= '5.0')
+
+
+def inline(value):
+    """Handle an Oracle LOB by returning its byte stream.
+
+    Returns other objects unchanged.
+    """
+    if isinstance(value, cx_Oracle.LOB):
+        return value.read()
+    return value
+
+
+if use_inline_lobs:
+    def execute_lob_stmt(cursor, stmt, args=(), default=None):
+        """Execute a statement and return one row with all LOBs inline.
+
+        Returns the value of the default parameter if the result was empty.
+        """
+        try:
+            cursor.execute(stmt, args)
+            for row in cursor:
+                return row
+        except cx_Oracle.DatabaseError, e:
+            # ORA-01406: fetched column value was truncated
+            if not e.args[0].endswith(' 1406'):
+                raise
+            del cursor.outputtypehandler
+            try:
+                # Execute the query, but alter it slightly without
+                # changing its meaning, so that the query cache
+                # will see it as a statement that has to be compiled
+                # with different output type parameters.
+                cursor.execute(stmt + ' ', args)
+            finally:
+                cursor.outputtypehandler = lob_handler
+            for row in cursor:
+                return tuple(map(inline, row))
+        return default
+else:
+    def execute_lob_stmt(cursor, stmt, args=(), default=None):
+        """Execute a statement and return one row with all LOBs inline.
+
+        Returns the value of the default parameter if the result was empty.
+        """
+        cursor.execute(stmt, args)
+        for row in cursor:
+            return tuple(map(inline, row))
+        return default
+
+
+def lob_handler(cursor, name, defaultType, size, precision, scale):
+    """cx_Oracle outputtypehandler that causes Oracle to send BLOBs inline.
+
+    Note that if a BLOB in the result is too large, Oracle generates an
+    error indicating truncation.  The execute_lob_stmt() function works
+    around this.
+    """
+    if defaultType == cx_Oracle.BLOB:
+        return cursor.var(cx_Oracle.LONG_BINARY)
 
 
 class OracleAdapter(Adapter):
@@ -99,7 +159,13 @@ class OracleAdapter(Adapter):
             params = ()
 
         try:
-            cursor.execute(stmt, params)
+            if use_inline_lobs:
+                del cursor.outputtypehandler
+            try:
+                cursor.execute(stmt, params)
+            finally:
+                if use_inline_lobs:
+                    cursor.outputtypehandler = lob_handler
         except:
             log.warning("script statement failed: %r; parameters: %r",
                 stmt, params)
@@ -290,6 +356,8 @@ class OracleAdapter(Adapter):
             conn = cx_Oracle.connect(*self._params, **kw)
             cursor = conn.cursor()
             cursor.arraysize = self._arraysize
+            if use_inline_lobs:
+                cursor.outputtypehandler = lob_handler
             if transaction_mode:
                 cursor.execute("SET TRANSACTION %s" % transaction_mode)
             return conn, cursor
@@ -370,34 +438,27 @@ class OracleAdapter(Adapter):
 
         oid is an integer.  Returns (None, None) if object does not exist.
         """
-        cursor.execute("""
+        stmt = """
         SELECT state, tid
         FROM current_object
             JOIN object_state USING(zoid, tid)
         WHERE zoid = :1
-        """, (oid,))
-        for state, tid in cursor:
-            if state is not None:
-                state = state.read()
-            # else this object's creation has been undone
-            return state, tid
-        return None, None
+        """
+        return execute_lob_stmt(cursor, stmt, (oid,), default=(None, None))
 
     def load_revision(self, cursor, oid, tid):
         """Returns the pickle for an object on a particular transaction.
 
         Returns None if no such state exists.
         """
-        cursor.execute("""
+        stmt = """
         SELECT state
         FROM object_state
         WHERE zoid = :1
             AND tid = :2
-        """, (oid, tid))
-        for (state,) in cursor:
-            if state is not None:
-                return state.read()
-        return None
+        """
+        (state,) = execute_lob_stmt(cursor, stmt, (oid, tid), default=(None,))
+        return state
 
     def exists(self, cursor, oid):
         """Returns a true value if the given object exists."""
@@ -420,13 +481,8 @@ class OracleAdapter(Adapter):
                     AND tid < :tid
             )
         """
-        cursor.execute(stmt, {'oid': oid, 'tid': tid})
-        for state, tid in cursor:
-            if state is not None:
-                state = state.read()
-            # else this object's creation has been undone
-            return state, tid
-        return None, None
+        return execute_lob_stmt(cursor, stmt, {'oid': oid, 'tid': tid},
+             default=(None, None))
 
     def get_object_tid_after(self, cursor, oid, tid):
         """Returns the tid of the next change after an object revision.
@@ -577,10 +633,7 @@ class OracleAdapter(Adapter):
             JOIN current_object ON (temp_store.zoid = current_object.zoid)
         WHERE temp_store.prev_tid != current_object.tid
         """
-        cursor.execute(stmt)
-        for oid, prev_tid, attempted_prev_tid, data in cursor:
-            return oid, prev_tid, attempted_prev_tid, data.read()
-        return None
+        return execute_lob_stmt(cursor, stmt)
 
     def move_from_temp(self, cursor, tid):
         """Moved the temporarily stored objects to permanent storage.

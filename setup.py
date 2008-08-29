@@ -27,7 +27,7 @@ A small patch to ZODB is required.  See the patch files distributed
 with RelStorage.
 """
 
-VERSION = "1.1c1"
+VERSION = "1.1jarn2"
 
 classifiers = """\
 Development Status :: 4 - Beta
