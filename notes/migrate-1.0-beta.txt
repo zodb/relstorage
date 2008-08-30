@@ -30,7 +30,7 @@ MySQL (using the mysql command):
 Oracle (using the sqlplus command):
 
     ALTER TABLE transaction ADD (
-        new_username    RAW(255),
+        new_username    RAW(500),
         new_description RAW(2000),
         new_extension   RAW(2000));
 
