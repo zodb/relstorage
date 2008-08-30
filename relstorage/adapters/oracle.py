@@ -636,7 +636,7 @@ class OracleAdapter(Adapter):
         return execute_lob_stmt(cursor, stmt)
 
     def move_from_temp(self, cursor, tid):
-        """Moved the temporarily stored objects to permanent storage.
+        """Move the temporarily stored objects to permanent storage.
 
         Returns the list of oids stored.
         """
