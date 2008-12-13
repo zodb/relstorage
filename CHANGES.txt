@@ -14,6 +14,10 @@ Next Release
     replication slave at the exact same time(s) it exists on the
     master.
 
+- Implemented the database size query in MySQL, based on a patch from
+  Kazuhiko Shiozaki.  Thanks!
+
+
 RelStorage 1.1c1
 
 - Added optional memcache integration.  This is useful when the connection
