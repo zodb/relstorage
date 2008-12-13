@@ -275,8 +275,16 @@ class MySQLAdapter(Adapter):
 
     def get_db_size(self):
         """Returns the approximate size of the database in bytes"""
-        # do later
-        return 0
+        conn, cursor = self.open()
+        try:
+            cursor.execute("SHOW TABLE STATUS")
+            description = [i[0] for i in cursor.description]
+            rows = list(cursor)
+        finally:
+            self.close(conn, cursor)
+        data_column = description.index('Data_length')
+        index_column = description.index('Index_length')
+        return sum([row[data_column] + row[index_column] for row in rows], 0)
 
     def get_current_tid(self, cursor, oid):
         """Returns the current integer tid for an object.
