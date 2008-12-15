@@ -17,6 +17,9 @@ Next Release
 - Implemented the database size query in MySQL, based on a patch from
   Kazuhiko Shiozaki.  Thanks!
 
+- Optimized Oracle object retrieval by causing BLOBs to be sent inline
+  when possible, based on a patch by Helge Tesdal.
+
 
 RelStorage 1.1c1
 
