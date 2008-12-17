@@ -20,6 +20,10 @@ Next Release
 - Optimized Oracle object retrieval by causing BLOBs to be sent inline
   when possible, based on a patch by Helge Tesdal.
 
+- Updated the storage iterator code to be compatible with ZODB 3.9.
+  The RelStorage tests now pass with the shane-poll-invalidations branch
+  of ZODB 3.9.
+
 
 RelStorage 1.1c1
 
