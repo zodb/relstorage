@@ -23,10 +23,19 @@ import md5
 import os
 import time
 import weakref
-from ZODB.utils import p64, u64, z64
-from ZODB.BaseStorage import BaseStorage
+from ZODB.utils import p64, u64
+from ZODB.BaseStorage import BaseStorage, TransactionRecord, DataRecord
 from ZODB import ConflictResolution, POSException
 from persistent.TimeStamp import TimeStamp
+
+try:
+    from ZODB.interfaces import StorageStopIteration
+except ImportError:
+    class StorageStopIteration(IndexError, StopIteration):
+        """A combination of StopIteration and IndexError to provide a
+        backwards-compatible exception.
+        """
+
 
 log = logging.getLogger("relstorage")
 
@@ -972,6 +981,9 @@ class TransactionIterator(object):
     def iterator(self):
         return self
 
+    def __iter__(self):
+        return self
+
     def __len__(self):
         return len(self._transactions)
 
@@ -982,28 +994,53 @@ class TransactionIterator(object):
     def next(self):
         if self._closed:
             raise IOError("TransactionIterator already closed")
+        if self._index >= len(self._transactions):
+            raise StorageStopIteration()
         params = self._transactions[self._index]
-        res = RecordIterator(self, *params)
+        res = RelStorageTransactionRecord(self, *params)
         self._index += 1
         return res
 
 
-class RecordIterator(object):
-    """Iterate over the objects in a transaction."""
+class RelStorageTransactionRecord(TransactionRecord):
+
     def __init__(self, trans_iter, tid_int, user, desc, ext, packed):
+        self._trans_iter = trans_iter
+        self._tid_int = tid_int
         self.tid = p64(tid_int)
         self.status = packed and 'p' or ' '
         self.user = user or ''
         self.description = desc or ''
         if ext:
-            self._extension = cPickle.loads(ext)
+            self.extension = cPickle.loads(ext)
         else:
-            self._extension = {}
+            self.extension = {}
 
-        cursor = trans_iter._cursor
-        adapter = trans_iter._adapter
+    # maintain compatibility with the old (ZODB 3.8 and below) name of
+    # the extension attribute.
+    def _ext_set(self, value):
+        self.extension = value
+    def _ext_get(self):
+        return self.extension
+    _extension = property(fset=_ext_set, fget=_ext_get)
+
+    def __iter__(self):
+        return RecordIterator(self)
+
+
+class RecordIterator(object):
+    """Iterate over the objects in a transaction."""
+    def __init__(self, record):
+        # record is a RelStorageTransactionRecord.
+        cursor = record._trans_iter._cursor
+        adapter = record._trans_iter._adapter
+        tid_int = record._tid_int
+        self.tid = record.tid
         self._records = list(adapter.iter_objects(cursor, tid_int))
         self._index = 0
+
+    def __iter__(self):
+        return self
 
     def __len__(self):
         return len(self._records)
@@ -1013,13 +1050,15 @@ class RecordIterator(object):
         return self.next()
 
     def next(self):
+        if self._index >= len(self._records):
+            raise StorageStopIteration()
         params = self._records[self._index]
         res = Record(self.tid, *params)
         self._index += 1
         return res
 
 
-class Record(object):
+class Record(DataRecord):
     """An object state in a transaction"""
     version = ''
     data_txn = None

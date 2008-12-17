@@ -13,8 +13,8 @@
 ##############################################################################
 """A foundation for relstorage adapter tests"""
 
+import itertools
 import time
-import unittest
 from relstorage.relstorage import RelStorage
 
 from ZODB.DB import DB
@@ -457,25 +457,33 @@ class IteratorDeepCompareUnordered:
         eq = self.assertEqual
         iter1 = storage1.iterator()
         iter2 = storage2.iterator()
-        for txn1, txn2 in zip(iter1, iter2):
+        for txn1, txn2 in itertools.izip(iter1, iter2):
             eq(txn1.tid,         txn2.tid)
             eq(txn1.status,      txn2.status)
             eq(txn1.user,        txn2.user)
             eq(txn1.description, txn2.description)
-            eq(txn1._extension,  txn2._extension)
+
+            missing = object()
+            e1 = getattr(txn1, 'extension', missing)
+            if e1 is missing:
+                # old attribute name
+                e1 = txn1._extension
+            e2 = getattr(txn2, 'extension', missing)
+            if e2 is missing:
+                # old attribute name
+                e2 = txn2._extension
+            eq(e1, e2)
+
             recs1 = [(r.oid, r) for r in txn1]
             recs1.sort()
             recs2 = [(r.oid, r) for r in txn2]
             recs2.sort()
+            eq(len(recs1), len(recs2))
             for (oid1, rec1), (oid2, rec2) in zip(recs1, recs2):
                 eq(rec1.oid,     rec2.oid)
                 eq(rec1.tid,  rec2.tid)
                 eq(rec1.version, rec2.version)
                 eq(rec1.data,    rec2.data)
-            # Make sure there are no more records left in rec1 and rec2,
-            # meaning they were the same length.
-            self.assertRaises(IndexError, txn1.next)
-            self.assertRaises(IndexError, txn2.next)
         # Make sure ther are no more records left in txn1 and txn2, meaning
         # they were the same length
         self.assertRaises(IndexError, iter1.next)
