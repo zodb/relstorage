@@ -48,7 +48,8 @@ if use_inline_lobs:
                 return row
         except cx_Oracle.DatabaseError, e:
             # ORA-01406: fetched column value was truncated
-            if not e.args[0].endswith(' 1406'):
+            error, = e
+            if (isinstance(error, str) and not error.endswith(' 1406')) or error.code != 1406:
                 raise
             del cursor.outputtypehandler
             try:
@@ -82,7 +83,9 @@ def lob_handler(cursor, name, defaultType, size, precision, scale):
     around this.
     """
     if defaultType == cx_Oracle.BLOB:
-        return cursor.var(cx_Oracle.LONG_BINARY)
+        # Default size for BLOB is 4, we want the whole blob inline.
+        # Typical chunk size is 8132, we choose a multiple - 32528
+        return cursor.var(cx_Oracle.LONG_BINARY, 32528, cursor.arraysize)
 
 
 class OracleAdapter(Adapter):
