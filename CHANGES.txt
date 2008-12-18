@@ -24,6 +24,9 @@ Next Release
   The RelStorage tests now pass with the shane-poll-invalidations branch
   of ZODB 3.9.
 
+- Added a translation of README.txt to Brazilian Portuguese by
+  Rogerio Ferreira.  Thanks!
+
 
 RelStorage 1.1c1
 
