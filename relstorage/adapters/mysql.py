@@ -81,8 +81,6 @@ class MySQLAdapter(Adapter):
 
     def __init__(self, **params):
         self._params = params.copy()
-        self._params['use_unicode'] = True
-        self._params['charset'] = 'utf8'
 
     def create_schema(self, cursor):
         """Create the database tables."""

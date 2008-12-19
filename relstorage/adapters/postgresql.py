@@ -23,8 +23,6 @@ from common import Adapter
 
 log = logging.getLogger("relstorage.adapters.postgresql")
 
-psycopg2.extensions.register_type(psycopg2.extensions.UNICODE)
-
 
 class PostgreSQLAdapter(Adapter):
     """PostgreSQL adapter for RelStorage."""
@@ -191,7 +189,6 @@ class PostgreSQLAdapter(Adapter):
         """Open a database connection and return (conn, cursor)."""
         try:
             conn = psycopg2.connect(self._dsn)
-            conn.set_client_encoding('UNICODE')
             conn.set_isolation_level(isolation)
             cursor = conn.cursor()
             cursor.arraysize = 64
