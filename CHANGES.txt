@@ -1,4 +1,4 @@
-Next Release
+Version 1.1
 
 - Normalized poll-invalidation patches as Solaris' patch command would not
   accept the current format. The patches now apply with:
@@ -27,7 +27,7 @@ Next Release
   Rogerio Ferreira.  Thanks!
 
 
-RelStorage 1.1c1
+Version 1.1c1
 
 - Added optional memcache integration.  This is useful when the connection
   to the relational database has high latency.
@@ -37,7 +37,7 @@ RelStorage 1.1c1
 - Log more info when a KeyError occurs within RelStorage.
 
 
-RelStorage 1.1b2
+Version 1.1b2
 
 - Made the MySQL locks database-specific rather than server-wide.  This is
   important for multi-database configurations.
@@ -50,7 +50,7 @@ RelStorage 1.1b2
   discovering this.
 
 
-RelStorage 1.1b1
+Version 1.1b1
 
 - Fixed the use of setup.py without setuptools.  Thanks to Chris Withers.
 
@@ -71,7 +71,7 @@ RelStorage 1.1b1
   Jim Fulton.
 
 
-RelStorage 1.0.1
+Version 1.0.1
 
 - The speedtest script failed if run on a test database that has no tables.
   Now the script creates the tables if needed.  Thanks to Flavio Coelho
@@ -87,12 +87,12 @@ RelStorage 1.0.1
   amount of code to maintain.
 
 
-RelStorage 1.0
+Version 1.0
 
 - Added a utility for converting between storages called zodbconvert.
 
 
-RelStorage 1.0c1
+Version 1.0c1
 
 - The previous fix for non-ASCII characters was incorrect.  Now transaction
   metadata is stored as raw bytes.  A schema migration is required; see
@@ -101,7 +101,7 @@ RelStorage 1.0c1
 - Integrated setuptools and made an egg.
 
 
-RelStorage 1.0 beta
+Version 1.0 beta
 
 - Renamed to reflect expanding database support.
 
@@ -152,7 +152,10 @@ RelStorage 1.0 beta
   metadata.  The problem has been fixed for all supported databases.
 
 
-PGStorage 0.4
+PGStorage history
+=================
+
+Version 0.4
 
 - Began using the PostgreSQL LISTEN and NOTIFY statements as a shortcut
   for invalidation polling.
@@ -192,12 +195,12 @@ PGStorage 0.4
   top-level packages easier to install.
 
 
-PGStorage 0.3
+Version 0.3
 
 - Made compatible with Zope 3, although an undo bug apparently remains.
 
 
-PGStorage 0.2
+Version 0.2
 
 - Fixed concurrent commits, which were generating deadlocks.  Fixed by
   adding a special table, "commit_lock", which is used for
