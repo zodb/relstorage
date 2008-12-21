@@ -242,6 +242,9 @@ class RelStorage(BaseStorage,
         cursor = self._load_cursor
         adapter = self._adapter
         msg = ["Storage KeyError on oid %d: %s" % (oid_int, reason)]
+        msg.append("Last transaction is %s" % self.lastTransaction())
+        msg.append("Previously polled transaction is %s" 
+                   % self._prev_polled_tid)
         rows = adapter.iter_transactions(cursor)
         row = None
         for row in rows:
@@ -251,14 +254,32 @@ class RelStorage(BaseStorage,
             msg.append("No transactions exist")
         else:
             msg.append("Current transaction is %d" % row[0])
-
-        rows = adapter.iter_object_history(cursor, oid_int)
-        tids = []
+        
+        # Collect data from newer transactions.
+        self._restart_load()
+        cursor = self._load_cursor
+        # it would be nice to transaction.doom() here
+        # but we can't really rely on that yet.
+        
+        rows = adapter.iter_transactions(cursor)
+        row = None
         for row in rows:
-            tids.append(row[0])
-            if len(tids) >= 10:
-                break
-        msg.append("Recent object tids: %s" % repr(tids))
+            # just get the first row
+            break
+        if row:
+            msg.append("Newest transaction is %d" % row[0])
+        
+        try:
+            rows = adapter.iter_object_history(cursor, oid_int)
+        except KeyError:
+            pass
+        else:
+            tids = []
+            for row in rows:
+                tids.append(row[0])
+                if len(tids) >= 10:
+                    break
+            msg.append("Recent object tids: %s" % repr(tids))
         log.warning('; '.join(msg))
 
     def load(self, oid, version):
