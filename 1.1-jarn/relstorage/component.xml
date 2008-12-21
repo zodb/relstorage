@@ -1,0 +1,219 @@
+<?xml version="1.0"?>
+
+<!-- RelStorage configuration via ZConfig -->
+
+<component prefix="relstorage.config">
+
+  <import package="ZODB"/>
+  <abstracttype name="relstorage.adapter"/>
+
+  <sectiontype name="relstorage" implements="ZODB.storage"
+      datatype=".RelStorageFactory">
+    <section type="relstorage.adapter" name="*" attribute="adapter"/>
+    <key name="name" datatype="string" required="no"/>
+    <key name="create" datatype="boolean" default="true">
+      <description>
+        Flag that indicates whether the storage should be initialized if
+        it does not already exist.
+      </description>
+    </key>
+    <key name="read-only" datatype="boolean" default="false">
+      <description>
+        If true, only reads may be executed against the storage.  Note
+        that the "pack" operation is not considered a write operation
+        and is still allowed on a read-only filestorage.
+      </description>
+    </key>
+    <key name="poll-interval" datatype="float" required="no">
+      <description>
+        Defer polling the database for the specified maximum time interval.
+        Set to 0 (the default) to always poll.  Fractional seconds are
+        allowed.
+
+        Use this to lighten the database load on servers with high read
+        volume and low write volume.  A setting of 1-5 seconds is sufficient
+        for most systems.
+
+        While this setting should not affect database integrity,
+        it increases the probability of basing transactions on stale data,
+        leading to conflicts.  Thus a nonzero setting can hurt
+        the performance of servers with high write volume.
+      </description>
+    </key>
+    <key name="pack-gc" datatype="boolean" default="true">
+      <description>
+        If pack-gc is false, pack operations do not perform
+        garbage collection.  Garbage collection is enabled by default.
+
+        If garbage collection is disabled, pack operations keep at least one
+        revision of every object.  With garbage collection disabled, the
+        pack code does not need to follow object references, making
+        packing conceivably much faster.  However, some of that benefit
+        may be lost due to an ever increasing number of unused objects.
+
+        Disabling garbage collection is also a hack that ensures
+        inter-database references never break.
+      </description>
+    </key>
+    <key name="pack-batch-timeout" datatype="float" required="no">
+      <description>
+        Packing occurs in batches of transactions; this specifies the
+        timeout in seconds for each batch.  Note that some database
+        configurations have unpredictable I/O performance
+        and might stall much longer than the timeout.
+        The default timeout is 5.0 seconds.
+      </description>
+    </key>
+    <key name="pack-duty-cycle" datatype="float" required="no">
+      <description>
+        After each batch, the pack code pauses for a time to
+        allow concurrent transactions to commit.  The pack-duty-cycle
+        specifies what fraction of time should be spent on packing.
+        For example, if the duty cycle is 0.75, then 75% of the time
+        will be spent packing: a 6 second pack batch
+        will be followed by a 2 second delay.  The duty cycle should
+        be greater than 0.0 and less than or equal to 1.0.  Specify
+        1.0 for no delay between batches.
+
+        The default is 0.5.  Raise it to finish packing faster; lower it
+        to reduce the effect of packing on transaction commit performance.
+      </description>
+    </key>
+    <key name="pack-max-delay" datatype="float" required="no">
+      <description>
+        This specifies a maximum delay between pack batches.  Sometimes
+        the database takes an extra long time to finish a pack batch; at
+        those times it is useful to cap the delay imposed by the
+        pack-duty-cycle.  The default is 20 seconds.
+      </description>
+    </key>
+    <key name="cache-servers" datatype="string" required="no">
+      <description>
+        Specifies a list of memcache servers.  Enabling memcache integration
+        is useful if the connection to the relational database has high
+        latency and the connection to memcache has significantly lower
+        latency.  On the other hand, if the connection to the relational
+        database already has low latency, memcache integration may actually
+        hurt overall performance.
+
+        Provide a list of host:port pairs, separated by whitespace.
+        "127.0.0.1:11211" is a common setting.  The default is to disable
+        memcache integration.
+      </description>
+    </key>
+    <key name="cache-module-name" datatype="string" required="no">
+      <description>
+        Specifies which Python memcache module to use.  The default is
+        "memcache", a pure Python module.  An alternative module is
+        "cmemcache".  This setting has no effect unless cache-servers is set.
+      </description>
+    </key>
+  </sectiontype>
+
+  <sectiontype name="postgresql" implements="relstorage.adapter"
+    datatype=".PostgreSQLAdapterFactory">
+    <key name="dsn" datatype="string" required="no" default="">
+      <description>
+        The PostgreSQL data source name.  For example:
+
+        dsn dbname='template1' user='user' host='localhost' password='pass'
+
+        If dsn is omitted, the adapter will connect to a local database with
+        no password.  Both the user and database name will match the
+        name of the owner of the current process.
+      </description>
+    </key>
+  </sectiontype>
+
+  <sectiontype name="oracle" implements="relstorage.adapter"
+    datatype=".OracleAdapterFactory">
+    <key name="user" datatype="string" required="yes">
+      <description>
+        The Oracle account name
+      </description>
+    </key>
+    <key name="password" datatype="string" required="yes">
+      <description>
+        The Oracle account password
+      </description>
+    </key>
+    <key name="dsn" datatype="string" required="yes">
+      <description>
+        The Oracle data source name.  The Oracle client library will
+        normally expect to find the DSN in /etc/oratab.
+      </description>
+    </key>
+  </sectiontype>
+
+  <sectiontype name="mysql" implements="relstorage.adapter"
+    datatype=".MySQLAdapterFactory">
+
+    <key name="host" datatype="string" required="no">
+      <description>
+        host to connect
+      </description>
+    </key>
+
+    <key name="user" datatype="string" required="no">
+      <description>
+        user to connect as
+      </description>
+    </key>
+
+    <key name="passwd" datatype="string" required="no">
+      <description>
+        password to use
+      </description>
+    </key>
+
+    <key name="db" datatype="string" required="no">
+      <description>
+        database to use
+      </description>
+    </key>
+
+    <key name="port" datatype="integer" required="no">
+      <description>
+        TCP/IP port to connect to
+      </description>
+    </key>
+
+    <key name="unix_socket" datatype="string" required="no">
+      <description>
+        location of unix_socket (UNIX-ish only)
+      </description>
+    </key>
+
+    <key name="connect_timeout" datatype="integer" required="no">
+      <description>
+        number of seconds to wait before the connection attempt fails.
+      </description>
+    </key>
+
+    <key name="compress" datatype="boolean" required="no">
+      <description>
+        if set, gzip compression is enabled
+      </description>
+    </key>
+
+    <key name="named_pipe" datatype="boolean" required="no">
+      <description>
+        if set, connect to server via named pipe (Windows only)
+      </description>
+    </key>
+
+    <key name="read_default_file" datatype="string" required="no">
+      <description>
+        see the MySQL documentation for mysql_options()
+      </description>
+    </key>
+
+    <key name="read_default_group" datatype="string" required="no">
+      <description>
+        see the MySQL documentation for mysql_options()
+      </description>
+    </key>
+
+  </sectiontype>
+
+</component>

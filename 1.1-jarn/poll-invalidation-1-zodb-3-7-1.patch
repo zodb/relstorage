@@ -1,0 +1,96 @@
+Index: Connection.py
+===================================================================
+--- Connection.py	(revision 87280)
++++ Connection.py	(working copy)
+@@ -75,8 +75,14 @@
+         """Create a new Connection."""
+ 
+         self._db = db
+-        self._normal_storage = self._storage = db._storage
+-        self.new_oid = db._storage.new_oid
++        storage = db._storage
++        m = getattr(storage, 'bind_connection', None)
++        if m is not None:
++            # Use a storage instance bound to this connection.
++            storage = m(self)
++
++        self._normal_storage = self._storage = storage
++        self.new_oid = storage.new_oid
+         self._savepoint_storage = None
+ 
+         self.transaction_manager = self._synch = self._mvcc = None
+@@ -170,6 +176,12 @@
+         # Multi-database support
+         self.connections = {self._db.database_name: self}
+ 
++        # Allow the storage to decide whether invalidations should
++        # propagate between connections.  If the storage provides MVCC
++        # semantics, it is better to not propagate invalidations between
++        # connections.
++        self._propagate_invalidations = getattr(
++            self._storage, 'propagate_invalidations', True)
+ 
+     def add(self, obj):
+         """Add a new object 'obj' to the database and assign it an oid."""
+@@ -267,6 +279,11 @@
+             self.transaction_manager.unregisterSynch(self)
+             self._synch = None
+ 
++        # If the storage wants to know, tell it this connection is closing.
++        m = getattr(self._storage, 'connection_closing', None)
++        if m is not None:
++            m()
++
+         if primary:
+             for connection in self.connections.values():
+                 if connection is not self:
+@@ -295,6 +312,10 @@
+ 
+     def invalidate(self, tid, oids):
+         """Notify the Connection that transaction 'tid' invalidated oids."""
++        if not self._propagate_invalidations:
++            # The storage disabled inter-connection invalidation.
++            return
++
+         self._inv_lock.acquire()
+         try:
+             if self._txn_time is None:
+@@ -438,8 +459,23 @@
+         self._registered_objects = []
+         self._creating.clear()
+ 
++    def _poll_invalidations(self):
++        """Poll and process object invalidations provided by the storage.
++        """
++        m = getattr(self._storage, 'poll_invalidations', None)
++        if m is not None:
++            # Poll the storage for invalidations.
++            invalidated = m()
++            if invalidated is None:
++                # special value: the transaction is so old that
++                # we need to flush the whole cache.
++                self._cache.invalidate(self._cache.cache_data.keys())
++            elif invalidated:
++                self._cache.invalidate(invalidated)
++
+     # Process pending invalidations.
+     def _flush_invalidations(self):
++        self._poll_invalidations()
+         self._inv_lock.acquire()
+         try:
+             # Non-ghostifiable objects may need to read when they are
+Index: DB.py
+===================================================================
+--- DB.py	(revision 87280)
++++ DB.py	(working copy)
+@@ -260,6 +260,10 @@
+             storage.store(z64, None, file.getvalue(), '', t)
+             storage.tpc_vote(t)
+             storage.tpc_finish(t)
++        if hasattr(storage, 'connection_closing'):
++            # Let the storage release whatever resources it used for loading
++            # the root object.
++            storage.connection_closing()
+ 
+         # Multi-database setup.
+         if databases is None:
