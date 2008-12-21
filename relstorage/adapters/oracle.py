@@ -62,14 +62,6 @@ class OracleAdapter(Adapter):
     }
 
     _scripts = {
-        'select_keep_tid': """
-            SELECT MAX(tid)
-            FROM object_state
-            WHERE zoid = pack_object.zoid
-                AND tid > 0
-                AND tid <= %(pack_tid)s
-            """,
-
         'choose_pack_transaction': """
             SELECT MAX(tid)
             FROM transaction
@@ -239,7 +231,8 @@ class OracleAdapter(Adapter):
         CREATE TABLE pack_object (
             zoid        NUMBER(20) NOT NULL PRIMARY KEY,
             keep        CHAR NOT NULL CHECK (keep IN ('N', 'Y')),
-            keep_tid    NUMBER(20)
+            keep_tid    NUMBER(20) NOT NULL,
+            visited     CHAR DEFAULT 'N' NOT NULL CHECK (visited IN ('N', 'Y'))
         );
         CREATE INDEX pack_object_keep_zoid ON pack_object (keep, zoid);
 
@@ -544,13 +537,25 @@ class OracleAdapter(Adapter):
 
     def store_temp(self, cursor, oid, prev_tid, md5sum, data):
         """Store an object in the temporary table."""
-        cursor.setinputsizes(data=cx_Oracle.BLOB)
-        stmt = """
-        INSERT INTO temp_store (zoid, prev_tid, md5, state)
-        VALUES (:oid, :prev_tid, :md5sum, :data)
-        """
-        cursor.execute(stmt, oid=oid, prev_tid=prev_tid,
-            md5sum=md5sum, data=cx_Oracle.Binary(data))
+        if len(data) <= 2000:
+            # Send data inline for speed.  Oracle docs say maximum size
+            # of a RAW is 2000 bytes.  cx_Oracle.BINARY corresponds with RAW.
+            cursor.setinputsizes(rawdata=cx_Oracle.BINARY)
+            stmt = """
+            INSERT INTO temp_store (zoid, prev_tid, md5, state)
+            VALUES (:oid, :prev_tid, :md5sum, :rawdata)
+            """
+            cursor.execute(stmt, oid=oid, prev_tid=prev_tid,
+                md5sum=md5sum, rawdata=data)
+        else:
+            # Send data as a BLOB
+            cursor.setinputsizes(blobdata=cx_Oracle.BLOB)
+            stmt = """
+            INSERT INTO temp_store (zoid, prev_tid, md5, state)
+            VALUES (:oid, :prev_tid, :md5sum, :blobdata)
+            """
+            cursor.execute(stmt, oid=oid, prev_tid=prev_tid,
+                md5sum=md5sum, blobdata=data)
 
     def replace_temp(self, cursor, oid, prev_tid, md5sum, data):
         """Replace an object in the temporary table."""

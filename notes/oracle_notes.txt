@@ -1,8 +1,4 @@
 
-If you are using Oracle 10g XE, use the "universal" version,
-since the smaller Western European version has minimal support
-for Unicode and will not pass all of the RelStorage tests.
-
 Docs:
     http://www.oracle.com/pls/db102/homepage
 
@@ -17,11 +13,3 @@ Work around session limit (fixes ORA-12520):
 Manually rollback an in-dispute transaction:
     select local_tran_id, state from DBA_2PC_PENDING;
     rollback force '$local_tran_id';
-
-It might be necessary to add the following lines to adapters/oracle.py,
-before all imports, to solve Oracle encoding issues.  (Let me know
-if you have to do this!)
-
-    import os
-    os.environ["NLS_LANG"] = ".AL32UTF8"
-

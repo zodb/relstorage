@@ -102,21 +102,23 @@ class PostgreSQLAdapter(Adapter):
         );
 
         -- Temporary state during packing:
-        -- The list of objects to pack.  If keep is 'N',
+        -- The list of objects to pack.  If keep is false,
         -- the object and all its revisions will be removed.
-        -- If keep is 'Y', instead of removing the object,
+        -- If keep is true, instead of removing the object,
         -- the pack operation will cut the object's history.
-        -- If keep is 'Y' then the keep_tid field must also be set.
         -- The keep_tid field specifies which revision to keep within
         -- the list of packable transactions.
+        -- The visited flag is set when pre_pack is visiting an object's
+        -- references, and remains set.
         CREATE TABLE pack_object (
             zoid        BIGINT NOT NULL PRIMARY KEY,
             keep        BOOLEAN NOT NULL,
-            keep_tid    BIGINT
+            keep_tid    BIGINT NOT NULL,
+            visited     BOOLEAN NOT NULL DEFAULT FALSE
         );
         CREATE INDEX pack_object_keep_false ON pack_object (zoid)
             WHERE keep = false;
-        CREATE INDEX pack_object_keep_true ON pack_object (zoid, keep_tid)
+        CREATE INDEX pack_object_keep_true ON pack_object (visited)
             WHERE keep = true;
 
         -- Temporary state during packing: the list of object states to pack.

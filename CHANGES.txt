@@ -1,3 +1,13 @@
+Version 1.1.1
+
+- Worked around MySQL performance bugs in packing.  Used temporary
+  tables and another column in the pack_object table.  The
+  other databases may benefit from the optimization as well.
+
+- Applied an optimization using setinputsizes() to the Oracle code,
+  bringing write speed back up to where it was in version 1.0.
+
+
 Version 1.1
 
 - Normalized poll-invalidation patches as Solaris' patch command would not
@@ -17,7 +27,8 @@ Version 1.1
   Kazuhiko Shiozaki.  Thanks!
 
 - Optimized Oracle object retrieval by causing BLOBs to be sent inline
-  when possible, based on a patch by Helge Tesdal.
+  when possible, based on a patch by Helge Tesdal.  By default, the
+  optimization is activated automatically when cx_Oracle 5 is used.
 
 - Updated the storage iterator code to be compatible with ZODB 3.9.
   The RelStorage tests now pass with the shane-poll-invalidations branch

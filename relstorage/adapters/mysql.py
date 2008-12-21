@@ -64,19 +64,34 @@ class MySQLAdapter(Adapter):
     """MySQL adapter for RelStorage."""
 
     _scripts = Adapter._scripts.copy()
-    # work around a MySQL performance bug
+    # Work around a MySQL performance bug by avoiding an expensive subquery.
     # See: http://mail.zope.org/pipermail/zodb-dev/2008-May/011880.html
     #      http://bugs.mysql.com/bug.php?id=28257
+    _scripts['create_temp_pack_visit'] = """
+    CREATE TEMPORARY TABLE temp_pack_visit (
+        zoid BIGINT NOT NULL
+    );
+    CREATE UNIQUE INDEX temp_pack_visit_zoid ON temp_pack_visit (zoid);
+    CREATE TEMPORARY TABLE temp_pack_child (
+        zoid BIGINT NOT NULL
+    );
+    CREATE UNIQUE INDEX temp_pack_child_zoid ON temp_pack_child (zoid);
+    """
+
+    # Note: UPDATE must be the last statement in the script
+    # because it returns a value.
     _scripts['prepack_follow_child_refs'] = """
-    UPDATE pack_object SET keep = %(TRUE)s
+    %(TRUNCATE)s temp_pack_child;
+
+    INSERT INTO temp_pack_child
+    SELECT DISTINCT to_zoid
+    FROM object_ref
+        JOIN temp_pack_visit USING (zoid);
+
+    -- MySQL-specific syntax for table join in update
+    UPDATE pack_object, temp_pack_child SET keep = %(TRUE)s
     WHERE keep = %(FALSE)s
-        AND zoid IN (
-            SELECT * FROM (
-                SELECT DISTINCT to_zoid
-                FROM object_ref
-                    JOIN temp_pack_visit USING (zoid)
-            ) AS child_zoids
-        )
+        AND pack_object.zoid = temp_pack_child.zoid;
     """
 
     def __init__(self, **params):
@@ -154,17 +169,19 @@ class MySQLAdapter(Adapter):
         ) ENGINE = MyISAM;
 
         -- Temporary state during packing:
-        -- The list of objects to pack.  If keep is 'N',
+        -- The list of objects to pack.  If keep is false,
         -- the object and all its revisions will be removed.
-        -- If keep is 'Y', instead of removing the object,
+        -- If keep is true, instead of removing the object,
         -- the pack operation will cut the object's history.
-        -- If keep is 'Y' then the keep_tid field must also be set.
         -- The keep_tid field specifies which revision to keep within
         -- the list of packable transactions.
+        -- The visited flag is set when pre_pack is visiting an object's
+        -- references, and remains set.
         CREATE TABLE pack_object (
             zoid        BIGINT NOT NULL PRIMARY KEY,
             keep        BOOLEAN NOT NULL,
-            keep_tid    BIGINT
+            keep_tid    BIGINT NOT NULL,
+            visited     BOOLEAN NOT NULL DEFAULT FALSE
         ) ENGINE = MyISAM;
         CREATE INDEX pack_object_keep_zoid ON pack_object (keep, zoid);
 
