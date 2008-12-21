@@ -55,16 +55,6 @@ class Adapter(object):
     }
 
     _scripts = {
-        'select_keep_tid': """
-            SELECT tid
-            FROM object_state
-            WHERE zoid = pack_object.zoid
-                AND tid > 0
-                AND tid <= %(pack_tid)s
-            ORDER BY tid DESC
-            LIMIT 1
-            """,
-
         'choose_pack_transaction': """
             SELECT tid
             FROM transaction
@@ -435,8 +425,7 @@ class Adapter(object):
                         AND tid > 0
                         AND tid <= %(pack_tid)s
                     """
-                    self._run_script_stmt(cursor, stmt, {'pack_tid':
-                        pack_tid})
+                    self._run_script_stmt(cursor, stmt, {'pack_tid': pack_tid})
                     to_remove += cursor.rowcount
 
                 # Pack object states with the keep flag set to true.
@@ -484,18 +473,16 @@ class Adapter(object):
         object references.
         """
         # Fill the pack_object table with OIDs, but configure them
-        # all to be kept by setting keep and keep_tid.
+        # all to be kept by setting keep to true.
         log.debug("pre_pack: populating pack_object")
-        subselect = self._scripts['select_keep_tid']
         stmt = """
         %(TRUNCATE)s pack_object;
 
-        INSERT INTO pack_object (zoid, keep)
-        SELECT DISTINCT zoid, %(TRUE)s
+        INSERT INTO pack_object (zoid, keep, keep_tid)
+        SELECT zoid, %(TRUE)s, MAX(tid)
         FROM object_state
-        WHERE tid <= %(pack_tid)s;
-
-        UPDATE pack_object SET keep_tid = (""" + subselect + """)
+        WHERE tid > 0 AND tid <= %(pack_tid)s
+        GROUP BY zoid
         """
         self._run_script(cursor, stmt, {'pack_tid': pack_tid})
 
@@ -519,10 +506,11 @@ class Adapter(object):
         stmt = """
         %(TRUNCATE)s pack_object;
 
-        INSERT INTO pack_object (zoid, keep)
-        SELECT DISTINCT zoid, %(FALSE)s
+        INSERT INTO pack_object (zoid, keep, keep_tid)
+        SELECT zoid, %(FALSE)s, MAX(tid)
         FROM object_state
-        WHERE tid <= %(pack_tid)s;
+        WHERE tid > 0 AND tid <= %(pack_tid)s
+        GROUP BY zoid;
 
         -- If the root object is in pack_object, keep it.
         UPDATE pack_object SET keep = %(TRUE)s
@@ -538,12 +526,19 @@ class Adapter(object):
 
         -- Keep objects that are still referenced by object states in
         -- transactions that will not be packed.
+        -- Use temp_pack_visit for temporary state; otherwise MySQL 5 chokes.
+        INSERT INTO temp_pack_visit
+        SELECT DISTINCT to_zoid
+        FROM object_ref
+        WHERE tid > %(pack_tid)s;
+
         UPDATE pack_object SET keep = %(TRUE)s
         WHERE zoid IN (
-            SELECT to_zoid
-            FROM object_ref
-            WHERE tid > %(pack_tid)s
+            SELECT zoid
+            FROM temp_pack_visit
         );
+
+        %(TRUNCATE)s temp_pack_visit;
         """
         self._run_script(cursor, stmt, {'pack_tid': pack_tid})
 
@@ -558,11 +553,8 @@ class Adapter(object):
                 "pass %d", pass_num)
 
             # Make a list of all parent objects that still need
-            # to be visited.  Then set keep_tid for all pack_object
+            # to be visited.  Then set pack_object.visited for all pack_object
             # rows with keep = true.
-            # keep_tid must be set before _fill_pack_object_refs examines
-            # references.
-            subselect = self._scripts['select_keep_tid']
             stmt = """
             %(TRUNCATE)s temp_pack_visit;
 
@@ -570,13 +562,13 @@ class Adapter(object):
             SELECT zoid
             FROM pack_object
             WHERE keep = %(TRUE)s
-                AND keep_tid IS NULL;
+                AND visited = %(FALSE)s;
 
-            UPDATE pack_object SET keep_tid = (""" + subselect + """)
+            UPDATE pack_object SET visited = %(TRUE)s
             WHERE keep = %(TRUE)s
-                AND keep_tid IS NULL
+                AND visited = %(FALSE)s
             """
-            self._run_script(cursor, stmt, {'pack_tid': pack_tid})
+            self._run_script(cursor, stmt)
             visit_count = cursor.rowcount
 
             if verify_sane_database:
@@ -585,7 +577,7 @@ class Adapter(object):
                 stmt = """
                 SELECT 1
                 FROM pack_object
-                WHERE keep = %(TRUE)s AND keep_tid IS NULL
+                WHERE keep = %(TRUE)s AND visited = %(FALSE)s
                 """
                 self._run_script_stmt(cursor, stmt)
                 if list(cursor):
@@ -630,18 +622,15 @@ class Adapter(object):
 
 
     def _fill_pack_object_refs(self, conn, cursor, get_references):
-        """Fill object_ref for all pack_object rows that have keep_tid."""
+        """Fill object_ref for all objects that are to be kept."""
         stmt = """
         SELECT DISTINCT keep_tid
         FROM pack_object
-        WHERE keep_tid IS NOT NULL
-            AND NOT EXISTS (
-                SELECT 1
-                FROM object_refs_added
-                WHERE tid = keep_tid
-            )
+            LEFT JOIN object_refs_added ON (keep_tid = tid)
+        WHERE keep = %(TRUE)s
+            AND object_refs_added.tid IS NULL
         """
-        cursor.execute(stmt)
+        self._run_script_stmt(cursor, stmt)
         tids = [tid for (tid,) in cursor]
         self._add_refs_for_tids(conn, cursor, tids, get_references)
 
@@ -728,7 +717,7 @@ class Adapter(object):
 
 
     def pack(self, pack_tid, options):
-        """Pack.  Requires populated pack tables."""
+        """Pack.  Requires the information provided by pre_pack."""
 
         # Read committed mode is sufficient.
         conn, cursor = self.open()
