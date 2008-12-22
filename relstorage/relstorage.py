@@ -242,7 +242,7 @@ class RelStorage(BaseStorage,
         cursor = self._load_cursor
         adapter = self._adapter
         msg = ["Storage KeyError on oid %d: %s" % (oid_int, reason)]
-        msg.append("Last transaction is %s" % self.lastTransaction())
+        msg.append("Last transaction is %s" % u64(self.lastTransaction()))
         msg.append("Previously polled transaction is %s" 
                    % self._prev_polled_tid)
         rows = adapter.iter_transactions(cursor)

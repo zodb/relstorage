@@ -1,1 +1,0 @@
-"""relstorage.adapters package"""
