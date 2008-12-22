@@ -67,32 +67,61 @@ class MySQLAdapter(Adapter):
     # Work around a MySQL performance bug by avoiding an expensive subquery.
     # See: http://mail.zope.org/pipermail/zodb-dev/2008-May/011880.html
     #      http://bugs.mysql.com/bug.php?id=28257
-    _scripts['create_temp_pack_visit'] = """
-    CREATE TEMPORARY TABLE temp_pack_visit (
-        zoid BIGINT NOT NULL
-    );
-    CREATE UNIQUE INDEX temp_pack_visit_zoid ON temp_pack_visit (zoid);
-    CREATE TEMPORARY TABLE temp_pack_child (
-        zoid BIGINT NOT NULL
-    );
-    CREATE UNIQUE INDEX temp_pack_child_zoid ON temp_pack_child (zoid);
-    """
+    _scripts.update({
+        'create_temp_pack_visit': """
+            CREATE TEMPORARY TABLE temp_pack_visit (
+                zoid BIGINT NOT NULL
+            );
+            CREATE UNIQUE INDEX temp_pack_visit_zoid ON temp_pack_visit (zoid);
+            CREATE TEMPORARY TABLE temp_pack_child (
+                zoid BIGINT NOT NULL
+            );
+            CREATE UNIQUE INDEX temp_pack_child_zoid ON temp_pack_child (zoid);
+            """,
 
-    # Note: UPDATE must be the last statement in the script
-    # because it returns a value.
-    _scripts['prepack_follow_child_refs'] = """
-    %(TRUNCATE)s temp_pack_child;
+        # Note: UPDATE must be the last statement in the script
+        # because it returns a value.
+        'prepack_follow_child_refs': """
+            %(TRUNCATE)s temp_pack_child;
 
-    INSERT INTO temp_pack_child
-    SELECT DISTINCT to_zoid
-    FROM object_ref
-        JOIN temp_pack_visit USING (zoid);
+            INSERT INTO temp_pack_child
+            SELECT DISTINCT to_zoid
+            FROM object_ref
+                JOIN temp_pack_visit USING (zoid);
 
-    -- MySQL-specific syntax for table join in update
-    UPDATE pack_object, temp_pack_child SET keep = %(TRUE)s
-    WHERE keep = %(FALSE)s
-        AND pack_object.zoid = temp_pack_child.zoid;
-    """
+            -- MySQL-specific syntax for table join in update
+            UPDATE pack_object, temp_pack_child SET keep = %(TRUE)s
+            WHERE keep = %(FALSE)s
+                AND pack_object.zoid = temp_pack_child.zoid;
+            """,
+
+        # MySQL optimizes deletion far better when using a join syntax.
+        'pack_current_object': """
+            DELETE FROM current_object
+            USING current_object
+                JOIN pack_state USING (zoid, tid)
+            WHERE current_object.tid = %(tid)s
+            """,
+
+        'pack_object_state': """
+            DELETE FROM object_state
+            USING object_state
+                JOIN pack_state USING (zoid, tid)
+            WHERE object_state.tid = %(tid)s
+            """,
+
+        'pack_object_ref': """
+            DELETE FROM object_refs_added
+            USING object_refs_added
+                JOIN transaction USING (tid)
+            WHERE transaction.empty = true;
+
+            DELETE FROM object_ref
+            USING object_ref
+                JOIN transaction USING (tid)
+            WHERE transaction.empty = true
+            """,
+        })
 
     def __init__(self, **params):
         self._params = params.copy()
@@ -142,6 +171,7 @@ class MySQLAdapter(Adapter):
             tid         BIGINT NOT NULL,
             FOREIGN KEY (zoid, tid) REFERENCES object_state (zoid, tid)
         ) ENGINE = InnoDB;
+        CREATE INDEX current_object_tid ON current_object (tid);
 
         -- A list of referenced OIDs from each object_state.
         -- This table is populated as needed during packing.
