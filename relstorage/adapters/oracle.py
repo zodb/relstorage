@@ -61,7 +61,8 @@ class OracleAdapter(Adapter):
         'max_tid':      ':max_tid',
     }
 
-    _scripts = {
+    _scripts = Adapter._scripts.copy()
+    _scripts.update({
         'choose_pack_transaction': """
             SELECT MAX(tid)
             FROM transaction
@@ -79,10 +80,7 @@ class OracleAdapter(Adapter):
             FROM object_state
             WHERE tid = %(tid)s
             """,
-
-        'prepack_follow_child_refs':
-            Adapter._scripts['prepack_follow_child_refs'],
-    }
+    })
 
     def __init__(self, user, password, dsn, twophase=False, arraysize=64,
             use_inline_lobs=None):

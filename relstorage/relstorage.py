@@ -834,6 +834,9 @@ class RelStorage(BaseStorage,
                     # Nothing needs to be packed.
                     return
 
+                s = time.ctime(TimeStamp(p64(tid_int)).timeTime())
+                log.info("packing transactions committed %s or before", s)
+
                 # In pre_pack, the adapter fills tables with
                 # information about what to pack.  The adapter
                 # should not actually pack anything yet.

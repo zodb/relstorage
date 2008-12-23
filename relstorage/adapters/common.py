@@ -98,8 +98,42 @@ class Adapter(object):
                         JOIN temp_pack_visit USING (zoid)
                 )
             """,
-    }
 
+        'pack_current_object': """
+            DELETE FROM current_object
+            WHERE tid = %(tid)s
+                AND zoid in (
+                    SELECT pack_state.zoid
+                    FROM pack_state
+                    WHERE pack_state.tid = %(tid)s
+                )
+            """,
+
+        'pack_object_state': """
+            DELETE FROM object_state
+            WHERE tid = %(tid)s
+                AND zoid in (
+                    SELECT pack_state.zoid
+                    FROM pack_state
+                    WHERE pack_state.tid = %(tid)s
+                )
+            """,
+
+        'pack_object_ref': """
+            DELETE FROM object_refs_added
+            WHERE tid IN (
+                SELECT tid
+                FROM transaction
+                WHERE empty = %(TRUE)s
+                );
+            DELETE FROM object_ref
+            WHERE tid IN (
+                SELECT tid
+                FROM transaction
+                WHERE empty = %(TRUE)s
+                )
+            """,
+    }
 
     def _run_script_stmt(self, cursor, generic_stmt, generic_params=()):
         """Execute a statement from a script with the given parameters.
@@ -185,7 +219,7 @@ class Adapter(object):
         """Iterate over the transactions in the given range, oldest first.
 
         Includes packed transactions.
-        Yields (tid, packed, username, description, extension)
+        Yields (tid, username, description, extension, packed)
         for each transaction.
         """
         stmt = """
@@ -740,6 +774,10 @@ class Adapter(object):
 
                 log.info("pack: will pack %d transaction(s)", len(tid_rows))
 
+                stmt = self._scripts['create_temp_pack_visit']
+                if stmt:
+                    self._run_script(cursor, stmt)
+
                 # Hold the commit lock while packing to prevent deadlocks.
                 # Pack in small batches of transactions in order to minimize
                 # the interruption of concurrent write operations.
@@ -785,21 +823,17 @@ class Adapter(object):
             has_removable):
         """Pack one transaction.  Requires populated pack tables."""
         log.debug("pack: transaction %d: packing", tid)
-        counters = {}
+        removed_objects = 0
+        removed_states = 0
 
         if has_removable:
-            for _table in ('current_object', 'object_state'):
-                stmt = """
-                DELETE FROM _table
-                WHERE tid = %(tid)s
-                    AND zoid IN (
-                        SELECT pack_state.zoid
-                        FROM pack_state
-                        WHERE pack_state.tid = %(tid)s
-                    )
-                """.replace('_table', _table)
-                self._run_script_stmt(cursor, stmt, {'tid': tid})
-                counters[_table] = cursor.rowcount
+            stmt = self._scripts['pack_current_object']
+            self._run_script_stmt(cursor, stmt, {'tid': tid})
+            removed_objects = cursor.rowcount
+
+            stmt = self._scripts['pack_object_state']
+            self._run_script_stmt(cursor, stmt, {'tid': tid})
+            removed_states = cursor.rowcount
 
             # Terminate prev_tid chains
             stmt = """
@@ -828,9 +862,7 @@ class Adapter(object):
 
         log.debug(
             "pack: transaction %d (%s): removed %d object(s) and %d state(s)",
-            tid, state,
-            counters.get('current_object', 0),
-            counters.get('object_state', 0))
+            tid, state, removed_objects, removed_states)
 
 
     def _pack_cleanup(self, conn, cursor):
@@ -839,7 +871,13 @@ class Adapter(object):
         conn.commit()
         self._release_commit_lock(cursor)
         self._hold_commit_lock(cursor)
-        log.info("pack: removing empty packed transactions")
+        log.info("pack: cleaning up")
+
+        log.debug("pack: removing unused object references")
+        stmt = self._scripts['pack_object_ref']
+        self._run_script(cursor, stmt)
+
+        log.debug("pack: removing empty packed transactions")
         stmt = """
         DELETE FROM transaction
         WHERE packed = %(TRUE)s
@@ -855,27 +893,6 @@ class Adapter(object):
         for _table in ('pack_object', 'pack_state', 'pack_state_tid'):
             stmt = '%(TRUNCATE)s ' + _table
             self._run_script_stmt(cursor, stmt)
-
-        log.debug("pack: removing unused object references")
-        stmt = """
-        DELETE FROM object_ref
-        WHERE tid IN (
-            SELECT tid
-            FROM transaction
-            WHERE empty = %(TRUE)s
-            )
-        """
-        self._run_script_stmt(cursor, stmt)
-
-        stmt = """
-        DELETE FROM object_refs_added
-        WHERE tid IN (
-            SELECT tid
-            FROM transaction
-            WHERE empty = %(TRUE)s
-            )
-        """
-        self._run_script_stmt(cursor, stmt)
 
 
     def poll_invalidations(self, conn, cursor, prev_polled_tid, ignore_tid):
@@ -902,7 +919,8 @@ class Adapter(object):
             return (), new_polled_tid
 
         stmt = "SELECT 1 FROM transaction WHERE tid = %(tid)s"
-        cursor.execute(stmt % self._script_vars, {'tid': prev_polled_tid})
+        cursor.execute(intern(stmt % self._script_vars),
+            {'tid': prev_polled_tid})
         rows = cursor.fetchall()
         if not rows:
             # Transaction not found; perhaps it has been packed.
@@ -916,10 +934,11 @@ class Adapter(object):
         WHERE tid > %(tid)s
         """
         if ignore_tid is None:
-            cursor.execute(stmt % self._script_vars, {'tid': prev_polled_tid})
+            cursor.execute(intern(stmt % self._script_vars),
+                {'tid': prev_polled_tid})
         else:
             stmt += " AND tid != %(self_tid)s"
-            cursor.execute(stmt % self._script_vars,
+            cursor.execute(intern(stmt % self._script_vars),
                 {'tid': prev_polled_tid, 'self_tid': ignore_tid})
         oids = [oid for (oid,) in cursor]
 

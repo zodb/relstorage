@@ -1,4 +1,4 @@
-Version 1.1.1
+Version 1.1.1 (unreleased)
 
 - Worked around MySQL performance bugs in packing.  Used temporary
   tables and another column in the pack_object table.  The
@@ -8,7 +8,7 @@ Version 1.1.1
   bringing write speed back up to where it was in version 1.0.
 
 
-Version 1.1
+Version 1.1 (2008-12-19)
 
 - Normalized poll-invalidation patches as Solaris' patch command would not
   accept the current format. The patches now apply with:
