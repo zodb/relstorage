@@ -30,7 +30,7 @@ with RelStorage.
 VERSION = "1.1dev"
 
 classifiers = """\
-Development Status :: 4 - Beta
+Development Status :: 5 - Production/Stable
 Intended Audience :: Developers
 License :: OSI Approved :: Zope Public License
 Programming Language :: Python
