@@ -1,4 +1,12 @@
-Version 1.1.1 (unreleased)
+Version 1.2 (unreleased)
+
+
+
+Version 1.1.2 (unreleased)
+
+
+
+Version 1.1.1 (2008-12-27)
 
 - Worked around MySQL performance bugs in packing.  Used temporary
   tables and another column in the pack_object table.  The
