@@ -223,9 +223,10 @@ class OracleAdapter(Adapter):
         -- the object and all its revisions will be removed.
         -- If keep is 'Y', instead of removing the object,
         -- the pack operation will cut the object's history.
-        -- If keep is 'Y' then the keep_tid field must also be set.
-        -- The keep_tid field specifies which revision to keep within
-        -- the list of packable transactions.
+        -- The keep_tid field specifies the oldest revision
+        -- of the object to keep.
+        -- The visited flag is set when pre_pack is visiting an object's
+        -- references, and remains set.
         CREATE TABLE pack_object (
             zoid        NUMBER(20) NOT NULL PRIMARY KEY,
             keep        CHAR NOT NULL CHECK (keep IN ('N', 'Y')),
@@ -250,7 +251,8 @@ class OracleAdapter(Adapter):
         -- Temporary state during packing: a list of objects
         -- whose references need to be examined.
         CREATE GLOBAL TEMPORARY TABLE temp_pack_visit (
-            zoid        NUMBER(20) NOT NULL PRIMARY KEY
+            zoid        NUMBER(20) NOT NULL PRIMARY KEY,
+            keep_tid    NUMBER(20)
         );
 
         -- Temporary state during undo: a list of objects

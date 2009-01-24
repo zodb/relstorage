@@ -106,8 +106,8 @@ class PostgreSQLAdapter(Adapter):
         -- the object and all its revisions will be removed.
         -- If keep is true, instead of removing the object,
         -- the pack operation will cut the object's history.
-        -- The keep_tid field specifies which revision to keep within
-        -- the list of packable transactions.
+        -- The keep_tid field specifies the oldest revision
+        -- of the object to keep.
         -- The visited flag is set when pre_pack is visiting an object's
         -- references, and remains set.
         CREATE TABLE pack_object (

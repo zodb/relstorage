@@ -449,6 +449,37 @@ class RelStorageTests(
         self._storage._options.pack_gc = False
         self.checkPackGC(gc_enabled=False)
 
+    def checkPackOldUnreferenced(self):
+        db = DB(self._storage)
+        try:
+            c1 = db.open()
+            r1 = c1.root()
+            r1['A'] = PersistentMapping()
+            B = PersistentMapping()
+            r1['A']['B'] = B
+            transaction.get().note('add A then add B to A')
+            transaction.commit()
+
+            del r1['A']['B']
+            transaction.get().note('remove B from A')
+            transaction.commit()
+
+            r1['A']['C'] = ''
+            transaction.get().note('add C to A')
+            transaction.commit()
+
+            now = packtime = time.time()
+            while packtime <= now:
+                packtime = time.time()
+            self._storage.pack(packtime, referencesf)
+
+            # B should be gone, since nothing refers to it.
+            self.assertRaises(KeyError, self._storage.load, B._p_oid, '')
+
+        finally:
+            db.close()
+        
+
 
 class IteratorDeepCompareUnordered:
     # Like IteratorDeepCompare, but compensates for OID order

@@ -1,5 +1,10 @@
 Next Release
 
+- Refined the pack algorithm.  It was not removing as many object states
+  as it should have.  As a bonus, there is now a method of adapters called
+  fill_object_refs(), which could be useful for debugging.  It ensures the
+  object_ref table is fully populated.
+
 - Began using zc.buildout for development.
 
 
