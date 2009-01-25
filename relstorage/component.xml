@@ -55,6 +55,15 @@
         inter-database references never break.
       </description>
     </key>
+    <key name="pack-dry-run" datatype="boolean" default="false">
+      <description>
+        If pack-dry-run is true, pack operations perform a full analysis
+        of what to pack, but no data is actually removed.  After a dry run,
+        the pack_object, pack_state, and pack_state_tid tables are filled
+        with the list of object states and objects that would have been
+        removed.
+      </description>
+    </key>
     <key name="pack-batch-timeout" datatype="float" required="no">
       <description>
         Packing occurs in batches of transactions; this specifies the

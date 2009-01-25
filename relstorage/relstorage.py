@@ -52,7 +52,7 @@ class RelStorage(BaseStorage,
     """Storage to a relational database, based on invalidation polling"""
 
     def __init__(self, adapter, name=None, create=True,
-            read_only=False, options=None):
+            read_only=False, options=None, **kwoptions):
         if name is None:
             name = 'RelStorage on %s' % adapter.__class__.__name__
 
@@ -61,6 +61,14 @@ class RelStorage(BaseStorage,
         self._is_read_only = read_only
         if options is None:
             options = Options()
+            for key, value in kwoptions.iteritems():
+                if key in options.__dict__:
+                    setattr(options, key, value)
+                else:
+                    raise TypeError("Unknown parameter: %s" % key)
+        elif kwoptions:
+            raise TypeError("The RelStorage constructor accepts either "
+                "an options parameter or keyword arguments, not both")
         self._options = options
         self._cache_client = None
 
@@ -839,20 +847,28 @@ class RelStorage(BaseStorage,
                 # Find the latest commit before or at the pack time.
                 tid_int = adapter.choose_pack_transaction(pack_point_int)
                 if tid_int is None:
-                    # Nothing needs to be packed.
+                    log.debug("all transactions before %s have already "
+                        "been packed", time.ctime(t))
                     return
 
+                if self._options.pack_dry_run:
+                    log.info("pack: beginning dry run")
+
                 s = time.ctime(TimeStamp(p64(tid_int)).timeTime())
-                log.info("packing transactions committed %s or before", s)
+                log.info("pack: analyzing transactions committed "
+                    "%s or before", s)
 
                 # In pre_pack, the adapter fills tables with
                 # information about what to pack.  The adapter
-                # should not actually pack anything yet.
+                # must not actually pack anything yet.
                 adapter.pre_pack(tid_int, get_references, self._options)
 
-                # Now pack.
-                adapter.pack(tid_int, self._options)
-                self._after_pack()
+                if self._options.pack_dry_run:
+                    log.info("pack: dry run complete")
+                else:
+                    # Now pack.
+                    adapter.pack(tid_int, self._options)
+                    self._after_pack()
             finally:
                 adapter.release_pack_lock(lock_cursor)
         finally:
@@ -1084,10 +1100,20 @@ class Record(DataRecord):
 
 
 class Options:
-    """Options for tuning RelStorage."""
+    """Options for tuning RelStorage.
+
+    These parameters can be provided as keyword options in the RelStorage
+    constructor.  For example:
+
+        storage = RelStorage(adapter, pack_gc=True, pack_dry_run=True)
+
+    Alternatively, the RelStorage constructor accepts an options
+    parameter, which should be an Options instance.
+    """
     def __init__(self):
         self.poll_interval = 0
         self.pack_gc = True
+        self.pack_dry_run = False
         self.pack_batch_timeout = 5.0
         self.pack_duty_cycle = 0.5
         self.pack_max_delay = 20.0

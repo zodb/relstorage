@@ -1,5 +1,9 @@
 Next Release
 
+- Added the pack-dry-run option, which causes pack operations to only
+  populate the pack tables with the list of objects and states to pack,
+  but not actually pack.
+
 - Refined the pack algorithm.  It was not removing as many object states
   as it should have.  As a bonus, there is now a method of adapters called
   fill_object_refs(), which could be useful for debugging.  It ensures the

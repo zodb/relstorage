@@ -698,6 +698,7 @@ class Adapter(object):
             LEFT JOIN object_refs_added
                 ON (transaction.tid = object_refs_added.tid)
         WHERE object_refs_added.tid IS NULL
+        ORDER BY transaction.tid
         """
         cursor.execute(stmt)
         tids = [tid for (tid,) in cursor]
