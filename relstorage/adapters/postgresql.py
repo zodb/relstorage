@@ -191,11 +191,14 @@ class PostgreSQLAdapter(Adapter):
         conn, cursor = self.open()
         try:
             try:
+                cursor.execute("SELECT tablename FROM pg_tables")
+                existent = set([name for (name,) in cursor])
                 for tablename in ('pack_state_tid', 'pack_state',
                         'pack_object', 'object_refs_added', 'object_ref',
                         'current_object', 'object_state', 'transaction',
                         'commit_lock', 'pack_lock'):
-                    cursor.execute("DROP TABLE IF EXISTS %s" % tablename)
+                    if tablename in existent:
+                        cursor.execute("DROP TABLE %s" % tablename)
                 cursor.execute("DROP SEQUENCE zoid_seq")
             except:
                 conn.rollback()
