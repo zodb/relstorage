@@ -1,6 +1,6 @@
 ##############################################################################
 #
-# Copyright (c) 2008 Zope Corporation and Contributors.
+# Copyright (c) 2008 Zope Foundation and Contributors.
 # All Rights Reserved.
 #
 # This software is subject to the provisions of the Zope Public License,
@@ -69,6 +69,10 @@ class RelStorageTests(
     MTStorage.MTStorage,
     ReadOnlyStorage.ReadOnlyStorage
     ):
+
+    def checkDropAndPrepare(self):
+        self._storage._adapter.drop_all()
+        self._storage._adapter.prepare_schema()
 
     def checkCrossConnectionInvalidation(self):
         # Verify connections see updated state at txn boundaries
@@ -224,6 +228,33 @@ class RelStorageTests(
         self.assertEqual(len(got), len(data))
         self.assertEqual(got, data)
 
+    def checkLoadFromCache(self):
+        # Store an object, cache it, then retrieve it from the cache
+        self._storage._options.cache_servers = 'x:1 y:2'
+        self._storage._options.cache_module_name = 'relstorage.tests.fakecache'
+
+        db = DB(self._storage)
+        try:
+            c1 = db.open()
+            cache = c1._storage._cache_client
+            self.assertEqual(cache.servers, ['x:1', 'y:2'])
+            self.assertEqual(len(cache.data), 0)
+            r1 = c1.root()
+            self.assertEqual(len(cache.data), 2)
+            r1['alpha'] = PersistentMapping()
+            transaction.commit()
+            oid = r1['alpha']._p_oid
+
+            self.assertEqual(len(cache.data), 2)
+            got, serialno = c1._storage.load(oid, '')
+            self.assertEqual(len(cache.data), 4)
+            # load the object from the cache
+            got, serialno = c1._storage.load(oid, '')
+            # try to load an object that doesn't exist
+            self.assertRaises(KeyError, c1._storage.load, 'bad.oid.', '')
+        finally:
+            db.close()
+
     def checkMultipleStores(self):
         # Verify a connection can commit multiple transactions
         db = DB(self._storage)
@@ -248,11 +279,14 @@ class RelStorageTests(
             c1.close()
 
             c1._storage._load_conn.close()
+            c1._storage._store_conn.close()
 
             c2 = db.open()
             self.assert_(c2 is c1)
             r = c2.root()
             self.assertEqual(r['alpha'], 1)
+            r['beta'] = 2
+            transaction.commit()
             c2.close()
         finally:
             db.close()
@@ -260,7 +294,7 @@ class RelStorageTests(
     def checkPollInterval(self):
         # Verify the poll_interval parameter causes RelStorage to
         # delay invalidation polling.
-        self._storage._poll_interval = 3600
+        self._storage._options.poll_interval = 3600
         db = DB(self._storage)
         try:
             c1 = db.open()
@@ -281,7 +315,10 @@ class RelStorageTests(
             storage.tpc_vote(t)
             storage.tpc_finish(t)
 
-            # c2 should not see the change yet
+            # flush invalidations to c2, but the poll timer has not
+            # yet expired, so the change to r2 should not be seen yet.
+            self.assertTrue(c2._storage._poll_at > 0)
+            c2._flush_invalidations()
             r2 = c2.root()
             self.assertEqual(r2['alpha'], 1)
 
@@ -448,6 +485,37 @@ class RelStorageTests(
     def checkPackGCDisabled(self):
         self._storage._options.pack_gc = False
         self.checkPackGC(gc_enabled=False)
+
+    def checkPackOldUnreferenced(self):
+        db = DB(self._storage)
+        try:
+            c1 = db.open()
+            r1 = c1.root()
+            r1['A'] = PersistentMapping()
+            B = PersistentMapping()
+            r1['A']['B'] = B
+            transaction.get().note('add A then add B to A')
+            transaction.commit()
+
+            del r1['A']['B']
+            transaction.get().note('remove B from A')
+            transaction.commit()
+
+            r1['A']['C'] = ''
+            transaction.get().note('add C to A')
+            transaction.commit()
+
+            now = packtime = time.time()
+            while packtime <= now:
+                packtime = time.time()
+            self._storage.pack(packtime, referencesf)
+
+            # B should be gone, since nothing refers to it.
+            self.assertRaises(KeyError, self._storage.load, B._p_oid, '')
+
+        finally:
+            db.close()
+        
 
 
 class IteratorDeepCompareUnordered:

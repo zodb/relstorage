@@ -1,5 +1,15 @@
-Version 1.1.2 (unreleased)
+Next Release
 
+- Refined the pack algorithm.  It was not removing as many object states
+  as it should have.  As a bonus, there is now a method of adapters called
+  fill_object_refs(), which could be useful for debugging.  It ensures the
+  object_ref table is fully populated.
+
+- Began using zc.buildout for development.
+
+- Increased automated test coverage.
+
+- Fixed KeyError reporting to not trip over a related KeyError while logging.
 
 
 Version 1.1.1 (2008-12-27)

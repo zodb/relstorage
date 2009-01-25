@@ -1,6 +1,6 @@
 ##############################################################################
 #
-# Copyright (c) 2008 Zope Corporation and Contributors.
+# Copyright (c) 2008 Zope Foundation and Contributors.
 # All Rights Reserved.
 #
 # This software is subject to the provisions of the Zope Public License,
@@ -70,7 +70,8 @@ class MySQLAdapter(Adapter):
     _scripts.update({
         'create_temp_pack_visit': """
             CREATE TEMPORARY TABLE temp_pack_visit (
-                zoid BIGINT NOT NULL
+                zoid BIGINT NOT NULL,
+                keep_tid BIGINT
             );
             CREATE UNIQUE INDEX temp_pack_visit_zoid ON temp_pack_visit (zoid);
             CREATE TEMPORARY TABLE temp_pack_child (
@@ -87,7 +88,8 @@ class MySQLAdapter(Adapter):
             INSERT INTO temp_pack_child
             SELECT DISTINCT to_zoid
             FROM object_ref
-                JOIN temp_pack_visit USING (zoid);
+                JOIN temp_pack_visit USING (zoid)
+            WHERE object_ref.tid >= temp_pack_visit.keep_tid;
 
             -- MySQL-specific syntax for table join in update
             UPDATE pack_object, temp_pack_child SET keep = %(TRUE)s
@@ -203,8 +205,8 @@ class MySQLAdapter(Adapter):
         -- the object and all its revisions will be removed.
         -- If keep is true, instead of removing the object,
         -- the pack operation will cut the object's history.
-        -- The keep_tid field specifies which revision to keep within
-        -- the list of packable transactions.
+        -- The keep_tid field specifies the oldest revision
+        -- of the object to keep.
         -- The visited flag is set when pre_pack is visiting an object's
         -- references, and remains set.
         CREATE TABLE pack_object (
@@ -265,6 +267,25 @@ class MySQLAdapter(Adapter):
                     (0, 'system', 'special transaction for object creation');
                 """
                 self._run_script(cursor, stmt)
+            except:
+                conn.rollback()
+                raise
+            else:
+                conn.commit()
+        finally:
+            self.close(conn, cursor)
+
+
+    def drop_all(self):
+        """Drop all tables and sequences."""
+        conn, cursor = self.open()
+        try:
+            try:
+                for tablename in ('pack_state_tid', 'pack_state',
+                        'pack_object', 'object_refs_added', 'object_ref',
+                        'current_object', 'object_state', 'new_oid',
+                        'transaction'):
+                    cursor.execute("DROP TABLE IF EXISTS %s" % tablename)
             except:
                 conn.rollback()
                 raise

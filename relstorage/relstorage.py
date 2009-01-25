@@ -1,6 +1,6 @@
 ##############################################################################
 #
-# Copyright (c) 2008 Zope Corporation and Contributors.
+# Copyright (c) 2008 Zope Foundation and Contributors.
 # All Rights Reserved.
 #
 # This software is subject to the provisions of the Zope Public License,
@@ -238,7 +238,9 @@ class RelStorage(BaseStorage,
     def _get_oid_cache_key(self, oid_int):
         """Return the cache key for finding the current tid.
 
-        This is overridden by BoundRelStorage.
+        This is overridden by BoundRelStorage.  This version always returns
+        None because a non-bound storage does not have a prev_polled_tid,
+        which is required for cache invalidation.
         """
         return None
 
@@ -261,12 +263,18 @@ class RelStorage(BaseStorage,
         else:
             msg.append("Current transaction is %d" % row[0])
 
-        rows = adapter.iter_object_history(cursor, oid_int)
         tids = []
-        for row in rows:
-            tids.append(row[0])
-            if len(tids) >= 10:
-                break
+        try:
+            rows = adapter.iter_object_history(cursor, oid_int)
+        except KeyError:
+            # The object has no history, at least from the point of view
+            # of the current database load connection.
+            pass
+        else:
+            for row in rows:
+                tids.append(row[0])
+                if len(tids) >= 10:
+                    break
         msg.append("Recent object tids: %s" % repr(tids))
         log.warning('; '.join(msg))
 

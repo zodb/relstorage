@@ -1,6 +1,6 @@
 ##############################################################################
 #
-# Copyright (c) 2008 Zope Corporation and Contributors.
+# Copyright (c) 2008 Zope Foundation and Contributors.
 # All Rights Reserved.
 #
 # This software is subject to the provisions of the Zope Public License,
@@ -223,9 +223,10 @@ class OracleAdapter(Adapter):
         -- the object and all its revisions will be removed.
         -- If keep is 'Y', instead of removing the object,
         -- the pack operation will cut the object's history.
-        -- If keep is 'Y' then the keep_tid field must also be set.
-        -- The keep_tid field specifies which revision to keep within
-        -- the list of packable transactions.
+        -- The keep_tid field specifies the oldest revision
+        -- of the object to keep.
+        -- The visited flag is set when pre_pack is visiting an object's
+        -- references, and remains set.
         CREATE TABLE pack_object (
             zoid        NUMBER(20) NOT NULL PRIMARY KEY,
             keep        CHAR NOT NULL CHECK (keep IN ('N', 'Y')),
@@ -250,7 +251,8 @@ class OracleAdapter(Adapter):
         -- Temporary state during packing: a list of objects
         -- whose references need to be examined.
         CREATE GLOBAL TEMPORARY TABLE temp_pack_visit (
-            zoid        NUMBER(20) NOT NULL PRIMARY KEY
+            zoid        NUMBER(20) NOT NULL PRIMARY KEY,
+            keep_tid    NUMBER(20)
         );
 
         -- Temporary state during undo: a list of objects
@@ -302,6 +304,27 @@ class OracleAdapter(Adapter):
                 CREATE SEQUENCE zoid_seq;
                 """
                 self._run_script(cursor, stmt)
+            except:
+                conn.rollback()
+                raise
+            else:
+                conn.commit()
+        finally:
+            self.close(conn, cursor)
+
+
+    def drop_all(self):
+        """Drop all tables and sequences."""
+        conn, cursor = self.open()
+        try:
+            try:
+                for tablename in ('pack_state_tid', 'pack_state',
+                        'pack_object', 'object_refs_added', 'object_ref',
+                        'current_object', 'object_state', 'transaction',
+                        'commit_lock', 'pack_lock',
+                        'temp_store', 'temp_undo', 'temp_pack_visit'):
+                    cursor.execute("DROP TABLE %s" % tablename)
+                cursor.execute("DROP SEQUENCE zoid_seq")
             except:
                 conn.rollback()
                 raise

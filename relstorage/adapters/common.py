@@ -1,6 +1,6 @@
 ##############################################################################
 #
-# Copyright (c) 2008 Zope Corporation and Contributors.
+# Copyright (c) 2008 Zope Foundation and Contributors.
 # All Rights Reserved.
 #
 # This software is subject to the provisions of the Zope Public License,
@@ -67,7 +67,8 @@ class Adapter(object):
 
         'create_temp_pack_visit': """
             CREATE TEMPORARY TABLE temp_pack_visit (
-                zoid BIGINT NOT NULL
+                zoid BIGINT NOT NULL,
+                keep_tid BIGINT
             );
             CREATE UNIQUE INDEX temp_pack_visit_zoid ON temp_pack_visit (zoid)
             """,
@@ -96,6 +97,7 @@ class Adapter(object):
                     SELECT DISTINCT to_zoid
                     FROM object_ref
                         JOIN temp_pack_visit USING (zoid)
+                    WHERE object_ref.tid >= temp_pack_visit.keep_tid
                 )
             """,
 
@@ -528,12 +530,9 @@ class Adapter(object):
         if stmt:
             self._run_script(cursor, stmt)
 
-        log.info("pre_pack: following references after the pack point")
-        # Fill object_ref with references from object states
-        # in transactions that will not be packed.
-        self._fill_nonpacked_refs(conn, cursor, pack_tid, get_references)
+        self.fill_object_refs(conn, cursor, get_references)
 
-        log.debug("pre_pack: populating pack_object")
+        log.info("pre_pack: filling the pack_object table")
         # Fill the pack_object table with OIDs that either will be
         # removed (if nothing references the OID) or whose history will
         # be cut.
@@ -561,7 +560,7 @@ class Adapter(object):
         -- Keep objects that are still referenced by object states in
         -- transactions that will not be packed.
         -- Use temp_pack_visit for temporary state; otherwise MySQL 5 chokes.
-        INSERT INTO temp_pack_visit
+        INSERT INTO temp_pack_visit (zoid)
         SELECT DISTINCT to_zoid
         FROM object_ref
         WHERE tid > %(pack_tid)s;
@@ -583,8 +582,7 @@ class Adapter(object):
         # repeatedly until all references have been satisfied.
         pass_num = 1
         while True:
-            log.info("pre_pack: following references before the pack point, "
-                "pass %d", pass_num)
+            log.info("pre_pack: following references, pass %d", pass_num)
 
             # Make a list of all parent objects that still need
             # to be visited.  Then set pack_object.visited for all pack_object
@@ -592,8 +590,8 @@ class Adapter(object):
             stmt = """
             %(TRUNCATE)s temp_pack_visit;
 
-            INSERT INTO temp_pack_visit (zoid)
-            SELECT zoid
+            INSERT INTO temp_pack_visit (zoid, keep_tid)
+            SELECT zoid, keep_tid
             FROM pack_object
             WHERE keep = %(TRUE)s
                 AND visited = %(FALSE)s;
@@ -621,8 +619,6 @@ class Adapter(object):
             log.debug("pre_pack: checking references from %d object(s)",
                 visit_count)
 
-            self._fill_pack_object_refs(conn, cursor, get_references)
-
             # Visit the children of all parent objects that were
             # just visited.
             stmt = self._scripts['prepack_follow_child_refs']
@@ -636,37 +632,6 @@ class Adapter(object):
                 break
             else:
                 pass_num += 1
-
-
-    def _fill_nonpacked_refs(self, conn, cursor, pack_tid, get_references):
-        """Fill object_ref for all transactions that will not be packed."""
-        stmt = """
-        SELECT DISTINCT tid
-        FROM object_state
-        WHERE tid > %(pack_tid)s
-            AND NOT EXISTS (
-                SELECT 1
-                FROM object_refs_added
-                WHERE tid = object_state.tid
-            )
-        """
-        self._run_script_stmt(cursor, stmt, {'pack_tid': pack_tid})
-        tids = [tid for (tid,) in cursor]
-        self._add_refs_for_tids(conn, cursor, tids, get_references)
-
-
-    def _fill_pack_object_refs(self, conn, cursor, get_references):
-        """Fill object_ref for all objects that are to be kept."""
-        stmt = """
-        SELECT DISTINCT keep_tid
-        FROM pack_object
-            LEFT JOIN object_refs_added ON (keep_tid = tid)
-        WHERE keep = %(TRUE)s
-            AND object_refs_added.tid IS NULL
-        """
-        self._run_script_stmt(cursor, stmt)
-        tids = [tid for (tid,) in cursor]
-        self._add_refs_for_tids(conn, cursor, tids, get_references)
 
 
     def _add_object_ref_rows(self, cursor, add_rows):
@@ -725,18 +690,29 @@ class Adapter(object):
         return to_count
 
 
-    def _add_refs_for_tids(self, conn, cursor, tids, get_references):
-        """Fill object_refs with all states for multiple transactions."""
+    def fill_object_refs(self, conn, cursor, get_references):
+        """Update the object_refs table by analyzing new transactions."""
+        stmt = """
+        SELECT transaction.tid
+        FROM transaction
+            LEFT JOIN object_refs_added
+                ON (transaction.tid = object_refs_added.tid)
+        WHERE object_refs_added.tid IS NULL
+        """
+        cursor.execute(stmt)
+        tids = [tid for (tid,) in cursor]
         if tids:
             added = 0
-            log.info("pre_pack: discovering references from objects in %d "
+            log.info("discovering references from objects in %d "
                 "transaction(s)" % len(tids))
             for tid in tids:
                 added += self._add_refs_for_tid(cursor, tid, get_references)
-                if added >= 1000:
+                if added >= 10000:
                     # save the work done so far
                     conn.commit()
                     added = 0
+            if added:
+                conn.commit()
 
 
     def _hold_commit_lock(self, cursor):

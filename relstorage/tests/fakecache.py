@@ -1,6 +1,6 @@
 ##############################################################################
 #
-# Copyright (c) 2008 Zope Foundation and Contributors.
+# Copyright (c) 2009 Zope Foundation and Contributors.
 # All Rights Reserved.
 #
 # This software is subject to the provisions of the Zope Public License,
@@ -11,17 +11,17 @@
 # FOR A PARTICULAR PURPOSE.
 #
 ##############################################################################
-"""Combines the tests of all adapters"""
+"""A memcache-like module sufficient for testing without an actual memcache.
+"""
 
-import unittest
+class Client(object):
 
-from testpostgresql import test_suite as postgresql_test_suite
-from testmysql import test_suite as mysql_test_suite
-from testoracle import test_suite as oracle_test_suite
+    def __init__(self, servers):
+        self.servers = servers
+        self.data = {}
 
-def make_suite():
-    suite = unittest.TestSuite()
-    suite.addTest(postgresql_test_suite())
-    suite.addTest(mysql_test_suite())
-    suite.addTest(oracle_test_suite())
-    return suite
+    def get(self, key):
+        return self.data.get(key)
+
+    def set(self, key, value):
+        self.data[key] = value
