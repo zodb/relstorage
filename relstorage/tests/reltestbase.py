@@ -224,6 +224,33 @@ class RelStorageTests(
         self.assertEqual(len(got), len(data))
         self.assertEqual(got, data)
 
+    def checkLoadFromCache(self):
+        # Store an object, cache it, then retrieve it from the cache
+        self._storage._options.cache_servers = 'x:1 y:2'
+        self._storage._options.cache_module_name = 'relstorage.tests.fakecache'
+
+        db = DB(self._storage)
+        try:
+            c1 = db.open()
+            cache = c1._storage._cache_client
+            self.assertEqual(cache.servers, ['x:1', 'y:2'])
+            self.assertEqual(len(cache.data), 0)
+            r1 = c1.root()
+            self.assertEqual(len(cache.data), 2)
+            r1['alpha'] = PersistentMapping()
+            transaction.commit()
+            oid = r1['alpha']._p_oid
+
+            self.assertEqual(len(cache.data), 2)
+            got, serialno = c1._storage.load(oid, '')
+            self.assertEqual(len(cache.data), 4)
+            # load the object from the cache
+            got, serialno = c1._storage.load(oid, '')
+            # try to load an object that doesn't exist
+            self.assertRaises(KeyError, c1._storage.load, 'bad.oid.', '')
+        finally:
+            db.close()
+
     def checkMultipleStores(self):
         # Verify a connection can commit multiple transactions
         db = DB(self._storage)
@@ -248,11 +275,14 @@ class RelStorageTests(
             c1.close()
 
             c1._storage._load_conn.close()
+            c1._storage._store_conn.close()
 
             c2 = db.open()
             self.assert_(c2 is c1)
             r = c2.root()
             self.assertEqual(r['alpha'], 1)
+            r['beta'] = 2
+            transaction.commit()
             c2.close()
         finally:
             db.close()
@@ -260,7 +290,7 @@ class RelStorageTests(
     def checkPollInterval(self):
         # Verify the poll_interval parameter causes RelStorage to
         # delay invalidation polling.
-        self._storage._poll_interval = 3600
+        self._storage._options.poll_interval = 3600
         db = DB(self._storage)
         try:
             c1 = db.open()
@@ -281,7 +311,10 @@ class RelStorageTests(
             storage.tpc_vote(t)
             storage.tpc_finish(t)
 
-            # c2 should not see the change yet
+            # flush invalidations to c2, but the poll timer has not
+            # yet expired, so the change to r2 should not be seen yet.
+            self.assertTrue(c2._storage._poll_at > 0)
+            c2._flush_invalidations()
             r2 = c2.root()
             self.assertEqual(r2['alpha'], 1)
 
