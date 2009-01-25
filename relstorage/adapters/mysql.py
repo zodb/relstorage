@@ -276,6 +276,25 @@ class MySQLAdapter(Adapter):
             self.close(conn, cursor)
 
 
+    def drop_all(self):
+        """Drop all tables and sequences."""
+        conn, cursor = self.open()
+        try:
+            try:
+                for tablename in ('pack_state_tid', 'pack_state',
+                        'pack_object', 'object_refs_added', 'object_ref',
+                        'current_object', 'object_state', 'new_oid',
+                        'transaction'):
+                    cursor.execute("DROP TABLE IF EXISTS %s" % tablename)
+            except:
+                conn.rollback()
+                raise
+            else:
+                conn.commit()
+        finally:
+            self.close(conn, cursor)
+
+
     def open(self, transaction_mode="ISOLATION LEVEL READ COMMITTED"):
         """Open a database connection and return (conn, cursor)."""
         try:

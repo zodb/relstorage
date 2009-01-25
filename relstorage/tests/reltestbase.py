@@ -70,6 +70,10 @@ class RelStorageTests(
     ReadOnlyStorage.ReadOnlyStorage
     ):
 
+    def checkDropAndPrepare(self):
+        self._storage._adapter.drop_all()
+        self._storage._adapter.prepare_schema()
+
     def checkCrossConnectionInvalidation(self):
         # Verify connections see updated state at txn boundaries
         db = DB(self._storage)
