@@ -334,6 +334,7 @@ class RelStorageTests(
                 c2._flush_invalidations()
                 r2 = c2.root()
                 self.assertEqual(r2['alpha'], 2)
+                self.assertFalse(c2._storage.need_poll())
             else:
                 self.assertFalse(c2._storage.need_poll())
                 c2._flush_invalidations()
