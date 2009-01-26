@@ -664,6 +664,15 @@ class RelStorage(BaseStorage,
         txn = self._prepared_txn
         assert txn is not None
         self._adapter.commit_phase2(self._store_cursor, txn)
+        cache = self._cache_client
+        if cache is not None:
+            if cache.incr('commit_count') is None:
+                # Use the current time as an initial commit_count value.
+                cache.add('commit_count', int(time.time()))
+                # A concurrent committer could have won the race to set the
+                # initial commit_count.  Increment commit_count so that it
+                # doesn't matter who won.
+                cache.incr('commit_count')
         self._prepared_txn = None
         self._ltid = self._tid
         self._tid = None
@@ -901,6 +910,10 @@ class BoundRelStorage(RelStorage):
             options=parent._options)
         # _prev_polled_tid contains the tid at the previous poll
         self._prev_polled_tid = None
+        # _commit_count contains the last polled value of the
+        # 'commit_count' cache key
+        self._commit_count = 0
+        # _poll_at is the time to poll regardless of commit_count
         self._poll_at = 0
 
     def _get_oid_cache_key(self, oid_int):
@@ -925,6 +938,30 @@ class BoundRelStorage(RelStorage):
         finally:
             self._lock_release()
 
+    def need_poll(self):
+        """Return true if polling is needed"""
+        now = time.time()
+
+        cache = self._cache_client
+        if cache is not None:
+            new_commit_count = cache.get('commit_count')
+            if new_commit_count != self._commit_count:
+                # There is new data ready to poll
+                self._commit_count = new_commit_count
+                self._poll_at = now
+                return True
+
+        if not self._load_transaction_open:
+            # Since the load connection is closed or does not have
+            # a transaction in progress, polling is required.
+            return True
+
+        if now >= self._poll_at:
+            # The poll timeout has expired
+            return True
+
+        return False
+
     def poll_invalidations(self):
         """Looks for OIDs of objects that changed since _prev_polled_tid
 
@@ -938,14 +975,10 @@ class BoundRelStorage(RelStorage):
                 return {}
 
             if self._options.poll_interval:
-                now = time.time()
-                if self._load_transaction_open and now < self._poll_at:
-                    # It's not yet time to poll again.  The previous load
-                    # transaction is still open, so it's safe to
-                    # ignore this poll.
+                if not self.need_poll():
                     return {}
-                # else poll now after resetting the timeout
-                self._poll_at = now + self._options.poll_interval
+                # reset the timeout
+                self._poll_at = time.time() + self._options.poll_interval
 
             self._restart_load()
             conn = self._load_conn

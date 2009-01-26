@@ -14,14 +14,27 @@
 """A memcache-like module sufficient for testing without an actual memcache.
 """
 
+data = {}
+
 class Client(object):
 
     def __init__(self, servers):
         self.servers = servers
-        self.data = {}
 
     def get(self, key):
-        return self.data.get(key)
+        return data.get(key)
 
     def set(self, key, value):
-        self.data[key] = value
+        data[key] = value
+
+    def add(self, key, value):
+        if key not in data:
+            data[key] = value
+
+    def incr(self, key):
+        value = data.get(key)
+        if value is None:
+            return None
+        value = int(value) + 1
+        data[key] = value
+        return value
