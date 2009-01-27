@@ -77,8 +77,8 @@ setup(
     classifiers=filter(None, classifiers.split("\n")),
     long_description = (
         read_file("README.txt") + "\n\n" +
-        "Changes\n" +
-        "=======\n\n" +
+        "Change History\n" +
+        "==============\n\n" +
         read_file("CHANGES.txt")),
     **setuptools_args
     )
