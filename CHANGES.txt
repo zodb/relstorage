@@ -1,5 +1,10 @@
 Next Release
 
+- When both cache-servers and poll-interval are set, we now poll the
+  cache for changes on every request.  This makes it possible to use
+  a high poll-interval to reduce the database polling burden, yet
+  every client can see changes immediately.
+
 - Added the pack-dry-run option, which causes pack operations to only
   populate the pack tables with the list of objects and states to pack,
   but not actually pack.

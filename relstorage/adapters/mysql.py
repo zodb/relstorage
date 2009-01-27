@@ -235,65 +235,38 @@ class MySQLAdapter(Adapter):
 
     def prepare_schema(self):
         """Create the database schema if it does not already exist."""
-        conn, cursor = self.open()
-        try:
-            try:
-                cursor.execute("SHOW TABLES LIKE 'object_state'")
-                if not cursor.rowcount:
-                    self.create_schema(cursor)
-            except:
-                conn.rollback()
-                raise
-            else:
-                conn.commit()
-        finally:
-            self.close(conn, cursor)
-
+        def callback(conn, cursor):
+            cursor.execute("SHOW TABLES LIKE 'object_state'")
+            if not cursor.rowcount:
+                self.create_schema(cursor)
+        self._open_and_call(callback)
 
     def zap_all(self):
         """Clear all data out of the database."""
-        conn, cursor = self.open()
-        try:
-            try:
-                stmt = """
-                DELETE FROM object_refs_added;
-                DELETE FROM object_ref;
-                DELETE FROM current_object;
-                DELETE FROM object_state;
-                TRUNCATE new_oid;
-                DELETE FROM transaction;
-                -- Create a transaction to represent object creation.
-                INSERT INTO transaction (tid, username, description) VALUES
-                    (0, 'system', 'special transaction for object creation');
-                """
-                self._run_script(cursor, stmt)
-            except:
-                conn.rollback()
-                raise
-            else:
-                conn.commit()
-        finally:
-            self.close(conn, cursor)
-
+        def callback(conn, cursor):
+            stmt = """
+            DELETE FROM object_refs_added;
+            DELETE FROM object_ref;
+            DELETE FROM current_object;
+            DELETE FROM object_state;
+            TRUNCATE new_oid;
+            DELETE FROM transaction;
+            -- Create a transaction to represent object creation.
+            INSERT INTO transaction (tid, username, description) VALUES
+                (0, 'system', 'special transaction for object creation');
+            """
+            self._run_script(cursor, stmt)
+        self._open_and_call(callback)
 
     def drop_all(self):
         """Drop all tables and sequences."""
-        conn, cursor = self.open()
-        try:
-            try:
-                for tablename in ('pack_state_tid', 'pack_state',
-                        'pack_object', 'object_refs_added', 'object_ref',
-                        'current_object', 'object_state', 'new_oid',
-                        'transaction'):
-                    cursor.execute("DROP TABLE IF EXISTS %s" % tablename)
-            except:
-                conn.rollback()
-                raise
-            else:
-                conn.commit()
-        finally:
-            self.close(conn, cursor)
-
+        def callback(conn, cursor):
+            for tablename in ('pack_state_tid', 'pack_state',
+                    'pack_object', 'object_refs_added', 'object_ref',
+                    'current_object', 'object_state', 'new_oid',
+                    'transaction'):
+                cursor.execute("DROP TABLE IF EXISTS %s" % tablename)
+        self._open_and_call(callback)
 
     def open(self, transaction_mode="ISOLATION LEVEL READ COMMITTED"):
         """Open a database connection and return (conn, cursor)."""

@@ -16,6 +16,7 @@
 import itertools
 import time
 from relstorage.relstorage import RelStorage
+from relstorage.tests import fakecache
 
 from ZODB.DB import DB
 from ZODB.utils import p64
@@ -42,13 +43,14 @@ class BaseRelStorageTests(StorageTestBase.StorageTestBase):
 
     def open(self, **kwargs):
         adapter = self.make_adapter()
-        self._storage = RelStorage(adapter, **kwargs)
+        self._storage = RelStorage(adapter, pack_gc=True, **kwargs)
 
     def setUp(self):
         self.open(create=1)
         self._storage.zap_all()
 
     def tearDown(self):
+        transaction.abort()
         self._storage.close()
         self._storage.cleanup()
 
@@ -231,25 +233,32 @@ class RelStorageTests(
     def checkLoadFromCache(self):
         # Store an object, cache it, then retrieve it from the cache
         self._storage._options.cache_servers = 'x:1 y:2'
-        self._storage._options.cache_module_name = 'relstorage.tests.fakecache'
+        self._storage._options.cache_module_name = fakecache.__name__
+        fakecache.data.clear()
 
         db = DB(self._storage)
         try:
             c1 = db.open()
-            cache = c1._storage._cache_client
-            self.assertEqual(cache.servers, ['x:1', 'y:2'])
-            self.assertEqual(len(cache.data), 0)
+            self.assertEqual(c1._storage._cache_client.servers, ['x:1', 'y:2'])
+            self.assertEqual(len(fakecache.data), 0)
             r1 = c1.root()
-            self.assertEqual(len(cache.data), 2)
+            # the root tid and state should now be cached
+            self.assertEqual(len(fakecache.data), 2)
             r1['alpha'] = PersistentMapping()
+            self.assertFalse('commit_count' in fakecache.data)
             transaction.commit()
+            self.assertTrue('commit_count' in fakecache.data)
+            self.assertEqual(len(fakecache.data), 3)
             oid = r1['alpha']._p_oid
 
-            self.assertEqual(len(cache.data), 2)
-            got, serialno = c1._storage.load(oid, '')
-            self.assertEqual(len(cache.data), 4)
-            # load the object from the cache
-            got, serialno = c1._storage.load(oid, '')
+            got, serial = c1._storage.load(oid, '')
+            # another tid and state should now be cached
+            self.assertEqual(len(fakecache.data), 5)
+
+            # load the object via loadSerial()
+            got2 = c1._storage.loadSerial(oid, serial)
+            self.assertEqual(got, got2)
+
             # try to load an object that doesn't exist
             self.assertRaises(KeyError, c1._storage.load, 'bad.oid.', '')
         finally:
@@ -291,7 +300,7 @@ class RelStorageTests(
         finally:
             db.close()
 
-    def checkPollInterval(self):
+    def checkPollInterval(self, using_cache=False):
         # Verify the poll_interval parameter causes RelStorage to
         # delay invalidation polling.
         self._storage._options.poll_interval = 3600
@@ -318,9 +327,19 @@ class RelStorageTests(
             # flush invalidations to c2, but the poll timer has not
             # yet expired, so the change to r2 should not be seen yet.
             self.assertTrue(c2._storage._poll_at > 0)
-            c2._flush_invalidations()
-            r2 = c2.root()
-            self.assertEqual(r2['alpha'], 1)
+            if using_cache:
+                # The cache reveals that a poll is needed even though
+                # the poll timeout has not expired.
+                self.assertTrue(c2._storage.need_poll())
+                c2._flush_invalidations()
+                r2 = c2.root()
+                self.assertEqual(r2['alpha'], 2)
+                self.assertFalse(c2._storage.need_poll())
+            else:
+                self.assertFalse(c2._storage.need_poll())
+                c2._flush_invalidations()
+                r2 = c2.root()
+                self.assertEqual(r2['alpha'], 1)
 
             # expire the poll timer and verify c2 sees the change
             c2._storage._poll_at -= 3601
@@ -334,6 +353,12 @@ class RelStorageTests(
 
         finally:
             db.close()
+
+    def checkPollIntervalWithCache(self):
+        self._storage._options.cache_servers = 'x:1'
+        self._storage._options.cache_module_name = fakecache.__name__
+        fakecache.data.clear()
+        self.checkPollInterval(using_cache=True)
 
 
     def checkTransactionalUndoIterator(self):
@@ -452,7 +477,7 @@ class RelStorageTests(
         finally:
             db.close()
 
-    def checkPackGC(self, gc_enabled=True):
+    def checkPackGC(self, expect_object_deleted=True):
         db = DB(self._storage)
         try:
             c1 = db.open()
@@ -473,7 +498,7 @@ class RelStorageTests(
                 packtime = time.time()
             self._storage.pack(packtime, referencesf)
 
-            if gc_enabled:
+            if expect_object_deleted:
                 # The object should now be gone
                 self.assertRaises(KeyError, self._storage.load, oid, '')
             else:
@@ -484,7 +509,11 @@ class RelStorageTests(
 
     def checkPackGCDisabled(self):
         self._storage._options.pack_gc = False
-        self.checkPackGC(gc_enabled=False)
+        self.checkPackGC(expect_object_deleted=False)
+
+    def checkPackGCDryRun(self):
+        self._storage._options.pack_dry_run = True
+        self.checkPackGC(expect_object_deleted=False)
 
     def checkPackOldUnreferenced(self):
         db = DB(self._storage)
@@ -513,6 +542,27 @@ class RelStorageTests(
             # B should be gone, since nothing refers to it.
             self.assertRaises(KeyError, self._storage.load, B._p_oid, '')
 
+        finally:
+            db.close()
+
+    def checkPackDutyCycle(self):
+        # Exercise the code in the pack algorithm that releases the
+        # commit lock for a time to allow concurrent transactions to commit.
+        self._storage._options.pack_batch_timeout = 0  # pause after every txn
+
+        slept = []
+        def sim_sleep(seconds):
+            slept.append(seconds)
+
+        db = DB(self._storage)
+        try:
+            # Pack
+            now = packtime = time.time()
+            while packtime <= now:
+                packtime = time.time()
+            self._storage.pack(packtime, referencesf, sleep=sim_sleep)
+
+            self.assertEquals(len(slept), 1)
         finally:
             db.close()
         

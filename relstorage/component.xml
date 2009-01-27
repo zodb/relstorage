@@ -26,18 +26,26 @@
     </key>
     <key name="poll-interval" datatype="float" required="no">
       <description>
-        Defer polling the database for the specified maximum time interval.
-        Set to 0 (the default) to always poll.  Fractional seconds are
-        allowed.
+        Defer polling the database for the specified maximum time interval,
+        in seconds.  Set to 0 (the default) to always poll.  Fractional
+        seconds are allowed.  Use this to lighten the database load on
+        servers with high read volume and low write volume.
 
-        Use this to lighten the database load on servers with high read
-        volume and low write volume.  A setting of 1-5 seconds is sufficient
-        for most systems.
+        The poll-interval option works best in conjunction with
+        the cache-servers option.  If both are enabled, RelStorage will
+        poll a single cache key for changes on every request.
+        The database will not be polled unless the cache indicates
+        there have been changes, or the timeout specified by poll-interval
+        has expired.  This configuration keeps clients fully up to date,
+        while removing much of the polling burden from the database.
+        A good cluster configuration is to use memcache servers
+        and a high poll-interval (say, 60 seconds).
 
-        While this setting should not affect database integrity,
-        it increases the probability of basing transactions on stale data,
-        leading to conflicts.  Thus a nonzero setting can hurt
-        the performance of servers with high write volume.
+        This option can be used without the cache-servers option,
+        but a large poll-interval without cache-servers increases the
+        probability of basing transactions on stale data, which does not
+        affect database consistency, but does increase the probability
+        of conflict errors, leading to low performance.
       </description>
     </key>
     <key name="pack-gc" datatype="boolean" default="true">
