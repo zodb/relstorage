@@ -11,23 +11,14 @@
 # FOR A PARTICULAR PURPOSE.
 #
 ##############################################################################
-"""A backend for ZODB that stores pickles in a relational database.
-
-This is designed to be a drop-in replacement for the standard ZODB
-combination of FileStorage and ZEO.  Multiple ZODB clients can
-share the same database without any additional configuration.
-Supports undo, historical database views, packing, and lossless
-migration between FileStorage and RelStorage instances.
-
-The supported relational databases are PostgreSQL 8.1 and above
-(using the psycopg2 Python module), MySQL 5.0 and above (using the
-MySQLdb 1.2.2 Python module), and Oracle 10g (using cx_Oracle 4.3).
-
-A small patch to ZODB is required.  See the patch files distributed
-with RelStorage.
-"""
+"""A backend for ZODB that stores pickles in a relational database."""
 
 VERSION = "1.1.2dev"
+
+# The choices for the Trove Development Status line:
+# Development Status :: 5 - Production/Stable
+# Development Status :: 4 - Beta
+# Development Status :: 3 - Alpha
 
 classifiers = """\
 Development Status :: 5 - Production/Stable
@@ -40,6 +31,7 @@ Operating System :: Microsoft :: Windows
 Operating System :: Unix
 """
 
+import os
 try:
     from setuptools import setup
 except ImportError:
@@ -64,6 +56,11 @@ else:
 
 doclines = __doc__.split("\n")
 
+def read_file(*path):
+    base_dir = os.path.dirname(__file__)
+    file_path = (base_dir, ) + tuple(path)
+    return file(os.path.join(*file_path)).read()
+
 setup(
     name="RelStorage",
     version=VERSION,
@@ -78,6 +75,10 @@ setup(
     platforms=["any"],
     description=doclines[0],
     classifiers=filter(None, classifiers.split("\n")),
-    long_description = "\n".join(doclines[2:]),
+    long_description = (
+        read_file("README.txt") + "\n\n" +
+        "Changes\n" +
+        "=======\n\n" +
+        read_file("CHANGES.txt")),
     **setuptools_args
     )

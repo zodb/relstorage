@@ -1,4 +1,6 @@
+
 Next Release
+------------
 
 - When both cache-servers and poll-interval are set, we now poll the
   cache for changes on every request.  This makes it possible to use
@@ -22,6 +24,7 @@ Next Release
 
 
 Version 1.1.1 (2008-12-27)
+--------------------------
 
 - Worked around MySQL performance bugs in packing.  Used temporary
   tables and another column in the pack_object table.  The
@@ -32,6 +35,7 @@ Version 1.1.1 (2008-12-27)
 
 
 Version 1.1 (2008-12-19)
+------------------------
 
 - Normalized poll-invalidation patches as Solaris' patch command would not
   accept the current format. The patches now apply with:
@@ -39,6 +43,7 @@ Version 1.1 (2008-12-19)
 
 - In MySQL, Use DROP TABLE IF EXISTS instead of TRUNCATE to clear 'temp_store'
   because:
+
   - TRUNCATE has one page of caveats in the MySQL documentation.
   - TEMPORARY TABLEs have half a page of caveats when it comes to
     replication.
@@ -62,6 +67,7 @@ Version 1.1 (2008-12-19)
 
 
 Version 1.1c1
+-------------
 
 - Added optional memcache integration.  This is useful when the connection
   to the relational database has high latency.
@@ -72,6 +78,7 @@ Version 1.1c1
 
 
 Version 1.1b2
+-------------
 
 - Made the MySQL locks database-specific rather than server-wide.  This is
   important for multi-database configurations.
@@ -85,6 +92,7 @@ Version 1.1b2
 
 
 Version 1.1b1
+-------------
 
 - Fixed the use of setup.py without setuptools.  Thanks to Chris Withers.
 
@@ -106,6 +114,7 @@ Version 1.1b1
 
 
 Version 1.0.1
+-------------
 
 - The speedtest script failed if run on a test database that has no tables.
   Now the script creates the tables if needed.  Thanks to Flavio Coelho
@@ -122,11 +131,13 @@ Version 1.0.1
 
 
 Version 1.0
+-----------
 
 - Added a utility for converting between storages called zodbconvert.
 
 
 Version 1.0c1
+-------------
 
 - The previous fix for non-ASCII characters was incorrect.  Now transaction
   metadata is stored as raw bytes.  A schema migration is required; see
@@ -136,6 +147,7 @@ Version 1.0c1
 
 
 Version 1.0 beta
+----------------
 
 - Renamed to reflect expanding database support.
 
@@ -190,6 +202,7 @@ PGStorage history
 =================
 
 Version 0.4
+-----------
 
 - Began using the PostgreSQL LISTEN and NOTIFY statements as a shortcut
   for invalidation polling.
@@ -230,11 +243,13 @@ Version 0.4
 
 
 Version 0.3
+-----------
 
 - Made compatible with Zope 3, although an undo bug apparently remains.
 
 
 Version 0.2
+-----------
 
 - Fixed concurrent commits, which were generating deadlocks.  Fixed by
   adding a special table, "commit_lock", which is used for
