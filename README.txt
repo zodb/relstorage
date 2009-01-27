@@ -1,11 +1,11 @@
 
-
 Overview
 ========
 
   RelStorage is a storage implementation for ZODB that stores pickles in a
 relational database.  PostgreSQL 8.1 and above (via psycopg2), MySQL 5.0.x (via
-MySQLdb), and Oracle 10g (via cx_Oracle) are currently supported.
+MySQLdb 1.2.2 and above), and Oracle 10g (via cx_Oracle) are currently
+supported.
 
   RelStorage replaces the PGStorage project.
 
@@ -48,12 +48,12 @@ command::
 
     python2.4 setup.py install --install-lib=${INSTANCE_HOME}/lib/python
 
-  Before you can use RelStorage, ZODB must have the invalidation polling patch
-applied.  Get it from Subversion (http://svn.zope.org/relstorage/trunk/). 
-There are two versions of the patch: one for ZODB 3.7.1 (which is part of Zope
-2.10.5) and one for ZODB 3.8.0 (which is part of Zope 2.11).  The patch has no
-effect on ZODB except when using RelStorage.  Hopefully, a future release of
-ZODB will include the feature.
+  RelStorage requires a version of ZODB with the invalidation polling patch
+applied.  You can get versions of ZODB with the patch already applied here:
+
+    http://packages.willowrise.org
+
+  The patches are also included in the source distribution of RelStorage.
 
   You need the Python database adapter that corresponds with your database. 
 Install psycopg2, MySQLdb 1.2.2+, or cx_Oracle 4.3+.  Note that Debian Etch
@@ -132,19 +132,29 @@ Migrating to a new version of RelStorage
   Sometimes RelStorage needs a schema modification along with a software
 upgrade.  Hopefully, this will not often be necessary.
 
-  To migrate from version 1.0 beta to version 1.0c1, see:
+  To migrate from version 1.1.1 to version 1.1.2, see:
 
-    migrate-1.0-beta.txt_
+    migrate-to-1.1.2.txt_
 
-    .. _migrate-1.0-beta.txt:
-http://svn.zope.org/*checkout*/relstorage/trunk/notes/migrate-1.0-beta.txt
+    .. _migrate-to-1.1.2.txt: http://svn.zope.org/*checkout*/relstorage/trunk/notes/migrate-to-1.1.2.txt
+
+  To migrate from version 1.1 to version 1.1.1, see:
+
+    migrate-to-1.1.1.txt_
+
+    .. _migrate-to-1.1.1.txt: http://svn.zope.org/*checkout*/relstorage/trunk/notes/migrate-to-1.1.1.txt
 
   To migrate from version 1.0.1 to version 1.1, see:
 
-    migrate-1.0.1.txt_
+    migrate-to-1.1.txt_
 
-    .. _migrate-1.0.1.txt:
-http://svn.zope.org/*checkout*/relstorage/branches/1.1/notes/migrate-1.0.1.txt
+    .. _migrate-to-1.1.txt: http://svn.zope.org/*checkout*/relstorage/trunk/notes/migrate-to-1.1.txt
+
+  To migrate from version 1.0 beta to version 1.0c1 through 1.0.1, see:
+
+    migrate-to-1.0.txt_
+
+    .. _migrate-to-1.0.txt: http://svn.zope.org/*checkout*/relstorage/trunk/notes/migrate-to-1.0.txt
 
 
 Optional Features
@@ -154,18 +164,26 @@ Optional Features
 
     poll-interval
 
-        Defer polling the database for the specified maximum time interval.
-        Set to 0 (the default) to always poll.  Fractional seconds are
-        allowed.
+        Defer polling the database for the specified maximum time interval,
+        in seconds.  Set to 0 (the default) to always poll.  Fractional
+        seconds are allowed.  Use this to lighten the database load on
+        servers with high read volume and low write volume.
 
-        Use this to lighten the database load on servers with high read
-        volume and low write volume.  A setting of 1-5 seconds is sufficient
-        for most systems.
+        The poll-interval option works best in conjunction with
+        the cache-servers option.  If both are enabled, RelStorage will
+        poll a single cache key for changes on every request.
+        The database will not be polled unless the cache indicates
+        there have been changes, or the timeout specified by poll-interval
+        has expired.  This configuration keeps clients fully up to date,
+        while removing much of the polling burden from the database.
+        A good cluster configuration is to use memcache servers
+        and a high poll-interval (say, 60 seconds).
 
-        While this setting should not affect database integrity,
-        it increases the probability of basing transactions on stale data,
-        leading to conflicts.  Thus a nonzero setting can hurt
-        the performance of servers with high write volume.
+        This option can be used without the cache-servers option,
+        but a large poll-interval without cache-servers increases the
+        probability of basing transactions on stale data, which does not
+        affect database consistency, but does increase the probability
+        of conflict errors, leading to low performance.
 
     pack-gc
 
@@ -180,6 +198,14 @@ Optional Features
 
         Disabling garbage collection is also a hack that ensures
         inter-database references never break.
+
+    pack-dry-run
+
+        If pack-dry-run is true, pack operations perform a full analysis
+        of what to pack, but no data is actually removed.  After a dry run,
+        the pack_object, pack_state, and pack_state_tid tables are filled
+        with the list of object states and objects that would have been
+        removed.
 
     pack-batch-timeout
 
@@ -226,8 +252,9 @@ Optional Features
     cache-module-name
 
         Specifies which Python memcache module to use.  The default is
-        "memcache", a pure Python module.  An alternative module is
-        "cmemcache".  This setting has no effect unless cache-servers is set.
+        "memcache", a pure Python module.  There are several alternative
+        modules available through PyPI.  This setting has no effect unless
+        cache-servers is set.
 
 Development
 ===========
@@ -245,10 +272,10 @@ mailing list.
 
 
 
-Probable FAQs
-==============
+FAQs
+====
 
-  Q: How can I help?
+  Q: How can I help improve RelStorage?
 
     A: The best way to help is to test and to provide database-specific
 expertise.  Ask questions about RelStorage on the zodb-dev mailing list.
