@@ -829,7 +829,7 @@ class RelStorage(BaseStorage,
             self._lock_release()
 
 
-    def pack(self, t, referencesf):
+    def pack(self, t, referencesf, sleep=time.sleep):
         if self._is_read_only:
             raise POSException.ReadOnlyError()
 
@@ -876,7 +876,7 @@ class RelStorage(BaseStorage,
                     log.info("pack: dry run complete")
                 else:
                     # Now pack.
-                    adapter.pack(tid_int, self._options)
+                    adapter.pack(tid_int, self._options, sleep=sleep)
                     self._after_pack()
             finally:
                 adapter.release_pack_lock(lock_cursor)

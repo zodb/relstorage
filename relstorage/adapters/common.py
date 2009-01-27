@@ -747,7 +747,7 @@ class Adapter(object):
         pass
 
 
-    def pack(self, pack_tid, options):
+    def pack(self, pack_tid, options, sleep=time.sleep):
         """Pack.  Requires the information provided by pre_pack."""
 
         # Read committed mode is sufficient.
@@ -797,7 +797,7 @@ class Adapter(object):
                             if delay > 0:
                                 log.debug('pack: sleeping %.4g second(s)',
                                     delay)
-                                time.sleep(delay)
+                                sleep(delay)
                         self._hold_commit_lock(cursor)
                         start = time.time()
 

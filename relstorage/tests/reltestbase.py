@@ -544,6 +544,27 @@ class RelStorageTests(
 
         finally:
             db.close()
+
+    def checkPackDutyCycle(self):
+        # Exercise the code in the pack algorithm that releases the
+        # commit lock for a time to allow concurrent transactions to commit.
+        self._storage._options.pack_batch_timeout = 0  # pause after every txn
+
+        slept = []
+        def sim_sleep(seconds):
+            slept.append(seconds)
+
+        db = DB(self._storage)
+        try:
+            # Pack
+            now = packtime = time.time()
+            while packtime <= now:
+                packtime = time.time()
+            self._storage.pack(packtime, referencesf, sleep=sim_sleep)
+
+            self.assertEquals(len(slept), 1)
+        finally:
+            db.close()
         
 
 
