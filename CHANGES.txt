@@ -43,6 +43,7 @@ Version 1.1 (2008-12-19)
 
 - In MySQL, Use DROP TABLE IF EXISTS instead of TRUNCATE to clear 'temp_store'
   because:
+
   - TRUNCATE has one page of caveats in the MySQL documentation.
   - TEMPORARY TABLEs have half a page of caveats when it comes to
     replication.
