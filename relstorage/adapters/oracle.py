@@ -15,6 +15,8 @@
 
 import logging
 import re
+import time
+
 import cx_Oracle
 from ZODB.POSException import StorageError
 
@@ -263,6 +265,9 @@ class OracleAdapter(Adapter):
         );
         """
         self._run_script(cursor, stmt)
+        # Let Oracle catch up with the new data definitions by sleeping.
+        # This reduces the likelihood of spurious ORA-01466 errors.
+	time.sleep(5)
 
 
     def prepare_schema(self):
