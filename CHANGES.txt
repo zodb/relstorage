@@ -1,6 +1,6 @@
 
-Next Release
-------------
+Version 1.1.2 (2009-01-27)
+--------------------------
 
 - When both cache-servers and poll-interval are set, we now poll the
   cache for changes on every request.  This makes it possible to use
