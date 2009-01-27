@@ -176,6 +176,26 @@ class Adapter(object):
             stmt = '\n'.join(lines)
             self._run_script_stmt(cursor, stmt, params)
 
+    def _open_and_call(self, callback):
+        """Call a function with an open connection and cursor.
+
+        If the function returns, commits the transaction and returns the
+        result returned by the function.
+        If the function raises an exception, aborts the transaction
+        then propagates the exception.
+        """
+        conn, cursor = self.open()
+        try:
+            try:
+                res = callback(conn, cursor)
+            except:
+                conn.rollback()
+                raise
+            else:
+                conn.commit()
+                return res
+        finally:
+            self.close(conn, cursor)
 
     def _transaction_iterator(self, cursor):
         """Iterate over a list of transactions returned from the database.
