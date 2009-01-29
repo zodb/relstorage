@@ -2,6 +2,8 @@
 Next Release
 ------------
 
+- In rare circumstances, ZODB can legitimately commit an object twice in a
+  single transaction.  Fixed RelStorage to accept that.
 
 
 Version 1.1.2 (2009-01-27)

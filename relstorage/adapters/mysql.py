@@ -464,7 +464,7 @@ class MySQLAdapter(Adapter):
     def store_temp(self, cursor, oid, prev_tid, md5sum, data):
         """Store an object in the temporary table."""
         stmt = """
-        INSERT INTO temp_store (zoid, prev_tid, md5, state)
+        REPLACE INTO temp_store (zoid, prev_tid, md5, state)
         VALUES (%s, %s, %s, %s)
         """
         cursor.execute(stmt, (oid, prev_tid, md5sum, MySQLdb.Binary(data)))

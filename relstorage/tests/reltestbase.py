@@ -21,6 +21,7 @@ from relstorage.tests import fakecache
 from ZODB.DB import DB
 from ZODB.utils import p64
 from ZODB.FileStorage import FileStorage
+from persistent import Persistent
 from persistent.mapping import PersistentMapping
 import transaction
 
@@ -565,7 +566,32 @@ class RelStorageTests(
             self.assertEquals(len(slept), 1)
         finally:
             db.close()
+
+    def checkDoubleCommitter(self):
+        # Verify we can store an object that gets committed twice in
+        # a single transaction.
+        db = DB(self._storage)
+        try:
+            conn = db.open()
+            try:
+                conn.root()['dc'] = DoubleCommitter()
+                transaction.commit()
+                conn2 = db.open()
+                self.assertEquals(conn2.root()['dc'].new_attribute, 1)
+                conn2.close()
+            finally:
+                transaction.abort()
+                conn.close()
+        finally:
+            db.close()
         
+
+class DoubleCommitter(Persistent):
+    """A crazy persistent class that changes self in __getstate__"""
+    def __getstate__(self):
+        if not hasattr(self, 'new_attribute'):
+            self.new_attribute = 1
+        return Persistent.__getstate__(self)
 
 
 class IteratorDeepCompareUnordered:

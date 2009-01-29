@@ -415,10 +415,11 @@ class PostgreSQLAdapter(Adapter):
     def store_temp(self, cursor, oid, prev_tid, md5sum, data):
         """Store an object in the temporary table."""
         stmt = """
+        DELETE FROM temp_store WHERE zoid = %s;
         INSERT INTO temp_store (zoid, prev_tid, md5, state)
         VALUES (%s, %s, %s, decode(%s, 'base64'))
         """
-        cursor.execute(stmt, (oid, prev_tid, md5sum, encodestring(data)))
+        cursor.execute(stmt, (oid, oid, prev_tid, md5sum, encodestring(data)))
 
     def replace_temp(self, cursor, oid, prev_tid, md5sum, data):
         """Replace an object in the temporary table."""

@@ -536,6 +536,7 @@ class OracleAdapter(Adapter):
 
     def store_temp(self, cursor, oid, prev_tid, md5sum, data):
         """Store an object in the temporary table."""
+        cursor.execute("DELETE FROM temp_store WHERE zoid = :oid", oid=oid)
         if len(data) <= 2000:
             # Send data inline for speed.  Oracle docs say maximum size
             # of a RAW is 2000 bytes.  cx_Oracle.BINARY corresponds with RAW.
