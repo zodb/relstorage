@@ -59,6 +59,14 @@ log = logging.getLogger("relstorage.adapters.mysql")
 
 commit_lock_timeout = 30
 
+# disconnected_exceptions contains the exception types that might be
+# raised when the connection to the database has been broken.
+disconnected_exceptions = (MySQLdb.OperationalError, MySQLdb.InterfaceError)
+
+# close_exceptions contains the exception types to ignore
+# when the adapter attempts to close a database connection.
+close_exceptions = disconnected_exceptions + (MySQLdb.ProgrammingError,)
+
 
 class MySQLAdapter(Adapter):
     """MySQL adapter for RelStorage."""
@@ -290,9 +298,7 @@ class MySQLAdapter(Adapter):
             if obj is not None:
                 try:
                     obj.close()
-                except (MySQLdb.InterfaceError,
-                        MySQLdb.OperationalError,
-                        MySQLdb.ProgrammingError):
+                except close_exceptions:
                     pass
 
     def open_for_load(self):
@@ -306,7 +312,7 @@ class MySQLAdapter(Adapter):
         """Reinitialize a connection for loading objects."""
         try:
             cursor.connection.rollback()
-        except (MySQLdb.OperationalError, MySQLdb.InterfaceError), e:
+        except disconnected_exceptions, e:
             raise StorageError(e)
 
     def get_object_count(self):
@@ -458,7 +464,7 @@ class MySQLAdapter(Adapter):
         try:
             cursor.connection.rollback()
             self._restart_temp_table(cursor)
-        except (MySQLdb.OperationalError, MySQLdb.InterfaceError), e:
+        except disconnected_exceptions, e:
             raise StorageError(e)
 
     def store_temp(self, cursor, oid, prev_tid, md5sum, data):

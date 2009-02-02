@@ -23,6 +23,10 @@ from common import Adapter
 
 log = logging.getLogger("relstorage.adapters.postgresql")
 
+# disconnected_exceptions contains the exception types that might be
+# raised when the connection to the database has been broken.
+disconnected_exceptions = (psycopg2.OperationalError, psycopg2.InterfaceError)
+
 
 class PostgreSQLAdapter(Adapter):
     """PostgreSQL adapter for RelStorage."""
@@ -202,8 +206,7 @@ class PostgreSQLAdapter(Adapter):
             if obj is not None:
                 try:
                     obj.close()
-                except (psycopg2.InterfaceError,
-                        psycopg2.OperationalError):
+                except disconnected_exceptions:
                     pass
 
     def _pg_version(self, cursor):
@@ -241,7 +244,7 @@ class PostgreSQLAdapter(Adapter):
         """Reinitialize a connection for loading objects."""
         try:
             cursor.connection.rollback()
-        except (psycopg2.OperationalError, psycopg2.InterfaceError), e:
+        except disconnected_exceptions, e:
             raise StorageError(e)
 
     def get_object_count(self):
@@ -409,7 +412,7 @@ class PostgreSQLAdapter(Adapter):
                 cursor.connection.set_isolation_level(
                     psycopg2.extensions.ISOLATION_LEVEL_READ_COMMITTED)
             self._make_temp_table(cursor)
-        except (psycopg2.OperationalError, psycopg2.InterfaceError), e:
+        except disconnected_exceptions, e:
             raise StorageError(e)
 
     def store_temp(self, cursor, oid, prev_tid, md5sum, data):
