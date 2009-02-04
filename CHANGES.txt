@@ -2,11 +2,19 @@
 Next Release
 ------------
 
+- ...
+
+
+Version 1.1.3 (2009-02-04)
+--------------------------
+
 - In rare circumstances, ZODB can legitimately commit an object twice in a
   single transaction.  Fixed RelStorage to accept that.
 
 - Auto reconnect to Oracle sometimes did not work because cx_Oracle was
   raising a different kind of exception than expected.  Fixed.
+
+- Included LICENSE.txt in the source distribution.
 
 
 Version 1.1.2 (2009-01-27)

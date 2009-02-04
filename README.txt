@@ -1,11 +1,10 @@
 
-Overview
-========
-
 RelStorage is a storage implementation for ZODB that stores pickles in a
 relational database.  PostgreSQL 8.1 and above (via psycopg2), MySQL 5.0.x (via
 MySQLdb 1.2.2 and above), and Oracle 10g (via cx_Oracle) are currently
 supported.  RelStorage replaces the PGStorage project.
+
+.. contents::
 
 
 Features
@@ -96,15 +95,19 @@ For Oracle (10g XE in this example)::
      </relstorage>
     </zodb_db>
 
+
+Migration
+=========
+
 Migrating from FileStorage
-==========================
+--------------------------
 
 You can convert a FileStorage instance to RelStorage and back using a utility
 called ZODBConvert.  See http://wiki.zope.org/ZODB/ZODBConvert .
 
 
 Migrating from PGStorage
-========================
+------------------------
 
 The following script migrates your database from PGStorage to RelStorage 1.0
 beta:
@@ -118,12 +121,12 @@ release.
 
 
 Migrating to a new version of RelStorage
-========================================
+----------------------------------------
 
 Sometimes RelStorage needs a schema modification along with a software
 upgrade.  Hopefully, this will not often be necessary.
 
-To migrate from version 1.1.1 to version 1.1.2, see:
+To migrate from version 1.1.1 to version 1.1.2 or 1.1.3, see:
 
   migrate-to-1.1.2.txt_
 

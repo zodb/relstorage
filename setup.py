@@ -13,7 +13,7 @@
 ##############################################################################
 """A backend for ZODB that stores pickles in a relational database."""
 
-VERSION = "1.2dev"
+VERSION = "1.1.3"
 
 # The choices for the Trove Development Status line:
 # Development Status :: 5 - Production/Stable
@@ -21,7 +21,7 @@ VERSION = "1.2dev"
 # Development Status :: 3 - Alpha
 
 classifiers = """\
-Development Status :: 4 - Beta
+Development Status :: 5 - Production/Stable
 Intended Audience :: Developers
 License :: OSI Approved :: Zope Public License
 Programming Language :: Python
