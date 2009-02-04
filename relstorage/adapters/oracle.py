@@ -24,6 +24,11 @@ from common import Adapter
 
 log = logging.getLogger("relstorage.adapters.oracle")
 
+# disconnected_exceptions contains the exception types that might be
+# raised when the connection to the database has been broken.
+disconnected_exceptions = (cx_Oracle.OperationalError,
+    cx_Oracle.InterfaceError, cx_Oracle.DatabaseError)
+
 def lob_handler(cursor, name, defaultType, size, precision, scale):
     """cx_Oracle outputtypehandler that causes Oracle to send BLOBs inline.
 
@@ -334,8 +339,7 @@ class OracleAdapter(Adapter):
             if obj is not None:
                 try:
                     obj.close()
-                except (cx_Oracle.InterfaceError,
-                        cx_Oracle.OperationalError):
+                except disconnected_exceptions:
                     pass
 
     def open_for_load(self):
@@ -350,7 +354,7 @@ class OracleAdapter(Adapter):
         try:
             cursor.connection.rollback()
             cursor.execute("SET TRANSACTION READ ONLY")
-        except (cx_Oracle.OperationalError, cx_Oracle.InterfaceError), e:
+        except disconnected_exceptions, e:
             raise StorageError(e)
 
     def get_object_count(self):
@@ -531,7 +535,7 @@ class OracleAdapter(Adapter):
             cursor.connection.rollback()
             if self._twophase:
                 self._set_xid(cursor)
-        except (cx_Oracle.OperationalError, cx_Oracle.InterfaceError), e:
+        except disconnected_exceptions, e:
             raise StorageError(e)
 
     def store_temp(self, cursor, oid, prev_tid, md5sum, data):
