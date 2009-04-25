@@ -21,7 +21,7 @@ VERSION = "1.2dev"
 # Development Status :: 3 - Alpha
 
 classifiers = """\
-Development Status :: 5 - Production/Stable
+Development Status :: 4 - Beta
 Intended Audience :: Developers
 License :: OSI Approved :: Zope Public License
 Programming Language :: Python
@@ -36,13 +36,16 @@ try:
     from setuptools import setup
 except ImportError:
     from distutils.core import setup
-    setuptools_args = dict(
+    setup_args = dict(
         scripts=['relstorage/zodbconvert.py'],
     )
 else:
-    setuptools_args = dict(
+    setup_args = dict(
         zip_safe=False,  # otherwise ZConfig can't see component.xml
-        install_requires=['ZODB3>=3.7.0'],
+        install_requires=[
+            'ZODB3>=3.7.0',
+            'zope.interface',
+            ],
         extras_require={
             'mysql':      ['MySQL-python>=1.2.2'],
             'postgresql': ['psycopg2>=2.0'],
@@ -66,7 +69,7 @@ setup(
     version=VERSION,
     maintainer="Shane Hathaway",
     maintainer_email="shane@hathawaymix.org",
-    url="http://wiki.zope.org/ZODB/RelStorage",
+    url="http://pypi.python.org/pypi/RelStorage",
     packages=['relstorage', 'relstorage.adapters', 'relstorage.tests'],
     package_data={
         'relstorage': ['component.xml'],
@@ -80,5 +83,5 @@ setup(
         "Change History\n" +
         "==============\n\n" +
         read_file("CHANGES.txt")),
-    **setuptools_args
+    **setup_args
     )
