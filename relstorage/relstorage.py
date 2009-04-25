@@ -19,7 +19,6 @@ Stores pickles in the database.
 import base64
 import cPickle
 import logging
-import md5
 import os
 import time
 import weakref
@@ -27,6 +26,8 @@ from ZODB.utils import p64, u64
 from ZODB.BaseStorage import BaseStorage, TransactionRecord, DataRecord
 from ZODB import ConflictResolution, POSException
 from persistent.TimeStamp import TimeStamp
+from zope.interface import Interface
+from zope.interface import implements
 
 try:
     from ZODB.interfaces import StorageStopIteration
@@ -35,6 +36,18 @@ except ImportError:
         """A combination of StopIteration and IndexError to provide a
         backwards-compatible exception.
         """
+
+try:
+    from ZODB.interfaces import IMVCCStorage
+except ImportError:
+    class IMVCCStorage(Interface):
+        """Stub for versions of ZODB that do not define IMVCCStorage.
+        """
+
+try:
+    from hashlib import md5
+except ImportError:
+    from md5 import new as md5
 
 
 log = logging.getLogger("relstorage")
@@ -50,6 +63,7 @@ abort_early = os.environ.get('RELSTORAGE_ABORT_EARLY')
 class RelStorage(BaseStorage,
                 ConflictResolution.ConflictResolvingStorage):
     """Storage to a relational database, based on invalidation polling"""
+    implements(IMVCCStorage)
 
     def __init__(self, adapter, name=None, create=True,
             read_only=False, options=None, **kwoptions):
@@ -120,6 +134,16 @@ class RelStorage(BaseStorage,
             self._cache_client = module.Client(servers)
         else:
             self._cache_client = None
+
+        # _prev_polled_tid contains the tid at the previous poll
+        self._prev_polled_tid = None
+
+        # _polled_commit_count contains the last polled value of the
+        # 'commit_count' cache key
+        self._polled_commit_count = 0
+
+        # _poll_at is the time to poll regardless of commit_count
+        self._poll_at = 0
 
 
     def _open_load_connection(self):
@@ -199,7 +223,7 @@ class RelStorage(BaseStorage,
     def zap_all(self):
         """Clear all objects and transactions out of the database.
 
-        Used by the test suite and migration scripts.
+        Used by the test suite and the ZODBConvert script.
         """
         self._adapter.zap_all()
         self._rollback_load_connection()
@@ -207,8 +231,18 @@ class RelStorage(BaseStorage,
         if cache is not None:
             cache.flush_all()
 
+    def release(self):
+        """Release back end database sessions used by this storage instance.
+        """
+        self._lock_acquire()
+        try:
+            self._drop_load_connection()
+            self._drop_store_connection()
+        finally:
+            self._lock_release()
+
     def close(self):
-        """Close the connections to the database."""
+        """Close the storage and all instances."""
         self._lock_acquire()
         try:
             self._closed = True
@@ -221,20 +255,16 @@ class RelStorage(BaseStorage,
         finally:
             self._lock_release()
 
-    def bind_connection(self, zodb_conn):
-        """Get a connection-bound storage instance.
+    def new_instance(self):
+        """Creates and returns another storage instance.
 
-        Connections have their own storage instances so that
-        the database can provide the MVCC semantics rather than ZODB.
+        See ZODB.interfaces.IMVCCStorage.
         """
-        res = BoundRelStorage(self, zodb_conn)
-        self._instances.append(weakref.ref(res))
-        return res
-
-    def connection_closing(self):
-        """Release resources."""
-        # Note that this is overridden in BoundRelStorage.
-        self._rollback_load_connection()
+        other = RelStorage(adapter=self._adapter, name=self._name,
+            create=False, read_only=self._is_read_only,
+            options=self._options)
+        self._instances.append(weakref.ref(other))
+        return other
 
     def __len__(self):
         return self._adapter.get_object_count()
@@ -242,15 +272,6 @@ class RelStorage(BaseStorage,
     def getSize(self):
         """Return database size in bytes"""
         return self._adapter.get_db_size()
-
-    def _get_oid_cache_key(self, oid_int):
-        """Return the cache key for finding the current tid.
-
-        This is overridden by BoundRelStorage.  This version always returns
-        None because a non-bound storage does not have a prev_polled_tid,
-        which is required for cache invalidation.
-        """
-        return None
 
     def _log_keyerror(self, oid_int, reason):
         """Log just before raising KeyError in load().
@@ -285,6 +306,13 @@ class RelStorage(BaseStorage,
                     break
         msg.append("Recent object tids: %s" % repr(tids))
         log.warning('; '.join(msg))
+
+    def _get_oid_cache_key(self, oid_int):
+        """Return the cache key for finding the current tid."""
+        my_tid = self._prev_polled_tid
+        if my_tid is None:
+            return None
+        return 'tid:%d:%d' % (oid_int, my_tid)
 
     def load(self, oid, version):
         oid_int = u64(oid)
@@ -423,7 +451,7 @@ class RelStorage(BaseStorage,
         # attempting to store objects after the vote phase has finished.
         # That should not happen, should it?
         assert self._prepared_txn is None
-        md5sum = md5.new(data).hexdigest()
+        md5sum = md5(data).hexdigest()
 
         adapter = self._adapter
         cursor = self._store_cursor
@@ -458,7 +486,7 @@ class RelStorage(BaseStorage,
         assert self._tid is not None
         assert self._prepared_txn is None
         if data is not None:
-            md5sum = md5.new(data).hexdigest()
+            md5sum = md5(data).hexdigest()
         else:
             # George Bailey object
             md5sum = None
@@ -590,7 +618,7 @@ class RelStorage(BaseStorage,
             else:
                 # resolved
                 data = rdata
-                md5sum = md5.new(data).hexdigest()
+                md5sum = md5(data).hexdigest()
                 self._adapter.replace_temp(
                     cursor, oid_int, prev_tid_int, md5sum, data)
                 resolved.add(oid)
@@ -877,7 +905,6 @@ class RelStorage(BaseStorage,
                 else:
                     # Now pack.
                     adapter.pack(tid_int, self._options, sleep=sleep)
-                    self._after_pack()
             finally:
                 adapter.release_pack_lock(lock_cursor)
         finally:
@@ -885,52 +912,23 @@ class RelStorage(BaseStorage,
             adapter.close(lock_conn, lock_cursor)
 
 
-    def _after_pack(self):
-        """Reset the transaction state after packing."""
-        # The tests depend on this.
-        self._rollback_load_connection()
-
     def iterator(self, start=None, stop=None):
         return TransactionIterator(self._adapter, start, stop)
 
+    def sync(self, force=True):
+        """Updates to a current view of the database.
 
-class BoundRelStorage(RelStorage):
-    """Storage to a database, bound to a particular ZODB.Connection."""
+        This is implemented by rolling back the transaction.
 
-    # The propagate_invalidations flag, set to a false value, tells
-    # the Connection not to propagate object invalidations across
-    # connections, since that ZODB feature is detrimental when the
-    # storage provides its own MVCC.
-    propagate_invalidations = False
-
-    def __init__(self, parent, zodb_conn):
-        # self._zodb_conn = zodb_conn
-        RelStorage.__init__(self, adapter=parent._adapter, name=parent._name,
-            create=False, read_only=parent._is_read_only,
-            options=parent._options)
-        # _prev_polled_tid contains the tid at the previous poll
-        self._prev_polled_tid = None
-        # _commit_count contains the last polled value of the
-        # 'commit_count' cache key
-        self._commit_count = 0
-        # _poll_at is the time to poll regardless of commit_count
-        self._poll_at = 0
-
-    def _get_oid_cache_key(self, oid_int):
-        my_tid = self._prev_polled_tid
-        if my_tid is None:
-            return None
-        return 'tid:%d:%d' % (oid_int, my_tid)
-
-    def connection_closing(self):
-        """Release resources."""
-        if not self._options.poll_interval:
-            self._rollback_load_connection()
-        # else keep the load transaction open so that it's possible
-        # to ignore the next poll.
-
-    def sync(self):
-        """Process pending invalidations regardless of poll interval"""
+        If force is False and a poll interval has been set, this call
+        is ignored. The poll_invalidations method will later choose to
+        sync with the database only if enough time has elapsed since
+        the last poll.
+        """
+        if not force and self._options.poll_interval:
+            # keep the load transaction open so that it's possible
+            # to ignore the next poll.
+            return
         self._lock_acquire()
         try:
             if self._load_transaction_open:
@@ -945,9 +943,9 @@ class BoundRelStorage(RelStorage):
         cache = self._cache_client
         if cache is not None:
             new_commit_count = cache.get('commit_count')
-            if new_commit_count != self._commit_count:
+            if new_commit_count != self._polled_commit_count:
                 # There is new data ready to poll
-                self._commit_count = new_commit_count
+                self._polled_commit_count = new_commit_count
                 self._poll_at = now
                 return True
 
@@ -1006,10 +1004,28 @@ class BoundRelStorage(RelStorage):
         finally:
             self._lock_release()
 
-    def _after_pack(self):
-        # Override transaction reset after packing.  If the connection
-        # wants to see the new state, it should call sync().
-        pass
+    # The propagate_invalidations flag implements the old
+    # invalidation polling API and is not otherwise used. Set to a
+    # false value, it tells the Connection not to propagate object
+    # invalidations across connections, since that ZODB feature is
+    # detrimental when the storage provides its own MVCC.
+    propagate_invalidations = False
+
+    def bind_connection(self, zodb_conn):
+        """Make a new storage instance.
+
+        This implements the old invalidation polling API and is not
+        otherwise used.
+        """
+        return self.new_instance()
+
+    def connection_closing(self):
+        """Release resources
+
+        This implements the old invalidation polling API and is not
+        otherwise used.
+        """
+        self.sync(False)
 
 
 class TransactionIterator(object):

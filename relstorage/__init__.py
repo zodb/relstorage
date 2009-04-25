@@ -14,9 +14,17 @@
 """relstorage package"""
 
 # perform a compatibility test
-from ZODB.Connection import Connection
-
-if not hasattr(Connection, '_poll_invalidations'):
-    raise ImportError('RelStorage requires the invalidation polling '
-        'patch for ZODB.')
-del Connection
+try:
+    from ZODB.interfaces import IMVCCStorage
+    del IMVCCStorage
+except ImportError:
+    # see if the polling patch has been applied
+    from ZODB.Connection import Connection
+    if not hasattr(Connection, '_poll_invalidations'):
+        raise ImportError('RelStorage requires the invalidation polling '
+            'patch for ZODB.')
+    del Connection
+else:
+    # We're running a version of ZODB that knows what to do with
+    # MVCC storages, so no patch is necessary.
+    pass

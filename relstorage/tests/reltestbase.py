@@ -235,13 +235,12 @@ class RelStorageTests(
         # Store an object, cache it, then retrieve it from the cache
         self._storage._options.cache_servers = 'x:1 y:2'
         self._storage._options.cache_module_name = fakecache.__name__
-        fakecache.data.clear()
 
         db = DB(self._storage)
         try:
             c1 = db.open()
             self.assertEqual(c1._storage._cache_client.servers, ['x:1', 'y:2'])
-            self.assertEqual(len(fakecache.data), 0)
+            fakecache.data.clear()
             r1 = c1.root()
             # the root tid and state should now be cached
             self.assertEqual(len(fakecache.data), 2)
@@ -498,6 +497,7 @@ class RelStorageTests(
             while packtime <= now:
                 packtime = time.time()
             self._storage.pack(packtime, referencesf)
+            self._storage.sync()
 
             if expect_object_deleted:
                 # The object should now be gone
