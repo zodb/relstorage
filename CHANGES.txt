@@ -2,6 +2,9 @@
 Next Release
 ------------
 
+- RelStorage now implements IMVCCStorage, making it compatible with
+  the upcoming ZODB 3.9 release.
+
 - ...
 
 
