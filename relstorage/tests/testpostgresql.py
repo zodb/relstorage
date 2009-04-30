@@ -22,7 +22,8 @@ from relstorage.adapters.postgresql import PostgreSQLAdapter
 
 class UsePostgreSQLAdapter:
     def make_adapter(self):
-        return PostgreSQLAdapter('dbname=relstoragetest')
+        return PostgreSQLAdapter(
+            'dbname=relstoragetest user=relstoragetest password=relstoragetest')
 
 class PostgreSQLTests(UsePostgreSQLAdapter, reltestbase.RelStorageTests):
     pass

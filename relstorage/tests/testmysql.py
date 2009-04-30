@@ -22,7 +22,11 @@ from relstorage.adapters.mysql import MySQLAdapter
 
 class UseMySQLAdapter:
     def make_adapter(self):
-        return MySQLAdapter(db='relstoragetest')
+        return MySQLAdapter(
+            db='relstoragetest',
+            user='relstoragetest',
+            passwd='relstoragetest',
+            )
 
 class MySQLTests(UseMySQLAdapter, reltestbase.RelStorageTests):
     pass
