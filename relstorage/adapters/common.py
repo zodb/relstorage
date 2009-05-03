@@ -790,6 +790,10 @@ class Adapter(object):
                         self._release_commit_lock(cursor)
                         # Add a delay based on the configured duty cycle.
                         elapsed = time.time() - start
+                        if elapsed == 0.0:
+                            # Compensate for low timer resolution by
+                            # assuming that at least 10 ms elapsed.
+                            elapsed = 0.01
                         duty_cycle = options.pack_duty_cycle
                         if duty_cycle > 0.0 and duty_cycle < 1.0:
                             delay = min(options.pack_max_delay,
