@@ -1,6 +1,6 @@
 
 Version 1.2.0b1 (2009-05-05)
---------------------------
+----------------------------
 
 - RelStorage now implements IMVCCStorage, making it compatible with
   ZODB 3.9.0b1 and above.
