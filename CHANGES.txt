@@ -1,11 +1,17 @@
 
-Next Release
-------------
+Version 1.2.0b1 (2009-05-05)
+--------------------------
 
 - RelStorage now implements IMVCCStorage, making it compatible with
-  the upcoming ZODB 3.9 release.
+  ZODB 3.9.0b1 and above.
 
-- ...
+- Removed two-phase commit support from the PostgreSQL adapter. The
+  feature turned out to be unnecessary.
+
+- Added MySQL 5.1.34 and above to the list of supportable databases.
+
+- Fixed minor test failures under Windows. Windows is now a supportable
+  platform.
 
 
 Version 1.1.3 (2009-02-04)

@@ -1,8 +1,9 @@
 
-RelStorage is a storage implementation for ZODB that stores pickles in a
-relational database.  PostgreSQL 8.1 and above (via psycopg2), MySQL 5.0.x (via
-MySQLdb 1.2.2 and above), and Oracle 10g (via cx_Oracle) are currently
-supported.  RelStorage replaces the PGStorage project.
+RelStorage is a storage implementation for ZODB that stores pickles in
+a relational database. PostgreSQL 8.1 and above (via psycopg2), MySQL
+5.0.32+ / 5.1.34+ (via MySQLdb 1.2.2 and above), and Oracle 10g (via
+cx_Oracle) are currently supported. RelStorage replaces the PGStorage
+project.
 
 .. contents::
 
@@ -50,8 +51,7 @@ You need the Python database adapter that corresponds with your database.
 Install psycopg2, MySQLdb 1.2.2+, or cx_Oracle 4.3+.  Note that Debian Etch
 ships MySQLdb 1.2.1, but that version has a bug in BLOB handling that manifests
 itself only with certain character set configurations.  MySQLdb 1.2.2 fixes the
-bug.  Also, MySQL 5.1.23 has major bugs that lead to loss of data when packing,
-so MySQL 5.1 is not recommended at this time.
+bug.
 
 Finally, modify etc/zope.conf of your Zope instance.  Remove the main mount
 point and add one of the following blocks.  For PostgreSQL::
@@ -125,6 +125,8 @@ Migrating to a new version of RelStorage
 
 Sometimes RelStorage needs a schema modification along with a software
 upgrade.  Hopefully, this will not often be necessary.
+
+Version 1.2.0b1 does not require a schema migration from version 1.1.3.
 
 To migrate from version 1.1.1 to version 1.1.2 or 1.1.3, see:
 
