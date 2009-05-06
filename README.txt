@@ -40,8 +40,10 @@ command::
 
     python2.4 setup.py install --install-lib=${INSTANCE_HOME}/lib/python
 
-RelStorage requires a version of ZODB with the invalidation polling patch
-applied.  You can get versions of ZODB with the patch already applied here:
+RelStorage requires a version of ZODB that is aware of MVCC storages.
+ZODB 3.9 supports RelStorage without any patches. ZODB 3.7 and 3.8 can
+support RelStorage if you first apply a patch to ZODB. You can get
+versions of ZODB with the patch already applied here:
 
     http://packages.willowrise.org
 
