@@ -31,9 +31,8 @@ disconnected_exceptions = (psycopg2.OperationalError, psycopg2.InterfaceError)
 class PostgreSQLAdapter(Adapter):
     """PostgreSQL adapter for RelStorage."""
 
-    def __init__(self, dsn='', twophase=False):
+    def __init__(self, dsn=''):
         self._dsn = dsn
-        self._twophase = twophase
 
     def create_schema(self, cursor):
         """Create the database tables."""
@@ -367,28 +366,15 @@ class PostgreSQLAdapter(Adapter):
 
     def _make_temp_table(self, cursor):
         """Create the temporary table for storing objects"""
-        if self._twophase:
-            # PostgreSQL does not allow two phase transactions
-            # to use temporary tables. :-(
-            stmt = """
-            CREATE TABLE temp_store (
-                zoid        BIGINT NOT NULL,
-                prev_tid    BIGINT NOT NULL,
-                md5         CHAR(32),
-                state       BYTEA
-            );
-            CREATE UNIQUE INDEX temp_store_zoid ON temp_store (zoid)
-            """
-        else:
-            stmt = """
-            CREATE TEMPORARY TABLE temp_store (
-                zoid        BIGINT NOT NULL,
-                prev_tid    BIGINT NOT NULL,
-                md5         CHAR(32),
-                state       BYTEA
-            ) ON COMMIT DROP;
-            CREATE UNIQUE INDEX temp_store_zoid ON temp_store (zoid)
-            """
+        stmt = """
+        CREATE TEMPORARY TABLE temp_store (
+            zoid        BIGINT NOT NULL,
+            prev_tid    BIGINT NOT NULL,
+            md5         CHAR(32),
+            state       BYTEA
+        ) ON COMMIT DROP;
+        CREATE UNIQUE INDEX temp_store_zoid ON temp_store (zoid)
+        """
         cursor.execute(stmt)
 
     def open_for_store(self):
@@ -408,9 +394,6 @@ class PostgreSQLAdapter(Adapter):
         """Reuse a store connection."""
         try:
             cursor.connection.rollback()
-            if self._twophase:
-                cursor.connection.set_isolation_level(
-                    psycopg2.extensions.ISOLATION_LEVEL_READ_COMMITTED)
             self._make_temp_table(cursor)
         except disconnected_exceptions, e:
             raise StorageError(e)
@@ -566,33 +549,15 @@ class PostgreSQLAdapter(Adapter):
         meaning that if commit_phase2() would raise any error, the error
         should be raised in commit_phase1() instead.
         """
-        if self._twophase:
-            txn = 'T%d' % tid
-            stmt = """
-            DROP TABLE temp_store;
-            PREPARE TRANSACTION %s
-            """
-            cursor.execute(stmt, (txn,))
-            cursor.connection.set_isolation_level(
-                psycopg2.extensions.ISOLATION_LEVEL_AUTOCOMMIT)
-            return txn
-        else:
-            return '-'
+        return '-'
 
     def commit_phase2(self, cursor, txn):
         """Final transaction commit."""
-        if self._twophase:
-            cursor.execute('COMMIT PREPARED %s', (txn,))
-        else:
-            cursor.connection.commit()
+        cursor.connection.commit()
 
     def abort(self, cursor, txn=None):
         """Abort the commit.  If txn is not None, phase 1 is also aborted."""
-        if self._twophase:
-            if txn is not None:
-                cursor.execute('ROLLBACK PREPARED %s', (txn,))
-        else:
-            cursor.connection.rollback()
+        cursor.connection.rollback()
 
     def new_oid(self, cursor):
         """Return a new, unused OID."""
