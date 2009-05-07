@@ -1,6 +1,6 @@
 ##############################################################################
 #
-# Copyright (c) 2008 Zope Foundation and Contributors.
+# Copyright (c) 2008-2009 Zope Foundation and Contributors.
 # All Rights Reserved.
 #
 # This software is subject to the provisions of the Zope Public License,
@@ -19,7 +19,7 @@ import psycopg2, psycopg2.extensions
 import re
 from ZODB.POSException import StorageError
 
-from common import Adapter
+from relstorage.adapters.packless.common import PacklessAdapter
 
 log = logging.getLogger("relstorage.adapters.postgresql")
 
@@ -28,8 +28,8 @@ log = logging.getLogger("relstorage.adapters.postgresql")
 disconnected_exceptions = (psycopg2.OperationalError, psycopg2.InterfaceError)
 
 
-class PostgreSQLAdapter(Adapter):
-    """PostgreSQL adapter for RelStorage."""
+class PacklessPostgreSQLAdapter(PacklessAdapter):
+    """Packless PostgreSQL adapter for RelStorage."""
 
     def __init__(self, dsn=''):
         self._dsn = dsn
@@ -39,108 +39,49 @@ class PostgreSQLAdapter(Adapter):
         stmt = """
         CREATE TABLE commit_lock ();
 
-        -- The list of all transactions in the database
-        CREATE TABLE transaction (
-            tid         BIGINT NOT NULL PRIMARY KEY,
-            packed      BOOLEAN NOT NULL DEFAULT FALSE,
-            empty       BOOLEAN NOT NULL DEFAULT FALSE,
-            username    BYTEA NOT NULL,
-            description BYTEA NOT NULL,
-            extension   BYTEA
-        );
-
-        -- Create a special transaction to represent object creation.  This
-        -- row is often referenced by object_state.prev_tid, but never by
-        -- object_state.tid.
-        INSERT INTO transaction (tid, username, description)
-            VALUES (0, 'system', 'special transaction for object creation');
-
         CREATE SEQUENCE zoid_seq;
 
-        -- All object states in all transactions.  Note that md5 and state
-        -- can be null to represent object uncreation.
+        -- All object states in all transactions.
         CREATE TABLE object_state (
-            zoid        BIGINT NOT NULL,
-            tid         BIGINT NOT NULL REFERENCES transaction
-                        CHECK (tid > 0),
-            PRIMARY KEY (zoid, tid),
-            prev_tid    BIGINT NOT NULL REFERENCES transaction,
-            md5         CHAR(32),
+            zoid        BIGINT NOT NULL PRIMARY KEY,
+            tid         BIGINT NOT NULL CHECK (tid > 0),
             state       BYTEA
         );
         CREATE INDEX object_state_tid ON object_state (tid);
-        CREATE INDEX object_state_prev_tid ON object_state (prev_tid);
-
-        -- Pointers to the current object state
-        CREATE TABLE current_object (
-            zoid        BIGINT NOT NULL PRIMARY KEY,
-            tid         BIGINT NOT NULL,
-            FOREIGN KEY (zoid, tid) REFERENCES object_state
-        );
-        CREATE INDEX current_object_tid ON current_object (tid);
 
         -- A list of referenced OIDs from each object_state.
-        -- This table is populated as needed during packing.
-        -- To prevent unnecessary table locking, it does not use
-        -- foreign keys, which is safe because rows in object_state
-        -- are never modified once committed, and rows are removed
-        -- from object_state only by packing.
+        -- This table is populated as needed during garbage collection.
         CREATE TABLE object_ref (
             zoid        BIGINT NOT NULL,
-            tid         BIGINT NOT NULL,
             to_zoid     BIGINT NOT NULL,
-            PRIMARY KEY (tid, zoid, to_zoid)
+            PRIMARY KEY (zoid, to_zoid)
         );
 
         -- The object_refs_added table tracks whether object_refs has
         -- been populated for all states in a given transaction.
         -- An entry is added only when the work is finished.
-        -- To prevent unnecessary table locking, it does not use
-        -- foreign keys, which is safe because object states
-        -- are never added to a transaction once committed, and
-        -- rows are removed from the transaction table only by
-        -- packing.
         CREATE TABLE object_refs_added (
             tid         BIGINT NOT NULL PRIMARY KEY
         );
 
-        -- Temporary state during packing:
-        -- The list of objects to pack.  If keep is false,
-        -- the object and all its revisions will be removed.
-        -- If keep is true, instead of removing the object,
-        -- the pack operation will cut the object's history.
-        -- The keep_tid field specifies the oldest revision
-        -- of the object to keep.
-        -- The visited flag is set when pre_pack is visiting an object's
-        -- references, and remains set.
-        CREATE TABLE pack_object (
+        -- Temporary state during garbage collection:
+        -- The list of all objects, a flag signifying whether
+        -- the object should be kept, and a flag signifying whether
+        -- the object's references have been visited.
+        CREATE TABLE gc_object (
             zoid        BIGINT NOT NULL PRIMARY KEY,
-            keep        BOOLEAN NOT NULL,
-            keep_tid    BIGINT NOT NULL,
+            keep        BOOLEAN NOT NULL DEFAULT FALSE,
             visited     BOOLEAN NOT NULL DEFAULT FALSE
         );
-        CREATE INDEX pack_object_keep_false ON pack_object (zoid)
+        CREATE INDEX gc_object_keep_false ON gc_object (zoid)
             WHERE keep = false;
-        CREATE INDEX pack_object_keep_true ON pack_object (visited)
+        CREATE INDEX gc_object_keep_true ON gc_object (visited)
             WHERE keep = true;
-
-        -- Temporary state during packing: the list of object states to pack.
-        CREATE TABLE pack_state (
-            tid         BIGINT NOT NULL,
-            zoid        BIGINT NOT NULL,
-            PRIMARY KEY (tid, zoid)
-        );
-
-        -- Temporary state during packing: the list of transactions that
-        -- have at least one object state to pack.
-        CREATE TABLE pack_state_tid (
-            tid         BIGINT NOT NULL PRIMARY KEY
-        );
         """
         cursor.execute(stmt)
 
         if not self._pg_has_advisory_locks(cursor):
-            cursor.execute("CREATE TABLE pack_lock ()")
+            cursor.execute("CREATE TABLE gc_lock ()")
 
 
     def prepare_schema(self):
@@ -161,12 +102,7 @@ class PostgreSQLAdapter(Adapter):
             cursor.execute("""
             DELETE FROM object_refs_added;
             DELETE FROM object_ref;
-            DELETE FROM current_object;
             DELETE FROM object_state;
-            DELETE FROM transaction;
-            -- Create a special transaction to represent object creation.
-            INSERT INTO transaction (tid, username, description) VALUES
-                (0, 'system', 'special transaction for object creation');
             ALTER SEQUENCE zoid_seq START WITH 1;
             """)
         self._open_and_call(callback)
@@ -176,10 +112,8 @@ class PostgreSQLAdapter(Adapter):
         def callback(conn, cursor):
             cursor.execute("SELECT tablename FROM pg_tables")
             existent = set([name for (name,) in cursor])
-            for tablename in ('pack_state_tid', 'pack_state',
-                    'pack_object', 'object_refs_added', 'object_ref',
-                    'current_object', 'object_state', 'transaction',
-                    'commit_lock', 'pack_lock'):
+            for tablename in ('gc_object', 'object_refs_added',
+                    'object_ref', 'object_state', 'commit_lock', 'pack_lock'):
                 if tablename in existent:
                     cursor.execute("DROP TABLE %s" % tablename)
             cursor.execute("DROP SEQUENCE zoid_seq")
@@ -232,7 +166,7 @@ class PostgreSQLAdapter(Adapter):
         stmt = """
         PREPARE get_latest_tid AS
         SELECT tid
-        FROM transaction
+        FROM object_state
         ORDER BY tid DESC
         LIMIT 1
         """
@@ -265,7 +199,7 @@ class PostgreSQLAdapter(Adapter):
         """
         cursor.execute("""
         SELECT tid
-        FROM current_object
+        FROM object_state
         WHERE zoid = %s
         """, (oid,))
         if cursor.rowcount:
@@ -280,8 +214,7 @@ class PostgreSQLAdapter(Adapter):
         """
         cursor.execute("""
         SELECT encode(state, 'base64'), tid
-        FROM current_object
-            JOIN object_state USING(zoid, tid)
+        FROM object_state
         WHERE zoid = %s
         """, (oid,))
         if cursor.rowcount:
@@ -370,7 +303,6 @@ class PostgreSQLAdapter(Adapter):
         CREATE TEMPORARY TABLE temp_store (
             zoid        BIGINT NOT NULL,
             prev_tid    BIGINT NOT NULL,
-            md5         CHAR(32),
             state       BYTEA
         ) ON COMMIT DROP;
         CREATE UNIQUE INDEX temp_store_zoid ON temp_store (zoid)
@@ -400,52 +332,46 @@ class PostgreSQLAdapter(Adapter):
 
     def store_temp(self, cursor, oid, prev_tid, data):
         """Store an object in the temporary table."""
-        md5sum = self.md5sum(data)
         stmt = """
         DELETE FROM temp_store WHERE zoid = %s;
-        INSERT INTO temp_store (zoid, prev_tid, md5, state)
-        VALUES (%s, %s, %s, decode(%s, 'base64'))
+        INSERT INTO temp_store (zoid, prev_tid, state)
+        VALUES (%s, %s, decode(%s, 'base64'))
         """
-        cursor.execute(stmt, (oid, oid, prev_tid, md5sum, encodestring(data)))
+        cursor.execute(stmt, (oid, oid, prev_tid, encodestring(data)))
 
     def replace_temp(self, cursor, oid, prev_tid, data):
         """Replace an object in the temporary table."""
-        md5sum = self.md5sum(data)
         stmt = """
         UPDATE temp_store SET
             prev_tid = %s,
-            md5 = %s,
             state = decode(%s, 'base64')
         WHERE zoid = %s
         """
-        cursor.execute(stmt, (prev_tid, md5sum, encodestring(data), oid))
+        cursor.execute(stmt, (prev_tid, encodestring(data), oid))
 
     def restore(self, cursor, oid, tid, data):
         """Store an object directly, without conflict detection.
 
         Used for copying transactions into this database.
         """
-        md5sum = self.md5sum(data)
         stmt = """
-        INSERT INTO object_state (zoid, tid, prev_tid, md5, state)
-        VALUES (%s, %s,
-            COALESCE((SELECT tid FROM current_object WHERE zoid = %s), 0),
-            %s, decode(%s, 'base64'))
+        DELETE FROM object_state WHERE zoid = %s;
+        INSERT INTO object_state (zoid, tid, state)
+        VALUES (%s, %s, decode(%s, 'base64'))
         """
         if data is not None:
             data = encodestring(data)
-        cursor.execute(stmt, (oid, tid, oid, md5sum, data))
+        cursor.execute(stmt, (oid, oid, tid, data))
 
     def start_commit(self, cursor):
         """Prepare to commit."""
         # Hold commit_lock to prevent concurrent commits
         # (for as short a time as possible).
-        # Lock transaction and current_object in share mode to ensure
+        # Lock object_state in share mode to ensure
         # conflict detection has the most current data.
         cursor.execute("""
         LOCK TABLE commit_lock IN EXCLUSIVE MODE;
-        LOCK TABLE transaction IN SHARE MODE;
-        LOCK TABLE current_object IN SHARE MODE
+        LOCK TABLE object_state IN SHARE MODE
         """)
 
     def get_tid_and_time(self, cursor):
@@ -455,25 +381,19 @@ class PostgreSQLAdapter(Adapter):
         """
         cursor.execute("""
         SELECT tid, EXTRACT(EPOCH FROM CURRENT_TIMESTAMP)
-        FROM transaction
+        FROM object_state
         ORDER BY tid DESC
         LIMIT 1
         """)
-        assert cursor.rowcount == 1
-        return cursor.fetchone()
+        if cursor.rowcount:
+            return cursor.fetchone()
+        else:
+            return 0, 0
 
     def add_transaction(self, cursor, tid, username, description, extension,
             packed=False):
         """Add a transaction."""
-        stmt = """
-        INSERT INTO transaction
-            (tid, packed, username, description, extension)
-        VALUES (%s, %s,
-            decode(%s, 'base64'), decode(%s, 'base64'), decode(%s, 'base64'))
-        """
-        cursor.execute(stmt, (tid, packed,
-            encodestring(username), encodestring(description),
-            encodestring(extension)))
+        pass
 
     def detect_conflict(self, cursor):
         """Find one conflict in the data about to be committed.
@@ -482,11 +402,11 @@ class PostgreSQLAdapter(Adapter):
         attempted_data).  If there is no conflict, returns None.
         """
         stmt = """
-        SELECT temp_store.zoid, current_object.tid, temp_store.prev_tid,
+        SELECT temp_store.zoid, object_state.tid, temp_store.prev_tid,
             encode(temp_store.state, 'base64')
         FROM temp_store
-            JOIN current_object ON (temp_store.zoid = current_object.zoid)
-        WHERE temp_store.prev_tid != current_object.tid
+            JOIN object_state ON (temp_store.zoid = object_state.zoid)
+        WHERE temp_store.prev_tid != object_state.tid
         LIMIT 1
         """
         cursor.execute(stmt)
@@ -501,8 +421,11 @@ class PostgreSQLAdapter(Adapter):
         Returns the list of oids stored.
         """
         stmt = """
-        INSERT INTO object_state (zoid, tid, prev_tid, md5, state)
-        SELECT zoid, %s, prev_tid, md5, state
+        DELETE FROM object_state
+        WHERE zoid IN (SELECT zoid FROM temp_store);
+
+        INSERT INTO object_state (zoid, tid, state)
+        SELECT zoid, %s, state
         FROM temp_store
         """
         cursor.execute(stmt, (tid,))
@@ -518,23 +441,7 @@ class PostgreSQLAdapter(Adapter):
 
         tid is the integer tid of the transaction being committed.
         """
-        cursor.execute("""
-        -- Insert objects created in this transaction into current_object.
-        INSERT INTO current_object (zoid, tid)
-        SELECT zoid, tid FROM object_state
-        WHERE tid = %(tid)s
-            AND prev_tid = 0;
-
-        -- Change existing objects.  To avoid deadlocks,
-        -- update in OID order.
-        UPDATE current_object SET tid = %(tid)s
-        WHERE zoid IN (
-            SELECT zoid FROM object_state
-            WHERE tid = %(tid)s
-                AND prev_tid != 0
-            ORDER BY zoid
-        )
-        """, {'tid': tid})
+        pass
 
     def set_min_oid(self, cursor, oid):
         """Ensure the next OID is at least the given OID."""
@@ -569,24 +476,26 @@ class PostgreSQLAdapter(Adapter):
         return cursor.fetchone()[0]
 
     def hold_pack_lock(self, cursor):
-        """Try to acquire the pack lock.
+        """Try to acquire the garbage collection lock.
 
-        Raise an exception if packing or undo is already in progress.
+        Raise an exception if gc is already in progress.
         """
         if self._pg_has_advisory_locks(cursor):
             cursor.execute("SELECT pg_try_advisory_lock(1)")
             locked = cursor.fetchone()[0]
             if not locked:
-                raise StorageError('A pack or undo operation is in progress')
+                raise StorageError(
+                    'A garbage collection operation is in progress')
         else:
-            # b/w compat
+            # b/w compat with PostgreSQL 8.1
             try:
-                cursor.execute("LOCK pack_lock IN EXCLUSIVE MODE NOWAIT")
+                cursor.execute("LOCK gc_lock IN EXCLUSIVE MODE NOWAIT")
             except psycopg2.DatabaseError:
-                raise StorageError('A pack or undo operation is in progress')
+                raise StorageError(
+                    'A garbage collection operation is in progress')
 
     def release_pack_lock(self, cursor):
-        """Release the pack lock."""
+        """Release the garbage collection lock."""
         if self._pg_has_advisory_locks(cursor):
             cursor.execute("SELECT pg_advisory_unlock(1)")
         # else no action needed since the lock will be released at txn commit

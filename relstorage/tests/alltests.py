@@ -18,10 +18,12 @@ import unittest
 from testpostgresql import test_suite as postgresql_test_suite
 from testmysql import test_suite as mysql_test_suite
 from testoracle import test_suite as oracle_test_suite
+from testpacklesspostgresql import test_suite as packless_postgresql_test_suite
 
 def make_suite():
     suite = unittest.TestSuite()
     suite.addTest(postgresql_test_suite())
     suite.addTest(mysql_test_suite())
     suite.addTest(oracle_test_suite())
+    suite.addTest(packless_postgresql_test_suite())
     return suite

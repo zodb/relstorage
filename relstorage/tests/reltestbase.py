@@ -36,7 +36,7 @@ from ZODB.tests.StorageTestBase import zodb_unpickle, zodb_pickle
 from ZODB.serialize import referencesf
 
 
-class BaseRelStorageTests(StorageTestBase.StorageTestBase):
+class RelStorageTestBase(StorageTestBase.StorageTestBase):
 
     def make_adapter(self):
         # abstract method
@@ -56,21 +56,15 @@ class BaseRelStorageTests(StorageTestBase.StorageTestBase):
         self._storage.cleanup()
 
 
-class RelStorageTests(
-    BaseRelStorageTests,
+class GenericRelStorageTests(
+    RelStorageTestBase,
     BasicStorage.BasicStorage,
-    TransactionalUndoStorage.TransactionalUndoStorage,
-    RevisionStorage.RevisionStorage,
     PackableStorage.PackableStorage,
-    PackableStorage.PackableUndoStorage,
     Synchronization.SynchronizedStorage,
     ConflictResolution.ConflictResolvingStorage,
-    HistoryStorage.HistoryStorage,
-    IteratorStorage.IteratorStorage,
-    IteratorStorage.ExtendedIteratorStorage,
     PersistentStorage.PersistentStorage,
     MTStorage.MTStorage,
-    ReadOnlyStorage.ReadOnlyStorage
+    ReadOnlyStorage.ReadOnlyStorage,
     ):
 
     def checkDropAndPrepare(self):
@@ -360,6 +354,35 @@ class RelStorageTests(
         fakecache.data.clear()
         self.checkPollInterval(using_cache=True)
 
+    def checkDoubleCommitter(self):
+        # Verify we can store an object that gets committed twice in
+        # a single transaction.
+        db = DB(self._storage)
+        try:
+            conn = db.open()
+            try:
+                conn.root()['dc'] = DoubleCommitter()
+                transaction.commit()
+                conn2 = db.open()
+                self.assertEquals(conn2.root()['dc'].new_attribute, 1)
+                conn2.close()
+            finally:
+                transaction.abort()
+                conn.close()
+        finally:
+            db.close()
+
+
+class RelStorageTests(
+    GenericRelStorageTests,
+    TransactionalUndoStorage.TransactionalUndoStorage,
+    IteratorStorage.IteratorStorage,
+    IteratorStorage.ExtendedIteratorStorage,
+    RevisionStorage.RevisionStorage,
+    PackableStorage.PackableUndoStorage,
+    HistoryStorage.HistoryStorage,
+    ConflictResolution.ConflictResolvingTransUndoStorage,
+    ):
 
     def checkTransactionalUndoIterator(self):
         # this test overrides the broken version in TransactionalUndoStorage.
@@ -567,24 +590,6 @@ class RelStorageTests(
         finally:
             db.close()
 
-    def checkDoubleCommitter(self):
-        # Verify we can store an object that gets committed twice in
-        # a single transaction.
-        db = DB(self._storage)
-        try:
-            conn = db.open()
-            try:
-                conn.root()['dc'] = DoubleCommitter()
-                transaction.commit()
-                conn2 = db.open()
-                self.assertEquals(conn2.root()['dc'].new_attribute, 1)
-                conn2.close()
-            finally:
-                transaction.abort()
-                conn.close()
-        finally:
-            db.close()
-        
 
 class DoubleCommitter(Persistent):
     """A crazy persistent class that changes self in __getstate__"""
@@ -647,7 +652,7 @@ for name, attr in RecoveryStorage.RecoveryStorage.__dict__.items():
         setattr(RecoveryStorageSubset, name, attr)
 
 
-class ToFileStorage(BaseRelStorageTests, RecoveryStorageSubset):
+class ToFileStorage(RelStorageTestBase, RecoveryStorageSubset):
     def setUp(self):
         self.open(create=1)
         self._storage.zap_all()
@@ -663,7 +668,7 @@ class ToFileStorage(BaseRelStorageTests, RecoveryStorageSubset):
         return FileStorage('Dest.fs')
 
 
-class FromFileStorage(BaseRelStorageTests, RecoveryStorageSubset):
+class FromFileStorage(RelStorageTestBase, RecoveryStorageSubset):
     def setUp(self):
         self.open(create=1)
         self._storage.zap_all()
