@@ -354,7 +354,8 @@ class Adapter(object):
         Parameters: "undo_tid", the integer tid of the transaction to undo,
         and "self_tid", the integer tid of the current transaction.
 
-        Returns the list of OIDs undone.
+        Returns the states copied forward by the undo operation as a
+        list of (oid, old_tid).
         """
         stmt = self._scripts['create_temp_undo']
         if stmt:
@@ -387,7 +388,7 @@ class Adapter(object):
         WHERE zoid IN (SELECT zoid FROM temp_undo)
             AND tid = %(self_tid)s;
 
-        -- Add new undo records.
+        -- Copy old states forward.
         INSERT INTO object_state (zoid, tid, prev_tid, md5, state)
         SELECT temp_undo.zoid, %(self_tid)s, current_object.tid,
             prev.md5, prev.state
@@ -397,12 +398,12 @@ class Adapter(object):
                 ON (prev.zoid = temp_undo.zoid
                     AND prev.tid = temp_undo.prev_tid);
 
-        -- List the changed OIDs.
-        SELECT zoid FROM temp_undo
+        -- List the copied states.
+        SELECT zoid, prev_tid FROM temp_undo
         """
         self._run_script(cursor, stmt,
             {'undo_tid': undo_tid, 'self_tid': self_tid})
-        res = [oid for (oid,) in cursor]
+        res = list(cursor)
 
         stmt = self._scripts['reset_temp_undo']
         if stmt:
@@ -747,7 +748,7 @@ class Adapter(object):
         pass
 
 
-    def pack(self, pack_tid, options, sleep=time.sleep):
+    def pack(self, pack_tid, options, sleep=time.sleep, packed_func=None):
         """Pack.  Requires the information provided by pre_pack."""
 
         # Read committed mode is sufficient.
@@ -779,31 +780,26 @@ class Adapter(object):
                 # Pack in small batches of transactions in order to minimize
                 # the interruption of concurrent write operations.
                 start = time.time()
+                packed_list = []
                 self._hold_commit_lock(cursor)
                 for tid, packed, has_removable in tid_rows:
                     self._pack_transaction(
-                        cursor, pack_tid, tid, packed, has_removable)
+                        cursor, pack_tid, tid, packed, has_removable,
+                        packed_list)
                     if time.time() >= start + options.pack_batch_timeout:
-                        # commit the work done so far and release the
-                        # commit lock for a short time
                         conn.commit()
+                        if packed_func is not None:
+                            for oid, tid in packed_list:
+                                packed_func(oid, tid)
+                        del packed_list[:]
                         self._release_commit_lock(cursor)
-                        # Add a delay based on the configured duty cycle.
-                        elapsed = time.time() - start
-                        if elapsed == 0.0:
-                            # Compensate for low timer resolution by
-                            # assuming that at least 10 ms elapsed.
-                            elapsed = 0.01
-                        duty_cycle = options.pack_duty_cycle
-                        if duty_cycle > 0.0 and duty_cycle < 1.0:
-                            delay = min(options.pack_max_delay,
-                                elapsed * (1.0 / duty_cycle - 1.0))
-                            if delay > 0:
-                                log.debug('pack: sleeping %.4g second(s)',
-                                    delay)
-                                sleep(delay)
+                        self._pause_pack(sleep, options, start)
                         self._hold_commit_lock(cursor)
                         start = time.time()
+                if packed_func is not None:
+                    for oid, tid in packed_list:
+                        packed_func(oid, tid)
+                packed_list = None
 
                 self._pack_cleanup(conn, cursor)
 
@@ -819,9 +815,23 @@ class Adapter(object):
         finally:
             self.close(conn, cursor)
 
+    def _pause_pack(self, sleep, options, start):
+        """Pause packing to allow concurrent commits."""
+        elapsed = time.time() - start
+        if elapsed == 0.0:
+            # Compensate for low timer resolution by
+            # assuming that at least 10 ms elapsed.
+            elapsed = 0.01
+        duty_cycle = options.pack_duty_cycle
+        if duty_cycle > 0.0 and duty_cycle < 1.0:
+            delay = min(options.pack_max_delay,
+                elapsed * (1.0 / duty_cycle - 1.0))
+            if delay > 0:
+                log.debug('pack: sleeping %.4g second(s)', delay)
+                sleep(delay)
 
     def _pack_transaction(self, cursor, pack_tid, tid, packed,
-            has_removable):
+            has_removable, packed_list):
         """Pack one transaction.  Requires populated pack tables."""
         log.debug("pack: transaction %d: packing", tid)
         removed_objects = 0
@@ -844,6 +854,15 @@ class Adapter(object):
             """
             self._run_script_stmt(cursor, stmt,
                 {'pack_tid': pack_tid, 'tid': tid})
+
+            stmt = """
+            SELECT pack_state.zoid
+            FROM pack_state
+            WHERE pack_state.tid = %(tid)s
+            """
+            self._run_script_stmt(cursor, stmt, {'tid': tid})
+            for (oid,) in cursor:
+                packed_list.append((oid, tid))
 
         # Find out whether the transaction is empty
         stmt = self._scripts['transaction_has_data']

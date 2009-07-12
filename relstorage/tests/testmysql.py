@@ -37,11 +37,42 @@ class MySQLToFile(UseMySQLAdapter, reltestbase.ToFileStorage):
 class FileToMySQL(UseMySQLAdapter, reltestbase.FromFileStorage):
     pass
 
+db_names = {
+    'data': 'relstoragetest',
+    '1': 'relstoragetest',
+    '2': 'relstoragetest2',
+    'dest': 'relstoragetest2',
+    }
 
 def test_suite():
     suite = unittest.TestSuite()
     for klass in [MySQLTests, MySQLToFile, FileToMySQL]:
         suite.addTest(unittest.makeSuite(klass, "check"))
+
+    try:
+        from ZODB.tests.testblob import storage_reusable_suite
+    except ImportError:
+        # ZODB < 3.9
+        pass
+    else:
+        def create_storage(name, blob_dir):
+            from relstorage.relstorage import RelStorage
+            adapter = MySQLAdapter(
+                db=db_names[name],
+                user='relstoragetest',
+                passwd='relstoragetest',
+                )
+            storage = RelStorage(adapter, name=name, create=True,
+                blob_dir=blob_dir)
+            storage.zap_all()
+            return storage
+
+        suite.addTest(storage_reusable_suite(
+            'MySQL', create_storage,
+            test_blob_storage_recovery=True,
+            test_packing=True,
+            ))
+
     return suite
 
 if __name__=='__main__':

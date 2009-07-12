@@ -1,4 +1,14 @@
 
+Next Feature Release
+--------------------
+
+- Added support for a blob directory. No BlobStorage wrapper is needed.
+  Cluster nodes will need to use a shared filesystem such as NFS or
+  SMB/CIFS.
+
+- [TODO: add the blob_dir parameter to component.xml and README]
+
+
 Version 1.2.0b2 (2009-05-05)
 ----------------------------
 
