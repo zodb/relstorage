@@ -1189,16 +1189,18 @@ class RelStorage(BaseStorage,
         self._txn_blobs[oid] = filename
 
     def copyTransactionsFrom(self, other):
-        # copied from ZODB.blob.BlobStorageMixin
+        # adapted from ZODB.blob.BlobStorageMixin
         for trans in other.iterator():
             self.tpc_begin(trans, trans.tid, trans.status)
             for record in trans:
                 blobfilename = None
-                if ZODB.blob.is_blob_record(record.data):
-                    try:
-                        blobfilename = other.loadBlob(record.oid, record.tid)
-                    except POSKeyError:
-                        pass
+                if self.fshelper is not None:
+                    if ZODB.blob.is_blob_record(record.data):
+                        try:
+                            blobfilename = other.loadBlob(
+                                record.oid, record.tid)
+                        except POSKeyError:
+                            pass
                 if blobfilename is not None:
                     fd, name = tempfile.mkstemp(
                         suffix='.tmp', dir=self.fshelper.temp_dir)
