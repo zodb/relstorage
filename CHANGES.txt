@@ -9,6 +9,13 @@ Next Feature Release
 - [TODO: add the blob_dir parameter to component.xml and README]
 
 
+Next Bug Fix Release
+--------------------
+
+- In Oracle, don't trip over transaction descriptions longer than 2000
+  bytes.
+
+
 Version 1.2.0b2 (2009-05-05)
 ----------------------------
 

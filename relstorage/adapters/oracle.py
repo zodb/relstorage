@@ -629,7 +629,11 @@ class OracleAdapter(Adapter):
             (tid, packed, username, description, extension)
         VALUES (:1, :2, :3, :4, :5)
         """
-        encoding = cursor.connection.encoding
+        max_desc_len = 2000
+        if len(description) > max_desc_len:
+            log.warning('Trimming description of transaction %s '
+                'to %d characters', tid, max_desc_len)
+            description = description[:max_desc_len]
         cursor.execute(stmt, (
             tid, packed and 'Y' or 'N', cx_Oracle.Binary(username),
             cx_Oracle.Binary(description), cx_Oracle.Binary(extension)))
