@@ -277,6 +277,18 @@ class RelStorageTests(
         finally:
             db.close()
 
+    def checkLongTransactionDescription(self):
+        # Don't trip over long transaction descriptions
+        db = DB(self._storage)
+        try:
+            c = db.open()
+            r = c.root()
+            r['key'] = 1
+            transaction.get().note('A long description. ' * 1000)
+            transaction.commit()
+        finally:
+            db.close()
+
     def checkAutoReconnect(self):
         # Verify auto-reconnect
         db = DB(self._storage)
