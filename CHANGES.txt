@@ -16,7 +16,7 @@ Next Bug Fix Release
   bytes.
 
 - When opening the database for the first time, don't issue a warning
-  about the inevitable PosKeyError on the root OID.
+  about the inevitable POSKeyError on the root OID.
 
 
 Version 1.2.0b2 (2009-05-05)
