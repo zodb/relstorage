@@ -281,6 +281,7 @@ class RelStorage(BaseStorage,
         """
         cursor = self._load_cursor
         adapter = self._adapter
+        logfunc = log.warning
         msg = ["Storage KeyError on oid %d: %s" % (oid_int, reason)]
         rows = adapter.iter_transactions(cursor)
         row = None
@@ -288,6 +289,9 @@ class RelStorage(BaseStorage,
             # just get the first row
             break
         if not row:
+            # This happens when initializing a new database, so it's
+            # not a warning.
+            logfunc = log.debug
             msg.append("No transactions exist")
         else:
             msg.append("Current transaction is %d" % row[0])
@@ -305,7 +309,7 @@ class RelStorage(BaseStorage,
                 if len(tids) >= 10:
                     break
         msg.append("Recent object tids: %s" % repr(tids))
-        log.warning('; '.join(msg))
+        logfunc('; '.join(msg))
 
     def _get_oid_cache_key(self, oid_int):
         """Return the cache key for finding the current tid."""

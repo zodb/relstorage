@@ -5,6 +5,9 @@ Next Bug Fix Release
 - In Oracle, don't trip over transaction descriptions longer than 2000
   bytes.
 
+- When opening the database for the first time, don't issue a warning
+  about the inevitable POSKeyError on the root OID.
+
 
 Version 1.2.0b2 (2009-05-05)
 ----------------------------
