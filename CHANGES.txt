@@ -6,7 +6,7 @@ Next Feature Release
   Cluster nodes will need to use a shared filesystem such as NFS or
   SMB/CIFS.
 
-- [TODO: add the blob_dir parameter to component.xml and README]
+- Added the blob-dir parameter to the ZConfig schema and README.txt.
 
 
 1.2.0 (2009-09-04)

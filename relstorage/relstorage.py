@@ -80,7 +80,7 @@ class RelStorage(BaseStorage,
     implements(*_relstorage_interfaces)
 
     def __init__(self, adapter, name=None, create=True,
-            read_only=False, options=None, blob_dir=None, **kwoptions):
+            read_only=False, options=None, **kwoptions):
         if name is None:
             name = 'RelStorage on %s' % adapter.__class__.__name__
 
@@ -163,10 +163,9 @@ class RelStorage(BaseStorage,
         # currently uncommitted transaction.
         self._txn_blobs = None
 
-        self._blob_dir = blob_dir
-        if blob_dir:
+        if options.blob_dir:
             from ZODB.blob import FilesystemHelper
-            self.fshelper = FilesystemHelper(blob_dir)
+            self.fshelper = FilesystemHelper(options.blob_dir)
             if create:
                 self.fshelper.create()
                 self.fshelper.checkSecure()
@@ -289,7 +288,7 @@ class RelStorage(BaseStorage,
         """
         other = RelStorage(adapter=self._adapter, name=self._name,
             create=False, read_only=self._is_read_only,
-            options=self._options, blob_dir=self._blob_dir)
+            options=self._options)
         self._instances.append(weakref.ref(other))
         return other
 
@@ -1379,6 +1378,7 @@ class Options:
     parameter, which should be an Options instance.
     """
     def __init__(self):
+        self.blob_dir = None
         self.poll_interval = 0
         self.pack_gc = True
         self.pack_dry_run = False

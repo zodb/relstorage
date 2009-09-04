@@ -21,7 +21,7 @@ Features
 * Whereas FileStorage takes longer to start as the database grows due to an
   in-memory index of all objects, RelStorage starts quickly regardless of
   database size.
-* Supports undo and packing.
+* Supports undo, packing, and filesystem-based ZODB blobs.
 * Free, open source (ZPL 2.1)
 
 
@@ -97,6 +97,20 @@ For Oracle (10g XE in this example)::
      </relstorage>
     </zodb_db>
 
+To add ZODB blob support, provide a blob-dir parameter that specifies
+where to store the blobs.  For example::
+
+    %import relstorage
+    <zodb_db main>
+      mount-point /
+      blob-dir ./blobs
+      <relstorage>
+        <postgresql>
+          dsn dbname='zodb' user='username' host='localhost' password='pass'
+        </postgresql>
+      </relstorage>
+    </zodb_db>
+
 
 Migration
 =========
@@ -162,6 +176,13 @@ Specify these options in zope.conf, as parameters for the RelStorage
 constructor, or as attributes of a relstorage.Options instance.
 In the latter two cases, use underscores instead of dashes in the
 parameter names.
+
+blob-dir
+
+        If supplied, the storage will provide blob support and this
+        is the name of a directory to hold blob data.  The directory will
+        be created if it doeesn't exist.  If no value (or an empty value)
+        is provided, then no blob support will be provided.
 
 poll-interval
 
@@ -260,7 +281,7 @@ cache-module-name
 Development
 ===========
 
-You can checkout from Subversion using the following command::
+You can check out from Subversion using the following command::
 
     svn co svn://svn.zope.org/repos/main/relstorage/trunk RelStorage
 
@@ -304,13 +325,12 @@ Q: Why should I choose RelStorage?
 
 Q: Can RelStorage replace ZRS (Zope Replication Services)?
 
-    A: In theory, yes.  With RelStorage, you can use the replication features
-    native to your database.  However, this capability has not yet been tested.
+    A: Yes.  Some people are successfully running a master/slave setup
+    using MySQL.
 
 
 Project URLs
 ============
 
-* http://wiki.zope.org/ZODB/RelStorage         (wiki)
-* http://shane.willowrise.com/                 (blog)
 * http://pypi.python.org/pypi/RelStorage       (PyPI entry and downloads)
+* http://shane.willowrise.com/                 (blog)
