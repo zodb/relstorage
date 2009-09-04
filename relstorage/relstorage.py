@@ -728,41 +728,45 @@ class RelStorage(BaseStorage,
         # It is assumed that self._lock_acquire was called before this
         # method was called.
         assert self._tid is not None
-        self._rollback_load_connection()
-        txn = self._prepared_txn
-        assert txn is not None
-        self._adapter.commit_phase2(self._store_cursor, txn)
-        cache = self._cache_client
-        if cache is not None:
-            if cache.incr('commit_count') is None:
-                # Use the current time as an initial commit_count value.
-                cache.add('commit_count', int(time.time()))
-                # A concurrent committer could have won the race to set the
-                # initial commit_count.  Increment commit_count so that it
-                # doesn't matter who won.
-                cache.incr('commit_count')
-        self._txn_blobs = None
-        self._prepared_txn = None
-        self._ltid = self._tid
-        self._tid = None
+        try:
+            self._rollback_load_connection()
+            txn = self._prepared_txn
+            assert txn is not None
+            self._adapter.commit_phase2(self._store_cursor, txn)
+            cache = self._cache_client
+            if cache is not None:
+                if cache.incr('commit_count') is None:
+                    # Use the current time as an initial commit_count value.
+                    cache.add('commit_count', int(time.time()))
+                    # A concurrent committer could have won the race to set the
+                    # initial commit_count.  Increment commit_count so that it
+                    # doesn't matter who won.
+                    cache.incr('commit_count')
+            self._ltid = self._tid
+        finally:
+            self._txn_blobs = None
+            self._prepared_txn = None
+            self._tid = None
+            self._transaction = None
 
     def _abort(self):
         # the lock is held here
-        self._rollback_load_connection()
-        if self._store_cursor is not None:
-            self._adapter.abort(self._store_cursor, self._prepared_txn)
-        if self._txn_blobs:
-            try:
+        try:
+            self._rollback_load_connection()
+            if self._store_cursor is not None:
+                self._adapter.abort(self._store_cursor, self._prepared_txn)
+            if self._txn_blobs:
                 for oid, filename in self._txn_blobs.iteritems():
                     if os.path.exists(filename):
                         ZODB.blob.remove_committed(filename)
                         dirname = os.path.dirname(filename)
                         if not os.listdir(dirname):
                             ZODB.blob.remove_committed_dir(dirname)
-            finally:
-                self._txn_blobs = None
-        self._prepared_txn = None
-        self._tid = None
+        finally:
+            self._txn_blobs = None
+            self._prepared_txn = None
+            self._tid = None
+            self._transaction = None
 
     def lastTransaction(self):
         return self._ltid
