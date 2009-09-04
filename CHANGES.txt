@@ -9,8 +9,8 @@ Next Feature Release
 - [TODO: add the blob_dir parameter to component.xml and README]
 
 
-Next Bug Fix Release
---------------------
+1.2.0 (2009-09-04)
+------------------
 
 - In Oracle, trim transaction descriptions longer than 2000 bytes.
 
@@ -21,8 +21,8 @@ Next Bug Fix Release
   it will now report the oid and tid in the log.
 
 
-Version 1.2.0b2 (2009-05-05)
-----------------------------
+1.2.0b2 (2009-05-05)
+--------------------
 
 - RelStorage now implements IMVCCStorage, making it compatible with
   ZODB 3.9.0b1 and above.
@@ -36,8 +36,8 @@ Version 1.2.0b2 (2009-05-05)
   platform.
 
 
-Version 1.1.3 (2009-02-04)
---------------------------
+1.1.3 (2009-02-04)
+------------------
 
 - In rare circumstances, ZODB can legitimately commit an object twice in a
   single transaction.  Fixed RelStorage to accept that.
@@ -48,8 +48,8 @@ Version 1.1.3 (2009-02-04)
 - Included LICENSE.txt in the source distribution.
 
 
-Version 1.1.2 (2009-01-27)
---------------------------
+1.1.2 (2009-01-27)
+------------------
 
 - When both cache-servers and poll-interval are set, we now poll the
   cache for changes on every request.  This makes it possible to use
@@ -72,8 +72,8 @@ Version 1.1.2 (2009-01-27)
 - Fixed KeyError reporting to not trip over a related KeyError while logging.
 
 
-Version 1.1.1 (2008-12-27)
---------------------------
+1.1.1 (2008-12-27)
+------------------
 
 - Worked around MySQL performance bugs in packing.  Used temporary
   tables and another column in the pack_object table.  The
@@ -83,8 +83,8 @@ Version 1.1.1 (2008-12-27)
   bringing write speed back up to where it was in version 1.0.
 
 
-Version 1.1 (2008-12-19)
-------------------------
+1.1 (2008-12-19)
+----------------
 
 - Normalized poll-invalidation patches as Solaris' patch command would not
   accept the current format. The patches now apply with:
@@ -115,8 +115,8 @@ Version 1.1 (2008-12-19)
   Rogerio Ferreira.  Thanks!
 
 
-Version 1.1c1
--------------
+1.1c1
+-----
 
 - Added optional memcache integration.  This is useful when the connection
   to the relational database has high latency.
@@ -126,8 +126,8 @@ Version 1.1c1
 - Log more info when a KeyError occurs within RelStorage.
 
 
-Version 1.1b2
--------------
+1.1b2
+-----
 
 - Made the MySQL locks database-specific rather than server-wide.  This is
   important for multi-database configurations.
@@ -140,8 +140,8 @@ Version 1.1b2
   discovering this.
 
 
-Version 1.1b1
--------------
+1.1b1
+-----
 
 - Fixed the use of setup.py without setuptools.  Thanks to Chris Withers.
 
@@ -162,8 +162,8 @@ Version 1.1b1
   Jim Fulton.
 
 
-Version 1.0.1
--------------
+1.0.1
+-----
 
 - The speedtest script failed if run on a test database that has no tables.
   Now the script creates the tables if needed.  Thanks to Flavio Coelho
@@ -179,14 +179,14 @@ Version 1.0.1
   amount of code to maintain.
 
 
-Version 1.0
------------
+1.0
+---
 
 - Added a utility for converting between storages called zodbconvert.
 
 
-Version 1.0c1
--------------
+1.0c1
+-----
 
 - The previous fix for non-ASCII characters was incorrect.  Now transaction
   metadata is stored as raw bytes.  A schema migration is required; see
@@ -195,8 +195,8 @@ Version 1.0c1
 - Integrated setuptools and made an egg.
 
 
-Version 1.0 beta
-----------------
+1.0 beta
+--------
 
 - Renamed to reflect expanding database support.
 
@@ -250,8 +250,8 @@ Version 1.0 beta
 PGStorage history
 =================
 
-Version 0.4
------------
+0.4
+---
 
 - Began using the PostgreSQL LISTEN and NOTIFY statements as a shortcut
   for invalidation polling.
@@ -291,14 +291,14 @@ Version 0.4
   top-level packages easier to install.
 
 
-Version 0.3
------------
+0.3
+---
 
 - Made compatible with Zope 3, although an undo bug apparently remains.
 
 
-Version 0.2
------------
+0.2
+---
 
 - Fixed concurrent commits, which were generating deadlocks.  Fixed by
   adding a special table, "commit_lock", which is used for
