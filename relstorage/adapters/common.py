@@ -691,7 +691,13 @@ class Adapter(object):
                 state = state.read()
             if state:
                 from_count += 1
-                to_oids = get_references(str(state))
+                try:
+                    to_oids = get_references(str(state))
+                except:
+                    log.error("pre_pack: can't unpickle "
+                        "object %d in transaction %d; state length = %d" % (
+                        from_oid, tid, len(state)))
+                    raise
                 for to_oid in to_oids:
                     add_rows.append((from_oid, tid, to_oid))
 

@@ -596,7 +596,15 @@ class RelStorageTests(
                 conn.close()
         finally:
             db.close()
-        
+
+    def checkPackBrokenPickle(self):
+        # Verify the pack stops with the right exception if it encounters
+        # a broken pickle.
+        from cPickle import UnpicklingError
+        self._dostoreNP(self._storage.new_oid(), data='brokenpickle')
+        self.assertRaises(UnpicklingError, self._storage.pack,
+            time.time() + 10000, referencesf)
+
 
 class DoubleCommitter(Persistent):
     """A crazy persistent class that changes self in __getstate__"""

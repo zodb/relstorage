@@ -12,11 +12,13 @@ Next Feature Release
 Next Bug Fix Release
 --------------------
 
-- In Oracle, don't trip over transaction descriptions longer than 2000
-  bytes.
+- In Oracle, trim transaction descriptions longer than 2000 bytes.
 
 - When opening the database for the first time, don't issue a warning
   about the inevitable POSKeyError on the root OID.
+
+- If RelStorage tries to unpickle a corrupt object state during packing,
+  it will now report the oid and tid in the log.
 
 
 Version 1.2.0b2 (2009-05-05)
