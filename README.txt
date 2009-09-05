@@ -142,7 +142,8 @@ Migrating to a new version of RelStorage
 Sometimes RelStorage needs a schema modification along with a software
 upgrade.  Hopefully, this will not often be necessary.
 
-Version 1.2.* does not require a schema migration from version 1.1.2 or 1.1.3.
+No schema migration is required if you are upgrading from version 1.1.2
+or later.
 
 To migrate from version 1.1.1 to version 1.1.2 or 1.1.3, see:
 
