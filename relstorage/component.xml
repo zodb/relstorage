@@ -24,7 +24,7 @@
         and is still allowed on a read-only filestorage.
       </description>
     </key>
-    <key name="blob-dir" required="no" datatype="existing-dirpath">
+    <key name="blob-dir" required="no">
       <description>
         If supplied, the storage will provide blob support and this
         is the name of a directory to hold blob data.  The directory will
