@@ -1,7 +1,8 @@
 Next bugfix release
 -------------------
 
-- ...
+- PostgreSQL: use the documented ALTER SEQUENCE RESTART WITH
+  statement instead of ALTER SEQUENCE START WITH.
 
 1.2.0 (2009-09-04)
 ------------------

@@ -167,7 +167,7 @@ class PostgreSQLAdapter(Adapter):
             -- Create a special transaction to represent object creation.
             INSERT INTO transaction (tid, username, description) VALUES
                 (0, 'system', 'special transaction for object creation');
-            ALTER SEQUENCE zoid_seq START WITH 1;
+            ALTER SEQUENCE zoid_seq RESTART WITH 1;
             """)
         self._open_and_call(callback)
 
