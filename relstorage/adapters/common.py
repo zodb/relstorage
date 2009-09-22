@@ -18,6 +18,12 @@ from ZODB.POSException import UndoError
 import logging
 import time
 
+try:
+    from hashlib import md5
+except ImportError:
+    from md5 import new as md5
+
+
 log = logging.getLogger("relstorage.adapters.common")
 
 verify_sane_database = False
@@ -954,18 +960,30 @@ class Adapter(object):
             return None, new_polled_tid
 
         # Get the list of changed OIDs and return it.
-        stmt = """
-        SELECT zoid
-        FROM current_object
-        WHERE tid > %(tid)s
-        """
         if ignore_tid is None:
+            stmt = """
+            SELECT zoid
+            FROM current_object
+            WHERE tid > %(tid)s
+            """
             cursor.execute(intern(stmt % self._script_vars),
                 {'tid': prev_polled_tid})
         else:
-            stmt += " AND tid != %(self_tid)s"
+            stmt = """
+            SELECT zoid
+            FROM current_object
+            WHERE tid > %(tid)s
+                AND tid != %(self_tid)s
+            """
             cursor.execute(intern(stmt % self._script_vars),
                 {'tid': prev_polled_tid, 'self_tid': ignore_tid})
         oids = [oid for (oid,) in cursor]
 
         return oids, new_polled_tid
+
+    def md5sum(self, data):
+        if data is not None:
+            return md5(data).hexdigest()
+        else:
+            # George Bailey object
+            return None

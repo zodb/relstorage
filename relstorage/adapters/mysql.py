@@ -467,16 +467,18 @@ class MySQLAdapter(Adapter):
         except disconnected_exceptions, e:
             raise StorageError(e)
 
-    def store_temp(self, cursor, oid, prev_tid, md5sum, data):
+    def store_temp(self, cursor, oid, prev_tid, data):
         """Store an object in the temporary table."""
+        md5sum = self.md5sum(data)
         stmt = """
         REPLACE INTO temp_store (zoid, prev_tid, md5, state)
         VALUES (%s, %s, %s, %s)
         """
         cursor.execute(stmt, (oid, prev_tid, md5sum, MySQLdb.Binary(data)))
 
-    def replace_temp(self, cursor, oid, prev_tid, md5sum, data):
+    def replace_temp(self, cursor, oid, prev_tid, data):
         """Replace an object in the temporary table."""
+        md5sum = self.md5sum(data)
         stmt = """
         UPDATE temp_store SET
             prev_tid = %s,
@@ -486,11 +488,12 @@ class MySQLAdapter(Adapter):
         """
         cursor.execute(stmt, (prev_tid, md5sum, MySQLdb.Binary(data), oid))
 
-    def restore(self, cursor, oid, tid, md5sum, data):
+    def restore(self, cursor, oid, tid, data):
         """Store an object directly, without conflict detection.
 
         Used for copying transactions into this database.
         """
+        md5sum = self.md5sum(data)
         stmt = """
         INSERT INTO object_state (zoid, tid, prev_tid, md5, state)
         VALUES (%s, %s,

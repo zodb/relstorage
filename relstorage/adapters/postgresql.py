@@ -167,7 +167,7 @@ class PostgreSQLAdapter(Adapter):
             -- Create a special transaction to represent object creation.
             INSERT INTO transaction (tid, username, description) VALUES
                 (0, 'system', 'special transaction for object creation');
-            ALTER SEQUENCE zoid_seq START WITH 1;
+            ALTER SEQUENCE zoid_seq RESTART WITH 1;
             """)
         self._open_and_call(callback)
 
@@ -398,8 +398,9 @@ class PostgreSQLAdapter(Adapter):
         except disconnected_exceptions, e:
             raise StorageError(e)
 
-    def store_temp(self, cursor, oid, prev_tid, md5sum, data):
+    def store_temp(self, cursor, oid, prev_tid, data):
         """Store an object in the temporary table."""
+        md5sum = self.md5sum(data)
         stmt = """
         DELETE FROM temp_store WHERE zoid = %s;
         INSERT INTO temp_store (zoid, prev_tid, md5, state)
@@ -407,8 +408,9 @@ class PostgreSQLAdapter(Adapter):
         """
         cursor.execute(stmt, (oid, oid, prev_tid, md5sum, encodestring(data)))
 
-    def replace_temp(self, cursor, oid, prev_tid, md5sum, data):
+    def replace_temp(self, cursor, oid, prev_tid, data):
         """Replace an object in the temporary table."""
+        md5sum = self.md5sum(data)
         stmt = """
         UPDATE temp_store SET
             prev_tid = %s,
@@ -418,11 +420,12 @@ class PostgreSQLAdapter(Adapter):
         """
         cursor.execute(stmt, (prev_tid, md5sum, encodestring(data), oid))
 
-    def restore(self, cursor, oid, tid, md5sum, data):
+    def restore(self, cursor, oid, tid, data):
         """Store an object directly, without conflict detection.
 
         Used for copying transactions into this database.
         """
+        md5sum = self.md5sum(data)
         stmt = """
         INSERT INTO object_state (zoid, tid, prev_tid, md5, state)
         VALUES (%s, %s,

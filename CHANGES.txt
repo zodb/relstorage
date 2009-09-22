@@ -2,8 +2,14 @@
 Unreleased
 ----------
 
-- ...
+- PostgreSQL: use the documented ALTER SEQUENCE RESTART WITH
+  statement instead of ALTER SEQUENCE START WITH.
 
+- Moved MD5 sum computation to the adapters so they can choose not
+  to use MD5.
+
+- Changed loadSerial to load from the store connection only if the
+  load connection can not provide the object requested.
 
 1.3.0b1 (2009-09-04)
 --------------------

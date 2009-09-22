@@ -58,12 +58,6 @@ for name in (
     if hasattr(ZODB.interfaces, name):
         _relstorage_interfaces.append(getattr(ZODB.interfaces, name))
 
-try:
-    from hashlib import md5
-except ImportError:
-    from md5 import new as md5
-
-
 log = logging.getLogger("relstorage")
 
 # Set the RELSTORAGE_ABORT_EARLY environment variable when debugging
@@ -412,15 +406,15 @@ class RelStorage(BaseStorage,
 
         self._lock_acquire()
         try:
-            if self._store_cursor is not None:
+            if not self._load_transaction_open:
+                self._restart_load()
+            state = self._adapter.load_revision(
+                self._load_cursor, oid_int, tid_int)
+            if state is None and self._store_cursor is not None:
                 # Allow loading data from later transactions
                 # for conflict resolution.
-                cursor = self._store_cursor
-            else:
-                if not self._load_transaction_open:
-                    self._restart_load()
-                cursor = self._load_cursor
-            state = self._adapter.load_revision(cursor, oid_int, tid_int)
+                state = self._adapter.load_revision(
+                    self._store_cursor, oid_int, tid_int)
         finally:
             self._lock_release()
 
@@ -481,7 +475,6 @@ class RelStorage(BaseStorage,
         # attempting to store objects after the vote phase has finished.
         # That should not happen, should it?
         assert self._prepared_txn is None
-        md5sum = md5(data).hexdigest()
 
         adapter = self._adapter
         cursor = self._store_cursor
@@ -496,7 +489,7 @@ class RelStorage(BaseStorage,
         try:
             self._max_stored_oid = max(self._max_stored_oid, oid_int)
             # save the data in a temporary table
-            adapter.store_temp(cursor, oid_int, prev_tid_int, md5sum, data)
+            adapter.store_temp(cursor, oid_int, prev_tid_int, data)
             return None
         finally:
             self._lock_release()
@@ -515,11 +508,6 @@ class RelStorage(BaseStorage,
 
         assert self._tid is not None
         assert self._prepared_txn is None
-        if data is not None:
-            md5sum = md5(data).hexdigest()
-        else:
-            # George Bailey object
-            md5sum = None
 
         adapter = self._adapter
         cursor = self._store_cursor
@@ -530,8 +518,8 @@ class RelStorage(BaseStorage,
         self._lock_acquire()
         try:
             self._max_stored_oid = max(self._max_stored_oid, oid_int)
-            # save the data.  Note that md5sum and data can be None.
-            adapter.restore(cursor, oid_int, tid_int, md5sum, data)
+            # save the data.  Note that data can be None.
+            adapter.restore(cursor, oid_int, tid_int, data)
         finally:
             self._lock_release()
 
@@ -648,9 +636,8 @@ class RelStorage(BaseStorage,
             else:
                 # resolved
                 data = rdata
-                md5sum = md5(data).hexdigest()
                 self._adapter.replace_temp(
-                    cursor, oid_int, prev_tid_int, md5sum, data)
+                    cursor, oid_int, prev_tid_int, data)
                 resolved.add(oid)
 
         # Move the new states into the permanent table
@@ -993,6 +980,7 @@ class RelStorage(BaseStorage,
         finally:
             lock_conn.rollback()
             adapter.close(lock_conn, lock_cursor)
+        self.sync()
 
     def _after_pack(self, oid_int, tid_int):
         """Called after an object state has been removed by packing.

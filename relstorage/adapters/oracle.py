@@ -538,8 +538,9 @@ class OracleAdapter(Adapter):
         except disconnected_exceptions, e:
             raise StorageError(e)
 
-    def store_temp(self, cursor, oid, prev_tid, md5sum, data):
+    def store_temp(self, cursor, oid, prev_tid, data):
         """Store an object in the temporary table."""
+        md5sum = self.md5sum(data)
         cursor.execute("DELETE FROM temp_store WHERE zoid = :oid", oid=oid)
         if len(data) <= 2000:
             # Send data inline for speed.  Oracle docs say maximum size
@@ -561,8 +562,9 @@ class OracleAdapter(Adapter):
             cursor.execute(stmt, oid=oid, prev_tid=prev_tid,
                 md5sum=md5sum, blobdata=data)
 
-    def replace_temp(self, cursor, oid, prev_tid, md5sum, data):
+    def replace_temp(self, cursor, oid, prev_tid, data):
         """Replace an object in the temporary table."""
+        md5sum = self.md5sum(data)
         cursor.setinputsizes(data=cx_Oracle.BLOB)
         stmt = """
         UPDATE temp_store SET
@@ -574,11 +576,12 @@ class OracleAdapter(Adapter):
         cursor.execute(stmt, oid=oid, prev_tid=prev_tid,
             md5sum=md5sum, data=cx_Oracle.Binary(data))
 
-    def restore(self, cursor, oid, tid, md5sum, data):
+    def restore(self, cursor, oid, tid, data):
         """Store an object directly, without conflict detection.
 
         Used for copying transactions into this database.
         """
+        md5sum = self.md5sum(data)
         cursor.setinputsizes(data=cx_Oracle.BLOB)
         stmt = """
         INSERT INTO object_state (zoid, tid, prev_tid, md5, state)
