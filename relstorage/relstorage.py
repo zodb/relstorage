@@ -554,7 +554,7 @@ class RelStorage(BaseStorage,
                 # get the commit lock and add the transaction now
                 cursor = self._store_cursor
                 packed = (status == 'p')
-                adapter.start_commit(cursor)
+                adapter.hold_commit_lock(cursor, ensure_current=True)
                 tid_int = u64(tid)
                 try:
                     adapter.add_transaction(
@@ -581,7 +581,7 @@ class RelStorage(BaseStorage,
 
         adapter = self._adapter
         cursor = self._store_cursor
-        adapter.start_commit(cursor)
+        adapter.hold_commit_lock(cursor, ensure_current=True)
         user, desc, ext = self._ude
 
         # Choose a transaction ID.
@@ -669,6 +669,7 @@ class RelStorage(BaseStorage,
 
         cursor = self._store_cursor
         assert cursor is not None
+        conn = self._store_conn
 
         if self._max_stored_oid > self._max_new_oid:
             self._adapter.set_min_oid(cursor, self._max_stored_oid + 1)
@@ -678,7 +679,8 @@ class RelStorage(BaseStorage,
 
         serials = self._finish_store()
         self._adapter.update_current(cursor, tid_int)
-        self._prepared_txn = self._adapter.commit_phase1(cursor, tid_int)
+        self._prepared_txn = self._adapter.commit_phase1(
+            conn, cursor, tid_int)
 
         if self._txn_blobs:
             # We now have a transaction ID, so rename all the blobs
@@ -718,7 +720,9 @@ class RelStorage(BaseStorage,
             self._rollback_load_connection()
             txn = self._prepared_txn
             assert txn is not None
-            self._adapter.commit_phase2(self._store_cursor, txn)
+            self._adapter.commit_phase2(
+                self._store_conn, self._store_cursor, txn)
+            self._adapter.release_commit_lock(self._store_cursor)
             cache = self._cache_client
             if cache is not None:
                 if cache.incr('commit_count') is None:
@@ -740,7 +744,9 @@ class RelStorage(BaseStorage,
         try:
             self._rollback_load_connection()
             if self._store_cursor is not None:
-                self._adapter.abort(self._store_cursor, self._prepared_txn)
+                self._adapter.abort(
+                    self._store_conn, self._store_cursor, self._prepared_txn)
+                self._adapter.release_commit_lock(self._store_cursor)
             if self._txn_blobs:
                 for oid, filename in self._txn_blobs.iteritems():
                     if os.path.exists(filename):
