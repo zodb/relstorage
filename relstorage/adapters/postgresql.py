@@ -19,7 +19,7 @@ import psycopg2, psycopg2.extensions
 import re
 from ZODB.POSException import StorageError
 
-from common import Adapter
+from relstorage.adapters.historypreserving import HistoryPreservingAdapter
 
 log = logging.getLogger("relstorage.adapters.postgresql")
 
@@ -28,7 +28,7 @@ log = logging.getLogger("relstorage.adapters.postgresql")
 disconnected_exceptions = (psycopg2.OperationalError, psycopg2.InterfaceError)
 
 
-class PostgreSQLAdapter(Adapter):
+class PostgreSQLAdapter(HistoryPreservingAdapter):
     """PostgreSQL adapter for RelStorage."""
 
     def __init__(self, dsn=''):

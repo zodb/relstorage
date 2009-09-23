@@ -782,10 +782,10 @@ class RelStorage(BaseStorage,
         return ''
 
     def supportsUndo(self):
-        return True
+        return self._adapter.keep_history
 
     def supportsTransactionalUndo(self):
-        return True
+        return self._adapter.keep_history
 
     def undoLog(self, first=0, last=-20, filter=None):
         if last < 0:

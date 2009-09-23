@@ -11,56 +11,128 @@
 # FOR A PARTICULAR PURPOSE.
 #
 ##############################################################################
-"""Code common to most adapters."""
+"""Code common to history-preserving adapters."""
 
-from ZODB.POSException import UndoError
 
 import logging
 import time
+from relstorage.adapters.abstract import AbstractAdapter
+from ZODB.POSException import UndoError
 
-try:
-    from hashlib import md5
-except ImportError:
-    from md5 import new as md5
-
-
-log = logging.getLogger("relstorage.adapters.common")
-
-verify_sane_database = False
+log = logging.getLogger(__name__)
 
 
-# Notes about adapters:
-#
-# An adapter must not hold a connection, cursor, or database state, because
-# RelStorage opens multiple concurrent connections using a single adapter
-# instance.
-# Within the context of an adapter, all OID and TID values are integers,
-# not binary strings, except as noted.
+class HistoryPreservingAdapter(AbstractAdapter):
+    """An abstract adapter that retains history.
 
-class Adapter(object):
-    """Common code for a database adapter.
+    Derivatives should have at least the following schema::
 
-    This is an abstract class; a lot of methods are expected to be
-    provided by subclasses.
+        -- The list of all transactions in the database
+        CREATE TABLE transaction (
+            tid         BIGINT NOT NULL PRIMARY KEY,
+            packed      BOOLEAN NOT NULL DEFAULT FALSE,
+            empty       BOOLEAN NOT NULL DEFAULT FALSE,
+            username    BYTEA NOT NULL,
+            description BYTEA NOT NULL,
+            extension   BYTEA
+        );
+
+        -- All object states in all transactions.  Note that md5 and state
+        -- can be null to represent object uncreation.
+        CREATE TABLE object_state (
+            zoid        BIGINT NOT NULL,
+            tid         BIGINT NOT NULL REFERENCES transaction
+                        CHECK (tid > 0),
+            PRIMARY KEY (zoid, tid),
+            prev_tid    BIGINT NOT NULL REFERENCES transaction,
+            md5         CHAR(32),
+            state       BYTEA
+        );
+
+        -- Pointers to the current object state
+        CREATE TABLE current_object (
+            zoid        BIGINT NOT NULL PRIMARY KEY,
+            tid         BIGINT NOT NULL,
+            FOREIGN KEY (zoid, tid) REFERENCES object_state
+        );
+
+        -- A list of referenced OIDs from each object_state.
+        -- This table is populated as needed during packing.
+        -- To prevent unnecessary table locking, it does not use
+        -- foreign keys, which is safe because rows in object_state
+        -- are never modified once committed, and rows are removed
+        -- from object_state only by packing.
+        CREATE TABLE object_ref (
+            zoid        BIGINT NOT NULL,
+            tid         BIGINT NOT NULL,
+            to_zoid     BIGINT NOT NULL,
+            PRIMARY KEY (tid, zoid, to_zoid)
+        );
+
+        -- The object_refs_added table tracks whether object_refs has
+        -- been populated for all states in a given transaction.
+        -- An entry is added only when the work is finished.
+        -- To prevent unnecessary table locking, it does not use
+        -- foreign keys, which is safe because object states
+        -- are never added to a transaction once committed, and
+        -- rows are removed from the transaction table only by
+        -- packing.
+        CREATE TABLE object_refs_added (
+            tid         BIGINT NOT NULL PRIMARY KEY
+        );
+
+        -- Temporary state during packing:
+        -- The list of objects to pack.  If keep is false,
+        -- the object and all its revisions will be removed.
+        -- If keep is true, instead of removing the object,
+        -- the pack operation will cut the object's history.
+        -- The keep_tid field specifies the oldest revision
+        -- of the object to keep.
+        -- The visited flag is set when pre_pack is visiting an object's
+        -- references, and remains set.
+        CREATE TABLE pack_object (
+            zoid        BIGINT NOT NULL PRIMARY KEY,
+            keep        BOOLEAN NOT NULL,
+            keep_tid    BIGINT NOT NULL,
+            visited     BOOLEAN NOT NULL DEFAULT FALSE
+        );
+
+        -- Temporary state during packing: the list of object states to pack.
+        CREATE TABLE pack_state (
+            tid         BIGINT NOT NULL,
+            zoid        BIGINT NOT NULL,
+            PRIMARY KEY (tid, zoid)
+        );
+
+        -- Temporary state during packing: the list of transactions that
+        -- have at least one object state to pack.
+        CREATE TABLE pack_state_tid (
+            tid         BIGINT NOT NULL PRIMARY KEY
+        );
     """
 
-    # _script_vars contains replacements for statements in scripts.
-    # These are correct for PostgreSQL and MySQL but not for Oracle.
-    _script_vars = {
-        'TRUE':         'TRUE',
-        'FALSE':        'FALSE',
-        'OCTET_LENGTH': 'OCTET_LENGTH',
-        'TRUNCATE':     'TRUNCATE',
-        'oid':          '%(oid)s',
-        'tid':          '%(tid)s',
-        'pack_tid':     '%(pack_tid)s',
-        'undo_tid':     '%(undo_tid)s',
-        'self_tid':     '%(self_tid)s',
-        'min_tid':      '%(min_tid)s',
-        'max_tid':      '%(max_tid)s',
-    }
+    keep_history = True
 
     _scripts = {
+        'create_temp_pack_visit': """
+            CREATE TEMPORARY TABLE temp_pack_visit (
+                zoid BIGINT NOT NULL,
+                keep_tid BIGINT
+            );
+            CREATE UNIQUE INDEX temp_pack_visit_zoid ON temp_pack_visit (zoid)
+            """,
+
+        'pre_pack_follow_child_refs': """
+            UPDATE pack_object SET keep = %(TRUE)s
+            WHERE keep = %(FALSE)s
+                AND zoid IN (
+                    SELECT DISTINCT to_zoid
+                    FROM object_ref
+                        JOIN temp_pack_visit USING (zoid)
+                    WHERE object_ref.tid >= temp_pack_visit.keep_tid
+                )
+            """,
+
         'choose_pack_transaction': """
             SELECT tid
             FROM transaction
@@ -69,14 +141,6 @@ class Adapter(object):
                 AND packed = FALSE
             ORDER BY tid DESC
             LIMIT 1
-            """,
-
-        'create_temp_pack_visit': """
-            CREATE TEMPORARY TABLE temp_pack_visit (
-                zoid BIGINT NOT NULL,
-                keep_tid BIGINT
-            );
-            CREATE UNIQUE INDEX temp_pack_visit_zoid ON temp_pack_visit (zoid)
             """,
 
         'create_temp_undo': """
@@ -94,17 +158,6 @@ class Adapter(object):
             FROM object_state
             WHERE tid = %(tid)s
             LIMIT 1
-            """,
-
-        'prepack_follow_child_refs': """
-            UPDATE pack_object SET keep = %(TRUE)s
-            WHERE keep = %(FALSE)s
-                AND zoid IN (
-                    SELECT DISTINCT to_zoid
-                    FROM object_ref
-                        JOIN temp_pack_visit USING (zoid)
-                    WHERE object_ref.tid >= temp_pack_visit.keep_tid
-                )
             """,
 
         'pack_current_object': """
@@ -142,66 +195,6 @@ class Adapter(object):
                 )
             """,
     }
-
-    def _run_script_stmt(self, cursor, generic_stmt, generic_params=()):
-        """Execute a statement from a script with the given parameters.
-
-        Subclasses may override this.
-        The input statement is generic and needs to be transformed
-        into a database-specific statement.
-        """
-        stmt = generic_stmt % self._script_vars
-        try:
-            cursor.execute(stmt, generic_params)
-        except:
-            log.warning("script statement failed: %r; parameters: %r",
-                stmt, generic_params)
-            raise
-
-
-    def _run_script(self, cursor, script, params=()):
-        """Execute a series of statements in the database.
-
-        The statements are transformed by _run_script_stmt
-        before execution.
-        """
-        lines = []
-        for line in script.split('\n'):
-            line = line.strip()
-            if not line or line.startswith('--'):
-                continue
-            if line.endswith(';'):
-                line = line[:-1]
-                lines.append(line)
-                stmt = '\n'.join(lines)
-                self._run_script_stmt(cursor, stmt, params)
-                lines = []
-            else:
-                lines.append(line)
-        if lines:
-            stmt = '\n'.join(lines)
-            self._run_script_stmt(cursor, stmt, params)
-
-    def _open_and_call(self, callback):
-        """Call a function with an open connection and cursor.
-
-        If the function returns, commits the transaction and returns the
-        result returned by the function.
-        If the function raises an exception, aborts the transaction
-        then propagates the exception.
-        """
-        conn, cursor = self.open()
-        try:
-            try:
-                res = callback(conn, cursor)
-            except:
-                conn.rollback()
-                raise
-            else:
-                conn.commit()
-                return res
-        finally:
-            self.close(conn, cursor)
 
     def _transaction_iterator(self, cursor):
         """Iterate over a list of transactions returned from the database.
@@ -290,25 +283,6 @@ class Adapter(object):
         """
         self._run_script_stmt(cursor, stmt, {'oid': oid})
         return self._transaction_iterator(cursor)
-
-
-    def iter_objects(self, cursor, tid):
-        """Iterate over object states in a transaction.
-
-        Yields (oid, prev_tid, state) for each object state.
-        """
-        stmt = """
-        SELECT zoid, state
-        FROM object_state
-        WHERE tid = %(tid)s
-        ORDER BY zoid
-        """
-        self._run_script_stmt(cursor, stmt, {'tid': tid})
-        for oid, state in cursor:
-            if hasattr(state, 'read'):
-                # Oracle
-                state = state.read()
-            yield oid, state
 
 
     def verify_undoable(self, cursor, undo_tid):
@@ -434,15 +408,6 @@ class Adapter(object):
             return rows[0][0]
         finally:
             self.close(conn, cursor)
-
-
-    def open_for_pre_pack(self):
-        """Open a connection to be used for the pre-pack phase.
-        Returns (conn, cursor).
-
-        Subclasses may override this.
-        """
-        return self.open()
 
 
     def pre_pack(self, pack_tid, get_references, options):
@@ -602,162 +567,8 @@ class Adapter(object):
         """
         self._run_script(cursor, stmt, {'pack_tid': pack_tid})
 
-        # Each of the packable objects to be kept might
-        # refer to other objects.  If some of those references
-        # include objects currently set to be removed, mark
-        # the referenced objects to be kept as well.  Do this
-        # repeatedly until all references have been satisfied.
-        pass_num = 1
-        while True:
-            log.info("pre_pack: following references, pass %d", pass_num)
-
-            # Make a list of all parent objects that still need
-            # to be visited.  Then set pack_object.visited for all pack_object
-            # rows with keep = true.
-            stmt = """
-            %(TRUNCATE)s temp_pack_visit;
-
-            INSERT INTO temp_pack_visit (zoid, keep_tid)
-            SELECT zoid, keep_tid
-            FROM pack_object
-            WHERE keep = %(TRUE)s
-                AND visited = %(FALSE)s;
-
-            UPDATE pack_object SET visited = %(TRUE)s
-            WHERE keep = %(TRUE)s
-                AND visited = %(FALSE)s
-            """
-            self._run_script(cursor, stmt)
-            visit_count = cursor.rowcount
-
-            if verify_sane_database:
-                # Verify the update actually worked.
-                # MySQL 5.1.23 fails this test; 5.1.24 passes.
-                stmt = """
-                SELECT 1
-                FROM pack_object
-                WHERE keep = %(TRUE)s AND visited = %(FALSE)s
-                """
-                self._run_script_stmt(cursor, stmt)
-                if list(cursor):
-                    raise AssertionError(
-                        "database failed to update pack_object")
-
-            log.debug("pre_pack: checking references from %d object(s)",
-                visit_count)
-
-            # Visit the children of all parent objects that were
-            # just visited.
-            stmt = self._scripts['prepack_follow_child_refs']
-            self._run_script(cursor, stmt)
-            found_count = cursor.rowcount
-
-            log.debug("pre_pack: found %d more referenced object(s) in "
-                "pass %d", found_count, pass_num)
-            if not found_count:
-                # No new references detected.
-                break
-            else:
-                pass_num += 1
-
-
-    def _add_object_ref_rows(self, cursor, add_rows):
-        """Add rows to object_ref.
-
-        The input rows are tuples containing (from_zoid, tid, to_zoid).
-
-        Subclasses can override this.
-        """
-        stmt = """
-        INSERT INTO object_ref (zoid, tid, to_zoid)
-        VALUES (%s, %s, %s)
-        """
-        cursor.executemany(stmt, add_rows)
-
-
-    def _add_refs_for_tid(self, cursor, tid, get_references):
-        """Fill object_refs with all states for a transaction.
-
-        Returns the number of references added.
-        """
-        log.debug("pre_pack: transaction %d: computing references ", tid)
-        from_count = 0
-
-        stmt = """
-        SELECT zoid, state
-        FROM object_state
-        WHERE tid = %(tid)s
-        """
-        self._run_script_stmt(cursor, stmt, {'tid': tid})
-
-        add_rows = []  # [(from_oid, tid, to_oid)]
-        for from_oid, state in cursor:
-            if hasattr(state, 'read'):
-                # Oracle
-                state = state.read()
-            if state:
-                from_count += 1
-                try:
-                    to_oids = get_references(str(state))
-                except:
-                    log.error("pre_pack: can't unpickle "
-                        "object %d in transaction %d; state length = %d" % (
-                        from_oid, tid, len(state)))
-                    raise
-                for to_oid in to_oids:
-                    add_rows.append((from_oid, tid, to_oid))
-
-        if add_rows:
-            self._add_object_ref_rows(cursor, add_rows)
-
-        # The references have been computed for this transaction.
-        stmt = """
-        INSERT INTO object_refs_added (tid)
-        VALUES (%(tid)s)
-        """
-        self._run_script_stmt(cursor, stmt, {'tid': tid})
-
-        to_count = len(add_rows)
-        log.debug("pre_pack: transaction %d: has %d reference(s) "
-            "from %d object(s)", tid, to_count, from_count)
-        return to_count
-
-
-    def fill_object_refs(self, conn, cursor, get_references):
-        """Update the object_refs table by analyzing new transactions."""
-        stmt = """
-        SELECT transaction.tid
-        FROM transaction
-            LEFT JOIN object_refs_added
-                ON (transaction.tid = object_refs_added.tid)
-        WHERE object_refs_added.tid IS NULL
-        ORDER BY transaction.tid
-        """
-        cursor.execute(stmt)
-        tids = [tid for (tid,) in cursor]
-        if tids:
-            added = 0
-            log.info("discovering references from objects in %d "
-                "transaction(s)" % len(tids))
-            for tid in tids:
-                added += self._add_refs_for_tid(cursor, tid, get_references)
-                if added >= 10000:
-                    # save the work done so far
-                    conn.commit()
-                    added = 0
-            if added:
-                conn.commit()
-
-
-    def _hold_commit_lock(self, cursor):
-        """Hold the commit lock for packing"""
-        cursor.execute("LOCK TABLE commit_lock IN EXCLUSIVE MODE")
-
-
-    def _release_commit_lock(self, cursor):
-        """Release the commit lock during packing"""
-        # no action needed
-        pass
+        # Set the 'keep' flags in pack_object
+        self._visit_all_references(cursor)
 
 
     def pack(self, pack_tid, options, sleep=time.sleep, packed_func=None):
@@ -827,20 +638,6 @@ class Adapter(object):
         finally:
             self.close(conn, cursor)
 
-    def _pause_pack(self, sleep, options, start):
-        """Pause packing to allow concurrent commits."""
-        elapsed = time.time() - start
-        if elapsed == 0.0:
-            # Compensate for low timer resolution by
-            # assuming that at least 10 ms elapsed.
-            elapsed = 0.01
-        duty_cycle = options.pack_duty_cycle
-        if duty_cycle > 0.0 and duty_cycle < 1.0:
-            delay = min(options.pack_max_delay,
-                elapsed * (1.0 / duty_cycle - 1.0))
-            if delay > 0:
-                log.debug('pack: sleeping %.4g second(s)', delay)
-                sleep(delay)
 
     def _pack_transaction(self, cursor, pack_tid, tid, packed,
             has_removable, packed_list):
@@ -925,65 +722,3 @@ class Adapter(object):
         for _table in ('pack_object', 'pack_state', 'pack_state_tid'):
             stmt = '%(TRUNCATE)s ' + _table
             self._run_script_stmt(cursor, stmt)
-
-
-    def poll_invalidations(self, conn, cursor, prev_polled_tid, ignore_tid):
-        """Polls for new transactions.
-
-        conn and cursor must have been created previously by open_for_load().
-        prev_polled_tid is the tid returned at the last poll, or None
-        if this is the first poll.  If ignore_tid is not None, changes
-        committed in that transaction will not be included in the list
-        of changed OIDs.
-
-        Returns (changed_oids, new_polled_tid).
-        """
-        # find out the tid of the most recent transaction.
-        cursor.execute(self._poll_query)
-        new_polled_tid = cursor.fetchone()[0]
-
-        if prev_polled_tid is None:
-            # This is the first time the connection has polled.
-            return None, new_polled_tid
-
-        if new_polled_tid == prev_polled_tid:
-            # No transactions have been committed since prev_polled_tid.
-            return (), new_polled_tid
-
-        stmt = "SELECT 1 FROM transaction WHERE tid = %(tid)s"
-        cursor.execute(intern(stmt % self._script_vars),
-            {'tid': prev_polled_tid})
-        rows = cursor.fetchall()
-        if not rows:
-            # Transaction not found; perhaps it has been packed.
-            # The connection cache needs to be cleared.
-            return None, new_polled_tid
-
-        # Get the list of changed OIDs and return it.
-        if ignore_tid is None:
-            stmt = """
-            SELECT zoid
-            FROM current_object
-            WHERE tid > %(tid)s
-            """
-            cursor.execute(intern(stmt % self._script_vars),
-                {'tid': prev_polled_tid})
-        else:
-            stmt = """
-            SELECT zoid
-            FROM current_object
-            WHERE tid > %(tid)s
-                AND tid != %(self_tid)s
-            """
-            cursor.execute(intern(stmt % self._script_vars),
-                {'tid': prev_polled_tid, 'self_tid': ignore_tid})
-        oids = [oid for (oid,) in cursor]
-
-        return oids, new_polled_tid
-
-    def md5sum(self, data):
-        if data is not None:
-            return md5(data).hexdigest()
-        else:
-            # George Bailey object
-            return None

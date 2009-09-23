@@ -53,7 +53,7 @@ import MySQLdb
 import time
 from ZODB.POSException import StorageError
 
-from common import Adapter
+from relstorage.adapters.historypreserving import HistoryPreservingAdapter
 
 log = logging.getLogger("relstorage.adapters.mysql")
 
@@ -68,10 +68,10 @@ disconnected_exceptions = (MySQLdb.OperationalError, MySQLdb.InterfaceError)
 close_exceptions = disconnected_exceptions + (MySQLdb.ProgrammingError,)
 
 
-class MySQLAdapter(Adapter):
+class MySQLAdapter(HistoryPreservingAdapter):
     """MySQL adapter for RelStorage."""
 
-    _scripts = Adapter._scripts.copy()
+    _scripts = HistoryPreservingAdapter._scripts.copy()
     # Work around a MySQL performance bug by avoiding an expensive subquery.
     # See: http://mail.zope.org/pipermail/zodb-dev/2008-May/011880.html
     #      http://bugs.mysql.com/bug.php?id=28257
@@ -90,7 +90,7 @@ class MySQLAdapter(Adapter):
 
         # Note: UPDATE must be the last statement in the script
         # because it returns a value.
-        'prepack_follow_child_refs': """
+        'pre_pack_follow_child_refs': """
             %(TRUNCATE)s temp_pack_child;
 
             INSERT INTO temp_pack_child
@@ -650,7 +650,7 @@ class MySQLAdapter(Adapter):
         """Open a connection to be used for the pre-pack phase.
         Returns (conn, cursor).
 
-        This overrides the method by the same name in common.Adapter.
+        This overrides a method.
         """
         conn, cursor = self.open(transaction_mode=None)
         try:
@@ -666,7 +666,7 @@ class MySQLAdapter(Adapter):
     def _hold_commit_lock(self, cursor):
         """Hold the commit lock.
 
-        This overrides the method by the same name in common.Adapter.
+        This overrides a method.
         """
         cursor.execute("SELECT GET_LOCK(CONCAT(DATABASE(), '.commit'), %s)",
             (commit_lock_timeout,))
@@ -678,7 +678,7 @@ class MySQLAdapter(Adapter):
     def _release_commit_lock(self, cursor):
         """Release the commit lock.
 
-        This overrides the method by the same name in common.Adapter.
+        This overrides a method.
         """
         cursor.execute("SELECT RELEASE_LOCK(CONCAT(DATABASE(), '.commit'))")
 

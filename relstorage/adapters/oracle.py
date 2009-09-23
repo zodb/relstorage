@@ -20,7 +20,7 @@ import time
 import cx_Oracle
 from ZODB.POSException import StorageError
 
-from common import Adapter
+from relstorage.adapters.historypreserving import HistoryPreservingAdapter
 
 log = logging.getLogger("relstorage.adapters.oracle")
 
@@ -51,7 +51,7 @@ def read_lob(value):
     return value
 
 
-class OracleAdapter(Adapter):
+class OracleAdapter(HistoryPreservingAdapter):
     """Oracle adapter for RelStorage."""
 
     _script_vars = {
@@ -68,7 +68,7 @@ class OracleAdapter(Adapter):
         'max_tid':      ':max_tid',
     }
 
-    _scripts = Adapter._scripts.copy()
+    _scripts = HistoryPreservingAdapter._scripts.copy()
     _scripts.update({
         'choose_pack_transaction': """
             SELECT MAX(tid)
@@ -117,7 +117,10 @@ class OracleAdapter(Adapter):
     def _run_script_stmt(self, cursor, generic_stmt, generic_params=()):
         """Execute a statement from a script with the given parameters.
 
-        This overrides the method by the same name in common.Adapter.
+        params should be either an empty tuple (no parameters) or
+        a map.
+
+        This overrides a method.
         """
         if generic_params:
             # Oracle raises ORA-01036 if the parameter map contains extra keys,
@@ -140,6 +143,19 @@ class OracleAdapter(Adapter):
                 stmt, params)
             raise
 
+    def _run_many(self, cursor, stmt, items):
+        """Execute a statement repeatedly.  Items should be a list of tuples.
+
+        stmt should use '%s' parameter format.  Overrides a method.
+        """
+        # replace '%s' with ':n'
+        matches = []
+        def replace(match):
+            matches.append(None)
+            return ':%d' % len(matches)
+        stmt = re.sub('%s', replace, stmt)
+
+        cursor.executemany(stmt, items)
 
     def create_schema(self, cursor):
         """Create the database tables."""
@@ -765,21 +781,6 @@ class OracleAdapter(Adapter):
         """Release the pack lock."""
         # No action needed
         pass
-
-
-    def _add_object_ref_rows(self, cursor, add_rows):
-        """Add rows to object_ref.
-
-        The input rows are tuples containing (from_zoid, tid, to_zoid).
-
-        This overrides the method by the same name in common.Adapter.
-        """
-        stmt = """
-        INSERT INTO object_ref (zoid, tid, to_zoid)
-        VALUES (:1, :2, :3)
-        """
-        cursor.executemany(stmt, add_rows)
-
 
     _poll_query = "SELECT MAX(tid) FROM transaction"
 
