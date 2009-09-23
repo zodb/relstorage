@@ -21,6 +21,7 @@ from relstorage.adapters.connmanager import AbstractConnectionManager
 from relstorage.adapters.dbiter import HistoryPreservingDatabaseIterator
 from relstorage.adapters.loadstore import HistoryPreservingPostgreSQLLoadStore
 from relstorage.adapters.locker import PostgreSQLLocker
+from relstorage.adapters.oidallocator import PostgreSQLOIDAllocator
 from relstorage.adapters.packundo import HistoryPreservingPackUndo
 from relstorage.adapters.poller import Poller
 from relstorage.adapters.schema import HistoryPreservingPostgreSQLSchema
@@ -32,8 +33,14 @@ log = logging.getLogger(__name__)
 
 # disconnected_exceptions contains the exception types that might be
 # raised when the connection to the database has been broken.
-disconnected_exceptions = (psycopg2.OperationalError, psycopg2.InterfaceError)
+disconnected_exceptions = (
+    psycopg2.OperationalError,
+    psycopg2.InterfaceError,
+    )
 
+# close_exceptions contains the exception types to ignore
+# when the adapter attempts to close a database connection.
+close_exceptions = disconnected_exceptions
 
 class PostgreSQLAdapter(object):
     """PostgreSQL adapter for RelStorage."""
@@ -48,10 +55,9 @@ class PostgreSQLAdapter(object):
             locker=self.locker,
             connmanager=self.connmanager,
             )
-        self.loadstore = HistoryPreservingPostgreSQLLoadStore(
-            connmanager=self.connmanager,
-            disconnected_exceptions=disconnected_exceptions,
-            )
+        self.loadstore = HistoryPreservingPostgreSQLLoadStore()
+        self.oidallocator = PostgreSQLOIDAllocator()
+        self.connmanager.set_on_store_opened(self.loadstore.on_store_opened)
         self.txncontrol = PostgreSQLTransactionControl()
         self.poller = Poller(
             poll_query="EXECUTE get_latest_tid",
@@ -72,6 +78,10 @@ class PostgreSQLAdapter(object):
 
         self.open = self.connmanager.open
         self.close = self.connmanager.close
+        self.open_for_load = self.connmanager.open_for_load
+        self.restart_load = self.connmanager.restart_load
+        self.open_for_store = self.connmanager.open_for_store
+        self.restart_store = self.connmanager.restart_store
 
         self.hold_commit_lock = self.locker.hold_commit_lock
         self.release_commit_lock = self.locker.release_commit_lock
@@ -83,25 +93,21 @@ class PostgreSQLAdapter(object):
         self.zap_all = self.schema.zap_all
         self.drop_all = self.schema.drop_all
 
-        self.open_for_load = self.loadstore.open_for_load
-        self.restart_load = self.loadstore.restart_load
         self.get_current_tid = self.loadstore.get_current_tid
         self.load_current = self.loadstore.load_current
         self.load_revision = self.loadstore.load_revision
         self.exists = self.loadstore.exists
         self.load_before = self.loadstore.load_before
         self.get_object_tid_after = self.loadstore.get_object_tid_after
-
-        self.open_for_store = self.loadstore.open_for_store
-        self.restart_store = self.loadstore.restart_store
         self.store_temp = self.loadstore.store_temp
         self.replace_temp = self.loadstore.replace_temp
         self.restore = self.loadstore.restore
         self.detect_conflict = self.loadstore.detect_conflict
         self.move_from_temp = self.loadstore.move_from_temp
         self.update_current = self.loadstore.update_current
-        self.set_min_oid = self.loadstore.set_min_oid
-        self.new_oid = self.loadstore.new_oid
+
+        self.set_min_oid = self.oidallocator.set_min_oid
+        self.new_oid = self.oidallocator.new_oid
 
         self.get_tid_and_time = self.txncontrol.get_tid_and_time
         self.add_transaction = self.txncontrol.add_transaction
@@ -135,7 +141,8 @@ class Psycopg2ConnectionManager(AbstractConnectionManager):
     isolation_serializable = (
         psycopg2.extensions.ISOLATION_LEVEL_SERIALIZABLE)
 
-    close_exceptions = disconnected_exceptions
+    disconnected_exceptions = disconnected_exceptions
+    close_exceptions = close_exceptions
 
     def __init__(self, dsn):
         self._dsn = dsn
@@ -151,5 +158,21 @@ class Psycopg2ConnectionManager(AbstractConnectionManager):
         except psycopg2.OperationalError, e:
             log.warning("Unable to connect: %s", e)
             raise
+        return conn, cursor
+
+    def open_for_load(self):
+        """Open and initialize a connection for loading objects.
+
+        Returns (conn, cursor).
+        """
+        conn, cursor = self.open(self.isolation_serializable)
+        stmt = """
+        PREPARE get_latest_tid AS
+        SELECT tid
+        FROM transaction
+        ORDER BY tid DESC
+        LIMIT 1
+        """
+        cursor.execute(stmt)
         return conn, cursor
 

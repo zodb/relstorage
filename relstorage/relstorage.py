@@ -195,7 +195,8 @@ class RelStorage(BaseStorage,
             self._open_load_connection()
         else:
             try:
-                self._adapter.restart_load(self._load_cursor)
+                self._adapter.restart_load(
+                    self._load_conn, self._load_cursor)
             except POSException.StorageError, e:
                 log.warning("Reconnecting load_conn: %s", e)
                 self._drop_load_connection()
@@ -227,7 +228,8 @@ class RelStorage(BaseStorage,
             self._open_store_connection()
         else:
             try:
-                self._adapter.restart_store(self._store_cursor)
+                self._adapter.restart_store(
+                    self._store_conn, self._store_cursor)
             except POSException.StorageError, e:
                 log.warning("Reconnecting store_conn: %s", e)
                 self._drop_store_connection()

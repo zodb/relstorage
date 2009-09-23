@@ -35,47 +35,19 @@ def compute_md5sum(data):
 
 class HistoryPreservingPostgreSQLLoadStore(object):
 
-    def __init__(self, connmanager, disconnected_exceptions):
-        self.connmanager = connmanager
-        self.disconnected_exceptions = disconnected_exceptions
-
-    def open_for_load(self):
-        """Open and initialize a connection for loading objects.
-
-        Returns (conn, cursor).
-        """
-        conn, cursor = self.connmanager.open(
-            self.connmanager.isolation_serializable)
-        stmt = """
-        PREPARE get_latest_tid AS
-        SELECT tid
-        FROM transaction
-        ORDER BY tid DESC
-        LIMIT 1
-        """
-        cursor.execute(stmt)
-        return conn, cursor
-
-    def restart_load(self, cursor):
-        """Reinitialize a connection for loading objects."""
-        try:
-            cursor.connection.rollback()
-        except self.disconnected_exceptions, e:
-            raise StorageError(e)
-
     def get_current_tid(self, cursor, oid):
         """Returns the current integer tid for an object.
 
         oid is an integer.  Returns None if object does not exist.
         """
-        cursor.execute("""
+        stmt = """
         SELECT tid
         FROM current_object
         WHERE zoid = %s
-        """, (oid,))
-        if cursor.rowcount:
-            assert cursor.rowcount == 1
-            return cursor.fetchone()[0]
+        """
+        cursor.execute(stmt, (oid,))
+        for (tid,) in cursor:
+            return tid
         return None
 
     def load_current(self, cursor, oid):
@@ -121,8 +93,11 @@ class HistoryPreservingPostgreSQLLoadStore(object):
 
     def exists(self, cursor, oid):
         """Returns a true value if the given object exists."""
-        cursor.execute("SELECT 1 FROM current_object WHERE zoid = %s", (oid,))
-        return cursor.rowcount
+        stmt = "SELECT 1 FROM current_object WHERE zoid = %s"
+        cursor.execute(stmt, (oid,))
+        for row in cursor:
+            return True
+        return False
 
     def load_before(self, cursor, oid, tid):
         """Returns the pickle and tid of an object before transaction tid.
@@ -169,7 +144,7 @@ class HistoryPreservingPostgreSQLLoadStore(object):
         else:
             return None
 
-    def _make_temp_table(self, cursor):
+    def on_store_opened(self, cursor, restart=False):
         """Create the temporary table for storing objects"""
         stmt = """
         CREATE TEMPORARY TABLE temp_store (
@@ -181,27 +156,6 @@ class HistoryPreservingPostgreSQLLoadStore(object):
         CREATE UNIQUE INDEX temp_store_zoid ON temp_store (zoid)
         """
         cursor.execute(stmt)
-
-    def open_for_store(self):
-        """Open and initialize a connection for storing objects.
-
-        Returns (conn, cursor).
-        """
-        conn, cursor = self.connmanager.open()
-        try:
-            self._make_temp_table(cursor)
-            return conn, cursor
-        except:
-            self.connmanager.close(conn, cursor)
-            raise
-
-    def restart_store(self, cursor):
-        """Reuse a store connection."""
-        try:
-            cursor.connection.rollback()
-            self._make_temp_table(cursor)
-        except self.disconnected_exceptions, e:
-            raise StorageError(e)
 
     def store_temp(self, cursor, oid, prev_tid, data):
         """Store an object in the temporary table."""
@@ -302,57 +256,25 @@ class HistoryPreservingPostgreSQLLoadStore(object):
         )
         """, {'tid': tid})
 
-    def set_min_oid(self, cursor, oid):
-        """Ensure the next OID is at least the given OID."""
-        cursor.execute("""
-        SELECT CASE WHEN %s > nextval('zoid_seq')
-            THEN setval('zoid_seq', %s)
-            ELSE 0
-            END
-        """, (oid, oid))
-
-    def new_oid(self, cursor):
-        """Return a new, unused OID."""
-        stmt = "SELECT NEXTVAL('zoid_seq')"
-        cursor.execute(stmt)
-        return cursor.fetchone()[0]
-
 
 class HistoryPreservingMySQLLoadStore(object):
 
-    def __init__(self, connmanager, disconnected_exceptions, Binary):
-        self.connmanager = connmanager
-        self.disconnected_exceptions = disconnected_exceptions
+    def __init__(self, Binary):
         self.Binary = Binary
-
-    def open_for_load(self):
-        """Open and initialize a connection for loading objects.
-
-        Returns (conn, cursor).
-        """
-        return self.connmanager.open(
-            self.connmanager.isolation_repeatable_read)
-
-    def restart_load(self, cursor):
-        """Reinitialize a connection for loading objects."""
-        try:
-            cursor.connection.rollback()
-        except self.disconnected_exceptions, e:
-            raise StorageError(e)
 
     def get_current_tid(self, cursor, oid):
         """Returns the current integer tid for an object.
 
         oid is an integer.  Returns None if object does not exist.
         """
-        cursor.execute("""
+        stmt = """
         SELECT tid
         FROM current_object
         WHERE zoid = %s
-        """, (oid,))
-        if cursor.rowcount:
-            assert cursor.rowcount == 1
-            return cursor.fetchone()[0]
+        """
+        cursor.execute(stmt, (oid,))
+        for (tid,) in cursor:
+            return tid
         return None
 
     def load_current(self, cursor, oid):
@@ -391,8 +313,11 @@ class HistoryPreservingMySQLLoadStore(object):
 
     def exists(self, cursor, oid):
         """Returns a true value if the given object exists."""
-        cursor.execute("SELECT 1 FROM current_object WHERE zoid = %s", (oid,))
-        return cursor.rowcount
+        stmt = "SELECT 1 FROM current_object WHERE zoid = %s"
+        cursor.execute(stmt, (oid,))
+        for row in cursor:
+            return True
+        return False
 
     def load_before(self, cursor, oid, tid):
         """Returns the pickle and tid of an object before transaction tid.
@@ -433,8 +358,14 @@ class HistoryPreservingMySQLLoadStore(object):
         else:
             return None
 
-    def _make_temp_table(self, cursor):
+    def on_store_opened(self, cursor, restart=False):
         """Create the temporary table for storing objects"""
+        if restart:
+            stmt = """
+            DROP TEMPORARY TABLE IF EXISTS temp_store
+            """
+            cursor.execute(stmt)
+
         stmt = """
         CREATE TEMPORARY TABLE temp_store (
             zoid        BIGINT NOT NULL PRIMARY KEY,
@@ -444,35 +375,6 @@ class HistoryPreservingMySQLLoadStore(object):
         ) ENGINE MyISAM
         """
         cursor.execute(stmt)
-
-    def open_for_store(self):
-        """Open and initialize a connection for storing objects.
-
-        Returns (conn, cursor).
-        """
-        conn, cursor = self.connmanager.open()
-        try:
-            self._make_temp_table(cursor)
-            return conn, cursor
-        except:
-            self.connmanager.close(conn, cursor)
-            raise
-
-    def _restart_temp_table(self, cursor):
-        """Restart the temporary table for storing objects"""
-        stmt = """
-        DROP TEMPORARY TABLE IF EXISTS temp_store
-        """
-        cursor.execute(stmt)
-        self._make_temp_table(cursor)
-
-    def restart_store(self, cursor):
-        """Reuse a store connection."""
-        try:
-            cursor.connection.rollback()
-            self._restart_temp_table(cursor)
-        except self.disconnected_exceptions, e:
-            raise StorageError(e)
 
     def store_temp(self, cursor, oid, prev_tid, data):
         """Store an object in the temporary table."""
@@ -561,59 +463,26 @@ class HistoryPreservingMySQLLoadStore(object):
         WHERE tid = %s
         """, (tid,))
 
-    def set_min_oid(self, cursor, oid):
-        """Ensure the next OID is at least the given OID."""
-        cursor.execute("REPLACE INTO new_oid VALUES(%s)", (oid,))
-
-    def new_oid(self, cursor):
-        """Return a new, unused OID."""
-        stmt = "INSERT INTO new_oid VALUES ()"
-        cursor.execute(stmt)
-        oid = cursor.connection.insert_id()
-        if oid % 100 == 0:
-            # Clean out previously generated OIDs.
-            stmt = "DELETE FROM new_oid WHERE zoid < %s"
-            cursor.execute(stmt, (oid,))
-        return oid
-
 
 class HistoryPreservingOracleLoadStore(object):
 
-    def __init__(self, connmanager, runner, disconnected_exceptions,
-            Binary, inputsize_BLOB, inputsize_BINARY, twophase):
-        self.connmanager = connmanager
+    def __init__(self, runner, Binary, inputsize_BLOB, inputsize_BINARY):
         self.runner = runner
-        self.disconnected_exceptions = disconnected_exceptions
         self.Binary = Binary
         self.inputsize_BLOB = inputsize_BLOB
         self.inputsize_BINARY = inputsize_BINARY
-        self.twophase = twophase
-
-    def open_for_load(self):
-        """Open and initialize a connection for loading objects.
-
-        Returns (conn, cursor).
-        """
-        return self.connmanager.open(self.connmanager.isolation_read_only)
-
-    def restart_load(self, cursor):
-        """Reinitialize a connection for loading objects."""
-        try:
-            cursor.connection.rollback()
-            cursor.execute("SET TRANSACTION READ ONLY")
-        except self.disconnected_exceptions, e:
-            raise StorageError(e)
 
     def get_current_tid(self, cursor, oid):
         """Returns the current integer tid for an object.
 
         oid is an integer.  Returns None if object does not exist.
         """
-        cursor.execute("""
+        stmt = """
         SELECT tid
         FROM current_object
         WHERE zoid = :1
-        """, (oid,))
+        """
+        cursor.execute(stmt, (oid,))
         for (tid,) in cursor:
             return tid
         return None
@@ -649,8 +518,11 @@ class HistoryPreservingOracleLoadStore(object):
 
     def exists(self, cursor, oid):
         """Returns a true value if the given object exists."""
-        cursor.execute("SELECT 1 FROM current_object WHERE zoid = :1", (oid,))
-        return len(list(cursor))
+        stmt = "SELECT 1 FROM current_object WHERE zoid = :1"
+        cursor.execute(stmt, (oid,))
+        for row in cursor:
+            return True
+        return False
 
     def load_before(self, cursor, oid, tid):
         """Returns the pickle and tid of an object before transaction tid.
@@ -690,40 +562,7 @@ class HistoryPreservingOracleLoadStore(object):
         else:
             return None
 
-    def _set_xid(self, cursor):
-        """Set up a distributed transaction"""
-        stmt = """
-        SELECT SYS_CONTEXT('USERENV', 'SID') FROM DUAL
-        """
-        cursor.execute(stmt)
-        xid = str(cursor.fetchone()[0])
-        cursor.connection.begin(0, xid, '0')
-
-    def open_for_store(self):
-        """Open and initialize a connection for storing objects.
-
-        Returns (conn, cursor).
-        """
-        if self.twophase:
-            conn, cursor = self.connmanager.open(
-                transaction_mode=None, twophase=True)
-            try:
-                self._set_xid(cursor)
-            except:
-                self.close(conn, cursor)
-                raise
-        else:
-            conn, cursor = self.connmanager.open()
-        return conn, cursor
-
-    def restart_store(self, cursor):
-        """Reuse a store connection."""
-        try:
-            cursor.connection.rollback()
-            if self.twophase:
-                self._set_xid(cursor)
-        except self.disconnected_exceptions, e:
-            raise StorageError(e)
+    on_store_opened = None  # no store connection initialization needed
 
     def store_temp(self, cursor, oid, prev_tid, data):
         """Store an object in the temporary table."""
@@ -838,30 +677,3 @@ class HistoryPreservingOracleLoadStore(object):
         """
         cursor.execute(stmt, (tid,))
 
-    def set_min_oid(self, cursor, oid):
-        """Ensure the next OID is at least the given OID."""
-        next_oid = self.new_oid(cursor)
-        if next_oid < oid:
-            # Oracle provides no way modify the sequence value
-            # except through alter sequence or drop/create sequence,
-            # but either statement kills the current transaction.
-            # Therefore, open a temporary connection to make the
-            # alteration.
-            conn2, cursor2 = self.connmanager.open()
-            try:
-                # Change the sequence by altering the increment.
-                # (this is safer than dropping and re-creating the sequence)
-                diff = oid - next_oid
-                cursor2.execute(
-                    "ALTER SEQUENCE zoid_seq INCREMENT BY %d" % diff)
-                cursor2.execute("SELECT zoid_seq.nextval FROM DUAL")
-                cursor2.execute("ALTER SEQUENCE zoid_seq INCREMENT BY 1")
-                conn2.commit()
-            finally:
-                self.connmanager.close(conn2, cursor2)
-
-    def new_oid(self, cursor):
-        """Return a new, unused OID."""
-        stmt = "SELECT zoid_seq.nextval FROM DUAL"
-        cursor.execute(stmt)
-        return cursor.fetchone()[0]

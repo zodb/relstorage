@@ -14,6 +14,7 @@
 
 from relstorage.adapters.interfaces import IConnectionManager
 from zope.interface import implements
+from ZODB.POSException import StorageError
 
 class AbstractConnectionManager(object):
     """Abstract base class for connection management.
@@ -22,13 +23,25 @@ class AbstractConnectionManager(object):
     """
     implements(IConnectionManager)
 
+    # disconnected_exceptions contains the exception types that might be
+    # raised when the connection to the database has been broken.
+    disconnected_exceptions = ()
+
     # close_exceptions contains the exception types to ignore
     # when the adapter attempts to close a database connection.
     close_exceptions = ()
 
+    # on_store_opened is either None or a callable that
+    # will be called whenever a store cursor is opened or rolled back.
+    on_store_opened = None
+
+    def set_on_store_opened(self, f):
+        """Set the on_store_opened hook"""
+        self.on_store_opened = f
+
     def open(self):
         """Open a database connection and return (conn, cursor)."""
-        raise NotImplementedError
+        raise NotImplementedError()
 
     def close(self, conn, cursor):
         """Close a connection and cursor, ignoring certain errors.
@@ -61,3 +74,35 @@ class AbstractConnectionManager(object):
         finally:
             self.close(conn, cursor)
 
+    def open_for_load(self):
+        raise NotImplementedError()
+
+    def restart_load(self, conn, cursor):
+        """Reinitialize a connection for loading objects."""
+        try:
+            conn.rollback()
+        except self.disconnected_exceptions, e:
+            raise StorageError(e)
+
+    def open_for_store(self):
+        """Open and initialize a connection for storing objects.
+
+        Returns (conn, cursor).
+        """
+        conn, cursor = self.open()
+        try:
+            if self.on_store_opened is not None:
+                self.on_store_opened(cursor, restart=False)
+            return conn, cursor
+        except:
+            self.close(conn, cursor)
+            raise
+
+    def restart_store(self, conn, cursor):
+        """Reuse a store connection."""
+        try:
+            conn.rollback()
+            if self.on_store_opened is not None:
+                self.on_store_opened(cursor, restart=True)
+        except self.disconnected_exceptions, e:
+            raise StorageError(e)

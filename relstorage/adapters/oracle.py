@@ -15,11 +15,13 @@
 
 import logging
 import cx_Oracle
+from ZODB.POSException import StorageError
 
 from relstorage.adapters.connmanager import AbstractConnectionManager
 from relstorage.adapters.dbiter import HistoryPreservingDatabaseIterator
 from relstorage.adapters.loadstore import HistoryPreservingOracleLoadStore
 from relstorage.adapters.locker import OracleLocker
+from relstorage.adapters.oidallocator import OracleOIDAllocator
 from relstorage.adapters.packundo import OracleHistoryPreservingPackUndo
 from relstorage.adapters.poller import Poller
 from relstorage.adapters.schema import HistoryPreservingOracleSchema
@@ -31,9 +33,15 @@ log = logging.getLogger(__name__)
 
 # disconnected_exceptions contains the exception types that might be
 # raised when the connection to the database has been broken.
-disconnected_exceptions = (cx_Oracle.OperationalError,
-    cx_Oracle.InterfaceError, cx_Oracle.DatabaseError)
+disconnected_exceptions = (
+    cx_Oracle.OperationalError,
+    cx_Oracle.InterfaceError,
+    cx_Oracle.DatabaseError,
+    )
 
+# close_exceptions contains the exception types to ignore
+# when the adapter attempts to close a database connection.
+close_exceptions = disconnected_exceptions
 
 class OracleAdapter(object):
     """Oracle adapter for RelStorage."""
@@ -70,14 +78,16 @@ class OracleAdapter(object):
             runner=self.runner,
             )
         self.loadstore = HistoryPreservingOracleLoadStore(
-            connmanager=self.connmanager,
             runner=self.runner,
-            disconnected_exceptions=disconnected_exceptions,
             Binary=cx_Oracle.Binary,
             inputsize_BLOB=cx_Oracle.BLOB,
             inputsize_BINARY=cx_Oracle.BINARY,
             twophase=bool(twophase),
             )
+        self.oidallocator = OracleOIDAllocator(
+            connmanager=self.connmanager,
+            )
+        self.connmanager.set_on_store_opened(self.loadstore.on_store_opened)
         self.txncontrol = OracleTransactionControl(
             Binary=cx_Oracle.Binary,
             )
@@ -100,6 +110,10 @@ class OracleAdapter(object):
 
         self.open = self.connmanager.open
         self.close = self.connmanager.close
+        self.open_for_load = self.connmanager.open_for_load
+        self.restart_load = self.connmanager.restart_load
+        self.open_for_store = self.connmanager.open_for_store
+        self.restart_store = self.connmanager.restart_store
 
         self.hold_commit_lock = self.locker.hold_commit_lock
         self.release_commit_lock = self.locker.release_commit_lock
@@ -111,25 +125,21 @@ class OracleAdapter(object):
         self.zap_all = self.schema.zap_all
         self.drop_all = self.schema.drop_all
 
-        self.open_for_load = self.loadstore.open_for_load
-        self.restart_load = self.loadstore.restart_load
         self.get_current_tid = self.loadstore.get_current_tid
         self.load_current = self.loadstore.load_current
         self.load_revision = self.loadstore.load_revision
         self.exists = self.loadstore.exists
         self.load_before = self.loadstore.load_before
         self.get_object_tid_after = self.loadstore.get_object_tid_after
-
-        self.open_for_store = self.loadstore.open_for_store
-        self.restart_store = self.loadstore.restart_store
         self.store_temp = self.loadstore.store_temp
         self.replace_temp = self.loadstore.replace_temp
         self.restore = self.loadstore.restore
         self.detect_conflict = self.loadstore.detect_conflict
         self.move_from_temp = self.loadstore.move_from_temp
         self.update_current = self.loadstore.update_current
-        self.set_min_oid = self.loadstore.set_min_oid
-        self.new_oid = self.loadstore.new_oid
+
+        self.set_min_oid = self.oidallocator.set_min_oid
+        self.new_oid = self.oidallocator.new_oid
 
         self.get_tid_and_time = self.txncontrol.get_tid_and_time
         self.add_transaction = self.txncontrol.add_transaction
@@ -222,11 +232,13 @@ class CXOracleConnectionManager(AbstractConnectionManager):
     isolation_read_committed = "ISOLATION LEVEL READ COMMITTED"
     isolation_read_only = "READ ONLY"
 
-    close_exceptions = disconnected_exceptions
+    disconnected_exceptions = disconnected_exceptions
+    close_exceptions = close_exceptions
 
-    def __init__(self, params, arraysize):
+    def __init__(self, params, arraysize, twophase):
         self._params = params
         self._arraysize = arraysize
+        self._twophase = twophase
 
     def open(self, transaction_mode="ISOLATION LEVEL READ COMMITTED",
             twophase=False):
@@ -243,3 +255,58 @@ class CXOracleConnectionManager(AbstractConnectionManager):
         except cx_Oracle.OperationalError, e:
             log.warning("Unable to connect: %s", e)
             raise
+
+    def open_for_load(self):
+        """Open and initialize a connection for loading objects.
+
+        Returns (conn, cursor).
+        """
+        return self.open(self.isolation_read_only)
+
+    def restart_load(self, cursor):
+        """Reinitialize a connection for loading objects."""
+        try:
+            cursor.connection.rollback()
+            cursor.execute("SET TRANSACTION READ ONLY")
+        except self.disconnected_exceptions, e:
+            raise StorageError(e)
+
+    def _set_xid(self, conn, cursor):
+        """Set up a distributed transaction"""
+        stmt = """
+        SELECT SYS_CONTEXT('USERENV', 'SID') FROM DUAL
+        """
+        cursor.execute(stmt)
+        xid = str(cursor.fetchone()[0])
+        conn.begin(0, xid, '0')
+
+    def open_for_store(self):
+        """Open and initialize a connection for storing objects.
+
+        Returns (conn, cursor).
+        """
+        try:
+            if self._twophase:
+                conn, cursor = self.open(transaction_mode=None, twophase=True)
+                try:
+                    self._set_xid(conn, cursor)
+            else:
+                conn, cursor = self.open()
+            if self.on_store_opened is not None:
+                self.on_store_opened(cursor, restart=False)
+            return conn, cursor
+        except:
+            self.close(conn, cursor)
+            raise
+
+    def restart_store(self, conn, cursor):
+        """Reuse a store connection."""
+        try:
+            conn.rollback()
+            if self._twophase:
+                self._set_xid(conn, cursor)
+            if self.on_store_opened is not None:
+                self.on_store_opened(cursor, restart=True)
+        except self.disconnected_exceptions, e:
+            raise StorageError(e)
+

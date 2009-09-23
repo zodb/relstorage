@@ -34,6 +34,30 @@ class IConnectionManager(Interface):
         then propagates the exception.
         """
 
+    def open_for_load():
+        """Open a connection for loading objects.
+
+        Returns (conn, cursor).
+        """
+
+    def restart_load(conn, cursor):
+        """Reinitialize a connection for loading objects.
+
+        Raise StorageError if the database has disconnected.
+        """
+
+    def open_for_store():
+        """Open and initialize a connection for storing objects.
+
+        Returns (conn, cursor).
+        """
+
+    def restart_store(conn, cursor):
+        """Rollback and reuse a store connection.
+
+        Raise StorageError if the database has disconnected.
+        """
+
 
 class IDatabaseIterator(Interface):
 
@@ -90,6 +114,15 @@ class ILocker(Interface):
 
     def release_pack_lock(cursor):
         """Release the pack lock."""
+
+
+class IOIDAllocator(Interface):
+
+    def set_min_oid(cursor, oid):
+        """Ensure the next OID is at least the given OID."""
+
+    def new_oid(cursor):
+        """Return a new, unused OID."""
 
 
 class IPackUndo(Interface):
