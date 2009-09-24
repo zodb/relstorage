@@ -34,13 +34,6 @@ def compute_md5sum(data):
         return None
 
 
-def for_databases(*database_names):
-    def decorate(f):
-        f._for_databases = database_names
-        return f
-    return decorate
-
-
 class HistoryPreservingObjectMover(object):
     implements(IObjectMover)
 

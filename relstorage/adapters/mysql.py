@@ -53,12 +53,15 @@ import MySQLdb
 from zope.interface import implements
 
 from relstorage.adapters.connmanager import AbstractConnectionManager
+from relstorage.adapters.dbiter import HistoryFreeDatabaseIterator
 from relstorage.adapters.dbiter import HistoryPreservingDatabaseIterator
+from relstorage.adapters.hfmover import HistoryFreeObjectMover
 from relstorage.adapters.hpmover import HistoryPreservingObjectMover
 from relstorage.adapters.interfaces import IRelStorageAdapter
 from relstorage.adapters.locker import MySQLLocker
 from relstorage.adapters.oidallocator import MySQLOIDAllocator
-from relstorage.adapters.packundo import HistoryPreservingPackUndo
+from relstorage.adapters.packundo import HistoryFreePackUndo
+from relstorage.adapters.packundo import MySQLHistoryPreservingPackUndo
 from relstorage.adapters.poller import Poller
 from relstorage.adapters.schema import MySQLSchemaInstaller
 from relstorage.adapters.scriptrunner import ScriptRunner
@@ -80,9 +83,8 @@ class MySQLAdapter(object):
     """MySQL adapter for RelStorage."""
     implements(IRelStorageAdapter)
 
-    keep_history = True
-
-    def __init__(self, **params):
+    def __init__(self, keep_history=True, **params):
+        self.keep_history = keep_history
         self.connmanager = MySQLdbConnectionManager(params)
         self.runner = ScriptRunner()
         self.locker = MySQLLocker((MySQLdb.DatabaseError,))
@@ -91,11 +93,18 @@ class MySQLAdapter(object):
             runner=self.runner,
             keep_history=self.keep_history,
             )
-        self.mover = HistoryPreservingObjectMover(
-            database_name='mysql',
-            runner=self.runner,
-            Binary=MySQLdb.Binary,
-            )
+        if self.keep_history:
+            self.mover = HistoryPreservingObjectMover(
+                database_name='mysql',
+                runner=self.runner,
+                Binary=MySQLdb.Binary,
+                )
+        else:
+            self.mover = HistoryFreeObjectMover(
+                database_name='mysql',
+                runner=self.runner,
+                Binary=MySQLdb.Binary,
+                )
         self.connmanager.set_on_store_opened(self.mover.on_store_opened)
         self.oidallocator = MySQLOIDAllocator()
         self.txncontrol = MySQLTransactionControl(
@@ -106,14 +115,24 @@ class MySQLAdapter(object):
             keep_history=self.keep_history,
             runner=self.runner,
             )
-        self.packundo = HistoryPreservingPackUndo(
-            connmanager=self.connmanager,
-            runner=self.runner,
-            locker=self.locker,
-            )
-        self.dbiter = HistoryPreservingDatabaseIterator(
-            runner=self.runner,
-            )
+        if self.keep_history:
+            self.packundo = MySQLHistoryPreservingPackUndo(
+                connmanager=self.connmanager,
+                runner=self.runner,
+                locker=self.locker,
+                )
+            self.dbiter = HistoryPreservingDatabaseIterator(
+                runner=self.runner,
+                )
+        else:
+            self.packundo = HistoryFreePackUndo(
+                connmanager=self.connmanager,
+                runner=self.runner,
+                locker=self.locker,
+                )
+            self.dbiter = HistoryFreeDatabaseIterator(
+                runner=self.runner,
+                )
         self.stats = MySQLStats(
             connmanager=self.connmanager,
             )

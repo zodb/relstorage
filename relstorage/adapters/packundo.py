@@ -98,24 +98,13 @@ class PackUndo(object):
                         "object %d in transaction %d; state length = %d" % (
                         from_oid, tid, len(state)))
                     raise
-                if self.keep_history:
-                    for to_oid in to_oids:
-                        add_rows.append((from_oid, tid, to_oid))
-                else:
-                    for to_oid in to_oids:
-                        add_rows.append((from_oid, to_oid))
+                for to_oid in to_oids:
+                    add_rows.append((from_oid, tid, to_oid))
 
-        if self.keep_history:
-            stmt = """
-            INSERT INTO object_ref (zoid, tid, to_zoid)
-            VALUES (%s, %s, %s)
-            """
-            self.runner.run_many(cursor, stmt, add_rows)
-
-        else:
+        if not self.keep_history:
             stmt = """
             DELETE FROM object_ref
-            WHERE zoid in (
+            WHERE tid in (
                 SELECT zoid
                 FROM object_state
                 WHERE tid = %(tid)s
@@ -123,11 +112,11 @@ class PackUndo(object):
             """
             self.runner.run_script(cursor, stmt, {'tid': tid})
 
-            stmt = """
-            INSERT INTO object_ref (zoid, to_zoid)
-            VALUES (%s, %s)
-            """
-            self.runner.run_many(cursor, stmt, add_rows)
+        stmt = """
+        INSERT INTO object_ref (zoid, tid, to_zoid)
+        VALUES (%s, %s, %s)
+        """
+        self.runner.run_many(cursor, stmt, add_rows)
 
         # The references have been computed for this transaction.
         stmt = """
@@ -1027,7 +1016,7 @@ class HistoryFreePackUndo(PackUndo):
             self.connmanager.close(conn, cursor)
 
 
-    def _pack_cleaup(self, conn, cursor):
+    def _pack_cleanup(self, conn, cursor):
         # commit the work done so far
         conn.commit()
         self.locker.release_commit_lock(cursor)
