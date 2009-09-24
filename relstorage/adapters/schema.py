@@ -418,6 +418,8 @@ class AbstractSchemaInstaller(object):
             todo = list(self.all_tables)
             todo.reverse()
             for table in todo:
+                if table.startswith('temp_'):
+                    continue
                 if table in existent:
                     cursor.execute("DELETE FROM %s" % table)
             script = filter_script(self.init_script, self.database_name)

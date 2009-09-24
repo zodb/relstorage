@@ -86,7 +86,7 @@ class IDatabaseIterator(Interface):
         """Iterate over an object's history.
 
         Raises KeyError if the object does not exist.
-        Yields (tid, username, description, extension, pickle_size)
+        Yields (tid, username, description, extension, state_size)
         for each modification.
         """
 
@@ -114,6 +114,84 @@ class ILocker(Interface):
 
     def release_pack_lock(cursor):
         """Release the pack lock."""
+
+
+class IObjectMover(Interface):
+    """Moves object states to/from the database and within the database"""
+
+    def get_current_tid(cursor, oid):
+        """Returns the current integer tid for an object.
+
+        oid is an integer.  Returns None if object does not exist.
+        """
+
+    def load_current(cursor, oid):
+        """Returns the current state and integer tid for an object.
+
+        oid is an integer.  Returns (None, None) if object does not exist.
+        """
+
+    def load_revision(cursor, oid, tid):
+        """Returns the state for an object on a particular transaction.
+
+        Returns None if no such state exists.
+        """
+
+    def exists(cursor, oid):
+        """Returns a true value if the given object exists."""
+
+    def load_before(cursor, oid, tid):
+        """Returns the state and tid of an object before transaction tid.
+
+        Returns (None, None) if no earlier state exists.
+        """
+
+    def get_object_tid_after(cursor, oid, tid):
+        """Returns the tid of the next change after an object revision.
+
+        Returns None if no later state exists.
+        """
+
+    def on_store_opened(cursor, restart=False):
+        """Create the temporary table for storing objects.
+
+        This method may be None, meaning no store connection
+        initialization is required.
+        """
+
+    def store_temp(cursor, oid, prev_tid, data):
+        """Store an object in the temporary table."""
+
+    def replace_temp(cursor, oid, prev_tid, data):
+        """Replace an object in the temporary table.
+
+        This happens after conflict resolution.
+        """
+
+    def restore(cursor, oid, tid, data):
+        """Store an object directly, without conflict detection.
+
+        Used for copying transactions into this database.
+        """
+
+    def detect_conflict(cursor):
+        """Find one conflict in the data about to be committed.
+
+        If there is a conflict, returns (oid, prev_tid, attempted_prev_tid,
+        attempted_data).  If there is no conflict, returns None.
+        """
+
+    def move_from_temp(cursor, tid):
+        """Moved the temporarily stored objects to permanent storage.
+
+        Returns the list of oids stored.
+        """
+
+    def update_current(cursor, tid):
+        """Update the current object pointers.
+
+        tid is the integer tid of the transaction being committed.
+        """
 
 
 class IOIDAllocator(Interface):
@@ -164,8 +242,8 @@ class IPackUndo(Interface):
 
         pack_tid specifies the most recent transaction to pack.
 
-        get_references is a function that accepts a pickled state and
-        returns a set of OIDs that state refers to.
+        get_references is a function that accepts a stored object state
+        and returns a set of OIDs that state refers to.
 
         options is an instance of relstorage.Options.
         In particular, the options.pack_gc flag indicates whether
@@ -175,9 +253,9 @@ class IPackUndo(Interface):
     def pack(pack_tid, options, sleep=None, packed_func=None):
         """Pack.  Requires the information provided by pre_pack.
 
-        packed_func, if provided, will be called for every object
-        packed, just after it is removed.  The function must accept
-        two parameters, oid and tid (64 bit integers).
+        packed_func, if provided, will be called for every object state
+        packed, just after the object is removed. The function must
+        accept two parameters, oid and tid (64 bit integers).
 
         The sleep function defaults to time.sleep(). It can be
         overridden to do something else instead of sleep during pauses

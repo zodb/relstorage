@@ -19,7 +19,7 @@ import psycopg2.extensions
 
 from relstorage.adapters.connmanager import AbstractConnectionManager
 from relstorage.adapters.dbiter import HistoryPreservingDatabaseIterator
-from relstorage.adapters.loadstore import HistoryPreservingPostgreSQLLoadStore
+from relstorage.adapters.hpmover import HistoryPreservingObjectMover
 from relstorage.adapters.locker import PostgreSQLLocker
 from relstorage.adapters.oidallocator import PostgreSQLOIDAllocator
 from relstorage.adapters.packundo import HistoryPreservingPackUndo
@@ -57,9 +57,12 @@ class PostgreSQLAdapter(object):
             locker=self.locker,
             keep_history=self.keep_history,
             )
-        self.loadstore = HistoryPreservingPostgreSQLLoadStore()
+        self.mover = HistoryPreservingObjectMover(
+            database_name='postgresql',
+            runner=self.runner,
+            )
+        self.connmanager.set_on_store_opened(self.mover.on_store_opened)
         self.oidallocator = PostgreSQLOIDAllocator()
-        self.connmanager.set_on_store_opened(self.loadstore.on_store_opened)
         self.txncontrol = PostgreSQLTransactionControl()
         self.poller = Poller(
             poll_query="EXECUTE get_latest_tid",
@@ -95,18 +98,18 @@ class PostgreSQLAdapter(object):
         self.zap_all = self.schema.zap_all
         self.drop_all = self.schema.drop_all
 
-        self.get_current_tid = self.loadstore.get_current_tid
-        self.load_current = self.loadstore.load_current
-        self.load_revision = self.loadstore.load_revision
-        self.exists = self.loadstore.exists
-        self.load_before = self.loadstore.load_before
-        self.get_object_tid_after = self.loadstore.get_object_tid_after
-        self.store_temp = self.loadstore.store_temp
-        self.replace_temp = self.loadstore.replace_temp
-        self.restore = self.loadstore.restore
-        self.detect_conflict = self.loadstore.detect_conflict
-        self.move_from_temp = self.loadstore.move_from_temp
-        self.update_current = self.loadstore.update_current
+        self.get_current_tid = self.mover.get_current_tid
+        self.load_current = self.mover.load_current
+        self.load_revision = self.mover.load_revision
+        self.exists = self.mover.exists
+        self.load_before = self.mover.load_before
+        self.get_object_tid_after = self.mover.get_object_tid_after
+        self.store_temp = self.mover.store_temp
+        self.replace_temp = self.mover.replace_temp
+        self.restore = self.mover.restore
+        self.detect_conflict = self.mover.detect_conflict
+        self.move_from_temp = self.mover.move_from_temp
+        self.update_current = self.mover.update_current
 
         self.set_min_oid = self.oidallocator.set_min_oid
         self.new_oid = self.oidallocator.new_oid
