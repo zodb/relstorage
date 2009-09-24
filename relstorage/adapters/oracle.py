@@ -289,12 +289,13 @@ class CXOracleConnectionManager(AbstractConnectionManager):
 
         Returns (conn, cursor).
         """
+        if self._twophase:
+            conn, cursor = self.open(transaction_mode=None, twophase=True)
+        else:
+            conn, cursor = self.open()
         try:
             if self._twophase:
-                conn, cursor = self.open(transaction_mode=None, twophase=True)
                 self._set_xid(conn, cursor)
-            else:
-                conn, cursor = self.open()
             if self.on_store_opened is not None:
                 self.on_store_opened(cursor, restart=False)
             return conn, cursor
