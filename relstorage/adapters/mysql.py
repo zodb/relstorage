@@ -55,10 +55,9 @@ from zope.interface import implements
 from relstorage.adapters.connmanager import AbstractConnectionManager
 from relstorage.adapters.dbiter import HistoryFreeDatabaseIterator
 from relstorage.adapters.dbiter import HistoryPreservingDatabaseIterator
-from relstorage.adapters.hfmover import HistoryFreeObjectMover
-from relstorage.adapters.hpmover import HistoryPreservingObjectMover
 from relstorage.adapters.interfaces import IRelStorageAdapter
 from relstorage.adapters.locker import MySQLLocker
+from relstorage.adapters.mover import ObjectMover
 from relstorage.adapters.oidallocator import MySQLOIDAllocator
 from relstorage.adapters.packundo import HistoryFreePackUndo
 from relstorage.adapters.packundo import MySQLHistoryPreservingPackUndo
@@ -87,34 +86,37 @@ class MySQLAdapter(object):
         self.keep_history = keep_history
         self.connmanager = MySQLdbConnectionManager(params)
         self.runner = ScriptRunner()
-        self.locker = MySQLLocker((MySQLdb.DatabaseError,))
+        self.locker = MySQLLocker(
+            keep_history=self.keep_history,
+            lock_exceptions=(MySQLdb.DatabaseError,),
+            )
         self.schema = MySQLSchemaInstaller(
             connmanager=self.connmanager,
             runner=self.runner,
             keep_history=self.keep_history,
             )
-        if self.keep_history:
-            self.mover = HistoryPreservingObjectMover(
-                database_name='mysql',
-                runner=self.runner,
-                Binary=MySQLdb.Binary,
-                )
-        else:
-            self.mover = HistoryFreeObjectMover(
-                database_name='mysql',
-                runner=self.runner,
-                Binary=MySQLdb.Binary,
-                )
+        self.mover = ObjectMover(
+            database_name='mysql',
+            keep_history=self.keep_history,
+            Binary=MySQLdb.Binary,
+            )
         self.connmanager.set_on_store_opened(self.mover.on_store_opened)
         self.oidallocator = MySQLOIDAllocator()
         self.txncontrol = MySQLTransactionControl(
+            keep_history=self.keep_history,
             Binary=MySQLdb.Binary,
             )
+
+        if self.keep_history:
+            poll_query="SELECT tid FROM transaction ORDER BY tid DESC LIMIT 1"
+        else:
+            poll_query="SELECT tid FROM object_state ORDER BY tid DESC LIMIT 1"
         self.poller = Poller(
-            poll_query="SELECT tid FROM transaction ORDER BY tid DESC LIMIT 1",
+            poll_query=poll_query,
             keep_history=self.keep_history,
             runner=self.runner,
             )
+
         if self.keep_history:
             self.packundo = MySQLHistoryPreservingPackUndo(
                 connmanager=self.connmanager,
@@ -133,6 +135,7 @@ class MySQLAdapter(object):
             self.dbiter = HistoryFreeDatabaseIterator(
                 runner=self.runner,
                 )
+
         self.stats = MySQLStats(
             connmanager=self.connmanager,
             )

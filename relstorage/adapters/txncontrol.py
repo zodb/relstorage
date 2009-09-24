@@ -52,38 +52,53 @@ class TransactionControl(object):
 class PostgreSQLTransactionControl(TransactionControl):
     implements(ITransactionControl)
 
+    def __init__(self, keep_history):
+        self.keep_history = keep_history
+
     def get_tid_and_time(self, cursor):
         """Returns the most recent tid and the current database time.
 
         The database time is the number of seconds since the epoch.
         """
-        cursor.execute("""
-        SELECT tid, EXTRACT(EPOCH FROM CURRENT_TIMESTAMP)
-        FROM transaction
-        ORDER BY tid DESC
-        LIMIT 1
-        """)
+        if self.keep_history:
+            stmt = """
+            SELECT tid, EXTRACT(EPOCH FROM CURRENT_TIMESTAMP)
+            FROM transaction
+            ORDER BY tid DESC
+            LIMIT 1
+            """
+        else:
+            stmt = """
+            SELECT tid, EXTRACT(EPOCH FROM CURRENT_TIMESTAMP)
+            FROM object_state
+            ORDER BY tid DESC
+            LIMIT 1
+            """
+        cursor.execute(stmt)
         assert cursor.rowcount == 1
         return cursor.fetchone()
 
     def add_transaction(self, cursor, tid, username, description, extension,
             packed=False):
         """Add a transaction."""
-        stmt = """
-        INSERT INTO transaction
-            (tid, packed, username, description, extension)
-        VALUES (%s, %s,
-            decode(%s, 'base64'), decode(%s, 'base64'), decode(%s, 'base64'))
-        """
-        cursor.execute(stmt, (tid, packed,
-            encodestring(username), encodestring(description),
-            encodestring(extension)))
+        if self.keep_history:
+            stmt = """
+            INSERT INTO transaction
+                (tid, packed, username, description, extension)
+            VALUES (%s, %s,
+                decode(%s, 'base64'), decode(%s, 'base64'),
+                decode(%s, 'base64'))
+            """
+            cursor.execute(stmt, (tid, packed,
+                encodestring(username), encodestring(description),
+                encodestring(extension)))
 
 
 class MySQLTransactionControl(TransactionControl):
     implements(ITransactionControl)
 
-    def __init__(self, Binary):
+    def __init__(self, keep_history, Binary):
+        self.keep_history = keep_history
         self.Binary = Binary
 
     def get_tid_and_time(self, cursor):
@@ -92,13 +107,23 @@ class MySQLTransactionControl(TransactionControl):
         The database time is the number of seconds since the epoch.
         """
         # Lock in share mode to ensure the data being read is up to date.
-        cursor.execute("""
-        SELECT tid, UNIX_TIMESTAMP()
-        FROM transaction
-        ORDER BY tid DESC
-        LIMIT 1
-        LOCK IN SHARE MODE
-        """)
+        if self.keep_history:
+            stmt = """
+            SELECT tid, UNIX_TIMESTAMP()
+            FROM transaction
+            ORDER BY tid DESC
+            LIMIT 1
+            LOCK IN SHARE MODE
+            """
+        else:
+            stmt = """
+            SELECT tid, UNIX_TIMESTAMP()
+            FROM object_state
+            ORDER BY tid DESC
+            LIMIT 1
+            LOCK IN SHARE MODE
+            """
+        cursor.execute(stmt)
         assert cursor.rowcount == 1
         tid, timestamp = cursor.fetchone()
         # MySQL does not provide timestamps with more than one second
@@ -112,20 +137,22 @@ class MySQLTransactionControl(TransactionControl):
     def add_transaction(self, cursor, tid, username, description, extension,
             packed=False):
         """Add a transaction."""
-        stmt = """
-        INSERT INTO transaction
-            (tid, packed, username, description, extension)
-        VALUES (%s, %s, %s, %s, %s)
-        """
-        cursor.execute(stmt, (
-            tid, packed, self.Binary(username),
-            self.Binary(description), self.Binary(extension)))
+        if self.keep_history:
+            stmt = """
+            INSERT INTO transaction
+                (tid, packed, username, description, extension)
+            VALUES (%s, %s, %s, %s, %s)
+            """
+            cursor.execute(stmt, (
+                tid, packed, self.Binary(username),
+                self.Binary(description), self.Binary(extension)))
 
 
 class OracleTransactionControl(TransactionControl):
     implements(ITransactionControl)
 
-    def __init__(self, Binary, twophase):
+    def __init__(self, keep_history, Binary, twophase):
+        self.keep_history = keep_history
         self.Binary = Binary
         self.twophase = twophase
 
@@ -155,28 +182,39 @@ class OracleTransactionControl(TransactionControl):
 
         The database time is the number of seconds since the epoch.
         """
-        cursor.execute("""
-        SELECT MAX(tid), TO_CHAR(TO_DSINTERVAL(SYSTIMESTAMP - TO_TIMESTAMP_TZ(
-            '1970-01-01 00:00:00 +00:00','YYYY-MM-DD HH24:MI:SS TZH:TZM')))
-        FROM transaction
-        """)
+        if self.keep_history:
+            stmt = """
+            SELECT MAX(tid),
+                TO_CHAR(TO_DSINTERVAL(SYSTIMESTAMP - TO_TIMESTAMP_TZ(
+                '1970-01-01 00:00:00 +00:00','YYYY-MM-DD HH24:MI:SS TZH:TZM')))
+            FROM transaction
+            """
+        else:
+            stmt = """
+            SELECT MAX(tid),
+                TO_CHAR(TO_DSINTERVAL(SYSTIMESTAMP - TO_TIMESTAMP_TZ(
+                '1970-01-01 00:00:00 +00:00','YYYY-MM-DD HH24:MI:SS TZH:TZM')))
+            FROM object_state
+            """
+        cursor.execute(stmt)
         tid, now = cursor.fetchone()
         return tid, self._parse_dsinterval(now)
 
     def add_transaction(self, cursor, tid, username, description, extension,
             packed=False):
         """Add a transaction."""
-        stmt = """
-        INSERT INTO transaction
-            (tid, packed, username, description, extension)
-        VALUES (:1, :2, :3, :4, :5)
-        """
-        max_desc_len = 2000
-        if len(description) > max_desc_len:
-            log.warning('Trimming description of transaction %s '
-                'to %d characters', tid, max_desc_len)
-            description = description[:max_desc_len]
-        cursor.execute(stmt, (
-            tid, packed and 'Y' or 'N', self.Binary(username),
-            self.Binary(description), self.Binary(extension)))
+        if self.keep_history:
+            stmt = """
+            INSERT INTO transaction
+                (tid, packed, username, description, extension)
+            VALUES (:1, :2, :3, :4, :5)
+            """
+            max_desc_len = 2000
+            if len(description) > max_desc_len:
+                log.warning('Trimming description of transaction %s '
+                    'to %d characters', tid, max_desc_len)
+                description = description[:max_desc_len]
+            cursor.execute(stmt, (
+                tid, packed and 'Y' or 'N', self.Binary(username),
+                self.Binary(description), self.Binary(extension)))
 

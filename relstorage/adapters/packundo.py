@@ -933,8 +933,8 @@ class HistoryFreePackUndo(PackUndo):
         stmt = """
         %(TRUNCATE)s pack_object;
 
-        INSERT INTO pack_object (zoid, keep_tid)
-        SELECT zoid, tid
+        INSERT INTO pack_object (zoid, keep, keep_tid)
+        SELECT zoid, %(FALSE)s, tid
         FROM object_state;
 
         -- Keep the root object

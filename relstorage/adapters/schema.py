@@ -338,9 +338,178 @@ history_preserving_init = """
         CREATE SEQUENCE zoid_seq;
 """
 
-history_free_schema = "TODO"
+history_free_schema = """
 
-history_free_init = "TODO"
+# commit_lock: Held during commit.  Another kind of lock is used for MySQL.
+
+    postgresql:
+        CREATE TABLE commit_lock ();
+
+    oracle:
+        CREATE TABLE commit_lock (dummy CHAR);
+
+# pack_lock: Held during pack.  Another kind of lock is used for MySQL.
+# Another kind of lock is used for PostgreSQL >= 8.2.
+
+    oracle:
+        CREATE TABLE pack_lock (dummy CHAR);
+
+# OID allocation
+
+    postgresql:
+        CREATE SEQUENCE zoid_seq;
+
+    mysql:
+        CREATE TABLE new_oid (
+            zoid        BIGINT NOT NULL PRIMARY KEY AUTO_INCREMENT
+        ) ENGINE = InnoDB;
+
+    oracle:
+        CREATE SEQUENCE zoid_seq;
+
+# object_state: All object states in all transactions.
+
+    postgresql:
+        CREATE TABLE object_state (
+            zoid        BIGINT NOT NULL PRIMARY KEY,
+            tid         BIGINT NOT NULL CHECK (tid > 0),
+            state       BYTEA
+        );
+        CREATE INDEX object_state_tid ON object_state (tid);
+
+    mysql:
+        CREATE TABLE object_state (
+            zoid        BIGINT NOT NULL PRIMARY KEY,
+            tid         BIGINT NOT NULL,
+            state       LONGBLOB,
+            CHECK (tid > 0)
+        ) ENGINE = InnoDB;
+        CREATE INDEX object_state_tid ON object_state (tid);
+
+    oracle:
+        CREATE TABLE object_state (
+            zoid        NUMBER(20) NOT NULL PRIMARY KEY,
+            tid         NUMBER(20) NOT NULL,
+            state       BLOB
+        );
+        CREATE INDEX object_state_tid ON object_state (tid);
+
+# object_ref: A list of referenced OIDs from each object_state. This
+# table is populated as needed during packing.
+
+    postgresql:
+        CREATE TABLE object_ref (
+            zoid        BIGINT NOT NULL,
+            to_zoid     BIGINT NOT NULL,
+            tid         BIGINT NOT NULL,
+            PRIMARY KEY (zoid, to_zoid)
+        );
+
+    mysql:
+        CREATE TABLE object_ref (
+            zoid        BIGINT NOT NULL,
+            to_zoid     BIGINT NOT NULL,
+            tid         BIGINT NOT NULL,
+            PRIMARY KEY (zoid, to_zoid)
+        ) ENGINE = MyISAM;
+
+    oracle:
+        CREATE TABLE object_ref (
+            zoid        NUMBER(20) NOT NULL,
+            to_zoid     NUMBER(20) NOT NULL,
+            tid         NUMBER(20) NOT NULL,
+            PRIMARY KEY (zoid, to_zoid)
+        );
+
+# The object_refs_added table tracks whether object_refs has been
+# populated for all states in a given transaction. An entry is added
+# only when the work is finished.
+
+    postgresql:
+        CREATE TABLE object_refs_added (
+            tid         BIGINT NOT NULL PRIMARY KEY
+        );
+
+    mysql:
+        CREATE TABLE object_refs_added (
+            tid         BIGINT NOT NULL PRIMARY KEY
+        ) ENGINE = MyISAM;
+
+    oracle:
+        CREATE TABLE object_refs_added (
+            tid         NUMBER(20) NOT NULL PRIMARY KEY
+        );
+
+# pack_object contains temporary state during garbage collection: The
+# list of all objects, a flag signifying whether the object should be
+# kept, and a flag signifying whether the object's references have been
+# visited. The keep_tid field specifies the current revision of the
+# object.
+
+    postgresql:
+        CREATE TABLE pack_object (
+            zoid        BIGINT NOT NULL PRIMARY KEY,
+            keep        BOOLEAN NOT NULL,
+            keep_tid    BIGINT NOT NULL,
+            visited     BOOLEAN NOT NULL DEFAULT FALSE
+        );
+        CREATE INDEX pack_object_keep_false ON pack_object (zoid)
+            WHERE keep = false;
+        CREATE INDEX pack_object_keep_true ON pack_object (visited)
+            WHERE keep = true;
+
+    mysql:
+        CREATE TABLE pack_object (
+            zoid        BIGINT NOT NULL PRIMARY KEY,
+            keep        BOOLEAN NOT NULL,
+            keep_tid    BIGINT NOT NULL,
+            visited     BOOLEAN NOT NULL DEFAULT FALSE
+        ) ENGINE = MyISAM;
+        CREATE INDEX pack_object_keep_zoid ON pack_object (keep, zoid);
+
+    oracle:
+        CREATE TABLE pack_object (
+            zoid        NUMBER(20) NOT NULL PRIMARY KEY,
+            keep        CHAR NOT NULL CHECK (keep IN ('N', 'Y')),
+            keep_tid    NUMBER(20) NOT NULL,
+            visited     CHAR DEFAULT 'N' NOT NULL CHECK (visited IN ('N', 'Y'))
+        );
+        CREATE INDEX pack_object_keep_zoid ON pack_object (keep, zoid);
+
+# Oracle expects temporary tables to be created ahead of time, while
+# MySQL and PostgreSQL expect them to be created in the session.
+# Note that the md5 column is not used in a history-free storage.
+
+    oracle:
+        # States that will soon be stored
+        CREATE GLOBAL TEMPORARY TABLE temp_store (
+            zoid        NUMBER(20) NOT NULL PRIMARY KEY,
+            prev_tid    NUMBER(20) NOT NULL,
+            md5         CHAR(32),
+            state       BLOB
+        ) ON COMMIT DELETE ROWS;
+
+        # Temporary state during packing: a list of objects
+        # whose references need to be examined.
+        CREATE GLOBAL TEMPORARY TABLE temp_pack_visit (
+            zoid        NUMBER(20) NOT NULL PRIMARY KEY,
+            keep_tid    NUMBER(20)
+        );
+"""
+
+history_free_init = """
+# Reset the OID counter.
+
+    postgresql:
+        ALTER SEQUENCE zoid_seq RESTART WITH 1;
+
+    mysql:
+        TRUNCATE new_oid;
+
+    oracle:
+        DROP SEQUENCE zoid_seq;
+        CREATE SEQUENCE zoid_seq;
+"""
 
 
 def filter_script(script, database_name):
@@ -360,7 +529,7 @@ def filter_script(script, database_name):
 
 class AbstractSchemaInstaller(object):
 
-    # Keep this list in the same order as the schema script
+    # Keep this list in the same order as the schema scripts
     all_tables = (
         'commit_lock',
         'pack_lock',

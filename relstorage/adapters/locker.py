@@ -24,8 +24,9 @@ commit_lock_timeout = 30
 
 class Locker(object):
 
-    def __init__(self, database_errors):
-        self.database_errors = database_errors
+    def __init__(self, keep_history, lock_exceptions):
+        self.keep_history = keep_history
+        self.lock_exceptions = lock_exceptions
 
 
 class PostgreSQLLocker(Locker):
@@ -37,11 +38,18 @@ class PostgreSQLLocker(Locker):
             # (for as short a time as possible).
             # Lock transaction and current_object in share mode to ensure
             # conflict detection has the most current data.
-            cursor.execute("""
-            LOCK TABLE commit_lock IN EXCLUSIVE MODE;
-            LOCK TABLE transaction IN SHARE MODE;
-            LOCK TABLE current_object IN SHARE MODE
-            """)
+            if self.keep_history:
+                stmt = """
+                LOCK TABLE commit_lock IN EXCLUSIVE MODE;
+                LOCK TABLE transaction IN SHARE MODE;
+                LOCK TABLE current_object IN SHARE MODE
+                """
+            else:
+                stmt = """
+                LOCK TABLE commit_lock IN EXCLUSIVE MODE;
+                LOCK TABLE object_state IN SHARE MODE
+                """
+            cursor.execute(stmt)
         else:
             cursor.execute("LOCK TABLE commit_lock IN EXCLUSIVE MODE")
 
@@ -81,7 +89,7 @@ class PostgreSQLLocker(Locker):
             # b/w compat
             try:
                 cursor.execute("LOCK pack_lock IN EXCLUSIVE MODE NOWAIT")
-            except self.database_errors:  # psycopg2.DatabaseError:
+            except self.lock_exceptions:  # psycopg2.DatabaseError:
                 raise StorageError('A pack or undo operation is in progress')
 
     def release_pack_lock(self, cursor):
@@ -129,10 +137,13 @@ class OracleLocker(Locker):
         # (for as short a time as possible).
         cursor.execute("LOCK TABLE commit_lock IN EXCLUSIVE MODE")
         if ensure_current:
-            # Lock transaction and current_object in share mode to ensure
-            # conflict detection has the most current data.
-            cursor.execute("LOCK TABLE transaction IN SHARE MODE")
-            cursor.execute("LOCK TABLE current_object IN SHARE MODE")
+            if self.keep_history:
+                # Lock transaction and current_object in share mode to ensure
+                # conflict detection has the most current data.
+                cursor.execute("LOCK TABLE transaction IN SHARE MODE")
+                cursor.execute("LOCK TABLE current_object IN SHARE MODE")
+            else:
+                cursor.execute("LOCK TABLE object_state IN SHARE MODE")
 
     def release_commit_lock(self, cursor):
         # no action needed
@@ -148,7 +159,7 @@ class OracleLocker(Locker):
         """
         try:
             cursor.execute(stmt)
-        except self.database_errors:  # cx_Oracle.DatabaseError:
+        except self.lock_exceptions:  # cx_Oracle.DatabaseError:
             raise StorageError('A pack or undo operation is in progress')
 
     def release_pack_lock(self, cursor):

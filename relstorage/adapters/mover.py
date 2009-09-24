@@ -34,7 +34,7 @@ def compute_md5sum(data):
         return None
 
 
-class HistoryPreservingObjectMover(object):
+class ObjectMover(object):
     implements(IObjectMover)
 
     _method_names = (
@@ -53,10 +53,11 @@ class HistoryPreservingObjectMover(object):
         'update_current',
         )
 
-    def __init__(self, database_name, runner=None,
+    def __init__(self, database_name, keep_history, runner=None,
             Binary=None, inputsize_BLOB=None, inputsize_BINARY=None):
         # The inputsize parameters are for Oracle only.
         self.database_name = database_name
+        self.keep_history = keep_history
         self.runner = runner
         self.Binary = Binary
         self.inputsize_BLOB = inputsize_BLOB
@@ -74,11 +75,18 @@ class HistoryPreservingObjectMover(object):
 
         oid is an integer.  Returns None if object does not exist.
         """
-        stmt = """
-        SELECT tid
-        FROM current_object
-        WHERE zoid = %s
-        """
+        if self.keep_history:
+            stmt = """
+            SELECT tid
+            FROM current_object
+            WHERE zoid = %s
+            """
+        else:
+            stmt = """
+            SELECT tid
+            FROM object_state
+            WHERE zoid = %s
+            """
         cursor.execute(stmt, (oid,))
         for (tid,) in cursor:
             return tid
@@ -92,11 +100,18 @@ class HistoryPreservingObjectMover(object):
 
         oid is an integer.  Returns None if object does not exist.
         """
-        stmt = """
-        SELECT tid
-        FROM current_object
-        WHERE zoid = :1
-        """
+        if self.keep_history:
+            stmt = """
+            SELECT tid
+            FROM current_object
+            WHERE zoid = :1
+            """
+        else:
+            stmt = """
+            SELECT tid
+            FROM object_state
+            WHERE zoid = :1
+            """
         cursor.execute(stmt, (oid,))
         for (tid,) in cursor:
             return tid
@@ -110,12 +125,19 @@ class HistoryPreservingObjectMover(object):
 
         oid is an integer.  Returns (None, None) if object does not exist.
         """
-        stmt = """
-        SELECT encode(state, 'base64'), tid
-        FROM current_object
-            JOIN object_state USING(zoid, tid)
-        WHERE zoid = %s
-        """
+        if self.keep_history:
+            stmt = """
+            SELECT encode(state, 'base64'), tid
+            FROM current_object
+                JOIN object_state USING(zoid, tid)
+            WHERE zoid = %s
+            """
+        else:
+            stmt = """
+            SELECT encode(state, 'base64'), tid
+            FROM object_state
+            WHERE zoid = %s
+            """
         cursor.execute(stmt, (oid,))
         if cursor.rowcount:
             assert cursor.rowcount == 1
@@ -134,12 +156,19 @@ class HistoryPreservingObjectMover(object):
 
         oid is an integer.  Returns (None, None) if object does not exist.
         """
-        stmt = """
-        SELECT state, tid
-        FROM current_object
-            JOIN object_state USING(zoid, tid)
-        WHERE zoid = %s
-        """
+        if self.keep_history:
+            stmt = """
+            SELECT state, tid
+            FROM current_object
+                JOIN object_state USING(zoid, tid)
+            WHERE zoid = %s
+            """
+        else:
+            stmt = """
+            SELECT state, tid
+            FROM object_state
+            WHERE zoid = %s
+            """
         cursor.execute(stmt, (oid,))
         if cursor.rowcount:
             assert cursor.rowcount == 1
@@ -152,12 +181,19 @@ class HistoryPreservingObjectMover(object):
 
         oid is an integer.  Returns (None, None) if object does not exist.
         """
-        stmt = """
-        SELECT state, tid
-        FROM current_object
-            JOIN object_state USING(zoid, tid)
-        WHERE zoid = :1
-        """
+        if self.keep_history:
+            stmt = """
+            SELECT state, tid
+            FROM current_object
+                JOIN object_state USING(zoid, tid)
+            WHERE zoid = :1
+            """
+        else:
+            stmt = """
+            SELECT state, tid
+            FROM object_state
+            WHERE zoid = :1
+            """
         return self.runner.run_lob_stmt(
             cursor, stmt, (oid,), default=(None, None))
 
@@ -221,18 +257,22 @@ class HistoryPreservingObjectMover(object):
 
     def generic_exists(self, cursor, oid):
         """Returns a true value if the given object exists."""
-        stmt = "SELECT 1 FROM current_object WHERE zoid = %s"
+        if self.keep_history:
+            stmt = "SELECT 1 FROM current_object WHERE zoid = %s"
+        else:
+            stmt = "SELECT 1 FROM object_state WHERE zoid = %s"
         cursor.execute(stmt, (oid,))
-        for row in cursor:
-            return True
-        return False
+        return cursor.rowcount
 
     postgresql_exists = generic_exists
     mysql_exists = generic_exists
 
     def oracle_exists(self, cursor, oid):
         """Returns a true value if the given object exists."""
-        stmt = "SELECT 1 FROM current_object WHERE zoid = :1"
+        if self.keep_history:
+            stmt = "SELECT 1 FROM current_object WHERE zoid = :1"
+        else:
+            stmt = "SELECT 1 FROM object_state WHERE zoid = :1"
         cursor.execute(stmt, (oid,))
         for row in cursor:
             return True
@@ -356,6 +396,7 @@ class HistoryPreservingObjectMover(object):
 
     def postgresql_on_store_opened(self, cursor, restart=False):
         """Create the temporary table for storing objects"""
+        # note that the md5 column is not used if self.keep_history == False.
         stmt = """
         CREATE TEMPORARY TABLE temp_store (
             zoid        BIGINT NOT NULL,
@@ -375,6 +416,7 @@ class HistoryPreservingObjectMover(object):
             """
             cursor.execute(stmt)
 
+        # note that the md5 column is not used if self.keep_history == False.
         stmt = """
         CREATE TEMPORARY TABLE temp_store (
             zoid        BIGINT NOT NULL PRIMARY KEY,
@@ -393,7 +435,10 @@ class HistoryPreservingObjectMover(object):
 
     def postgresql_store_temp(self, cursor, oid, prev_tid, data):
         """Store an object in the temporary table."""
-        md5sum = compute_md5sum(data)
+        if self.keep_history:
+            md5sum = compute_md5sum(data)
+        else:
+            md5sum = None
         stmt = """
         DELETE FROM temp_store WHERE zoid = %s;
         INSERT INTO temp_store (zoid, prev_tid, md5, state)
@@ -403,7 +448,10 @@ class HistoryPreservingObjectMover(object):
 
     def mysql_store_temp(self, cursor, oid, prev_tid, data):
         """Store an object in the temporary table."""
-        md5sum = compute_md5sum(data)
+        if self.keep_history:
+            md5sum = compute_md5sum(data)
+        else:
+            md5sum = None
         stmt = """
         REPLACE INTO temp_store (zoid, prev_tid, md5, state)
         VALUES (%s, %s, %s, %s)
@@ -412,7 +460,10 @@ class HistoryPreservingObjectMover(object):
 
     def oracle_store_temp(self, cursor, oid, prev_tid, data):
         """Store an object in the temporary table."""
-        md5sum = compute_md5sum(data)
+        if self.keep_history:
+            md5sum = compute_md5sum(data)
+        else:
+            md5sum = None
         cursor.execute("DELETE FROM temp_store WHERE zoid = :oid", oid=oid)
         if len(data) <= 2000:
             # Send data inline for speed.  Oracle docs say maximum size
@@ -442,7 +493,10 @@ class HistoryPreservingObjectMover(object):
 
         This happens after conflict resolution.
         """
-        md5sum = compute_md5sum(data)
+        if self.keep_history:
+            md5sum = compute_md5sum(data)
+        else:
+            md5sum = None
         stmt = """
         UPDATE temp_store SET
             prev_tid = %s,
@@ -457,7 +511,10 @@ class HistoryPreservingObjectMover(object):
 
         This happens after conflict resolution.
         """
-        md5sum = compute_md5sum(data)
+        if self.keep_history:
+            md5sum = compute_md5sum(data)
+        else:
+            md5sum = None
         stmt = """
         UPDATE temp_store SET
             prev_tid = %s,
@@ -472,7 +529,10 @@ class HistoryPreservingObjectMover(object):
 
         This happens after conflict resolution.
         """
-        md5sum = compute_md5sum(data)
+        if self.keep_history:
+            md5sum = compute_md5sum(data)
+        else:
+            md5sum = None
         cursor.setinputsizes(data=self.inputsize_BLOB)
         stmt = """
         UPDATE temp_store SET
@@ -492,63 +552,110 @@ class HistoryPreservingObjectMover(object):
 
         Used for copying transactions into this database.
         """
-        md5sum = compute_md5sum(data)
-        stmt = """
-        INSERT INTO object_state (zoid, tid, prev_tid, md5, state)
-        VALUES (%s, %s,
-            COALESCE((SELECT tid FROM current_object WHERE zoid = %s), 0),
-            %s, decode(%s, 'base64'))
-        """
+        if self.keep_history:
+            md5sum = compute_md5sum(data)
+        else:
+            md5sum = None
+
         if data is not None:
-            data = encodestring(data)
-        cursor.execute(stmt, (oid, tid, oid, md5sum, data))
+            encoded = encodestring(data)
+        else:
+            encoded = None
+
+        if self.keep_history:
+            stmt = """
+            INSERT INTO object_state (zoid, tid, prev_tid, md5, state)
+            VALUES (%s, %s,
+                COALESCE((SELECT tid FROM current_object WHERE zoid = %s), 0),
+                %s, decode(%s, 'base64'))
+            """
+            cursor.execute(stmt, (oid, tid, oid, md5sum, encoded))
+        else:
+            stmt = """
+            INSERT INTO object_state (zoid, tid, state)
+            VALUES (%s, %s, decode(%s, 'base64'))
+            """
+            cursor.execute(stmt, (oid, tid, encoded))
 
     def mysql_restore(self, cursor, oid, tid, data):
         """Store an object directly, without conflict detection.
 
         Used for copying transactions into this database.
         """
-        md5sum = compute_md5sum(data)
-        stmt = """
-        INSERT INTO object_state (zoid, tid, prev_tid, md5, state)
-        VALUES (%s, %s,
-            COALESCE((SELECT tid FROM current_object WHERE zoid = %s), 0),
-            %s, %s)
-        """
+        if self.keep_history:
+            md5sum = compute_md5sum(data)
+        else:
+            md5sum = None
+
         if data is not None:
-            data = self.Binary(data)
-        cursor.execute(stmt, (oid, tid, oid, md5sum, data))
+            encoded = self.Binary(data)
+        else:
+            encoded = None
+
+        if self.keep_history:
+            stmt = """
+            INSERT INTO object_state (zoid, tid, prev_tid, md5, state)
+            VALUES (%s, %s,
+                COALESCE((SELECT tid FROM current_object WHERE zoid = %s), 0),
+                %s, %s)
+            """
+            cursor.execute(stmt, (oid, tid, oid, md5sum, encoded))
+        else:
+            stmt = """
+            INSERT INTO object_state (zoid, tid, state)
+            VALUES (%s, %s, %s)
+            """
+            cursor.execute(stmt, (oid, tid, encoded))
 
     def oracle_restore(self, cursor, oid, tid, data):
         """Store an object directly, without conflict detection.
 
         Used for copying transactions into this database.
         """
-        md5sum = compute_md5sum(data)
+        if self.keep_history:
+            md5sum = compute_md5sum(data)
+        else:
+            md5sum = None
+
         if not data or len(data) <= 2000:
             # Send data inline for speed.  Oracle docs say maximum size
             # of a RAW is 2000 bytes.  inputsize_BINARY corresponds with RAW.
             cursor.setinputsizes(rawdata=self.inputsize_BINARY)
-            stmt = """
-            INSERT INTO object_state (zoid, tid, prev_tid, md5, state)
-            VALUES (:oid, :tid,
-              COALESCE((SELECT tid FROM current_object WHERE zoid = :oid), 0),
-              :md5sum, :rawdata)
-            """
-            cursor.execute(stmt, oid=oid, tid=tid,
-                md5sum=md5sum, rawdata=data)
+            if self.keep_history:
+                stmt = """
+                INSERT INTO object_state (zoid, tid, prev_tid, md5, state)
+                VALUES (:oid, :tid,
+                    COALESCE(
+                        (SELECT tid FROM current_object WHERE zoid = :oid), 0),
+                    :md5sum, :rawdata)
+                """
+                cursor.execute(stmt, oid=oid, tid=tid,
+                    md5sum=md5sum, rawdata=data)
+            else:
+                stmt = """
+                INSERT INTO object_state (zoid, tid, state)
+                VALUES (:oid, :tid, :rawdata)
+                """
+                cursor.execute(stmt, oid=oid, tid=tid, rawdata=data)
         else:
             # Send data as a BLOB
             cursor.setinputsizes(blobdata=self.inputsize_BLOB)
-            stmt = """
-            INSERT INTO object_state (zoid, tid, prev_tid, md5, state)
-            VALUES (:oid, :tid,
-              COALESCE((SELECT tid FROM current_object WHERE zoid = :oid), 0),
-              :md5sum, :blobdata)
-            """
-            cursor.execute(stmt, oid=oid, tid=tid,
-                md5sum=md5sum, blobdata=data)
-
+            if self.keep_history:
+                stmt = """
+                INSERT INTO object_state (zoid, tid, prev_tid, md5, state)
+                VALUES (:oid, :tid,
+                    COALESCE(
+                        (SELECT tid FROM current_object WHERE zoid = :oid), 0),
+                    :md5sum, :blobdata)
+                """
+                cursor.execute(stmt, oid=oid, tid=tid,
+                    md5sum=md5sum, blobdata=data)
+            else:
+                stmt = """
+                INSERT INTO object_state (zoid, tid, state)
+                VALUES (:oid, :tid, :blobdata)
+                """
+                cursor.execute(stmt, oid=oid, tid=tid, blobdata=data)
 
 
 
@@ -558,14 +665,24 @@ class HistoryPreservingObjectMover(object):
         If there is a conflict, returns (oid, prev_tid, attempted_prev_tid,
         attempted_data).  If there is no conflict, returns None.
         """
-        stmt = """
-        SELECT temp_store.zoid, current_object.tid, temp_store.prev_tid,
-            encode(temp_store.state, 'base64')
-        FROM temp_store
-            JOIN current_object ON (temp_store.zoid = current_object.zoid)
-        WHERE temp_store.prev_tid != current_object.tid
-        LIMIT 1
-        """
+        if self.keep_history:
+            stmt = """
+            SELECT temp_store.zoid, current_object.tid, temp_store.prev_tid,
+                encode(temp_store.state, 'base64')
+            FROM temp_store
+                JOIN current_object ON (temp_store.zoid = current_object.zoid)
+            WHERE temp_store.prev_tid != current_object.tid
+            LIMIT 1
+            """
+        else:
+            stmt = """
+            SELECT temp_store.zoid, object_state.tid, temp_store.prev_tid,
+                encode(temp_store.state, 'base64')
+            FROM temp_store
+                JOIN object_state ON (temp_store.zoid = object_state.zoid)
+            WHERE temp_store.prev_tid != object_state.tid
+            LIMIT 1
+            """
         cursor.execute(stmt)
         if cursor.rowcount:
             oid, prev_tid, attempted_prev_tid, data = cursor.fetchone()
@@ -579,15 +696,26 @@ class HistoryPreservingObjectMover(object):
         attempted_data).  If there is no conflict, returns None.
         """
         # Lock in share mode to ensure the data being read is up to date.
-        stmt = """
-        SELECT temp_store.zoid, current_object.tid, temp_store.prev_tid,
-            temp_store.state
-        FROM temp_store
-            JOIN current_object ON (temp_store.zoid = current_object.zoid)
-        WHERE temp_store.prev_tid != current_object.tid
-        LIMIT 1
-        LOCK IN SHARE MODE
-        """
+        if self.keep_history:
+            stmt = """
+            SELECT temp_store.zoid, current_object.tid, temp_store.prev_tid,
+                temp_store.state
+            FROM temp_store
+                JOIN current_object ON (temp_store.zoid = current_object.zoid)
+            WHERE temp_store.prev_tid != current_object.tid
+            LIMIT 1
+            LOCK IN SHARE MODE
+            """
+        else:
+            stmt = """
+            SELECT temp_store.zoid, object_state.tid, temp_store.prev_tid,
+                temp_store.state
+            FROM temp_store
+                JOIN object_state ON (temp_store.zoid = object_state.zoid)
+            WHERE temp_store.prev_tid != object_state.tid
+            LIMIT 1
+            LOCK IN SHARE MODE
+            """
         cursor.execute(stmt)
         if cursor.rowcount:
             return cursor.fetchone()
@@ -599,13 +727,22 @@ class HistoryPreservingObjectMover(object):
         If there is a conflict, returns (oid, prev_tid, attempted_prev_tid,
         attempted_data).  If there is no conflict, returns None.
         """
-        stmt = """
-        SELECT temp_store.zoid, current_object.tid, temp_store.prev_tid,
-            temp_store.state
-        FROM temp_store
-            JOIN current_object ON (temp_store.zoid = current_object.zoid)
-        WHERE temp_store.prev_tid != current_object.tid
-        """
+        if self.keep_history:
+            stmt = """
+            SELECT temp_store.zoid, current_object.tid, temp_store.prev_tid,
+                temp_store.state
+            FROM temp_store
+                JOIN current_object ON (temp_store.zoid = current_object.zoid)
+            WHERE temp_store.prev_tid != current_object.tid
+            """
+        else:
+            stmt = """
+            SELECT temp_store.zoid, object_state.tid, temp_store.prev_tid,
+                temp_store.state
+            FROM temp_store
+                JOIN object_state ON (temp_store.zoid = object_state.zoid)
+            WHERE temp_store.prev_tid != object_state.tid
+            """
         return self.runner.run_lob_stmt(cursor, stmt)
 
 
@@ -616,12 +753,43 @@ class HistoryPreservingObjectMover(object):
 
         Returns the list of oids stored.
         """
-        stmt = """
-        INSERT INTO object_state (zoid, tid, prev_tid, md5, state)
-        SELECT zoid, %s, prev_tid, md5, state
-        FROM temp_store
-        """
-        cursor.execute(stmt, (tid,))
+        if self.keep_history:
+            if self.database_name == 'oracle':
+                stmt = """
+                INSERT INTO object_state (zoid, tid, prev_tid, md5, state)
+                SELECT zoid, :1, prev_tid, md5, state
+                FROM temp_store
+                """
+            else:
+                stmt = """
+                INSERT INTO object_state (zoid, tid, prev_tid, md5, state)
+                SELECT zoid, %s, prev_tid, md5, state
+                FROM temp_store
+                """
+            cursor.execute(stmt, (tid,))
+
+        else:
+            if self.database_name == 'mysql':
+                stmt = """
+                REPLACE INTO object_state (zoid, tid, state)
+                SELECT zoid, %s, state
+                FROM temp_store
+                """
+                cursor.execute(stmt, (tid,))
+
+            else:
+                stmt = """
+                DELETE FROM object_state
+                WHERE zoid IN (SELECT zoid FROM temp_store)
+                """
+                cursor.execute(stmt)
+
+                stmt = """
+                INSERT INTO object_state (zoid, tid, state)
+                SELECT zoid, %s, state
+                FROM temp_store
+                """
+                cursor.execute(stmt, (tid,))
 
         stmt = """
         SELECT zoid FROM temp_store
@@ -631,24 +799,7 @@ class HistoryPreservingObjectMover(object):
 
     postgresql_move_from_temp = generic_move_from_temp
     mysql_move_from_temp = generic_move_from_temp
-
-    def oracle_move_from_temp(self, cursor, tid):
-        """Move the temporarily stored objects to permanent storage.
-
-        Returns the list of oids stored.
-        """
-        stmt = """
-        INSERT INTO object_state (zoid, tid, prev_tid, md5, state)
-        SELECT zoid, :tid, prev_tid, md5, state
-        FROM temp_store
-        """
-        cursor.execute(stmt, tid=tid)
-
-        stmt = """
-        SELECT zoid FROM temp_store
-        """
-        cursor.execute(stmt)
-        return [oid for (oid,) in cursor]
+    oracle_move_from_temp = generic_move_from_temp
 
 
 
@@ -658,6 +809,10 @@ class HistoryPreservingObjectMover(object):
 
         tid is the integer tid of the transaction being committed.
         """
+        if not self.keep_history:
+            # nothing needs to be updated
+            return
+
         cursor.execute("""
         -- Insert objects created in this transaction into current_object.
         INSERT INTO current_object (zoid, tid)
@@ -681,6 +836,10 @@ class HistoryPreservingObjectMover(object):
 
         tid is the integer tid of the transaction being committed.
         """
+        if not self.keep_history:
+            # nothing needs to be updated
+            return
+
         cursor.execute("""
         REPLACE INTO current_object (zoid, tid)
         SELECT zoid, tid FROM object_state
@@ -692,6 +851,10 @@ class HistoryPreservingObjectMover(object):
 
         tid is the integer tid of the transaction being committed.
         """
+        if not self.keep_history:
+            # nothing needs to be updated
+            return
+
         # Insert objects created in this transaction into current_object.
         stmt = """
         INSERT INTO current_object (zoid, tid)

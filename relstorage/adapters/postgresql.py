@@ -19,11 +19,13 @@ import psycopg2.extensions
 from zope.interface import implements
 
 from relstorage.adapters.connmanager import AbstractConnectionManager
+from relstorage.adapters.dbiter import HistoryFreeDatabaseIterator
 from relstorage.adapters.dbiter import HistoryPreservingDatabaseIterator
-from relstorage.adapters.hpmover import HistoryPreservingObjectMover
 from relstorage.adapters.interfaces import IRelStorageAdapter
 from relstorage.adapters.locker import PostgreSQLLocker
+from relstorage.adapters.mover import ObjectMover
 from relstorage.adapters.oidallocator import PostgreSQLOIDAllocator
+from relstorage.adapters.packundo import HistoryFreePackUndo
 from relstorage.adapters.packundo import HistoryPreservingPackUndo
 from relstorage.adapters.poller import Poller
 from relstorage.adapters.schema import PostgreSQLSchemaInstaller
@@ -48,38 +50,59 @@ class PostgreSQLAdapter(object):
     """PostgreSQL adapter for RelStorage."""
     implements(IRelStorageAdapter)
 
-    keep_history = True
-
-    def __init__(self, dsn=''):
-        self.connmanager = Psycopg2ConnectionManager(dsn)
+    def __init__(self, dsn='', keep_history=True):
+        self.keep_history = keep_history
+        self.connmanager = Psycopg2ConnectionManager(
+            dsn=dsn,
+            keep_history=self.keep_history,
+            )
         self.runner = ScriptRunner()
-        self.locker = PostgreSQLLocker((psycopg2.DatabaseError,))
+        self.locker = PostgreSQLLocker(
+            keep_history=self.keep_history,
+            lock_exceptions=(psycopg2.DatabaseError,),
+            )
         self.schema = PostgreSQLSchemaInstaller(
             connmanager=self.connmanager,
             runner=self.runner,
             locker=self.locker,
             keep_history=self.keep_history,
             )
-        self.mover = HistoryPreservingObjectMover(
+        self.mover = ObjectMover(
             database_name='postgresql',
+            keep_history=self.keep_history,
             runner=self.runner,
             )
         self.connmanager.set_on_store_opened(self.mover.on_store_opened)
         self.oidallocator = PostgreSQLOIDAllocator()
-        self.txncontrol = PostgreSQLTransactionControl()
+        self.txncontrol = PostgreSQLTransactionControl(
+            keep_history=self.keep_history,
+            )
+
         self.poller = Poller(
             poll_query="EXECUTE get_latest_tid",
             keep_history=self.keep_history,
             runner=self.runner,
             )
-        self.packundo = HistoryPreservingPackUndo(
-            connmanager=self.connmanager,
-            runner=self.runner,
-            locker=self.locker,
-            )
-        self.dbiter = HistoryPreservingDatabaseIterator(
-            runner=self.runner,
-            )
+
+        if self.keep_history:
+            self.packundo = HistoryPreservingPackUndo(
+                connmanager=self.connmanager,
+                runner=self.runner,
+                locker=self.locker,
+                )
+            self.dbiter = HistoryPreservingDatabaseIterator(
+                runner=self.runner,
+                )
+        else:
+            self.packundo = HistoryFreePackUndo(
+                connmanager=self.connmanager,
+                runner=self.runner,
+                locker=self.locker,
+                )
+            self.dbiter = HistoryFreeDatabaseIterator(
+                runner=self.runner,
+                )
+
         self.stats = PostgreSQLStats(
             connmanager=self.connmanager,
             )
@@ -95,8 +118,9 @@ class Psycopg2ConnectionManager(AbstractConnectionManager):
     disconnected_exceptions = disconnected_exceptions
     close_exceptions = close_exceptions
 
-    def __init__(self, dsn):
+    def __init__(self, dsn, keep_history):
         self._dsn = dsn
+        self.keep_history = keep_history
 
     def open(self,
             isolation=psycopg2.extensions.ISOLATION_LEVEL_READ_COMMITTED):
@@ -117,13 +141,22 @@ class Psycopg2ConnectionManager(AbstractConnectionManager):
         Returns (conn, cursor).
         """
         conn, cursor = self.open(self.isolation_serializable)
-        stmt = """
-        PREPARE get_latest_tid AS
-        SELECT tid
-        FROM transaction
-        ORDER BY tid DESC
-        LIMIT 1
-        """
+        if self.keep_history:
+            stmt = """
+            PREPARE get_latest_tid AS
+            SELECT tid
+            FROM transaction
+            ORDER BY tid DESC
+            LIMIT 1
+            """
+        else:
+            stmt = """
+            PREPARE get_latest_tid AS
+            SELECT tid
+            FROM object_state
+            ORDER BY tid DESC
+            LIMIT 1
+            """            
         cursor.execute(stmt)
         return conn, cursor
 

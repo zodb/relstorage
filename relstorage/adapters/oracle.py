@@ -19,11 +19,13 @@ from ZODB.POSException import StorageError
 from zope.interface import implements
 
 from relstorage.adapters.connmanager import AbstractConnectionManager
+from relstorage.adapters.dbiter import HistoryFreeDatabaseIterator
 from relstorage.adapters.dbiter import HistoryPreservingDatabaseIterator
-from relstorage.adapters.hpmover import HistoryPreservingObjectMover
 from relstorage.adapters.interfaces import IRelStorageAdapter
 from relstorage.adapters.locker import OracleLocker
+from relstorage.adapters.mover import ObjectMover
 from relstorage.adapters.oidallocator import OracleOIDAllocator
+from relstorage.adapters.packundo import HistoryFreePackUndo
 from relstorage.adapters.packundo import OracleHistoryPreservingPackUndo
 from relstorage.adapters.poller import Poller
 from relstorage.adapters.schema import OracleSchemaInstaller
@@ -49,10 +51,8 @@ class OracleAdapter(object):
     """Oracle adapter for RelStorage."""
     implements(IRelStorageAdapter)
 
-    keep_history = True
-
     def __init__(self, user, password, dsn, twophase=False, arraysize=64,
-            use_inline_lobs=None):
+            use_inline_lobs=None, keep_history=True):
         """Create an Oracle adapter.
 
         The user, password, and dsn parameters are provided to cx_Oracle
@@ -71,21 +71,28 @@ class OracleAdapter(object):
         """
         if use_inline_lobs is None:
             use_inline_lobs = (cx_Oracle.version >= '5.0')
+        self.keep_history = keep_history
 
         self.connmanager = CXOracleConnectionManager(
             params=(user, password, dsn),
             arraysize=arraysize,
-            twophase=bool(twophase),
+            twophase=twophase,
             )
-        self.runner = CXOracleScriptRunner(bool(use_inline_lobs))
-        self.locker = OracleLocker((cx_Oracle.DatabaseError,))
+        self.runner = CXOracleScriptRunner(
+            use_inline_lobs=use_inline_lobs,
+            )
+        self.locker = OracleLocker(
+            keep_history=self.keep_history,
+            lock_exceptions=(cx_Oracle.DatabaseError,),
+            )
         self.schema = OracleSchemaInstaller(
             connmanager=self.connmanager,
             runner=self.runner,
             keep_history=self.keep_history,
             )
-        self.mover = HistoryPreservingObjectMover(
+        self.mover = ObjectMover(
             database_name='oracle',
+            keep_history=self.keep_history,
             runner=self.runner,
             Binary=cx_Oracle.Binary,
             inputsize_BLOB=cx_Oracle.BLOB,
@@ -96,22 +103,40 @@ class OracleAdapter(object):
             connmanager=self.connmanager,
             )
         self.txncontrol = OracleTransactionControl(
+            keep_history=self.keep_history,
             Binary=cx_Oracle.Binary,
-            twophase=bool(twophase),
+            twophase=twophase,
             )
+
+        if self.keep_history:
+            poll_query="SELECT MAX(tid) FROM transaction"
+        else:
+            poll_query="SELECT MAX(tid) FROM object_state"
         self.poller = Poller(
-            poll_query="SELECT MAX(tid) FROM transaction",
+            poll_query=poll_query,
             keep_history=self.keep_history,
             runner=self.runner,
             )
-        self.packundo = OracleHistoryPreservingPackUndo(
-            connmanager=self.connmanager,
-            runner=self.runner,
-            locker=self.locker,
-            )
-        self.dbiter = HistoryPreservingDatabaseIterator(
-            runner=self.runner,
-            )
+
+        if self.keep_history:
+            self.packundo = OracleHistoryPreservingPackUndo(
+                connmanager=self.connmanager,
+                runner=self.runner,
+                locker=self.locker,
+                )
+            self.dbiter = HistoryPreservingDatabaseIterator(
+                runner=self.runner,
+                )
+        else:
+            self.packundo = HistoryFreePackUndo(
+                connmanager=self.connmanager,
+                runner=self.runner,
+                locker=self.locker,
+                )
+            self.dbiter = HistoryFreeDatabaseIterator(
+                runner=self.runner,
+                )
+
         self.stats = OracleStats(
             connmanager=self.connmanager,
             )
