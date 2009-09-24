@@ -288,8 +288,7 @@ class CXOracleConnectionManager(AbstractConnectionManager):
         try:
             if self._twophase:
                 conn, cursor = self.open(transaction_mode=None, twophase=True)
-                try:
-                    self._set_xid(conn, cursor)
+                self._set_xid(conn, cursor)
             else:
                 conn, cursor = self.open()
             if self.on_store_opened is not None:
