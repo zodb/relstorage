@@ -532,7 +532,7 @@ class HistoryPreservingObjectMover(object):
         Used for copying transactions into this database.
         """
         md5sum = compute_md5sum(data)
-        if len(data) <= 2000:
+        if not data or len(data) <= 2000:
             # Send data inline for speed.  Oracle docs say maximum size
             # of a RAW is 2000 bytes.  inputsize_BINARY corresponds with RAW.
             cursor.setinputsizes(rawdata=self.inputsize_BINARY)
