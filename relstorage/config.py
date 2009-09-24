@@ -22,7 +22,7 @@ class RelStorageFactory(BaseConfig):
     """Open a storage configured via ZConfig"""
     def open(self):
         config = self.config
-        adapter = config.adapter.open()
+        adapter = config.adapter.create()
         options = Options()
         for key in options.__dict__.keys():
             value = getattr(config, key, None)
@@ -33,20 +33,20 @@ class RelStorageFactory(BaseConfig):
 
 
 class PostgreSQLAdapterFactory(BaseConfig):
-    def open(self):
+    def create(self):
         from adapters.postgresql import PostgreSQLAdapter
         return PostgreSQLAdapter(self.config.dsn)
 
 
 class OracleAdapterFactory(BaseConfig):
-    def open(self):
+    def create(self):
         from adapters.oracle import OracleAdapter
         config = self.config
         return OracleAdapter(config.user, config.password, config.dsn)
 
 
 class MySQLAdapterFactory(BaseConfig):
-    def open(self):
+    def create(self):
         from adapters.mysql import MySQLAdapter
         options = {}
         for key in self.config.getSectionAttributes():

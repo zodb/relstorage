@@ -125,7 +125,7 @@ class MySQLTransactionControl(TransactionControl):
 class OracleTransactionControl(TransactionControl):
     implements(ITransactionControl)
 
-    def __init__(self, Binary, twophase=False):
+    def __init__(self, Binary, twophase):
         self.Binary = Binary
         self.twophase = twophase
 

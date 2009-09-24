@@ -95,7 +95,7 @@ class RelStorage(BaseStorage,
         self._cache_client = None
 
         if create:
-            self._adapter.prepare_schema()
+            self._adapter.schema.prepare()
 
         # load_conn and load_cursor are open most of the time.
         self._load_conn = None
@@ -168,7 +168,7 @@ class RelStorage(BaseStorage,
 
     def _open_load_connection(self):
         """Open the load connection to the database.  Return nothing."""
-        conn, cursor = self._adapter.open_for_load()
+        conn, cursor = self._adapter.connmanager.open_for_load()
         self._drop_load_connection()
         self._load_conn, self._load_cursor = conn, cursor
         self._load_transaction_open = True
@@ -177,7 +177,7 @@ class RelStorage(BaseStorage,
         """Unconditionally drop the load connection"""
         conn, cursor = self._load_conn, self._load_cursor
         self._load_conn, self._load_cursor = None, None
-        self._adapter.close(conn, cursor)
+        self._adapter.connmanager.close(conn, cursor)
         self._load_transaction_open = False
 
     def _rollback_load_connection(self):
@@ -195,7 +195,7 @@ class RelStorage(BaseStorage,
             self._open_load_connection()
         else:
             try:
-                self._adapter.restart_load(
+                self._adapter.connmanager.restart_load(
                     self._load_conn, self._load_cursor)
             except POSException.StorageError, e:
                 log.warning("Reconnecting load_conn: %s", e)
@@ -212,7 +212,7 @@ class RelStorage(BaseStorage,
 
     def _open_store_connection(self):
         """Open the store connection to the database.  Return nothing."""
-        conn, cursor = self._adapter.open_for_store()
+        conn, cursor = self._adapter.connmanager.open_for_store()
         self._drop_store_connection()
         self._store_conn, self._store_cursor = conn, cursor
 
@@ -220,7 +220,7 @@ class RelStorage(BaseStorage,
         """Unconditionally drop the store connection"""
         conn, cursor = self._store_conn, self._store_cursor
         self._store_conn, self._store_cursor = None, None
-        self._adapter.close(conn, cursor)
+        self._adapter.connmanager.close(conn, cursor)
 
     def _restart_store(self):
         """Restart the store connection, creating a new connection if needed"""
@@ -228,7 +228,7 @@ class RelStorage(BaseStorage,
             self._open_store_connection()
         else:
             try:
-                self._adapter.restart_store(
+                self._adapter.connmanager.restart_store(
                     self._store_conn, self._store_cursor)
             except POSException.StorageError, e:
                 log.warning("Reconnecting store_conn: %s", e)
@@ -247,7 +247,7 @@ class RelStorage(BaseStorage,
 
         Used by the test suite and the ZODBConvert script.
         """
-        self._adapter.zap_all()
+        self._adapter.schema.zap_all()
         self._rollback_load_connection()
         cache = self._cache_client
         if cache is not None:
@@ -289,11 +289,11 @@ class RelStorage(BaseStorage,
         return other
 
     def __len__(self):
-        return self._adapter.get_object_count()
+        return self._adapter.stats.get_object_count()
 
     def getSize(self):
         """Return database size in bytes"""
-        return self._adapter.get_db_size()
+        return self._adapter.stats.get_db_size()
 
     def _log_keyerror(self, oid_int, reason):
         """Log just before raising KeyError in load().
@@ -305,7 +305,7 @@ class RelStorage(BaseStorage,
         adapter = self._adapter
         logfunc = log.warning
         msg = ["Storage KeyError on oid %d: %s" % (oid_int, reason)]
-        rows = adapter.iter_transactions(cursor)
+        rows = adapter.dbiter.iter_transactions(cursor)
         row = None
         for row in rows:
             # just get the first row
@@ -320,7 +320,7 @@ class RelStorage(BaseStorage,
 
         tids = []
         try:
-            rows = adapter.iter_object_history(cursor, oid_int)
+            rows = adapter.dbiter.iter_object_history(cursor, oid_int)
         except KeyError:
             # The object has no history, at least from the point of view
             # of the current database load connection.
@@ -350,14 +350,15 @@ class RelStorage(BaseStorage,
                 self._restart_load()
             cursor = self._load_cursor
             if cache is None:
-                state, tid_int = self._adapter.load_current(cursor, oid_int)
+                state, tid_int = self._adapter.mover.load_current(
+                    cursor, oid_int)
             else:
                 # get tid_int from the cache or the database
                 cachekey = self._get_oid_cache_key(oid_int)
                 if cachekey:
                     tid_int = cache.get(cachekey)
                 if not cachekey or not tid_int:
-                    tid_int = self._adapter.get_current_tid(
+                    tid_int = self._adapter.mover.get_current_tid(
                         cursor, oid_int)
                     if cachekey and tid_int is not None:
                         cache.set(cachekey, tid_int)
@@ -369,7 +370,7 @@ class RelStorage(BaseStorage,
                 cachekey = 'state:%d:%d' % (oid_int, tid_int)
                 state = cache.get(cachekey)
                 if not state:
-                    state = self._adapter.load_revision(
+                    state = self._adapter.mover.load_revision(
                         cursor, oid_int, tid_int)
                     if state:
                         state = str(state)
@@ -410,12 +411,12 @@ class RelStorage(BaseStorage,
         try:
             if not self._load_transaction_open:
                 self._restart_load()
-            state = self._adapter.load_revision(
+            state = self._adapter.mover.load_revision(
                 self._load_cursor, oid_int, tid_int)
             if state is None and self._store_cursor is not None:
                 # Allow loading data from later transactions
                 # for conflict resolution.
-                state = self._adapter.load_revision(
+                state = self._adapter.mover.load_revision(
                     self._store_cursor, oid_int, tid_int)
         finally:
             self._lock_release()
@@ -444,13 +445,13 @@ class RelStorage(BaseStorage,
                 if not self._load_transaction_open:
                     self._restart_load()
                 cursor = self._load_cursor
-            if not self._adapter.exists(cursor, u64(oid)):
+            if not self._adapter.mover.exists(cursor, u64(oid)):
                 raise POSKeyError(oid)
 
-            state, start_tid = self._adapter.load_before(
+            state, start_tid = self._adapter.mover.load_before(
                 cursor, oid_int, u64(tid))
             if start_tid is not None:
-                end_int = self._adapter.get_object_tid_after(
+                end_int = self._adapter.mover.get_object_tid_after(
                     cursor, oid_int, start_tid)
                 if end_int is not None:
                     end = p64(end_int)
@@ -491,7 +492,7 @@ class RelStorage(BaseStorage,
         try:
             self._max_stored_oid = max(self._max_stored_oid, oid_int)
             # save the data in a temporary table
-            adapter.store_temp(cursor, oid_int, prev_tid_int, data)
+            adapter.mover.store_temp(cursor, oid_int, prev_tid_int, data)
             return None
         finally:
             self._lock_release()
@@ -521,7 +522,7 @@ class RelStorage(BaseStorage,
         try:
             self._max_stored_oid = max(self._max_stored_oid, oid_int)
             # save the data.  Note that data can be None.
-            adapter.restore(cursor, oid_int, tid_int, data)
+            adapter.mover.restore(cursor, oid_int, tid_int, data)
         finally:
             self._lock_release()
 
@@ -556,10 +557,10 @@ class RelStorage(BaseStorage,
                 # get the commit lock and add the transaction now
                 cursor = self._store_cursor
                 packed = (status == 'p')
-                adapter.hold_commit_lock(cursor, ensure_current=True)
+                adapter.locker.hold_commit_lock(cursor, ensure_current=True)
                 tid_int = u64(tid)
                 try:
-                    adapter.add_transaction(
+                    adapter.txncontrol.add_transaction(
                         cursor, tid_int, user, desc, ext, packed)
                 except:
                     self._drop_store_connection()
@@ -583,20 +584,20 @@ class RelStorage(BaseStorage,
 
         adapter = self._adapter
         cursor = self._store_cursor
-        adapter.hold_commit_lock(cursor, ensure_current=True)
+        adapter.locker.hold_commit_lock(cursor, ensure_current=True)
         user, desc, ext = self._ude
 
         # Choose a transaction ID.
         # Base the transaction ID on the database time,
         # while ensuring that the tid of this transaction
         # is greater than any existing tid.
-        last_tid, now = adapter.get_tid_and_time(cursor)
+        last_tid, now = adapter.txncontrol.get_tid_and_time(cursor)
         stamp = TimeStamp(*(time.gmtime(now)[:5] + (now % 60,)))
         stamp = stamp.laterThan(TimeStamp(p64(last_tid)))
         tid = repr(stamp)
 
         tid_int = u64(tid)
-        adapter.add_transaction(cursor, tid_int, user, desc, ext)
+        adapter.txncontrol.add_transaction(cursor, tid_int, user, desc, ext)
         self._tid = tid
 
 
@@ -621,7 +622,7 @@ class RelStorage(BaseStorage,
         # Try to resolve the conflicts.
         resolved = set()  # a set of OIDs
         while True:
-            conflict = adapter.detect_conflict(cursor)
+            conflict = adapter.mover.detect_conflict(cursor)
             if conflict is None:
                 break
 
@@ -638,14 +639,14 @@ class RelStorage(BaseStorage,
             else:
                 # resolved
                 data = rdata
-                self._adapter.replace_temp(
+                self._adapter.mover.replace_temp(
                     cursor, oid_int, prev_tid_int, data)
                 resolved.add(oid)
 
         # Move the new states into the permanent table
         tid_int = u64(self._tid)
         serials = []
-        oid_ints = adapter.move_from_temp(cursor, tid_int)
+        oid_ints = adapter.mover.move_from_temp(cursor, tid_int)
         for oid_int in oid_ints:
             oid = p64(oid_int)
             if oid in resolved:
@@ -674,14 +675,15 @@ class RelStorage(BaseStorage,
         conn = self._store_conn
 
         if self._max_stored_oid > self._max_new_oid:
-            self._adapter.set_min_oid(cursor, self._max_stored_oid + 1)
+            self._adapter.oidallocator.set_min_oid(
+                cursor, self._max_stored_oid + 1)
 
         self._prepare_tid()
         tid_int = u64(self._tid)
 
         serials = self._finish_store()
-        self._adapter.update_current(cursor, tid_int)
-        self._prepared_txn = self._adapter.commit_phase1(
+        self._adapter.mover.update_current(cursor, tid_int)
+        self._prepared_txn = self._adapter.txncontrol.commit_phase1(
             conn, cursor, tid_int)
 
         if self._txn_blobs:
@@ -722,9 +724,9 @@ class RelStorage(BaseStorage,
             self._rollback_load_connection()
             txn = self._prepared_txn
             assert txn is not None
-            self._adapter.commit_phase2(
+            self._adapter.txncontrol.commit_phase2(
                 self._store_conn, self._store_cursor, txn)
-            self._adapter.release_commit_lock(self._store_cursor)
+            self._adapter.locker.release_commit_lock(self._store_cursor)
             cache = self._cache_client
             if cache is not None:
                 if cache.incr('commit_count') is None:
@@ -746,9 +748,9 @@ class RelStorage(BaseStorage,
         try:
             self._rollback_load_connection()
             if self._store_cursor is not None:
-                self._adapter.abort(
+                self._adapter.txncontrol.abort(
                     self._store_conn, self._store_cursor, self._prepared_txn)
-                self._adapter.release_commit_lock(self._store_cursor)
+                self._adapter.locker.release_commit_lock(self._store_cursor)
             if self._txn_blobs:
                 for oid, filename in self._txn_blobs.iteritems():
                     if os.path.exists(filename):
@@ -774,7 +776,7 @@ class RelStorage(BaseStorage,
             if cursor is None:
                 self._open_load_connection()
                 cursor = self._load_cursor
-            oid_int = self._adapter.new_oid(cursor)
+            oid_int = self._adapter.oidallocator.new_oid(cursor)
             self._max_new_oid = max(self._max_new_oid, oid_int)
             return p64(oid_int)
         finally:
@@ -801,9 +803,9 @@ class RelStorage(BaseStorage,
 
         # use a private connection to ensure the most current results
         adapter = self._adapter
-        conn, cursor = adapter.open()
+        conn, cursor = adapter.connmanager.open()
         try:
-            rows = adapter.iter_transactions(cursor)
+            rows = adapter.dbiter.iter_transactions(cursor)
             i = 0
             res = []
             for tid_int, user, desc, ext in rows:
@@ -823,7 +825,7 @@ class RelStorage(BaseStorage,
             return res
 
         finally:
-            adapter.close(conn, cursor)
+            adapter.connmanager.close(conn, cursor)
 
     def history(self, oid, version=None, size=1, filter=None):
         self._lock_acquire()
@@ -831,7 +833,8 @@ class RelStorage(BaseStorage,
             cursor = self._load_cursor
             oid_int = u64(oid)
             try:
-                rows = self._adapter.iter_object_history(cursor, oid_int)
+                rows = self._adapter.dbiter.iter_object_history(
+                    cursor, oid_int)
             except KeyError:
                 raise POSKeyError(oid)
 
@@ -881,30 +884,31 @@ class RelStorage(BaseStorage,
             cursor = self._store_cursor
             assert cursor is not None
 
-            adapter.hold_pack_lock(cursor)
+            adapter.locker.hold_pack_lock(cursor)
             try:
                 # Note that _prepare_tid acquires the commit lock.
                 # The commit lock must be acquired after the pack lock
                 # because the database adapters also acquire in that
                 # order during packing.
                 self._prepare_tid()
-                adapter.verify_undoable(cursor, undo_tid_int)
+                adapter.packundo.verify_undoable(cursor, undo_tid_int)
 
                 self_tid_int = u64(self._tid)
-                copied = adapter.undo(cursor, undo_tid_int, self_tid_int)
+                copied = adapter.packundo.undo(
+                    cursor, undo_tid_int, self_tid_int)
                 oids = [p64(oid_int) for oid_int, _ in copied]
 
                 # Update the current object pointers immediately, so that
                 # subsequent undo operations within this transaction will see
                 # the new current objects.
-                adapter.update_current(cursor, self_tid_int)
+                adapter.mover.update_current(cursor, self_tid_int)
 
                 if self.fshelper is not None:
                     self._copy_undone_blobs(copied)
 
                 return self._tid, oids
             finally:
-                adapter.release_pack_lock(cursor)
+                adapter.locker.release_pack_lock(cursor)
         finally:
             self._lock_release()
 
@@ -930,7 +934,7 @@ class RelStorage(BaseStorage,
 
             self._add_blob_to_transaction(oid, new_fn)
 
-    def pack(self, t, referencesf, sleep=time.sleep):
+    def pack(self, t, referencesf, sleep=None):
         if self._is_read_only:
             raise POSException.ReadOnlyError()
 
@@ -950,12 +954,13 @@ class RelStorage(BaseStorage,
         # connections to do the actual work, allowing the adapter
         # to use special transaction modes for packing.
         adapter = self._adapter
-        lock_conn, lock_cursor = adapter.open()
+        lock_conn, lock_cursor = adapter.connmanager.open()
         try:
-            adapter.hold_pack_lock(lock_cursor)
+            adapter.locker.hold_pack_lock(lock_cursor)
             try:
                 # Find the latest commit before or at the pack time.
-                tid_int = adapter.choose_pack_transaction(pack_point_int)
+                tid_int = adapter.packundo.choose_pack_transaction(
+                    pack_point_int)
                 if tid_int is None:
                     log.debug("all transactions before %s have already "
                         "been packed", time.ctime(t))
@@ -971,7 +976,8 @@ class RelStorage(BaseStorage,
                 # In pre_pack, the adapter fills tables with
                 # information about what to pack.  The adapter
                 # must not actually pack anything yet.
-                adapter.pre_pack(tid_int, get_references, self._options)
+                adapter.packundo.pre_pack(
+                    tid_int, get_references, self._options)
 
                 if self._options.pack_dry_run:
                     log.info("pack: dry run complete")
@@ -981,13 +987,13 @@ class RelStorage(BaseStorage,
                         packed_func = self._after_pack
                     else:
                         packed_func = None
-                    adapter.pack(tid_int, self._options, sleep=sleep,
+                    adapter.packundo.pack(tid_int, self._options, sleep=sleep,
                         packed_func=packed_func)
             finally:
-                adapter.release_pack_lock(lock_cursor)
+                adapter.locker.release_pack_lock(lock_cursor)
         finally:
             lock_conn.rollback()
-            adapter.close(lock_conn, lock_cursor)
+            adapter.connmanager.close(lock_conn, lock_cursor)
         self.sync()
 
     def _after_pack(self, oid_int, tid_int):
@@ -1083,7 +1089,7 @@ class RelStorage(BaseStorage,
                 ignore_tid = None
 
             # get a list of changed OIDs and the most recent tid
-            oid_ints, new_polled_tid = self._adapter.poll_invalidations(
+            oid_ints, new_polled_tid = self._adapter.poller.poll_invalidations(
                 conn, cursor, self._prev_polled_tid, ignore_tid)
             self._prev_polled_tid = new_polled_tid
 
@@ -1247,7 +1253,7 @@ class TransactionIterator(object):
 
     def __init__(self, adapter, start, stop):
         self._adapter = adapter
-        self._conn, self._cursor = self._adapter.open_for_load()
+        self._conn, self._cursor = self._adapter.connmanager.open_for_load()
         self._closed = False
 
         if start is not None:
@@ -1260,12 +1266,12 @@ class TransactionIterator(object):
             stop_int = None
 
         # _transactions: [(tid, username, description, extension, packed)]
-        self._transactions = list(adapter.iter_transactions_range(
+        self._transactions = list(adapter.dbiter.iter_transactions_range(
             self._cursor, start_int, stop_int))
         self._index = 0
 
     def close(self):
-        self._adapter.close(self._conn, self._cursor)
+        self._adapter.connmanager.close(self._conn, self._cursor)
         self._closed = True
 
     def iterator(self):
@@ -1326,7 +1332,7 @@ class RecordIterator(object):
         adapter = record._trans_iter._adapter
         tid_int = record._tid_int
         self.tid = record.tid
-        self._records = list(adapter.iter_objects(cursor, tid_int))
+        self._records = list(adapter.dbiter.iter_objects(cursor, tid_int))
         self._index = 0
 
     def __iter__(self):

@@ -16,7 +16,25 @@
 from zope.interface import Attribute
 from zope.interface import Interface
 
+class IRelStorageAdapter(Interface):
+    """A database adapter for RelStorage"""
+
+    connmanager = Attribute("An IConnectionManager")
+    dbiter = Attribute("An IDatabaseIterator")
+    keep_history = Attribute("True if this adapter supports undo")
+    locker = Attribute("An ILocker")
+    mover = Attribute("An IObjectMover")
+    oidallocator = Attribute("An IOIDAllocator")
+    packundo = Attribute("An IPackUndo")
+    poller = Attribute("An IPoller")
+    runner = Attribute("An IScriptRunner")
+    schema = Attribute("An ISchemaInstaller")
+    stats = Attribute("An IStats")
+    txncontrol = Attribute("An ITransactionControl")
+
+
 class IConnectionManager(Interface):
+    """Open and close database connections"""
 
     def open():
         """Open a database connection and return (conn, cursor)."""
@@ -43,6 +61,8 @@ class IConnectionManager(Interface):
     def restart_load(conn, cursor):
         """Reinitialize a connection for loading objects.
 
+        This gets called when polling the database, so it needs to be quick.
+
         Raise StorageError if the database has disconnected.
         """
 
@@ -60,6 +80,7 @@ class IConnectionManager(Interface):
 
 
 class IDatabaseIterator(Interface):
+    """Iterate over the available data in the database"""
 
     def iter_objects(cursor, tid):
         """Iterate over object states in a transaction.
@@ -92,6 +113,7 @@ class IDatabaseIterator(Interface):
 
 
 class ILocker(Interface):
+    """Acquire and release the commit and pack locks."""
 
     def hold_commit_lock(cursor, ensure_current=False):
         """Acquire the commit lock.
@@ -117,7 +139,7 @@ class ILocker(Interface):
 
 
 class IObjectMover(Interface):
-    """Moves object states to/from the database and within the database"""
+    """Move object states to/from the database and within the database."""
 
     def get_current_tid(cursor, oid):
         """Returns the current integer tid for an object.
@@ -195,15 +217,17 @@ class IObjectMover(Interface):
 
 
 class IOIDAllocator(Interface):
-
-    def set_min_oid(cursor, oid):
-        """Ensure the next OID is at least the given OID."""
+    """Allocate OIDs and control future allocation"""
 
     def new_oid(cursor):
         """Return a new, unused OID."""
 
+    def set_min_oid(cursor, oid):
+        """Ensure the next OID is at least the given OID."""
+
 
 class IPackUndo(Interface):
+    """Perform pack and undo operations"""
 
     def verify_undoable(cursor, undo_tid):
         """Raise UndoError if it is not safe to undo the specified txn.
@@ -264,6 +288,7 @@ class IPackUndo(Interface):
 
 
 class IPoller(Interface):
+    """Poll for new data"""
 
     def poll_invalidations(conn, cursor, prev_polled_tid, ignore_tid):
         """Polls for new transactions.
@@ -279,6 +304,7 @@ class IPoller(Interface):
 
 
 class ISchemaInstaller(Interface):
+    """Install the schema in the database, clear it, or uninstall it"""
 
     def create(cursor):
         """Create the database tables, sequences, etc."""
@@ -294,6 +320,12 @@ class ISchemaInstaller(Interface):
 
 
 class IScriptRunner(Interface):
+    """Run database-agnostic SQL scripts.
+
+    Using an IScriptRunner is appropriate for batch operations and
+    uncommon operations that can be slow, but is not appropriate
+    for performance-critical code.
+    """
 
     script_vars = Attribute(
         """A mapping providing replacements for parts of scripts.
@@ -328,8 +360,22 @@ class IScriptRunner(Interface):
         stmt should use '%s' parameter format (not %(name)s).
         """
 
+    # Note: the Oracle implementation also provides run_lob_stmt, which
+    # is useful for reading LOBs from the database quickly.
+
 
 class ITransactionControl(Interface):
+    """Begin, commit, and abort transactions."""
+
+    def get_tid_and_time(cursor):
+        """Returns the most recent tid and the current database time.
+
+        The database time is the number of seconds since the epoch.
+        """
+
+    def add_transaction(cursor, tid, username, description, extension,
+            packed=False):
+        """Add a transaction."""
 
     def commit_phase1(conn, cursor, tid):
         """Begin a commit.  Returns the transaction name.
@@ -349,14 +395,4 @@ class ITransactionControl(Interface):
 
     def abort(conn, cursor, txn=None):
         """Abort the commit.  If txn is not None, phase 1 is also aborted."""
-
-    def get_tid_and_time(cursor):
-        """Returns the most recent tid and the current database time.
-
-        The database time is the number of seconds since the epoch.
-        """
-
-    def add_transaction(cursor, tid, username, description, extension,
-            packed=False):
-        """Add a transaction."""
 

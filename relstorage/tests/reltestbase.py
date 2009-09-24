@@ -74,8 +74,8 @@ class RelStorageTests(
     ):
 
     def checkDropAndPrepare(self):
-        self._storage._adapter.drop_all()
-        self._storage._adapter.prepare_schema()
+        self._storage._adapter.schema.drop_all()
+        self._storage._adapter.schema.prepare()
 
     def checkCrossConnectionInvalidation(self):
         # Verify connections see updated state at txn boundaries

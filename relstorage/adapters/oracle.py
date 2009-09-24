@@ -16,10 +16,12 @@
 import logging
 import cx_Oracle
 from ZODB.POSException import StorageError
+from zope.interface import implements
 
 from relstorage.adapters.connmanager import AbstractConnectionManager
 from relstorage.adapters.dbiter import HistoryPreservingDatabaseIterator
 from relstorage.adapters.hpmover import HistoryPreservingObjectMover
+from relstorage.adapters.interfaces import IRelStorageAdapter
 from relstorage.adapters.locker import OracleLocker
 from relstorage.adapters.oidallocator import OracleOIDAllocator
 from relstorage.adapters.packundo import OracleHistoryPreservingPackUndo
@@ -45,6 +47,7 @@ close_exceptions = disconnected_exceptions
 
 class OracleAdapter(object):
     """Oracle adapter for RelStorage."""
+    implements(IRelStorageAdapter)
 
     keep_history = True
 
@@ -94,6 +97,7 @@ class OracleAdapter(object):
             )
         self.txncontrol = OracleTransactionControl(
             Binary=cx_Oracle.Binary,
+            twophase=bool(twophase),
             )
         self.poller = Poller(
             poll_query="SELECT MAX(tid) FROM transaction",
@@ -111,63 +115,6 @@ class OracleAdapter(object):
         self.stats = OracleStats(
             connmanager=self.connmanager,
             )
-
-        self.open = self.connmanager.open
-        self.close = self.connmanager.close
-        self.open_for_load = self.connmanager.open_for_load
-        self.restart_load = self.connmanager.restart_load
-        self.open_for_store = self.connmanager.open_for_store
-        self.restart_store = self.connmanager.restart_store
-
-        self.hold_commit_lock = self.locker.hold_commit_lock
-        self.release_commit_lock = self.locker.release_commit_lock
-        self.hold_pack_lock = self.locker.hold_pack_lock
-        self.release_pack_lock = self.locker.release_pack_lock
-
-        self.create_schema = self.schema.create
-        self.prepare_schema = self.schema.prepare
-        self.zap_all = self.schema.zap_all
-        self.drop_all = self.schema.drop_all
-
-        self.get_current_tid = self.mover.get_current_tid
-        self.load_current = self.mover.load_current
-        self.load_revision = self.mover.load_revision
-        self.exists = self.mover.exists
-        self.load_before = self.mover.load_before
-        self.get_object_tid_after = self.mover.get_object_tid_after
-        self.store_temp = self.mover.store_temp
-        self.replace_temp = self.mover.replace_temp
-        self.restore = self.mover.restore
-        self.detect_conflict = self.mover.detect_conflict
-        self.move_from_temp = self.mover.move_from_temp
-        self.update_current = self.mover.update_current
-
-        self.set_min_oid = self.oidallocator.set_min_oid
-        self.new_oid = self.oidallocator.new_oid
-
-        self.get_tid_and_time = self.txncontrol.get_tid_and_time
-        self.add_transaction = self.txncontrol.add_transaction
-        self.commit_phase1 = self.txncontrol.commit_phase1
-        self.commit_phase2 = self.txncontrol.commit_phase2
-        self.abort = self.txncontrol.abort
-
-        self.poll_invalidations = self.poller.poll_invalidations
-
-        self.fill_object_refs = self.packundo.fill_object_refs
-        self.open_for_pre_pack = self.packundo.open_for_pre_pack
-        self.choose_pack_transaction = self.packundo.choose_pack_transaction
-        self.pre_pack = self.packundo.pre_pack
-        self.pack = self.packundo.pack
-        self.verify_undoable = self.packundo.verify_undoable
-        self.undo = self.packundo.undo
-
-        self.iter_objects = self.dbiter.iter_objects
-        self.iter_transactions = self.dbiter.iter_transactions
-        self.iter_transactions_range = self.dbiter.iter_transactions_range
-        self.iter_object_history = self.dbiter.iter_object_history
-
-        self.get_object_count = self.stats.get_object_count
-        self.get_db_size = self.stats.get_db_size
 
 
 class CXOracleScriptRunner(OracleScriptRunner):
