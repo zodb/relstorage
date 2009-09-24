@@ -58,7 +58,7 @@ from relstorage.adapters.locker import MySQLLocker
 from relstorage.adapters.oidallocator import MySQLOIDAllocator
 from relstorage.adapters.packundo import HistoryPreservingPackUndo
 from relstorage.adapters.poller import Poller
-from relstorage.adapters.schema import HistoryPreservingMySQLSchema
+from relstorage.adapters.schema import MySQLSchemaInstaller
 from relstorage.adapters.scriptrunner import ScriptRunner
 from relstorage.adapters.stats import MySQLStats
 from relstorage.adapters.txncontrol import MySQLTransactionControl
@@ -83,9 +83,10 @@ class MySQLAdapter(object):
         self.connmanager = MySQLdbConnectionManager(params)
         self.runner = ScriptRunner()
         self.locker = MySQLLocker((MySQLdb.DatabaseError,))
-        self.schema = HistoryPreservingMySQLSchema(
+        self.schema = MySQLSchemaInstaller(
             connmanager=self.connmanager,
             runner=self.runner,
+            keep_history=self.keep_history,
             )
         self.loadstore = HistoryPreservingMySQLLoadStore(
             Binary=MySQLdb.Binary,
@@ -97,7 +98,7 @@ class MySQLAdapter(object):
             )
         self.poller = Poller(
             poll_query="SELECT tid FROM transaction ORDER BY tid DESC LIMIT 1",
-            keep_history=True,
+            keep_history=self.keep_history,
             runner=self.runner,
             )
         self.packundo = HistoryPreservingPackUndo(

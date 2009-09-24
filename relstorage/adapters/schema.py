@@ -34,10 +34,7 @@ history_preserving_schema = """
     oracle:
         CREATE TABLE pack_lock (dummy CHAR);
 
-# transaction: The list of all transactions in the database. Create a
-# special '0' transaction to represent object creation. The '0'
-# transaction is often referenced by object_state.prev_tid, but never
-# by object_state.tid.
+# transaction: The list of all transactions in the database.
 
     postgresql:
         CREATE TABLE transaction (
@@ -48,8 +45,6 @@ history_preserving_schema = """
             description BYTEA NOT NULL,
             extension   BYTEA
         );
-        INSERT INTO transaction (tid, username, description)
-            VALUES (0, 'system', 'special transaction for object creation');
 
     mysql:
         CREATE TABLE transaction (
@@ -60,8 +55,6 @@ history_preserving_schema = """
             description BLOB NOT NULL,
             extension   BLOB
         ) ENGINE = InnoDB;
-        INSERT INTO transaction (tid, username, description)
-            VALUES (0, 'system', 'special transaction for object creation');
 
     oracle:
         CREATE TABLE transaction (
@@ -72,11 +65,6 @@ history_preserving_schema = """
             description RAW(2000),
             extension   RAW(2000)
         );
-        INSERT INTO transaction (tid, username, description)
-            VALUES (0,
-            UTL_I18N.STRING_TO_RAW('system', 'US7ASCII'),
-            UTL_I18N.STRING_TO_RAW(
-                'special transaction for object creation', 'US7ASCII'));
 
 # OID allocation
 
@@ -317,178 +305,187 @@ history_preserving_schema = """
         );
 """
 
-def filter_schema(schema, database):
+history_preserving_init = """
+# Create a special '0' transaction to represent object creation. The
+# '0' transaction is often referenced by object_state.prev_tid, but
+# never by object_state.tid.
+
+    postgresql:
+        INSERT INTO transaction (tid, username, description)
+            VALUES (0, 'system', 'special transaction for object creation');
+
+    mysql:
+        INSERT INTO transaction (tid, username, description)
+            VALUES (0, 'system', 'special transaction for object creation');
+
+    oracle:
+        INSERT INTO transaction (tid, username, description)
+            VALUES (0,
+            UTL_I18N.STRING_TO_RAW('system', 'US7ASCII'),
+            UTL_I18N.STRING_TO_RAW(
+                'special transaction for object creation', 'US7ASCII'));
+
+# Reset the OID counter.
+
+    postgresql:
+        ALTER SEQUENCE zoid_seq RESTART WITH 1;
+
+    mysql:
+        TRUNCATE new_oid;
+
+    oracle:
+        DROP SEQUENCE zoid_seq;
+        CREATE SEQUENCE zoid_seq;
+"""
+
+history_free_schema = "TODO"
+
+history_free_init = "TODO"
+
+
+def filter_script(script, database_name):
     res = []
     match = False
-    for line in schema.splitlines():
+    for line in script.splitlines():
         line = line.strip()
         if not line or line.startswith('#'):
             continue
         if line.endswith(':'):
-            match = (database in line[:-1].split())
+            match = (database_name in line[:-1].split())
             continue
         if match:
             res.append(line)
     return '\n'.join(res)
 
 
-class HistoryPreservingPostgreSQLSchema(object):
-    implements(ISchemaInstaller)
+class AbstractSchemaInstaller(object):
 
-    def __init__(self, locker, connmanager):
-        self.locker = locker
+    # Keep this list in the same order as the schema script
+    all_tables = (
+        'commit_lock',
+        'pack_lock',
+        'transaction',
+        'new_oid',
+        'object_state',
+        'current_object',
+        'object_ref',
+        'object_refs_added',
+        'pack_object',
+        'pack_state',
+        'pack_state_tid',
+        'temp_store',
+        'temp_pack_visit',
+        'temp_undo',
+        )
+
+    database_name = None  # provided by a subclass
+
+    def __init__(self, connmanager, runner, keep_history):
         self.connmanager = connmanager
+        self.runner = runner
+        if keep_history:
+            self.schema_script = history_preserving_schema
+            self.init_script = history_preserving_init
+        else:
+            self.schema_script = history_free_schema
+            self.init_script = history_free_init
+
+    def list_tables(self, cursor):
+        raise NotImplementedError()
+
+    def list_sequences(self, cursor):
+        raise NotImplementedError()
 
     def create(self, cursor):
         """Create the database tables."""
-        script = filter_schema(history_preserving_schema, 'postgresql')
-        cursor.execute(script)
+        script = filter_script(self.schema_script, self.database_name)
+        self.runner.run_script(cursor, script)
+        script = filter_script(self.init_script, self.database_name)
+        self.runner.run_script(cursor, script)
+
+    def prepare(self):
+        """Create the database schema if it does not already exist."""
+        def callback(conn, cursor):
+            tables = self.list_tables(cursor)
+            if not 'object_state' in tables:
+                self.create(cursor)
+        self.connmanager.open_and_call(callback)
+
+    def zap_all(self):
+        """Clear all data out of the database."""
+        def callback(conn, cursor):
+            existent = set(self.list_tables(cursor))
+            todo = list(self.all_tables)
+            todo.reverse()
+            for table in todo:
+                if table in existent:
+                    cursor.execute("DELETE FROM %s" % table)
+            script = filter_script(self.init_script, self.database_name)
+            if script:
+                self.runner.run_script(cursor, script)
+        self.connmanager.open_and_call(callback)
+
+    def drop_all(self):
+        """Drop all tables and sequences."""
+        def callback(conn, cursor):
+            existent = set(self.list_tables(cursor))
+            todo = list(self.all_tables)
+            todo.reverse()
+            for table in todo:
+                if table in existent:
+                    cursor.execute("DROP TABLE %s" % table)
+            for sequence in self.list_sequences(cursor):
+                cursor.execute("DROP SEQUENCE %s" % sequence)
+        self.connmanager.open_and_call(callback)
+
+
+class PostgreSQLSchemaInstaller(AbstractSchemaInstaller):
+    implements(ISchemaInstaller)
+
+    database_name = 'postgresql'
+
+    def __init__(self, connmanager, runner, locker, keep_history):
+        super(PostgreSQLSchemaInstaller, self).__init__(
+            connmanager, runner, keep_history)
+        self.locker = locker
+
+    def create(self, cursor):
+        """Create the database tables."""
+        super(PostgreSQLSchemaInstaller, self).create(cursor)
+        # Create the pack_lock table only on PostgreSQL 8.1 (not 8.2+)
         self.locker.create_pack_lock(cursor)
 
-    def prepare(self):
-        """Create the database schema if it does not already exist."""
-        def callback(conn, cursor):
-            cursor.execute("""
-            SELECT tablename
-            FROM pg_tables
-            WHERE tablename = 'object_state'
-            """)
-            if not cursor.rowcount:
-                self.create(cursor)
-        self.connmanager.open_and_call(callback)
+    def list_tables(self, cursor):
+        cursor.execute("SELECT tablename FROM pg_tables")
+        return [name for (name,) in cursor]
 
-    def zap_all(self):
-        """Clear all data out of the database."""
-        def callback(conn, cursor):
-            cursor.execute("""
-            DELETE FROM object_refs_added;
-            DELETE FROM object_ref;
-            DELETE FROM current_object;
-            DELETE FROM object_state;
-            DELETE FROM transaction;
-            -- Create a special transaction to represent object creation.
-            INSERT INTO transaction (tid, username, description) VALUES
-                (0, 'system', 'special transaction for object creation');
-            ALTER SEQUENCE zoid_seq RESTART WITH 1;
-            """)
-        self.connmanager.open_and_call(callback)
-
-    def drop_all(self):
-        """Drop all tables and sequences."""
-        def callback(conn, cursor):
-            cursor.execute("SELECT tablename FROM pg_tables")
-            existent = set([name for (name,) in cursor])
-            for tablename in ('pack_state_tid', 'pack_state',
-                    'pack_object', 'object_refs_added', 'object_ref',
-                    'current_object', 'object_state', 'transaction',
-                    'commit_lock', 'pack_lock'):
-                if tablename in existent:
-                    cursor.execute("DROP TABLE %s" % tablename)
-            cursor.execute("DROP SEQUENCE zoid_seq")
-        self.connmanager.open_and_call(callback)
+    def list_sequences(self, cursor):
+        cursor.execute("SELECT relname FROM pg_class WHERE relkind = 'S'")
+        return [name for (name,) in cursor]
 
 
-class HistoryPreservingMySQLSchema(object):
+class MySQLSchemaInstaller(AbstractSchemaInstaller):
     implements(ISchemaInstaller)
 
-    def __init__(self, connmanager, runner):
-        self.connmanager = connmanager
-        self.runner = runner
+    database_name = 'mysql'
 
-    def create(self, cursor):
-        """Create the database tables."""
-        script = filter_schema(history_preserving_schema, 'mysql')
-        self.runner.run_script(cursor, script)
+    def list_tables(self, cursor):
+        cursor.execute("SHOW TABLES")
+        return [name for (name,) in cursor]
 
-    def prepare(self):
-        """Create the database schema if it does not already exist."""
-        def callback(conn, cursor):
-            cursor.execute("SHOW TABLES LIKE 'object_state'")
-            if not cursor.rowcount:
-                self.create(cursor)
-        self.connmanager.open_and_call(callback)
-
-    def zap_all(self):
-        """Clear all data out of the database."""
-        def callback(conn, cursor):
-            stmt = """
-            DELETE FROM object_refs_added;
-            DELETE FROM object_ref;
-            DELETE FROM current_object;
-            DELETE FROM object_state;
-            TRUNCATE new_oid;
-            DELETE FROM transaction;
-            -- Create a transaction to represent object creation.
-            INSERT INTO transaction (tid, username, description) VALUES
-                (0, 'system', 'special transaction for object creation');
-            """
-            self.runner.run_script(cursor, stmt)
-        self.connmanager.open_and_call(callback)
-
-    def drop_all(self):
-        """Drop all tables and sequences."""
-        def callback(conn, cursor):
-            for tablename in ('pack_state_tid', 'pack_state',
-                    'pack_object', 'object_refs_added', 'object_ref',
-                    'current_object', 'object_state', 'new_oid',
-                    'transaction'):
-                cursor.execute("DROP TABLE IF EXISTS %s" % tablename)
-        self.connmanager.open_and_call(callback)
+    def list_sequences(self, cursor):
+        return []
 
 
-class HistoryPreservingOracleSchema(object):
+class OracleSchemaInstaller(AbstractSchemaInstaller):
     implements(ISchemaInstaller)
 
-    def __init__(self, connmanager, runner):
-        self.connmanager = connmanager
-        self.runner = runner
+    database_name = 'oracle'
 
-    def create(self, cursor):
-        """Create the database tables."""
-        script = filter_schema(history_preserving_schema, 'oracle')
-        self.runner.run_script(cursor, script)
-        # Let Oracle catch up with the new data definitions by sleeping.
-        # This reduces the likelihood of spurious ORA-01466 errors.
-        time.sleep(5)
+    def list_tables(self, cursor):
+        cursor.execute("SELECT table_name FROM user_tables")
+        return [name.lower() for (name,) in cursor]
 
-    def prepare(self):
-        """Create the database schema if it does not already exist."""
-        def callback(conn, cursor):
-            cursor.execute("""
-            SELECT 1 FROM USER_TABLES WHERE TABLE_NAME = 'OBJECT_STATE'
-            """)
-            if not cursor.fetchall():
-                self.create(cursor)
-        self.connmanager.open_and_call(callback)
-
-    def zap_all(self):
-        """Clear all data out of the database."""
-        def callback(conn, cursor):
-            stmt = """
-            DELETE FROM object_refs_added;
-            DELETE FROM object_ref;
-            DELETE FROM current_object;
-            DELETE FROM object_state;
-            DELETE FROM transaction;
-            -- Create a transaction to represent object creation.
-            INSERT INTO transaction (tid, username, description) VALUES
-                (0, UTL_I18N.STRING_TO_RAW('system', 'US7ASCII'),
-                UTL_I18N.STRING_TO_RAW(
-                'special transaction for object creation', 'US7ASCII'));
-            DROP SEQUENCE zoid_seq;
-            CREATE SEQUENCE zoid_seq;
-            """
-            self.runner.run_script(cursor, stmt)
-        self.connmanager.open_and_call(callback)
-
-    def drop_all(self):
-        """Drop all tables and sequences."""
-        def callback(conn, cursor):
-            for tablename in ('pack_state_tid', 'pack_state',
-                    'pack_object', 'object_refs_added', 'object_ref',
-                    'current_object', 'object_state', 'transaction',
-                    'commit_lock', 'pack_lock',
-                    'temp_store', 'temp_undo', 'temp_pack_visit'):
-                cursor.execute("DROP TABLE %s" % tablename)
-            cursor.execute("DROP SEQUENCE zoid_seq")
-        self.connmanager.open_and_call(callback)
+    def list_sequences(self, cursor):
+        cursor.execute("SELECT sequence_name FROM user_sequences")
+        return [name.lower() for (name,) in cursor]

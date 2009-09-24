@@ -24,7 +24,7 @@ from relstorage.adapters.locker import OracleLocker
 from relstorage.adapters.oidallocator import OracleOIDAllocator
 from relstorage.adapters.packundo import OracleHistoryPreservingPackUndo
 from relstorage.adapters.poller import Poller
-from relstorage.adapters.schema import HistoryPreservingOracleSchema
+from relstorage.adapters.schema import OracleSchemaInstaller
 from relstorage.adapters.scriptrunner import OracleScriptRunner
 from relstorage.adapters.stats import OracleStats
 from relstorage.adapters.txncontrol import OracleTransactionControl
@@ -66,23 +66,26 @@ class OracleAdapter(object):
         queries.  It depends on features in cx_Oracle 5.  The default is None,
         telling the adapter to auto-detect the presence of cx_Oracle 5.
         """
-        params = (user, password, dsn)
         if use_inline_lobs is None:
             use_inline_lobs = (cx_Oracle.version >= '5.0')
 
-        self.connmanager = CXOracleConnectionManager(params, arraysize)
+        self.connmanager = CXOracleConnectionManager(
+            params=(user, password, dsn),
+            arraysize=arraysize,
+            twophase=bool(twophase),
+            )
         self.runner = CXOracleScriptRunner(bool(use_inline_lobs))
         self.locker = OracleLocker((cx_Oracle.DatabaseError,))
-        self.schema = HistoryPreservingOracleSchema(
+        self.schema = OracleSchemaInstaller(
             connmanager=self.connmanager,
             runner=self.runner,
+            keep_history=self.keep_history,
             )
         self.loadstore = HistoryPreservingOracleLoadStore(
             runner=self.runner,
             Binary=cx_Oracle.Binary,
             inputsize_BLOB=cx_Oracle.BLOB,
             inputsize_BINARY=cx_Oracle.BINARY,
-            twophase=bool(twophase),
             )
         self.oidallocator = OracleOIDAllocator(
             connmanager=self.connmanager,
@@ -93,7 +96,7 @@ class OracleAdapter(object):
             )
         self.poller = Poller(
             poll_query="SELECT MAX(tid) FROM transaction",
-            keep_history=True,
+            keep_history=self.keep_history,
             runner=self.runner,
             )
         self.packundo = OracleHistoryPreservingPackUndo(

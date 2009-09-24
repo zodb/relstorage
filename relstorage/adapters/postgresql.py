@@ -24,7 +24,7 @@ from relstorage.adapters.locker import PostgreSQLLocker
 from relstorage.adapters.oidallocator import PostgreSQLOIDAllocator
 from relstorage.adapters.packundo import HistoryPreservingPackUndo
 from relstorage.adapters.poller import Poller
-from relstorage.adapters.schema import HistoryPreservingPostgreSQLSchema
+from relstorage.adapters.schema import PostgreSQLSchemaInstaller
 from relstorage.adapters.scriptrunner import ScriptRunner
 from relstorage.adapters.stats import PostgreSQLStats
 from relstorage.adapters.txncontrol import PostgreSQLTransactionControl
@@ -51,9 +51,11 @@ class PostgreSQLAdapter(object):
         self.connmanager = Psycopg2ConnectionManager(dsn)
         self.runner = ScriptRunner()
         self.locker = PostgreSQLLocker((psycopg2.DatabaseError,))
-        self.schema = HistoryPreservingPostgreSQLSchema(
-            locker=self.locker,
+        self.schema = PostgreSQLSchemaInstaller(
             connmanager=self.connmanager,
+            runner=self.runner,
+            locker=self.locker,
+            keep_history=self.keep_history,
             )
         self.loadstore = HistoryPreservingPostgreSQLLoadStore()
         self.oidallocator = PostgreSQLOIDAllocator()
@@ -61,7 +63,7 @@ class PostgreSQLAdapter(object):
         self.txncontrol = PostgreSQLTransactionControl()
         self.poller = Poller(
             poll_query="EXECUTE get_latest_tid",
-            keep_history=True,
+            keep_history=self.keep_history,
             runner=self.runner,
             )
         self.packundo = HistoryPreservingPackUndo(
