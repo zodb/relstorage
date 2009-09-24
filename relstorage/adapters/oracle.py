@@ -267,10 +267,10 @@ class CXOracleConnectionManager(AbstractConnectionManager):
         """
         return self.open(self.isolation_read_only)
 
-    def restart_load(self, cursor):
+    def restart_load(self, conn, cursor):
         """Reinitialize a connection for loading objects."""
         try:
-            cursor.connection.rollback()
+            conn.rollback()
             cursor.execute("SET TRANSACTION READ ONLY")
         except self.disconnected_exceptions, e:
             raise StorageError(e)
