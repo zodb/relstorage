@@ -451,8 +451,9 @@ def savepoint_cleanup():
 
 def setUp(test):
     ZODB.tests.util.setUp(test)
-    test.globs['rmtree'] = zope.testing.setupstack.rmtree
 
+def tearDown(test):
+    ZODB.tests.util.tearDown(test)
 
 def storage_reusable_suite(prefix, factory,
                            test_blob_storage_recovery=False,
@@ -479,16 +480,16 @@ def storage_reusable_suite(prefix, factory,
     suite.addTest(doctest.DocFileSuite(
         "blob_connection.txt", "blob_importexport.txt",
         "blob_transaction.txt",
-        setUp=setup, tearDown=zope.testing.setupstack.tearDown,
+        setUp=setup, tearDown=tearDown,
         optionflags=doctest.ELLIPSIS,
         ))
     if test_packing:
         suite.addTest(doctest.DocFileSuite(
             pack_test_name,
-            setUp=setup, tearDown=zope.testing.setupstack.tearDown,
+            setUp=setup, tearDown=tearDown,
             ))
     suite.addTest(doctest.DocTestSuite(
-        setUp=setup, tearDown=zope.testing.setupstack.tearDown,
+        setUp=setup, tearDown=tearDown,
         checker = zope.testing.renormalizing.RENormalizing([
             (re.compile(r'\%(sep)s\%(sep)s' % dict(sep=os.path.sep)), '/'),
             (re.compile(r'\%(sep)s' % dict(sep=os.path.sep)), '/'),
