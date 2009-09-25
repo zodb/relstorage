@@ -888,7 +888,7 @@ class HistoryFreePackUndo(PackUndo):
 
         Returns None if there is nothing to pack.
         """
-        return 1
+        return pack_point
 
 
     def pre_pack(self, pack_tid, get_references, options):
