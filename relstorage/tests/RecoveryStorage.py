@@ -23,9 +23,14 @@ from ZODB.tests.StorageTestBase import MinPO, zodb_unpickle, snooze
 from ZODB import DB
 import ZODB.POSException
 from ZODB.serialize import referencesf
-import ZODB.blob
 
 import time
+
+try:
+    from ZODB.blob import is_blob_record
+except ImportError:
+    def is_blob_record(data):
+        return False
 
 
 class IteratorDeepCompare:
@@ -69,7 +74,7 @@ class IteratorDeepCompare:
                 eq(rec1.oid, rec2.oid)
                 eq(rec1.tid, rec2.tid)
                 eq(rec1.data, rec2.data)
-                if ZODB.blob.is_blob_record(rec1.data):
+                if is_blob_record(rec1.data):
                     try:
                         fn1 = storage1.loadBlob(rec1.oid, rec1.tid)
                     except ZODB.POSException.POSKeyError:
@@ -101,7 +106,7 @@ class IteratorDeepCompare:
         src_objects = {}  # {oid: (tid, data, blob or None)}
         for txn in src.iterator():
             for rec in txn:
-                if ZODB.blob.is_blob_record(rec.data):
+                if is_blob_record(rec.data):
                     try:
                         fn = src.loadBlob(rec.oid, rec.tid)
                     except ZODB.POSException.POSKeyError:
@@ -115,7 +120,7 @@ class IteratorDeepCompare:
         unchecked = set(src_objects)
         for txn in dest.iterator():
             for rec in txn:
-                if ZODB.blob.is_blob_record(rec.data):
+                if is_blob_record(rec.data):
                     try:
                         fn = dest.loadBlob(rec.oid, rec.tid)
                     except ZODB.POSException.POSKeyError:
