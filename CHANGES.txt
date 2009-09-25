@@ -2,7 +2,8 @@
 Next Release
 ------------
 
-- ...
+- Updated the ZODB 3.7 and 3.8 polling patch to fix issues with blobs
+  and subtransactions.
 
 
 Version 1.1.3 (2009-02-04)

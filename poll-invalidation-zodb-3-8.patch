@@ -1,27 +1,28 @@
 Index: Connection.py
 ===================================================================
---- Connection.py	(revision 87280)
+--- Connection.py	(revision 104546)
 +++ Connection.py	(working copy)
-@@ -75,8 +75,14 @@
-         """Create a new Connection."""
+@@ -90,8 +90,15 @@
+         self.connections = {self._db.database_name: self}
  
-         self._db = db
+         self._version = version
 -        self._normal_storage = self._storage = db._storage
 -        self.new_oid = db._storage.new_oid
++
 +        storage = db._storage
 +        m = getattr(storage, 'bind_connection', None)
 +        if m is not None:
 +            # Use a storage instance bound to this connection.
 +            storage = m(self)
-+
 +        self._normal_storage = self._storage = storage
 +        self.new_oid = storage.new_oid
++
          self._savepoint_storage = None
  
-         self.transaction_manager = self._synch = self._mvcc = None
-@@ -170,6 +176,12 @@
-         # Multi-database support
-         self.connections = {self._db.database_name: self}
+         # Do we need to join a txn manager?
+@@ -151,6 +158,12 @@
+         # in the cache on abort and in other connections on finish.
+         self._modified = []
  
 +        # Allow the storage to decide whether invalidations should
 +        # propagate between connections.  If the storage provides MVCC
@@ -30,11 +31,11 @@ Index: Connection.py
 +        self._propagate_invalidations = getattr(
 +            self._storage, 'propagate_invalidations', True)
  
-     def add(self, obj):
-         """Add a new object 'obj' to the database and assign it an oid."""
-@@ -267,6 +279,11 @@
+         # _invalidated queues invalidate messages delivered from the DB
+         # _inv_lock prevents one thread from modifying the set while
+@@ -297,6 +310,11 @@
+         if self._opened:
              self.transaction_manager.unregisterSynch(self)
-             self._synch = None
  
 +        # If the storage wants to know, tell it this connection is closing.
 +        m = getattr(self._storage, 'connection_closing', None)
@@ -44,18 +45,7 @@ Index: Connection.py
          if primary:
              for connection in self.connections.values():
                  if connection is not self:
-@@ -295,6 +312,10 @@
- 
-     def invalidate(self, tid, oids):
-         """Notify the Connection that transaction 'tid' invalidated oids."""
-+        if not self._propagate_invalidations:
-+            # The storage disabled inter-connection invalidation.
-+            return
-+
-         self._inv_lock.acquire()
-         try:
-             if self._txn_time is None:
-@@ -438,8 +459,23 @@
+@@ -469,8 +487,23 @@
          self._registered_objects = []
          self._creating.clear()
  
@@ -79,11 +69,21 @@ Index: Connection.py
          self._inv_lock.acquire()
          try:
              # Non-ghostifiable objects may need to read when they are
+@@ -748,6 +781,9 @@
+         """Indicate confirmation that the transaction is done."""
+ 
+         def callback(tid):
++            if not self._propagate_invalidations:
++                # The storage disabled inter-connection invalidation.
++                return
+             d = dict.fromkeys(self._modified)
+             self._db.invalidate(tid, d, self)
+ #       It's important that the storage calls the passed function
 Index: DB.py
 ===================================================================
---- DB.py	(revision 87280)
+--- DB.py	(revision 104546)
 +++ DB.py	(working copy)
-@@ -260,6 +260,10 @@
+@@ -284,6 +284,10 @@
              storage.store(z64, None, file.getvalue(), '', t)
              storage.tpc_vote(t)
              storage.tpc_finish(t)
