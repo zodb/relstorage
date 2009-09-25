@@ -15,7 +15,6 @@
 
 from persistent import Persistent
 from persistent.mapping import PersistentMapping
-from relstorage.relstorage import RelStorage
 from relstorage.tests import fakecache
 from ZODB.DB import DB
 from ZODB.serialize import referencesf
@@ -42,6 +41,7 @@ class RelStorageTestBase(StorageTestBase.StorageTestBase):
         raise NotImplementedError
 
     def open(self, **kwargs):
+        from relstorage.storage import RelStorage
         adapter = self.make_adapter()
         self._storage = RelStorage(adapter, **kwargs)
 

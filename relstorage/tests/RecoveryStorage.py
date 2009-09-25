@@ -17,20 +17,14 @@
 # history-free storages.
 
 import itertools
+import time
 import transaction
 from transaction import Transaction
 from ZODB.tests.StorageTestBase import MinPO, zodb_unpickle, snooze
 from ZODB import DB
 import ZODB.POSException
 from ZODB.serialize import referencesf
-
-import time
-
-try:
-    from ZODB.blob import is_blob_record
-except ImportError:
-    def is_blob_record(data):
-        return False
+from relstorage.util import is_blob_record
 
 
 class IteratorDeepCompare:

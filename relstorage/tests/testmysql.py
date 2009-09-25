@@ -13,7 +13,6 @@
 ##############################################################################
 """Tests of relstorage.adapters.mysql"""
 
-from relstorage.adapters.mysql import MySQLAdapter
 from relstorage.tests.hftestbase import HistoryFreeFromFileStorage
 from relstorage.tests.hftestbase import HistoryFreeRelStorageTests
 from relstorage.tests.hftestbase import HistoryFreeToFileStorage
@@ -21,10 +20,12 @@ from relstorage.tests.hptestbase import HistoryPreservingFromFileStorage
 from relstorage.tests.hptestbase import HistoryPreservingRelStorageTests
 from relstorage.tests.hptestbase import HistoryPreservingToFileStorage
 import logging
+import os
 import unittest
 
 class UseMySQLAdapter:
     def make_adapter(self):
+        from relstorage.adapters.mysql import MySQLAdapter
         if self.keep_history:
             db = 'relstoragetest'
         else:
@@ -82,7 +83,8 @@ def test_suite():
         from relstorage.tests.blob.testblob import storage_reusable_suite
         for keep_history in (False, True):
             def create_storage(name, blob_dir, keep_history=keep_history):
-                from relstorage.relstorage import RelStorage
+                from relstorage.storage import RelStorage
+                from relstorage.adapters.mysql import MySQLAdapter
                 db = db_names[name]
                 if not keep_history:
                     db += '_hf'
@@ -93,7 +95,7 @@ def test_suite():
                     passwd='relstoragetest',
                     )
                 storage = RelStorage(adapter, name=name, create=True,
-                    blob_dir=blob_dir)
+                    blob_dir=os.path.abspath(blob_dir))
                 storage.zap_all()
                 return storage
 

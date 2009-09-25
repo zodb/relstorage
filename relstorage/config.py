@@ -15,7 +15,7 @@
 
 from ZODB.config import BaseConfig
 
-from relstorage import RelStorage, Options
+from relstorage.storage import RelStorage, Options
 
 
 class RelStorageFactory(BaseConfig):

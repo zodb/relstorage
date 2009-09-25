@@ -17,6 +17,7 @@ Stores pickles in the database.
 """
 
 from persistent.TimeStamp import TimeStamp
+from relstorage.util import is_blob_record
 from ZODB.BaseStorage import BaseStorage
 from ZODB.BaseStorage import DataRecord
 from ZODB.BaseStorage import TransactionRecord
@@ -1238,7 +1239,7 @@ class RelStorage(BaseStorage,
             for record in trans:
                 blobfilename = None
                 if self.fshelper is not None:
-                    if ZODB.blob.is_blob_record(record.data):
+                    if is_blob_record(record.data):
                         try:
                             blobfilename = other.loadBlob(
                                 record.oid, record.tid)

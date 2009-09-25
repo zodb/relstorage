@@ -32,7 +32,7 @@ from BTrees.IOBTree import IOBTree
 from ZODB.DB import DB
 from ZODB.Connection import Connection
 
-from relstorage.relstorage import RelStorage
+from relstorage.storage import RelStorage
 
 debug = False
 txn_count = 10

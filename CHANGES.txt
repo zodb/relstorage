@@ -2,6 +2,15 @@
 Unreleased
 ----------
 
+- Added the keep_history option to the database adapters.  Set it
+  to false to keep no history.  (Packing is still required for
+  garbage collection and blob deletion.)
+
+- Renamed relstorage.py to storage.py to overcome import issues.
+
+- Updated the patch for ZODB 3.7 and 3.8 to fix an issue with
+  blobs and subtransactions.
+
 - Divided the implementation of database adapters into many small
   objects, making the adapter code more modular.  Added interfaces
   that describe the duties of each part.

@@ -2,7 +2,7 @@
 import logging
 
 from ZODB.DB import DB
-from relstorage.relstorage import RelStorage
+from relstorage.storage import RelStorage
 import transaction
 from persistent.mapping import PersistentMapping
 import random

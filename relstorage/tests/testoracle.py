@@ -18,7 +18,6 @@ import os
 import re
 import unittest
 
-from relstorage.adapters.oracle import OracleAdapter
 from relstorage.tests.hptestbase import HistoryPreservingFromFileStorage
 from relstorage.tests.hptestbase import HistoryPreservingRelStorageTests
 from relstorage.tests.hptestbase import HistoryPreservingToFileStorage
@@ -42,6 +41,7 @@ def getOracleParams():
 
 class UseOracleAdapter:
     def make_adapter(self):
+        from relstorage.adapters.oracle import OracleAdapter
         user, password, dsn = getOracleParams()
         return OracleAdapter(user, password, dsn)
 

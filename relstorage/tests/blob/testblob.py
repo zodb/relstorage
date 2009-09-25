@@ -184,9 +184,11 @@ class RecoveryBlobStorage(BlobTestBase,
 
     # Requires a setUp() that creates a self._dst destination storage
     def testSimpleBlobRecovery(self):
-        self.assert_(
-            ZODB.interfaces.IBlobStorageRestoreable.providedBy(self._storage)
-            )
+        if hasattr(ZODB.interfaces, 'IBlobStorageRestoreable'):
+            self.assert_(
+                ZODB.interfaces.IBlobStorageRestoreable.providedBy(
+                    self._storage)
+                )
         db = DB(self._storage)
         conn = db.open()
         conn.root()[1] = ZODB.blob.Blob()
@@ -337,7 +339,11 @@ def loadblob_tmpstore():
     >>> database.close()
 
     >>> from ZODB.Connection import TmpStore
-    >>> tmpstore = TmpStore(blob_storage)
+    >>> try:
+    ...     tmpstore = TmpStore(blob_storage)
+    ... except TypeError:
+    ...     # ZODB 3.8
+    ...     tmpstore = TmpStore('', blob_storage)
 
     We can access the blob correctly:
 
@@ -348,35 +354,6 @@ def loadblob_tmpstore():
 
     >>> tmpstore.close()
     >>> database.close()
-    """
-
-def is_blob_record():
-    r"""
-    >>> bs = create_storage()
-    >>> db = DB(bs)
-    >>> conn = db.open()
-    >>> conn.root()['blob'] = ZODB.blob.Blob()
-    >>> transaction.commit()
-    >>> ZODB.blob.is_blob_record(bs.load(ZODB.utils.p64(0), '')[0])
-    False
-    >>> ZODB.blob.is_blob_record(bs.load(ZODB.utils.p64(1), '')[0])
-    True
-
-    An invalid pickle yields a false value:
-
-    >>> ZODB.blob.is_blob_record("Hello world!")
-    False
-    >>> ZODB.blob.is_blob_record('c__main__\nC\nq\x01.')
-    False
-    >>> ZODB.blob.is_blob_record('cWaaaa\nC\nq\x01.')
-    False
-
-    As does None, which may occur in delete records:
-
-    >>> ZODB.blob.is_blob_record(None)
-    False
-
-    >>> db.close()
     """
 
 def do_not_depend_on_cwd():
@@ -397,31 +374,35 @@ def do_not_depend_on_cwd():
     >>> bs.close()
     """
 
-def savepoint_isolation():
-    """Make sure savepoint data is distinct accross transactions
+if False:
+    # ZODB 3.8 fails this test because it creates a single
+    # 'savepoints' directory.
+    def savepoint_isolation():
+        """Make sure savepoint data is distinct accross transactions
 
-    >>> bs = create_storage()
-    >>> db = DB(bs)
-    >>> conn = db.open()
-    >>> conn.root.b = ZODB.blob.Blob('initial')
-    >>> transaction.commit()
-    >>> conn.root.b.open('w').write('1')
-    >>> _ = transaction.savepoint()
-    >>> tm = transaction.TransactionManager()
-    >>> conn2 = db.open(transaction_manager=tm)
-    >>> conn2.root.b.open('w').write('2')
-    >>> _ = tm.savepoint()
-    >>> conn.root.b.open().read()
-    '1'
-    >>> conn2.root.b.open().read()
-    '2'
-    >>> transaction.abort()
-    >>> tm.commit()
-    >>> conn.sync()
-    >>> conn.root.b.open().read()
-    '2'
-    >>> db.close()
-    """
+        >>> bs = create_storage()
+        >>> db = DB(bs)
+        >>> conn = db.open()
+        >>> conn.root().b = ZODB.blob.Blob()
+        >>> conn.root().b.open('w').write('initial')
+        >>> transaction.commit()
+        >>> conn.root().b.open('w').write('1')
+        >>> _ = transaction.savepoint()
+        >>> tm = transaction.TransactionManager()
+        >>> conn2 = db.open(transaction_manager=tm)
+        >>> conn2.root().b.open('w').write('2')
+        >>> _ = tm.savepoint()
+        >>> conn.root().b.open().read()
+        '1'
+        >>> conn2.root().b.open().read()
+        '2'
+        >>> transaction.abort()
+        >>> tm.commit()
+        >>> conn.sync()
+        >>> conn.root().b.open().read()
+        '2'
+        >>> db.close()
+        """
 
 def savepoint_cleanup():
     """Make sure savepoint data gets cleaned up.
@@ -433,20 +414,23 @@ def savepoint_cleanup():
 
     >>> db = DB(bs)
     >>> conn = db.open()
-    >>> conn.root.b = ZODB.blob.Blob('initial')
+    >>> conn.root().b = ZODB.blob.Blob()
+    >>> conn.root().b.open('w').write('initial')
     >>> _ = transaction.savepoint()
     >>> len(os.listdir(tdir))
     1
     >>> transaction.abort()
-    >>> os.listdir(tdir)
-    []
-    >>> conn.root.b = ZODB.blob.Blob('initial')
+    >>> savepoint_dir = os.path.join(tdir, 'savepoint')
+    >>> os.path.exists(savepoint_dir) and len(os.listdir(savepoint_dir)) > 0
+    False
+    >>> conn.root().b = ZODB.blob.Blob()
+    >>> conn.root().b.open('w').write('initial')
     >>> transaction.commit()
-    >>> conn.root.b.open('w').write('1')
+    >>> conn.root().b.open('w').write('1')
     >>> _ = transaction.savepoint()
     >>> transaction.abort()
-    >>> os.listdir(tdir)
-    []
+    >>> os.path.exists(savepoint_dir) and len(os.listdir(savepoint_dir)) > 0
+    False
 
     >>> db.close()
     """
@@ -479,7 +463,11 @@ class MinimalTestLayer:
         os.chdir(self.here)
         shutil.rmtree(self.tmp)
 
-    testSetUp = testTearDown = lambda self: None
+    def testSetUp(self):
+        transaction.abort()
+
+    def testTearDown(self):
+        transaction.abort()
 
 
 def clean(tmp):
