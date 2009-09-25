@@ -4,6 +4,10 @@ Next bugfix release
 - PostgreSQL: use the documented ALTER SEQUENCE RESTART WITH
   statement instead of ALTER SEQUENCE START WITH.
 
+- Updated the ZODB 3.7 and 3.8 polling patch to fix issues with blobs
+  and subtransactions.
+
+
 1.2.0 (2009-09-04)
 ------------------
 
