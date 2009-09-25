@@ -103,14 +103,15 @@ class MySQLLocker(Locker):
     implements(ILocker)
 
     def hold_commit_lock(self, cursor, ensure_current=False):
-        cursor.execute("SELECT GET_LOCK(CONCAT(DATABASE(), '.commit'), %s)",
-            (commit_lock_timeout,))
+        stmt = "SELECT GET_LOCK(CONCAT(DATABASE(), '.commit'), %s)"
+        cursor.execute(stmt, (commit_lock_timeout,))
         locked = cursor.fetchone()[0]
         if not locked:
             raise StorageError("Unable to acquire commit lock")
 
     def release_commit_lock(self, cursor):
-        cursor.execute("SELECT RELEASE_LOCK(CONCAT(DATABASE(), '.commit'))")
+        stmt = "SELECT RELEASE_LOCK(CONCAT(DATABASE(), '.commit'))"
+        cursor.execute(stmt)
 
     def hold_pack_lock(self, cursor):
         """Try to acquire the pack lock.

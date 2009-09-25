@@ -78,6 +78,12 @@ class IConnectionManager(Interface):
         Raise StorageError if the database has disconnected.
         """
 
+    def open_for_pre_pack():
+        """Open a connection to be used for the pre-pack phase.
+
+        Returns (conn, cursor).
+        """
+
 
 class IDatabaseIterator(Interface):
     """Iterate over the available data in the database"""
@@ -243,12 +249,6 @@ class IPackUndo(Interface):
         list of (oid, old_tid).
 
         May raise UndoError.
-        """
-
-    def open_for_pre_pack():
-        """Open a connection to be used for the pre-pack phase.
-
-        Returns (conn, cursor).
         """
 
     def fill_object_refs(conn, cursor, get_references):

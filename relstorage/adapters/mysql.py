@@ -174,3 +174,18 @@ class MySQLdbConnectionManager(AbstractConnectionManager):
         """
         return self.open(self.isolation_repeatable_read)
 
+    def open_for_pre_pack(self):
+        """Open a connection to be used for the pre-pack phase.
+        Returns (conn, cursor).
+
+        This overrides a method.
+        """
+        conn, cursor = self.open(transaction_mode=None)
+        try:
+            # This phase of packing works best with transactions
+            # disabled.  It changes no user-facing data.
+            conn.autocommit(True)
+            return conn, cursor
+        except:
+            self.close(conn, cursor)
+            raise

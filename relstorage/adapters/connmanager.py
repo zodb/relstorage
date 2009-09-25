@@ -106,3 +106,9 @@ class AbstractConnectionManager(object):
                 self.on_store_opened(cursor, restart=True)
         except self.disconnected_exceptions, e:
             raise StorageError(e)
+
+    def open_for_pre_pack(self):
+        """Open a connection to be used for the pre-pack phase.
+        Returns (conn, cursor).
+        """
+        return self.open()

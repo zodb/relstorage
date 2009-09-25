@@ -84,8 +84,10 @@ class PackUndo(object):
         """
         self.runner.run_script_stmt(cursor, stmt, {'tid': tid})
 
+        replace_rows = []
         add_rows = []  # [(from_oid, tid, to_oid)]
         for from_oid, state in cursor:
+            replace_rows.append((from_oid,))
             if hasattr(state, 'read'):
                 # Oracle
                 state = state.read()
@@ -102,15 +104,8 @@ class PackUndo(object):
                     add_rows.append((from_oid, tid, to_oid))
 
         if not self.keep_history:
-            stmt = """
-            DELETE FROM object_ref
-            WHERE zoid in (
-                SELECT zoid
-                FROM object_state
-                WHERE tid = %(tid)s
-                )
-            """
-            self.runner.run_script(cursor, stmt, {'tid': tid})
+            stmt = "DELETE FROM object_ref WHERE zoid = %s"
+            self.runner.run_many(cursor, stmt, replace_rows)
 
         stmt = """
         INSERT INTO object_ref (zoid, tid, to_zoid)
@@ -206,14 +201,6 @@ class PackUndo(object):
             if delay > 0:
                 log.debug('pack: sleeping %.4g second(s)', delay)
                 sleep(delay)
-
-    def open_for_pre_pack(self):
-        """Open a connection to be used for the pre-pack phase.
-        Returns (conn, cursor).
-
-        Subclasses may override this.
-        """
-        return self.connmanager.open()
 
 
 class HistoryPreservingPackUndo(PackUndo):
@@ -444,7 +431,7 @@ class HistoryPreservingPackUndo(PackUndo):
         even if nothing refers to it.  Packing with pack_gc disabled can be
         much faster.
         """
-        conn, cursor = self.open_for_pre_pack()
+        conn, cursor = self.connmanager.open_for_pre_pack()
         try:
             try:
                 if options.pack_gc:
@@ -808,22 +795,6 @@ class MySQLHistoryPreservingPackUndo(HistoryPreservingPackUndo):
         WHERE transaction.empty = true
         """
 
-    def open_for_pre_pack(self):
-        """Open a connection to be used for the pre-pack phase.
-        Returns (conn, cursor).
-
-        This overrides a method.
-        """
-        conn, cursor = self.connmanager.open(transaction_mode=None)
-        try:
-            # This phase of packing works best with transactions
-            # disabled.  It changes no user-facing data.
-            conn.autocommit(True)
-            return conn, cursor
-        except:
-            self.connmanager.close(conn, cursor)
-            raise
-
 
 class OracleHistoryPreservingPackUndo(HistoryPreservingPackUndo):
 
@@ -908,7 +879,7 @@ class HistoryFreePackUndo(PackUndo):
                 "history-free storage, so doing nothing")
             return
 
-        conn, cursor = self.open_for_pre_pack()
+        conn, cursor = self.connmanager.open_for_pre_pack()
         try:
             try:
                 self._pre_pack_main(conn, cursor, get_references)
