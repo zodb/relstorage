@@ -16,11 +16,14 @@ from ZODB.blob import Blob
 from ZODB.DB import DB
 from zope.testing import doctest
 
+import atexit
 import os
 import random
 import re
+import shutil
 import struct
 import sys
+import tempfile
 import time
 import transaction
 import unittest
@@ -455,6 +458,35 @@ def setUp(test):
 def tearDown(test):
     ZODB.tests.util.tearDown(test)
 
+
+class MinimalTestLayer:
+
+    __bases__ = ()
+    __module__ = ''
+
+    def __init__(self, name):
+        self.__name__ = name
+
+    def setUp(self):
+        self.here = os.getcwd()
+        self.tmp = tempfile.mkdtemp(self.__name__, dir=os.getcwd())
+        os.chdir(self.tmp)
+
+        # sigh. tearDown isn't called when a layer is run in a sub-process.
+        atexit.register(clean, self.tmp)
+
+    def tearDown(self):
+        os.chdir(self.here)
+        shutil.rmtree(self.tmp)
+
+    testSetUp = testTearDown = lambda self: None
+
+
+def clean(tmp):
+    if os.path.isdir(tmp):
+        shutil.rmtree(tmp)
+
+
 def storage_reusable_suite(prefix, factory,
                            test_blob_storage_recovery=False,
                            test_packing=False,
@@ -513,6 +545,6 @@ def storage_reusable_suite(prefix, factory,
     if test_undo:
         add_test_based_on_test_class(BlobUndoTests)
 
-    suite.layer = ZODB.tests.util.MininalTestLayer(prefix+'BlobTests')
+    suite.layer = MinimalTestLayer(prefix+'BlobTests')
 
     return suite
