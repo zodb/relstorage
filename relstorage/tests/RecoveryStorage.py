@@ -90,8 +90,6 @@ class IteratorDeepCompare:
         # they were the same length
         self.assertRaises(IndexError, iter1.next)
         self.assertRaises(IndexError, iter2.next)
-        self.assertRaises(StopIteration, iter1.next)
-        self.assertRaises(StopIteration, iter2.next)
         iter1.close()
         iter2.close()
 
