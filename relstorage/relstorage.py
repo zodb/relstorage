@@ -737,6 +737,23 @@ class RelStorage(BaseStorage,
                     # doesn't matter who won.
                     cache.incr('commit_count')
             self._ltid = self._tid
+
+            #if self._txn_blobs and not self._adapter.keep_history:
+                ## For each blob just committed, get the name of
+                ## one earlier revision (if any) and write the
+                ## name of the file to a log.  At pack time,
+                ## all the files in the log will be deleted and
+                ## the log will be cleared.
+                #for oid, filename in self._txn_blobs.iteritems():
+                    #dirname, current_name = os.path.split(filename)
+                    #names = os.listdir(dirname)
+                    #names.sort()
+                    #if current_name in names:
+                        #i = names.index(current_name)
+                        #if i > 0:
+                        #    to_delete = os.path.join(dirname, names[i-1])
+                        #    log.write('%s\n') % to_delete
+
         finally:
             self._txn_blobs = None
             self._prepared_txn = None
@@ -913,7 +930,7 @@ class RelStorage(BaseStorage,
             self._lock_release()
 
     def _copy_undone_blobs(self, copied):
-        """After an undo operation, copies the matching blobs forward.
+        """After an undo operation, copy the matching blobs forward.
 
         The copied parameter is a list of (integer oid, integer tid).
         """
@@ -996,6 +1013,8 @@ class RelStorage(BaseStorage,
             adapter.connmanager.close(lock_conn, lock_cursor)
         self.sync()
 
+        self._pack_finished()
+
     def _after_pack(self, oid_int, tid_int):
         """Called after an object state has been removed by packing.
 
@@ -1004,11 +1023,26 @@ class RelStorage(BaseStorage,
         oid = p64(oid_int)
         tid = p64(tid_int)
         fn = self.fshelper.getBlobFilename(oid, tid)
-        if os.path.exists(fn):
-            ZODB.blob.remove_committed(fn)
+        if self._adapter.keep_history:
+            # remove only the revision just packed
+            if os.path.exists(fn):
+                ZODB.blob.remove_committed(fn)
+                dirname = os.path.dirname(fn)
+                if not os.listdir(dirname):
+                    ZODB.blob.remove_committed_dir(dirname)
+        else:
+            # remove all revisions
             dirname = os.path.dirname(fn)
-            if not os.listdir(dirname):
+            if os.path.exists(dirname):
+                for name in os.listdir(dirname):
+                    ZODB.blob.remove_committed(os.path.join(dirname, name))
                 ZODB.blob.remove_committed_dir(dirname)
+
+    def _pack_finished(self):
+        if self.fshelper is None or self._adapter.keep_history:
+            return
+
+        # Remove all old revisions of blobs.
 
     def iterator(self, start=None, stop=None):
         return TransactionIterator(self._adapter, start, stop)

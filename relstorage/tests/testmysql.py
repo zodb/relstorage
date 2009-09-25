@@ -13,28 +13,45 @@
 ##############################################################################
 """Tests of relstorage.adapters.mysql"""
 
+from relstorage.adapters.mysql import MySQLAdapter
+from relstorage.tests.hftestbase import HistoryFreeFromFileStorage
+from relstorage.tests.hftestbase import HistoryFreeRelStorageTests
+from relstorage.tests.hftestbase import HistoryFreeToFileStorage
+from relstorage.tests.hptestbase import HistoryPreservingFromFileStorage
+from relstorage.tests.hptestbase import HistoryPreservingRelStorageTests
+from relstorage.tests.hptestbase import HistoryPreservingToFileStorage
 import logging
 import unittest
 
-import reltestbase
-from relstorage.adapters.mysql import MySQLAdapter
-
-
 class UseMySQLAdapter:
     def make_adapter(self):
+        if self.keep_history:
+            db = 'relstoragetest'
+        else:
+            db = 'relstoragetest_hf'
         return MySQLAdapter(
-            db='relstoragetest',
+            keep_history=self.keep_history,
+            db=db,
             user='relstoragetest',
             passwd='relstoragetest',
             )
 
-class MySQLTests(UseMySQLAdapter, reltestbase.RelStorageTests):
+class HPMySQLTests(UseMySQLAdapter, HistoryPreservingRelStorageTests):
     pass
 
-class MySQLToFile(UseMySQLAdapter, reltestbase.ToFileStorage):
+class HPMySQLToFile(UseMySQLAdapter, HistoryPreservingToFileStorage):
     pass
 
-class FileToMySQL(UseMySQLAdapter, reltestbase.FromFileStorage):
+class HPMySQLFromFile(UseMySQLAdapter, HistoryPreservingFromFileStorage):
+    pass
+
+class HFMySQLTests(UseMySQLAdapter, HistoryFreeRelStorageTests):
+    pass
+
+class HFMySQLToFile(UseMySQLAdapter, HistoryFreeToFileStorage):
+    pass
+
+class HFMySQLFromFile(UseMySQLAdapter, HistoryFreeFromFileStorage):
     pass
 
 db_names = {
@@ -46,32 +63,54 @@ db_names = {
 
 def test_suite():
     suite = unittest.TestSuite()
-    for klass in [MySQLTests, MySQLToFile, FileToMySQL]:
+    for klass in [
+            HPMySQLTests,
+            HPMySQLToFile,
+            HPMySQLFromFile,
+            HFMySQLTests,
+            HFMySQLToFile,
+            HFMySQLFromFile,
+            ]:
         suite.addTest(unittest.makeSuite(klass, "check"))
 
     try:
-        from ZODB.tests.testblob import storage_reusable_suite
+        import ZODB.blob
     except ImportError:
-        # ZODB < 3.9
+        # ZODB < 3.8
         pass
     else:
-        def create_storage(name, blob_dir):
-            from relstorage.relstorage import RelStorage
-            adapter = MySQLAdapter(
-                db=db_names[name],
-                user='relstoragetest',
-                passwd='relstoragetest',
-                )
-            storage = RelStorage(adapter, name=name, create=True,
-                blob_dir=blob_dir)
-            storage.zap_all()
-            return storage
+        from relstorage.tests.blob.testblob import storage_reusable_suite
+        for keep_history in (False, True):
+            def create_storage(name, blob_dir, keep_history=keep_history):
+                from relstorage.relstorage import RelStorage
+                db = db_names[name]
+                if not keep_history:
+                    db += '_hf'
+                adapter = MySQLAdapter(
+                    keep_history=keep_history,
+                    db=db,
+                    user='relstoragetest',
+                    passwd='relstoragetest',
+                    )
+                storage = RelStorage(adapter, name=name, create=True,
+                    blob_dir=blob_dir)
+                storage.zap_all()
+                return storage
 
-        suite.addTest(storage_reusable_suite(
-            'MySQL', create_storage,
-            test_blob_storage_recovery=True,
-            test_packing=True,
-            ))
+            if keep_history:
+                prefix = 'HPMySQL'
+                pack_test_name = 'blob_packing.txt'
+            else:
+                prefix = 'HFMySQL'
+                pack_test_name = 'blob_packing_history_free.txt'
+
+            suite.addTest(storage_reusable_suite(
+                prefix, create_storage,
+                test_blob_storage_recovery=True,
+                test_packing=True,
+                test_undo=keep_history,
+                pack_test_name=pack_test_name,
+                ))
 
     return suite
 

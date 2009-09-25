@@ -14,9 +14,9 @@
 """Database schema installers
 """
 from relstorage.adapters.interfaces import ISchemaInstaller
+from ZODB.POSException import StorageError
 from zope.interface import implements
 import time
-
 
 history_preserving_schema = """
 
@@ -552,6 +552,7 @@ class AbstractSchemaInstaller(object):
     def __init__(self, connmanager, runner, keep_history):
         self.connmanager = connmanager
         self.runner = runner
+        self.keep_history = keep_history
         if keep_history:
             self.schema_script = history_preserving_schema
             self.init_script = history_preserving_init
@@ -578,7 +579,25 @@ class AbstractSchemaInstaller(object):
             tables = self.list_tables(cursor)
             if not 'object_state' in tables:
                 self.create(cursor)
+            else:
+                self.check_compatibility(cursor, tables)
         self.connmanager.open_and_call(callback)
+
+    def check_compatibility(self, cursor, tables):
+        if self.keep_history:
+            if 'transaction' not in tables and 'current_object' not in tables:
+                raise StorageError(
+                    "Schema mismatch: a history-preserving adapter "
+                    "can not connect to a history-free database. "
+                    "If you need to convert, use the zodbconvert utility."
+                    )
+        else:
+            if 'transaction' in tables and 'current_object' in tables:
+                raise StorageError(
+                    "Schema mismatch: a history-free adapter "
+                    "can not connect to a history-preserving database. "
+                    "If you need to convert, use the zodbconvert utility."
+                    )
 
     def zap_all(self):
         """Clear all data out of the database."""

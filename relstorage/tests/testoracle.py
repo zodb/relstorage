@@ -18,8 +18,10 @@ import os
 import re
 import unittest
 
-import reltestbase
 from relstorage.adapters.oracle import OracleAdapter
+from relstorage.tests.hptestbase import HistoryPreservingFromFileStorage
+from relstorage.tests.hptestbase import HistoryPreservingRelStorageTests
+from relstorage.tests.hptestbase import HistoryPreservingToFileStorage
 
 
 def getOracleParams():
@@ -43,19 +45,23 @@ class UseOracleAdapter:
         user, password, dsn = getOracleParams()
         return OracleAdapter(user, password, dsn)
 
-class OracleTests(UseOracleAdapter, reltestbase.RelStorageTests):
+class HPOracleTests(UseOracleAdapter, HistoryPreservingRelStorageTests):
     pass
 
-class OracleToFile(UseOracleAdapter, reltestbase.ToFileStorage):
+class HPOracleToFile(UseOracleAdapter, HistoryPreservingToFileStorage):
     pass
 
-class FileToOracle(UseOracleAdapter, reltestbase.FromFileStorage):
+class HPOracleFromFile(UseOracleAdapter, HistoryPreservingFromFileStorage):
     pass
 
 
 def test_suite():
     suite = unittest.TestSuite()
-    for klass in [OracleTests, OracleToFile, FileToOracle]:
+    for klass in [
+            HPOracleTests,
+            HPOracleToFile,
+            HPOracleFromFile,
+            ]:
         suite.addTest(unittest.makeSuite(klass, "check"))
     return suite
 

@@ -11,32 +11,31 @@
 # FOR A PARTICULAR PURPOSE.
 #
 ##############################################################################
-"""A foundation for relstorage adapter tests"""
+"""A foundation for RelStorage tests"""
 
-import itertools
-import time
-from relstorage.relstorage import RelStorage
-from relstorage.tests import fakecache
-
-from ZODB.DB import DB
-from ZODB.utils import p64
-from ZODB.FileStorage import FileStorage
 from persistent import Persistent
 from persistent.mapping import PersistentMapping
+from relstorage.relstorage import RelStorage
+from relstorage.tests import fakecache
+from ZODB.DB import DB
+from ZODB.serialize import referencesf
+from ZODB.tests import BasicStorage
+from ZODB.tests import ConflictResolution
+from ZODB.tests import MTStorage
+from ZODB.tests import PackableStorage
+from ZODB.tests import PersistentStorage
+from ZODB.tests import ReadOnlyStorage
+from ZODB.tests import StorageTestBase
+from ZODB.tests import Synchronization
+from ZODB.tests.MinPO import MinPO
+from ZODB.tests.StorageTestBase import zodb_pickle
+from ZODB.tests.StorageTestBase import zodb_unpickle
+from ZODB.utils import p64
+import time
 import transaction
 
-from ZODB.tests import StorageTestBase, BasicStorage, \
-     TransactionalUndoStorage, PackableStorage, \
-     Synchronization, ConflictResolution, HistoryStorage, \
-     IteratorStorage, RevisionStorage, PersistentStorage, \
-     MTStorage, ReadOnlyStorage, RecoveryStorage
 
-from ZODB.tests.MinPO import MinPO
-from ZODB.tests.StorageTestBase import zodb_unpickle, zodb_pickle
-from ZODB.serialize import referencesf
-
-
-class BaseRelStorageTests(StorageTestBase.StorageTestBase):
+class RelStorageTestBase(StorageTestBase.StorageTestBase):
 
     def make_adapter(self):
         # abstract method
@@ -44,7 +43,7 @@ class BaseRelStorageTests(StorageTestBase.StorageTestBase):
 
     def open(self, **kwargs):
         adapter = self.make_adapter()
-        self._storage = RelStorage(adapter, pack_gc=True, **kwargs)
+        self._storage = RelStorage(adapter, **kwargs)
 
     def setUp(self):
         self.open(create=1)
@@ -56,21 +55,15 @@ class BaseRelStorageTests(StorageTestBase.StorageTestBase):
         self._storage.cleanup()
 
 
-class RelStorageTests(
-    BaseRelStorageTests,
+class GenericRelStorageTests(
+    RelStorageTestBase,
     BasicStorage.BasicStorage,
-    TransactionalUndoStorage.TransactionalUndoStorage,
-    RevisionStorage.RevisionStorage,
     PackableStorage.PackableStorage,
-    PackableStorage.PackableUndoStorage,
     Synchronization.SynchronizedStorage,
     ConflictResolution.ConflictResolvingStorage,
-    HistoryStorage.HistoryStorage,
-    IteratorStorage.IteratorStorage,
-    IteratorStorage.ExtendedIteratorStorage,
     PersistentStorage.PersistentStorage,
     MTStorage.MTStorage,
-    ReadOnlyStorage.ReadOnlyStorage
+    ReadOnlyStorage.ReadOnlyStorage,
     ):
 
     def checkDropAndPrepare(self):
@@ -250,6 +243,7 @@ class RelStorageTests(
             self.assertTrue('commit_count' in fakecache.data)
             self.assertEqual(len(fakecache.data), 3)
             oid = r1['alpha']._p_oid
+            self.assertEqual(len(fakecache.data), 3)
 
             got, serial = c1._storage.load(oid, '')
             # another tid and state should now be cached
@@ -372,213 +366,6 @@ class RelStorageTests(
         fakecache.data.clear()
         self.checkPollInterval(using_cache=True)
 
-
-    def checkTransactionalUndoIterator(self):
-        # this test overrides the broken version in TransactionalUndoStorage.
-
-        s = self._storage
-
-        BATCHES = 4
-        OBJECTS = 4
-
-        orig = []
-        for i in range(BATCHES):
-            t = transaction.Transaction()
-            tid = p64(i + 1)
-            s.tpc_begin(t, tid)
-            txn_orig = []
-            for j in range(OBJECTS):
-                oid = s.new_oid()
-                obj = MinPO(i * OBJECTS + j)
-                revid = s.store(oid, None, zodb_pickle(obj), '', t)
-                txn_orig.append((tid, oid, revid))
-            serials = s.tpc_vote(t)
-            if not serials:
-                orig.extend(txn_orig)
-            else:
-                # The storage provided revision IDs after the vote
-                serials = dict(serials)
-                for tid, oid, revid in txn_orig:
-                    self.assertEqual(revid, None)
-                    orig.append((tid, oid, serials[oid]))
-            s.tpc_finish(t)
-
-        i = 0
-        for tid, oid, revid in orig:
-            self._dostore(oid, revid=revid, data=MinPO(revid),
-                          description="update %s" % i)
-
-        # Undo the OBJECTS transactions that modified objects created
-        # in the ith original transaction.
-
-        def undo(i):
-            info = s.undoInfo()
-            t = transaction.Transaction()
-            s.tpc_begin(t)
-            base = i * OBJECTS + i
-            for j in range(OBJECTS):
-                tid = info[base + j]['id']
-                s.undo(tid, t)
-            s.tpc_vote(t)
-            s.tpc_finish(t)
-
-        for i in range(BATCHES):
-            undo(i)
-
-        # There are now (2 + OBJECTS) * BATCHES transactions:
-        #     BATCHES original transactions, followed by
-        #     OBJECTS * BATCHES modifications, followed by
-        #     BATCHES undos
-
-        iter = s.iterator()
-        offset = 0
-
-        eq = self.assertEqual
-
-        for i in range(BATCHES):
-            txn = iter[offset]
-            offset += 1
-
-            tid = p64(i + 1)
-            eq(txn.tid, tid)
-
-            L1 = [(rec.oid, rec.tid, rec.data_txn) for rec in txn]
-            L2 = [(oid, revid, None) for _tid, oid, revid in orig
-                  if _tid == tid]
-
-            eq(L1, L2)
-
-        for i in range(BATCHES * OBJECTS):
-            txn = iter[offset]
-            offset += 1
-            eq(len([rec for rec in txn if rec.data_txn is None]), 1)
-
-        for i in range(BATCHES):
-            txn = iter[offset]
-            offset += 1
-
-            # The undos are performed in reverse order.
-            otid = p64(BATCHES - i)
-            L1 = [rec.oid for rec in txn]
-            L2 = [oid for _tid, oid, revid in orig if _tid == otid]
-            L1.sort()
-            L2.sort()
-            eq(L1, L2)
-
-        self.assertRaises(IndexError, iter.__getitem__, offset)
-
-    def checkNonASCIITransactionMetadata(self):
-        # Verify the database stores and retrieves non-ASCII text
-        # in transaction metadata.
-        ugly_string = ''.join(chr(c) for c in range(256))
-
-        db = DB(self._storage)
-        try:
-            c1 = db.open()
-            r1 = c1.root()
-            r1['alpha'] = 1
-            transaction.get().setUser(ugly_string)
-            transaction.commit()
-            r1['alpha'] = 2
-            transaction.get().note(ugly_string)
-            transaction.commit()
-
-            info = self._storage.undoInfo()
-            self.assertEqual(info[0]['description'], ugly_string)
-            self.assertEqual(info[1]['user_name'], '/ ' + ugly_string)
-        finally:
-            db.close()
-
-    def checkPackGC(self, expect_object_deleted=True):
-        db = DB(self._storage)
-        try:
-            c1 = db.open()
-            r1 = c1.root()
-            r1['alpha'] = PersistentMapping()
-            transaction.commit()
-
-            oid = r1['alpha']._p_oid
-            r1['alpha'] = None
-            transaction.commit()
-
-            # The object should still exist
-            self._storage.load(oid, '')
-
-            # Pack
-            now = packtime = time.time()
-            while packtime <= now:
-                packtime = time.time()
-            self._storage.pack(packtime, referencesf)
-            self._storage.sync()
-
-            if expect_object_deleted:
-                # The object should now be gone
-                self.assertRaises(KeyError, self._storage.load, oid, '')
-            else:
-                # The object should still exist
-                self._storage.load(oid, '')
-        finally:
-            db.close()
-
-    def checkPackGCDisabled(self):
-        self._storage._options.pack_gc = False
-        self.checkPackGC(expect_object_deleted=False)
-
-    def checkPackGCDryRun(self):
-        self._storage._options.pack_dry_run = True
-        self.checkPackGC(expect_object_deleted=False)
-
-    def checkPackOldUnreferenced(self):
-        db = DB(self._storage)
-        try:
-            c1 = db.open()
-            r1 = c1.root()
-            r1['A'] = PersistentMapping()
-            B = PersistentMapping()
-            r1['A']['B'] = B
-            transaction.get().note('add A then add B to A')
-            transaction.commit()
-
-            del r1['A']['B']
-            transaction.get().note('remove B from A')
-            transaction.commit()
-
-            r1['A']['C'] = ''
-            transaction.get().note('add C to A')
-            transaction.commit()
-
-            now = packtime = time.time()
-            while packtime <= now:
-                packtime = time.time()
-            self._storage.pack(packtime, referencesf)
-
-            # B should be gone, since nothing refers to it.
-            self.assertRaises(KeyError, self._storage.load, B._p_oid, '')
-
-        finally:
-            db.close()
-
-    def checkPackDutyCycle(self):
-        # Exercise the code in the pack algorithm that releases the
-        # commit lock for a time to allow concurrent transactions to commit.
-        self._storage._options.pack_batch_timeout = 0  # pause after every txn
-
-        slept = []
-        def sim_sleep(seconds):
-            slept.append(seconds)
-
-        db = DB(self._storage)
-        try:
-            # Pack
-            now = packtime = time.time()
-            while packtime <= now:
-                packtime = time.time()
-            self._storage.pack(packtime, referencesf, sleep=sim_sleep)
-
-            self.assertEquals(len(slept), 1)
-        finally:
-            db.close()
-
     def checkDoubleCommitter(self):
         # Verify we can store an object that gets committed twice in
         # a single transaction.
@@ -597,6 +384,35 @@ class RelStorageTests(
         finally:
             db.close()
 
+    def checkPackDutyCycle(self):
+        # Exercise the code in the pack algorithm that releases the
+        # commit lock for a time to allow concurrent transactions to commit.
+        self._storage._options.pack_batch_timeout = 0  # pause after every txn
+
+        slept = []
+        def sim_sleep(seconds):
+            slept.append(seconds)
+
+        db = DB(self._storage)
+        try:
+            # add some data to be packed
+            c = db.open()
+            r = c.root()
+            r['alpha'] = PersistentMapping()
+            transaction.commit()
+            del r['alpha']
+            transaction.commit()
+
+            # Pack
+            now = packtime = time.time()
+            while packtime <= now:
+                packtime = time.time()
+            self._storage.pack(packtime, referencesf, sleep=sim_sleep)
+
+            self.assertTrue(len(slept) > 0)
+        finally:
+            db.close()
+
     def checkPackBrokenPickle(self):
         # Verify the pack stops with the right exception if it encounters
         # a broken pickle.
@@ -612,89 +428,3 @@ class DoubleCommitter(Persistent):
         if not hasattr(self, 'new_attribute'):
             self.new_attribute = 1
         return Persistent.__getstate__(self)
-
-
-class IteratorDeepCompareUnordered:
-    # Like IteratorDeepCompare, but compensates for OID order
-    # differences in transactions.
-    def compare(self, storage1, storage2):
-        eq = self.assertEqual
-        iter1 = storage1.iterator()
-        iter2 = storage2.iterator()
-        for txn1, txn2 in itertools.izip(iter1, iter2):
-            eq(txn1.tid,         txn2.tid)
-            eq(txn1.status,      txn2.status)
-            eq(txn1.user,        txn2.user)
-            eq(txn1.description, txn2.description)
-
-            missing = object()
-            e1 = getattr(txn1, 'extension', missing)
-            if e1 is missing:
-                # old attribute name
-                e1 = txn1._extension
-            e2 = getattr(txn2, 'extension', missing)
-            if e2 is missing:
-                # old attribute name
-                e2 = txn2._extension
-            eq(e1, e2)
-
-            recs1 = [(r.oid, r) for r in txn1]
-            recs1.sort()
-            recs2 = [(r.oid, r) for r in txn2]
-            recs2.sort()
-            eq(len(recs1), len(recs2))
-            for (oid1, rec1), (oid2, rec2) in zip(recs1, recs2):
-                eq(rec1.oid,     rec2.oid)
-                eq(rec1.tid,  rec2.tid)
-                eq(rec1.version, rec2.version)
-                eq(rec1.data,    rec2.data)
-        # Make sure ther are no more records left in txn1 and txn2, meaning
-        # they were the same length
-        self.assertRaises(IndexError, iter1.next)
-        self.assertRaises(IndexError, iter2.next)
-        iter1.close()
-        iter2.close()
-
-
-
-class RecoveryStorageSubset(IteratorDeepCompareUnordered):
-    # The subset of RecoveryStorage tests that do not rely on version
-    # support.
-    pass
-
-for name, attr in RecoveryStorage.RecoveryStorage.__dict__.items():
-    if 'check' in name and 'Version' not in name:
-        setattr(RecoveryStorageSubset, name, attr)
-
-
-class ToFileStorage(BaseRelStorageTests, RecoveryStorageSubset):
-    def setUp(self):
-        self.open(create=1)
-        self._storage.zap_all()
-        self._dst = FileStorage("Dest.fs", create=True)
-
-    def tearDown(self):
-        self._storage.close()
-        self._dst.close()
-        self._storage.cleanup()
-        self._dst.cleanup()
-
-    def new_dest(self):
-        return FileStorage('Dest.fs')
-
-
-class FromFileStorage(BaseRelStorageTests, RecoveryStorageSubset):
-    def setUp(self):
-        self.open(create=1)
-        self._storage.zap_all()
-        self._dst = self._storage
-        self._storage = FileStorage("Source.fs", create=True)
-
-    def tearDown(self):
-        self._storage.close()
-        self._dst.close()
-        self._storage.cleanup()
-        self._dst.cleanup()
-
-    def new_dest(self):
-        return self._dst

@@ -104,7 +104,7 @@ class PackUndo(object):
         if not self.keep_history:
             stmt = """
             DELETE FROM object_ref
-            WHERE tid in (
+            WHERE zoid in (
                 SELECT zoid
                 FROM object_state
                 WHERE tid = %(tid)s
@@ -317,6 +317,10 @@ class HistoryPreservingPackUndo(PackUndo):
         # transaction to undo matches the object's current state.
         # If any object in the transaction does not fit that rule,
         # refuse to undo.
+        # (Note that this prevents conflict-resolving undo as described
+        # by ZODB.tests.ConflictResolution.ConflictResolvingTransUndoStorage.
+        # Do people need that? If so, we can probably support it, but it
+        # will require additional code.)
         stmt = """
         SELECT prev_os.zoid, current_object.tid
         FROM object_state prev_os
@@ -952,7 +956,6 @@ class HistoryFreePackUndo(PackUndo):
 
         Requires the information provided by _pre_gc.
         """
-
         # Read committed mode is sufficient.
         conn, cursor = self.connmanager.open()
         try:

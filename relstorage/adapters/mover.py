@@ -572,6 +572,12 @@ class ObjectMover(object):
             cursor.execute(stmt, (oid, tid, oid, md5sum, encoded))
         else:
             stmt = """
+            DELETE FROM object_state
+            WHERE zoid = %s
+            """
+            cursor.execute(stmt, (oid,))
+
+            stmt = """
             INSERT INTO object_state (zoid, tid, state)
             VALUES (%s, %s, decode(%s, 'base64'))
             """
@@ -601,11 +607,18 @@ class ObjectMover(object):
             """
             cursor.execute(stmt, (oid, tid, oid, md5sum, encoded))
         else:
-            stmt = """
-            INSERT INTO object_state (zoid, tid, state)
-            VALUES (%s, %s, %s)
-            """
-            cursor.execute(stmt, (oid, tid, encoded))
+            if not data:
+                stmt = """
+                DELETE FROM object_state
+                WHERE zoid = %s
+                """
+                cursor.execute(stmt, (oid,))
+            else:
+                stmt = """
+                REPLACE INTO object_state (zoid, tid, state)
+                VALUES (%s, %s, %s)
+                """
+                cursor.execute(stmt, (oid, tid, encoded))
 
     def oracle_restore(self, cursor, oid, tid, data):
         """Store an object directly, without conflict detection.
@@ -616,6 +629,11 @@ class ObjectMover(object):
             md5sum = compute_md5sum(data)
         else:
             md5sum = None
+            stmt = """
+            DELETE FROM object_state
+            WHERE zoid = %s
+            """
+            cursor.execute(stmt, (oid,))
 
         if not data or len(data) <= 2000:
             # Send data inline for speed.  Oracle docs say maximum size
@@ -656,6 +674,7 @@ class ObjectMover(object):
                 VALUES (:oid, :tid, :blobdata)
                 """
                 cursor.execute(stmt, oid=oid, tid=tid, blobdata=data)
+
 
 
 

@@ -48,35 +48,39 @@ class Poller:
             return (), new_polled_tid
 
         if self.keep_history:
+            # If the previously polled transaction no longer exists,
+            # the cache is too old and needs to be cleared.
+            # XXX Do we actually need to detect this condition? I think
+            # if we delete this block of code, all the reachable objects
+            # will be invalidated anyway.
             stmt = "SELECT 1 FROM transaction WHERE tid = %(tid)s"
-        else:
-            stmt = "SELECT 1 FROM object_state WHERE tid <= %(tid)s LIMIT 1"
-        cursor.execute(intern(stmt % self.runner.script_vars),
-            {'tid': prev_polled_tid})
-        rows = cursor.fetchall()
-        if not rows:
-            # Transaction not found; perhaps it has been packed.
-            # The connection cache needs to be cleared.
-            return None, new_polled_tid
-
-        # Get the list of changed OIDs and return it.
-        if ignore_tid is None:
-            stmt = """
-            SELECT zoid
-            FROM current_object
-            WHERE tid > %(tid)s
-            """
             cursor.execute(intern(stmt % self.runner.script_vars),
                 {'tid': prev_polled_tid})
-        else:
+            rows = cursor.fetchall()
+            if not rows:
+                # Transaction not found; perhaps it has been packed.
+                # The connection cache needs to be cleared.
+                return None, new_polled_tid
+
+        # Get the list of changed OIDs and return it.
+        if self.keep_history:
             stmt = """
             SELECT zoid
             FROM current_object
             WHERE tid > %(tid)s
-                AND tid != %(self_tid)s
             """
-            cursor.execute(intern(stmt % self.runner.script_vars),
-                {'tid': prev_polled_tid, 'self_tid': ignore_tid})
+        else:
+            stmt = """
+            SELECT zoid
+            FROM object_state
+            WHERE tid > %(tid)s
+            """
+        params = {'tid': prev_polled_tid}
+        if ignore_tid is not None:
+            stmt += " AND tid != %(self_tid)s"
+            params['self_tid'] = ignore_tid
+        stmt = intern(stmt % self.runner.script_vars)
+        cursor.execute(stmt, params)
         oids = [oid for (oid,) in cursor]
 
         return oids, new_polled_tid
