@@ -20,7 +20,7 @@ import atexit
 import os
 import random
 import re
-import shutil
+import stat
 import struct
 import sys
 import tempfile
@@ -461,7 +461,7 @@ class MinimalTestLayer:
 
     def tearDown(self):
         os.chdir(self.here)
-        shutil.rmtree(self.tmp)
+        rmtree(self.tmp)
 
     def testSetUp(self):
         transaction.abort()
@@ -472,7 +472,20 @@ class MinimalTestLayer:
 
 def clean(tmp):
     if os.path.isdir(tmp):
-        shutil.rmtree(tmp)
+        rmtree(tmp)
+
+def rmtree(path):
+    """Remove a tree without causing Windows file access errors"""
+    # copied from setupstack.py
+    for path, dirs, files in os.walk(path, False):
+        for fname in files:
+            fname = os.path.join(path, fname)
+            os.chmod(fname, stat.S_IWUSR)
+            os.remove(fname)
+        for dname in dirs:
+            dname = os.path.join(path, dname)
+            os.rmdir(dname)
+    os.rmdir(path)
 
 
 def storage_reusable_suite(prefix, factory,
