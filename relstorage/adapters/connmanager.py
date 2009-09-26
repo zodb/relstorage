@@ -14,7 +14,6 @@
 
 from relstorage.adapters.interfaces import IConnectionManager
 from zope.interface import implements
-from ZODB.POSException import StorageError
 
 class AbstractConnectionManager(object):
     """Abstract base class for connection management.
@@ -79,10 +78,7 @@ class AbstractConnectionManager(object):
 
     def restart_load(self, conn, cursor):
         """Reinitialize a connection for loading objects."""
-        try:
-            conn.rollback()
-        except self.disconnected_exceptions, e:
-            raise StorageError(e)
+        conn.rollback()
 
     def open_for_store(self):
         """Open and initialize a connection for storing objects.
@@ -100,12 +96,9 @@ class AbstractConnectionManager(object):
 
     def restart_store(self, conn, cursor):
         """Reuse a store connection."""
-        try:
-            conn.rollback()
-            if self.on_store_opened is not None:
-                self.on_store_opened(cursor, restart=True)
-        except self.disconnected_exceptions, e:
-            raise StorageError(e)
+        conn.rollback()
+        if self.on_store_opened is not None:
+            self.on_store_opened(cursor, restart=True)
 
     def open_for_pre_pack(self):
         """Open a connection to be used for the pre-pack phase.

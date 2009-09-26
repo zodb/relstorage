@@ -17,7 +17,6 @@
 from base64 import decodestring
 from base64 import encodestring
 from relstorage.adapters.interfaces import IObjectMover
-from ZODB.POSException import StorageError
 from zope.interface import implements
 
 try:

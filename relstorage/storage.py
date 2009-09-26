@@ -198,7 +198,7 @@ class RelStorage(BaseStorage,
             try:
                 self._adapter.connmanager.restart_load(
                     self._load_conn, self._load_cursor)
-            except POSException.StorageError, e:
+            except self._adapter.connmanager.disconnected_exceptions, e:
                 log.warning("Reconnecting load_conn: %s", e)
                 self._drop_load_connection()
                 try:
@@ -231,7 +231,7 @@ class RelStorage(BaseStorage,
             try:
                 self._adapter.connmanager.restart_store(
                     self._store_conn, self._store_cursor)
-            except POSException.StorageError, e:
+            except self._adapter.connmanager.disconnected_exceptions, e:
                 log.warning("Reconnecting store_conn: %s", e)
                 self._drop_store_connection()
                 try:
@@ -1113,8 +1113,6 @@ class RelStorage(BaseStorage,
                 self._poll_at = time.time() + self._options.poll_interval
 
             self._restart_load()
-            conn = self._load_conn
-            cursor = self._load_cursor
 
             # Ignore changes made by the last transaction committed
             # by this connection.
@@ -1124,8 +1122,24 @@ class RelStorage(BaseStorage,
                 ignore_tid = None
 
             # get a list of changed OIDs and the most recent tid
-            oid_ints, new_polled_tid = self._adapter.poller.poll_invalidations(
-                conn, cursor, self._prev_polled_tid, ignore_tid)
+            poll = self._adapter.poller.poll_invalidations
+            try:
+                oid_ints, new_polled_tid = poll(
+                    self._load_conn, self._load_cursor,
+                    self._prev_polled_tid, ignore_tid)
+            except self._adapter.connmanager.disconnected_exceptions, e:
+                log.warning("Reconnecting load_conn: %s", e)
+                self._drop_load_connection()
+                try:
+                    self._open_load_connection()
+                except:
+                    log.exception("Reconnect failed.")
+                    raise
+                log.info("Reconnected.")
+                oid_ints, new_polled_tid = poll(
+                    self._load_conn, self._load_cursor,
+                    self._prev_polled_tid, ignore_tid)
+
             self._prev_polled_tid = new_polled_tid
 
             if oid_ints is None:

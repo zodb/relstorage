@@ -26,6 +26,10 @@ Unreleased
 - Changed loadSerial to load from the store connection only if the
   load connection can not provide the object requested.
 
+- Stopped wrapping database disconnect exceptions.  Now the code
+  catches and handles them directly.
+
+
 1.3.0b1 (2009-09-04)
 --------------------
 

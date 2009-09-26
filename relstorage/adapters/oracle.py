@@ -15,7 +15,6 @@
 
 import logging
 import cx_Oracle
-from ZODB.POSException import StorageError
 from zope.interface import implements
 
 from relstorage.adapters.connmanager import AbstractConnectionManager
@@ -241,11 +240,8 @@ class CXOracleConnectionManager(AbstractConnectionManager):
 
     def restart_load(self, conn, cursor):
         """Reinitialize a connection for loading objects."""
-        try:
-            conn.rollback()
-            cursor.execute("SET TRANSACTION READ ONLY")
-        except self.disconnected_exceptions, e:
-            raise StorageError(e)
+        conn.rollback()
+        cursor.execute("SET TRANSACTION READ ONLY")
 
     def _set_xid(self, conn, cursor):
         """Set up a distributed transaction"""
@@ -277,12 +273,9 @@ class CXOracleConnectionManager(AbstractConnectionManager):
 
     def restart_store(self, conn, cursor):
         """Reuse a store connection."""
-        try:
-            conn.rollback()
-            if self._twophase:
-                self._set_xid(conn, cursor)
-            if self.on_store_opened is not None:
-                self.on_store_opened(cursor, restart=True)
-        except self.disconnected_exceptions, e:
-            raise StorageError(e)
+        conn.rollback()
+        if self._twophase:
+            self._set_xid(conn, cursor)
+        if self.on_store_opened is not None:
+            self.on_store_opened(cursor, restart=True)
 

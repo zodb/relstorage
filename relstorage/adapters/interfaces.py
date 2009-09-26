@@ -36,6 +36,11 @@ class IRelStorageAdapter(Interface):
 class IConnectionManager(Interface):
     """Open and close database connections"""
 
+    disconnected_exceptions = Attribute(
+        """The tuple of exception types that might be
+        raised when the connection to the database has been broken.
+        """)
+
     def open():
         """Open a database connection and return (conn, cursor)."""
 
@@ -63,7 +68,8 @@ class IConnectionManager(Interface):
 
         This gets called when polling the database, so it needs to be quick.
 
-        Raise StorageError if the database has disconnected.
+        Raise one of self.disconnected_exceptions if the database has
+        disconnected.
         """
 
     def open_for_store():
@@ -75,7 +81,8 @@ class IConnectionManager(Interface):
     def restart_store(conn, cursor):
         """Rollback and reuse a store connection.
 
-        Raise StorageError if the database has disconnected.
+        Raise one of self.disconnected_exceptions if the database
+        has disconnected.
         """
 
     def open_for_pre_pack():
@@ -298,6 +305,10 @@ class IPoller(Interface):
         if this is the first poll.  If ignore_tid is not None, changes
         committed in that transaction will not be included in the list
         of changed OIDs.
+
+        If the database has disconnected, this method should raise one
+        of the exceptions listed in the disconnected_exceptions
+        attribute of the associated IConnectionManager.
 
         Returns (changed_oids, new_polled_tid).
         """
