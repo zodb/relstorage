@@ -6,6 +6,8 @@ Unreleased
   to false to keep no history.  (Packing is still required for
   garbage collection and blob deletion.)
 
+- Copied the ZConfig documentation of the storage options into README.
+
 - Renamed relstorage.py to storage.py to overcome import issues.
 
 - Updated the patch for ZODB 3.7 and 3.8 to fix an issue with

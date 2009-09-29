@@ -35,14 +35,22 @@ class RelStorageFactory(BaseConfig):
 class PostgreSQLAdapterFactory(BaseConfig):
     def create(self):
         from adapters.postgresql import PostgreSQLAdapter
-        return PostgreSQLAdapter(self.config.dsn)
+        return PostgreSQLAdapter(
+            dsn=self.config.dsn,
+            keep_history=self.config.keep_history,
+            )
 
 
 class OracleAdapterFactory(BaseConfig):
     def create(self):
         from adapters.oracle import OracleAdapter
         config = self.config
-        return OracleAdapter(config.user, config.password, config.dsn)
+        return OracleAdapter(
+            user=config.user,
+            password=config.password,
+            dsn=config.dsn,
+            keep_history=config.keep_history,
+            )
 
 
 class MySQLAdapterFactory(BaseConfig):
