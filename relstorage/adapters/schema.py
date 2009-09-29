@@ -74,7 +74,7 @@ history_preserving_schema = """
     mysql:
         CREATE TABLE new_oid (
             zoid        BIGINT NOT NULL PRIMARY KEY AUTO_INCREMENT
-        ) ENGINE = InnoDB;
+        ) ENGINE = MyISAM;
 
     oracle:
         CREATE SEQUENCE zoid_seq;
@@ -362,7 +362,7 @@ history_free_schema = """
     mysql:
         CREATE TABLE new_oid (
             zoid        BIGINT NOT NULL PRIMARY KEY AUTO_INCREMENT
-        ) ENGINE = InnoDB;
+        ) ENGINE = MyISAM;
 
     oracle:
         CREATE SEQUENCE zoid_seq;
