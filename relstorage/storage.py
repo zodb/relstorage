@@ -790,10 +790,10 @@ class RelStorage(BaseStorage,
             raise POSException.ReadOnlyError()
         self._lock_acquire()
         try:
-            cursor = self._load_cursor
+            cursor = self._store_cursor
             if cursor is None:
-                self._open_load_connection()
-                cursor = self._load_cursor
+                self._open_store_connection()
+                cursor = self._store_cursor
             oid_int = self._adapter.oidallocator.new_oid(cursor)
             self._max_new_oid = max(self._max_new_oid, oid_int)
             return p64(oid_int)

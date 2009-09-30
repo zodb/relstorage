@@ -31,6 +31,8 @@ Unreleased
 - Stopped wrapping database disconnect exceptions.  Now the code
   catches and handles them directly.
 
+- Use the store connection rather than the load connection for OID
+  allocation.
 
 1.3.0b1 (2009-09-04)
 --------------------
