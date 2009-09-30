@@ -59,7 +59,7 @@ from relstorage.adapters.interfaces import IRelStorageAdapter
 from relstorage.adapters.locker import MySQLLocker
 from relstorage.adapters.mover import ObjectMover
 from relstorage.adapters.oidallocator import MySQLOIDAllocator
-from relstorage.adapters.packundo import HistoryFreePackUndo
+from relstorage.adapters.packundo import MySQLHistoryFreePackUndo
 from relstorage.adapters.packundo import MySQLHistoryPreservingPackUndo
 from relstorage.adapters.poller import Poller
 from relstorage.adapters.schema import MySQLSchemaInstaller
@@ -127,7 +127,7 @@ class MySQLAdapter(object):
                 runner=self.runner,
                 )
         else:
-            self.packundo = HistoryFreePackUndo(
+            self.packundo = MySQLHistoryFreePackUndo(
                 connmanager=self.connmanager,
                 runner=self.runner,
                 locker=self.locker,

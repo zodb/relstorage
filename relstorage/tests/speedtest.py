@@ -46,6 +46,7 @@ contenders = [
     ]
 repetitions = 3
 max_attempts = 20
+keep_history = True
 
 
 class ChildProcessError(Exception):
@@ -195,7 +196,12 @@ class SpeedTest:
 
     def postgres_test(self):
         from relstorage.adapters.postgresql import PostgreSQLAdapter
-        adapter = PostgreSQLAdapter('dbname=relstoragetest')
+        if keep_history:
+            db = 'relstoragetest'
+        else:
+            db = 'relstoragetest_hf'
+        dsn = 'dbname=%s user=relstoragetest password=relstoragetest' % db
+        adapter = PostgreSQLAdapter(dsn=dsn, keep_history=keep_history)
         adapter.schema.prepare()
         adapter.schema.zap_all()
         def make_storage():
@@ -204,9 +210,17 @@ class SpeedTest:
 
     def oracle_test(self):
         from relstorage.adapters.oracle import OracleAdapter
-        from relstorage.tests.testoracle import getOracleParams
-        user, password, dsn = getOracleParams()
-        adapter = OracleAdapter(user, password, dsn)
+        dsn = os.environ.get('ORACLE_TEST_DSN', 'XE')
+        if keep_history:
+            db = 'relstoragetest'
+        else:
+            db = 'relstoragetest_hf'
+        adapter = OracleAdapter(
+            user=db,
+            password='relstoragetest',
+            dsn=dsn,
+            keep_history=keep_history,
+            )
         adapter.schema.prepare()
         adapter.schema.zap_all()
         def make_storage():
@@ -215,7 +229,16 @@ class SpeedTest:
 
     def mysql_test(self):
         from relstorage.adapters.mysql import MySQLAdapter
-        adapter = MySQLAdapter(db='relstoragetest')
+        if keep_history:
+            db = 'relstoragetest'
+        else:
+            db = 'relstoragetest_hf'
+        adapter = MySQLAdapter(
+            db=db,
+            user='relstoragetest',
+            passwd='relstoragetest',
+            keep_history=keep_history,
+            )
         adapter.schema.prepare()
         adapter.schema.zap_all()
         def make_storage():

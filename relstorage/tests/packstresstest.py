@@ -6,23 +6,39 @@ from relstorage.storage import RelStorage
 import transaction
 from persistent.mapping import PersistentMapping
 import random
+import os
 
 logging.basicConfig()
 logging.getLogger().setLevel(logging.DEBUG)
 
 use = 'oracle'
+keep_history=True
 
 if use == 'mysql':
     from relstorage.adapters.mysql import MySQLAdapter
-    a = MySQLAdapter(db='packtest')
+    a = MySQLAdapter(
+        db='packtest',
+        user='relstoragetest',
+        passwd='relstoragetest',
+        keep_history=keep_history,
+        )
 elif use == 'postgresql':
     from relstorage.adapters.postgresql import PostgreSQLAdapter
-    a = PostgreSQLAdapter(dsn="dbname='packtest'")
+    a = PostgreSQLAdapter(dsn=
+        "dbname='packtest' "
+        'user=relstoragetest '
+        'password=relstoragetest',
+        keep_history=keep_history,
+        )
 elif use == 'oracle':
     from relstorage.adapters.oracle import OracleAdapter
-    from relstorage.tests.testoracle import getOracleParams
-    user, password, dsn = getOracleParams()
-    a = OracleAdapter(user, password, dsn)
+    dsn = os.environ.get('ORACLE_TEST_DSN', 'XE')
+    a = OracleAdapter(
+        user='packtest',
+        password='relstoragetest',
+        dsn=dsn,
+        keep_history=keep_history,
+        )
 else:
     raise AssertionError("which database?")
 

@@ -6,6 +6,7 @@ To run these tests, you need to create a test user account and several
 databases. Use or adapt the SQL statements below to create the
 databases.
 
+
 PostgreSQL
 ----------
 
@@ -37,3 +38,20 @@ GRANT ALL ON relstoragetest_hf.* TO 'relstoragetest'@'localhost';
 CREATE DATABASE relstoragetest2_hf;
 GRANT ALL ON relstoragetest2_hf.* TO 'relstoragetest'@'localhost';
 FLUSH PRIVILEGES;
+
+
+Oracle
+------
+
+Execute these commands as the 'SYSTEM' user.  When running the tests,
+you can use the environment variable ORACLE_TEST_DSN to override the
+data source name, which defaults to "XE" (for Oracle 10g XE).
+
+CREATE USER relstoragetest IDENTIFIED BY relstoragetest;
+GRANT CONNECT, RESOURCE, CREATE TABLE, CREATE SEQUENCE TO relstoragetest;
+CREATE USER relstoragetest2 IDENTIFIED BY relstoragetest;
+GRANT CONNECT, RESOURCE, CREATE TABLE, CREATE SEQUENCE TO relstoragetest2;
+CREATE USER relstoragetest_hf IDENTIFIED BY relstoragetest;
+GRANT CONNECT, RESOURCE, CREATE TABLE, CREATE SEQUENCE TO relstoragetest_hf;
+CREATE USER relstoragetest2_hf IDENTIFIED BY relstoragetest;
+GRANT CONNECT, RESOURCE, CREATE TABLE, CREATE SEQUENCE TO relstoragetest2_hf;

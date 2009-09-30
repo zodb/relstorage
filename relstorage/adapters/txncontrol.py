@@ -225,6 +225,8 @@ class OracleTransactionControl(TransactionControl):
 
         assert len(rows) == 1
         tid, now = rows[0]
+        if tid is None:
+            tid = 0
         return tid, self._parse_dsinterval(now)
 
     def add_transaction(self, cursor, tid, username, description, extension,

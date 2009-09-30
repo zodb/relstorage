@@ -24,7 +24,7 @@ from relstorage.adapters.interfaces import IRelStorageAdapter
 from relstorage.adapters.locker import OracleLocker
 from relstorage.adapters.mover import ObjectMover
 from relstorage.adapters.oidallocator import OracleOIDAllocator
-from relstorage.adapters.packundo import HistoryFreePackUndo
+from relstorage.adapters.packundo import OracleHistoryFreePackUndo
 from relstorage.adapters.packundo import OracleHistoryPreservingPackUndo
 from relstorage.adapters.poller import Poller
 from relstorage.adapters.schema import OracleSchemaInstaller
@@ -127,7 +127,7 @@ class OracleAdapter(object):
                 runner=self.runner,
                 )
         else:
-            self.packundo = HistoryFreePackUndo(
+            self.packundo = OracleHistoryFreePackUndo(
                 connmanager=self.connmanager,
                 runner=self.runner,
                 locker=self.locker,

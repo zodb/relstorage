@@ -467,20 +467,20 @@ class ObjectMover(object):
         if len(data) <= 2000:
             # Send data inline for speed.  Oracle docs say maximum size
             # of a RAW is 2000 bytes.  inputsize_BINARY corresponds with RAW.
-            cursor.setinputsizes(rawdata=self.inputsize_BINARY)
             stmt = """
             INSERT INTO temp_store (zoid, prev_tid, md5, state)
             VALUES (:oid, :prev_tid, :md5sum, :rawdata)
             """
+            cursor.setinputsizes(rawdata=self.inputsize_BINARY)
             cursor.execute(stmt, oid=oid, prev_tid=prev_tid,
                 md5sum=md5sum, rawdata=data)
         else:
             # Send data as a BLOB
-            cursor.setinputsizes(blobdata=self.inputsize_BLOB)
             stmt = """
             INSERT INTO temp_store (zoid, prev_tid, md5, state)
             VALUES (:oid, :prev_tid, :md5sum, :blobdata)
             """
+            cursor.setinputsizes(blobdata=self.inputsize_BLOB)
             cursor.execute(stmt, oid=oid, prev_tid=prev_tid,
                 md5sum=md5sum, blobdata=data)
 
@@ -532,16 +532,16 @@ class ObjectMover(object):
             md5sum = compute_md5sum(data)
         else:
             md5sum = None
-        cursor.setinputsizes(data=self.inputsize_BLOB)
         stmt = """
         UPDATE temp_store SET
             prev_tid = :prev_tid,
             md5 = :md5sum,
-            state = :data
+            state = :blobdata
         WHERE zoid = :oid
         """
+        cursor.setinputsizes(blobdata=self.inputsize_BLOB)
         cursor.execute(stmt, oid=oid, prev_tid=prev_tid,
-            md5sum=md5sum, data=self.Binary(data))
+            md5sum=md5sum, blobdata=self.Binary(data))
 
 
 
@@ -575,12 +575,12 @@ class ObjectMover(object):
             WHERE zoid = %s
             """
             cursor.execute(stmt, (oid,))
-
-            stmt = """
-            INSERT INTO object_state (zoid, tid, state)
-            VALUES (%s, %s, decode(%s, 'base64'))
-            """
-            cursor.execute(stmt, (oid, tid, encoded))
+            if data:
+                stmt = """
+                INSERT INTO object_state (zoid, tid, state)
+                VALUES (%s, %s, decode(%s, 'base64'))
+                """
+                cursor.execute(stmt, (oid, tid, encoded))
 
     def mysql_restore(self, cursor, oid, tid, data):
         """Store an object directly, without conflict detection.
@@ -606,18 +606,18 @@ class ObjectMover(object):
             """
             cursor.execute(stmt, (oid, tid, oid, md5sum, encoded))
         else:
-            if not data:
-                stmt = """
-                DELETE FROM object_state
-                WHERE zoid = %s
-                """
-                cursor.execute(stmt, (oid,))
-            else:
+            if data:
                 stmt = """
                 REPLACE INTO object_state (zoid, tid, state)
                 VALUES (%s, %s, %s)
                 """
                 cursor.execute(stmt, (oid, tid, encoded))
+            else:
+                stmt = """
+                DELETE FROM object_state
+                WHERE zoid = %s
+                """
+                cursor.execute(stmt, (oid,))
 
     def oracle_restore(self, cursor, oid, tid, data):
         """Store an object directly, without conflict detection.
@@ -628,16 +628,12 @@ class ObjectMover(object):
             md5sum = compute_md5sum(data)
         else:
             md5sum = None
-            stmt = """
-            DELETE FROM object_state
-            WHERE zoid = %s
-            """
+            stmt = "DELETE FROM object_state WHERE zoid = :1"
             cursor.execute(stmt, (oid,))
 
         if not data or len(data) <= 2000:
             # Send data inline for speed.  Oracle docs say maximum size
             # of a RAW is 2000 bytes.  inputsize_BINARY corresponds with RAW.
-            cursor.setinputsizes(rawdata=self.inputsize_BINARY)
             if self.keep_history:
                 stmt = """
                 INSERT INTO object_state (zoid, tid, prev_tid, md5, state)
@@ -646,17 +642,19 @@ class ObjectMover(object):
                         (SELECT tid FROM current_object WHERE zoid = :oid), 0),
                     :md5sum, :rawdata)
                 """
+                cursor.setinputsizes(rawdata=self.inputsize_BINARY)
                 cursor.execute(stmt, oid=oid, tid=tid,
                     md5sum=md5sum, rawdata=data)
             else:
-                stmt = """
-                INSERT INTO object_state (zoid, tid, state)
-                VALUES (:oid, :tid, :rawdata)
-                """
-                cursor.execute(stmt, oid=oid, tid=tid, rawdata=data)
+                if data:
+                    stmt = """
+                    INSERT INTO object_state (zoid, tid, state)
+                    VALUES (:oid, :tid, :rawdata)
+                    """
+                    cursor.setinputsizes(rawdata=self.inputsize_BINARY)
+                    cursor.execute(stmt, oid=oid, tid=tid, rawdata=data)
         else:
             # Send data as a BLOB
-            cursor.setinputsizes(blobdata=self.inputsize_BLOB)
             if self.keep_history:
                 stmt = """
                 INSERT INTO object_state (zoid, tid, prev_tid, md5, state)
@@ -665,13 +663,16 @@ class ObjectMover(object):
                         (SELECT tid FROM current_object WHERE zoid = :oid), 0),
                     :md5sum, :blobdata)
                 """
+                cursor.setinputsizes(blobdata=self.inputsize_BLOB)
                 cursor.execute(stmt, oid=oid, tid=tid,
                     md5sum=md5sum, blobdata=data)
             else:
+                cursor.execute(stmt, (oid,))
                 stmt = """
                 INSERT INTO object_state (zoid, tid, state)
                 VALUES (:oid, :tid, :blobdata)
                 """
+                cursor.setinputsizes(blobdata=self.inputsize_BLOB)
                 cursor.execute(stmt, oid=oid, tid=tid, blobdata=data)
 
 
@@ -802,11 +803,18 @@ class ObjectMover(object):
                 """
                 cursor.execute(stmt)
 
-                stmt = """
-                INSERT INTO object_state (zoid, tid, state)
-                SELECT zoid, %s, state
-                FROM temp_store
-                """
+                if self.database_name == 'oracle':
+                    stmt = """
+                    INSERT INTO object_state (zoid, tid, state)
+                    SELECT zoid, :1, state
+                    FROM temp_store
+                    """
+                else:
+                    stmt = """
+                    INSERT INTO object_state (zoid, tid, state)
+                    SELECT zoid, %s, state
+                    FROM temp_store
+                    """
                 cursor.execute(stmt, (tid,))
 
         stmt = """

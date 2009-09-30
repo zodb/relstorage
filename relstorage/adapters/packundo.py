@@ -47,7 +47,7 @@ class PackUndo(object):
         else:
             stmt = """
             SELECT transaction.tid
-            FROM (SELECT DISTINCT tid FROM object_state) AS transaction
+            FROM (SELECT DISTINCT tid FROM object_state) transaction
                 LEFT JOIN object_refs_added
                     ON (transaction.tid = object_refs_added.tid)
             WHERE object_refs_added.tid IS NULL
@@ -1014,3 +1014,39 @@ class HistoryFreePackUndo(PackUndo):
         %(TRUNCATE)s pack_object
         """
         self.runner.run_script(cursor, stmt)
+
+
+class MySQLHistoryFreePackUndo(HistoryFreePackUndo):
+
+    _script_create_temp_pack_visit = """
+        CREATE TEMPORARY TABLE temp_pack_visit (
+            zoid BIGINT NOT NULL,
+            keep_tid BIGINT
+        );
+        CREATE UNIQUE INDEX temp_pack_visit_zoid ON temp_pack_visit (zoid);
+        CREATE TEMPORARY TABLE temp_pack_child (
+            zoid BIGINT NOT NULL
+        );
+        CREATE UNIQUE INDEX temp_pack_child_zoid ON temp_pack_child (zoid);
+        """
+
+    # Note: UPDATE must be the last statement in the script
+    # because it returns a value.
+    _script_pre_pack_follow_child_refs = """
+        %(TRUNCATE)s temp_pack_child;
+
+        INSERT INTO temp_pack_child
+        SELECT DISTINCT to_zoid
+        FROM object_ref
+            JOIN temp_pack_visit USING (zoid);
+
+        -- MySQL-specific syntax for table join in update
+        UPDATE pack_object, temp_pack_child SET keep = %(TRUE)s
+        WHERE keep = %(FALSE)s
+            AND pack_object.zoid = temp_pack_child.zoid;
+        """
+
+
+class OracleHistoryFreePackUndo(HistoryFreePackUndo):
+
+    _script_create_temp_pack_visit = None
