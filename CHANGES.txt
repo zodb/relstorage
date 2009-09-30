@@ -34,6 +34,10 @@ Unreleased
 - Use the store connection rather than the load connection for OID
   allocation.
 
+- Detect and handle backward time travel, which can happen after
+  failover to an out-of-date asynchronous slave database. For
+  simplicity, invalidate the whole ZODB cache when this happens.
+
 1.3.0b1 (2009-09-04)
 --------------------
 

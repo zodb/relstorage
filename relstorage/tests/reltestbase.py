@@ -421,6 +421,59 @@ class GenericRelStorageTests(
         self.assertRaises(UnpicklingError, self._storage.pack,
             time.time() + 10000, referencesf)
 
+    def checkBackwardTimeTravel(self):
+        # When a failover event causes the storage to switch to an
+        # asynchronous slave that is not fully up to date, the poller
+        # should notice that backward time travel has occurred and
+        # handle the situation by invalidating all objects that have
+        # changed in the interval. (Currently, we simply invalidate all
+        # objects when backward time travel occurs.)
+        import os
+        import shutil
+        import tempfile
+        from ZODB.FileStorage import FileStorage
+        db = DB(self._storage)
+        try:
+            c = db.open()
+            r = c.root()
+            r['alpha'] = PersistentMapping()
+            transaction.commit()
+
+            # To simulate failover to an out of date async slave, take
+            # a snapshot of the database at this point, change some
+            # object, then restore the database to its earlier state.
+
+            d = tempfile.mkdtemp()
+            try:
+                fs = FileStorage(os.path.join(d, 'Data.fs'))
+                fs.copyTransactionsFrom(c._storage)
+
+                r['beta'] = PersistentMapping()
+                transaction.commit()
+                self.assertTrue('beta' in r)
+
+                c._storage.zap_all()
+                c._storage.copyTransactionsFrom(fs)
+
+                fs.close()
+            finally:
+                shutil.rmtree(d)
+
+            # r should still be in the cache.
+            self.assertTrue('beta' in r)
+
+            # Now sync, which will call poll_invalidations().
+            c.sync()
+
+            # r should have been invalidated
+            self.assertEqual(r._p_changed, None)
+
+            # r should be reverted to its earlier state.
+            self.assertFalse('beta' in r)
+
+        finally:
+            db.close()
+
 
 class DoubleCommitter(Persistent):
     """A crazy persistent class that changes self in __getstate__"""
