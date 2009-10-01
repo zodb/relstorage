@@ -142,13 +142,7 @@ class HistoryFreeDatabaseIterator(DatabaseIterator):
         Skips packed transactions.
         Yields (tid, username, description, extension) for each transaction.
         """
-        stmt = """
-        SELECT DISTINCT tid
-        FROM object_state
-        ORDER BY tid DESC
-        """
-        self.runner.run_script_stmt(cursor, stmt)
-        return ((tid, '', '', '') for (tid,) in cursor)
+        return []
 
     def iter_transactions_range(self, cursor, start=None, stop=None):
         """Iterate over the transactions in the given range, oldest first.
