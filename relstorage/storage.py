@@ -298,7 +298,7 @@ class RelStorage(BaseStorage,
         return self._adapter.stats.get_db_size()
 
     def _log_keyerror(self, oid_int, reason):
-        """Log just before raising KeyError in load().
+        """Log just before raising POSKeyError in load().
 
         KeyErrors in load() are generally not supposed to happen,
         so this is a good place to gather information.
@@ -306,33 +306,39 @@ class RelStorage(BaseStorage,
         cursor = self._load_cursor
         adapter = self._adapter
         logfunc = log.warning
-        msg = ["Storage KeyError on oid %d: %s" % (oid_int, reason)]
-        rows = adapter.dbiter.iter_transactions(cursor)
-        row = None
-        for row in rows:
-            # just get the first row
-            break
-        if not row:
-            # This happens when initializing a new database, so it's
-            # not a warning.
-            logfunc = log.debug
-            msg.append("No transactions exist")
-        else:
-            msg.append("Current transaction is %d" % row[0])
+        msg = ["POSKeyError on oid %d: %s" % (oid_int, reason)]
 
-        tids = []
-        try:
-            rows = adapter.dbiter.iter_object_history(cursor, oid_int)
-        except KeyError:
-            # The object has no history, at least from the point of view
-            # of the current database load connection.
-            pass
-        else:
+        if adapter.keep_history:
+            rows = adapter.dbiter.iter_transactions(cursor)
+            row = None
             for row in rows:
-                tids.append(row[0])
-                if len(tids) >= 10:
-                    break
-        msg.append("Recent object tids: %s" % repr(tids))
+                # just get the first row
+                break
+            if not row:
+                # This happens when initializing a new database or
+                # after packing, so it's not a warning.
+                logfunc = log.debug
+                msg.append("No previous transactions exist")
+            else:
+                msg.append("Current transaction is %d" % row[0])
+
+            tids = []
+            try:
+                rows = adapter.dbiter.iter_object_history(cursor, oid_int)
+            except KeyError:
+                # The object has no history, at least from the point of view
+                # of the current database load connection.
+                pass
+            else:
+                for row in rows:
+                    tids.append(row[0])
+                    if len(tids) >= 10:
+                        break
+            msg.append("Recent object tids: %s" % repr(tids))
+
+        else:
+            msg.append("history-free adapter")
+
         logfunc('; '.join(msg))
 
     def _get_oid_cache_key(self, oid_int):
