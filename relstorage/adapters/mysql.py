@@ -84,6 +84,7 @@ class MySQLAdapter(object):
 
     def __init__(self, keep_history=True, **params):
         self.keep_history = keep_history
+        self._params = params
         self.connmanager = MySQLdbConnectionManager(params)
         self.runner = ScriptRunner()
         self.locker = MySQLLocker(
@@ -139,6 +140,21 @@ class MySQLAdapter(object):
         self.stats = MySQLStats(
             connmanager=self.connmanager,
             )
+
+    def new_instance(self):
+        # This adapter and its components are stateless, so it's
+        # safe to share it between threads.
+        return self
+
+    def __str__(self):
+        if self.keep_history:
+            t = 'history preserving'
+        else:
+            t = 'history free'
+        p = self._params.copy()
+        if 'passwd' in p:
+            del p['passwd']
+        return "%s, %s, %r" % (self.__class__.__name__, t, p)
 
 
 class MySQLdbConnectionManager(AbstractConnectionManager):

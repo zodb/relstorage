@@ -77,7 +77,7 @@ class RelStorage(BaseStorage,
     def __init__(self, adapter, name=None, create=True,
             read_only=False, options=None, **kwoptions):
         if name is None:
-            name = 'RelStorage on %s' % adapter.__class__.__name__
+            name = 'RelStorage: %s' % adapter
 
         self._adapter = adapter
         self._name = name
@@ -283,7 +283,8 @@ class RelStorage(BaseStorage,
 
         See ZODB.interfaces.IMVCCStorage.
         """
-        other = RelStorage(adapter=self._adapter, name=self._name,
+        adapter = self._adapter.new_instance()
+        other = RelStorage(adapter=adapter, name=self._name,
             create=False, read_only=self._is_read_only,
             options=self._options)
         self._instances.append(weakref.ref(other))

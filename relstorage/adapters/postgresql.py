@@ -52,6 +52,7 @@ class PostgreSQLAdapter(object):
 
     def __init__(self, dsn='', keep_history=True):
         self.keep_history = keep_history
+        self._dsn = dsn
         self.connmanager = Psycopg2ConnectionManager(
             dsn=dsn,
             keep_history=self.keep_history,
@@ -106,6 +107,20 @@ class PostgreSQLAdapter(object):
         self.stats = PostgreSQLStats(
             connmanager=self.connmanager,
             )
+
+    def new_instance(self):
+        # This adapter and its components are stateless, so it's
+        # safe to share it between threads.
+        return self
+
+    def __str__(self):
+        if self.keep_history:
+            t = 'history preserving'
+        else:
+            t = 'history free'
+        parts = self._dsn.split()
+        s = ' '.join(p for p in parts if not p.startswith('password'))
+        return "%s, %s, dsn=%r" % (self.__class__.__name__, t, s)
 
 
 class Psycopg2ConnectionManager(AbstractConnectionManager):

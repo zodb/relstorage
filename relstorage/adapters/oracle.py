@@ -71,6 +71,8 @@ class OracleAdapter(object):
         if use_inline_lobs is None:
             use_inline_lobs = (cx_Oracle.version >= '5.0')
         self.keep_history = keep_history
+        self._user = user
+        self._dsn = dsn
 
         self.connmanager = CXOracleConnectionManager(
             params=(user, password, dsn),
@@ -139,6 +141,19 @@ class OracleAdapter(object):
         self.stats = OracleStats(
             connmanager=self.connmanager,
             )
+
+    def new_instance(self):
+        # This adapter and its components are stateless, so it's
+        # safe to share it between threads.
+        return self
+
+    def __str__(self):
+        if self.keep_history:
+            t = 'history preserving'
+        else:
+            t = 'history free'
+        return "%s, %s, user=%r, dsn=%r" % (
+            self.__class__.__name__, t, self._user, self._dsn)
 
 
 class CXOracleScriptRunner(OracleScriptRunner):
