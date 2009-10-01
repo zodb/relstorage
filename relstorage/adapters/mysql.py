@@ -154,7 +154,10 @@ class MySQLAdapter(object):
         p = self._params.copy()
         if 'passwd' in p:
             del p['passwd']
-        return "%s, %s, %r" % (self.__class__.__name__, t, p)
+        p = p.items()
+        p.sort()
+        p = ', '.join('%s=%r' % item for item in p)
+        return "%s, %s, %s" % (self.__class__.__name__, t, p)
 
 
 class MySQLdbConnectionManager(AbstractConnectionManager):
