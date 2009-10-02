@@ -37,7 +37,71 @@ class UseMySQLAdapter:
             passwd='relstoragetest',
             )
 
-class HPMySQLTests(UseMySQLAdapter, HistoryPreservingRelStorageTests):
+
+class ZConfigTests:
+
+    def checkConfigureViaZConfig(self):
+        import tempfile
+        replica_conf = tempfile.NamedTemporaryFile()
+        try:
+            replica_conf.write("localhost")
+            replica_conf.flush()
+
+            if self.keep_history:
+                dbname = 'relstoragetest'
+            else:
+                dbname = 'relstoragetest_hf'
+            conf = """
+            %%import relstorage
+            <zodb main>
+              <relstorage>
+                <mysql>
+                  db %s
+                  user relstoragetest
+                  passwd relstoragetest
+                  keep-history %s
+                  replica-conf %s
+                </mysql>
+              </relstorage>
+            </zodb>
+            """ % (
+                dbname,
+                self.keep_history and 'true' or 'false',
+                replica_conf.name,
+                )
+
+            schema_xml = """
+            <schema>
+            <import package="ZODB"/>
+            <section type="ZODB.database" name="main" attribute="database"/>
+            </schema>
+            """
+            import ZConfig
+            from StringIO import StringIO
+            schema = ZConfig.loadSchemaFile(StringIO(schema_xml))
+            config, handler = ZConfig.loadConfigFile(schema, StringIO(conf))
+
+            db = config.database.open()
+            try:
+                storage = db.storage
+                adapter = storage._adapter
+                from relstorage.adapters.mysql import MySQLAdapter
+                self.assert_(isinstance(adapter, MySQLAdapter))
+                self.assertEqual(adapter._params, {
+                    'passwd': 'relstoragetest',
+                    'db': dbname,
+                    'user': 'relstoragetest',
+                    'replica_conf': replica_conf.name,
+                    })
+                self.assertEqual(adapter.keep_history, self.keep_history)
+            finally:
+                db.close()
+        finally:
+            replica_conf.close()
+
+
+class HPMySQLTests(UseMySQLAdapter, HistoryPreservingRelStorageTests,
+        ZConfigTests):
     pass
 
 class HPMySQLToFile(UseMySQLAdapter, HistoryPreservingToFileStorage):
@@ -46,7 +110,8 @@ class HPMySQLToFile(UseMySQLAdapter, HistoryPreservingToFileStorage):
 class HPMySQLFromFile(UseMySQLAdapter, HistoryPreservingFromFileStorage):
     pass
 
-class HFMySQLTests(UseMySQLAdapter, HistoryFreeRelStorageTests):
+class HFMySQLTests(UseMySQLAdapter, HistoryFreeRelStorageTests,
+        ZConfigTests):
     pass
 
 class HFMySQLToFile(UseMySQLAdapter, HistoryFreeToFileStorage):

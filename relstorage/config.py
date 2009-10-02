@@ -38,6 +38,7 @@ class PostgreSQLAdapterFactory(BaseConfig):
         return PostgreSQLAdapter(
             dsn=self.config.dsn,
             keep_history=self.config.keep_history,
+            replica_conf=self.config.replica_conf,
             )
 
 
@@ -50,6 +51,7 @@ class OracleAdapterFactory(BaseConfig):
             password=config.password,
             dsn=config.dsn,
             keep_history=config.keep_history,
+            replica_conf=config.replica_conf,
             )
 
 

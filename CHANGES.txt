@@ -2,9 +2,13 @@
 Unreleased
 ----------
 
-- Added the keep_history option to the database adapters.  Set it
+- Added the keep-history option to the database adapters.  Set it
   to false to keep no history.  (Packing is still required for
   garbage collection and blob deletion.)
+
+- Added the replica-conf option to the database adapters.  Set it
+  to a filename containing the location of database replicas.  Changes
+  to the file take effect at transaction boundaries.
 
 - Copied the ZConfig documentation of the storage options into README.
 

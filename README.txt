@@ -22,6 +22,8 @@ Features
   in-memory index of all objects, RelStorage starts quickly regardless of
   database size.
 * Supports undo, packing, and filesystem-based ZODB blobs.
+* Both history-preserving and history-free storage are available.
+* Capable of failover to replicated SQL databases.
 * Free, open source (ZPL 2.1)
 
 
@@ -32,13 +34,10 @@ You can install RelStorage using easy_install::
 
     easy_install RelStorage
 
-If you are not using easy_install (part of the setuptools package), you can
-get the latest release at PyPI (http://pypi.python.org/pypi/RelStorage), then
-place the relstorage package in the lib/python directory of either the
-SOFTWARE_HOME or the INSTANCE_HOME.  You can do this with the following
-command::
+To install RelStorage in Plone, see the instructions in the following
+article:
 
-    python2.4 setup.py install --install-lib=${INSTANCE_HOME}/lib/python
+    http://shane.willowrise.com/archives/how-to-install-plone-with-relstorage-and-mysql/
 
 RelStorage requires a version of ZODB that is aware of MVCC storages.
 ZODB 3.9 supports RelStorage without any patches. ZODB 3.7 and 3.8 can
@@ -55,8 +54,9 @@ ships MySQLdb 1.2.1, but that version has a bug in BLOB handling that manifests
 itself only with certain character set configurations.  MySQLdb 1.2.2 fixes the
 bug.
 
-Finally, modify etc/zope.conf of your Zope instance.  Remove the main mount
-point and add one of the following blocks.  For PostgreSQL::
+To integrate RelStorage in Zope 2, specify a RelStorage backend in
+``etc/zope.conf``. Remove the main mount point and add one of the
+following blocks. For PostgreSQL::
 
     %import relstorage
     <zodb_db main>
@@ -111,29 +111,93 @@ where to store the blobs.  For example::
       </relstorage>
     </zodb_db>
 
+To use RelStorage with ``repoze.zodbconn``, a package that makes ZODB
+available to WSGI applications, create a configuration file with
+contents similar to the following::
 
-Migration
-=========
+    %import relstorage
+    <zodb main>
+      <relstorage>
+        <mysql>
+          db zodb
+        </mysql>
+      </relstorage>
+      cache-size 100000
+    </zodb>
 
-Migrating from FileStorage
---------------------------
-
-You can convert a FileStorage instance to RelStorage and back using a utility
-called ZODBConvert.  See http://wiki.zope.org/ZODB/ZODBConvert .
+``repoze.zodbconn`` expects a ZODB URI.  Use a URI of the form
+``zconfig://path/to/configuration#main``.
 
 
-Migrating from PGStorage
-------------------------
+Migrating Existing Data
+=======================
 
-The following script migrates your database from PGStorage to RelStorage 1.0
-beta:
+The ``zodbconvert`` Utility
+---------------------------
 
-    migrate.sql_
+RelStorage comes with a script named ``zodbconvert`` that converts
+databases to different formats. Use it to convert a FileStorage
+instance to RelStorage and back, or to convert between different kinds
+of RelStorage instances, or to convert other kinds of storages that
+support the storage iterator protocol.
 
-    .. _migrate.sql: http://svn.zope.org/*checkout*/relstorage/trunk/notes/migrate.sql
+When converting between two history-preserving databases (note that
+FileStorage uses a history-preserving format), ``zodbconvert`` utility
+preserves all objects and transactions, meaning you can still use the
+ZODB undo feature after the conversion, and you can convert back using
+the same process in reverse. When converting from a history-free
+database to either a history-free database or a history-preserving
+database, ``zodbconvert`` retains all data, but the converted
+transactions will not be undoable. When converting from a
+history-preserving storage to a history-free storage, ``zodbconvert``
+drops all historical information during the conversion.
 
-After you do this, you still need to migrate from 1.0 beta to the latest
-release.
+How to use ``zodbconvert``
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Create a ZConfig style configuration file that specifies two storages,
+one named "source", the other "destination". The configuration file
+format is very much like zope.conf. Then run ``zodbconvert``, providing
+the name of the configuration file as a parameter.
+
+The utility does not modify the source storage. Before copying the
+data, the utility verifies the destination storage is completely empty.
+If the destination storage is not empty, the utility aborts without
+making any changes to the destination. (Adding transactions to an
+existing database is complex and out of scope for ``zodbconvert``.)
+
+Here is a sample ``zodbconvert`` configuration file::
+
+  <filestorage source>
+    path /zope/var/Data.fs
+  </filestorage>
+
+  <relstorage destination>
+    <mysql>
+      db zodb
+    </mysql>
+  </relstorage>
+
+This configuration file specifies that the utility should copy all of
+the transactions from Data.fs to a MySQL database called "zodb". If you
+want to reverse the conversion, exchange the names "source" and
+"destination". All storage types and storage parameters available in
+zope.conf are also available in this configuration file.
+
+Options for ``zodbconvert``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+  ``--clear``
+    Clears all data from the destination storage before copying. Use
+    this only if you are certain the destination has no useful data.
+
+  ``--dry-run``
+    Opens both storages and analyzes what would be copied, but does not
+    actually copy.
+
+  ``--verbose``
+    List the transactions and objects as they are copied. This is very
+    verbose.
 
 
 Migrating to a new version of RelStorage
@@ -170,118 +234,21 @@ To migrate from version 1.0 beta to version 1.0c1 through 1.0.1, see:
   .. _migrate-to-1.0.txt: http://svn.zope.org/*checkout*/relstorage/trunk/notes/migrate-to-1.0.txt
 
 
-Adapter Options
-===============
+RelStorage Options
+==================
 
-Common options
---------------
+Specify these options in zope.conf, as parameters for the
+``relstorage.storage.RelStorage`` constructor, or as attributes of a
+``relstorage.storage.Options`` instance. In the latter two cases, use
+underscores instead of dashes in the parameter names.
 
-All of the adapters support the following options.
-
-keep-history
-
-        If this parameter is set to true (the default), the adapter
-        will create and use a history-preserving database schema,
-        similar to FileStorage. A history-preserving schema supports
-        ZODB-level undo, but grows more quickly and requires extensive
-        packing on a regular basis.
-
-        If this parameter is set to false, the adapter will create and
-        use a history-free database schema. Undo will not be supported,
-        but the database will not grow as quickly. The database will
-        still require regular garbage collection (which is accessible
-        through the database pack mechanism.)
-
-        This parameter must not change once the database schema has
-        been installed. If you want to convert between a
-        history-preserving and a history-free database, use the
-        zodbconvert utility to copy to a new database.
-
-PostgreSQL adapter options
---------------------------
-
-In addition to the common options, the PostgreSQL adapter accepts:
-
-dsn
-
-        Specifies the data source name for connecting to PostgreSQL.
-        A PostgreSQL DSN is a list of parameters separated with
-        whitespace.  A typical DSN looks like::
-
-            dbname='zodb' user='username' host='localhost' password='pass'
-
-        If dsn is omitted, the adapter will connect to a local database with
-        no password.  Both the user and database name will match the
-        name of the owner of the current process.
-
-MySQL options
--------------
-
-In addition to the common options, this adapter accepts most parameters
-supported by the MySQL-python library, including:
-
-host
-    string, host to connect
-user
-    string, user to connect as
-passwd
-    string, password to use
-db
-    string, database to use
-port
-    integer, TCP/IP port to connect to
-unix_socket
-    string, location of unix_socket (UNIX-ish only)
-conv
-    mapping, maps MySQL FIELD_TYPE.* to Python functions which convert a
-    string to the appropriate Python type
-connect_timeout
-    number of seconds to wait before the connection attempt fails.
-compress
-    if set, gzip compression is enabled
-named_pipe
-    if set, connect to server via named pipe (Windows only)
-init_command
-    command which is run once the connection is created
-read_default_file
-    see the MySQL documentation for mysql_options()
-read_default_group
-    see the MySQL documentation for mysql_options()
-client_flag
-    client flags from MySQLdb.constants.CLIENT
-load_infile
-    int, non-zero enables LOAD LOCAL INFILE, zero disables
-
-Oracle options
---------------
-
-In addition to the common options, the Oracle adapter accepts:
-
-user
-        The Oracle account name
-password
-        The Oracle account password
-dsn
-        The Oracle data source name.  The Oracle client library will
-        normally expect to find the DSN in /etc/oratab.
-
-Optional Features
-=================
-
-Specify these options in zope.conf, as parameters for the RelStorage
-constructor, or as attributes of a relstorage.Options instance.
-In the latter two cases, use underscores instead of dashes in the
-parameter names.
-
-blob-dir
-
+``blob-dir``
         If supplied, the storage will provide blob support and this
         is the name of a directory to hold blob data.  The directory will
         be created if it doeesn't exist.  If no value (or an empty value)
         is provided, then no blob support will be provided.
 
-poll-interval
-
+``poll-interval``
         Defer polling the database for the specified maximum time interval,
         in seconds.  Set to 0 (the default) to always poll.  Fractional
         seconds are allowed.  Use this to lighten the database load on
@@ -303,8 +270,7 @@ poll-interval
         affect database consistency, but does increase the probability
         of conflict errors, leading to low performance.
 
-pack-gc
-
+``pack-gc``
         If pack-gc is false, pack operations do not perform
         garbage collection.  Garbage collection is enabled by default.
 
@@ -317,24 +283,21 @@ pack-gc
         Disabling garbage collection is also a hack that ensures
         inter-database references never break.
 
-pack-dry-run
-
+``pack-dry-run``
         If pack-dry-run is true, pack operations perform a full analysis
         of what to pack, but no data is actually removed.  After a dry run,
         the pack_object, pack_state, and pack_state_tid tables are filled
         with the list of object states and objects that would have been
         removed.
 
-pack-batch-timeout
-
+``pack-batch-timeout``
         Packing occurs in batches of transactions; this specifies the
         timeout in seconds for each batch.  Note that some database
         configurations have unpredictable I/O performance
         and might stall much longer than the timeout.
         The default timeout is 5.0 seconds.
 
-pack-duty-cycle
-
+``pack-duty-cycle``
         After each batch, the pack code pauses for a time to
         allow concurrent transactions to commit.  The pack-duty-cycle
         specifies what fraction of time should be spent on packing.
@@ -347,15 +310,13 @@ pack-duty-cycle
         The default is 0.5.  Raise it to finish packing faster; lower it
         to reduce the effect of packing on transaction commit performance.
 
-pack-max-delay
-
+``pack-max-delay``
         This specifies a maximum delay between pack batches.  Sometimes
         the database takes an extra long time to finish a pack batch; at
         those times it is useful to cap the delay imposed by the
         pack-duty-cycle.  The default is 20 seconds.
 
-cache-servers
-
+``cache-servers``
         Specifies a list of memcache servers.  Enabling memcache integration
         is useful if the connection to the relational database has high
         latency and the connection to memcache has significantly lower
@@ -367,12 +328,121 @@ cache-servers
         "127.0.0.1:11211" is a common setting.  The default is to disable
         memcache integration.
 
-cache-module-name
-
+``cache-module-name``
         Specifies which Python memcache module to use.  The default is
         "memcache", a pure Python module.  There are several alternative
         modules available through PyPI.  This setting has no effect unless
         cache-servers is set.
+
+Adapter Options
+===============
+
+Common Adapter Options
+----------------------
+
+All current RelStorage adapters support the following options.
+
+``keep-history``
+        If this parameter is set to true (the default), the adapter
+        will create and use a history-preserving database schema
+        like FileStorage. A history-preserving schema supports
+        ZODB-level undo, but also grows more quickly and requires extensive
+        packing on a regular basis.
+
+        If this parameter is set to false, the adapter will create and
+        use a history-free database schema. Undo will not be supported,
+        but the database will not grow as quickly. The database will
+        still require regular garbage collection (which is accessible
+        through the database pack mechanism.)
+
+        This parameter must not change once the database schema has
+        been installed, because the schemas for history-preserving and
+        history-free storage are different. If you want to convert
+        between a history-preserving and a history-free database, use
+        the ``zodbconvert`` utility to copy to a new database.
+
+``replica-conf``
+        If this parameter is provided, it specifies a text file that
+        contains a list of database replicas this adapter can choose
+        from. For MySQL and PostgreSQL, put in the replica file a list
+        of ``host:port`` or ``host`` values, one per line. For Oracle,
+        put in a list of DSN values. Blank lines and lines starting
+        with ``#`` are ignored.
+
+        The adapter prefers the first replica specified in the file. If
+        the first is not available, the adapter automatically tries the
+        rest of the replicas, in order. If the file changes, the
+        adapter will drop existing SQL database connections and make
+        new connections when ZODB starts a new transaction.
+
+
+PostgreSQL Adapter Options
+--------------------------
+
+In addition to the common options, the PostgreSQL adapter accepts:
+
+``dsn``
+    Specifies the data source name for connecting to PostgreSQL.
+    A PostgreSQL DSN is a list of parameters separated with
+    whitespace.  A typical DSN looks like::
+
+        dbname='zodb' user='username' host='localhost' password='pass'
+
+    If dsn is omitted, the adapter will connect to a local database with
+    no password.  Both the user and database name will match the
+    name of the owner of the current process.
+
+MySQL Adapter Options
+---------------------
+
+In addition to the common options, this adapter accepts most parameters
+supported by the MySQL-python library, including:
+
+``host``
+    string, host to connect
+``user``
+    string, user to connect as
+``passwd``
+    string, password to use
+``db``
+    string, database to use
+``port``
+    integer, TCP/IP port to connect to
+``unix_socket``
+    string, location of unix_socket (UNIX-ish only)
+``conv``
+    mapping, maps MySQL FIELD_TYPE.* to Python functions which convert a
+    string to the appropriate Python type
+``connect_timeout``
+    number of seconds to wait before the connection attempt fails.
+``compress``
+    if set, gzip compression is enabled
+``named_pipe``
+    if set, connect to server via named pipe (Windows only)
+``init_command``
+    command which is run once the connection is created
+``read_default_file``
+    see the MySQL documentation for mysql_options()
+``read_default_group``
+    see the MySQL documentation for mysql_options()
+``client_flag``
+    client flags from MySQLdb.constants.CLIENT
+``load_infile``
+    int, non-zero enables LOAD LOCAL INFILE, zero disables
+
+Oracle Adapter Options
+----------------------
+
+In addition to the common options, the Oracle adapter accepts:
+
+``user``
+        The Oracle account name
+``password``
+        The Oracle account password
+``dsn``
+        The Oracle data source name.  The Oracle client library will
+        normally expect to find the DSN in /etc/oratab.
+
 
 Development
 ===========
@@ -422,8 +492,12 @@ Q: Why should I choose RelStorage?
 Q: Can RelStorage replace ZRS (Zope Replication Services)?
 
     A: Yes, RelStorage inherits the asynchronous master/slave replication
-    capability of MySQL and other databases.  Currently looking for funding
-    opportunities to support master/master replication.
+    capability of MySQL and other databases.  The author is currently
+    looking for funding opportunities to support master/master replication.
+
+Q: How do I set up an environment to run the RelStorage tests?
+
+    A: See README.txt in the relstorage/tests directory.
 
 
 Project URLs

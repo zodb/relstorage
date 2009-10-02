@@ -38,7 +38,72 @@ class UseOracleAdapter:
             dsn=dsn,
             )
 
-class HPOracleTests(UseOracleAdapter, HistoryPreservingRelStorageTests):
+
+class ZConfigTests:
+
+    def checkConfigureViaZConfig(self):
+        import tempfile
+        dsn = os.environ.get('ORACLE_TEST_DSN', 'XE')
+        replica_conf = tempfile.NamedTemporaryFile()
+        try:
+            replica_conf.write(dsn)
+            replica_conf.flush()
+
+            if self.keep_history:
+                dbname = 'relstoragetest'
+            else:
+                dbname = 'relstoragetest_hf'
+            conf = """
+            %%import relstorage
+            <zodb main>
+              <relstorage>
+                <oracle>
+                  user %s
+                  password relstoragetest
+                  dsn %s
+                  keep-history %s
+                  replica-conf %s
+                </oracle>
+              </relstorage>
+            </zodb>
+            """ % (
+                dbname,
+                dsn,
+                self.keep_history and 'true' or 'false',
+                replica_conf.name,
+                )
+
+            schema_xml = """
+            <schema>
+            <import package="ZODB"/>
+            <section type="ZODB.database" name="main" attribute="database"/>
+            </schema>
+            """
+            import ZConfig
+            from StringIO import StringIO
+            schema = ZConfig.loadSchemaFile(StringIO(schema_xml))
+            config, handler = ZConfig.loadConfigFile(schema, StringIO(conf))
+
+            db = config.database.open()
+            try:
+                storage = db.storage
+                adapter = storage._adapter
+                from relstorage.adapters.oracle import OracleAdapter
+                self.assert_(isinstance(adapter, OracleAdapter))
+                self.assertEqual(adapter._user, dbname)
+                self.assertEqual(adapter._password, 'relstoragetest')
+                self.assertEqual(adapter._dsn, dsn)
+                self.assertEqual(adapter._twophase, False)
+                self.assertEqual(adapter.keep_history, self.keep_history)
+                self.assertEqual(adapter.replica_conf, replica_conf.name)
+            finally:
+                db.close()
+        finally:
+            replica_conf.close()
+
+
+class HPOracleTests(UseOracleAdapter, HistoryPreservingRelStorageTests,
+        ZConfigTests):
     pass
 
 class HPOracleToFile(UseOracleAdapter, HistoryPreservingToFileStorage):
@@ -47,7 +112,8 @@ class HPOracleToFile(UseOracleAdapter, HistoryPreservingToFileStorage):
 class HPOracleFromFile(UseOracleAdapter, HistoryPreservingFromFileStorage):
     pass
 
-class HFOracleTests(UseOracleAdapter, HistoryFreeRelStorageTests):
+class HFOracleTests(UseOracleAdapter, HistoryFreeRelStorageTests,
+        ZConfigTests):
     pass
 
 class HFOracleToFile(UseOracleAdapter, HistoryFreeToFileStorage):

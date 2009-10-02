@@ -35,7 +35,68 @@ class UsePostgreSQLAdapter:
             dsn='dbname=%s user=relstoragetest password=relstoragetest' % db
             )
 
-class HPPostgreSQLTests(UsePostgreSQLAdapter, HistoryPreservingRelStorageTests):
+
+class ZConfigTests:
+
+    def checkConfigureViaZConfig(self):
+        import tempfile
+        replica_conf = tempfile.NamedTemporaryFile()
+        try:
+            replica_conf.write("localhost")
+            replica_conf.flush()
+
+            if self.keep_history:
+                dbname = 'relstoragetest'
+            else:
+                dbname = 'relstoragetest_hf'
+            dsn = (
+                "dbname='%s' user='relstoragetest' password='relstoragetest'"
+                % dbname)
+            conf = """
+            %%import relstorage
+            <zodb main>
+              <relstorage>
+                <postgresql>
+                  dsn %s
+                  keep-history %s
+                  replica-conf %s
+                </postgresql>
+              </relstorage>
+            </zodb>
+            """ % (
+                dsn,
+                self.keep_history and 'true' or 'false',
+                replica_conf.name,
+                )
+
+            schema_xml = """
+            <schema>
+            <import package="ZODB"/>
+            <section type="ZODB.database" name="main" attribute="database"/>
+            </schema>
+            """
+            import ZConfig
+            from StringIO import StringIO
+            schema = ZConfig.loadSchemaFile(StringIO(schema_xml))
+            config, handler = ZConfig.loadConfigFile(schema, StringIO(conf))
+
+            db = config.database.open()
+            try:
+                storage = db.storage
+                adapter = storage._adapter
+                from relstorage.adapters.postgresql import PostgreSQLAdapter
+                self.assert_(isinstance(adapter, PostgreSQLAdapter))
+                self.assertEqual(adapter._dsn, dsn)
+                self.assertEqual(adapter.keep_history, self.keep_history)
+                self.assertEqual(adapter.replica_conf, replica_conf.name)
+            finally:
+                db.close()
+        finally:
+            replica_conf.close()
+
+
+class HPPostgreSQLTests(UsePostgreSQLAdapter, HistoryPreservingRelStorageTests,
+        ZConfigTests):
     pass
 
 class HPPostgreSQLToFile(UsePostgreSQLAdapter, HistoryPreservingToFileStorage):
@@ -45,7 +106,8 @@ class HPPostgreSQLFromFile(UsePostgreSQLAdapter,
         HistoryPreservingFromFileStorage):
     pass
 
-class HFPostgreSQLTests(UsePostgreSQLAdapter, HistoryFreeRelStorageTests):
+class HFPostgreSQLTests(UsePostgreSQLAdapter, HistoryFreeRelStorageTests,
+        ZConfigTests):
     pass
 
 class HFPostgreSQLToFile(UsePostgreSQLAdapter, HistoryFreeToFileStorage):

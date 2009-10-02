@@ -135,8 +135,7 @@
     </key>
   </sectiontype>
 
-  <sectiontype name="postgresql" implements="relstorage.adapter"
-    datatype=".PostgreSQLAdapterFactory">
+  <sectiontype name="relstorage.adapter.common">
     <key name="keep-history" datatype="boolean" default="true">
       <description>
         If this parameter is set to true (the default), the adapter
@@ -157,6 +156,26 @@
         zodbconvert utility to copy to a new database.
       </description>
     </key>
+    <key name="replica-conf" datatype="string" required="no">
+      <description>
+        If this parameter is provided, it specifies a text file that
+        contains a list of database replicas this adapter can choose
+        from. For MySQL and PostgreSQL, put in the replica file a list
+        of ``host:port`` or ``host`` values, one per line. For Oracle,
+        put in a list of DSN values. Blank lines and lines starting
+        with ``#`` are ignored.
+
+        The adapter prefers the first replica specified in the file. If
+        the first is not available, the adapter automatically tries the
+        rest of the replicas, in order. If the file changes, the
+        adapter will drop existing SQL database connections and make
+        new connections when ZODB starts a new transaction.
+      </description>
+    </key>
+  </sectiontype>
+
+  <sectiontype name="postgresql" implements="relstorage.adapter"
+    datatype=".PostgreSQLAdapterFactory" extends="relstorage.adapter.common">
     <key name="dsn" datatype="string" required="no" default="">
       <description>
         The PostgreSQL data source name.  For example:
@@ -171,28 +190,7 @@
   </sectiontype>
 
   <sectiontype name="oracle" implements="relstorage.adapter"
-    datatype=".OracleAdapterFactory">
-    <key name="keep-history" datatype="boolean" default="true">
-      <description>
-        If this parameter is set to true (the default), the adapter
-        will create and use a history-preserving database schema,
-        similar to FileStorage. A history-preserving schema supports
-        ZODB-level undo, but grows more quickly and requires extensive
-        packing on a regular basis.
-
-        If this parameter is set to false, the adapter will create and
-        use a history-free database schema. Undo will not be supported,
-        but the database will not grow as quickly. The database will
-        still require regular garbage collection (which is accessible
-        through the database pack mechanism.)
-
-        This parameter must not change once the database schema has
-        been installed. If you want to convert between a
-        history-preserving and a history-free database, use the
-        zodbconvert utility to copy to a new database.
-      </description>
-    </key>
-
+    datatype=".OracleAdapterFactory" extends="relstorage.adapter.common">
     <key name="user" datatype="string" required="yes">
       <description>
         The Oracle account name
@@ -212,29 +210,7 @@
   </sectiontype>
 
   <sectiontype name="mysql" implements="relstorage.adapter"
-    datatype=".MySQLAdapterFactory">
-
-    <key name="keep-history" datatype="boolean" default="true">
-      <description>
-        If this parameter is set to true (the default), the adapter
-        will create and use a history-preserving database schema,
-        similar to FileStorage. A history-preserving schema supports
-        ZODB-level undo, but grows more quickly and requires extensive
-        packing on a regular basis.
-
-        If this parameter is set to false, the adapter will create and
-        use a history-free database schema. Undo will not be supported,
-        but the database will not grow as quickly. The database will
-        still require regular garbage collection (which is accessible
-        through the database pack mechanism.)
-
-        This parameter must not change once the database schema has
-        been installed. If you want to convert between a
-        history-preserving and a history-free database, use the
-        zodbconvert utility to copy to a new database.
-      </description>
-    </key>
-
+    datatype=".MySQLAdapterFactory" extends="relstorage.adapter.common">
     <key name="host" datatype="string" required="no">
       <description>
         host to connect
