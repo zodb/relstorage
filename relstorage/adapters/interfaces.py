@@ -417,3 +417,7 @@ class ITransactionControl(Interface):
     def abort(conn, cursor, txn=None):
         """Abort the commit.  If txn is not None, phase 1 is also aborted."""
 
+
+class ReplicaClosedException(Exception):
+    """The connection to the replica has been closed"""
+

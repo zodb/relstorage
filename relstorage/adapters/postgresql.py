@@ -22,6 +22,7 @@ from relstorage.adapters.connmanager import AbstractConnectionManager
 from relstorage.adapters.dbiter import HistoryFreeDatabaseIterator
 from relstorage.adapters.dbiter import HistoryPreservingDatabaseIterator
 from relstorage.adapters.interfaces import IRelStorageAdapter
+from relstorage.adapters.interfaces import ReplicaClosedException
 from relstorage.adapters.locker import PostgreSQLLocker
 from relstorage.adapters.mover import ObjectMover
 from relstorage.adapters.oidallocator import PostgreSQLOIDAllocator
@@ -40,6 +41,7 @@ log = logging.getLogger(__name__)
 disconnected_exceptions = (
     psycopg2.OperationalError,
     psycopg2.InterfaceError,
+    ReplicaClosedException,
     )
 
 # close_exceptions contains the exception types to ignore
@@ -50,12 +52,14 @@ class PostgreSQLAdapter(object):
     """PostgreSQL adapter for RelStorage."""
     implements(IRelStorageAdapter)
 
-    def __init__(self, dsn='', keep_history=True):
-        self.keep_history = keep_history
+    def __init__(self, dsn='', keep_history=True, replica_conf=None):
         self._dsn = dsn
+        self.keep_history = keep_history
+        self.replica_conf = replica_conf
         self.connmanager = Psycopg2ConnectionManager(
             dsn=dsn,
             keep_history=self.keep_history,
+            replica_conf=replica_conf,
             )
         self.runner = ScriptRunner()
         self.locker = PostgreSQLLocker(
@@ -109,18 +113,27 @@ class PostgreSQLAdapter(object):
             )
 
     def new_instance(self):
-        # This adapter and its components are stateless, so it's
-        # safe to share it between threads.
-        return self
+        return PostgreSQLAdapter(
+            dsn=self._dsn, keep_history=self.keep_history,
+            replica_conf=self.replica_conf)
 
     def __str__(self):
+        parts = [self.__class__.__name__]
         if self.keep_history:
-            t = 'history preserving'
+            parts.append('history preserving')
         else:
-            t = 'history free'
-        parts = self._dsn.split()
-        s = ' '.join(p for p in parts if not p.startswith('password'))
-        return "%s, %s, dsn=%r" % (self.__class__.__name__, t, s)
+            parts.append('history free')
+        dsnparts = self._dsn.split()
+        s = ' '.join(p for p in dsnparts if not p.startswith('password'))
+        parts.append('dsn=%r' % s)
+        parts.append('replica_conf=%r' % self.replica_conf)
+        return ", ".join(parts)
+
+
+class Psycopg2Connection(psycopg2.extensions.connection):
+    # The replica attribute holds the name of the replica this
+    # connection is bound to.
+    __slots__ = ('replica',)
 
 
 class Psycopg2ConnectionManager(AbstractConnectionManager):
@@ -133,22 +146,53 @@ class Psycopg2ConnectionManager(AbstractConnectionManager):
     disconnected_exceptions = disconnected_exceptions
     close_exceptions = close_exceptions
 
-    def __init__(self, dsn, keep_history):
+    def __init__(self, dsn, keep_history, replica_conf=None):
+        self._orig_dsn = dsn
         self._dsn = dsn
         self.keep_history = keep_history
+        self._current_replica = None
+        super(Psycopg2ConnectionManager, self).__init__(
+            replica_conf=replica_conf)
+
+    def _set_dsn(self, replica):
+        """Alter the DSN to use the specified replica.
+
+        The replica parameter is a string specifying either host or host:port.
+        """
+        if replica != self._current_replica:
+            if ':' in replica:
+                host, port = replica.split(':')
+                self._dsn = self._orig_dsn + ' host=%s port=%s' % (host, port)
+            else:
+                self._dsn = self._orig_dsn + ' host=%s' % replica
+            self._current_replica = replica
 
     def open(self,
             isolation=psycopg2.extensions.ISOLATION_LEVEL_READ_COMMITTED):
         """Open a database connection and return (conn, cursor)."""
-        try:
-            conn = psycopg2.connect(self._dsn)
-            conn.set_isolation_level(isolation)
-            cursor = conn.cursor()
-            cursor.arraysize = 64
-        except psycopg2.OperationalError, e:
-            log.warning("Unable to connect: %s", e)
-            raise
-        return conn, cursor
+        if self.replicas is not None:
+            self._set_dsn(self.replicas.current())
+        while True:
+            try:
+                conn = Psycopg2Connection(self._dsn)
+                conn.set_isolation_level(isolation)
+                cursor = conn.cursor()
+                cursor.arraysize = 64
+                conn.replica = self._current_replica
+                return conn, cursor
+            except psycopg2.OperationalError, e:
+                if self._current_replica:
+                    log.warning("Unable to connect to replica %s: %s",
+                        self._current_replica, e)
+                else:
+                    log.warning("Unable to connect: %s", e)
+                if self.replicas is not None:
+                    replica = self.replicas.next()
+                    if replica is not None:
+                        # try the new replica
+                        self._set_dsn(replica)
+                        continue
+                raise
 
     def open_for_load(self):
         """Open and initialize a connection for loading objects.

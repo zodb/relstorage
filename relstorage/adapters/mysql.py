@@ -56,6 +56,7 @@ from relstorage.adapters.connmanager import AbstractConnectionManager
 from relstorage.adapters.dbiter import HistoryFreeDatabaseIterator
 from relstorage.adapters.dbiter import HistoryPreservingDatabaseIterator
 from relstorage.adapters.interfaces import IRelStorageAdapter
+from relstorage.adapters.interfaces import ReplicaClosedException
 from relstorage.adapters.locker import MySQLLocker
 from relstorage.adapters.mover import ObjectMover
 from relstorage.adapters.oidallocator import MySQLOIDAllocator
@@ -71,7 +72,11 @@ log = logging.getLogger(__name__)
 
 # disconnected_exceptions contains the exception types that might be
 # raised when the connection to the database has been broken.
-disconnected_exceptions = (MySQLdb.OperationalError, MySQLdb.InterfaceError)
+disconnected_exceptions = (
+    MySQLdb.OperationalError,
+    MySQLdb.InterfaceError,
+    ReplicaClosedException,
+    )
 
 # close_exceptions contains the exception types to ignore
 # when the adapter attempts to close a database connection.
@@ -85,7 +90,7 @@ class MySQLAdapter(object):
     def __init__(self, keep_history=True, **params):
         self.keep_history = keep_history
         self._params = params
-        self.connmanager = MySQLdbConnectionManager(params)
+        self.connmanager = MySQLdbConnectionManager(**params)
         self.runner = ScriptRunner()
         self.locker = MySQLLocker(
             keep_history=self.keep_history,
@@ -142,9 +147,7 @@ class MySQLAdapter(object):
             )
 
     def new_instance(self):
-        # This adapter and its components are stateless, so it's
-        # safe to share it between threads.
-        return self
+        return MySQLAdapter(keep_history=self.keep_history, **self._params)
 
     def __str__(self):
         if self.keep_history:
@@ -168,23 +171,58 @@ class MySQLdbConnectionManager(AbstractConnectionManager):
     disconnected_exceptions = disconnected_exceptions
     close_exceptions = close_exceptions
 
-    def __init__(self, params):
-        self._params = params.copy()
+    def __init__(self, replica_conf=None, **params):
+        self._orig_params = params.copy()
+        self._params = self._orig_params
+        self._current_replica = None
+        super(MySQLdbConnectionManager, self).__init__(
+            replica_conf=replica_conf)
+
+    def _set_params(self, replica):
+        """Alter the connection parameters to use the specified replica.
+
+        The replica parameter is a string specifying either host or host:port.
+        """
+        if replica != self._current_replica:
+            params = self._orig_params.copy()
+            if ':' in replica:
+                host, port = replica.split(':')
+                params['host'] = host
+                params['port'] = int(port)
+            else:
+                params['host'] = replica
+            self._current_replica = replica
+            self._params = params
 
     def open(self, transaction_mode="ISOLATION LEVEL READ COMMITTED"):
         """Open a database connection and return (conn, cursor)."""
-        try:
-            conn = MySQLdb.connect(**self._params)
-            cursor = conn.cursor()
-            cursor.arraysize = 64
-            if transaction_mode:
-                conn.autocommit(True)
-                cursor.execute("SET SESSION TRANSACTION %s" % transaction_mode)
-                conn.autocommit(False)
-            return conn, cursor
-        except MySQLdb.OperationalError, e:
-            log.warning("Unable to connect: %s", e)
-            raise
+        if self.replicas is not None:
+            self._set_params(self.replicas.current())
+        while True:
+            try:
+                conn = MySQLdb.connect(**self._params)
+                cursor = conn.cursor()
+                cursor.arraysize = 64
+                if transaction_mode:
+                    conn.autocommit(True)
+                    cursor.execute(
+                        "SET SESSION TRANSACTION %s" % transaction_mode)
+                    conn.autocommit(False)
+                conn.replica = self._current_replica
+                return conn, cursor
+            except MySQLdb.OperationalError, e:
+                if self._current_replica:
+                    log.warning("Unable to connect to replica %s: %s",
+                        self._current_replica, e)
+                else:
+                    log.warning("Unable to connect: %s", e)
+                if self.replicas is not None:
+                    replica = self.replicas.next()
+                    if replica is not None:
+                        # try the new replica
+                        self._set_params(replica)
+                        continue
+                raise
 
     def open_for_load(self):
         """Open and initialize a connection for loading objects.

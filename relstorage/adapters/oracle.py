@@ -21,6 +21,7 @@ from relstorage.adapters.connmanager import AbstractConnectionManager
 from relstorage.adapters.dbiter import HistoryFreeDatabaseIterator
 from relstorage.adapters.dbiter import HistoryPreservingDatabaseIterator
 from relstorage.adapters.interfaces import IRelStorageAdapter
+from relstorage.adapters.interfaces import ReplicaClosedException
 from relstorage.adapters.locker import OracleLocker
 from relstorage.adapters.mover import ObjectMover
 from relstorage.adapters.oidallocator import OracleOIDAllocator
@@ -40,6 +41,7 @@ disconnected_exceptions = (
     cx_Oracle.OperationalError,
     cx_Oracle.InterfaceError,
     cx_Oracle.DatabaseError,
+    ReplicaClosedException,
     )
 
 # close_exceptions contains the exception types to ignore
@@ -50,8 +52,8 @@ class OracleAdapter(object):
     """Oracle adapter for RelStorage."""
     implements(IRelStorageAdapter)
 
-    def __init__(self, user, password, dsn, twophase=False, arraysize=64,
-            use_inline_lobs=None, keep_history=True):
+    def __init__(self, user, password, dsn, twophase=False,
+            keep_history=True, replica_conf=None):
         """Create an Oracle adapter.
 
         The user, password, and dsn parameters are provided to cx_Oracle
@@ -60,28 +62,22 @@ class OracleAdapter(object):
         If twophase is true, all commits go through an Oracle-level two-phase
         commit process.  This is disabled by default.  Even when this option
         is disabled, the ZODB two-phase commit is still in effect.
-
-        arraysize sets the number of rows to buffer in cx_Oracle.  The default
-        is 64.
-
-        use_inline_lobs enables Oracle to send BLOBs inline in response to
-        queries.  It depends on features in cx_Oracle 5.  The default is None,
-        telling the adapter to auto-detect the presence of cx_Oracle 5.
         """
-        if use_inline_lobs is None:
-            use_inline_lobs = (cx_Oracle.version >= '5.0')
-        self.keep_history = keep_history
         self._user = user
+        self._password = password
         self._dsn = dsn
+        self._twophase = twophase
+        self.keep_history = keep_history
+        self.replica_conf = replica_conf
 
         self.connmanager = CXOracleConnectionManager(
-            params=(user, password, dsn),
-            arraysize=arraysize,
+            user=user,
+            password=password,
+            dsn=dsn,
             twophase=twophase,
+            replica_conf=replica_conf,
             )
-        self.runner = CXOracleScriptRunner(
-            use_inline_lobs=use_inline_lobs,
-            )
+        self.runner = CXOracleScriptRunner()
         self.locker = OracleLocker(
             keep_history=self.keep_history,
             lock_exceptions=(cx_Oracle.DatabaseError,),
@@ -145,21 +141,32 @@ class OracleAdapter(object):
     def new_instance(self):
         # This adapter and its components are stateless, so it's
         # safe to share it between threads.
-        return self
+        return OracleAdapter(
+            user=self._user,
+            password=self._password,
+            dsn=self._dsn,
+            twophase=self._twophase,
+            keep_history=self.keep_history,
+            replica_conf=self.replica_conf,
+            )
 
     def __str__(self):
+        parts = [self.__class__.__name__]
         if self.keep_history:
-            t = 'history preserving'
+            parts.append('history preserving')
         else:
-            t = 'history free'
-        return "%s, %s, user=%r, dsn=%r" % (
-            self.__class__.__name__, t, self._user, self._dsn)
+            parts.append('history free')
+        parts.append('user=%r' % self._user)
+        parts.append('dsn=%r' % self._dsn)
+        parts.append('twophase=%r' % self._twophase)
+        parts.append('replica_conf=%r' % self.replica_conf)
+        return ", ".join(parts)
 
 
 class CXOracleScriptRunner(OracleScriptRunner):
 
-    def __init__(self, use_inline_lobs):
-        self.use_inline_lobs = use_inline_lobs
+    def __init__(self):
+        self.use_inline_lobs = (cx_Oracle.version >= '5.0')
 
     def _outputtypehandler(self,
             cursor, name, defaultType, size, precision, scale):
@@ -225,26 +232,39 @@ class CXOracleConnectionManager(AbstractConnectionManager):
     disconnected_exceptions = disconnected_exceptions
     close_exceptions = close_exceptions
 
-    def __init__(self, params, arraysize, twophase):
-        self._params = params
-        self._arraysize = arraysize
+    def __init__(self, user, password, dsn, twophase, replica_conf=None):
+        self._user = user
+        self._password = password
+        self._dsn = dsn
         self._twophase = twophase
+        super(CXOracleConnectionManager, self).__init__(
+            replica_conf=replica_conf)
 
     def open(self, transaction_mode="ISOLATION LEVEL READ COMMITTED",
             twophase=False):
         """Open a database connection and return (conn, cursor)."""
-        try:
-            kw = {'twophase': twophase}  #, 'threaded': True}
-            conn = cx_Oracle.connect(*self._params, **kw)
-            cursor = conn.cursor()
-            cursor.arraysize = self._arraysize
-            if transaction_mode:
-                cursor.execute("SET TRANSACTION %s" % transaction_mode)
-            return conn, cursor
+        if self.replicas is not None:
+            self._dsn = self.replicas.current()
+        while True:
+            try:
+                kw = {'twophase': twophase}  #, 'threaded': True}
+                conn = cx_Oracle.connect(
+                    self._user, self._password, self._dsn, **kw)
+                cursor = conn.cursor()
+                cursor.arraysize = 64
+                if transaction_mode:
+                    cursor.execute("SET TRANSACTION %s" % transaction_mode)
+                return conn, cursor
 
-        except cx_Oracle.OperationalError, e:
-            log.warning("Unable to connect: %s", e)
-            raise
+            except cx_Oracle.OperationalError, e:
+                log.warning("Unable to connect to DSN %s: %s", self._dsn, e)
+                if self.replicas is not None:
+                    replica = self.replicas.next()
+                    if replica is not None:
+                        # try the new replica
+                        self._dsn = replica
+                        continue
+                raise
 
     def open_for_load(self):
         """Open and initialize a connection for loading objects.
@@ -255,6 +275,11 @@ class CXOracleConnectionManager(AbstractConnectionManager):
 
     def restart_load(self, conn, cursor):
         """Reinitialize a connection for loading objects."""
+        if self.replicas is not None:
+            if conn.dsn != self.replicas.current():
+                # Prompt the change to a new replica by raising an exception.
+                self.close(conn, cursor)
+                raise ReplicaClosedException()
         conn.rollback()
         cursor.execute("SET TRANSACTION READ ONLY")
 
@@ -288,6 +313,11 @@ class CXOracleConnectionManager(AbstractConnectionManager):
 
     def restart_store(self, conn, cursor):
         """Reuse a store connection."""
+        if self.replicas is not None:
+            if conn.dsn != self.replicas.current():
+                # Prompt the change to a new replica by raising an exception.
+                self.close(conn, cursor)
+                raise ReplicaClosedException()
         conn.rollback()
         if self._twophase:
             self._set_xid(conn, cursor)
