@@ -32,15 +32,15 @@ class IRelStorageAdapter(Interface):
     stats = Attribute("An IStats")
     txncontrol = Attribute("An ITransactionControl")
 
-    def new_instance(self):
+    def new_instance():
         """Return an instance for use by another RelStorage instance.
 
         Adapters that are stateless can simply return self.  Adapters
         that have mutable state must make a clone and return it.
         """
 
-    def __str__(self):
-        """A short description of the adapter"""
+    def __str__():
+        """Return a short description of the adapter"""
 
 
 class IConnectionManager(Interface):
