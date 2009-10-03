@@ -15,23 +15,24 @@
       <description>
         If true, only reads may be executed against the storage.  Note
         that the "pack" operation is not considered a write operation
-        and is still allowed on a read-only filestorage.
+        and is still allowed on a read-only storage.
       </description>
     </key>
     <key name="blob-dir" required="no">
       <description>
-        If supplied, the storage will provide blob support and this
-        is the name of a directory to hold blob data.  The directory will
-        be created if it doeesn't exist.  If no value (or an empty value)
-        is provided, then no blob support will be provided.
+        If supplied, the storage will provide blob support; this
+        parameter specifies the name of the directory to hold blob data.
+        The directory will be created if it doeesn't exist. If no value
+        (or an empty value) is provided, then no blob support will be
+        provided.
       </description>
     </key>
     <key name="keep-history" datatype="boolean" default="true">
       <description>
         If this parameter is set to true (the default), the adapter
-        will create and use a history-preserving database schema,
-        similar to FileStorage. A history-preserving schema supports
-        ZODB-level undo, but grows more quickly and requires extensive
+        will create and use a history-preserving database schema
+        (like FileStorage). A history-preserving schema supports
+        ZODB-level undo, but also grows more quickly and requires extensive
         packing on a regular basis.
 
         If this parameter is set to false, the adapter will create and
@@ -41,9 +42,10 @@
         through the database pack mechanism.)
 
         This parameter must not change once the database schema has
-        been installed. If you want to convert between a
-        history-preserving and a history-free database, use the
-        zodbconvert utility to copy to a new database.
+        been installed, because the schemas for history-preserving and
+        history-free storage are different. If you want to convert
+        between a history-preserving and a history-free database, use
+        the ``zodbconvert`` utility to copy to a new database.
       </description>
     </key>
     <key name="replica-conf" datatype="string" required="no">

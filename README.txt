@@ -243,25 +243,26 @@ Specify these options in zope.conf, as parameters for the
 underscores instead of dashes in the parameter names.
 
 ``name``
-        The name of the storage.  Defaults to a descriptive name
-        that includes most of the adapter configuration parameters
-        except the database password.
+        The name of the storage. Defaults to a descriptive name that
+        includes the adapter connection parameters, except the database
+        password.
 
 ``read-only``
         If true, only reads may be executed against the storage.  Note
         that the "pack" operation is not considered a write operation
-        and is still allowed on a read-only filestorage.
+        and is still allowed on a read-only storage.
 
 ``blob-dir``
-        If supplied, the storage will provide blob support and this
-        is the name of a directory to hold blob data.  The directory will
-        be created if it doeesn't exist.  If no value (or an empty value)
-        is provided, then no blob support will be provided.
+        If supplied, the storage will provide blob support; this
+        parameter specifies the name of the directory to hold blob data.
+        The directory will be created if it doeesn't exist. If no value
+        (or an empty value) is provided, then no blob support will be
+        provided.
 
 ``keep-history``
         If this parameter is set to true (the default), the adapter
         will create and use a history-preserving database schema
-        like FileStorage. A history-preserving schema supports
+        (like FileStorage). A history-preserving schema supports
         ZODB-level undo, but also grows more quickly and requires extensive
         packing on a regular basis.
 
@@ -389,7 +390,7 @@ Adapter Options
 PostgreSQL Adapter Options
 --------------------------
 
-In addition to the common options, the PostgreSQL adapter accepts:
+The PostgreSQL adapter accepts:
 
 ``dsn``
     Specifies the data source name for connecting to PostgreSQL.
@@ -405,8 +406,8 @@ In addition to the common options, the PostgreSQL adapter accepts:
 MySQL Adapter Options
 ---------------------
 
-In addition to the common options, this adapter accepts most parameters
-supported by the MySQL-python library, including:
+The MySQL adapter accepts most parameters supported by the MySQL-python
+library, including:
 
 ``host``
     string, host to connect
@@ -443,7 +444,7 @@ supported by the MySQL-python library, including:
 Oracle Adapter Options
 ----------------------
 
-In addition to the common options, the Oracle adapter accepts:
+The Oracle adapter accepts:
 
 ``user``
         The Oracle account name
