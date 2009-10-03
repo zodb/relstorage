@@ -32,6 +32,7 @@ from BTrees.IOBTree import IOBTree
 from ZODB.DB import DB
 from ZODB.Connection import Connection
 
+from relstorage.options import Options
 from relstorage.storage import RelStorage
 
 debug = False
@@ -201,7 +202,8 @@ class SpeedTest:
         else:
             db = 'relstoragetest_hf'
         dsn = 'dbname=%s user=relstoragetest password=relstoragetest' % db
-        adapter = PostgreSQLAdapter(dsn=dsn, keep_history=keep_history)
+        options = Options(keep_history=keep_history)
+        adapter = PostgreSQLAdapter(dsn=dsn, options=)
         adapter.schema.prepare()
         adapter.schema.zap_all()
         def make_storage():
@@ -215,11 +217,12 @@ class SpeedTest:
             db = 'relstoragetest'
         else:
             db = 'relstoragetest_hf'
+        options = Options(keep_history=keep_history)
         adapter = OracleAdapter(
             user=db,
             password='relstoragetest',
             dsn=dsn,
-            keep_history=keep_history,
+            options=options,
             )
         adapter.schema.prepare()
         adapter.schema.zap_all()
@@ -233,11 +236,12 @@ class SpeedTest:
             db = 'relstoragetest'
         else:
             db = 'relstoragetest_hf'
+        options = Options(keep_history=keep_history)
         adapter = MySQLAdapter(
+            options=options,
             db=db,
             user='relstoragetest',
             passwd='relstoragetest',
-            keep_history=keep_history,
             )
         adapter.schema.prepare()
         adapter.schema.zap_all()
