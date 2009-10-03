@@ -1,0 +1,90 @@
+#
+# The MySQL database server configuration file.
+#
+[client]
+socket          = ${datadir}/mysqld.sock
+port            = ${port}
+
+[mysqld_safe]
+socket          = ${datadir}/mysqld.sock
+nice            = 0
+
+[mysqld]
+#
+# * Basic Settings
+#
+
+socket          = ${datadir}/mysqld.sock
+port            = ${port}
+pid-file        = ${datadir}/mysqld.pid
+basedir         = ${mysql:location}
+datadir         = ${datadir}
+tmpdir          = /tmp
+skip-external-locking
+bind-address            = 127.0.0.1
+
+#
+# * Fine Tuning
+#
+key_buffer              = 16M
+max_allowed_packet      = 32M
+thread_stack            = 128K
+thread_cache_size       = 8
+myisam-recover          = BACKUP
+#max_connections        = 100
+#table_cache            = 64
+#thread_concurrency     = 10
+
+#
+# * Query Cache Configuration
+#
+query_cache_limit       = 1M
+query_cache_size        = 16M
+
+#
+# * Logging and Replication
+#
+# Both location gets rotated by the cronjob.
+# Be aware that this log type is a performance killer.
+#log            = ${logdir}/mysql.log
+#
+# Error logging goes to syslog. This is a Debian improvement :)
+#
+# Here you can see queries with especially long duration
+#log_slow_queries       = ${logdir}/mysql-slow.log
+#long_query_time = 2
+#log-queries-not-using-indexes
+#
+# The following can be used as easy to replay backup logs or for replication.
+server-id               = ${server-id}
+log_bin                 = ${datadir}/mysql-bin.log
+binlog_format           = ROW
+read_only               = ${read-only}
+expire_logs_days        = 10
+max_binlog_size         = 100M
+sync_binlog             = 1
+#binlog_do_db           = include_database_name
+#binlog_ignore_db       = include_database_name
+
+#
+# * InnoDB
+#
+innodb_data_file_path = ibdata1:10M:autoextend
+innodb_buffer_pool_size=64M
+innodb_log_file_size=16M
+innodb_log_buffer_size=8M
+innodb_flush_log_at_trx_commit=1
+innodb_file_per_table
+innodb_locks_unsafe_for_binlog=1
+
+
+[mysqldump]
+quick
+quote-names
+max_allowed_packet      = 32M
+
+[mysql]
+#no-auto-rehash # faster start of mysql but no tab completion
+
+[isamchk]
+key_buffer              = 16M
