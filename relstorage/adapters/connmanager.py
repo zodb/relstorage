@@ -14,9 +14,8 @@
 
 from relstorage.adapters.interfaces import IConnectionManager
 from relstorage.adapters.interfaces import ReplicaClosedException
+from relstorage.adapters.replica import ReplicaSelector
 from zope.interface import implements
-import os
-import time
 
 
 class AbstractConnectionManager(object):
@@ -38,11 +37,12 @@ class AbstractConnectionManager(object):
     # will be called whenever a store cursor is opened or rolled back.
     on_store_opened = None
 
-    def __init__(self, replica_conf=None):
-        if replica_conf:
-            self.replicas = ReplicaSelector(replica_conf)
+    def __init__(self, options=None):
+        # options is a relstorage.options.Options instance
+        if options is not None and options.replica_conf:
+            self.replica_selector = ReplicaSelector(options)
         else:
-            self.replicas = None
+            self.replica_selector = None
 
     def set_on_store_opened(self, f):
         """Set the on_store_opened hook"""
@@ -88,12 +88,18 @@ class AbstractConnectionManager(object):
 
     def restart_load(self, conn, cursor):
         """Reinitialize a connection for loading objects."""
-        if self.replicas is not None:
-            if conn.replica != self.replicas.current():
+        self.check_replica(conn, cursor)
+        conn.rollback()
+
+    def check_replica(self, conn, cursor):
+        """Raise an exception if the connection belongs to an old replica"""
+        if self.replica_selector is not None:
+            current = self.replica_selector.current()
+            if conn.replica != current:
                 # Prompt the change to a new replica by raising an exception.
                 self.close(conn, cursor)
-                raise ReplicaClosedException()
-        conn.rollback()
+                raise ReplicaClosedException(
+                    "Switched replica from %s to %s" % (conn.replica, current))
 
     def open_for_store(self):
         """Open and initialize a connection for storing objects.
@@ -111,11 +117,7 @@ class AbstractConnectionManager(object):
 
     def restart_store(self, conn, cursor):
         """Reuse a store connection."""
-        if self.replicas is not None:
-            if conn.replica != self.replicas.current():
-                # Prompt the change to a new replica by raising an exception.
-                self.close(conn, cursor)
-                raise ReplicaClosedException()
+        self.check_replica(conn, cursor)
         conn.rollback()
         if self.on_store_opened is not None:
             self.on_store_opened(cursor, restart=True)
@@ -126,95 +128,3 @@ class AbstractConnectionManager(object):
         """
         return self.open()
 
-
-class ReplicaSelector(object):
-
-    def __init__(self, replica_conf, alt_timeout=600):
-        self.replica_conf = replica_conf
-        self.alt_timeout = alt_timeout
-        self._read_config()
-        self._select(0)
-        self._iterating = False
-        self._skip_index = None
-
-    def _read_config(self):
-        self._config_modified = os.path.getmtime(self.replica_conf)
-        self._config_checked = time.time()
-        f = open(self.replica_conf, 'r')
-        try:
-            lines = f.readlines()
-        finally:
-            f.close()
-        replicas = []
-        for line in lines:
-            line = line.strip()
-            if not line or line.startswith('#'):
-                continue
-            replicas.append(line)
-        if not replicas:
-            raise IndexError(
-                "No replicas specified in %s" % self.replica_conf)
-        self._replicas = replicas
-
-    def _is_config_modified(self):
-        now = time.time()
-        if now < self._config_checked + 1:
-            # don't check the last mod time more often than once per second
-            return False
-        self._config_checked = now
-        t = os.path.getmtime(self.replica_conf)
-        return t != self._config_modified
-
-    def _select(self, index):
-        self._current_replica = self._replicas[index]
-        self._current_index = index
-        if index > 0 and self.alt_timeout:
-            self._expiration = time.time() + self.alt_timeout
-        else:
-            self._expiration = None
-
-    def current(self):
-        """Get the current replica."""
-        self._iterating = False
-        if self._is_config_modified():
-            self._read_config()
-            self._select(0)
-        elif self._expiration is not None and time.time() >= self._expiration:
-            self._select(0)
-        return self._current_replica
-
-    def next(self):
-        """Return the next replica to try.
-
-        Return None if there are no more replicas defined.
-        """
-        if self._is_config_modified():
-            # Start over even if iteration was already in progress.
-            self._read_config()
-            self._select(0)
-            self._skip_index = None
-            self._iterating = True
-        elif not self._iterating:
-            # Start iterating.
-            self._skip_index = self._current_index
-            i = 0
-            if i == self._skip_index:
-                i = 1
-                if i >= len(self._replicas):
-                    # There are no more replicas to try.
-                    self._select(0)
-                    return None
-            self._select(i)
-            self._iterating = True
-        else:
-            # Continue iterating.
-            i = self._current_index + 1
-            if i == self._skip_index:
-                i += 1
-            if i >= len(self._replicas):
-                # There are no more replicas to try.
-                self._select(0)
-                return None
-            self._select(i)
-
-        return self._current_replica

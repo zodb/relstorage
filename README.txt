@@ -242,11 +242,60 @@ Specify these options in zope.conf, as parameters for the
 ``relstorage.storage.Options`` instance. In the latter two cases, use
 underscores instead of dashes in the parameter names.
 
+``name``
+        The name of the storage.  Defaults to a descriptive name
+        that includes most of the adapter configuration parameters
+        except the database password.
+
+``read-only``
+        If true, only reads may be executed against the storage.  Note
+        that the "pack" operation is not considered a write operation
+        and is still allowed on a read-only filestorage.
+
 ``blob-dir``
         If supplied, the storage will provide blob support and this
         is the name of a directory to hold blob data.  The directory will
         be created if it doeesn't exist.  If no value (or an empty value)
         is provided, then no blob support will be provided.
+
+``keep-history``
+        If this parameter is set to true (the default), the adapter
+        will create and use a history-preserving database schema
+        like FileStorage. A history-preserving schema supports
+        ZODB-level undo, but also grows more quickly and requires extensive
+        packing on a regular basis.
+
+        If this parameter is set to false, the adapter will create and
+        use a history-free database schema. Undo will not be supported,
+        but the database will not grow as quickly. The database will
+        still require regular garbage collection (which is accessible
+        through the database pack mechanism.)
+
+        This parameter must not change once the database schema has
+        been installed, because the schemas for history-preserving and
+        history-free storage are different. If you want to convert
+        between a history-preserving and a history-free database, use
+        the ``zodbconvert`` utility to copy to a new database.
+
+``replica-conf``
+        If this parameter is provided, it specifies a text file that
+        contains a list of database replicas the adapter can choose
+        from. For MySQL and PostgreSQL, put in the replica file a list
+        of ``host:port`` or ``host`` values, one per line. For Oracle,
+        put in a list of DSN values. Blank lines and lines starting
+        with ``#`` are ignored.
+
+        The adapter prefers the first replica specified in the file. If
+        the first is not available, the adapter automatically tries the
+        rest of the replicas, in order. If the file changes, the
+        adapter will drop existing SQL database connections and make
+        new connections when ZODB starts a new transaction.
+
+``replica-timeout``
+        If this parameter has a nonzero value, when the adapter selects
+        a replica other than the primary replica, the adapter will
+        try to revert to the primary replica after the specified
+        timeout (in seconds).  The default is 600, meaning 10 minutes.
 
 ``poll-interval``
         Defer polling the database for the specified maximum time interval,
@@ -336,45 +385,6 @@ underscores instead of dashes in the parameter names.
 
 Adapter Options
 ===============
-
-Common Adapter Options
-----------------------
-
-All current RelStorage adapters support the following options.
-
-``keep-history``
-        If this parameter is set to true (the default), the adapter
-        will create and use a history-preserving database schema
-        like FileStorage. A history-preserving schema supports
-        ZODB-level undo, but also grows more quickly and requires extensive
-        packing on a regular basis.
-
-        If this parameter is set to false, the adapter will create and
-        use a history-free database schema. Undo will not be supported,
-        but the database will not grow as quickly. The database will
-        still require regular garbage collection (which is accessible
-        through the database pack mechanism.)
-
-        This parameter must not change once the database schema has
-        been installed, because the schemas for history-preserving and
-        history-free storage are different. If you want to convert
-        between a history-preserving and a history-free database, use
-        the ``zodbconvert`` utility to copy to a new database.
-
-``replica-conf``
-        If this parameter is provided, it specifies a text file that
-        contains a list of database replicas this adapter can choose
-        from. For MySQL and PostgreSQL, put in the replica file a list
-        of ``host:port`` or ``host`` values, one per line. For Oracle,
-        put in a list of DSN values. Blank lines and lines starting
-        with ``#`` are ignored.
-
-        The adapter prefers the first replica specified in the file. If
-        the first is not available, the adapter automatically tries the
-        rest of the replicas, in order. If the file changes, the
-        adapter will drop existing SQL database connections and make
-        new connections when ZODB starts a new transaction.
-
 
 PostgreSQL Adapter Options
 --------------------------

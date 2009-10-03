@@ -52,14 +52,18 @@ class PostgreSQLAdapter(object):
     """PostgreSQL adapter for RelStorage."""
     implements(IRelStorageAdapter)
 
-    def __init__(self, dsn='', keep_history=True, replica_conf=None):
+    def __init__(self, dsn='', options=None):
+        # options is a relstorage.options.Options or None
         self._dsn = dsn
-        self.keep_history = keep_history
-        self.replica_conf = replica_conf
+        self.options = options
+        if options is not None:
+            self.keep_history = options.keep_history
+        else:
+            self.keep_history = True
         self.connmanager = Psycopg2ConnectionManager(
             dsn=dsn,
+            options=options,
             keep_history=self.keep_history,
-            replica_conf=replica_conf,
             )
         self.runner = ScriptRunner()
         self.locker = PostgreSQLLocker(
@@ -113,9 +117,7 @@ class PostgreSQLAdapter(object):
             )
 
     def new_instance(self):
-        return PostgreSQLAdapter(
-            dsn=self._dsn, keep_history=self.keep_history,
-            replica_conf=self.replica_conf)
+        return PostgreSQLAdapter(dsn=self._dsn, options=self.options)
 
     def __str__(self):
         parts = [self.__class__.__name__]
@@ -126,7 +128,6 @@ class PostgreSQLAdapter(object):
         dsnparts = self._dsn.split()
         s = ' '.join(p for p in dsnparts if not p.startswith('password'))
         parts.append('dsn=%r' % s)
-        parts.append('replica_conf=%r' % self.replica_conf)
         return ", ".join(parts)
 
 
@@ -146,48 +147,53 @@ class Psycopg2ConnectionManager(AbstractConnectionManager):
     disconnected_exceptions = disconnected_exceptions
     close_exceptions = close_exceptions
 
-    def __init__(self, dsn, keep_history, replica_conf=None):
+    def __init__(self, dsn, options=None, keep_history=True):
         self._orig_dsn = dsn
         self._dsn = dsn
         self.keep_history = keep_history
-        self._current_replica = None
-        super(Psycopg2ConnectionManager, self).__init__(
-            replica_conf=replica_conf)
+        # _dsn_derived_from_replica contains the replica that
+        # was used to set self._dsn.
+        self._dsn_derived_from_replica = None
+        super(Psycopg2ConnectionManager, self).__init__(options)
 
     def _set_dsn(self, replica):
         """Alter the DSN to use the specified replica.
 
         The replica parameter is a string specifying either host or host:port.
         """
-        if replica != self._current_replica:
+        if replica != self._dsn_derived_from_replica:
             if ':' in replica:
                 host, port = replica.split(':')
                 self._dsn = self._orig_dsn + ' host=%s port=%s' % (host, port)
             else:
                 self._dsn = self._orig_dsn + ' host=%s' % replica
-            self._current_replica = replica
+            self._dsn_derived_from_replica = replica
 
     def open(self,
             isolation=psycopg2.extensions.ISOLATION_LEVEL_READ_COMMITTED):
         """Open a database connection and return (conn, cursor)."""
-        if self.replicas is not None:
-            self._set_dsn(self.replicas.current())
+        if self.replica_selector is not None:
+            replica = self.replica_selector.current()
+            self._set_dsn(replica)
+        else:
+            replica = None
+
         while True:
             try:
                 conn = Psycopg2Connection(self._dsn)
                 conn.set_isolation_level(isolation)
                 cursor = conn.cursor()
                 cursor.arraysize = 64
-                conn.replica = self._current_replica
+                conn.replica = replica
                 return conn, cursor
             except psycopg2.OperationalError, e:
-                if self._current_replica:
+                if replica is not None:
                     log.warning("Unable to connect to replica %s: %s",
-                        self._current_replica, e)
+                        replica, e)
                 else:
                     log.warning("Unable to connect: %s", e)
-                if self.replicas is not None:
-                    replica = self.replicas.next()
+                if self.replica_selector is not None:
+                    replica = self.replica_selector.next()
                     if replica is not None:
                         # try the new replica
                         self._set_dsn(replica)

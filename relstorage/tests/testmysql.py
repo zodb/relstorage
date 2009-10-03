@@ -13,6 +13,7 @@
 ##############################################################################
 """Tests of relstorage.adapters.mysql"""
 
+from relstorage.options import Options
 from relstorage.tests.hftestbase import HistoryFreeFromFileStorage
 from relstorage.tests.hftestbase import HistoryFreeRelStorageTests
 from relstorage.tests.hftestbase import HistoryFreeToFileStorage
@@ -31,7 +32,7 @@ class UseMySQLAdapter:
         else:
             db = 'relstoragetest_hf'
         return MySQLAdapter(
-            keep_history=self.keep_history,
+            options=Options(keep_history=self.keep_history),
             db=db,
             user='relstoragetest',
             passwd='relstoragetest',
@@ -55,19 +56,21 @@ class ZConfigTests:
             %%import relstorage
             <zodb main>
               <relstorage>
+                name xyz
+                read-only false
+                keep-history %s
+                replica-conf %s
                 <mysql>
                   db %s
                   user relstoragetest
                   passwd relstoragetest
-                  keep-history %s
-                  replica-conf %s
                 </mysql>
               </relstorage>
             </zodb>
             """ % (
-                dbname,
                 self.keep_history and 'true' or 'false',
                 replica_conf.name,
+                dbname,
                 )
 
             schema_xml = """
@@ -84,6 +87,8 @@ class ZConfigTests:
             db = config.database.open()
             try:
                 storage = db.storage
+                self.assertEqual(storage._is_read_only, False)
+                self.assertEqual(storage._name, "xyz")
                 adapter = storage._adapter
                 from relstorage.adapters.mysql import MySQLAdapter
                 self.assert_(isinstance(adapter, MySQLAdapter))
@@ -91,9 +96,11 @@ class ZConfigTests:
                     'passwd': 'relstoragetest',
                     'db': dbname,
                     'user': 'relstoragetest',
-                    'replica_conf': replica_conf.name,
                     })
                 self.assertEqual(adapter.keep_history, self.keep_history)
+                self.assertEqual(
+                    adapter.connmanager.replica_selector.replica_conf,
+                    replica_conf.name)
             finally:
                 db.close()
         finally:
@@ -154,7 +161,7 @@ def test_suite():
                 if not keep_history:
                     db += '_hf'
                 adapter = MySQLAdapter(
-                    keep_history=keep_history,
+                    options=Options(keep_history=keep_history),
                     db=db,
                     user='relstoragetest',
                     passwd='relstoragetest',

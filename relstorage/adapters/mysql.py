@@ -87,10 +87,18 @@ class MySQLAdapter(object):
     """MySQL adapter for RelStorage."""
     implements(IRelStorageAdapter)
 
-    def __init__(self, keep_history=True, **params):
-        self.keep_history = keep_history
+    def __init__(self, options=None, **params):
+        # options is a relstorage.options.Options or None
+        self.options = options
+        if options is not None:
+            self.keep_history = options.keep_history
+        else:
+            self.keep_history = True
         self._params = params
-        self.connmanager = MySQLdbConnectionManager(**params)
+        self.connmanager = MySQLdbConnectionManager(
+            params=params,
+            options=options,
+            )
         self.runner = ScriptRunner()
         self.locker = MySQLLocker(
             keep_history=self.keep_history,
@@ -147,20 +155,21 @@ class MySQLAdapter(object):
             )
 
     def new_instance(self):
-        return MySQLAdapter(keep_history=self.keep_history, **self._params)
+        return MySQLAdapter(options=self.options, **self._params)
 
     def __str__(self):
+        parts = [self.__class__.__name__]
         if self.keep_history:
-            t = 'history preserving'
+            parts.append('history preserving')
         else:
-            t = 'history free'
+            parts.append('history free')
         p = self._params.copy()
         if 'passwd' in p:
             del p['passwd']
         p = p.items()
         p.sort()
-        p = ', '.join('%s=%r' % item for item in p)
-        return "%s, %s, %s" % (self.__class__.__name__, t, p)
+        parts.extend('%s=%r' % item for item in p)
+        return ", ".join(parts)
 
 
 class MySQLdbConnectionManager(AbstractConnectionManager):
@@ -171,19 +180,20 @@ class MySQLdbConnectionManager(AbstractConnectionManager):
     disconnected_exceptions = disconnected_exceptions
     close_exceptions = close_exceptions
 
-    def __init__(self, replica_conf=None, **params):
+    def __init__(self, params, options=None):
         self._orig_params = params.copy()
         self._params = self._orig_params
-        self._current_replica = None
-        super(MySQLdbConnectionManager, self).__init__(
-            replica_conf=replica_conf)
+        # _params_derived_from_replica contains the replica that
+        # was used to set self._params.
+        self._params_derived_from_replica = None
+        super(MySQLdbConnectionManager, self).__init__(options)
 
     def _set_params(self, replica):
         """Alter the connection parameters to use the specified replica.
 
         The replica parameter is a string specifying either host or host:port.
         """
-        if replica != self._current_replica:
+        if replica != self._params_derived_from_replica:
             params = self._orig_params.copy()
             if ':' in replica:
                 host, port = replica.split(':')
@@ -191,13 +201,17 @@ class MySQLdbConnectionManager(AbstractConnectionManager):
                 params['port'] = int(port)
             else:
                 params['host'] = replica
-            self._current_replica = replica
+            self._params_derived_from_replica = replica
             self._params = params
 
     def open(self, transaction_mode="ISOLATION LEVEL READ COMMITTED"):
         """Open a database connection and return (conn, cursor)."""
-        if self.replicas is not None:
-            self._set_params(self.replicas.current())
+        if self.replica_selector is not None:
+            replica = self.replica_selector.current()
+            self._set_params(replica)
+        else:
+            replica = None
+
         while True:
             try:
                 conn = MySQLdb.connect(**self._params)
@@ -208,16 +222,16 @@ class MySQLdbConnectionManager(AbstractConnectionManager):
                     cursor.execute(
                         "SET SESSION TRANSACTION %s" % transaction_mode)
                     conn.autocommit(False)
-                conn.replica = self._current_replica
+                conn.replica = replica
                 return conn, cursor
             except MySQLdb.OperationalError, e:
-                if self._current_replica:
+                if replica is not None:
                     log.warning("Unable to connect to replica %s: %s",
-                        self._current_replica, e)
+                        replica, e)
                 else:
                     log.warning("Unable to connect: %s", e)
-                if self.replicas is not None:
-                    replica = self.replicas.next()
+                if self.replica_selector is not None:
+                    replica = self.replica_selector.next()
                     if replica is not None:
                         # try the new replica
                         self._set_params(replica)

@@ -13,6 +13,7 @@
 ##############################################################################
 """Tests of relstorage.adapters.oracle"""
 
+from relstorage.options import Options
 from relstorage.tests.hftestbase import HistoryFreeFromFileStorage
 from relstorage.tests.hftestbase import HistoryFreeRelStorageTests
 from relstorage.tests.hftestbase import HistoryFreeToFileStorage
@@ -32,10 +33,10 @@ class UseOracleAdapter:
         else:
             db = 'relstoragetest_hf'
         return OracleAdapter(
-            keep_history=self.keep_history,
             user=db,
             password='relstoragetest',
             dsn=dsn,
+            options=Options(keep_history=self.keep_history),
             )
 
 
@@ -57,20 +58,22 @@ class ZConfigTests:
             %%import relstorage
             <zodb main>
               <relstorage>
+                name xyz
+                read-only false
+                keep-history %s
+                replica-conf %s
                 <oracle>
                   user %s
                   password relstoragetest
                   dsn %s
-                  keep-history %s
-                  replica-conf %s
                 </oracle>
               </relstorage>
             </zodb>
             """ % (
-                dbname,
-                dsn,
                 self.keep_history and 'true' or 'false',
                 replica_conf.name,
+                dbname,
+                dsn,
                 )
 
             schema_xml = """
@@ -87,6 +90,8 @@ class ZConfigTests:
             db = config.database.open()
             try:
                 storage = db.storage
+                self.assertEqual(storage._is_read_only, False)
+                self.assertEqual(storage._name, "xyz")
                 adapter = storage._adapter
                 from relstorage.adapters.oracle import OracleAdapter
                 self.assert_(isinstance(adapter, OracleAdapter))
@@ -95,7 +100,9 @@ class ZConfigTests:
                 self.assertEqual(adapter._dsn, dsn)
                 self.assertEqual(adapter._twophase, False)
                 self.assertEqual(adapter.keep_history, self.keep_history)
-                self.assertEqual(adapter.replica_conf, replica_conf.name)
+                self.assertEqual(
+                    adapter.connmanager.replica_selector.replica_conf,
+                    replica_conf.name)
             finally:
                 db.close()
         finally:
@@ -157,10 +164,10 @@ def test_suite():
                 if not keep_history:
                     db += '_hf'
                 adapter = OracleAdapter(
-                    keep_history=keep_history,
                     user=db,
                     password='relstoragetest',
                     dsn=dsn,
+                    options=Options(keep_history=keep_history),
                     )
                 storage = RelStorage(adapter, name=name, create=True,
                     blob_dir=os.path.abspath(blob_dir))

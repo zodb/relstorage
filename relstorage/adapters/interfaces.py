@@ -102,6 +102,24 @@ class IConnectionManager(Interface):
         """
 
 
+class IReplicaSelector(Interface):
+    """Selects a database replica"""
+
+    def current():
+        """Get the current replica.
+
+        Return a string.  For PostgreSQL and MySQL, the string is
+        either a host:port specification or host name.  For Oracle,
+        the string is a DSN.
+        """
+
+    def next():
+        """Return the next replica to try.
+
+        Return None if there are no more replicas defined.
+        """
+
+
 class IDatabaseIterator(Interface):
     """Iterate over the available data in the database"""
 

@@ -15,53 +15,52 @@
 
 from ZODB.config import BaseConfig
 
-from relstorage.storage import RelStorage, Options
+from relstorage.options import Options
+from relstorage.storage import RelStorage
+from relstorage.adapters.replica import ReplicaSelector
 
 
 class RelStorageFactory(BaseConfig):
     """Open a storage configured via ZConfig"""
     def open(self):
         config = self.config
-        adapter = config.adapter.create()
         options = Options()
         for key in options.__dict__.keys():
             value = getattr(config, key, None)
             if value is not None:
                 setattr(options, key, value)
-        return RelStorage(adapter, name=config.name, create=config.create,
-            read_only=config.read_only, options=options)
+        adapter = config.adapter.create(options)
+        return RelStorage(adapter, name=config.name, options=options)
 
 
 class PostgreSQLAdapterFactory(BaseConfig):
-    def create(self):
+    def create(self, options):
         from adapters.postgresql import PostgreSQLAdapter
         return PostgreSQLAdapter(
             dsn=self.config.dsn,
-            keep_history=self.config.keep_history,
-            replica_conf=self.config.replica_conf,
+            options=options,
             )
 
 
 class OracleAdapterFactory(BaseConfig):
-    def create(self):
+    def create(self, options):
         from adapters.oracle import OracleAdapter
         config = self.config
         return OracleAdapter(
             user=config.user,
             password=config.password,
             dsn=config.dsn,
-            keep_history=config.keep_history,
-            replica_conf=config.replica_conf,
+            options=options,
             )
 
 
 class MySQLAdapterFactory(BaseConfig):
-    def create(self):
+    def create(self, options):
         from adapters.mysql import MySQLAdapter
-        options = {}
+        params = {}
         for key in self.config.getSectionAttributes():
             value = getattr(self.config, key)
             if value is not None:
-                options[key] = value
-        return MySQLAdapter(**options)
+                params[key] = value
+        return MySQLAdapter(options=options, **params)
 

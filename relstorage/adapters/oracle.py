@@ -52,8 +52,7 @@ class OracleAdapter(object):
     """Oracle adapter for RelStorage."""
     implements(IRelStorageAdapter)
 
-    def __init__(self, user, password, dsn, twophase=False,
-            keep_history=True, replica_conf=None):
+    def __init__(self, user, password, dsn, twophase=False, options=None):
         """Create an Oracle adapter.
 
         The user, password, and dsn parameters are provided to cx_Oracle
@@ -63,19 +62,23 @@ class OracleAdapter(object):
         commit process.  This is disabled by default.  Even when this option
         is disabled, the ZODB two-phase commit is still in effect.
         """
+        # options is a relstorage.options.Options or None
         self._user = user
         self._password = password
         self._dsn = dsn
         self._twophase = twophase
-        self.keep_history = keep_history
-        self.replica_conf = replica_conf
+        self.options = options
+        if options is not None:
+            self.keep_history = options.keep_history
+        else:
+            self.keep_history = True
 
         self.connmanager = CXOracleConnectionManager(
             user=user,
             password=password,
             dsn=dsn,
             twophase=twophase,
-            replica_conf=replica_conf,
+            options=options,
             )
         self.runner = CXOracleScriptRunner()
         self.locker = OracleLocker(
@@ -146,8 +149,7 @@ class OracleAdapter(object):
             password=self._password,
             dsn=self._dsn,
             twophase=self._twophase,
-            keep_history=self.keep_history,
-            replica_conf=self.replica_conf,
+            options=self.options,
             )
 
     def __str__(self):
@@ -159,7 +161,6 @@ class OracleAdapter(object):
         parts.append('user=%r' % self._user)
         parts.append('dsn=%r' % self._dsn)
         parts.append('twophase=%r' % self._twophase)
-        parts.append('replica_conf=%r' % self.replica_conf)
         return ", ".join(parts)
 
 
@@ -232,19 +233,19 @@ class CXOracleConnectionManager(AbstractConnectionManager):
     disconnected_exceptions = disconnected_exceptions
     close_exceptions = close_exceptions
 
-    def __init__(self, user, password, dsn, twophase, replica_conf=None):
+    def __init__(self, user, password, dsn, twophase, options=None):
         self._user = user
         self._password = password
         self._dsn = dsn
         self._twophase = twophase
-        super(CXOracleConnectionManager, self).__init__(
-            replica_conf=replica_conf)
+        super(CXOracleConnectionManager, self).__init__(options)
 
     def open(self, transaction_mode="ISOLATION LEVEL READ COMMITTED",
             twophase=False):
         """Open a database connection and return (conn, cursor)."""
-        if self.replicas is not None:
-            self._dsn = self.replicas.current()
+        if self.replica_selector is not None:
+            self._dsn = self.replica_selector.current()
+
         while True:
             try:
                 kw = {'twophase': twophase}  #, 'threaded': True}
@@ -258,8 +259,8 @@ class CXOracleConnectionManager(AbstractConnectionManager):
 
             except cx_Oracle.OperationalError, e:
                 log.warning("Unable to connect to DSN %s: %s", self._dsn, e)
-                if self.replicas is not None:
-                    replica = self.replicas.next()
+                if self.replica_selector is not None:
+                    replica = self.replica_selector.next()
                     if replica is not None:
                         # try the new replica
                         self._dsn = replica
@@ -275,13 +276,19 @@ class CXOracleConnectionManager(AbstractConnectionManager):
 
     def restart_load(self, conn, cursor):
         """Reinitialize a connection for loading objects."""
-        if self.replicas is not None:
-            if conn.dsn != self.replicas.current():
-                # Prompt the change to a new replica by raising an exception.
-                self.close(conn, cursor)
-                raise ReplicaClosedException()
+        self.check_replica(conn, cursor)
         conn.rollback()
         cursor.execute("SET TRANSACTION READ ONLY")
+
+    def check_replica(self, conn, cursor):
+        """Raise an exception if the connection belongs to an old replica"""
+        if self.replica_selector is not None:
+            current = self.replica_selector.current()
+            if conn.dsn != current:
+                # Prompt the change to a new replica by raising an exception.
+                self.close(conn, cursor)
+                raise ReplicaClosedException(
+                    "Switching replica from %s to %s" % (conn.dsn, current))
 
     def _set_xid(self, conn, cursor):
         """Set up a distributed transaction"""
@@ -313,11 +320,7 @@ class CXOracleConnectionManager(AbstractConnectionManager):
 
     def restart_store(self, conn, cursor):
         """Reuse a store connection."""
-        if self.replicas is not None:
-            if conn.dsn != self.replicas.current():
-                # Prompt the change to a new replica by raising an exception.
-                self.close(conn, cursor)
-                raise ReplicaClosedException()
+        self.check_replica(conn, cursor)
         conn.rollback()
         if self._twophase:
             self._set_xid(conn, cursor)

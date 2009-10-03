@@ -17,6 +17,7 @@ Stores pickles in the database.
 """
 
 from persistent.TimeStamp import TimeStamp
+from relstorage.options import Options
 from relstorage.util import is_blob_record
 from ZODB.BaseStorage import BaseStorage
 from ZODB.BaseStorage import DataRecord
@@ -75,24 +76,23 @@ class RelStorage(BaseStorage,
     implements(*_relstorage_interfaces)
 
     def __init__(self, adapter, name=None, create=True,
-            read_only=False, options=None, **kwoptions):
-        if name is None:
-            name = 'RelStorage: %s' % adapter
-
+            options=None, **kwoptions):
         self._adapter = adapter
-        self._name = name
-        self._is_read_only = read_only
+
         if options is None:
-            options = Options()
-            for key, value in kwoptions.iteritems():
-                if key in options.__dict__:
-                    setattr(options, key, value)
-                else:
-                    raise TypeError("Unknown parameter: %s" % key)
+            options = Options(**kwoptions)
         elif kwoptions:
             raise TypeError("The RelStorage constructor accepts either "
                 "an options parameter or keyword arguments, not both")
         self._options = options
+
+        if not name:
+            name = options.name
+            if not name:
+                name = 'RelStorage: %s' % adapter
+        self._name = name
+
+        self._is_read_only = options.read_only
         self._cache_client = None
 
         if create:
@@ -285,8 +285,7 @@ class RelStorage(BaseStorage,
         """
         adapter = self._adapter.new_instance()
         other = RelStorage(adapter=adapter, name=self._name,
-            create=False, read_only=self._is_read_only,
-            options=self._options)
+            create=False, options=self._options)
         self._instances.append(weakref.ref(other))
         return other
 
@@ -1422,26 +1421,3 @@ class Record(DataRecord):
             self.data = str(data)
         else:
             self.data = None
-
-
-class Options:
-    """Options for tuning RelStorage.
-
-    These parameters can be provided as keyword options in the RelStorage
-    constructor.  For example:
-
-        storage = RelStorage(adapter, pack_gc=True, pack_dry_run=True)
-
-    Alternatively, the RelStorage constructor accepts an options
-    parameter, which should be an Options instance.
-    """
-    def __init__(self):
-        self.blob_dir = None
-        self.poll_interval = 0
-        self.pack_gc = True
-        self.pack_dry_run = False
-        self.pack_batch_timeout = 5.0
-        self.pack_duty_cycle = 0.5
-        self.pack_max_delay = 20.0
-        self.cache_servers = ()  # ['127.0.0.1:11211']
-        self.cache_module_name = 'memcache'

@@ -2,17 +2,17 @@
 Unreleased
 ----------
 
-- Added the keep-history option to the database adapters.  Set it
-  to false to keep no history.  (Packing is still required for
-  garbage collection and blob deletion.)
+- Added the keep-history option. Set it to false to keep no history.
+  (Packing is still required for garbage collection and blob deletion.)
 
-- Added the replica-conf option to the database adapters.  Set it
+- Added the replica-conf and replica-timeout options.  Set replica-conf
   to a filename containing the location of database replicas.  Changes
   to the file take effect at transaction boundaries.
 
-- Copied the ZConfig documentation of the storage options into README.
+- Expanded the option documentation in README.txt.
 
 - Renamed relstorage.py to storage.py to overcome import issues.
+  Also moved the Options class to options.py.
 
 - Updated the patch for ZODB 3.7 and 3.8 to fix an issue with
   blobs and subtransactions.
