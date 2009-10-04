@@ -40,69 +40,62 @@ class UsePostgreSQLAdapter:
 class ZConfigTests:
 
     def checkConfigureViaZConfig(self):
-        import tempfile
-        replica_conf = tempfile.NamedTemporaryFile()
+        replica_conf = os.path.join(os.path.dirname(__file__), 'replicas.conf')
+        if self.keep_history:
+            dbname = 'relstoragetest'
+        else:
+            dbname = 'relstoragetest_hf'
+        dsn = (
+            "dbname='%s' user='relstoragetest' password='relstoragetest'"
+            % dbname)
+        conf = """
+        %%import relstorage
+        <zodb main>
+            <relstorage>
+            name xyz
+            read-only false
+            keep-history %s
+            replica-conf %s
+            <postgresql>
+                dsn %s
+            </postgresql>
+            </relstorage>
+        </zodb>
+        """ % (
+            self.keep_history and 'true' or 'false',
+            replica_conf,
+            dsn,
+            )
+
+        schema_xml = """
+        <schema>
+        <import package="ZODB"/>
+        <section type="ZODB.database" name="main" attribute="database"/>
+        </schema>
+        """
+        import ZConfig
+        from StringIO import StringIO
+        schema = ZConfig.loadSchemaFile(StringIO(schema_xml))
+        config, handler = ZConfig.loadConfigFile(schema, StringIO(conf))
+
+        db = config.database.open()
         try:
-            replica_conf.write("localhost")
-            replica_conf.flush()
-
-            if self.keep_history:
-                dbname = 'relstoragetest'
-            else:
-                dbname = 'relstoragetest_hf'
-            dsn = (
-                "dbname='%s' user='relstoragetest' password='relstoragetest'"
-                % dbname)
-            conf = """
-            %%import relstorage
-            <zodb main>
-              <relstorage>
-                name xyz
-                read-only false
-                keep-history %s
-                replica-conf %s
-                <postgresql>
-                  dsn %s
-                </postgresql>
-              </relstorage>
-            </zodb>
-            """ % (
-                self.keep_history and 'true' or 'false',
-                replica_conf.name,
-                dsn,
-                )
-
-            schema_xml = """
-            <schema>
-            <import package="ZODB"/>
-            <section type="ZODB.database" name="main" attribute="database"/>
-            </schema>
-            """
-            import ZConfig
-            from StringIO import StringIO
-            schema = ZConfig.loadSchemaFile(StringIO(schema_xml))
-            config, handler = ZConfig.loadConfigFile(schema, StringIO(conf))
-
-            db = config.database.open()
-            try:
-                storage = getattr(db, 'storage', None)
-                if storage is None:
-                    # ZODB < 3.8 and before
-                    storage = db._storage
-                self.assertEqual(storage._is_read_only, False)
-                self.assertEqual(storage._name, "xyz")
-                adapter = storage._adapter
-                from relstorage.adapters.postgresql import PostgreSQLAdapter
-                self.assert_(isinstance(adapter, PostgreSQLAdapter))
-                self.assertEqual(adapter._dsn, dsn)
-                self.assertEqual(adapter.keep_history, self.keep_history)
-                self.assertEqual(
-                    adapter.connmanager.replica_selector.replica_conf,
-                    replica_conf.name)
-            finally:
-                db.close()
+            storage = getattr(db, 'storage', None)
+            if storage is None:
+                # ZODB < 3.9
+                storage = db._storage
+            self.assertEqual(storage._is_read_only, False)
+            self.assertEqual(storage._name, "xyz")
+            adapter = storage._adapter
+            from relstorage.adapters.postgresql import PostgreSQLAdapter
+            self.assert_(isinstance(adapter, PostgreSQLAdapter))
+            self.assertEqual(adapter._dsn, dsn)
+            self.assertEqual(adapter.keep_history, self.keep_history)
+            self.assertEqual(
+                adapter.connmanager.replica_selector.replica_conf,
+                replica_conf)
         finally:
-            replica_conf.close()
+            db.close()
 
 
 class HPPostgreSQLTests(UsePostgreSQLAdapter, HistoryPreservingRelStorageTests,

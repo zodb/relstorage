@@ -17,16 +17,18 @@ import unittest
 class ReplicaSelectorTests(unittest.TestCase):
 
     def setUp(self):
+        import os
         import tempfile
-        self.f = tempfile.NamedTemporaryFile()
-        self.f.write(
+        fd, self.fn = tempfile.mkstemp()
+        os.write(fd,
             "# Replicas\n\nexample.com:1234\nlocalhost:4321\n"
             "\nlocalhost:9999\n")
-        self.f.flush()
-        self.options = MockOptions(self.f.name)
+        os.close(fd)
+        self.options = MockOptions(self.fn)
 
     def tearDown(self):
-        self.f.close()
+        import os
+        os.remove(self.fn)
 
     def test__read_config_normal(self):
         from relstorage.adapters.replica import ReplicaSelector
@@ -36,8 +38,7 @@ class ReplicaSelectorTests(unittest.TestCase):
 
     def test__read_config_empty(self):
         from relstorage.adapters.replica import ReplicaSelector
-        self.f.seek(0)
-        self.f.truncate()
+        open(self.fn, 'w').close()  # truncate the replica list file
         self.assertRaises(IndexError, ReplicaSelector, self.options)
 
     def test__is_config_modified(self):
@@ -71,9 +72,9 @@ class ReplicaSelectorTests(unittest.TestCase):
         rs = ReplicaSelector(self.options)
         self.assertEqual(rs.current(), 'example.com:1234')
         # change the file and get the new current replica
-        self.f.seek(0)
-        self.f.write('localhost\nalternate\n')
-        self.f.flush()
+        f = open(self.fn, 'w')
+        f.write('localhost\nalternate\n')
+        f.close()
         rs._config_checked = 0
         rs._config_modified = 0
         self.assertEqual(rs.current(), 'localhost')
@@ -105,10 +106,9 @@ class ReplicaSelectorTests(unittest.TestCase):
 
     def test_next_only_one_server(self):
         from relstorage.adapters.replica import ReplicaSelector
-        self.f.seek(0)
-        self.f.write('localhost\n')
-        self.f.flush()
-        self.f.truncate()
+        f = open(self.fn, 'w')
+        f.write('localhost\n')
+        f.close()
         rs = ReplicaSelector(self.options)
         self.assertEqual(rs.current(), 'localhost')
         self.assertEqual(rs.next(), None)
@@ -119,10 +119,9 @@ class ReplicaSelectorTests(unittest.TestCase):
         self.assertEqual(rs.current(), 'example.com:1234')
         self.assertEqual(rs.next(), 'localhost:4321')
         # interrupt the iteration by changing the replica conf file
-        self.f.seek(0)
-        self.f.write('example.com:9999\n')
-        self.f.flush()
-        self.f.truncate()
+        f = open(self.fn, 'w')
+        f.write('example.com:9999\n')
+        f.close()
         rs._config_checked = 0
         rs._config_modified = 0
         self.assertEqual(rs.next(), 'example.com:9999')

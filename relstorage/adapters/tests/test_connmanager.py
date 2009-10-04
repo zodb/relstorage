@@ -29,18 +29,19 @@ class AbstractConnectionManagerTests(unittest.TestCase):
         self.assertTrue(conn.rolled_back)
 
     def test_with_replica_conf(self):
-        import tempfile
-        f = tempfile.NamedTemporaryFile()
-        f.write("example.com:1234\n")
-        f.flush()
-        options = MockOptions(f.name)
+        import os
+        import relstorage.tests
+        tests_dir = relstorage.tests.__file__
+        replica_conf = os.path.join(os.path.dirname(tests_dir), 'replicas.conf')
+        options = MockOptions(replica_conf)
 
-        from relstorage.adapters.connmanager import AbstractConnectionManager
+        from relstorage.adapters.connmanager \
+            import AbstractConnectionManager
         from relstorage.adapters.interfaces import ReplicaClosedException
         cm = AbstractConnectionManager(options)
 
         conn = MockConnection()
-        conn.replica = 'example.com:1234'
+        conn.replica = 'localhost'
         cm.restart_load(conn, MockCursor())
         self.assertTrue(conn.rolled_back)
         conn.replica = 'other'
@@ -48,7 +49,7 @@ class AbstractConnectionManagerTests(unittest.TestCase):
             cm.restart_load, conn, MockCursor())
 
         conn = MockConnection()
-        conn.replica = 'example.com:1234'
+        conn.replica = 'localhost'
         cm.restart_store(conn, MockCursor())
         self.assertTrue(conn.rolled_back)
         conn.replica = 'other'

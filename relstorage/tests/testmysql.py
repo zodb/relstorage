@@ -42,72 +42,65 @@ class UseMySQLAdapter:
 class ZConfigTests:
 
     def checkConfigureViaZConfig(self):
-        import tempfile
-        replica_conf = tempfile.NamedTemporaryFile()
+        replica_conf = os.path.join(os.path.dirname(__file__), 'replicas.conf')
+        if self.keep_history:
+            dbname = 'relstoragetest'
+        else:
+            dbname = 'relstoragetest_hf'
+        conf = """
+        %%import relstorage
+        <zodb main>
+            <relstorage>
+            name xyz
+            read-only false
+            keep-history %s
+            replica-conf %s
+            <mysql>
+                db %s
+                user relstoragetest
+                passwd relstoragetest
+            </mysql>
+            </relstorage>
+        </zodb>
+        """ % (
+            self.keep_history and 'true' or 'false',
+            replica_conf,
+            dbname,
+            )
+
+        schema_xml = """
+        <schema>
+        <import package="ZODB"/>
+        <section type="ZODB.database" name="main" attribute="database"/>
+        </schema>
+        """
+        import ZConfig
+        from StringIO import StringIO
+        schema = ZConfig.loadSchemaFile(StringIO(schema_xml))
+        config, handler = ZConfig.loadConfigFile(schema, StringIO(conf))
+
+        db = config.database.open()
         try:
-            replica_conf.write("localhost")
-            replica_conf.flush()
-
-            if self.keep_history:
-                dbname = 'relstoragetest'
-            else:
-                dbname = 'relstoragetest_hf'
-            conf = """
-            %%import relstorage
-            <zodb main>
-              <relstorage>
-                name xyz
-                read-only false
-                keep-history %s
-                replica-conf %s
-                <mysql>
-                  db %s
-                  user relstoragetest
-                  passwd relstoragetest
-                </mysql>
-              </relstorage>
-            </zodb>
-            """ % (
-                self.keep_history and 'true' or 'false',
-                replica_conf.name,
-                dbname,
-                )
-
-            schema_xml = """
-            <schema>
-            <import package="ZODB"/>
-            <section type="ZODB.database" name="main" attribute="database"/>
-            </schema>
-            """
-            import ZConfig
-            from StringIO import StringIO
-            schema = ZConfig.loadSchemaFile(StringIO(schema_xml))
-            config, handler = ZConfig.loadConfigFile(schema, StringIO(conf))
-
-            db = config.database.open()
-            try:
-                storage = getattr(db, 'storage', None)
-                if storage is None:
-                    # ZODB < 3.8 and before
-                    storage = db._storage
-                self.assertEqual(storage._is_read_only, False)
-                self.assertEqual(storage._name, "xyz")
-                adapter = storage._adapter
-                from relstorage.adapters.mysql import MySQLAdapter
-                self.assert_(isinstance(adapter, MySQLAdapter))
-                self.assertEqual(adapter._params, {
-                    'passwd': 'relstoragetest',
-                    'db': dbname,
-                    'user': 'relstoragetest',
-                    })
-                self.assertEqual(adapter.keep_history, self.keep_history)
-                self.assertEqual(
-                    adapter.connmanager.replica_selector.replica_conf,
-                    replica_conf.name)
-            finally:
-                db.close()
+            storage = getattr(db, 'storage', None)
+            if storage is None:
+                # ZODB < 3.9
+                storage = db._storage
+            self.assertEqual(storage._is_read_only, False)
+            self.assertEqual(storage._name, "xyz")
+            adapter = storage._adapter
+            from relstorage.adapters.mysql import MySQLAdapter
+            self.assert_(isinstance(adapter, MySQLAdapter))
+            self.assertEqual(adapter._params, {
+                'passwd': 'relstoragetest',
+                'db': dbname,
+                'user': 'relstoragetest',
+                })
+            self.assertEqual(adapter.keep_history, self.keep_history)
+            self.assertEqual(
+                adapter.connmanager.replica_selector.replica_conf,
+                replica_conf)
         finally:
-            replica_conf.close()
+            db.close()
 
 
 class HPMySQLTests(UseMySQLAdapter, HistoryPreservingRelStorageTests,

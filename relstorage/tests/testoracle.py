@@ -45,11 +45,10 @@ class ZConfigTests:
     def checkConfigureViaZConfig(self):
         import tempfile
         dsn = os.environ.get('ORACLE_TEST_DSN', 'XE')
-        replica_conf = tempfile.NamedTemporaryFile()
+        fd, replica_conf = tempfile.mkstemp()
+        os.write(fd, dsn)
+        os.close(fd)
         try:
-            replica_conf.write(dsn)
-            replica_conf.flush()
-
             if self.keep_history:
                 dbname = 'relstoragetest'
             else:
@@ -71,7 +70,7 @@ class ZConfigTests:
             </zodb>
             """ % (
                 self.keep_history and 'true' or 'false',
-                replica_conf.name,
+                replica_conf,
                 dbname,
                 dsn,
                 )
@@ -105,11 +104,11 @@ class ZConfigTests:
                 self.assertEqual(adapter.keep_history, self.keep_history)
                 self.assertEqual(
                     adapter.connmanager.replica_selector.replica_conf,
-                    replica_conf.name)
+                    replica_conf)
             finally:
                 db.close()
         finally:
-            replica_conf.close()
+            os.remove(replica_conf)
 
 
 class HPOracleTests(UseOracleAdapter, HistoryPreservingRelStorageTests,
