@@ -85,7 +85,10 @@ class ZConfigTests:
 
             db = config.database.open()
             try:
-                storage = db.storage
+                storage = getattr(db, 'storage', None)
+                if storage is None:
+                    # ZODB < 3.8 and before
+                    storage = db._storage
                 self.assertEqual(storage._is_read_only, False)
                 self.assertEqual(storage._name, "xyz")
                 adapter = storage._adapter
