@@ -336,6 +336,10 @@ class RelStorage(BaseStorage,
             msg.append("Recent object tids: %s" % repr(tids))
 
         else:
+            if oid_int == 0:
+                # This happens when initializing a new database or
+                # after packing, so it's usually not a warning.
+                logfunc = log.debug
             msg.append("history-free adapter")
 
         logfunc('; '.join(msg))
