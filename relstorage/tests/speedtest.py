@@ -203,7 +203,7 @@ class SpeedTest:
             db = 'relstoragetest_hf'
         dsn = 'dbname=%s user=relstoragetest password=relstoragetest' % db
         options = Options(keep_history=keep_history)
-        adapter = PostgreSQLAdapter(dsn=dsn, options=)
+        adapter = PostgreSQLAdapter(dsn=dsn, options=options)
         adapter.schema.prepare()
         adapter.schema.zap_all()
         def make_storage():
