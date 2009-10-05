@@ -447,7 +447,7 @@ def main(args=None):
     addr = options.zeo_address
     if addr and ':' in addr:
         h, p = addr.split(':')
-        addr = h, int(port)
+        addr = h, int(p)
 
     zeo_runner = ZEOServerRunner(addr, options.external_zeo)
     zeo_runner.start()
