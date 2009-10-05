@@ -165,6 +165,7 @@ class SpeedTest:
             transaction.commit()
             conn.close()
         end = time.time()
+        time.sleep(.1)
         db.close()
         return end - start
 
