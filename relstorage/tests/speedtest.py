@@ -19,6 +19,7 @@ interpreter lock.
 
 import cPickle
 import logging
+import optparse
 import os
 import shutil
 import signal
@@ -37,9 +38,7 @@ from relstorage.storage import RelStorage
 
 debug = False
 txn_count = 10
-object_counts = [10000]  # [1, 100, 10000]
-concurrency_levels = range(1, 16, 2)
-contenders = [
+all_contenders = [
     ('ZEO + FileStorage', 'zeofs_test'),
     ('PostgreSQLAdapter', 'postgres_test'),
     ('MySQLAdapter', 'mysql_test'),
@@ -80,11 +79,14 @@ def run_in_child(wait, func, *args, **kw):
 
 class ZEOServerRunner(object):
 
-    def __init__(self):
+    def __init__(self, addr=None, external=False):
         self.dir = tempfile.mkdtemp()
         self.store_fn = os.path.join(self.dir, 'storage')
-        self.sock_fn = os.path.join(self.dir, 'sock')
+        if addr is None:
+            addr = os.path.join(self.dir, 'sock')
+        self.sock_fn = addr
         self.pid = None
+        self.external = external
 
     def run(self):
         from ZODB.FileStorage import FileStorage
@@ -93,12 +95,21 @@ class ZEOServerRunner(object):
         fs = FileStorage(self.store_fn, create=True)
         ss = StorageServer(self.sock_fn, {'1': fs})
 
-        import ThreadedAsync.LoopCallback
-        ThreadedAsync.LoopCallback.loop()
+        try:
+            import ThreadedAsync.LoopCallback
+            ThreadedAsync.LoopCallback.loop()
+        except ImportError:
+            import asyncore
+            asyncore.loop()
 
     def start(self):
+        if self.external:
+            return
         self.pid = run_in_child(False, self.run)
         # parent
+        if isinstance(self.sock_fn, tuple):
+            time.sleep(1)
+            return
         sys.stderr.write('Waiting for ZEO server to start...')
         while not os.path.exists(self.sock_fn):
             sys.stderr.write('.')
@@ -108,6 +119,8 @@ class ZEOServerRunner(object):
         sys.stderr.flush()
 
     def stop(self):
+        if self.external:
+            return
         os.kill(self.pid, signal.SIGTERM)
         shutil.rmtree(self.dir)
 
@@ -167,8 +180,34 @@ class SpeedTest:
                 raise AssertionError
             conn.close()
         end = time.time()
+        cold = end-start
+        conn = db.open()
+        conn.cacheMinimize()
+        conn.close()
+        start = time.time()
+        for i in range(txn_count):
+            conn = db.open()
+            root = conn.root()
+            got = len(list(root['speedtest'][n][i]))
+            expect = len(self.data_to_store)
+            if got != expect:
+                raise AssertionError
+            conn.close()
+        end = time.time()
+        hot = end-start
+        start = time.time()
+        for i in range(txn_count):
+            conn = db.open()
+            root = conn.root()
+            got = len(list(root['speedtest'][n][i]))
+            expect = len(self.data_to_store)
+            if got != expect:
+                raise AssertionError
+            conn.close()
+        end = time.time()
+        steamin = end-start
         db.close()
-        return end - start
+        return cold, hot, steamin
 
     def run_tests(self, make_storage):
         """Run a write and read test.
@@ -186,37 +225,45 @@ class SpeedTest:
 
         write_times = distribute(write, r)
         read_times = distribute(read, r)
+        cold_times = [t[0] for t in read_times]
+        hot_times = [t[1] for t in read_times]
+        steamin_times = [t[2] for t in read_times]
         count = float(self.concurrency * txn_count)
-        return (sum(write_times) / count, sum(read_times) / count)
+        return (sum(write_times) / count,
+                sum(cold_times) / count,
+                sum(hot_times) / count,
+                sum(steamin_times) / count,
+                )
 
-    def zeofs_test(self):
+    def zeofs_test(self, _):
         def make_storage():
             from ZEO.ClientStorage import ClientStorage
             return ClientStorage(self.zeo_runner.sock_fn)
         return self.run_tests(make_storage)
 
-    def postgres_test(self):
+    def postgres_test(self, opts):
         from relstorage.adapters.postgresql import PostgreSQLAdapter
+
+        db = opts.db or 'relstoragetest'
+        keep_history = bool(options.keep_history)
         if keep_history:
-            db = 'relstoragetest'
-        else:
-            db = 'relstoragetest_hf'
+            db += '_hf'
         dsn = 'dbname=%s user=relstoragetest password=relstoragetest' % db
         options = Options(keep_history=keep_history)
-        adapter = PostgreSQLAdapter(dsn=dsn, options=)
+        adapter = PostgreSQLAdapter(dsn=dsn)
         adapter.schema.prepare()
         adapter.schema.zap_all()
         def make_storage():
             return RelStorage(adapter)
         return self.run_tests(make_storage)
 
-    def oracle_test(self):
+    def oracle_test(self, opts):
         from relstorage.adapters.oracle import OracleAdapter
         dsn = os.environ.get('ORACLE_TEST_DSN', 'XE')
+        db = opts.db or 'relstoragetest'
+        keep_history = bool(options.keep_history)
         if keep_history:
-            db = 'relstoragetest'
-        else:
-            db = 'relstoragetest_hf'
+            db += '_hf'
         options = Options(keep_history=keep_history)
         adapter = OracleAdapter(
             user=db,
@@ -230,19 +277,24 @@ class SpeedTest:
             return RelStorage(adapter)
         return self.run_tests(make_storage)
 
-    def mysql_test(self):
+    def mysql_test(self, opts):
         from relstorage.adapters.mysql import MySQLAdapter
-        if keep_history:
-            db = 'relstoragetest'
-        else:
-            db = 'relstoragetest_hf'
+        db = opts.db or 'relstoragetest'
+        keep_history = not opts.no_keep_history
+        if not keep_history:
+            db += '_hf'
         options = Options(keep_history=keep_history)
+        kw = {}
+        if opts.mysql_port:
+            kw['port'] = opts.mysql_port
+        if opts.mysql_host:
+            kw['host'] = opts.mysql_host
         adapter = MySQLAdapter(
             options=options,
             db=db,
-            user='relstoragetest',
-            passwd='relstoragetest',
-            )
+            user=opts.mysql_user,
+            passwd=opts.mysql_passwd,
+            **kw)
         adapter.schema.prepare()
         adapter.schema.zap_all()
         def make_storage():
@@ -324,8 +376,80 @@ def distribute(func, param_iter):
         shutil.rmtree(dir)
 
 
-def main():
-    zeo_runner = ZEOServerRunner()
+parser = optparse.OptionParser()
+parser.add_option(
+    "-Z", "--external-zeo", dest='external_zeo', action='store_true',
+    help="Use an external ZEO server. Don't start one internally.",
+    )
+parser.add_option(
+    "-z", "--zeo-address", dest='zeo_address',
+    help="The address to use for the ZEO server."
+    " The default is a unix-domain socket",
+    )
+parser.add_option(
+    "-r", "--run", dest="run", action="append", type="choice",
+    choices=['zeofs', 'postgres', 'mysql', 'oracle'],
+    help=("Specify which tests to run. Default is just ZEO. "
+          "Must be zeofs, postgres, mysql, or oracle. "
+          "Can be used multiple times. "),
+    )
+parser.add_option(
+    "-n", "--object-counts", dest="counts", default="1,100,10000",
+    help="Object counts to use, separated by commas",
+    )
+parser.add_option(
+    "-c", "--concurrency", dest="concurrency", default="1,2,4,8,16",
+    help="Concurrency levels to use, separated by commas",
+    )
+parser.add_option(
+    "-K", "--no-keep-history", dest="no_keep_history", action='store_true',
+    help="Don't keep history",
+    )
+parser.add_option(
+    "-d", "--db", dest="db", default="relstoragetest",
+    help="Relational db name",
+    )
+parser.add_option(
+    "--mysql-user", dest="mysql_user", default="relstoragetest",
+    help="MySQL user, defaults to relstoragetest",
+    )
+parser.add_option(
+    "--mysql-password", dest="mysql_passwd", default="relstoragetest",
+    help="MySQL password, defaults to relstoragetest",
+    )
+parser.add_option(
+    "--mysql-host", dest="mysql_host",
+    help="MySQL host name",
+    )
+parser.add_option(
+    "--mysql-port", dest="mysql_port", type='int',
+    help="MySQL port",
+    )
+
+
+
+
+def main(args=None):
+    if args is None:
+        args = sys.argv[1:]
+
+    options, args = parser.parse_args(args)
+
+    assert not args
+
+    object_counts = [int(x.strip())
+                     for x in options.counts.split(',')]
+    concurrency_levels = [int(x.strip())
+                          for x in options.concurrency.split(',')]
+    contenders = [(l, n) for (l, n) in all_contenders
+                  if n[:-5] in (options.run or ['zeofs'])]
+
+    addr = options.zeo_address
+    if addr and ':' in addr:
+        h, p = addr.split(':')
+        addr = h, int(port)
+
+    zeo_runner = ZEOServerRunner(addr, options.external_zeo)
     zeo_runner.start()
 
     # results: {(objects_per_txn, concurrency, contender, direction): [time]}}
@@ -333,7 +457,7 @@ def main():
     for objects_per_txn in object_counts:
         for concurrency in concurrency_levels:
             for contender_name, method_name in contenders:
-                for direction in (0, 1):
+                for direction in (0, 1, 2, 3):
                     key = (objects_per_txn, concurrency,
                             contender_name, direction)
                     results[key] = []
@@ -356,16 +480,21 @@ def main():
                                 msg += ' (attempt %d)' % (attempt + 1)
                             print >> sys.stderr, msg,
                             try:
-                                w, r = method()
+                                w, c, h, s = method(options)
                             except ChildProcessError:
                                 if attempt >= max_attempts - 1:
                                     raise
                             else:
                                 break
-                        msg = 'write %5.3fs, read %5.3fs' % (w, r)
+                        msg = (
+                            'write %6.4fs, cold %6.4fs'
+                            ', hot %6.4fs, steamin %6.4fs'
+                            % (w, c, h, s))
                         print >> sys.stderr, msg
                         results[key + (0,)].append(w)
-                        results[key + (1,)].append(r)
+                        results[key + (1,)].append(c)
+                        results[key + (2,)].append(h)
+                        results[key + (3,)].append(s)
 
     # The finally clause causes test results to print even if the tests
     # stop early.
@@ -381,8 +510,8 @@ def main():
 
             line = ['"Concurrency"']
             for contender_name, func in contenders:
-                for direction in (0, 1):
-                    dir_text = ['write', 'read'][direction]
+                for direction in (0, 1, 2, 3):
+                    dir_text = ['write', 'cold', 'hot', 'steamin'][direction]
                     line.append('%s - %s' % (contender_name, dir_text))
             print ', '.join(line)
 
@@ -390,13 +519,13 @@ def main():
                 line = [str(concurrency)]
 
                 for contender_name, method_name in contenders:
-                    for direction in (0, 1):
+                    for direction in (0, 1, 2, 3):
                         key = (objects_per_txn, concurrency,
                             contender_name, direction)
                         lst = results[key]
                         if lst:
                             t = min(lst)
-                            line.append('%5.3f' % t)
+                            line.append('%6.4f' % t)
                         else:
                             line.append('?')
 
