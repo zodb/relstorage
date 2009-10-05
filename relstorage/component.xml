@@ -13,9 +13,7 @@
     <key name="name" datatype="string" required="no"/>
     <key name="read-only" datatype="boolean" default="false">
       <description>
-        If true, only reads may be executed against the storage.  Note
-        that the "pack" operation is not considered a write operation
-        and is still allowed on a read-only storage.
+        If true, only reads may be executed against the storage.
       </description>
     </key>
     <key name="blob-dir" required="no">

@@ -248,9 +248,7 @@ underscores instead of dashes in the parameter names.
         password.
 
 ``read-only``
-        If true, only reads may be executed against the storage.  Note
-        that the "pack" operation is not considered a write operation
-        and is still allowed on a read-only storage.
+        If true, only reads may be executed against the storage.
 
 ``blob-dir``
         If supplied, the storage will provide blob support; this
