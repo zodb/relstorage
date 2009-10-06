@@ -413,6 +413,40 @@ class GenericRelStorageTests(
         finally:
             db.close()
 
+    def checkPackKeepNewObjects(self):
+        # Packing should not remove objects created or modified after
+        # the pack time, even if they are unreferenced.
+        db = DB(self._storage)
+        try:
+            # add some data to be packed
+            c = db.open()
+            extra1 = PersistentMapping()
+            c.add(extra1)
+            extra2 = PersistentMapping()
+            c.add(extra2)
+            transaction.commit()
+
+            # Choose the pack time
+            now = packtime = time.time()
+            while packtime <= now:
+                packtime = time.time()
+
+            extra2.foo = 'bar'
+            extra3 = PersistentMapping()
+            c.add(extra3)
+            transaction.commit()
+
+            self._storage.pack(packtime, referencesf)
+
+            # extra1 should have been garbage collected
+            self.assertRaises(KeyError,
+                self._storage.load, extra1._p_oid, '')
+            # extra2 and extra3 should both still exist
+            self._storage.load(extra2._p_oid, '')
+            self._storage.load(extra3._p_oid, '')
+        finally:
+            db.close()
+
     def checkPackBrokenPickle(self):
         # Verify the pack stops with the right exception if it encounters
         # a broken pickle.

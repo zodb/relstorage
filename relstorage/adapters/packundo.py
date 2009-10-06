@@ -33,6 +33,23 @@ class PackUndo(object):
         self.runner = runner
         self.locker = locker
 
+    def choose_pack_transaction(self, pack_point):
+        """Return the transaction before or at the specified pack time.
+
+        Returns None if there is nothing to pack.
+        """
+        conn, cursor = self.connmanager.open()
+        try:
+            stmt = self._script_choose_pack_transaction
+            self.runner.run_script(cursor, stmt, {'tid': pack_point})
+            rows = cursor.fetchall()
+            if not rows:
+                # Nothing needs to be packed.
+                return None
+            return rows[0][0]
+        finally:
+            self.connmanager.close(conn, cursor)
+
     def fill_object_refs(self, conn, cursor, get_references):
         """Update the object_refs table by analyzing new transactions."""
         if self.keep_history:
@@ -208,6 +225,16 @@ class HistoryPreservingPackUndo(PackUndo):
 
     keep_history = True
 
+    _script_choose_pack_transaction = """
+        SELECT tid
+        FROM transaction
+        WHERE tid > 0
+            AND tid <= %(tid)s
+            AND packed = FALSE
+        ORDER BY tid DESC
+        LIMIT 1
+        """
+
     _script_create_temp_pack_visit = """
         CREATE TEMPORARY TABLE temp_pack_visit (
             zoid BIGINT NOT NULL,
@@ -225,16 +252,6 @@ class HistoryPreservingPackUndo(PackUndo):
                     JOIN temp_pack_visit USING (zoid)
                 WHERE object_ref.tid >= temp_pack_visit.keep_tid
             )
-        """
-
-    _script_choose_pack_transaction = """
-        SELECT tid
-        FROM transaction
-        WHERE tid > 0
-            AND tid <= %(tid)s
-            AND packed = FALSE
-        ORDER BY tid DESC
-        LIMIT 1
         """
 
     _script_create_temp_undo = """
@@ -399,28 +416,10 @@ class HistoryPreservingPackUndo(PackUndo):
 
         return res
 
-    def choose_pack_transaction(self, pack_point):
-        """Return the transaction before or at the specified pack time.
-
-        Returns None if there is nothing to pack.
-        """
-        conn, cursor = self.connmanager.open()
-        try:
-            stmt = self._script_choose_pack_transaction
-            self.runner.run_script(cursor, stmt, {'tid': pack_point})
-            rows = cursor.fetchall()
-            if not rows:
-                # Nothing needs to be packed.
-                return None
-            return rows[0][0]
-        finally:
-            self.connmanager.close(conn, cursor)
-
-
     def pre_pack(self, pack_tid, get_references, options):
         """Decide what to pack.
 
-        tid specifies the most recent transaction to pack.
+        pack_tid specifies the most recent transaction to pack.
 
         get_references is a function that accepts a pickled state and
         returns a set of OIDs that state refers to.
@@ -546,17 +545,24 @@ class HistoryPreservingPackUndo(PackUndo):
         WHERE tid > 0 AND tid <= %(pack_tid)s
         GROUP BY zoid;
 
-        -- If the root object is in pack_object, keep it.
+        -- Keep the root object.
         UPDATE pack_object SET keep = %(TRUE)s
         WHERE zoid = 0;
 
         -- Keep objects that have been revised since pack_tid.
+        -- Use temp_pack_visit for temporary state; otherwise MySQL 5 chokes.
+        INSERT INTO temp_pack_visit (zoid)
+        SELECT zoid
+        FROM current_object
+        WHERE tid > %(pack_tid)s;
+
         UPDATE pack_object SET keep = %(TRUE)s
         WHERE zoid IN (
             SELECT zoid
-            FROM current_object
-            WHERE tid > %(pack_tid)s
+            FROM temp_pack_visit
         );
+
+        %(TRUNCATE)s temp_pack_visit;
 
         -- Keep objects that are still referenced by object states in
         -- transactions that will not be packed.
@@ -822,6 +828,15 @@ class HistoryFreePackUndo(PackUndo):
 
     keep_history = False
 
+    _script_choose_pack_transaction = """
+        SELECT tid
+        FROM object_state
+        WHERE tid > 0
+            AND tid <= %(tid)s
+        ORDER BY tid DESC
+        LIMIT 1
+        """
+
     _script_create_temp_pack_visit = """
         CREATE TEMPORARY TABLE temp_pack_visit (
             zoid BIGINT NOT NULL,
@@ -854,18 +869,11 @@ class HistoryFreePackUndo(PackUndo):
         """
         raise UndoError("Undo is not supported by this storage")
 
-    def choose_pack_transaction(self, pack_point):
-        """Return the transaction before or at the specified pack time.
-
-        Returns None if there is nothing to pack.
-        """
-        return pack_point
-
-
     def pre_pack(self, pack_tid, get_references, options):
         """Decide what the garbage collector should delete.
 
-        pack_tid is ignored.
+        Objects created or modified after pack_tid will not be
+        garbage collected.
 
         get_references is a function that accepts a pickled state and
         returns a set of OIDs that state refers to.
@@ -882,7 +890,7 @@ class HistoryFreePackUndo(PackUndo):
         conn, cursor = self.connmanager.open_for_pre_pack()
         try:
             try:
-                self._pre_pack_main(conn, cursor, get_references)
+                self._pre_pack_main(conn, cursor, pack_tid, get_references)
             except:
                 log.exception("pre_pack: failed")
                 conn.rollback()
@@ -894,7 +902,7 @@ class HistoryFreePackUndo(PackUndo):
             self.connmanager.close(conn, cursor)
 
 
-    def _pre_pack_main(self, conn, cursor, get_references):
+    def _pre_pack_main(self, conn, cursor, pack_tid, get_references):
         """Determine what to garbage collect.
         """
         stmt = self._script_create_temp_pack_visit
@@ -912,11 +920,15 @@ class HistoryFreePackUndo(PackUndo):
         SELECT zoid, %(FALSE)s, tid
         FROM object_state;
 
-        -- Keep the root object
+        -- Keep the root object.
         UPDATE pack_object SET keep = %(TRUE)s
         WHERE zoid = 0;
+
+        -- Keep objects that have been revised since pack_tid.
+        UPDATE pack_object SET keep = %(TRUE)s
+        WHERE keep_tid > %(pack_tid)s;
         """
-        self.runner.run_script(cursor, stmt)
+        self.runner.run_script(cursor, stmt, {'pack_tid': pack_tid})
 
         # Set the 'keep' flags in pack_object
         self._visit_all_references(cursor)
@@ -948,16 +960,15 @@ class HistoryFreePackUndo(PackUndo):
                 packed_list = []
                 self.locker.hold_commit_lock(cursor)
 
-                for item in to_remove:
-                    oid, tid = item
+                while to_remove:
+                    items = to_remove[:100]
+                    del to_remove[:100]
                     stmt = """
                     DELETE FROM object_state
-                    WHERE zoid = %(oid)s
-                        AND tid = %(tid)s
+                    WHERE zoid = %s AND tid = %s
                     """
-                    self.runner.run_script_stmt(
-                        cursor, stmt, {'oid': oid, 'tid': tid})
-                    packed_list.append(item)
+                    self.runner.run_many(cursor, stmt, items)
+                    packed_list.extend(items)
 
                     if time.time() >= start + options.pack_batch_timeout:
                         conn.commit()
@@ -1048,5 +1059,12 @@ class MySQLHistoryFreePackUndo(HistoryFreePackUndo):
 
 
 class OracleHistoryFreePackUndo(HistoryFreePackUndo):
+
+    _script_choose_pack_transaction = """
+        SELECT MAX(tid)
+        FROM object_state
+        WHERE tid > 0
+            AND tid <= %(tid)s
+        """
 
     _script_create_temp_pack_visit = None
