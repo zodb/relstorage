@@ -170,7 +170,7 @@ class SpeedTest:
         return end - start
 
     def read_test(self, storage, n):
-        db = DB(storage)
+        db = DB(storage, cache_size=len(self.data_to_store)+400)
         start = time.time()
         for i in range(txn_count):
             conn = db.open()
