@@ -429,7 +429,10 @@ class GenericRelStorageTests(
             # Choose the pack time
             now = packtime = time.time()
             while packtime <= now:
+                time.sleep(0.1)
                 packtime = time.time()
+            while packtime == time.time():
+                time.sleep(0.1)
 
             extra2.foo = 'bar'
             extra3 = PersistentMapping()
