@@ -11,6 +11,11 @@ Unreleased
 
 - Expanded the option documentation in README.txt.
 
+- Revised the way RelStorage uses memcached.  Minimized the number of
+  trips to both the cache server and the database.
+
+- Added a wrapper module for pylibmc.
+
 - Renamed relstorage.py to storage.py to overcome import issues.
   Also moved the Options class to options.py.
 

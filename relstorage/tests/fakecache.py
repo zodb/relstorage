@@ -24,8 +24,14 @@ class Client(object):
     def get(self, key):
         return data.get(key)
 
+    def get_multi(self, keys):
+        return dict((key, data.get(key)) for key in keys)
+
     def set(self, key, value):
         data[key] = value
+
+    def set_multi(self, d):
+        data.update(d)
 
     def add(self, key, value):
         if key not in data:

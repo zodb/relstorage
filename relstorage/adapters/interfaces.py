@@ -182,12 +182,6 @@ class ILocker(Interface):
 class IObjectMover(Interface):
     """Move object states to/from the database and within the database."""
 
-    def get_current_tid(cursor, oid):
-        """Returns the current integer tid for an object.
-
-        oid is an integer.  Returns None if object does not exist.
-        """
-
     def load_current(cursor, oid):
         """Returns the current state and integer tid for an object.
 

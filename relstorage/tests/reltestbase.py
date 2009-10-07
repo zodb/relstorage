@@ -235,23 +235,29 @@ class GenericRelStorageTests(
             self.assertEqual(c1._storage._cache_client.servers, ['x:1', 'y:2'])
             fakecache.data.clear()
             r1 = c1.root()
-            # the root tid and state should now be cached
-            self.assertEqual(len(fakecache.data), 2)
+            # the root state should now be cached
+            self.assertEqual(fakecache.data.keys(), ['state:0'])
             r1['alpha'] = PersistentMapping()
             self.assertFalse('commit_count' in fakecache.data)
             transaction.commit()
             self.assertTrue('commit_count' in fakecache.data)
-            self.assertEqual(len(fakecache.data), 3)
+            self.assertEqual(sorted(fakecache.data.keys()),
+                ['commit_count', 'state:0'])
             oid = r1['alpha']._p_oid
-            self.assertEqual(len(fakecache.data), 3)
+            self.assertEqual(sorted(fakecache.data.keys()),
+                ['commit_count', 'state:0'])
 
             got, serial = c1._storage.load(oid, '')
-            # another tid and state should now be cached
-            self.assertEqual(len(fakecache.data), 5)
+            # another state should now be cached
+            self.assertEqual(len(fakecache.data.keys()), 3)
 
-            # load the object via loadSerial()
-            got2 = c1._storage.loadSerial(oid, serial)
-            self.assertEqual(got, got2)
+            # make a change
+            r1['beta'] = 0
+            transaction.commit()
+
+            got, serial = c1._storage.load(oid, '')
+            # a backpointer should now be cached
+            self.assertEqual(len(fakecache.data.keys()), 4)
 
             # try to load an object that doesn't exist
             self.assertRaises(KeyError, c1._storage.load, 'bad.oid.', '')

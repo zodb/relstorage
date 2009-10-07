@@ -344,13 +344,6 @@ class RelStorage(BaseStorage,
 
         logfunc('; '.join(msg))
 
-    def _get_oid_cache_key(self, oid_int):
-        """Return the cache key for finding the current tid."""
-        my_tid = self._prev_polled_tid
-        if my_tid is None:
-            return None
-        return 'tid:%d:%d' % (oid_int, my_tid)
-
     def load(self, oid, version):
         oid_int = u64(oid)
         cache = self._cache_client
@@ -360,38 +353,57 @@ class RelStorage(BaseStorage,
             if not self._load_transaction_open:
                 self._restart_load()
             cursor = self._load_cursor
+
             if cache is None:
                 state, tid_int = self._adapter.mover.load_current(
                     cursor, oid_int)
-            else:
-                # get tid_int from the cache or the database
-                cachekey = self._get_oid_cache_key(oid_int)
-                if cachekey:
-                    tid_int = cache.get(cachekey)
-                if not cachekey or not tid_int:
-                    tid_int = self._adapter.mover.get_current_tid(
-                        cursor, oid_int)
-                    if cachekey and tid_int is not None:
-                        cache.set(cachekey, tid_int)
-                if tid_int is None:
-                    self._log_keyerror(oid_int, "no tid found(1)")
-                    raise POSKeyError(oid)
+                state = str(state or '')
 
-                # get state from the cache or the database
-                cachekey = 'state:%d:%d' % (oid_int, tid_int)
-                state = cache.get(cachekey)
-                if not state:
-                    state = self._adapter.mover.load_revision(
-                        cursor, oid_int, tid_int)
-                    if state:
-                        state = str(state)
-                        cache.set(cachekey, state)
+            else:
+                # try to load from cache
+                state_key = 'state:%d' % oid_int
+                my_tid = self._prev_polled_tid
+                if my_tid:
+                    backptr_key = 'back:%d:%d' % (my_tid, oid_int)
+                    v = cache.get_multi([state_key, backptr_key])
+                    if v is not None:
+                        cache_data = v.get(state_key)
+                        backptr = v.get(backptr_key)
+                    else:
+                        cache_data = None
+                        backptr = None
+                else:
+                    cache_data = cache.get(state_key)
+                    backptr = None
+
+                state = None
+                if cache_data and len(cache_data) >= 8:
+                    # validate the cache result
+                    tid = cache_data[:8]
+                    tid_int = u64(tid)
+                    if tid_int == my_tid or tid == backptr:
+                        # the cached data is current.
+                        state = cache_data[8:]
+
+                if state is None:
+                    # could not load from cache, so get from the database
+                    state, tid_int = self._adapter.mover.load_current(
+                        cursor, oid_int)
+                    state = str(state or '')
+                    if tid_int is not None:
+                        # cache the result
+                        tid = p64(tid_int)
+                        if my_tid and my_tid != tid_int:
+                            cache.set_multi({
+                                state_key: tid + state,
+                                backptr_key: tid,
+                                })
+                        else:
+                            cache.set(state_key, tid + state)
         finally:
             self._lock_release()
 
         if tid_int is not None:
-            if state:
-                state = str(state)
             if not state:
                 # This can happen if something attempts to load
                 # an object whose creation has been undone.
@@ -399,7 +411,7 @@ class RelStorage(BaseStorage,
                 raise POSKeyError(oid)
             return state, p64(tid_int)
         else:
-            self._log_keyerror(oid_int, "no tid found(2)")
+            self._log_keyerror(oid_int, "no tid found")
             raise POSKeyError(oid)
 
     def loadEx(self, oid, version):
@@ -411,12 +423,6 @@ class RelStorage(BaseStorage,
         """Load a specific revision of an object"""
         oid_int = u64(oid)
         tid_int = u64(serial)
-        cache = self._cache_client
-        if cache is not None:
-            cachekey = 'state:%d:%d' % (oid_int, tid_int)
-            state = cache.get(cachekey)
-            if state:
-                return state
 
         self._lock_acquire()
         try:
@@ -436,8 +442,6 @@ class RelStorage(BaseStorage,
             state = str(state)
             if not state:
                 raise POSKeyError(oid)
-            if cache is not None:
-                cache.set(cachekey, state)
             return state
         else:
             raise POSKeyError(oid)

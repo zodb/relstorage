@@ -37,7 +37,6 @@ class ObjectMover(object):
     implements(IObjectMover)
 
     _method_names = (
-        'get_current_tid',
         'load_current',
         'load_revision',
         'exists',
@@ -65,56 +64,6 @@ class ObjectMover(object):
         for method_name in self._method_names:
             method = getattr(self, '%s_%s' % (database_name, method_name))
             setattr(self, method_name, method)
-
-
-
-
-    def generic_get_current_tid(self, cursor, oid):
-        """Returns the current integer tid for an object.
-
-        oid is an integer.  Returns None if object does not exist.
-        """
-        if self.keep_history:
-            stmt = """
-            SELECT tid
-            FROM current_object
-            WHERE zoid = %s
-            """
-        else:
-            stmt = """
-            SELECT tid
-            FROM object_state
-            WHERE zoid = %s
-            """
-        cursor.execute(stmt, (oid,))
-        for (tid,) in cursor:
-            return tid
-        return None
-
-    postgresql_get_current_tid = generic_get_current_tid
-    mysql_get_current_tid = generic_get_current_tid
-
-    def oracle_get_current_tid(self, cursor, oid):
-        """Returns the current integer tid for an object.
-
-        oid is an integer.  Returns None if object does not exist.
-        """
-        if self.keep_history:
-            stmt = """
-            SELECT tid
-            FROM current_object
-            WHERE zoid = :1
-            """
-        else:
-            stmt = """
-            SELECT tid
-            FROM object_state
-            WHERE zoid = :1
-            """
-        cursor.execute(stmt, (oid,))
-        for (tid,) in cursor:
-            return tid
-        return None
 
 
 
