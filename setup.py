@@ -13,7 +13,7 @@
 ##############################################################################
 """A backend for ZODB that stores pickles in a relational database."""
 
-VERSION = "1.3.0dev"
+VERSION = "1.4.0dev"
 
 # The choices for the Trove Development Status line:
 # Development Status :: 5 - Production/Stable
