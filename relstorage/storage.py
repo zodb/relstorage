@@ -392,14 +392,15 @@ class RelStorage(BaseStorage,
                     state = str(state or '')
                     if tid_int is not None:
                         # cache the result
+                        to_cache = {}
                         tid = p64(tid_int)
+                        new_cache_data = tid + state
+                        if new_cache_data != cache_data:
+                            to_cache[state_key] = new_cache_data
                         if my_tid and my_tid != tid_int:
-                            cache.set_multi({
-                                state_key: tid + state,
-                                backptr_key: tid,
-                                })
-                        else:
-                            cache.set(state_key, tid + state)
+                            to_cache[backptr_key] = tid
+                        if to_cache:
+                            cache.set_multi(to_cache)
         finally:
             self._lock_release()
 
