@@ -16,6 +16,9 @@ Unreleased
 
 - Added a wrapper module for pylibmc.
 
+- Store operations now use multi-insert and multi-delete SQL
+  statements to reduce the effect of network latency.
+
 - Renamed relstorage.py to storage.py to overcome import issues.
   Also moved the Options class to options.py.
 

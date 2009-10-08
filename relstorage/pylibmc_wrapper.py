@@ -35,6 +35,11 @@ class Client(object):
 
     def __init__(self, servers):
         self._client = pylibmc.Client(servers, binary=True)
+        self._client.set_behaviors({
+            "tcp_nodelay": True,
+            #"no block": True,
+            #"buffer requests": True,
+            })
 
     def get(self, key):
         try:

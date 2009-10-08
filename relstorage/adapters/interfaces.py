@@ -216,19 +216,21 @@ class IObjectMover(Interface):
         initialization is required.
         """
 
-    def store_temp(cursor, oid, prev_tid, data):
-        """Store an object in the temporary table."""
+    def make_batcher(cursor):
+        """Return an object to be used for batch store operations."""
 
-    def replace_temp(cursor, oid, prev_tid, data):
-        """Replace an object in the temporary table.
+    def store_temp(cursor, batcher, oid, prev_tid, data):
+        """Store an object in the temporary table.
 
-        This happens after conflict resolution.
+        batcher is an object returned by self.make_batcher().
         """
 
-    def restore(cursor, oid, tid, data):
+    def restore(cursor, batcher, oid, tid, data, stmt_buf):
         """Store an object directly, without conflict detection.
 
         Used for copying transactions into this database.
+
+        batcher is an object returned by self.make_batcher().
         """
 
     def detect_conflict(cursor):
@@ -236,6 +238,12 @@ class IObjectMover(Interface):
 
         If there is a conflict, returns (oid, prev_tid, attempted_prev_tid,
         attempted_data).  If there is no conflict, returns None.
+        """
+
+    def replace_temp(cursor, oid, prev_tid, data):
+        """Replace an object in the temporary table.
+
+        This happens after conflict resolution.
         """
 
     def move_from_temp(cursor, tid):

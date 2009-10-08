@@ -158,6 +158,10 @@ class RelStorage(BaseStorage,
         # currently uncommitted transaction.
         self._txn_blobs = None
 
+        # _batcher: An object that accumulates store operations
+        # so they can be executed in batch (to minimize latency).
+        self._batcher = None
+
         if options.blob_dir:
             from ZODB.blob import FilesystemHelper
             self.fshelper = FilesystemHelper(options.blob_dir)
@@ -508,7 +512,8 @@ class RelStorage(BaseStorage,
         try:
             self._max_stored_oid = max(self._max_stored_oid, oid_int)
             # save the data in a temporary table
-            adapter.mover.store_temp(cursor, oid_int, prev_tid_int, data)
+            adapter.mover.store_temp(
+                cursor, self._batcher, oid_int, prev_tid_int, data)
             return None
         finally:
             self._lock_release()
@@ -538,7 +543,8 @@ class RelStorage(BaseStorage,
         try:
             self._max_stored_oid = max(self._max_stored_oid, oid_int)
             # save the data.  Note that data can be None.
-            adapter.mover.restore(cursor, oid_int, tid_int, data)
+            adapter.mover.restore(
+                cursor, self._batcher, oid_int, tid_int, data)
         finally:
             self._lock_release()
 
@@ -566,8 +572,10 @@ class RelStorage(BaseStorage,
             self._ude = user, desc, ext
             self._tstatus = status
 
-            adapter = self._adapter
             self._restart_store()
+            adapter = self._adapter
+            self._batcher = self._adapter.mover.make_batcher(
+                self._store_cursor)
 
             if tid is not None:
                 # get the commit lock and add the transaction now
@@ -622,6 +630,7 @@ class RelStorage(BaseStorage,
         # method was called.
         self._prepared_txn = None
         self._max_stored_oid = 0
+        self._batcher = None
 
 
     def _finish_store(self):
@@ -690,6 +699,10 @@ class RelStorage(BaseStorage,
         assert cursor is not None
         conn = self._store_conn
 
+        # execute all remaining batch store operations
+        self._batcher.flush()
+
+        # Reserve all OIDs used by this transaction
         if self._max_stored_oid > self._max_new_oid:
             self._adapter.oidallocator.set_min_oid(
                 cursor, self._max_stored_oid + 1)
@@ -775,6 +788,7 @@ class RelStorage(BaseStorage,
             self._prepared_txn = None
             self._tid = None
             self._transaction = None
+            self._batcher = None
 
     def _abort(self):
         # the lock is held here
@@ -796,6 +810,7 @@ class RelStorage(BaseStorage,
             self._prepared_txn = None
             self._tid = None
             self._transaction = None
+            self._batcher = None
 
     def lastTransaction(self):
         return self._ltid

@@ -17,6 +17,8 @@
 from base64 import decodestring
 from base64 import encodestring
 from relstorage.adapters.interfaces import IObjectMover
+from relstorage.adapters.batch import OracleRowBatcher
+from relstorage.adapters.batch import RowBatcher
 from zope.interface import implements
 
 try:
@@ -44,9 +46,9 @@ class ObjectMover(object):
         'get_object_tid_after',
         'on_store_opened',
         'store_temp',
-        'replace_temp',
         'restore',
         'detect_conflict',
+        'replace_temp',
         'move_from_temp',
         'update_current',
         )
@@ -59,11 +61,20 @@ class ObjectMover(object):
         self.runner = runner
         self.Binary = Binary
         self.inputsize_BLOB = inputsize_BLOB
-        self.inputsize_BINARY = inputsize_BINARY
+        self.inputsizes = {
+            'blobdata': inputsize_BLOB,
+            'rawdata': inputsize_BINARY,
+            }
 
         for method_name in self._method_names:
             method = getattr(self, '%s_%s' % (database_name, method_name))
             setattr(self, method_name, method)
+
+    def make_batcher(self, cursor):
+        if self.database_name == 'oracle':
+            return OracleRowBatcher(cursor, self.inputsizes)
+        else:
+            return RowBatcher(cursor)
 
 
 
@@ -381,121 +392,67 @@ class ObjectMover(object):
 
 
 
-    def postgresql_store_temp(self, cursor, oid, prev_tid, data):
+    def postgresql_store_temp(self, cursor, batcher, oid, prev_tid, data):
         """Store an object in the temporary table."""
         if self.keep_history:
             md5sum = compute_md5sum(data)
         else:
             md5sum = None
-        stmt = """
-        DELETE FROM temp_store WHERE zoid = %s;
-        INSERT INTO temp_store (zoid, prev_tid, md5, state)
-        VALUES (%s, %s, %s, decode(%s, 'base64'))
-        """
-        cursor.execute(stmt, (oid, oid, prev_tid, md5sum, encodestring(data)))
+        batcher.delete_from('temp_store', 'zoid', oid)
+        batcher.insert_into(
+            "temp_store (zoid, prev_tid, md5, state)",
+            "%s, %s, %s, decode(%s, 'base64')",
+            (oid, prev_tid, md5sum, encodestring(data)),
+            rowkey=oid,
+            size=len(data),
+            )
 
-    def mysql_store_temp(self, cursor, oid, prev_tid, data):
+    def mysql_store_temp(self, cursor, batcher, oid, prev_tid, data):
         """Store an object in the temporary table."""
         if self.keep_history:
             md5sum = compute_md5sum(data)
         else:
             md5sum = None
-        stmt = """
-        REPLACE INTO temp_store (zoid, prev_tid, md5, state)
-        VALUES (%s, %s, %s, %s)
-        """
-        cursor.execute(stmt, (oid, prev_tid, md5sum, self.Binary(data)))
+        batcher.insert_into(
+            "temp_store (zoid, prev_tid, md5, state)",
+            "%s, %s, %s, %s",
+            (oid, prev_tid, md5sum, self.Binary(data)),
+            rowkey=oid,
+            size=len(data),
+            command='REPLACE',
+            )
 
-    def oracle_store_temp(self, cursor, oid, prev_tid, data):
+    def oracle_store_temp(self, cursor, batcher, oid, prev_tid, data):
         """Store an object in the temporary table."""
         if self.keep_history:
             md5sum = compute_md5sum(data)
         else:
             md5sum = None
-        cursor.execute("DELETE FROM temp_store WHERE zoid = :oid", oid=oid)
+
+        batcher.delete_from('temp_store', 'zoid', oid)
+
+        row = {'oid': oid, 'prev_tid': prev_tid, 'md5sum': md5sum}
         if len(data) <= 2000:
             # Send data inline for speed.  Oracle docs say maximum size
-            # of a RAW is 2000 bytes.  inputsize_BINARY corresponds with RAW.
-            stmt = """
-            INSERT INTO temp_store (zoid, prev_tid, md5, state)
-            VALUES (:oid, :prev_tid, :md5sum, :rawdata)
-            """
-            cursor.setinputsizes(rawdata=self.inputsize_BINARY)
-            cursor.execute(stmt, oid=oid, prev_tid=prev_tid,
-                md5sum=md5sum, rawdata=data)
+            # of a RAW is 2000 bytes.
+            row_schema = ":oid, :prev_tid, :md5sum, :rawdata"
+            row['rawdata'] = data
         else:
             # Send data as a BLOB
-            stmt = """
-            INSERT INTO temp_store (zoid, prev_tid, md5, state)
-            VALUES (:oid, :prev_tid, :md5sum, :blobdata)
-            """
-            cursor.setinputsizes(blobdata=self.inputsize_BLOB)
-            cursor.execute(stmt, oid=oid, prev_tid=prev_tid,
-                md5sum=md5sum, blobdata=data)
+            row_schema = ":oid, :prev_tid, :md5sum, :blobdata"
+            row['blobdata'] = data
+        batcher.insert_into(
+            "temp_store (zoid, prev_tid, md5, state)",
+            row_schema,
+            row,
+            rowkey=oid,
+            size=len(data),
+            )
 
 
 
 
-    def postgresql_replace_temp(self, cursor, oid, prev_tid, data):
-        """Replace an object in the temporary table.
-
-        This happens after conflict resolution.
-        """
-        if self.keep_history:
-            md5sum = compute_md5sum(data)
-        else:
-            md5sum = None
-        stmt = """
-        UPDATE temp_store SET
-            prev_tid = %s,
-            md5 = %s,
-            state = decode(%s, 'base64')
-        WHERE zoid = %s
-        """
-        cursor.execute(stmt, (prev_tid, md5sum, encodestring(data), oid))
-
-    def mysql_replace_temp(self, cursor, oid, prev_tid, data):
-        """Replace an object in the temporary table.
-
-        This happens after conflict resolution.
-        """
-        if self.keep_history:
-            md5sum = compute_md5sum(data)
-        else:
-            md5sum = None
-        stmt = """
-        UPDATE temp_store SET
-            prev_tid = %s,
-            md5 = %s,
-            state = %s
-        WHERE zoid = %s
-        """
-        cursor.execute(stmt, (prev_tid, md5sum, self.Binary(data), oid))
-
-    def oracle_replace_temp(self, cursor, oid, prev_tid, data):
-        """Replace an object in the temporary table.
-
-        This happens after conflict resolution.
-        """
-        if self.keep_history:
-            md5sum = compute_md5sum(data)
-        else:
-            md5sum = None
-        stmt = """
-        UPDATE temp_store SET
-            prev_tid = :prev_tid,
-            md5 = :md5sum,
-            state = :blobdata
-        WHERE zoid = :oid
-        """
-        cursor.setinputsizes(blobdata=self.inputsize_BLOB)
-        cursor.execute(stmt, oid=oid, prev_tid=prev_tid,
-            md5sum=md5sum, blobdata=self.Binary(data))
-
-
-
-
-    def postgresql_restore(self, cursor, oid, tid, data):
+    def postgresql_restore(self, cursor, batcher, oid, tid, data):
         """Store an object directly, without conflict detection.
 
         Used for copying transactions into this database.
@@ -511,27 +468,30 @@ class ObjectMover(object):
             encoded = None
 
         if self.keep_history:
-            stmt = """
-            INSERT INTO object_state (zoid, tid, prev_tid, md5, state)
-            VALUES (%s, %s,
+            row_schema = """
+                %s, %s,
                 COALESCE((SELECT tid FROM current_object WHERE zoid = %s), 0),
-                %s, decode(%s, 'base64'))
+                %s, decode(%s, 'base64')
             """
-            cursor.execute(stmt, (oid, tid, oid, md5sum, encoded))
+            batcher.insert_into(
+                "object_state (zoid, tid, prev_tid, md5, state)",
+                row_schema,
+                (oid, tid, oid, md5sum, encoded),
+                rowkey=(oid, tid),
+                size=len(data or ''),
+                )
         else:
-            stmt = """
-            DELETE FROM object_state
-            WHERE zoid = %s
-            """
-            cursor.execute(stmt, (oid,))
+            batcher.delete_from('object_state', 'zoid', oid)
             if data:
-                stmt = """
-                INSERT INTO object_state (zoid, tid, state)
-                VALUES (%s, %s, decode(%s, 'base64'))
-                """
-                cursor.execute(stmt, (oid, tid, encoded))
+                batcher.insert_into(
+                    "object_state (zoid, tid, state)",
+                    "%s, %s, decode(%s, 'base64')",
+                    (oid, tid, encoded),
+                    rowkey=oid,
+                    size=len(data),
+                    )
 
-    def mysql_restore(self, cursor, oid, tid, data):
+    def mysql_restore(self, cursor, batcher, oid, tid, data):
         """Store an object directly, without conflict detection.
 
         Used for copying transactions into this database.
@@ -547,28 +507,32 @@ class ObjectMover(object):
             encoded = None
 
         if self.keep_history:
-            stmt = """
-            INSERT INTO object_state (zoid, tid, prev_tid, md5, state)
-            VALUES (%s, %s,
+            row_schema = """
+                %s, %s,
                 COALESCE((SELECT tid FROM current_object WHERE zoid = %s), 0),
-                %s, %s)
+                %s, %s
             """
-            cursor.execute(stmt, (oid, tid, oid, md5sum, encoded))
+            batcher.insert_into(
+                "object_state (zoid, tid, prev_tid, md5, state)",
+                row_schema,
+                (oid, tid, oid, md5sum, encoded),
+                rowkey=(oid, tid),
+                size=len(data or ''),
+                )
         else:
             if data:
-                stmt = """
-                REPLACE INTO object_state (zoid, tid, state)
-                VALUES (%s, %s, %s)
-                """
-                cursor.execute(stmt, (oid, tid, encoded))
+                batcher.insert_into(
+                    "object_state (zoid, tid, state)",
+                    "%s, %s, %s",
+                    (oid, tid, encoded),
+                    rowkey=oid,
+                    size=len(data),
+                    command='REPLACE',
+                    )
             else:
-                stmt = """
-                DELETE FROM object_state
-                WHERE zoid = %s
-                """
-                cursor.execute(stmt, (oid,))
+                batcher.delete_from('object_state', 'zoid', oid)
 
-    def oracle_restore(self, cursor, oid, tid, data):
+    def oracle_restore(self, cursor, batcher, oid, tid, data):
         """Store an object directly, without conflict detection.
 
         Used for copying transactions into this database.
@@ -577,52 +541,43 @@ class ObjectMover(object):
             md5sum = compute_md5sum(data)
         else:
             md5sum = None
-            stmt = "DELETE FROM object_state WHERE zoid = :1"
-            cursor.execute(stmt, (oid,))
 
-        if not data or len(data) <= 2000:
-            # Send data inline for speed.  Oracle docs say maximum size
-            # of a RAW is 2000 bytes.  inputsize_BINARY corresponds with RAW.
-            if self.keep_history:
-                stmt = """
-                INSERT INTO object_state (zoid, tid, prev_tid, md5, state)
-                VALUES (:oid, :tid,
-                    COALESCE(
-                        (SELECT tid FROM current_object WHERE zoid = :oid), 0),
-                    :md5sum, :rawdata)
-                """
-                cursor.setinputsizes(rawdata=self.inputsize_BINARY)
-                cursor.execute(stmt, oid=oid, tid=tid,
-                    md5sum=md5sum, rawdata=data)
+        if self.keep_history:
+            row = {'oid': oid, 'tid': tid, 'md5sum': md5sum}
+            row_schema = """
+                :oid, :tid,
+                COALESCE((SELECT tid FROM current_object WHERE zoid = :oid), 0),
+                :md5sum, :rawdata
+            """
+            if not data or len(data) <= 2000:
+                row['rawdata'] = data
             else:
-                if data:
-                    stmt = """
-                    INSERT INTO object_state (zoid, tid, state)
-                    VALUES (:oid, :tid, :rawdata)
-                    """
-                    cursor.setinputsizes(rawdata=self.inputsize_BINARY)
-                    cursor.execute(stmt, oid=oid, tid=tid, rawdata=data)
+                row_schema = row_schema.replace(":rawdata", ":blobdata")
+                row['blobdata'] = data
+            batcher.insert_into(
+                "object_state (zoid, tid, prev_tid, md5, state)",
+                row_schema,
+                row,
+                rowkey=(oid, tid),
+                size=len(data or ''),
+                )
         else:
-            # Send data as a BLOB
-            if self.keep_history:
-                stmt = """
-                INSERT INTO object_state (zoid, tid, prev_tid, md5, state)
-                VALUES (:oid, :tid,
-                    COALESCE(
-                        (SELECT tid FROM current_object WHERE zoid = :oid), 0),
-                    :md5sum, :blobdata)
-                """
-                cursor.setinputsizes(blobdata=self.inputsize_BLOB)
-                cursor.execute(stmt, oid=oid, tid=tid,
-                    md5sum=md5sum, blobdata=data)
-            else:
-                cursor.execute(stmt, (oid,))
-                stmt = """
-                INSERT INTO object_state (zoid, tid, state)
-                VALUES (:oid, :tid, :blobdata)
-                """
-                cursor.setinputsizes(blobdata=self.inputsize_BLOB)
-                cursor.execute(stmt, oid=oid, tid=tid, blobdata=data)
+            batcher.delete_from('object_state', 'zoid', oid)
+            if data:
+                row = {'oid': oid, 'tid': tid}
+                if len(data) <= 2000:
+                    row_schema = ":oid, :tid, :rawdata"
+                    row['rawdata'] = data
+                else:
+                    row_schema = ":oid, :tid, :blobdata"
+                    row['blobdata'] = data
+                batcher.insert_into(
+                    "object_state (zoid, tid, state)",
+                    row_schema,
+                    row,
+                    rowkey=oid,
+                    size=len(data),
+                    )
 
 
 
@@ -712,6 +667,65 @@ class ObjectMover(object):
             WHERE temp_store.prev_tid != object_state.tid
             """
         return self.runner.run_lob_stmt(cursor, stmt)
+
+
+
+
+    def postgresql_replace_temp(self, cursor, oid, prev_tid, data):
+        """Replace an object in the temporary table.
+
+        This happens after conflict resolution.
+        """
+        if self.keep_history:
+            md5sum = compute_md5sum(data)
+        else:
+            md5sum = None
+        stmt = """
+        UPDATE temp_store SET
+            prev_tid = %s,
+            md5 = %s,
+            state = decode(%s, 'base64')
+        WHERE zoid = %s
+        """
+        cursor.execute(stmt, (prev_tid, md5sum, encodestring(data), oid))
+
+    def mysql_replace_temp(self, cursor, oid, prev_tid, data):
+        """Replace an object in the temporary table.
+
+        This happens after conflict resolution.
+        """
+        if self.keep_history:
+            md5sum = compute_md5sum(data)
+        else:
+            md5sum = None
+        stmt = """
+        UPDATE temp_store SET
+            prev_tid = %s,
+            md5 = %s,
+            state = %s
+        WHERE zoid = %s
+        """
+        cursor.execute(stmt, (prev_tid, md5sum, self.Binary(data), oid))
+
+    def oracle_replace_temp(self, cursor, oid, prev_tid, data):
+        """Replace an object in the temporary table.
+
+        This happens after conflict resolution.
+        """
+        if self.keep_history:
+            md5sum = compute_md5sum(data)
+        else:
+            md5sum = None
+        stmt = """
+        UPDATE temp_store SET
+            prev_tid = :prev_tid,
+            md5 = :md5sum,
+            state = :blobdata
+        WHERE zoid = :oid
+        """
+        cursor.setinputsizes(blobdata=self.inputsize_BLOB)
+        cursor.execute(stmt, oid=oid, prev_tid=prev_tid,
+            md5sum=md5sum, blobdata=self.Binary(data))
 
 
 
