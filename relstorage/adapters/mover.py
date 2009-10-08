@@ -17,8 +17,9 @@
 from base64 import decodestring
 from base64 import encodestring
 from relstorage.adapters.interfaces import IObjectMover
+from relstorage.adapters.batch import MySQLRowBatcher
 from relstorage.adapters.batch import OracleRowBatcher
-from relstorage.adapters.batch import RowBatcher
+from relstorage.adapters.batch import PostgreSQLRowBatcher
 from zope.interface import implements
 
 try:
@@ -45,6 +46,7 @@ class ObjectMover(object):
         'load_before',
         'get_object_tid_after',
         'on_store_opened',
+        'make_batcher',
         'store_temp',
         'restore',
         'detect_conflict',
@@ -54,7 +56,8 @@ class ObjectMover(object):
         )
 
     def __init__(self, database_name, keep_history, runner=None,
-            Binary=None, inputsize_BLOB=None, inputsize_BINARY=None):
+            Binary=None, inputsize_BLOB=None, inputsize_BINARY=None,
+            version_detector=None):
         # The inputsize parameters are for Oracle only.
         self.database_name = database_name
         self.keep_history = keep_history
@@ -65,16 +68,11 @@ class ObjectMover(object):
             'blobdata': inputsize_BLOB,
             'rawdata': inputsize_BINARY,
             }
+        self.version_detector = version_detector
 
         for method_name in self._method_names:
             method = getattr(self, '%s_%s' % (database_name, method_name))
             setattr(self, method_name, method)
-
-    def make_batcher(self, cursor):
-        if self.database_name == 'oracle':
-            return OracleRowBatcher(cursor, self.inputsizes)
-        else:
-            return RowBatcher(cursor)
 
 
 
@@ -388,6 +386,18 @@ class ObjectMover(object):
 
     # no store connection initialization needed for Oracle
     oracle_on_store_opened = None
+
+
+
+
+    def postgresql_make_batcher(self, cursor):
+        return PostgreSQLRowBatcher(cursor, self.version_detector)
+
+    def mysql_make_batcher(self, cursor):
+        return MySQLRowBatcher(cursor)
+
+    def oracle_make_batcher(self, cursor):
+        return OracleRowBatcher(cursor, self.inputsizes)
 
 
 

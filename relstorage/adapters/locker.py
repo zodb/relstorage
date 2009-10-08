@@ -17,7 +17,6 @@
 from relstorage.adapters.interfaces import ILocker
 from ZODB.POSException import StorageError
 from zope.interface import implements
-import re
 
 commit_lock_timeout = 30
 
@@ -31,6 +30,11 @@ class Locker(object):
 
 class PostgreSQLLocker(Locker):
     implements(ILocker)
+
+    def __init__(self, keep_history, lock_exceptions, version_detector):
+        super(PostgreSQLLocker, self).__init__(
+            keep_history=keep_history, lock_exceptions=lock_exceptions)
+        self.version_detector = version_detector
 
     def hold_commit_lock(self, cursor, ensure_current=False):
         if ensure_current:
@@ -57,19 +61,9 @@ class PostgreSQLLocker(Locker):
         # no action needed
         pass
 
-    def _pg_version(self, cursor):
-        """Return the (major, minor) version of PostgreSQL"""
-        cursor.execute("SELECT version()")
-        v = cursor.fetchone()[0]
-        m = re.search(r"([0-9]+)[.]([0-9]+)", v)
-        if m is None:
-            raise AssertionError("Unable to detect PostgreSQL version: " + v)
-        else:
-            return int(m.group(1)), int(m.group(2))
-
     def _pg_has_advisory_locks(self, cursor):
         """Return true if this version of PostgreSQL supports advisory locks"""
-        return self._pg_version(cursor) >= (8, 2)
+        return self.version_detector.get_version(cursor) >= (8, 2)
 
     def create_pack_lock(self, cursor):
         if not self._pg_has_advisory_locks(cursor):

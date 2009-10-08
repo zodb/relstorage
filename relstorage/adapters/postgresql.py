@@ -16,6 +16,7 @@
 import logging
 import psycopg2
 import psycopg2.extensions
+import re
 from zope.interface import implements
 
 from relstorage.adapters.connmanager import AbstractConnectionManager
@@ -60,6 +61,7 @@ class PostgreSQLAdapter(object):
             self.keep_history = options.keep_history
         else:
             self.keep_history = True
+        self.version_detector = PostgreSQLVersionDetector()
         self.connmanager = Psycopg2ConnectionManager(
             dsn=dsn,
             options=options,
@@ -69,6 +71,7 @@ class PostgreSQLAdapter(object):
         self.locker = PostgreSQLLocker(
             keep_history=self.keep_history,
             lock_exceptions=(psycopg2.DatabaseError,),
+            version_detector=self.version_detector,
             )
         self.schema = PostgreSQLSchemaInstaller(
             connmanager=self.connmanager,
@@ -80,6 +83,7 @@ class PostgreSQLAdapter(object):
             database_name='postgresql',
             keep_history=self.keep_history,
             runner=self.runner,
+            version_detector=self.version_detector,
             )
         self.connmanager.set_on_store_opened(self.mover.on_store_opened)
         self.oidallocator = PostgreSQLOIDAllocator()
@@ -221,7 +225,22 @@ class Psycopg2ConnectionManager(AbstractConnectionManager):
             FROM object_state
             ORDER BY tid DESC
             LIMIT 1
-            """            
+            """
         cursor.execute(stmt)
         return conn, cursor
 
+
+class PostgreSQLVersionDetector(object):
+
+    version = None
+
+    def get_version(self, cursor):
+        """Return the (major, minor) version of the database"""
+        if self.version is None:
+            cursor.execute("SELECT version()")
+            v = cursor.fetchone()[0]
+            m = re.search(r"([0-9]+)[.]([0-9]+)", v)
+            if m is None:
+                raise AssertionError("Unable to detect database version: " + v)
+            self.version = int(m.group(1)), int(m.group(2))
+        return self.version

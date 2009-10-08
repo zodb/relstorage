@@ -25,6 +25,7 @@ class RowBatcher(object):
     row_limit = 100
     size_limit = 1<<20
     database_name = None
+    support_batch_insert = True
 
     def __init__(self, cursor):
         self.cursor = cursor
@@ -76,15 +77,33 @@ class RowBatcher(object):
     def do_inserts(self):
         items = sorted(self.inserts.items())
         for (command, header, row_schema), rows in items:
-            parts = []
-            params = []
-            s = "(%s)" % row_schema
-            for row in rows.values():
-                parts.append(s)
-                params.extend(row)
-            parts = ',\n'.join(parts)
-            stmt = "%s INTO %s VALUES %s" % (command, header, parts)
-            self.cursor.execute(stmt, tuple(params))
+            if self.support_batch_insert:
+                parts = []
+                params = []
+                s = "(%s)" % row_schema
+                for row in rows.values():
+                    parts.append(s)
+                    params.extend(row)
+                parts = ',\n'.join(parts)
+                stmt = "%s INTO %s VALUES %s" % (command, header, parts)
+                self.cursor.execute(stmt, tuple(params))
+            else:
+                for row in rows.values():
+                    stmt = "%s INTO %s VALUES (%s)" % (
+                        command, header, row_schema)
+                    self.cursor.execute(stmt, tuple(row))
+
+
+class PostgreSQLRowBatcher(RowBatcher):
+
+    def __init__(self, cursor, version_detector):
+        super(PostgreSQLRowBatcher, self).__init__(cursor)
+        self.support_batch_insert = (
+            version_detector.get_version(cursor) >= (8, 2))
+
+
+class MySQLRowBatcher(RowBatcher):
+    pass
 
 
 oracle_rowvar_re = re.compile(":([a-zA-Z0-9_]+)")
@@ -137,3 +156,4 @@ class OracleRowBatcher(RowBatcher):
                 if stmt_inputsizes:
                     self.cursor.setinputsizes(**stmt_inputsizes)
                 self.cursor.execute(stmt, params)
+
