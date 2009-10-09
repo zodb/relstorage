@@ -255,7 +255,7 @@ class SpeedTest:
         adapter.schema.prepare()
         adapter.schema.zap_all()
         def make_storage():
-            return RelStorage(adapter)
+            return RelStorage(adapter, poll_interval=opts.poll_interval)
         return self.run_tests(make_storage)
 
     def oracle_test(self, opts):
@@ -275,7 +275,7 @@ class SpeedTest:
         adapter.schema.prepare()
         adapter.schema.zap_all()
         def make_storage():
-            return RelStorage(adapter)
+            return RelStorage(adapter, poll_interval=opts.poll_interval)
         return self.run_tests(make_storage)
 
     def mysql_test(self, opts):
@@ -299,7 +299,7 @@ class SpeedTest:
         adapter.schema.prepare()
         adapter.schema.zap_all()
         def make_storage():
-            return RelStorage(adapter)
+            return RelStorage(adapter, poll_interval=opts.poll_interval)
         return self.run_tests(make_storage)
 
 
@@ -426,6 +426,10 @@ parser.add_option(
     "--mysql-port", dest="mysql_port", type='int',
     help="MySQL port",
     )
+parser.add_option(
+    "-p", "--poll-interval", dest="poll_interval", type='float', default=2.0,
+    help="RelStorage poll interval. Defaults to 2.",
+    )
 
 
 
@@ -526,7 +530,7 @@ def main(args=None):
                         lst = results[key]
                         if lst:
                             t = min(lst)
-                            line.append('%6.4f' % t)
+                            line.append('%7.5f' % t)
                         else:
                             line.append('?')
 
