@@ -59,22 +59,24 @@ class RowBatcher(object):
 
     def flush(self):
         if self.deletes:
-            self.do_deletes()
+            self._do_deletes()
             self.deletes.clear()
         if self.inserts:
-            self.do_inserts()
+            self._do_inserts()
             self.inserts.clear()
         self.rows_added = 0
         self.size_added = 0
 
-    def do_deletes(self):
+    def _do_deletes(self):
         for (table, varname), values in sorted(self.deletes.items()):
-            value_str = ','.join(values)
+            v = list(values)
+            v.sort()
+            value_str = ','.join(v)
             stmt = "DELETE FROM %s WHERE %s IN (%s)" % (
                 table, varname, value_str)
             self.cursor.execute(stmt)
 
-    def do_inserts(self):
+    def _do_inserts(self):
         items = sorted(self.inserts.items())
         for (command, header, row_schema), rows in items:
             if self.support_batch_insert:
@@ -85,7 +87,7 @@ class RowBatcher(object):
                     parts.append(s)
                     params.extend(row)
                 parts = ',\n'.join(parts)
-                stmt = "%s INTO %s VALUES %s" % (command, header, parts)
+                stmt = "%s INTO %s VALUES\n%s" % (command, header, parts)
                 self.cursor.execute(stmt, tuple(params))
             else:
                 for row in rows.values():
@@ -118,7 +120,7 @@ class OracleRowBatcher(RowBatcher):
         super(OracleRowBatcher, self).__init__(cursor)
         self.inputsizes = inputsizes
 
-    def do_inserts(self):
+    def _do_inserts(self):
 
         def replace_var(match):
             name = match.group(1)
