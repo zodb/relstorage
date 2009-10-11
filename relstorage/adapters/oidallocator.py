@@ -11,7 +11,12 @@
 # FOR A PARTICULAR PURPOSE.
 #
 ##############################################################################
-"""IOIDAllocator implementations"""
+"""IOIDAllocator implementations.
+"""
+
+# All of these allocators allocate 16 OIDs at a time.  In the sequence
+# or table, value 1 represents OID block 1-16, 2 represents OID block 17-32,
+# and so on.
 
 from relstorage.adapters.interfaces import IOIDAllocator
 from zope.interface import implements
@@ -21,18 +26,20 @@ class PostgreSQLOIDAllocator(object):
 
     def set_min_oid(self, cursor, oid):
         """Ensure the next OID is at least the given OID."""
+        n = (oid + 15) / 16
         cursor.execute("""
         SELECT CASE WHEN %s > nextval('zoid_seq')
             THEN setval('zoid_seq', %s)
             ELSE 0
             END
-        """, (oid, oid))
+        """, (n, n))
 
-    def new_oid(self, cursor):
-        """Return a new, unused OID."""
+    def new_oids(self, cursor):
+        """Return a sequence of new, unused OIDs."""
         stmt = "SELECT NEXTVAL('zoid_seq')"
         cursor.execute(stmt)
-        return cursor.fetchone()[0]
+        n = cursor.fetchone()[0]
+        return range(n * 16 - 15, n * 16 + 1)
 
 
 class MySQLOIDAllocator(object):
@@ -40,18 +47,19 @@ class MySQLOIDAllocator(object):
 
     def set_min_oid(self, cursor, oid):
         """Ensure the next OID is at least the given OID."""
-        cursor.execute("REPLACE INTO new_oid VALUES(%s)", (oid,))
+        n = (oid + 15) / 16
+        cursor.execute("REPLACE INTO new_oid VALUES(%s)", (n,))
 
-    def new_oid(self, cursor):
-        """Return a new, unused OID."""
+    def new_oids(self, cursor):
+        """Return a sequence of new, unused OIDs."""
         stmt = "INSERT INTO new_oid VALUES ()"
         cursor.execute(stmt)
-        oid = cursor.connection.insert_id()
-        if oid % 100 == 0:
+        n = cursor.connection.insert_id()
+        if n % 100 == 0:
             # Clean out previously generated OIDs.
             stmt = "DELETE FROM new_oid WHERE zoid < %s"
-            cursor.execute(stmt, (oid,))
-        return oid
+            cursor.execute(stmt, (n,))
+        return range(n * 16 - 15, n * 16 + 1)
 
 
 class OracleOIDAllocator(object):
@@ -62,8 +70,11 @@ class OracleOIDAllocator(object):
 
     def set_min_oid(self, cursor, oid):
         """Ensure the next OID is at least the given OID."""
-        next_oid = self.new_oid(cursor)
-        if next_oid < oid:
+        n = (oid + 15) / 16
+        stmt = "SELECT zoid_seq.nextval FROM DUAL"
+        cursor.execute(stmt)
+        next_n = cursor.fetchone()[0]
+        if next_n < n:
             # Oracle provides no way modify the sequence value
             # except through alter sequence or drop/create sequence,
             # but either statement kills the current transaction.
@@ -73,7 +84,7 @@ class OracleOIDAllocator(object):
             try:
                 # Change the sequence by altering the increment.
                 # (this is safer than dropping and re-creating the sequence)
-                diff = oid - next_oid
+                diff = n - next_n
                 cursor2.execute(
                     "ALTER SEQUENCE zoid_seq INCREMENT BY %d" % diff)
                 cursor2.execute("SELECT zoid_seq.nextval FROM DUAL")
@@ -82,9 +93,10 @@ class OracleOIDAllocator(object):
             finally:
                 self.connmanager.close(conn2, cursor2)
 
-    def new_oid(self, cursor):
-        """Return a new, unused OID."""
+    def new_oids(self, cursor):
+        """Return a sequence of new, unused OIDs."""
         stmt = "SELECT zoid_seq.nextval FROM DUAL"
         cursor.execute(stmt)
-        return cursor.fetchone()[0]
+        n = cursor.fetchone()[0]
+        return range(n * 16 - 15, n * 16 + 1)
 

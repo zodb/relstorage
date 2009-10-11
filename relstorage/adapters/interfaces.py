@@ -262,8 +262,8 @@ class IObjectMover(Interface):
 class IOIDAllocator(Interface):
     """Allocate OIDs and control future allocation"""
 
-    def new_oid(cursor):
-        """Return a new, unused OID."""
+    def new_oids(cursor):
+        """Return a sequence of new, unused OIDs."""
 
     def set_min_oid(cursor, oid):
         """Ensure the next OID is at least the given OID."""

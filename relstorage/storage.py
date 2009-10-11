@@ -133,6 +133,10 @@ class RelStorage(BaseStorage,
         # _max_new_oid is the highest OID provided by new_oid()
         self._max_new_oid = 0
 
+        # _preallocated_oids contains OIDs provided by the database
+        # but not yet used.
+        self._preallocated_oids = []
+
         # set _cache_client
         if options.cache_servers:
             module_name = options.cache_module_name
@@ -820,11 +824,18 @@ class RelStorage(BaseStorage,
             raise POSException.ReadOnlyError()
         self._lock_acquire()
         try:
-            cursor = self._store_cursor
-            if cursor is None:
-                self._open_store_connection()
+            if self._preallocated_oids:
+                oid_int = self._preallocated_oids.pop()
+            else:
                 cursor = self._store_cursor
-            oid_int = self._adapter.oidallocator.new_oid(cursor)
+                if cursor is None:
+                    self._open_store_connection()
+                    cursor = self._store_cursor
+                preallocated = list(
+                    self._adapter.oidallocator.new_oids(cursor))
+                preallocated.sort(reverse=True)
+                oid_int = preallocated.pop()
+                self._preallocated_oids = preallocated
             self._max_new_oid = max(self._max_new_oid, oid_int)
             return p64(oid_int)
         finally:
