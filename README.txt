@@ -382,6 +382,12 @@ underscores instead of dashes in the parameter names.
         modules available through PyPI.  This setting has no effect unless
         cache-servers is set.
 
+``cache-prefix``
+        The prefix for all keys in the cache.  All clients using a
+        database should use the same cache-prefix.  Use this if you use
+        a single cache for multiple databases.
+
+
 Adapter Options
 ===============
 
