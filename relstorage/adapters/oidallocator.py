@@ -15,7 +15,8 @@
 """
 
 # All of these allocators allocate 16 OIDs at a time.  In the sequence
-# or table, value 1 represents OID block 1-16, 2 represents OID block 17-32,
+# or table, value (n) represents (n * 16 - 15) through (n * 16).  So,
+# value 1 represents OID block 1-16, 2 represents OID block 17-32,
 # and so on.
 
 from relstorage.adapters.interfaces import IOIDAllocator

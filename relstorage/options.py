@@ -38,6 +38,7 @@ class Options(object):
         self.pack_max_delay = 20.0
         self.cache_servers = ()  # ['127.0.0.1:11211']
         self.cache_module_name = 'memcache'
+        self.cache_prefix = ''
 
         for key, value in kwoptions.iteritems():
             if key in self.__dict__:

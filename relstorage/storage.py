@@ -145,8 +145,10 @@ class RelStorage(BaseStorage,
             if isinstance(servers, basestring):
                 servers = servers.split()
             self._cache_client = module.Client(servers)
+            self._cache_prefix = options.cache_prefix or ''
         else:
             self._cache_client = None
+            self._cache_prefix = ''
 
         # _prev_polled_tid contains the tid at the previous poll
         self._prev_polled_tid = None
@@ -369,10 +371,11 @@ class RelStorage(BaseStorage,
 
             else:
                 # try to load from cache
-                state_key = 'state:%d' % oid_int
+                prefix = self._cache_prefix
+                state_key = '%s:state:%d' % (prefix, oid_int)
                 my_tid = self._prev_polled_tid
                 if my_tid:
-                    backptr_key = 'back:%d:%d' % (my_tid, oid_int)
+                    backptr_key = '%s:back:%d:%d' % (prefix, my_tid, oid_int)
                     v = cache.get_multi([state_key, backptr_key])
                     if v is not None:
                         cache_data = v.get(state_key)
@@ -762,13 +765,14 @@ class RelStorage(BaseStorage,
             self._adapter.locker.release_commit_lock(self._store_cursor)
             cache = self._cache_client
             if cache is not None:
-                if cache.incr('commit_count') is None:
+                cachekey = '%s:commit_count' % self._cache_prefix
+                if cache.incr(cachekey) is None:
                     # Use the current time as an initial commit_count value.
-                    cache.add('commit_count', int(time.time()))
+                    cache.add(cachekey, int(time.time()))
                     # A concurrent committer could have won the race to set the
                     # initial commit_count.  Increment commit_count so that it
                     # doesn't matter who won.
-                    cache.incr('commit_count')
+                    cache.incr(cachekey)
             self._ltid = self._tid
 
             #if self._txn_blobs and not self._adapter.keep_history:
@@ -1117,7 +1121,8 @@ class RelStorage(BaseStorage,
 
         cache = self._cache_client
         if cache is not None:
-            new_commit_count = cache.get('commit_count')
+            new_commit_count = cache.get(
+                '%s:commit_count' % self._cache_prefix)
             if new_commit_count != self._polled_commit_count:
                 # There is new data ready to poll
                 self._polled_commit_count = new_commit_count

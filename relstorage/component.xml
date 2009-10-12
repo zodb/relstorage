@@ -171,6 +171,13 @@
         "cmemcache".  This setting has no effect unless cache-servers is set.
       </description>
     </key>
+    <key name="cache-prefix" datatype="string" required="no">
+      <description>
+        The prefix for all keys in the cache.  All clients using a
+        database should use the same cache-prefix.  Use this if you use
+        a single cache for multiple databases.
+      </description>
+    </key>
   </sectiontype>
 
   <sectiontype name="postgresql" implements="relstorage.adapter"

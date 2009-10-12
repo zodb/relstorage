@@ -228,6 +228,7 @@ class GenericRelStorageTests(
         # Store an object, cache it, then retrieve it from the cache
         self._storage._options.cache_servers = 'x:1 y:2'
         self._storage._options.cache_module_name = fakecache.__name__
+        self._storage._options.cache_prefix = 'zzz'
 
         db = DB(self._storage)
         try:
@@ -236,16 +237,16 @@ class GenericRelStorageTests(
             fakecache.data.clear()
             r1 = c1.root()
             # the root state should now be cached
-            self.assertEqual(fakecache.data.keys(), ['state:0'])
+            self.assertEqual(fakecache.data.keys(), ['zzz:state:0'])
             r1['alpha'] = PersistentMapping()
-            self.assertFalse('commit_count' in fakecache.data)
+            self.assertFalse('zzz:commit_count' in fakecache.data)
             transaction.commit()
-            self.assertTrue('commit_count' in fakecache.data)
+            self.assertTrue('zzz:commit_count' in fakecache.data)
             self.assertEqual(sorted(fakecache.data.keys()),
-                ['commit_count', 'state:0'])
+                ['zzz:commit_count', 'zzz:state:0'])
             oid = r1['alpha']._p_oid
             self.assertEqual(sorted(fakecache.data.keys()),
-                ['commit_count', 'state:0'])
+                ['zzz:commit_count', 'zzz:state:0'])
 
             got, serial = c1._storage.load(oid, '')
             # another state should now be cached
