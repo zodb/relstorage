@@ -44,3 +44,7 @@ class Client(object):
         value = int(value) + 1
         data[key] = value
         return value
+
+    def flush_all(self):
+        data.clear()
+

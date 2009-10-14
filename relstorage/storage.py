@@ -17,14 +17,15 @@ Stores pickles in the database.
 """
 
 from persistent.TimeStamp import TimeStamp
+from relstorage.cache import StorageCache
 from relstorage.options import Options
 from relstorage.util import is_blob_record
-from ZODB.BaseStorage import BaseStorage
 from ZODB.BaseStorage import DataRecord
 from ZODB.BaseStorage import TransactionRecord
 from ZODB import ConflictResolution
 from ZODB import POSException
 from ZODB.POSException import POSKeyError
+from ZODB.UndoLogCompatible import UndoLogCompatible
 from ZODB.utils import p64
 from ZODB.utils import u64
 from zope.interface import implements
@@ -35,6 +36,7 @@ import logging
 import os
 import sys
 import tempfile
+import threading
 import time
 import weakref
 import ZODB.interfaces
@@ -70,10 +72,71 @@ log = logging.getLogger("relstorage")
 abort_early = os.environ.get('RELSTORAGE_ABORT_EARLY')
 
 
-class RelStorage(BaseStorage,
-                ConflictResolution.ConflictResolvingStorage):
+class RelStorage(
+        UndoLogCompatible,
+        ConflictResolution.ConflictResolvingStorage
+        ):
     """Storage to a relational database, based on invalidation polling"""
     implements(*_relstorage_interfaces)
+
+    _transaction=None # Transaction that is being committed
+    _tstatus=' '      # Transaction status, used for copying data
+    _is_read_only = False
+
+    # load_conn and load_cursor are open most of the time.
+    _load_conn = None
+    _load_cursor = None
+    _load_transaction_open = False
+
+    # store_conn and store_cursor are open during commit,
+    # but not necessarily open at other times.
+    _store_conn = None
+    _store_cursor = None
+
+    # _tid is the current transaction ID being committed; generally
+    # only set after tpc_vote().
+    _tid = None
+
+    # _ltid is the ID of the last transaction committed by this instance.
+    _ltid = None
+
+    # _prepared_txn is the name of the transaction to commit in the
+    # second phase.
+    _prepared_txn = None
+
+    # _closed is True after self.close() is called.  Since close()
+    # can be called from another thread, access to self._closed should
+    # be inside a _lock_acquire()/_lock_release() block.
+    _closed = False
+
+    # _max_stored_oid is the highest OID stored by the current
+    # transaction
+    _max_stored_oid = 0
+
+    # _max_new_oid is the highest OID provided by new_oid()
+    _max_new_oid = 0
+
+    # _cache, if set, is a StorageCache object.
+    _cache = None
+
+    # _prev_polled_tid contains the tid at the previous poll
+    _prev_polled_tid = None
+
+    # _poll_at is the time to force a poll
+    _poll_at = 0
+
+    # If the blob directory is set, fshelper is a filesystem blob
+    # helper.  Otherwise, fshelper is None.
+    fshelper = None
+
+    # _txn_blobs: {oid->filename}; contains blob data for the
+    # currently uncommitted transaction.
+    _txn_blobs = None
+
+    # _batcher: An object that accumulates store operations
+    # so they can be executed in batch (to minimize latency).
+    _batcher = None
+
 
     def __init__(self, adapter, name=None, create=True,
             options=None, **kwoptions):
@@ -90,83 +153,32 @@ class RelStorage(BaseStorage,
             name = options.name
             if not name:
                 name = 'RelStorage: %s' % adapter
-        self._name = name
+        self.__name__ = name
 
         self._is_read_only = options.read_only
-        self._cache_client = None
 
         if create:
             self._adapter.schema.prepare()
 
-        # load_conn and load_cursor are open most of the time.
-        self._load_conn = None
-        self._load_cursor = None
-        self._load_transaction_open = False
         self._open_load_connection()
-        # store_conn and store_cursor are open during commit,
-        # but not necessarily open at other times.
-        self._store_conn = None
-        self._store_cursor = None
 
-        BaseStorage.__init__(self, name)
-
-        self._tid = None
-        self._ltid = None
-
-        # _prepared_txn is the name of the transaction to commit in the
-        # second phase.
-        self._prepared_txn = None
+        self.__lock = threading.RLock()
+        self.__commit_lock = threading.Lock()
+        self._lock_acquire = self.__lock.acquire
+        self._lock_release = self.__lock.release
+        self._commit_lock_acquire = self.__commit_lock.acquire
+        self._commit_lock_release = self.__commit_lock.release
 
         # _instances is a list of weak references to storage instances bound
         # to the same database.
         self._instances = []
 
-        # _closed is True after self.close() is called.  Since close()
-        # can be called from another thread, access to self._closed should
-        # be inside a _lock_acquire()/_lock_release() block.
-        self._closed = False
-
-        # _max_stored_oid is the highest OID stored by the current
-        # transaction
-        self._max_stored_oid = 0
-
-        # _max_new_oid is the highest OID provided by new_oid()
-        self._max_new_oid = 0
-
         # _preallocated_oids contains OIDs provided by the database
         # but not yet used.
         self._preallocated_oids = []
 
-        # set _cache_client
         if options.cache_servers:
-            module_name = options.cache_module_name
-            module = __import__(module_name, {}, {}, ['Client'])
-            servers = options.cache_servers
-            if isinstance(servers, basestring):
-                servers = servers.split()
-            self._cache_client = module.Client(servers)
-            self._cache_prefix = options.cache_prefix or ''
-        else:
-            self._cache_client = None
-            self._cache_prefix = ''
-
-        # _prev_polled_tid contains the tid at the previous poll
-        self._prev_polled_tid = None
-
-        # _polled_commit_count contains the last polled value of the
-        # 'commit_count' cache key
-        self._polled_commit_count = 0
-
-        # _poll_at is the time to poll regardless of commit_count
-        self._poll_at = 0
-
-        # _txn_blobs: {oid->filename}; contains blob data for the
-        # currently uncommitted transaction.
-        self._txn_blobs = None
-
-        # _batcher: An object that accumulates store operations
-        # so they can be executed in batch (to minimize latency).
-        self._batcher = None
+            self._cache = StorageCache(options)
 
         if options.blob_dir:
             from ZODB.blob import FilesystemHelper
@@ -174,8 +186,6 @@ class RelStorage(BaseStorage,
             if create:
                 self.fshelper.create()
                 self.fshelper.checkSecure()
-        else:
-            self.fshelper = None
 
     def _open_load_connection(self):
         """Open the load connection to the database.  Return nothing."""
@@ -260,7 +270,7 @@ class RelStorage(BaseStorage,
         """
         self._adapter.schema.zap_all()
         self._rollback_load_connection()
-        cache = self._cache_client
+        cache = self._cache
         if cache is not None:
             cache.flush_all()
 
@@ -294,7 +304,7 @@ class RelStorage(BaseStorage,
         See ZODB.interfaces.IMVCCStorage.
         """
         adapter = self._adapter.new_instance()
-        other = RelStorage(adapter=adapter, name=self._name,
+        other = RelStorage(adapter=adapter, name=self.__name__,
             create=False, options=self._options)
         self._instances.append(weakref.ref(other))
         return other
@@ -302,9 +312,26 @@ class RelStorage(BaseStorage,
     def __len__(self):
         return self._adapter.stats.get_object_count()
 
+    def sortKey(self):
+        """Return a string that can be used to sort storage instances.
+
+        The key must uniquely identify a storage and must be the same
+        across multiple instantiations of the same storage.
+        """
+        return self.__name__
+
+    def getName(self):
+        return self.__name__
+
     def getSize(self):
         """Return database size in bytes"""
         return self._adapter.stats.get_db_size()
+
+    def registerDB(self, db):
+        pass # we don't care
+
+    def isReadOnly(self):
+        return self._is_read_only
 
     def _log_keyerror(self, oid_int, reason):
         """Log just before raising POSKeyError in load().
@@ -356,7 +383,7 @@ class RelStorage(BaseStorage,
 
     def load(self, oid, version):
         oid_int = u64(oid)
-        cache = self._cache_client
+        cache = self._cache
 
         self._lock_acquire()
         try:
@@ -367,51 +394,10 @@ class RelStorage(BaseStorage,
             if cache is None:
                 state, tid_int = self._adapter.mover.load_current(
                     cursor, oid_int)
-                state = str(state or '')
-
             else:
-                # try to load from cache
-                prefix = self._cache_prefix
-                state_key = '%s:state:%d' % (prefix, oid_int)
-                my_tid = self._prev_polled_tid
-                if my_tid:
-                    backptr_key = '%s:back:%d:%d' % (prefix, my_tid, oid_int)
-                    v = cache.get_multi([state_key, backptr_key])
-                    if v is not None:
-                        cache_data = v.get(state_key)
-                        backptr = v.get(backptr_key)
-                    else:
-                        cache_data = None
-                        backptr = None
-                else:
-                    cache_data = cache.get(state_key)
-                    backptr = None
+                state, tid_int = cache.load(
+                    cursor, oid_int, self._prev_polled_tid, self._adapter)
 
-                state = None
-                if cache_data and len(cache_data) >= 8:
-                    # validate the cache result
-                    tid = cache_data[:8]
-                    tid_int = u64(tid)
-                    if tid_int == my_tid or tid == backptr:
-                        # the cached data is current.
-                        state = cache_data[8:]
-
-                if state is None:
-                    # could not load from cache, so get from the database
-                    state, tid_int = self._adapter.mover.load_current(
-                        cursor, oid_int)
-                    state = str(state or '')
-                    if tid_int is not None:
-                        # cache the result
-                        to_cache = {}
-                        tid = p64(tid_int)
-                        new_cache_data = tid + state
-                        if new_cache_data != cache_data:
-                            to_cache[state_key] = new_cache_data
-                        if my_tid and my_tid != tid_int:
-                            to_cache[backptr_key] = tid
-                        if to_cache:
-                            cache.set_multi(to_cache)
         finally:
             self._lock_release()
 
@@ -421,10 +407,15 @@ class RelStorage(BaseStorage,
                 # an object whose creation has been undone.
                 self._log_keyerror(oid_int, "creation has been undone")
                 raise POSKeyError(oid)
+            state = str(state or '')
             return state, p64(tid_int)
         else:
             self._log_keyerror(oid_int, "no tid found")
             raise POSKeyError(oid)
+
+    def getTid(self, oid):
+        state, serial = self.load(oid, '')
+        return serial
 
     def loadEx(self, oid, version):
         # Since we don't support versions, just tack the empty version
@@ -521,6 +512,9 @@ class RelStorage(BaseStorage,
             # save the data in a temporary table
             adapter.mover.store_temp(
                 cursor, self._batcher, oid_int, prev_tid_int, data)
+            cache = self._cache
+            if cache is not None:
+                cache.store_temp(oid_int, data)
             return None
         finally:
             self._lock_release()
@@ -566,8 +560,8 @@ class RelStorage(BaseStorage,
             self._lock_release()
             self._commit_lock_acquire()
             self._lock_acquire()
-            self._transaction = transaction
             self._clear_temp()
+            self._transaction = transaction
 
             user = str(transaction.user)
             desc = str(transaction.description)
@@ -583,9 +577,12 @@ class RelStorage(BaseStorage,
             adapter = self._adapter
             self._batcher = self._adapter.mover.make_batcher(
                 self._store_cursor)
+            cache = self._cache
+            if cache is not None:
+                cache.tpc_begin()
 
             if tid is not None:
-                # get the commit lock and add the transaction now
+                # hold the commit lock and add the transaction now
                 cursor = self._store_cursor
                 packed = (status == 'p')
                 adapter.locker.hold_commit_lock(cursor, ensure_current=True)
@@ -601,6 +598,9 @@ class RelStorage(BaseStorage,
 
         finally:
             self._lock_release()
+
+    def tpc_transaction(self):
+        return self._transaction
 
     def _prepare_tid(self):
         """Choose a tid for the current transaction.
@@ -633,11 +633,19 @@ class RelStorage(BaseStorage,
 
 
     def _clear_temp(self):
+        # Clear all attributes used for transaction commit.
         # It is assumed that self._lock_acquire was called before this
         # method was called.
+        self._transaction = None
+        self._ude = None
+        self._tid = None
         self._prepared_txn = None
         self._max_stored_oid = 0
         self._batcher = None
+        self._txn_blobs = None
+        cache = self._cache
+        if cache is not None:
+            cache.clear_temp()
 
 
     def _finish_store(self):
@@ -649,6 +657,7 @@ class RelStorage(BaseStorage,
         assert self._tid is not None
         cursor = self._store_cursor
         adapter = self._adapter
+        cache = self._cache
 
         # Detect conflicting changes.
         # Try to resolve the conflicts.
@@ -674,6 +683,8 @@ class RelStorage(BaseStorage,
                 self._adapter.mover.replace_temp(
                     cursor, oid_int, prev_tid_int, data)
                 resolved.add(oid)
+                if cache is not None:
+                    cache.store_temp(oid_int, data)
 
         # Move the new states into the permanent table
         tid_int = u64(self._tid)
@@ -689,6 +700,22 @@ class RelStorage(BaseStorage,
 
         return serials
 
+
+    def tpc_vote(self, transaction):
+        self._lock_acquire()
+        try:
+            if transaction is not self._transaction:
+                return
+            try:
+                return self._vote()
+            except:
+                if abort_early:
+                    # abort early to avoid lockups while running the
+                    # somewhat brittle ZODB test suite
+                    self.tpc_abort(transaction)
+                raise
+        finally:
+            self._lock_release()
 
     def _vote(self):
         """Prepare the transaction for final commit."""
@@ -731,22 +758,28 @@ class RelStorage(BaseStorage,
                     ZODB.blob.rename_or_copy_blob(sourcename, targetname)
                     self._txn_blobs[oid] = targetname
 
+        cache = self._cache
+        if cache is not None:
+            cache.tpc_vote(self._tid)
+
         return serials
 
 
-    def tpc_vote(self, transaction):
+    def tpc_finish(self, transaction, f=None):
         self._lock_acquire()
         try:
             if transaction is not self._transaction:
                 return
             try:
-                return self._vote()
-            except:
-                if abort_early:
-                    # abort early to avoid lockups while running the
-                    # somewhat brittle ZODB test suite
-                    self.tpc_abort(transaction)
-                raise
+                try:
+                    if f is not None:
+                        f(self._tid)
+                    u, d, e = self._ude
+                    self._finish(self._tid, u, d, e)
+                finally:
+                    self._clear_temp()
+            finally:
+                self._commit_lock_release()
         finally:
             self._lock_release()
 
@@ -756,69 +789,64 @@ class RelStorage(BaseStorage,
         # It is assumed that self._lock_acquire was called before this
         # method was called.
         assert self._tid is not None
+        self._rollback_load_connection()
+        txn = self._prepared_txn
+        assert txn is not None
+        self._adapter.txncontrol.commit_phase2(
+            self._store_conn, self._store_cursor, txn)
+        self._adapter.locker.release_commit_lock(self._store_cursor)
+        cache = self._cache
+        if cache is not None:
+            cache.tpc_finish()
+        self._ltid = self._tid
+
+        #if self._txn_blobs and not self._adapter.keep_history:
+            ## For each blob just committed, get the name of
+            ## one earlier revision (if any) and write the
+            ## name of the file to a log.  At pack time,
+            ## all the files in the log will be deleted and
+            ## the log will be cleared.
+            #for oid, filename in self._txn_blobs.iteritems():
+                #dirname, current_name = os.path.split(filename)
+                #names = os.listdir(dirname)
+                #names.sort()
+                #if current_name in names:
+                    #i = names.index(current_name)
+                    #if i > 0:
+                    #    to_delete = os.path.join(dirname, names[i-1])
+                    #    log.write('%s\n') % to_delete
+
+
+    def tpc_abort(self, transaction):
+        self._lock_acquire()
         try:
-            self._rollback_load_connection()
-            txn = self._prepared_txn
-            assert txn is not None
-            self._adapter.txncontrol.commit_phase2(
-                self._store_conn, self._store_cursor, txn)
-            self._adapter.locker.release_commit_lock(self._store_cursor)
-            cache = self._cache_client
-            if cache is not None:
-                cachekey = '%s:commit_count' % self._cache_prefix
-                if cache.incr(cachekey) is None:
-                    # Use the current time as an initial commit_count value.
-                    cache.add(cachekey, int(time.time()))
-                    # A concurrent committer could have won the race to set the
-                    # initial commit_count.  Increment commit_count so that it
-                    # doesn't matter who won.
-                    cache.incr(cachekey)
-            self._ltid = self._tid
-
-            #if self._txn_blobs and not self._adapter.keep_history:
-                ## For each blob just committed, get the name of
-                ## one earlier revision (if any) and write the
-                ## name of the file to a log.  At pack time,
-                ## all the files in the log will be deleted and
-                ## the log will be cleared.
-                #for oid, filename in self._txn_blobs.iteritems():
-                    #dirname, current_name = os.path.split(filename)
-                    #names = os.listdir(dirname)
-                    #names.sort()
-                    #if current_name in names:
-                        #i = names.index(current_name)
-                        #if i > 0:
-                        #    to_delete = os.path.join(dirname, names[i-1])
-                        #    log.write('%s\n') % to_delete
-
+            if transaction is not self._transaction:
+                return
+            try:
+                try:
+                    self._abort()
+                finally:
+                    self._clear_temp()
+            finally:
+                self._commit_lock_release()
         finally:
-            self._txn_blobs = None
-            self._prepared_txn = None
-            self._tid = None
-            self._transaction = None
-            self._batcher = None
+            self._lock_release()
 
     def _abort(self):
         # the lock is held here
-        try:
-            self._rollback_load_connection()
-            if self._store_cursor is not None:
-                self._adapter.txncontrol.abort(
-                    self._store_conn, self._store_cursor, self._prepared_txn)
-                self._adapter.locker.release_commit_lock(self._store_cursor)
-            if self._txn_blobs:
-                for oid, filename in self._txn_blobs.iteritems():
-                    if os.path.exists(filename):
-                        ZODB.blob.remove_committed(filename)
-                        dirname = os.path.dirname(filename)
-                        if not os.listdir(dirname):
-                            ZODB.blob.remove_committed_dir(dirname)
-        finally:
-            self._txn_blobs = None
-            self._prepared_txn = None
-            self._tid = None
-            self._transaction = None
-            self._batcher = None
+        self._rollback_load_connection()
+        if self._store_cursor is not None:
+            self._adapter.txncontrol.abort(
+                self._store_conn, self._store_cursor, self._prepared_txn)
+            self._adapter.locker.release_commit_lock(self._store_cursor)
+        if self._txn_blobs:
+            for oid, filename in self._txn_blobs.iteritems():
+                if os.path.exists(filename):
+                    ZODB.blob.remove_committed(filename)
+                    dirname = os.path.dirname(filename)
+                    if not os.listdir(dirname):
+                        ZODB.blob.remove_committed_dir(dirname)
+
 
     def lastTransaction(self):
         return self._ltid
@@ -1119,13 +1147,10 @@ class RelStorage(BaseStorage,
         """Return true if polling is needed"""
         now = time.time()
 
-        cache = self._cache_client
+        cache = self._cache
         if cache is not None:
-            new_commit_count = cache.get(
-                '%s:commit_count' % self._cache_prefix)
-            if new_commit_count != self._polled_commit_count:
+            if cache.need_poll():
                 # There is new data ready to poll
-                self._polled_commit_count = new_commit_count
                 self._poll_at = now
                 return True
 

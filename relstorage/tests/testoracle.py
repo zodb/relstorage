@@ -90,10 +90,10 @@ class ZConfigTests:
             try:
                 storage = getattr(db, 'storage', None)
                 if storage is None:
-                    # ZODB < 3.8 and before
+                    # ZODB < 3.9
                     storage = db._storage
-                self.assertEqual(storage._is_read_only, False)
-                self.assertEqual(storage._name, "xyz")
+                self.assertEqual(storage.isReadOnly(), False)
+                self.assertEqual(storage.getName(), "xyz")
                 adapter = storage._adapter
                 from relstorage.adapters.oracle import OracleAdapter
                 self.assert_(isinstance(adapter, OracleAdapter))

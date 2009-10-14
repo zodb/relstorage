@@ -224,7 +224,7 @@ class GenericRelStorageTests(
         self.assertEqual(len(got), len(data))
         self.assertEqual(got, data)
 
-    def checkLoadFromCache(self):
+    def checkUseCache(self):
         # Store an object, cache it, then retrieve it from the cache
         self._storage._options.cache_servers = 'x:1 y:2'
         self._storage._options.cache_module_name = fakecache.__name__
@@ -233,7 +233,7 @@ class GenericRelStorageTests(
         db = DB(self._storage)
         try:
             c1 = db.open()
-            self.assertEqual(c1._storage._cache_client.servers, ['x:1', 'y:2'])
+            self.assert_(c1._storage._cache.client.servers, ['x:1', 'y:2'])
             fakecache.data.clear()
             r1 = c1.root()
             # the root state should now be cached
@@ -243,11 +243,9 @@ class GenericRelStorageTests(
             transaction.commit()
             self.assertTrue('zzz:commit_count' in fakecache.data)
             self.assertEqual(sorted(fakecache.data.keys()),
-                ['zzz:commit_count', 'zzz:state:0'])
-            oid = r1['alpha']._p_oid
-            self.assertEqual(sorted(fakecache.data.keys()),
-                ['zzz:commit_count', 'zzz:state:0'])
+                ['zzz:commit_count', 'zzz:state:0', 'zzz:state:1'])
 
+            oid = r1['alpha']._p_oid
             got, serial = c1._storage.load(oid, '')
             # another state should now be cached
             self.assertEqual(len(fakecache.data.keys()), 3)

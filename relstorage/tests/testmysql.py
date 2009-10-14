@@ -85,8 +85,8 @@ class ZConfigTests:
             if storage is None:
                 # ZODB < 3.9
                 storage = db._storage
-            self.assertEqual(storage._is_read_only, False)
-            self.assertEqual(storage._name, "xyz")
+            self.assertEqual(storage.isReadOnly(), False)
+            self.assertEqual(storage.getName(), "xyz")
             adapter = storage._adapter
             from relstorage.adapters.mysql import MySQLAdapter
             self.assert_(isinstance(adapter, MySQLAdapter))
