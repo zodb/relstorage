@@ -334,11 +334,27 @@ class RelStorage(
         """Return database size in bytes"""
         return self._adapter.stats.get_db_size()
 
-    def registerDB(self, db):
+    def registerDB(self, db, limit=None):
         pass # we don't care
 
     def isReadOnly(self):
         return self._is_read_only
+
+    def abortVersion(self, src, transaction):
+        # this method is only here for b/w compat with ZODB 3.7
+        if transaction is not self._transaction:
+            raise POSException.StorageTransactionError(self, transaction)
+        return self._tid, []
+
+    def commitVersion(self, src, dest, transaction):
+        # this method is only here for b/w compat with ZODB 3.7
+        if transaction is not self._transaction:
+            raise POSException.StorageTransactionError(self, transaction)
+        return self._tid, []
+
+    def getExtensionMethods(self):
+        # this method is only here for b/w compat with ZODB 3.7
+        return {}
 
     def _log_keyerror(self, oid_int, reason):
         """Log just before raising POSKeyError in load().
@@ -423,6 +439,8 @@ class RelStorage(
     def getTid(self, oid):
         state, serial = self.load(oid, '')
         return serial
+
+    getSerial = getTid  # ZODB 3.7
 
     def loadEx(self, oid, version):
         # Since we don't support versions, just tack the empty version
