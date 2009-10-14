@@ -274,6 +274,13 @@ class RelStorage(
         if cache is not None:
             cache.flush_all()
 
+    def clear_cache(self):
+        """Clear all data from memcached.  Used by speed tests.
+        """
+        cache = self._cache
+        if cache is not None:
+            cache.flush_all()
+
     def release(self):
         """Release back end database sessions used by this storage instance.
         """
