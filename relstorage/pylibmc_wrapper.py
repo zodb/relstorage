@@ -76,3 +76,10 @@ class Client(object):
             return self._client.incr(key)
         except MemcachedError:
             return None
+
+    def flush_all(self):
+        try:
+            self._client.flush_all()
+        except MemcachedError:
+            return None
+
