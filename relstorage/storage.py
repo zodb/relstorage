@@ -356,6 +356,14 @@ class RelStorage(
         # this method is only here for b/w compat with ZODB 3.7
         return {}
 
+    def versionEmpty(self, version):
+        # this method is only here for b/w compat with ZODB 3.7
+        return 1
+
+    def versions(self, max=None):
+        # this method is only here for b/w compat with ZODB 3.7
+        return ()
+
     def _log_keyerror(self, oid_int, reason):
         """Log just before raising POSKeyError in load().
 
