@@ -34,11 +34,6 @@ You can install RelStorage using easy_install::
 
     easy_install RelStorage
 
-To install RelStorage in Plone, see the instructions in the following
-article:
-
-    http://shane.willowrise.com/archives/how-to-install-plone-with-relstorage-and-mysql/
-
 RelStorage requires a version of ZODB that is aware of MVCC storages.
 ZODB 3.9 supports RelStorage without any patches. ZODB 3.7 and 3.8 can
 support RelStorage if you first apply a patch to ZODB. You can get
@@ -53,6 +48,36 @@ Install psycopg2, MySQLdb 1.2.2+, or cx_Oracle 4.3+.  Note that Debian Etch
 ships MySQLdb 1.2.1, but that version has a bug in BLOB handling that manifests
 itself only with certain character set configurations.  MySQLdb 1.2.2 fixes the
 bug.
+
+Configuring Plone
+-----------------
+
+To install RelStorage in Plone, see the instructions in the following
+article:
+
+    http://shane.willowrise.com/archives/how-to-install-plone-with-relstorage-and-mysql/
+
+Plone uses the ``plone.recipe.zope2instance`` Buildout recipe to
+generate zope.conf, so the easiest way to configure RelStorage in a
+Plone site is to set the ``rel-storage`` parameter in ``buildout.cfg``.
+The ``rel-storage`` parameter contains settings separated by newlines,
+with these values:
+
+    * ``type``: any database type supported (``postgresql``, ``mysql``,
+      or ``oracle``)
+    * RelStorage options like ``cache-servers`` and ``poll-interval``
+    * Adapter-specific options
+
+An example::
+
+    rel-storage =
+        type mysql
+        db plone
+        user plone
+        passwd PASSWORD
+
+Configuring Zope 2
+------------------
 
 To integrate RelStorage in Zope 2, specify a RelStorage backend in
 ``etc/zope.conf``. Remove the main mount point and add one of the
@@ -110,6 +135,9 @@ where to store the blobs.  For example::
         </postgresql>
       </relstorage>
     </zodb_db>
+
+Configuring ``repoze.zodbconn``
+-------------------------------
 
 To use RelStorage with ``repoze.zodbconn``, a package that makes ZODB
 available to WSGI applications, create a configuration file with
@@ -491,7 +519,7 @@ Q: Can I perform SQL queries on the data in the database?
     way, but it turned out that Ape worked too much against ZODB principles and
     therefore could not be made reliable enough for production use.  RelStorage,
     on the other hand, is much closer to an ordinary ZODB storage, and is
-    therefore much safer for production use.
+    therefore more appropriate for production use.
 
 Q: How does RelStorage performance compare with FileStorage?
 
