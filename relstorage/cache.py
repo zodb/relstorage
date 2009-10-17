@@ -102,8 +102,8 @@ class StorageCache(object):
         local_client = self.clients_local_first[0]
         return StorageCache(self.adapter, self.options, local_client)
 
-    def flush_all(self):
-        """Remove all data from the cache.  Called by RelStorage.zap_all()"""
+    def clear(self):
+        """Remove all data from the cache.  Called by speed tests."""
         for client in self.clients_local_first:
             client.flush_all()
         self.checkpoints = None

@@ -272,12 +272,7 @@ class RelStorage(
         """
         self._adapter.schema.zap_all()
         self._rollback_load_connection()
-        self._cache.flush_all()
-
-    def clear_cache(self):
-        """Clear all data from storage caches.  Used by speed tests.
-        """
-        self._cache.flush_all()
+        self._cache.clear()
 
     def release(self):
         """Release back end database sessions used by this storage instance.
