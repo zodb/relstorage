@@ -281,7 +281,7 @@ underscores instead of dashes in the parameter names.
 ``blob-dir``
         If supplied, the storage will provide blob support; this
         parameter specifies the name of the directory to hold blob data.
-        The directory will be created if it doeesn't exist. If no value
+        The directory will be created if it does not exist. If no value
         (or an empty value) is provided, then no blob support will be
         provided.
 
