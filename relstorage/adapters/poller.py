@@ -54,8 +54,8 @@ class Poller:
             # the cache is too old and needs to be cleared.
             # XXX Do we actually need to detect this condition? I think
             # if we delete this block of code, all the unreachable
-            # objects will be invalidated anyway. So, as a test, I have
-            # not written the equivalent of this block of code for
+            # objects will be garbage collected anyway. So, as a test,
+            # there is no equivalent of this block of code for
             # history-free storage. If something goes wrong, then we'll
             # know there's some other edge condition we have to account
             # for.
@@ -88,6 +88,11 @@ class Poller:
                 params['self_tid'] = ignore_tid
             stmt = intern(stmt % self.runner.script_vars)
 
+            cursor.execute(stmt, params)
+            oids = [oid for (oid,) in cursor]
+
+            return oids, new_polled_tid
+
         else:
             # We moved backward in time. This can happen after failover
             # to an asynchronous slave that is not fully up to date. If
@@ -101,12 +106,7 @@ class Poller:
                 "indicate a problem.",
                 prev_polled_tid, new_polled_tid)
             # Although we could handle this situation by looking at the
-            # whole cache and invalidating only certain objects,
+            # whole cPickleCache and invalidating only certain objects,
             # invalidating the whole cache is simpler.
             return None, new_polled_tid
-
-        cursor.execute(stmt, params)
-        oids = [oid for (oid,) in cursor]
-
-        return oids, new_polled_tid
 
