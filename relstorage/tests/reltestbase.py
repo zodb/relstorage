@@ -232,31 +232,33 @@ class GenericRelStorageTests(
 
         db = DB(self._storage)
         try:
-            c1 = db.open()
-            self.assert_(c1._storage._cache.client.servers, ['x:1', 'y:2'])
             fakecache.data.clear()
+            c1 = db.open()
+            self.assert_(c1._storage._cache.clients_global_first[0].servers,
+                ['x:1', 'y:2'])
             r1 = c1.root()
             # the root state should now be cached
-            self.assertEqual(fakecache.data.keys(), ['zzz:state:0'])
+            self.assertEqual(len(fakecache.data), 2)
+            self.assertTrue('zzz:checkpoints' in fakecache.data)
+            self.assertEqual(sorted(fakecache.data.keys())[1][:10],
+                'zzz:state:')
             r1['alpha'] = PersistentMapping()
-            self.assertFalse('zzz:commit_count' in fakecache.data)
+            self.assertFalse('zzz:commits' in fakecache.data)
             transaction.commit()
-            self.assertTrue('zzz:commit_count' in fakecache.data)
-            self.assertEqual(sorted(fakecache.data.keys()),
-                ['zzz:commit_count', 'zzz:state:0', 'zzz:state:1'])
+            self.assertTrue('zzz:commits' in fakecache.data)
+            self.assertEqual(len(fakecache.data.keys()), 5)
 
             oid = r1['alpha']._p_oid
             got, serial = c1._storage.load(oid, '')
             # another state should now be cached
-            self.assertEqual(len(fakecache.data.keys()), 3)
+            self.assertEqual(len(fakecache.data.keys()), 5)
 
             # make a change
             r1['beta'] = 0
             transaction.commit()
+            self.assertEqual(len(fakecache.data.keys()), 6)
 
             got, serial = c1._storage.load(oid, '')
-            # a backpointer should now be cached
-            self.assertEqual(len(fakecache.data.keys()), 4)
 
             # try to load an object that doesn't exist
             self.assertRaises(KeyError, c1._storage.load, 'bad.oid.', '')
@@ -311,7 +313,7 @@ class GenericRelStorageTests(
         finally:
             db.close()
 
-    def checkPollInterval(self, using_cache=False):
+    def checkPollInterval(self, using_cache=True):
         # Verify the poll_interval parameter causes RelStorage to
         # delay invalidation polling.
         self._storage._options.poll_interval = 3600
@@ -347,6 +349,7 @@ class GenericRelStorageTests(
                 self.assertEqual(r2['alpha'], 2)
                 self.assertFalse(c2._storage.need_poll())
             else:
+                # Now confirm that no poll is needed
                 self.assertFalse(c2._storage.need_poll())
                 c2._flush_invalidations()
                 r2 = c2.root()
@@ -365,10 +368,8 @@ class GenericRelStorageTests(
         finally:
             db.close()
 
-    def checkPollIntervalWithCache(self):
-        self._storage._options.cache_servers = 'x:1'
-        self._storage._options.cache_module_name = fakecache.__name__
-        fakecache.data.clear()
+    def checkPollIntervalWithoutCache(self):
+        self._storage._options.cache_local_mb = 0
         self.checkPollInterval(using_cache=True)
 
     def checkDoubleCommitter(self):

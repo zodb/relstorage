@@ -35,11 +35,15 @@ class Poller:
         committed in that transaction will not be included in the list
         of changed OIDs.
 
-        Returns (changed_oids, new_polled_tid).
+        Returns (changes, new_polled_tid), where changes is either
+        a list of (oid, tid) that have changed, or None to indicate
+        that the changes are too complex to list.  new_polled_tid is
+        never None.
         """
         # find out the tid of the most recent transaction.
         cursor.execute(self.poll_query)
         new_polled_tid = cursor.fetchone()[0]
+        assert new_polled_tid is not None
 
         if prev_polled_tid is None:
             # This is the first time the connection has polled.
@@ -72,13 +76,13 @@ class Poller:
         if new_polled_tid > prev_polled_tid:
             if self.keep_history:
                 stmt = """
-                SELECT zoid
+                SELECT zoid, tid
                 FROM current_object
                 WHERE tid > %(tid)s
                 """
             else:
                 stmt = """
-                SELECT zoid
+                SELECT zoid, tid
                 FROM object_state
                 WHERE tid > %(tid)s
                 """
@@ -89,9 +93,9 @@ class Poller:
             stmt = intern(stmt % self.runner.script_vars)
 
             cursor.execute(stmt, params)
-            oids = [oid for (oid,) in cursor]
+            changes = list(cursor)
 
-            return oids, new_polled_tid
+            return changes, new_polled_tid
 
         else:
             # We moved backward in time. This can happen after failover
@@ -110,3 +114,28 @@ class Poller:
             # invalidating the whole cache is simpler.
             return None, new_polled_tid
 
+    def list_changes(self, cursor, after_tid, last_tid):
+        """Return the (oid, tid) values changed in a range of transactions.
+
+        The returned iterable must include the latest changes in the range
+        after_tid < tid <= last_tid.
+        """
+        if self.keep_history:
+            stmt = """
+            SELECT zoid, tid
+            FROM current_object
+            WHERE tid > %(min_tid)s
+                AND tid <= %(max_tid)s
+            """
+        else:
+            stmt = """
+            SELECT zoid, tid
+            FROM object_state
+            WHERE tid > %(min_tid)s
+                AND tid <= %(max_tid)s
+            """
+        params = {'min_tid': after_tid, 'max_tid': last_tid}
+        stmt = intern(stmt % self.runner.script_vars)
+
+        cursor.execute(stmt, params)
+        return list(cursor)

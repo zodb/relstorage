@@ -15,91 +15,192 @@
 from relstorage.autotemp import AutoTemporaryFile
 from ZODB.utils import p64
 from ZODB.utils import u64
-import time
+import random
+import threading
 
 
 class StorageCache(object):
     """RelStorage integration with memcached or similar.
+
+    Holds a list of memcache clients in order from most local to
+    most global.  The first is a LocalClient, which stores the cache
+    in process but shares the cache between threads.
     """
 
-    # send_limit: max approx. bytes to buffer before sending to the cache
+    # send_limit: approximate limit on the bytes to buffer before
+    # sending to the cache.
     send_limit = 1024 * 1024
 
-    def __init__(self, options):
-        module_name = options.cache_module_name
-        module = __import__(module_name, {}, {}, ['Client'])
-        servers = options.cache_servers
-        if isinstance(servers, basestring):
-            servers = servers.split()
-        self.client = module.Client(servers)
+    # queue is an AutoTemporaryFile during transaction commit.
+    queue = None
+
+    # queue_contents is a map of {oid_int: (startpos, endpos)}
+    # during transaction commit.
+    queue_contents = None
+
+    # checkpoints, when set, is a tuple containing the integer
+    # transaction ID of the two current checkpoints. checkpoint0 is
+    # greater than or equal to checkpoint1.
+    checkpoints = None
+
+    # current_tid contains the last polled transaction ID.  Invariant:
+    # when self.checkpoints is not None, self.delta_after0 has info
+    # from all transactions in the range:
+    #   self.checkpoints[0] < tid <= self.current_tid
+    current_tid = 0
+
+    # commit_count contains the last polled value of the
+    # :commits cache key.  The most global client currently
+    # responding stores the value.
+    commit_count = object()
+
+    def __init__(self, adapter, options, local_client=None):
+        self.adapter = adapter
+        self.options = options
+        if local_client is None:
+            local_client = LocalClient(options)
+        self.clients_local_first = [local_client]
+
+        if options.cache_servers:
+            module_name = options.cache_module_name
+            module = __import__(module_name, {}, {}, ['Client'])
+            servers = options.cache_servers
+            if isinstance(servers, basestring):
+                servers = servers.split()
+            self.clients_local_first.append(module.Client(servers))
+
+        # self.clients_local_first is in order from local to global caches,
+        # while self.clients_global_first is in order from global to local.
+        self.clients_global_first = list(self.clients_local_first)
+        self.clients_global_first.reverse()
+
+        # every cache key has a prefix
         self.prefix = options.cache_prefix or ''
 
-        # queue is an AutoTemporaryFile during txn commit.
-        self.queue = None
+        # commit_count_key contains a number that is incremented
+        # for every commit.  See tpc_finish().
+        self.commit_count_key = '%s:commits' % self.prefix
 
-        # queue_contents is a map of {oid: (startpos, endpos)}
-        # during txn commit.
-        self.queue_contents = None
+        # checkpoints_key holds the current checkpoints.
+        self.checkpoints_key = '%s:checkpoints' % self.prefix
 
-        # commit_count_key is the cache key to poll for changes
-        self.commit_count_key = '%s:commit_count' % self.prefix
+        # delta_after0 contains {oid: tid} after checkpoint 0
+        # and before or at self.current_tid.
+        self.delta_after0 = {}
 
-        # polled_commit_count contains the last polled value of the
-        # 'commit_count' cache key
-        self.polled_commit_count = 0
+        # delta_after1 contains {oid: tid} after checkpoint 1 and
+        # before or at checkpoint 0. The content of delta_after1 only
+        # changes when checkpoints move.
+        self.delta_after1 = {}
+
+        # delta_size_limit places an approximate limit on the number of
+        # entries in the delta_after maps.
+        self.delta_size_limit = options.cache_delta_size_limit
+
+    def new_instance(self):
+        """Return a copy of this instance sharing the same local client"""
+        local_client = self.clients_local_first[0]
+        return StorageCache(self.adapter, self.options, local_client)
 
     def flush_all(self):
         """Remove all data from the cache.  Called by RelStorage.zap_all()"""
-        self.client.flush_all()
+        for client in self.clients_local_first:
+            client.flush_all()
+        self.checkpoints = None
+        self.delta_after0 = {}
+        self.delta_after1 = {}
 
-    def load(self, cursor, oid_int, prev_polled_tid, adapter):
+    def load(self, cursor, oid_int):
         """Load the given object from cache if possible.
 
         Fall back to loading from the database.
         """
-        client = self.client
-        state_key = '%s:state:%d' % (self.prefix, oid_int)
-        if prev_polled_tid:
-            backptr_key = '%s:back:%d:%d' % (
-                self.prefix, prev_polled_tid, oid_int)
-            v = client.get_multi([state_key, backptr_key])
-            if v is not None:
-                cache_data = v.get(state_key)
-                backptr = v.get(backptr_key)
-            else:
-                cache_data = None
-                backptr = None
-        else:
-            cache_data = client.get(state_key)
-            backptr = None
+        if not self.checkpoints:
+            # No poll has occurred yet.  For safety, don't use the cache.
+            return self.adapter.mover.load_current(cursor, oid_int)
 
-        state = None
-        if cache_data and len(cache_data) >= 8:
-            # validate the cache result
-            tid = cache_data[:8]
-            tid_int = u64(tid)
-            if tid_int == prev_polled_tid or tid == backptr:
-                # the cached data is current.
-                state = cache_data[8:]
+        prefix = self.prefix
 
-        if state is None:
-            # could not load from cache, so get from the database
-            state, tid_int = adapter.mover.load_current(
+        # Get the object from the transaction specified
+        # by the following values, in order:
+        #
+        #   1. delta_after0[oid_int]
+        #   2. checkpoints[0]
+        #   3. delta_after1[oid_int]
+        #   4. checkpoints[1]
+        #   5. The database.
+        #
+        # checkpoints[0] is the preferred location.
+        #
+        # If delta_after0 contains oid_int, we should not look at any
+        # other cache keys, since the tid_int specified in delta_after0
+        # replaces all older transaction IDs. Similarly, if
+        # delta_after1 contains oid_int, we should not look at
+        # checkpoints[1]. Also, when both checkpoints are set to the
+        # same transaction ID, we don't need to ask for the same key
+        # twice.
+
+        tid_int = self.delta_after0.get(oid_int)
+        if tid_int:
+            # This object changed after checkpoint0, so
+            # there is only one place to look for its state.
+            cachekey = '%s:state:%d:%d' % (prefix, tid_int, oid_int)
+            for client in self.clients_local_first:
+                cache_data = client.get(cachekey)
+                if cache_data and len(cache_data) >= 8:
+                    # cache hit
+                    assert cache_data[:8] == p64(tid_int)
+                    return cache_data[8:], tid_int
+            # cache miss
+            state, actual_tid_int = self.adapter.mover.load_current(
                 cursor, oid_int)
-            state = str(state or '')
-            if tid_int is not None:
-                # cache the result
-                to_cache = {}
-                tid = p64(tid_int)
-                new_cache_data = tid + state
-                if new_cache_data != cache_data:
-                    to_cache[state_key] = new_cache_data
-                if prev_polled_tid and prev_polled_tid != tid_int:
-                    to_cache[backptr_key] = tid
-                if to_cache:
-                    client.set_multi(to_cache)
+            assert actual_tid_int == tid_int
+            for client in self.clients_local_first:
+                client.set(cachekey, '%s%s' % (p64(tid_int), state or ''))
+            return state, tid_int
 
+        # Make a list of cache keys to query. The list will have either
+        # 1 or 2 keys.
+        cp0, cp1 = self.checkpoints
+        cachekeys = []
+        cp0_key = '%s:state:%d:%d' % (prefix, cp0, oid_int)
+        cachekeys.append(cp0_key)
+        da1_key = None
+        cp1_key = None
+        tid_int = self.delta_after1.get(oid_int)
+        if tid_int:
+            da1_key = '%s:state:%d:%d' % (prefix, tid_int, oid_int)
+            cachekeys.append(da1_key)
+        elif cp1 != cp0:
+            cp1_key = '%s:state:%d:%d' % (prefix, cp1, oid_int)
+            cachekeys.append(cp1_key)
+
+        for client in self.clients_local_first:
+            # Query the cache. Query multiple keys simultaneously to
+            # minimize latency.
+            response = client.get_multi(cachekeys)
+            if response:
+                cache_data = response.get(cp0_key)
+                if cache_data and len(cache_data) >= 8:
+                    # cache hit on the preferred cache key
+                    return cache_data[8:], u64(cache_data[:8])
+
+                if da1_key:
+                    cache_data = response.get(da1_key)
+                elif cp1_key:
+                    cache_data = response.get(cp1_key)
+                if cache_data and len(cache_data) >= 8:
+                    # cache hit, but copy the state to
+                    # the currently preferred key.
+                    client.set(cp0_key, cache_data)
+                    return cache_data[8:], u64(cache_data[:8])
+
+        # cache miss
+        state, tid_int = self.adapter.mover.load_current(cursor, oid_int)
+        if tid_int:
+            client.set(cp0_key, '%s%s' % (p64(tid_int), state or ''))
         return state, tid_int
+
 
     def tpc_begin(self):
         """Prepare temp space for objects to cache."""
@@ -120,14 +221,15 @@ class StorageCache(object):
         endpos = queue.tell()
         self.queue_contents[oid_int] = (startpos, endpos)
 
-    def tpc_vote(self, tid):
-        """Now that the tid is chosen, send queued objects to the cache.
-        """
-        client = self.client
-        assert len(tid) == 8
+    def send_queue(self, tid):
+        """Now that this tid is known, send all queued objects to the cache"""
+        tid_int = u64(tid)
         send_size = 0
         to_send = {}
+        prefix = self.prefix
 
+        # Order the queue by file position, which should help if the
+        # file is large and needs to be read sequentially from disk.
         items = [
             (startpos, endpos, oid_int)
             for (oid_int, (startpos, endpos)) in self.queue_contents.items()
@@ -140,35 +242,70 @@ class StorageCache(object):
             state = self.queue.read(length)
             if len(state) != length:
                 raise AssertionError("Queued cache data is truncated")
-            cachekey = '%s:state:%d' % (self.prefix, oid_int)
-            to_send[cachekey] = '%s%s' % (tid, state)
-            send_size += length + len(cachekey)
-            if send_size >= self.send_limit:
-                client.set_multi(to_send)
+            cachekey = '%s:state:%d:%d' % (prefix, tid_int, oid_int)
+            item_size = length + len(cachekey)
+            if send_size and send_size + item_size >= self.send_limit:
+                for client in self.clients_local_first:
+                    client.set_multi(to_send)
                 to_send.clear()
                 send_size = 0
+            to_send[cachekey] = '%s%s' % (tid, state)
+            send_size += item_size
 
         if to_send:
-            client.set_multi(to_send)
+            for client in self.clients_local_first:
+                client.set_multi(to_send)
 
         self.queue_contents.clear()
         self.queue.seek(0)
 
+    def after_tpc_finish(self, tid):
+        """Update the commit count in the cache.
 
-    def tpc_finish(self):
-        """Update the commit count in the cache."""
-        client = self.client
+        This is called after the database commit lock is released,
+        but before releasing the storage lock that will allow other
+        threads to use this instance.
+        """
+        tid_int = u64(tid)
+
+        # Why do we cache a commit count instead of the transaction ID?
+        # Here's why. This method gets called after the commit lock is
+        # released; other threads or processes could have committed
+        # more transactions in the time that has passed since releasing
+        # the lock, so a cached transaction ID would cause a race. It
+        # also wouldn't work to cache the transaction ID before
+        # releasing the commit lock, since that could cause some
+        # threads or processes watching the cache for changes to think
+        # they are up to date when they are not. The commit count
+        # solves these problems by ensuring that every commit is
+        # followed by a change to the cache that does not conflict with
+        # concurrent committers.
         cachekey = self.commit_count_key
-        if client.incr(cachekey) is None:
-            # Use the current time as an initial commit_count value.
-            client.add(cachekey, int(time.time()))
-            # A concurrent committer could have won the race to set the
-            # initial commit_count.  Increment commit_count so that it
-            # doesn't matter who won.
-            client.incr(cachekey)
+        for client in self.clients_global_first:
+            if client.incr(cachekey) is None:
+                # Initialize commit_count.
+                # Use a random number for the base.
+                client.add(cachekey, random.randint(1, 1<<31))
+                # A concurrent committer could have won the race to set the
+                # initial commit_count.  Increment commit_count so that it
+                # doesn't matter who won.
+                if client.incr(cachekey) is not None:
+                    break
+                # else the client is dead.  Fall back to the next client.
+
+        if self.checkpoints:
+            for oid_int in self.queue_contents:
+                # Future cache lookups for oid_int should now use
+                # the tid just committed.
+                self.delta_after0[oid_int] = tid_int
+
+        self.send_queue(tid)
 
     def clear_temp(self):
-        """Clear any transactional data.  Called after txn finish or abort."""
+        """Discard all transaction-specific temporary data.
+
+        Called after transaction finish or abort.
+        """
         self.queue_contents = None
         if self.queue is not None:
             self.queue.close()
@@ -176,8 +313,296 @@ class StorageCache(object):
 
     def need_poll(self):
         """Return True if the commit count has changed"""
-        new_commit_count = self.client.get(self.commit_count_key)
-        if new_commit_count != self.polled_commit_count:
-            self.polled_commit_count = new_commit_count
+        for client in self.clients_global_first:
+            new_commit_count = client.get(self.commit_count_key)
+            if new_commit_count is not None:
+                break
+        if new_commit_count != self.commit_count:
+            self.commit_count = new_commit_count
             return True
         return False
+
+    def after_poll(self, cursor, prev_tid_int, new_tid_int, changes):
+        """Update checkpoint data after a database poll.
+
+        cursor is connected to a load connection.
+
+        changes lists all [(oid_int, tid_int)] changed after
+        prev_tid_int, up to and including new_tid_int, excluding the
+        changes last committed by the associated storage instance.
+        changes can be None to indicate too many objects changed
+        to list them all.
+
+        prev_tid_int can be None, in which case the changes
+        parameter will be ignored.  new_tid_int can not be None.
+        """
+        new_checkpoints = None
+        for client in self.clients_global_first:
+            s = client.get(self.checkpoints_key)
+            if s:
+                try:
+                    c0, c1 = s.split()
+                    c0 = int(c0)
+                    c1 = int(c1)
+                except ValueError:
+                    # Invalid checkpoint cache value; ignore it.
+                    pass
+                else:
+                    if c0 >= c1:
+                        new_checkpoints = (c0, c1)
+                        break
+
+        if not new_checkpoints:
+            new_checkpoints = (new_tid_int, new_tid_int)
+
+            if not self.checkpoints:
+                # Initialize the checkpoints.
+                for client in self.clients_global_first:
+                    client.set(
+                        self.checkpoints_key, '%d %d' % new_checkpoints)
+            else:
+                # Suggest reinstatement of the former checkpoints, but
+                # use new checkpoints for this instance. Using new
+                # checkpoints ensures that we don't build up
+                # self.delta_after0 in case the cache is offline.
+                for client in self.clients_global_first:
+                    client.set(
+                        self.checkpoints_key, '%d %d' % self.checkpoints)
+
+            self.checkpoints = new_checkpoints
+            self.delta_after0 = {}
+            self.delta_after1 = {}
+            self.current_tid = new_tid_int
+            return
+
+        cp0, cp1 = new_checkpoints
+        allow_shift = True
+        if cp0 > new_tid_int:
+            # checkpoint0 is in a future that this instance can't
+            # yet see.  Ignore the checkpoint change for now.
+            new_checkpoints = self.checkpoints
+            allow_shift = False
+
+        if (new_checkpoints == self.checkpoints
+                and changes is not None
+                and prev_tid_int
+                and prev_tid_int <= self.current_tid
+                and new_tid_int >= self.current_tid
+                ):
+            # Keep the checkpoints and update self.delta_after0.
+            m = self.delta_after0
+            m_get = m.get
+            for oid_int, tid_int in changes:
+                my_tid_int = m_get(oid_int)
+                if my_tid_int is None or tid_int > my_tid_int:
+                    m[oid_int] = tid_int
+            self.current_tid = new_tid_int
+        else:
+            # Use the checkpoints specified by the cache.
+            # Rebuild delta_after0 and delta_after1.
+            new_delta_after0 = {}
+            new_delta_after1 = {}
+            # poller.list_changes provides an iterator of (oid, tid) where
+            # tid > after_tid and tid <= last_tid.
+            changes = self.adapter.poller.list_changes(
+                cursor, cp1, new_tid_int)
+            for oid_int, tid_int in changes:
+                if tid_int > cp0:
+                    new_delta_after0[oid_int] = tid_int
+                elif tid_int > cp1:
+                    new_delta_after1[oid_int] = tid_int
+            self.checkpoints = new_checkpoints
+            self.delta_after0 = new_delta_after0
+            self.delta_after1 = new_delta_after1
+            self.current_tid = new_tid_int
+
+        if allow_shift and len(self.delta_after0) >= self.delta_size_limit:
+            # delta_after0 has reached its limit.  The way to
+            # shrink it is to shift the checkpoints.  Suggest
+            # shifted checkpoints for future polls.
+            self._suggest_shifted_checkpoints(new_tid_int)
+
+
+    def _suggest_shifted_checkpoints(self, tid_int):
+        """Suggest that future polls use a new pair of checkpoints.
+
+        This does nothing if another instance has already shifted
+        the checkpoints.
+
+        checkpoint0 shifts to checkpoint1 and the tid just committed
+        becomes checkpoint0.
+        """
+        cp0, cp1 = self.checkpoints
+        assert tid_int > cp0
+        expect = '%d %d' % self.checkpoints
+        change_to = '%d %d' % (tid_int, cp0)
+        for client in self.clients_global_first:
+            old_value = client.get(self.checkpoints_key)
+            if old_value:
+                break
+        if not old_value or old_value == expect:
+            # Shift the checkpoints.
+            # Although this is a race with other instances, the race
+            # should not matter.
+            for client in self.clients_global_first:
+                client.set(self.checkpoints_key, change_to)
+            # The poll code will later see the new checkpoints
+            # and update self.checkpoints and self.delta_after(0|1).
+
+
+class SizeOverflow(Exception):
+    """Too much memory would be consumed by a new key"""
+
+class LocalClientBucket(dict):
+    """A map that keeps a record of its approx. size.
+
+    keys must be strings and most values are strings.
+    """
+
+    def __init__(self, limit):
+        self.size = 0
+        self.limit = limit
+        self._super = super(LocalClientBucket, self)
+
+    def __setitem__(self, key, value):
+        """Set an item.
+
+        Throws SizeOverflow if the new item would cause this map to
+        surpass its memory limit.
+        """
+        if isinstance(value, basestring):
+            sizedelta = len(value)
+        else:
+            sizedelta = 0
+        if key in self:
+            oldvalue = self[key]
+            if isinstance(oldvalue, basestring):
+                sizedelta -= len(oldvalue)
+        else:
+            sizedelta += len(key)
+        if self.size + sizedelta > self.limit:
+            raise SizeOverflow()
+        self._super.__setitem__(key, value)
+        self.size += sizedelta
+        return True
+
+    def __delitem__(self, key):
+        oldvalue = self[key]
+        self._super.__delitem__(key)
+        sizedelta = len(key)
+        if isinstance(oldvalue, basestring):
+            sizedelta += len(oldvalue)
+        self.size -= sizedelta
+
+
+class LocalClient(object):
+    """A memcache-like object that stores in dictionaries"""
+
+    def __init__(self, options):
+        self._lock = threading.Lock()
+        self._lock_acquire = self._lock.acquire
+        self._lock_release = self._lock.release
+        self._bucket_limit = 1000000 * options.cache_local_mb / 2
+        self._value_limit = self._bucket_limit / 10
+        self._bucket0 = LocalClientBucket(self._bucket_limit)
+        self._bucket1 = LocalClientBucket(self._bucket_limit)
+
+    def flush_all(self):
+        self._lock_acquire()
+        try:
+            self._bucket0 = LocalClientBucket(self._bucket_limit)
+            self._bucket1 = LocalClientBucket(self._bucket_limit)
+        finally:
+            self._lock_release()
+
+    def get(self, key):
+        self._lock_acquire()
+        try:
+            value = self._bucket0.get(key)
+            if value is None:
+                value = self._bucket1.get(key)
+                if value is None:
+                    return None
+                # This key is active, so move it to bucket0.
+                del self._bucket1[key]
+                self._set_one(key, value)
+            return value
+        finally:
+            self._lock_release()
+
+    def get_multi(self, keys):
+        res = {}
+        self._lock_acquire()
+        try:
+            for key in keys:
+                value = self._bucket0.get(key)
+                if value is None:
+                    value = self._bucket1.get(key)
+                    if value is None:
+                        continue
+                    # This key is active, so move it to bucket0.
+                    del self._bucket1[key]
+                    self._set_one(key, value)
+                res[key] = value
+        finally:
+            self._lock_release()
+        return res
+
+    def _set_one(self, key, value):
+        try:
+            self._bucket0[key] = value
+        except SizeOverflow:
+            # shift bucket0 to bucket1
+            self._bucket1 = self._bucket0
+            self._bucket0 = LocalClientBucket(self._bucket_limit)
+            self._bucket0[key] = value
+
+    def set(self, key, value):
+        self.set_multi({key: value})
+
+    def set_multi(self, d, allow_replace=True):
+        res = {}
+        self._lock_acquire()
+        try:
+            for key, value in d.iteritems():
+                if isinstance(value, basestring):
+                    if len(value) >= self._value_limit:
+                        # This value is too big, so don't cache it.
+                        continue
+
+                if key in self._bucket0:
+                    if not allow_replace:
+                        continue
+                    del self._bucket0[key]
+
+                if key in self._bucket1:
+                    if not allow_replace:
+                        continue
+                    del self._bucket1[key]
+
+                self._set_one(key, value)
+                res[key] = value
+
+        finally:
+            self._lock_release()
+        return res
+
+    def add(self, key, value):
+        self.set_multi({key: value}, allow_replace=False)
+
+    def incr(self, key):
+        self._lock_acquire()
+        try:
+            value = self._bucket0.get(key)
+            if value is None:
+                value = self._bucket1.get(key)
+                if value is None:
+                    return None
+                # this key is active, so move it to bucket0
+                del self._bucket1[key]
+            res = int(value) + 1
+            self._set_one(key, res)
+            return res
+        finally:
+            self._lock_release()
+

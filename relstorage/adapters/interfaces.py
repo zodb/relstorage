@@ -340,7 +340,17 @@ class IPoller(Interface):
         of the exceptions listed in the disconnected_exceptions
         attribute of the associated IConnectionManager.
 
-        Returns (changed_oids, new_polled_tid).
+        Returns (changes, new_polled_tid), where changes is either
+        a list of (oid, tid) that have changed, or None to indicate
+        that the changes are too complex to list.  new_polled_tid is
+        never None.
+        """
+
+    def list_changes(cursor, after_tid, last_tid):
+        """Return the (oid, tid) values changed in a range of transactions.
+
+        The returned iterable must include all changes in the range
+        after_tid < tid <= last_tid.
         """
 
 

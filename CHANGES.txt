@@ -14,6 +14,9 @@ Unreleased
 - Revised the way RelStorage uses memcached.  Minimized the number of
   trips to both the cache server and the database.
 
+- Added an in-process pickle cache that serves a function similar to the
+  ZEO cache.
+
 - Added a wrapper module for pylibmc.
 
 - Store operations now use multi-insert and multi-delete SQL

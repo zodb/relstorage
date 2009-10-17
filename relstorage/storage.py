@@ -139,7 +139,7 @@ class RelStorage(
 
 
     def __init__(self, adapter, name=None, create=True,
-            options=None, **kwoptions):
+            options=None, cache=None, **kwoptions):
         self._adapter = adapter
 
         if options is None:
@@ -177,8 +177,10 @@ class RelStorage(
         # but not yet used.
         self._preallocated_oids = []
 
-        if options.cache_servers:
-            self._cache = StorageCache(options)
+        if cache is not None:
+            self._cache = cache
+        else:
+            self._cache = StorageCache(adapter, options)
 
         if options.blob_dir:
             from ZODB.blob import FilesystemHelper
@@ -270,16 +272,12 @@ class RelStorage(
         """
         self._adapter.schema.zap_all()
         self._rollback_load_connection()
-        cache = self._cache
-        if cache is not None:
-            cache.flush_all()
+        self._cache.flush_all()
 
     def clear_cache(self):
-        """Clear all data from memcached.  Used by speed tests.
+        """Clear all data from storage caches.  Used by speed tests.
         """
-        cache = self._cache
-        if cache is not None:
-            cache.flush_all()
+        self._cache.flush_all()
 
     def release(self):
         """Release back end database sessions used by this storage instance.
@@ -311,8 +309,9 @@ class RelStorage(
         See ZODB.interfaces.IMVCCStorage.
         """
         adapter = self._adapter.new_instance()
+        cache = self._cache.new_instance()
         other = RelStorage(adapter=adapter, name=self.__name__,
-            create=False, options=self._options)
+            create=False, options=self._options, cache=cache)
         self._instances.append(weakref.ref(other))
         return other
 
@@ -421,14 +420,7 @@ class RelStorage(
             if not self._load_transaction_open:
                 self._restart_load()
             cursor = self._load_cursor
-
-            if cache is None:
-                state, tid_int = self._adapter.mover.load_current(
-                    cursor, oid_int)
-            else:
-                state, tid_int = cache.load(
-                    cursor, oid_int, self._prev_polled_tid, self._adapter)
-
+            state, tid_int = cache.load(cursor, oid_int)
         finally:
             self._lock_release()
 
@@ -531,6 +523,7 @@ class RelStorage(
         assert self._prepared_txn is None
 
         adapter = self._adapter
+        cache = self._cache
         cursor = self._store_cursor
         assert cursor is not None
         oid_int = u64(oid)
@@ -545,9 +538,7 @@ class RelStorage(
             # save the data in a temporary table
             adapter.mover.store_temp(
                 cursor, self._batcher, oid_int, prev_tid_int, data)
-            cache = self._cache
-            if cache is not None:
-                cache.store_temp(oid_int, data)
+            cache.store_temp(oid_int, data)
             return None
         finally:
             self._lock_release()
@@ -608,11 +599,9 @@ class RelStorage(
 
             self._restart_store()
             adapter = self._adapter
+            self._cache.tpc_begin()
             self._batcher = self._adapter.mover.make_batcher(
                 self._store_cursor)
-            cache = self._cache
-            if cache is not None:
-                cache.tpc_begin()
 
             if tid is not None:
                 # hold the commit lock and add the transaction now
@@ -676,9 +665,7 @@ class RelStorage(
         self._max_stored_oid = 0
         self._batcher = None
         self._txn_blobs = None
-        cache = self._cache
-        if cache is not None:
-            cache.clear_temp()
+        self._cache.clear_temp()
 
 
     def _finish_store(self):
@@ -791,10 +778,6 @@ class RelStorage(
                     ZODB.blob.rename_or_copy_blob(sourcename, targetname)
                     self._txn_blobs[oid] = targetname
 
-        cache = self._cache
-        if cache is not None:
-            cache.tpc_vote(self._tid)
-
         return serials
 
 
@@ -828,9 +811,10 @@ class RelStorage(
         self._adapter.txncontrol.commit_phase2(
             self._store_conn, self._store_cursor, txn)
         self._adapter.locker.release_commit_lock(self._store_cursor)
-        cache = self._cache
-        if cache is not None:
-            cache.tpc_finish()
+        self._cache.after_tpc_finish(self._tid)
+
+        # N.B. only set _ltid after the commit succeeds,
+        # including cache updates.
         self._ltid = self._tid
 
         #if self._txn_blobs and not self._adapter.keep_history:
@@ -1180,12 +1164,10 @@ class RelStorage(
         """Return true if polling is needed"""
         now = time.time()
 
-        cache = self._cache
-        if cache is not None:
-            if cache.need_poll():
-                # There is new data ready to poll
-                self._poll_at = now
-                return True
+        if self._cache.need_poll():
+            # There is new data ready to poll
+            self._poll_at = now
+            return True
 
         if not self._load_transaction_open:
             # Since the load connection is closed or does not have
@@ -1227,10 +1209,10 @@ class RelStorage(
 
             # get a list of changed OIDs and the most recent tid
             poll = self._adapter.poller.poll_invalidations
+            prev = self._prev_polled_tid
             try:
-                oid_ints, new_polled_tid = poll(
-                    self._load_conn, self._load_cursor,
-                    self._prev_polled_tid, ignore_tid)
+                changes, new_polled_tid = poll(
+                    self._load_conn, self._load_cursor, prev, ignore_tid)
             except self._adapter.connmanager.disconnected_exceptions, e:
                 log.warning("Reconnecting load_conn: %s", e)
                 self._drop_load_connection()
@@ -1240,17 +1222,19 @@ class RelStorage(
                     log.exception("Reconnect failed.")
                     raise
                 log.info("Reconnected.")
-                oid_ints, new_polled_tid = poll(
-                    self._load_conn, self._load_cursor,
-                    self._prev_polled_tid, ignore_tid)
+                changes, new_polled_tid = poll(
+                    self._load_conn, self._load_cursor, prev, ignore_tid)
+
+            self._cache.after_poll(
+                self._load_cursor, prev, new_polled_tid, changes)
 
             self._prev_polled_tid = new_polled_tid
 
-            if oid_ints is None:
+            if changes is None:
                 oids = None
             else:
                 oids = {}
-                for oid_int in oid_ints:
+                for oid_int, tid_int in changes:
                     oids[p64(oid_int)] = 1
             return oids
         finally:
