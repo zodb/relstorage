@@ -205,6 +205,35 @@ class GenericRelStorageTests(
         self.assertEqual(len(got), len(data))
         self.assertEqual(got, data)
 
+    def check16MObject(self):
+        # Store 16 * 1024 * 1024 bytes in an object, then retrieve it
+        data = 'a 16 byte string' * (1024 * 1024)
+        oid = self._storage.new_oid()
+        self._dostoreNP(oid, data=data)
+        got, serialno = self._storage.load(oid, '')
+        self.assertEqual(len(got), len(data))
+        self.assertEqual(got, data)
+
+    def check99X1900Objects(self):
+        # Store 99 objects each with 1900 bytes.  This is intended
+        # to exercise possible buffer overfilling that the batching
+        # code might cause.
+        import transaction
+        data = '0123456789012345678' * 100
+        t = transaction.Transaction()
+        self._storage.tpc_begin(t)
+        oids = []
+        for i in range(99):
+            oid = self._storage.new_oid()
+            self._storage.store(oid, '\0'*8, data, '', t)
+            oids.append(oid)
+        self._storage.tpc_vote(t)
+        self._storage.tpc_finish(t)
+        for oid in oids:
+            got, serialno = self._storage.load(oid, '')
+            self.assertEqual(len(got), len(data))
+            self.assertEqual(got, data)
+
     def checkPreventOIDOverlap(self):
         # Store an object with a particular OID, then verify that
         # OID is not reused.
@@ -214,15 +243,6 @@ class GenericRelStorageTests(
         oid2 = self._storage.new_oid()
         self.assert_(oid1 < oid2, 'old OID %r should be less than new OID %r'
             % (oid1, oid2))
-
-    def check16MObject(self):
-        # Store 16 * 1024 * 1024 bytes in an object, then retrieve it
-        data = 'a 16 byte string' * (1024 * 1024)
-        oid = self._storage.new_oid()
-        self._dostoreNP(oid, data=data)
-        got, serialno = self._storage.load(oid, '')
-        self.assertEqual(len(got), len(data))
-        self.assertEqual(got, data)
 
     def checkUseCache(self):
         # Store an object, cache it, then retrieve it from the cache
