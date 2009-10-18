@@ -230,22 +230,22 @@ class GenericRelStorageTests(
         self._storage._options.cache_module_name = fakecache.__name__
         self._storage._options.cache_prefix = 'zzz'
 
+        fakecache.data.clear()
         db = DB(self._storage)
         try:
-            fakecache.data.clear()
             c1 = db.open()
             self.assert_(c1._storage._cache.clients_global_first[0].servers,
                 ['x:1', 'y:2'])
             r1 = c1.root()
-            # the root state should now be cached
-            self.assertEqual(len(fakecache.data), 2)
+            # the root state, the commit count, and checkpoints should
+            # now be cached
+            self.assertEqual(len(fakecache.data), 3)
             self.assertTrue('zzz:checkpoints' in fakecache.data)
-            self.assertEqual(sorted(fakecache.data.keys())[1][:10],
+            self.assertTrue('zzz:commits' in fakecache.data)
+            self.assertEqual(sorted(fakecache.data.keys())[2][:10],
                 'zzz:state:')
             r1['alpha'] = PersistentMapping()
-            self.assertFalse('zzz:commits' in fakecache.data)
             transaction.commit()
-            self.assertTrue('zzz:commits' in fakecache.data)
             self.assertEqual(len(fakecache.data.keys()), 5)
 
             oid = r1['alpha']._p_oid
