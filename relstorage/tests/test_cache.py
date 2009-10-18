@@ -38,12 +38,12 @@ class StorageCacheTests(unittest.TestCase):
         self.assertEqual(c.clients_global_first[0].servers, ['host:9999'])
         self.assertEqual(c.prefix, 'myprefix')
 
-    def test_flush_all(self):
+    def test_clear(self):
         from relstorage.tests.fakecache import data
         data.clear()
         c = self._makeOne()
         data['x'] = '1'
-        c.flush_all()
+        c.clear()
         self.assert_(not data)
         self.assertEqual(c.checkpoints, None)
         self.assertEqual(c.delta_after0, {})

@@ -109,6 +109,8 @@ class StorageCache(object):
         self.checkpoints = None
         self.delta_after0 = {}
         self.delta_after1 = {}
+        self.current_tid = 0
+        self.commit_count = object()
 
     def load(self, cursor, oid_int):
         """Load the given object from cache if possible.
@@ -155,8 +157,9 @@ class StorageCache(object):
             state, actual_tid_int = self.adapter.mover.load_current(
                 cursor, oid_int)
             assert actual_tid_int == tid_int
+            cache_data = '%s%s' % (p64(tid_int), state or '')
             for client in self.clients_local_first:
-                client.set(cachekey, '%s%s' % (p64(tid_int), state or ''))
+                client.set(cachekey, cache_data)
             return state, tid_int
 
         # Make a list of cache keys to query. The list will have either
@@ -198,7 +201,9 @@ class StorageCache(object):
         # cache miss
         state, tid_int = self.adapter.mover.load_current(cursor, oid_int)
         if tid_int:
-            client.set(cp0_key, '%s%s' % (p64(tid_int), state or ''))
+            cache_data = '%s%s' % (p64(tid_int), state or '')
+            for client in self.clients_local_first:
+                client.set(cp0_key, cache_data)
         return state, tid_int
 
 
@@ -357,17 +362,15 @@ class StorageCache(object):
 
             if not self.checkpoints:
                 # Initialize the checkpoints.
-                for client in self.clients_global_first:
-                    client.set(
-                        self.checkpoints_key, '%d %d' % new_checkpoints)
+                cache_data = '%d %d' % new_checkpoints
             else:
                 # Suggest reinstatement of the former checkpoints, but
                 # use new checkpoints for this instance. Using new
                 # checkpoints ensures that we don't build up
                 # self.delta_after0 in case the cache is offline.
-                for client in self.clients_global_first:
-                    client.set(
-                        self.checkpoints_key, '%d %d' % self.checkpoints)
+                cache_data = '%d %d' % self.checkpoints
+            for client in self.clients_global_first:
+                client.set(self.checkpoints_key, cache_data)
 
             self.checkpoints = new_checkpoints
             self.delta_after0 = {}
