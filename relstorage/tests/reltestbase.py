@@ -237,12 +237,10 @@ class GenericRelStorageTests(
             self.assert_(c1._storage._cache.clients_global_first[0].servers,
                 ['x:1', 'y:2'])
             r1 = c1.root()
-            # the root state, the commit count, and checkpoints should
-            # now be cached
-            self.assertEqual(len(fakecache.data), 3)
+            # The root state and checkpoints should now be cached.
+            # A commit count *might* be cached depending on the ZODB version.
             self.assertTrue('zzz:checkpoints' in fakecache.data)
-            self.assertTrue('zzz:commits' in fakecache.data)
-            self.assertEqual(sorted(fakecache.data.keys())[2][:10],
+            self.assertEqual(sorted(fakecache.data.keys())[-1][:10],
                 'zzz:state:')
             r1['alpha'] = PersistentMapping()
             transaction.commit()
