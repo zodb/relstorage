@@ -152,23 +152,24 @@
     </key>
     <key name="cache-servers" datatype="string" required="no">
       <description>
-        Specifies a list of memcache servers.  Enabling memcache integration
-        is useful if the connection to the relational database has high
-        latency and the connection to memcache has significantly lower
-        latency.  On the other hand, if the connection to the relational
-        database already has low latency, memcache integration may actually
-        hurt overall performance.
+        Specifies a list of memcached servers. Using memcached with
+        RelStorage improves the speed of frequent object accesses while
+        slightly reducing the speed of other operations.
 
         Provide a list of host:port pairs, separated by whitespace.
-        "127.0.0.1:11211" is a common setting.  The default is to disable
-        memcache integration.
+        "127.0.0.1:11211" is a common setting.  Some memcached modules,
+        such as pylibmc, allow you to specify a path to a Unix socket
+        instead of a host:port pair.
+
+        The default is to disable memcached integration.
       </description>
     </key>
     <key name="cache-module-name" datatype="string" required="no">
       <description>
         Specifies which Python memcache module to use.  The default is
         "memcache", a pure Python module.  An alternative module is
-        "cmemcache".  This setting has no effect unless cache-servers is set.
+        "relstorage.pylibmc_wrapper".  This setting has no effect
+        unless cache-servers is set.
       </description>
     </key>
     <key name="cache-prefix" datatype="string" required="no">
@@ -176,6 +177,22 @@
         The prefix for all keys in the cache.  All clients using a
         database should use the same cache-prefix.  Use this if you use
         a single cache for multiple databases.
+      </description>
+    </key>
+    <key name="cache-local-mb" datatype="integer" required="no">
+      <description>
+        RelStorage caches pickled objects in memory, similar to a ZEO
+        cache. This cache is shared between threads. This parameter
+        configures the approximate maximum amount of memory the cache
+        should consume, in megabytes.  It defaults to 10.
+      </description>
+    </key>
+    <key name="cache-delta-size-limit" datatype="integer" required="no">
+      <description>
+        This is an advanced option. RelStorage uses a system of
+        checkpoints to achieve a high cache hit rate. This parameter
+        configures how many objects should be stored before creating a
+        new checkpoint. The default is 10000.
       </description>
     </key>
   </sectiontype>

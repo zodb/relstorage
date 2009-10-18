@@ -127,6 +127,14 @@ db_names = {
     }
 
 def test_suite():
+    try:
+        import psycopg2
+    except ImportError, e:
+        import warnings
+        warnings.warn(
+            "psycopg2 is not importable, so PostgreSQL tests disabled")
+        return unittest.TestSuite()
+
     suite = unittest.TestSuite()
     for klass in [
             HPPostgreSQLTests,

@@ -39,7 +39,7 @@ class Options(object):
         self.cache_servers = ()  # ['127.0.0.1:11211']
         self.cache_module_name = 'memcache'
         self.cache_prefix = ''
-        self.cache_local_mb = 4
+        self.cache_local_mb = 10
         self.cache_delta_size_limit = 10000
 
         for key, value in kwoptions.iteritems():

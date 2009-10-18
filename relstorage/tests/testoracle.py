@@ -139,6 +139,13 @@ db_names = {
     }
 
 def test_suite():
+    try:
+        import cx_Oracle
+    except ImportError, e:
+        import warnings
+        warnings.warn("cx_Oracle is not importable, so Oracle tests disabled")
+        return unittest.TestSuite()
+
     suite = unittest.TestSuite()
     for klass in [
             HPOracleTests,
