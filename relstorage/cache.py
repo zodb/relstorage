@@ -389,6 +389,8 @@ class StorageCache(object):
             # checkpoint0 is in a future that this instance can't
             # yet see.  Ignore the checkpoint change for now.
             new_checkpoints = self.checkpoints
+            if not new_checkpoints:
+                new_checkpoints = (new_tid_int, new_tid_int)
             allow_shift = False
 
         if (new_checkpoints == self.checkpoints
@@ -412,15 +414,16 @@ class StorageCache(object):
             # Rebuild delta_after0 and delta_after1.
             new_delta_after0 = {}
             new_delta_after1 = {}
-            # poller.list_changes provides an iterator of (oid, tid) where
-            # tid > after_tid and tid <= last_tid.
-            changes = self.adapter.poller.list_changes(
-                cursor, cp1, new_tid_int)
-            for oid_int, tid_int in changes:
-                if tid_int > cp0:
-                    new_delta_after0[oid_int] = tid_int
-                elif tid_int > cp1:
-                    new_delta_after1[oid_int] = tid_int
+            if cp0 <= new_tid_int:
+                # poller.list_changes provides an iterator of
+                # (oid, tid) where tid > after_tid and tid <= last_tid.
+                changes = self.adapter.poller.list_changes(
+                    cursor, cp1, new_tid_int)
+                for oid_int, tid_int in changes:
+                    if tid_int > cp0:
+                        new_delta_after0[oid_int] = tid_int
+                    elif tid_int > cp1:
+                        new_delta_after1[oid_int] = tid_int
             self.checkpoints = new_checkpoints
             self.delta_after0 = new_delta_after0
             self.delta_after1 = new_delta_after1

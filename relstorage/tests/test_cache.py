@@ -253,7 +253,7 @@ class StorageCacheTests(unittest.TestCase):
         self.assertEqual(c.checkpoints, (50, 50))
         self.assertEqual(data['myprefix:checkpoints'], '40 30')
 
-    def test_after_poll_future_checkpoints(self):
+    def test_after_poll_future_checkpoints_when_cp_exist(self):
         from relstorage.tests.fakecache import data
         data['myprefix:checkpoints'] = '90 80'
         c = self._makeOne()
@@ -265,6 +265,18 @@ class StorageCacheTests(unittest.TestCase):
         self.assertEqual(c.checkpoints, (40, 30))
         self.assertEqual(data['myprefix:checkpoints'], '90 80')
         self.assertEqual(c.delta_after0, {2: 45})
+        self.assertEqual(c.delta_after1, {})
+
+    def test_after_poll_future_checkpoints_when_cp_nonexistent(self):
+        from relstorage.tests.fakecache import data
+        data['myprefix:checkpoints'] = '90 80'
+        c = self._makeOne()
+        c.after_poll(None, 40, 50, [(2, 45)])
+        # This instance can't yet see txn 90, and there aren't any
+        # existing checkpoints, so fall back to the current tid.
+        self.assertEqual(c.checkpoints, (50, 50))
+        self.assertEqual(data['myprefix:checkpoints'], '90 80')
+        self.assertEqual(c.delta_after0, {})
         self.assertEqual(c.delta_after1, {})
 
     def test_after_poll_retain_checkpoints(self):
