@@ -15,8 +15,11 @@
 from relstorage.autotemp import AutoTemporaryFile
 from ZODB.utils import p64
 from ZODB.utils import u64
+import logging
 import random
 import threading
+
+log = logging.getLogger(__name__)
 
 
 class StorageCache(object):
@@ -24,7 +27,7 @@ class StorageCache(object):
 
     Holds a list of memcache clients in order from most local to
     most global.  The first is a LocalClient, which stores the cache
-    in process but shares the cache between threads.
+    in the Python process, but shares the cache between threads.
     """
 
     # send_limit: approximate limit on the bytes to buffer before
@@ -363,12 +366,14 @@ class StorageCache(object):
             if not self.checkpoints:
                 # Initialize the checkpoints.
                 cache_data = '%d %d' % new_checkpoints
+                log.debug("Initializing checkpoints: %s", cache_data)
             else:
                 # Suggest reinstatement of the former checkpoints, but
                 # use new checkpoints for this instance. Using new
                 # checkpoints ensures that we don't build up
                 # self.delta_after0 in case the cache is offline.
                 cache_data = '%d %d' % self.checkpoints
+                log.debug("Reinstating checkpoints: %s", cache_data)
             for client in self.clients_global_first:
                 client.set(self.checkpoints_key, cache_data)
 
@@ -384,6 +389,7 @@ class StorageCache(object):
             # checkpoint0 is in a future that this instance can't
             # yet see.  Ignore the checkpoint change for now.
             new_checkpoints = self.checkpoints
+            cp0, cp1 = new_checkpoints
             allow_shift = False
 
         if (new_checkpoints == self.checkpoints
@@ -401,6 +407,7 @@ class StorageCache(object):
                     m[oid_int] = tid_int
             self.current_tid = new_tid_int
         else:
+            log.debug("Using new checkpoints: %d %d", cp0, cp1)
             # Use the checkpoints specified by the cache.
             # Rebuild delta_after0 and delta_after1.
             new_delta_after0 = {}
@@ -447,10 +454,15 @@ class StorageCache(object):
             # Shift the checkpoints.
             # Although this is a race with other instances, the race
             # should not matter.
+            log.debug("Shifting checkpoints to: %s. len(delta_after0) == %d.",
+                change_to, len(self.delta_after0))
             for client in self.clients_global_first:
                 client.set(self.checkpoints_key, change_to)
             # The poll code will later see the new checkpoints
             # and update self.checkpoints and self.delta_after(0|1).
+        else:
+            log.debug("Checkpoints already shifted to %s. "
+                "len(delta_after0) == %d.", old_value, len(self.delta_after0))
 
 
 class SizeOverflow(Exception):
@@ -499,7 +511,7 @@ class LocalClientBucket(dict):
 
 
 class LocalClient(object):
-    """A memcache-like object that stores in dictionaries"""
+    """A memcache-like object that stores in Python dictionaries."""
 
     def __init__(self, options):
         self._lock = threading.Lock()
@@ -559,6 +571,11 @@ class LocalClient(object):
             self._bucket1 = self._bucket0
             self._bucket0 = LocalClientBucket(self._bucket_limit)
             self._bucket0[key] = value
+            # Watch for this log message to decide whether the
+            # cache_local_mb parameter is set to a reasonable value.
+            # The log message indicates that old cache data has
+            # been garbage collected.
+            log.debug("LocalClient buckets shifted")
 
     def set(self, key, value):
         self.set_multi({key: value})
