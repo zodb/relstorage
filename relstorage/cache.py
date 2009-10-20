@@ -153,10 +153,10 @@ class StorageCache(object):
             for client in self.clients_local_first:
                 cache_data = client.get(cachekey)
                 if cache_data and len(cache_data) >= 8:
-                    # cache hit
+                    # Cache hit.
                     assert cache_data[:8] == p64(tid_int)
                     return cache_data[8:], tid_int
-            # cache miss
+            # Cache miss.
             state, actual_tid_int = self.adapter.mover.load_current(
                 cursor, oid_int)
             assert actual_tid_int == tid_int
@@ -188,7 +188,7 @@ class StorageCache(object):
             if response:
                 cache_data = response.get(cp0_key)
                 if cache_data and len(cache_data) >= 8:
-                    # cache hit on the preferred cache key
+                    # Cache hit on the preferred cache key.
                     return cache_data[8:], u64(cache_data[:8])
 
                 if da1_key:
@@ -196,12 +196,13 @@ class StorageCache(object):
                 elif cp1_key:
                     cache_data = response.get(cp1_key)
                 if cache_data and len(cache_data) >= 8:
-                    # cache hit, but copy the state to
+                    # Cache hit, but copy the state to
                     # the currently preferred key.
-                    client.set(cp0_key, cache_data)
+                    for client_to_set in self.clients_local_first:
+                        client_to_set.set(cp0_key, cache_data)
                     return cache_data[8:], u64(cache_data[:8])
 
-        # cache miss
+        # Cache miss.
         state, tid_int = self.adapter.mover.load_current(cursor, oid_int)
         if tid_int:
             cache_data = '%s%s' % (p64(tid_int), state or '')
@@ -383,13 +384,11 @@ class StorageCache(object):
             self.current_tid = new_tid_int
             return
 
-        cp0, cp1 = new_checkpoints
         allow_shift = True
-        if cp0 > new_tid_int:
+        if new_checkpoints[0] > new_tid_int:
             # checkpoint0 is in a future that this instance can't
             # yet see.  Ignore the checkpoint change for now.
             new_checkpoints = self.checkpoints
-            cp0, cp1 = new_checkpoints
             allow_shift = False
 
         if (new_checkpoints == self.checkpoints
@@ -407,6 +406,7 @@ class StorageCache(object):
                     m[oid_int] = tid_int
             self.current_tid = new_tid_int
         else:
+            cp0, cp1 = new_checkpoints
             log.debug("Using new checkpoints: %d %d", cp0, cp1)
             # Use the checkpoints specified by the cache.
             # Rebuild delta_after0 and delta_after1.
@@ -517,7 +517,7 @@ class LocalClient(object):
         self._lock = threading.Lock()
         self._lock_acquire = self._lock.acquire
         self._lock_release = self._lock.release
-        self._bucket_limit = 1000000 * options.cache_local_mb / 2
+        self._bucket_limit = int(1000000 * options.cache_local_mb / 2)
         self._value_limit = self._bucket_limit / 10
         self._bucket0 = LocalClientBucket(self._bucket_limit)
         self._bucket1 = LocalClientBucket(self._bucket_limit)
@@ -567,21 +567,28 @@ class LocalClient(object):
         try:
             self._bucket0[key] = value
         except SizeOverflow:
-            # shift bucket0 to bucket1
+            # Shift bucket0 to bucket1.
             self._bucket1 = self._bucket0
             self._bucket0 = LocalClientBucket(self._bucket_limit)
-            self._bucket0[key] = value
-            # Watch for this log message to decide whether the
+            # Watch for the log message below to decide whether the
             # cache_local_mb parameter is set to a reasonable value.
             # The log message indicates that old cache data has
             # been garbage collected.
             log.debug("LocalClient buckets shifted")
 
+            try:
+                self._bucket0[key] = value
+            except SizeOverflow:
+                # The value doesn't fit in the cache at all, apparently.
+                pass
+
     def set(self, key, value):
         self.set_multi({key: value})
 
     def set_multi(self, d, allow_replace=True):
-        res = {}
+        if not self._bucket_limit:
+            # don't bother
+            return
         self._lock_acquire()
         try:
             for key, value in d.iteritems():
@@ -601,16 +608,16 @@ class LocalClient(object):
                     del self._bucket1[key]
 
                 self._set_one(key, value)
-                res[key] = value
-
         finally:
             self._lock_release()
-        return res
 
     def add(self, key, value):
         self.set_multi({key: value}, allow_replace=False)
 
     def incr(self, key):
+        if not self._bucket_limit:
+            # don't bother
+            return None
         self._lock_acquire()
         try:
             value = self._bucket0.get(key)

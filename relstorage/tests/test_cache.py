@@ -388,6 +388,17 @@ class LocalClientTests(unittest.TestCase):
         self.assertEqual(c.get('abc'), 'def')
         self.assertEqual(c.get('xyz'), None)
 
+    def test_set_with_zero_space(self):
+        options = MockOptions()
+        options.cache_local_mb = 0
+        c = self.getClass()(options)
+        self.assertEqual(c._bucket_limit, 0)
+        self.assertEqual(c._value_limit, 0)
+        c.set('abc', 1)
+        c.set('def', '')
+        self.assertEqual(c.get('abc'), None)
+        self.assertEqual(c.get('def'), None)
+
     def test_set_multi_and_get_multi(self):
         c = self._makeOne()
         c.set_multi({'k0': 'abc', 'k1': 'def'})
@@ -462,6 +473,12 @@ class LocalClientTests(unittest.TestCase):
         self.assertEqual(c.incr('k0'), 15)  # this moves k0 to bucket0
         self.assertEqual(c._bucket0.size, 2)
         self.assertEqual(c._bucket1.size, 4)
+
+    def test_incr_with_zero_space(self):
+        options = MockOptions()
+        options.cache_local_mb = 0
+        c = self.getClass()(options)
+        self.assertEqual(c.incr('abc'), None)
 
 
 class MockOptions:
