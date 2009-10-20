@@ -414,7 +414,7 @@ class StorageCache(object):
             # Rebuild delta_after0 and delta_after1.
             new_delta_after0 = {}
             new_delta_after1 = {}
-            if cp0 <= new_tid_int:
+            if cp1 < new_tid_int:
                 # poller.list_changes provides an iterator of
                 # (oid, tid) where tid > after_tid and tid <= last_tid.
                 changes = self.adapter.poller.list_changes(
