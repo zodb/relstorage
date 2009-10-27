@@ -52,7 +52,8 @@ class OracleAdapter(object):
     """Oracle adapter for RelStorage."""
     implements(IRelStorageAdapter)
 
-    def __init__(self, user, password, dsn, twophase=False, options=None):
+    def __init__(self, user, password, dsn, commit_lock_id=0,
+            twophase=False, options=None):
         """Create an Oracle adapter.
 
         The user, password, and dsn parameters are provided to cx_Oracle
@@ -84,6 +85,8 @@ class OracleAdapter(object):
         self.locker = OracleLocker(
             keep_history=self.keep_history,
             lock_exceptions=(cx_Oracle.DatabaseError,),
+            commit_lock_id=commit_lock_id,
+            inputsize_NUMBER=cx_Oracle.NUMBER,
             )
         self.schema = OracleSchemaInstaller(
             connmanager=self.connmanager,

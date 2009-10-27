@@ -127,10 +127,32 @@ class MySQLLocker(Locker):
 class OracleLocker(Locker):
     implements(ILocker)
 
+    def __init__(self, keep_history, lock_exceptions,
+            commit_lock_id, inputsize_NUMBER):
+        self.keep_history = keep_history
+        self.lock_exceptions = lock_exceptions
+        self.commit_lock_id = commit_lock_id
+        self.inputsize_NUMBER = inputsize_NUMBER
+
     def hold_commit_lock(self, cursor, ensure_current=False):
         # Hold commit_lock to prevent concurrent commits
         # (for as short a time as possible).
-        cursor.execute("LOCK TABLE commit_lock IN EXCLUSIVE MODE")
+        status = cursor.callfunc(
+            "sys.relstorage_util.request_lock",
+            self.inputsize_NUMBER,
+            (self.commit_lock_id, commit_lock_timeout))
+        if status != 0:
+            if status >= 1 and status <= 5:
+                msg = ('', 'timeout', 'deadlock', 'parameter error',
+                    'lock already owned', 'illegal handle')[int(status)]
+            else:
+                msg = str(status)
+            raise StorageError(
+                "Unable to acquire commit lock (%s)" % msg)
+
+        # Alternative:
+        #cursor.execute("LOCK TABLE commit_lock IN EXCLUSIVE MODE")
+
         if ensure_current:
             if self.keep_history:
                 # Lock transaction and current_object in share mode to ensure

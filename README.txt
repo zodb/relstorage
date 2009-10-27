@@ -49,6 +49,105 @@ ships MySQLdb 1.2.1, but that version has a bug in BLOB handling that manifests
 itself only with certain character set configurations.  MySQLdb 1.2.2 fixes the
 bug.
 
+Configuring Your Database
+-------------------------
+
+You need to create a database, user name, and password for RelStorage.
+RelStorage will populate the database with its schema the first time it
+connects.
+
+PostgreSQL
+~~~~~~~~~~
+
+If you installed PostgreSQL from a binary package, you probably have a
+user account named ``postgres``. Since PostgreSQL respects the name of
+the logged-in user by default, switch to the ``postgres`` account to
+create the RelStorage user and database. Even ``root`` does not have
+the PostgreSQL privileges that the ``postgres`` account has. For
+example::
+
+    $ sudo su - postgres
+    $ createuser --pwprompt zodbuser
+    $ createdb -O zodbuser zodb
+
+New PostgreSQL accounts often require modifications to ``pg_hba.conf``,
+which contains host-based access control rules.  PostgreSQL processes
+the rules in order, so add new rules before the default rules rather than
+after.  Here is a sample rule that allows only local connections by
+``zodbuser`` to the ``zodb`` database::
+
+    local  zodb  zodbuser  md5
+
+PostgreSQL re-reads ``pg_hba.conf`` when you ask it to reload its
+configuration file::
+
+    /etc/init.d/postgresql reload
+
+MySQL
+~~~~~
+
+Use the ``mysql`` utility to create the database and user account. One
+surprising behavior of the ``mysql`` utility is the ``-p`` option. You
+must use the ``-p`` option if the account you are accessing requires a
+password, but you should not use the ``-p`` option if the account you
+are accessing does not require a password. Most people must use the
+``-p`` option. If you do not provide the ``-p`` option, yet the account
+requires a password, the ``mysql`` utility will not prompt for a
+password and will fail to authenticate.
+
+Therefore, most users can start the ``mysql`` utility with the
+following shell command (unlike PostgreSQL, your login account name does
+not matter)::
+
+    $ mysql -u root -p
+
+Here are some sample SQL statements for creating the user and database::
+
+    CREATE USER 'zodbuser'@'localhost' IDENTIFIED BY 'mypassword';
+    CREATE DATABASE zodb;
+    GRANT ALL ON zodb.* TO 'zodbuser'@'localhost';
+    FLUSH PRIVILEGES;
+
+Oracle
+~~~~~~
+
+Initial setup will require ``SYS`` privileges. Using Oracle 10g XE, you
+can start a ``SYS`` session with the following shell commands::
+
+    $ su - oracle
+    $ sqlplus / as sysdba
+
+The commands below will create a PL/SQL package that provides limited
+access to the DBMS_LOCK package so that RelStorage can acquire user
+locks. Using ``sqlplus`` with ``SYS`` privileges, execute the
+following::
+
+    CREATE OR REPLACE PACKAGE relstorage_util AS
+        FUNCTION request_lock(id IN NUMBER, timeout IN NUMBER)
+            RETURN NUMBER;
+    END relstorage_util;
+    /
+
+    CREATE OR REPLACE PACKAGE BODY relstorage_util AS
+        FUNCTION request_lock(id IN NUMBER, timeout IN NUMBER)
+            RETURN NUMBER IS
+        BEGIN
+            RETURN DBMS_LOCK.REQUEST(
+                id => id,
+                lockmode => DBMS_LOCK.X_MODE,
+                timeout => timeout,
+                release_on_commit => TRUE);
+        END request_lock;
+    END relstorage_util;
+    /
+
+Here are some sample SQL statements for creating the user and database::
+
+    CREATE USER zodb IDENTIFIED BY mypassword;
+    GRANT CONNECT, RESOURCE, CREATE TABLE, CREATE SEQUENCE TO zodb;
+    GRANT EXECUTE ON relstorage_util TO zodb;
+
+
 Configuring Plone
 -----------------
 

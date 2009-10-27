@@ -32,7 +32,10 @@ Unreleased
   objects, making the adapter code more modular.  Added interfaces
   that describe the duties of each part.
 
-- Oracle: sped up restore operations by sending short blobs inline
+- Oracle: sped up restore operations by sending short blobs inline.
+
+- Oracle: use a timeout on commit locks.  This requires installation
+  of a small PL/SQL package that can access DBMS_LOCK.  See README.txt.
 
 - PostgreSQL: use the documented ALTER SEQUENCE RESTART WITH
   statement instead of ALTER SEQUENCE START WITH.
