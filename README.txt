@@ -52,7 +52,7 @@ bug.
 Configuring Your Database
 -------------------------
 
-You need to create a database, user name, and password for RelStorage.
+You need to configure a database and user account for RelStorage.
 RelStorage will populate the database with its schema the first time it
 connects.
 
@@ -71,10 +71,12 @@ example::
     $ createdb -O zodbuser zodb
 
 New PostgreSQL accounts often require modifications to ``pg_hba.conf``,
-which contains host-based access control rules.  PostgreSQL processes
-the rules in order, so add new rules before the default rules rather than
-after.  Here is a sample rule that allows only local connections by
-``zodbuser`` to the ``zodb`` database::
+which contains host-based access control rules. The location of
+``pg_hba.conf`` varies, but ``/etc/postgresql/8.4/main/pg_hba.conf`` is
+common. PostgreSQL processes the rules in order, so add new rules
+before the default rules rather than after. Here is a sample rule that
+allows only local connections by ``zodbuser`` to the ``zodb``
+database::
 
     local  zodb  zodbuser  md5
 
@@ -86,18 +88,16 @@ configuration file::
 MySQL
 ~~~~~
 
-Use the ``mysql`` utility to create the database and user account. One
-surprising behavior of the ``mysql`` utility is the ``-p`` option. You
-must use the ``-p`` option if the account you are accessing requires a
-password, but you should not use the ``-p`` option if the account you
-are accessing does not require a password. Most people must use the
-``-p`` option. If you do not provide the ``-p`` option, yet the account
-requires a password, the ``mysql`` utility will not prompt for a
-password and will fail to authenticate.
+Use the ``mysql`` utility to create the database and user account. Note
+that the ``-p`` option is usually required. You must use the ``-p``
+option if the account you are accessing requires a password, but you
+should not use the ``-p`` option if the account you are accessing does
+not require a password. If you do not provide the ``-p`` option, yet
+the account requires a password, the ``mysql`` utility will not prompt
+for a password and will fail to authenticate.
 
-Therefore, most users can start the ``mysql`` utility with the
-following shell command (unlike PostgreSQL, your login account name does
-not matter)::
+Most users can start the ``mysql`` utility with the following shell
+command, using any login account::
 
     $ mysql -u root -p
 
@@ -141,7 +141,7 @@ following::
     END relstorage_util;
     /
 
-Here are some sample SQL statements for creating the user and database::
+Here are some sample SQL statements for creating the user::
 
     CREATE USER zodb IDENTIFIED BY mypassword;
     GRANT CONNECT, RESOURCE, CREATE TABLE, CREATE SEQUENCE TO zodb;
