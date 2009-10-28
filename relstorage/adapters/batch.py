@@ -119,6 +119,7 @@ class OracleRowBatcher(RowBatcher):
     def __init__(self, cursor, inputsizes):
         super(OracleRowBatcher, self).__init__(cursor)
         self.inputsizes = inputsizes
+        self.array_ops = {}  # {(operation, row_schema): {rowkey: [row]}}
 
     def _do_inserts(self):
 
@@ -159,3 +160,37 @@ class OracleRowBatcher(RowBatcher):
                     self.cursor.setinputsizes(**stmt_inputsizes)
                 self.cursor.execute(stmt, params)
 
+    def add_array_op(self, operation, row_schema, row, rowkey, size):
+        key = (operation, row_schema)
+        rows = self.array_ops.get(key)
+        if rows is None:
+            self.array_ops[key] = rows = {}
+        rows[rowkey] = row  # note that this may replace a row
+        self.rows_added += 1
+        self.size_added += size
+        if (self.rows_added >= self.row_limit
+            or self.size_added >= self.size_limit):
+            self.flush()
+
+    def flush(self):
+        if self.deletes:
+            self._do_deletes()
+            self.deletes.clear()
+        if self.inserts:
+            self._do_inserts()
+            self.inserts.clear()
+        if self.array_ops:
+            self._do_array_ops()
+            self.array_ops.clear()
+        self.rows_added = 0
+        self.size_added = 0
+
+    def _do_array_ops(self):
+        items = sorted(self.array_ops.items())
+        for (operation, row_schema), rows in items:
+            r = rows.values()
+            params = []
+            datatypes = [self.inputsizes[name] for name in row_schema.split()]
+            for i, column in enumerate(zip(*r)):
+                params.append(self.cursor.arrayvar(datatypes[i], list(column)))
+            self.cursor.execute(operation, tuple(params))

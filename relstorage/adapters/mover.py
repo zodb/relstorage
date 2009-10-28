@@ -56,18 +56,13 @@ class ObjectMover(object):
         )
 
     def __init__(self, database_name, keep_history, runner=None,
-            Binary=None, inputsize_BLOB=None, inputsize_BINARY=None,
-            version_detector=None):
-        # The inputsize parameters are for Oracle only.
+            Binary=None, inputsizes=None, version_detector=None):
+        # The inputsizes parameter is for Oracle only.
         self.database_name = database_name
         self.keep_history = keep_history
         self.runner = runner
         self.Binary = Binary
-        self.inputsize_BLOB = inputsize_BLOB
-        self.inputsizes = {
-            'blobdata': inputsize_BLOB,
-            'rawdata': inputsize_BINARY,
-            }
+        self.inputsizes = inputsizes
         self.version_detector = version_detector
 
         for method_name in self._method_names:
@@ -439,25 +434,32 @@ class ObjectMover(object):
         else:
             md5sum = None
 
-        batcher.delete_from('temp_store', 'zoid', oid)
-
-        row = {'oid': oid, 'prev_tid': prev_tid, 'md5sum': md5sum}
         if len(data) <= 2000:
             # Send data inline for speed.  Oracle docs say maximum size
             # of a RAW is 2000 bytes.
-            row_schema = ":oid, :prev_tid, :md5sum, :rawdata"
-            row['rawdata'] = data
+            stmt = "BEGIN relstorage_op.store_temp(:1, :2, :3, :4); END;"
+            batcher.add_array_op(
+                stmt,
+                'oid prev_tid md5sum rawdata',
+                (oid, prev_tid, md5sum, data),
+                rowkey=oid,
+                size=len(data),
+                )
         else:
             # Send data as a BLOB
-            row_schema = ":oid, :prev_tid, :md5sum, :blobdata"
-            row['blobdata'] = data
-        batcher.insert_into(
-            "temp_store (zoid, prev_tid, md5, state)",
-            row_schema,
-            row,
-            rowkey=oid,
-            size=len(data),
-            )
+            row = {
+                'oid': oid,
+                'prev_tid': prev_tid,
+                'md5sum': md5sum,
+                'blobdata': data,
+                }
+            batcher.insert_into(
+                "temp_store (zoid, prev_tid, md5, state)",
+                ":oid, :prev_tid, :md5sum, :blobdata",
+                row,
+                rowkey=oid,
+                size=len(data),
+                )
 
 
 
@@ -552,42 +554,61 @@ class ObjectMover(object):
         else:
             md5sum = None
 
-        if self.keep_history:
-            row = {'oid': oid, 'tid': tid, 'md5sum': md5sum}
-            row_schema = """
-                :oid, :tid,
-                COALESCE((SELECT tid FROM current_object WHERE zoid = :oid), 0),
-                :md5sum, :rawdata
-            """
-            if not data or len(data) <= 2000:
-                row['rawdata'] = data
+        if not data or len(data) <= 2000:
+            # Send data inline for speed.  Oracle docs say maximum size
+            # of a RAW is 2000 bytes.
+            if self.keep_history:
+                stmt = "BEGIN relstorage_op.restore(:1, :2, :3, :4); END;"
+                batcher.add_array_op(
+                    stmt,
+                    'oid tid md5sum rawdata',
+                    (oid, tid, md5sum, data),
+                    rowkey=(oid, tid),
+                    size=len(data or ''),
+                    )
             else:
-                row_schema = row_schema.replace(":rawdata", ":blobdata")
-                row['blobdata'] = data
-            batcher.insert_into(
-                "object_state (zoid, tid, prev_tid, md5, state)",
-                row_schema,
-                row,
-                rowkey=(oid, tid),
-                size=len(data or ''),
-                )
+                stmt = "BEGIN relstorage_op.restore(:1, :2, :3); END;"
+                batcher.add_array_op(
+                    stmt,
+                    'oid tid rawdata',
+                    (oid, tid, data),
+                    rowkey=(oid, tid),
+                    size=len(data or ''),
+                    )
+
         else:
-            batcher.delete_from('object_state', 'zoid', oid)
-            if data:
-                row = {'oid': oid, 'tid': tid}
-                if len(data) <= 2000:
-                    row_schema = ":oid, :tid, :rawdata"
-                    row['rawdata'] = data
-                else:
-                    row_schema = ":oid, :tid, :blobdata"
-                    row['blobdata'] = data
+            # Send as a BLOB
+            if self.keep_history:
+                row = {
+                    'oid': oid,
+                    'tid': tid,
+                    'md5sum': md5sum,
+                    'blobdata': data,
+                    }
+                row_schema = """
+                    :oid, :tid,
+                    COALESCE((SELECT tid
+                              FROM current_object
+                              WHERE zoid = :oid), 0),
+                    :md5sum, :blobdata
+                """
                 batcher.insert_into(
-                    "object_state (zoid, tid, state)",
+                    "object_state (zoid, tid, prev_tid, md5, state)",
                     row_schema,
                     row,
-                    rowkey=oid,
-                    size=len(data),
+                    rowkey=(oid, tid),
+                    size=len(data or ''),
                     )
+            else:
+                batcher.delete_from('object_state', 'zoid', oid)
+                if data:
+                    batcher.insert_into(
+                        "object_state (zoid, tid, state)",
+                        ":oid, :tid, :blobdata",
+                        {'oid': oid, 'tid': tid, 'blobdata': data},
+                        rowkey=oid,
+                        size=len(data),
+                        )
 
 
 
@@ -733,7 +754,7 @@ class ObjectMover(object):
             state = :blobdata
         WHERE zoid = :oid
         """
-        cursor.setinputsizes(blobdata=self.inputsize_BLOB)
+        cursor.setinputsizes(blobdata=self.inputsizes['blobdata'])
         cursor.execute(stmt, oid=oid, prev_tid=prev_tid,
             md5sum=md5sum, blobdata=self.Binary(data))
 

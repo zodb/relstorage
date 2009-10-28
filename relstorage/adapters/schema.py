@@ -338,6 +338,57 @@ history_preserving_init = """
         CREATE SEQUENCE zoid_seq;
 """
 
+oracle_history_preserving_plsql = """
+CREATE OR REPLACE PACKAGE relstorage_op AS
+    TYPE numlist IS TABLE OF NUMBER(20) INDEX BY BINARY_INTEGER;
+    TYPE md5list IS TABLE OF VARCHAR2(32) INDEX BY BINARY_INTEGER;
+    TYPE statelist IS TABLE OF RAW(2000) INDEX BY BINARY_INTEGER;
+    PROCEDURE store_temp(
+        zoids IN numlist,
+        prev_tids IN numlist,
+        md5s IN md5list,
+        states IN statelist);
+    PROCEDURE restore(
+        zoids IN numlist,
+        tids IN numlist,
+        md5s IN md5list,
+        states IN statelist);
+END relstorage_op;
+/
+
+CREATE OR REPLACE PACKAGE BODY relstorage_op AS
+    PROCEDURE store_temp(
+        zoids IN numlist,
+        prev_tids IN numlist,
+        md5s IN md5list,
+        states IN statelist) IS
+    BEGIN
+        FORALL indx IN zoids.first..zoids.last
+            DELETE FROM temp_store WHERE zoid = zoids(indx);
+        FORALL indx IN zoids.first..zoids.last
+            INSERT INTO temp_store (zoid, prev_tid, md5, state) VALUES
+            (zoids(indx), prev_tids(indx), md5s(indx), states(indx));
+    END store_temp;
+
+    PROCEDURE restore(
+        zoids IN numlist,
+        tids IN numlist,
+        md5s IN md5list,
+        states IN statelist) IS
+    BEGIN
+        FORALL indx IN zoids.first..zoids.last
+            INSERT INTO object_state (zoid, tid, prev_tid, md5, state) VALUES
+            (zoids(indx), tids(indx),
+            COALESCE((SELECT tid
+                      FROM current_object
+                      WHERE zoid = zoids(indx)), 0),
+            md5s(indx), states(indx));
+    END restore;
+END relstorage_op;
+/
+"""
+
+
 history_free_schema = """
 
 # commit_lock: Held during commit.  Another kind of lock is used for MySQL.
@@ -511,6 +562,52 @@ history_free_init = """
         CREATE SEQUENCE zoid_seq;
 """
 
+oracle_history_free_plsql = """
+CREATE OR REPLACE PACKAGE relstorage_op AS
+    TYPE numlist IS TABLE OF NUMBER(20) INDEX BY BINARY_INTEGER;
+    TYPE md5list IS TABLE OF VARCHAR2(32) INDEX BY BINARY_INTEGER;
+    TYPE statelist IS TABLE OF RAW(2000) INDEX BY BINARY_INTEGER;
+    PROCEDURE store_temp(
+        zoids IN numlist,
+        prev_tids IN numlist,
+        md5s IN md5list,
+        states IN statelist);
+    PROCEDURE restore(
+        zoids IN numlist,
+        tids IN numlist,
+        states IN statelist);
+END relstorage_op;
+/
+
+CREATE OR REPLACE PACKAGE BODY relstorage_op AS
+    PROCEDURE store_temp(
+        zoids IN numlist,
+        prev_tids IN numlist,
+        md5s IN md5list,
+        states IN statelist) IS
+    BEGIN
+        FORALL indx IN zoids.first..zoids.last
+            DELETE FROM temp_store WHERE zoid = zoids(indx);
+        FORALL indx IN zoids.first..zoids.last
+            INSERT INTO temp_store (zoid, prev_tid, md5, state) VALUES
+            (zoids(indx), prev_tids(indx), md5s(indx), states(indx));
+    END store_temp;
+
+    PROCEDURE restore(
+        zoids IN numlist,
+        tids IN numlist,
+        states IN statelist) IS
+    BEGIN
+        FORALL indx IN zoids.first..zoids.last
+            DELETE FROM object_state WHERE zoid = zoids(indx);
+        FORALL indx IN zoids.first..zoids.last
+            INSERT INTO object_state (zoid, tid, state) VALUES
+            (zoids(indx), tids(indx), states(indx));
+    END restore;
+END relstorage_op;
+/
+"""
+
 
 def filter_script(script, database_name):
     res = []
@@ -671,6 +768,23 @@ class OracleSchemaInstaller(AbstractSchemaInstaller):
     implements(ISchemaInstaller)
 
     database_name = 'oracle'
+
+    def create(self, cursor):
+        """Create the database tables and the relstorage_op PL/SQL package."""
+        super(OracleSchemaInstaller, self).create(cursor)
+        if self.keep_history:
+            plsql = oracle_history_preserving_plsql
+        else:
+            plsql = oracle_history_free_plsql
+
+        lines = []
+        for line in plsql.splitlines():
+            if line.strip() == '/':
+                # end of a statement
+                cursor.execute('\n'.join(lines))
+                lines = []
+            elif line.strip():
+                lines.append(line)
 
     def list_tables(self, cursor):
         cursor.execute("SELECT table_name FROM user_tables")

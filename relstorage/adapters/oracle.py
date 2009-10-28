@@ -98,8 +98,14 @@ class OracleAdapter(object):
             keep_history=self.keep_history,
             runner=self.runner,
             Binary=cx_Oracle.Binary,
-            inputsize_BLOB=cx_Oracle.BLOB,
-            inputsize_BINARY=cx_Oracle.BINARY,
+            inputsizes={
+                'blobdata': cx_Oracle.BLOB,
+                'rawdata': cx_Oracle.BINARY,
+                'oid': cx_Oracle.NUMBER,
+                'tid': cx_Oracle.NUMBER,
+                'prev_tid': cx_Oracle.NUMBER,
+                'md5sum': cx_Oracle.STRING,
+                },
             )
         self.connmanager.set_on_store_opened(self.mover.on_store_opened)
         self.oidallocator = OracleOIDAllocator(
