@@ -141,7 +141,7 @@ following::
     END relstorage_util;
     /
 
-Here are some sample SQL statements for creating the user::
+Here are some sample SQL statements for creating the database user::
 
     CREATE USER zodb IDENTIFIED BY mypassword;
     GRANT CONNECT, RESOURCE, CREATE TABLE, CREATE SEQUENCE TO zodb;
@@ -317,14 +317,11 @@ Options for ``zodbconvert``
   ``--clear``
     Clears all data from the destination storage before copying. Use
     this only if you are certain the destination has no useful data.
+    Currently only works when the destination is a RelStorage instance.
 
   ``--dry-run``
     Opens both storages and analyzes what would be copied, but does not
     actually copy.
-
-  ``--verbose``
-    List the transactions and objects as they are copied. This is very
-    verbose.
 
 
 Migrating to a new version of RelStorage

@@ -14,10 +14,9 @@
 ##############################################################################
 """ZODB storage conversion utility.
 
-See http://wiki.zope.org/ZODB/ZODBConvert for details.
+See README.txt for details.
 """
 
-import logging
 import optparse
 from persistent.TimeStamp import TimeStamp
 from StringIO import StringIO
@@ -40,15 +39,18 @@ schema_xml = """
 def storage_has_data(storage):
     i = storage.iterator()
     try:
-        i[0]
-    except IndexError:
+        if hasattr(i, 'next'):
+            # New iterator API
+            i.next()
+        else:
+            # Old index lookup API
+            i[0]
+    except (IndexError, StopIteration):
         return False
     return True
 
 
-def main():
-    logging.basicConfig()
-
+def main(argv=sys.argv, write=sys.stdout.write):
     parser = optparse.OptionParser(description=__doc__,
         usage="%prog [options] config_file")
     parser.add_option(
@@ -57,11 +59,8 @@ def main():
     parser.add_option(
         "--clear", dest="clear", action="store_true",
         help="Clear the contents of the destination storage before copying")
-    parser.add_option(
-        "-v", "--verbose", dest="verbose", action="store_true",
-        help="Show verbose information while copying")
-    parser.set_defaults(dry_run=False, clear=False, verbose=False)
-    options, args = parser.parse_args()
+    parser.set_defaults(dry_run=False, clear=False)
+    options, args = parser.parse_args(argv[1:])
 
     if len(args) != 1:
         parser.error("The name of one configuration file is required.")
@@ -71,42 +70,39 @@ def main():
     source = config.source.open()
     destination = config.destination.open()
 
-    print "Storages opened successfully."
+    write("Storages opened successfully.\n")
 
     if options.dry_run:
-        print "Dry run mode: not changing the destination."
+        write("Dry run mode: not changing the destination.\n")
         if storage_has_data(destination):
-            print "Warning: the destination storage has data"
+            write("Warning: the destination storage has data\n")
         count = 0
         for txn in source.iterator():
-            print '%s user=%s description=%s' % (
-                TimeStamp(txn.tid), txn.user, txn.description)
-            for rec in txn:
-                print '  oid=%s length=%d' % (oid_repr(rec.oid), len(rec.data))
+            write('%s user=%s description=%s\n' % (
+                TimeStamp(txn.tid), txn.user, txn.description))
             count += 1
-        print "Would copy %d transactions." % count
-        sys.exit(0)
+        write("Would copy %d transactions.\n" % count)
 
-    if options.clear:
-        if hasattr(destination, 'zap_all'):
-            destination.zap_all()
-        else:
-            msg = ("Error: no API is known for clearing this type of storage."
-                " Use another method.")
+    else:
+        if options.clear:
+            if hasattr(destination, 'zap_all'):
+                destination.zap_all()
+            else:
+                msg = ("Error: no API is known for clearing this type "
+                       "of storage. Use another method.")
+                sys.exit(msg)
+
+        if storage_has_data(destination):
+            msg = "Error: the destination storage has data.  Try --clear."
             sys.exit(msg)
 
-    if storage_has_data(destination):
-        msg = "Error: the destination storage has data.  Try --clear."
-        sys.exit(msg)
+        destination.copyTransactionsFrom(source)
 
-    destination.copyTransactionsFrom(source, verbose=options.verbose)
+        source.close()
+        destination.close()
 
-    source.close()
-    destination.close()
-
-    print 'All transactions copied successfully.'
+        write('All transactions copied successfully.\n')
 
 
 if __name__ == '__main__':
     main()
-
