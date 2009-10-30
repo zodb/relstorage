@@ -17,9 +17,7 @@ import logging
 import os
 import re
 import unittest
-
 import reltestbase
-from relstorage.adapters.oracle import OracleAdapter
 
 
 def getOracleParams():
@@ -40,6 +38,7 @@ def getOracleParams():
 
 class UseOracleAdapter:
     def make_adapter(self):
+        from relstorage.adapters.oracle import OracleAdapter
         user, password, dsn = getOracleParams()
         return OracleAdapter(user, password, dsn)
 
@@ -54,6 +53,13 @@ class FileToOracle(UseOracleAdapter, reltestbase.FromFileStorage):
 
 
 def test_suite():
+    try:
+        import cx_Oracle
+    except ImportError, e:
+        import warnings
+        warnings.warn("cx_Oracle is not importable, so Oracle tests disabled")
+        return unittest.TestSuite()
+
     suite = unittest.TestSuite()
     for klass in [OracleTests, OracleToFile, FileToOracle]:
         suite.addTest(unittest.makeSuite(klass, "check"))
