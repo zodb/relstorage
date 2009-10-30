@@ -41,6 +41,8 @@ class Options(object):
         self.cache_prefix = ''
         self.cache_local_mb = 10
         self.cache_delta_size_limit = 10000
+        self.commit_lock_timeout = 30
+        self.commit_lock_id = 0
 
         for key, value in kwoptions.iteritems():
             if key in self.__dict__:

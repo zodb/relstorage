@@ -18,22 +18,22 @@ from relstorage.adapters.interfaces import ILocker
 from ZODB.POSException import StorageError
 from zope.interface import implements
 
-commit_lock_timeout = 30
-
 
 class Locker(object):
 
-    def __init__(self, keep_history, lock_exceptions):
-        self.keep_history = keep_history
+    def __init__(self, options, lock_exceptions):
+        self.keep_history = options.keep_history
+        self.commit_lock_timeout = options.commit_lock_timeout
+        self.commit_lock_id = options.commit_lock_id
         self.lock_exceptions = lock_exceptions
 
 
 class PostgreSQLLocker(Locker):
     implements(ILocker)
 
-    def __init__(self, keep_history, lock_exceptions, version_detector):
+    def __init__(self, options, lock_exceptions, version_detector):
         super(PostgreSQLLocker, self).__init__(
-            keep_history=keep_history, lock_exceptions=lock_exceptions)
+            options=options, lock_exceptions=lock_exceptions)
         self.version_detector = version_detector
 
     def hold_commit_lock(self, cursor, ensure_current=False):
@@ -98,7 +98,7 @@ class MySQLLocker(Locker):
 
     def hold_commit_lock(self, cursor, ensure_current=False):
         stmt = "SELECT GET_LOCK(CONCAT(DATABASE(), '.commit'), %s)"
-        cursor.execute(stmt, (commit_lock_timeout,))
+        cursor.execute(stmt, (self.commit_lock_timeout,))
         locked = cursor.fetchone()[0]
         if not locked:
             raise StorageError("Unable to acquire commit lock")
@@ -127,11 +127,9 @@ class MySQLLocker(Locker):
 class OracleLocker(Locker):
     implements(ILocker)
 
-    def __init__(self, keep_history, lock_exceptions,
-            commit_lock_id, inputsize_NUMBER):
-        self.keep_history = keep_history
-        self.lock_exceptions = lock_exceptions
-        self.commit_lock_id = commit_lock_id
+    def __init__(self, options, lock_exceptions, inputsize_NUMBER):
+        super(OracleLocker, self).__init__(
+            options=options, lock_exceptions=lock_exceptions)
         self.inputsize_NUMBER = inputsize_NUMBER
 
     def hold_commit_lock(self, cursor, ensure_current=False):
@@ -140,7 +138,7 @@ class OracleLocker(Locker):
         status = cursor.callfunc(
             "sys.relstorage_util.request_lock",
             self.inputsize_NUMBER,
-            (self.commit_lock_id, commit_lock_timeout))
+            (self.commit_lock_id, self.commit_lock_timeout))
         if status != 0:
             if status >= 1 and status <= 5:
                 msg = ('', 'timeout', 'deadlock', 'parameter error',

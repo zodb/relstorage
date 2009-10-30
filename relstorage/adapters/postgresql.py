@@ -34,6 +34,7 @@ from relstorage.adapters.schema import PostgreSQLSchemaInstaller
 from relstorage.adapters.scriptrunner import ScriptRunner
 from relstorage.adapters.stats import PostgreSQLStats
 from relstorage.adapters.txncontrol import PostgreSQLTransactionControl
+from relstorage.options import Options
 
 log = logging.getLogger(__name__)
 
@@ -56,20 +57,18 @@ class PostgreSQLAdapter(object):
     def __init__(self, dsn='', options=None):
         # options is a relstorage.options.Options or None
         self._dsn = dsn
+        if options is None:
+            options = Options()
         self.options = options
-        if options is not None:
-            self.keep_history = options.keep_history
-        else:
-            self.keep_history = True
+        self.keep_history = options.keep_history
         self.version_detector = PostgreSQLVersionDetector()
         self.connmanager = Psycopg2ConnectionManager(
             dsn=dsn,
             options=options,
-            keep_history=self.keep_history,
             )
         self.runner = ScriptRunner()
         self.locker = PostgreSQLLocker(
-            keep_history=self.keep_history,
+            options=options,
             lock_exceptions=(psycopg2.DatabaseError,),
             version_detector=self.version_detector,
             )
@@ -151,10 +150,10 @@ class Psycopg2ConnectionManager(AbstractConnectionManager):
     disconnected_exceptions = disconnected_exceptions
     close_exceptions = close_exceptions
 
-    def __init__(self, dsn, options=None, keep_history=True):
+    def __init__(self, dsn, options):
         self._orig_dsn = dsn
         self._dsn = dsn
-        self.keep_history = keep_history
+        self.keep_history = options.keep_history
         # _dsn_derived_from_replica contains the replica that
         # was used to set self._dsn.
         self._dsn_derived_from_replica = None

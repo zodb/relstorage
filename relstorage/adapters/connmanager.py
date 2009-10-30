@@ -37,9 +37,9 @@ class AbstractConnectionManager(object):
     # will be called whenever a store cursor is opened or rolled back.
     on_store_opened = None
 
-    def __init__(self, options=None):
+    def __init__(self, options):
         # options is a relstorage.options.Options instance
-        if options is not None and options.replica_conf:
+        if options.replica_conf:
             self.replica_selector = ReplicaSelector(options)
         else:
             self.replica_selector = None

@@ -67,6 +67,7 @@ from relstorage.adapters.schema import MySQLSchemaInstaller
 from relstorage.adapters.scriptrunner import ScriptRunner
 from relstorage.adapters.stats import MySQLStats
 from relstorage.adapters.txncontrol import MySQLTransactionControl
+from relstorage.options import Options
 
 log = logging.getLogger(__name__)
 
@@ -88,20 +89,19 @@ class MySQLAdapter(object):
     implements(IRelStorageAdapter)
 
     def __init__(self, options=None, **params):
-        # options is a relstorage.options.Options or None
+        if options is None:
+            options = Options()
         self.options = options
-        if options is not None:
-            self.keep_history = options.keep_history
-        else:
-            self.keep_history = True
+        self.keep_history = options.keep_history
         self._params = params
+
         self.connmanager = MySQLdbConnectionManager(
             params=params,
             options=options,
             )
         self.runner = ScriptRunner()
         self.locker = MySQLLocker(
-            keep_history=self.keep_history,
+            options=options,
             lock_exceptions=(MySQLdb.DatabaseError,),
             )
         self.schema = MySQLSchemaInstaller(
@@ -180,7 +180,7 @@ class MySQLdbConnectionManager(AbstractConnectionManager):
     disconnected_exceptions = disconnected_exceptions
     close_exceptions = close_exceptions
 
-    def __init__(self, params, options=None):
+    def __init__(self, params, options):
         self._orig_params = params.copy()
         self._params = self._orig_params
         # _params_derived_from_replica contains the replica that

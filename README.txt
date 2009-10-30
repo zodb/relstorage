@@ -519,10 +519,22 @@ underscores instead of dashes in the parameter names.
 
 ``cache-delta-size-limit``
         This is an advanced option. RelStorage uses a system of
-        checkpoints to achieve a high cache hit rate. This parameter
+        checkpoints to improve the cache hit rate. This parameter
         configures how many objects should be stored before creating a
         new checkpoint. The default is 10000.
 
+``commit-lock-timeout``
+        During commit, RelStorage acquires a database-wide lock. This
+        parameter specifies how long to wait for the lock before
+        failing the attempt to commit. The default is 30 seconds.
+
+        The MySQL and Oracle adapters support this parameter. The
+        PostgreSQL adapter currently does not.
+
+``commit-lock-id``
+        During commit, RelStorage acquires a database-wide lock. This
+        parameter specifies the lock ID. This parameter currently
+        applies only to the Oracle adapter.
 
 Adapter Options
 ===============

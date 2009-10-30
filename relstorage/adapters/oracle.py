@@ -32,6 +32,7 @@ from relstorage.adapters.schema import OracleSchemaInstaller
 from relstorage.adapters.scriptrunner import OracleScriptRunner
 from relstorage.adapters.stats import OracleStats
 from relstorage.adapters.txncontrol import OracleTransactionControl
+from relstorage.options import Options
 
 log = logging.getLogger(__name__)
 
@@ -63,16 +64,14 @@ class OracleAdapter(object):
         commit process.  This is disabled by default.  Even when this option
         is disabled, the ZODB two-phase commit is still in effect.
         """
-        # options is a relstorage.options.Options or None
         self._user = user
         self._password = password
         self._dsn = dsn
         self._twophase = twophase
+        if options is None:
+            options = Options()
         self.options = options
-        if options is not None:
-            self.keep_history = options.keep_history
-        else:
-            self.keep_history = True
+        self.keep_history = options.keep_history
 
         self.connmanager = CXOracleConnectionManager(
             user=user,
@@ -83,9 +82,8 @@ class OracleAdapter(object):
             )
         self.runner = CXOracleScriptRunner()
         self.locker = OracleLocker(
-            keep_history=self.keep_history,
+            options=self.options,
             lock_exceptions=(cx_Oracle.DatabaseError,),
-            commit_lock_id=commit_lock_id,
             inputsize_NUMBER=cx_Oracle.NUMBER,
             )
         self.schema = OracleSchemaInstaller(
@@ -242,7 +240,7 @@ class CXOracleConnectionManager(AbstractConnectionManager):
     disconnected_exceptions = disconnected_exceptions
     close_exceptions = close_exceptions
 
-    def __init__(self, user, password, dsn, twophase, options=None):
+    def __init__(self, user, password, dsn, twophase, options):
         self._user = user
         self._password = password
         self._dsn = dsn

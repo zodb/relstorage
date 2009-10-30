@@ -18,7 +18,7 @@ class AbstractConnectionManagerTests(unittest.TestCase):
 
     def test_without_replica_conf(self):
         from relstorage.adapters.connmanager import AbstractConnectionManager
-        cm = AbstractConnectionManager()
+        cm = AbstractConnectionManager(MockOptions())
 
         conn = MockConnection()
         cm.restart_load(conn, MockCursor())
@@ -58,7 +58,7 @@ class AbstractConnectionManagerTests(unittest.TestCase):
 
 
 class MockOptions:
-    def __init__(self, fn):
+    def __init__(self, fn=None):
         self.replica_conf = fn
         self.replica_timeout = 600.0
 
