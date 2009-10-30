@@ -208,7 +208,7 @@
     <key name="commit-lock-id" datatype="integer" required="no">
       <description>
         During commit, RelStorage acquires a database-wide lock. This
-        parameter specifies the lock ID. This paramter currently
+        parameter specifies the lock ID. This parameter currently
         applies only to the Oracle adapter.
       </description>
     </key>
