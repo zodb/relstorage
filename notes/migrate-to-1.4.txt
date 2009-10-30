@@ -1,0 +1,38 @@
+
+Migrating to RelStorage version 1.4
+-----------------------------------
+
+Before following these directions, first upgrade to the schema of
+RelStorage version 1.1.2 by following the directions in "migrate-to-1.1.2.txt".
+
+Only Oracle needs a change for this release.  The Oracle adapter
+now requires the installation of a PL/SQL package with ``SYS`` privileges.
+
+Using Oracle 10g XE, you can start a ``SYS`` session with the following
+shell commands::
+
+    $ su - oracle
+    $ sqlplus / as sysdba
+
+The PL/SQL package below provides limited access to the DBMS_LOCK
+package so that RelStorage can acquire user locks. Using ``sqlplus``
+with ``SYS`` privileges, execute the following::
+
+    CREATE OR REPLACE PACKAGE relstorage_util AS
+        FUNCTION request_lock(id IN NUMBER, timeout IN NUMBER)
+            RETURN NUMBER;
+    END relstorage_util;
+    /
+
+    CREATE OR REPLACE PACKAGE BODY relstorage_util AS
+        FUNCTION request_lock(id IN NUMBER, timeout IN NUMBER)
+            RETURN NUMBER IS
+        BEGIN
+            RETURN DBMS_LOCK.REQUEST(
+                id => id,
+                lockmode => DBMS_LOCK.X_MODE,
+                timeout => timeout,
+                release_on_commit => TRUE);
+        END request_lock;
+    END relstorage_util;
+    /

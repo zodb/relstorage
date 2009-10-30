@@ -769,9 +769,21 @@ class OracleSchemaInstaller(AbstractSchemaInstaller):
 
     database_name = 'oracle'
 
-    def create(self, cursor):
-        """Create the database tables and the relstorage_op PL/SQL package."""
-        super(OracleSchemaInstaller, self).create(cursor)
+    def prepare(self):
+        """Create the database schema if it does not already exist."""
+        def callback(conn, cursor):
+            tables = self.list_tables(cursor)
+            if not 'object_state' in tables:
+                self.create(cursor)
+            else:
+                self.check_compatibility(cursor, tables)
+            packages = self.list_packages(cursor)
+            if not 'relstorage_op' in packages:
+                self.install_plsql(cursor)
+        self.connmanager.open_and_call(callback)
+
+    def install_plsql(self, cursor):
+        """Install the unprivileged PL/SQL package"""
         if self.keep_history:
             plsql = oracle_history_preserving_plsql
         else:
@@ -792,4 +804,13 @@ class OracleSchemaInstaller(AbstractSchemaInstaller):
 
     def list_sequences(self, cursor):
         cursor.execute("SELECT sequence_name FROM user_sequences")
+        return [name.lower() for (name,) in cursor]
+
+    def list_packages(self, cursor):
+        stmt = """
+        SELECT object_name
+        FROM user_objects
+        WHERE object_type = 'PACKAGE'
+        """
+        cursor.execute(stmt)
         return [name.lower() for (name,) in cursor]

@@ -330,32 +330,15 @@ Migrating to a new version of RelStorage
 Sometimes RelStorage needs a schema modification along with a software
 upgrade.  Hopefully, this will not often be necessary.
 
-No schema migration is required if you are upgrading from version 1.1.2
-or later.
+No schema migration is required if you are using PostgreSQL or MySQL
+and upgrading from version 1.1.2 or later.  See the `notes subdirectory`_
+if you are upgrading from an older version.
 
-To migrate from version 1.1.1 to version 1.1.2 or 1.1.3, see:
+.. _`notes subdirectory`: http://svn.zope.org/relstorage/trunk/notes/
 
-  migrate-to-1.1.2.txt_
+To migrate Oracle to version 1.4, see `migrate-to-1.4.txt`_.
 
-  .. _migrate-to-1.1.2.txt: http://svn.zope.org/*checkout*/relstorage/trunk/notes/migrate-to-1.1.2.txt
-
-To migrate from version 1.1 to version 1.1.1, see:
-
-  migrate-to-1.1.1.txt_
-
-  .. _migrate-to-1.1.1.txt: http://svn.zope.org/*checkout*/relstorage/trunk/notes/migrate-to-1.1.1.txt
-
-To migrate from version 1.0.1 to version 1.1, see:
-
-  migrate-to-1.1.txt_
-
-  .. _migrate-to-1.1.txt: http://svn.zope.org/*checkout*/relstorage/trunk/notes/migrate-to-1.1.txt
-
-To migrate from version 1.0 beta to version 1.0c1 through 1.0.1, see:
-
-  migrate-to-1.0.txt_
-
-  .. _migrate-to-1.0.txt: http://svn.zope.org/*checkout*/relstorage/trunk/notes/migrate-to-1.0.txt
+.. _`migrate-to-1.4.txt`: http://svn.zope.org/*checkout*/relstorage/trunk/notes/migrate-to-1.4.txt
 
 
 RelStorage Options
