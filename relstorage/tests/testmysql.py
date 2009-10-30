@@ -15,13 +15,12 @@
 
 import logging
 import unittest
-
 import reltestbase
-from relstorage.adapters.mysql import MySQLAdapter
 
 
 class UseMySQLAdapter:
     def make_adapter(self):
+        from relstorage.adapters.mysql import MySQLAdapter
         return MySQLAdapter(
             db='relstoragetest',
             user='relstoragetest',
@@ -39,6 +38,13 @@ class FileToMySQL(UseMySQLAdapter, reltestbase.FromFileStorage):
 
 
 def test_suite():
+    try:
+        import MySQLdb
+    except ImportError, e:
+        import warnings
+        warnings.warn("MySQLdb is not importable, so MySQL tests disabled")
+        return unittest.TestSuite()
+
     suite = unittest.TestSuite()
     for klass in [MySQLTests, MySQLToFile, FileToMySQL]:
         suite.addTest(unittest.makeSuite(klass, "check"))

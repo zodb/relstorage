@@ -15,13 +15,12 @@
 
 import logging
 import unittest
-
 import reltestbase
-from relstorage.adapters.postgresql import PostgreSQLAdapter
 
 
 class UsePostgreSQLAdapter:
     def make_adapter(self):
+        from relstorage.adapters.postgresql import PostgreSQLAdapter
         return PostgreSQLAdapter(
             'dbname=relstoragetest user=relstoragetest password=relstoragetest')
 
@@ -36,6 +35,14 @@ class FileToPG(UsePostgreSQLAdapter, reltestbase.FromFileStorage):
 
 
 def test_suite():
+    try:
+        import psycopg2
+    except ImportError, e:
+        import warnings
+        warnings.warn(
+            "psycopg2 is not importable, so PostgreSQL tests disabled")
+        return unittest.TestSuite()
+
     suite = unittest.TestSuite()
     for klass in [PostgreSQLTests, PGToFile, FileToPG]:
         suite.addTest(unittest.makeSuite(klass, "check"))
