@@ -433,10 +433,14 @@ class StorageCache(object):
             # delta_after0 has reached its limit.  The way to
             # shrink it is to shift the checkpoints.  Suggest
             # shifted checkpoints for future polls.
-            self._suggest_shifted_checkpoints(new_tid_int)
+            # If delta_after0 is far over the limit (caused by a large
+            # transaction), suggest starting new checkpoints instead of
+            # shifting.
+            oversize = (len(self.delta_after0) >= self.delta_size_limit * 2)
+            self._suggest_shifted_checkpoints(new_tid_int, oversize)
 
 
-    def _suggest_shifted_checkpoints(self, tid_int):
+    def _suggest_shifted_checkpoints(self, tid_int, oversize):
         """Suggest that future polls use a new pair of checkpoints.
 
         This does nothing if another instance has already shifted
@@ -448,7 +452,12 @@ class StorageCache(object):
         cp0, cp1 = self.checkpoints
         assert tid_int > cp0
         expect = '%d %d' % self.checkpoints
-        change_to = '%d %d' % (tid_int, cp0)
+        if oversize:
+            # start new checkpoints
+            change_to = '%d %d' % (tid_int, tid_int)
+        else:
+            # shift the existing checkpoints
+            change_to = '%d %d' % (tid_int, cp0)
         for client in self.clients_global_first:
             old_value = client.get(self.checkpoints_key)
             if old_value:
