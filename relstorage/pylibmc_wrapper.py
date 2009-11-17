@@ -18,17 +18,7 @@ to zope.conf and set the 'cache-servers' parameter as well.
 """
 
 import pylibmc
-
-# Get the MemcachedError class.  XXX Report to the pylibmc author that
-# pylibmc should at least export the exception class!
-_c = pylibmc.Client([])
-try:
-    _c.get('foo')
-except Exception, e:
-    MemcachedError = type(e)
-    del _c
-else:
-    raise ImportError("Could not get MemcachedError")
+from _pylibmc import MemcachedError  # pylibmc >= 0.9
 
 
 class Client(object):
