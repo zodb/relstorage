@@ -1,6 +1,6 @@
 
-Unreleased
-----------
+1.4.0b1 (2009-11-17)
+--------------------
 
 - Added the keep-history option. Set it to false to keep no history.
   (Packing is still required for garbage collection and blob deletion.)
