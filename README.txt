@@ -589,6 +589,31 @@ The Oracle adapter accepts:
         The Oracle data source name.  The Oracle client library will
         normally expect to find the DSN in /etc/oratab.
 
+The ``zodbpack`` Script
+=======================
+
+RelStorage also comes with a script named ``zodbpack`` that packs any
+ZODB storage that allows concurrent connections (including RelStorage
+and ZEO, but not including FileStorage). Use ``zodbpack`` in ``cron``
+scripts. Pass the script the name of a configuration file that lists
+the storages to pack, in ZConfig format. An example configuration file::
+
+  <relstorage>
+    pack-gc true
+    pack-duty-cycle 0.9
+    <mysql>
+      db zodb
+    </mysql>
+  </relstorage>
+
+Options for ``zodbpack``
+------------------------
+
+  ``--days`` or ``-d``
+    Specifies how many days of historical data to keep. Defaults to 0,
+    meaning no history is kept. This is meaningful even for
+    history-free storages, since unreferenced objects are not removed
+    from the database until the specified number of days have passed.
 
 Development
 ===========

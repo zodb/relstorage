@@ -59,6 +59,11 @@ Unreleased
   failover to an out-of-date asynchronous slave database. For
   simplicity, invalidate the whole ZODB cache when this happens.
 
+- Replaced the speed test script with a separately distributed package,
+  ``zodbshootout``.
+
+- Added the ``zodbpack`` script.
+
 1.3.0b1 (2009-09-04)
 --------------------
 

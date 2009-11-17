@@ -47,6 +47,8 @@ class ZODBConvertTests(unittest.TestCase):
             os.remove(self.destfile)
         if os.path.exists(self.srcfile):
             os.remove(self.srcfile)
+        if os.path.exists(self.cfgfile):
+            os.remove(self.cfgfile)
 
     def test_storage_has_data(self):
         from ZODB.DB import DB

@@ -53,6 +53,7 @@ else:
             },
         entry_points = {'console_scripts': [
             'zodbconvert = relstorage.zodbconvert:main',
+            'zodbpack = relstorage.zodbpack:main',
             ]},
         test_suite='relstorage.tests.alltests.make_suite',
     )
