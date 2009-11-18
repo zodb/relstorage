@@ -36,3 +36,10 @@ with ``SYS`` privileges, execute the following::
         END request_lock;
     END relstorage_util;
     /
+
+Also with ``SYS`` privileges, grant the execute permission on the
+relstorage_util package to the Oracle account that holds the
+database.  In the example below, "zodb" is the name of the account::
+
+    GRANT EXECUTE ON relstorage_util TO zodb;
+
