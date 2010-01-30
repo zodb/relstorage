@@ -763,6 +763,19 @@ class MySQLSchemaInstaller(AbstractSchemaInstaller):
     def list_sequences(self, cursor):
         return []
 
+    def check_compatibility(self, cursor, tables):
+        super(MySQLSchemaInstaller, self).check_compatibility(cursor, tables)
+        stmt = "SHOW TABLE STATUS LIKE 'object_state'"
+        cursor.execute(stmt)
+        for row in cursor:
+            for col_index, col in enumerate(cursor.description):
+                if col[0].lower() == 'engine':
+                    engine = row[col_index]
+                    if engine.lower() != 'innodb':
+                        raise StorageError(
+                            "The object_state must use the InnoDB engine, "
+                            "but it is using the %s engine." % engine)
+
 
 class OracleSchemaInstaller(AbstractSchemaInstaller):
     implements(ISchemaInstaller)

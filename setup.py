@@ -13,7 +13,7 @@
 ##############################################################################
 """A backend for ZODB that stores pickles in a relational database."""
 
-VERSION = "1.4.1dev"
+VERSION = "1.4.0b2"
 
 # The choices for the Trove Development Status line:
 # Development Status :: 5 - Production/Stable
@@ -71,7 +71,13 @@ setup(
     maintainer="Shane Hathaway",
     maintainer_email="shane@hathawaymix.org",
     url="http://pypi.python.org/pypi/RelStorage",
-    packages=['relstorage', 'relstorage.adapters', 'relstorage.tests'],
+    packages=[
+        'relstorage',
+        'relstorage.adapters',
+        'relstorage.adapters.tests',
+        'relstorage.tests',
+        'relstorage.tests.blob',
+        ],
     package_data={
         'relstorage': ['component.xml'],
     },

@@ -1,8 +1,10 @@
-Next Release
-------------
+1.4.0b2 (2010-01-30)
+--------------------
 
-- ...
+- Include all test subpackages in setup.py.
 
+- Raise an error if MySQL reverts to MyISAM rather than using the InnoDB
+  storage engine.
 
 1.4.0b1 (2009-11-17)
 --------------------
