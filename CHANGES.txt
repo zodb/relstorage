@@ -1,7 +1,7 @@
 Next release
 ------------
 
-- ...
+- Auto-reconnect in new_oid().
 
 1.4.0b2 (2010-01-30)
 --------------------

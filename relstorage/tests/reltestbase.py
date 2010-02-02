@@ -325,7 +325,8 @@ class GenericRelStorageTests(
             self.assert_(c2 is c1)
             r = c2.root()
             self.assertEqual(r['alpha'], 1)
-            r['beta'] = 2
+            r['beta'] = PersistentMapping()
+            c2.add(r['beta'])
             transaction.commit()
             c2.close()
         finally:

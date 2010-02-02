@@ -773,8 +773,8 @@ class MySQLSchemaInstaller(AbstractSchemaInstaller):
                     engine = row[col_index]
                     if engine.lower() != 'innodb':
                         raise StorageError(
-                            "The object_state must use the InnoDB engine, "
-                            "but it is using the %s engine." % engine)
+                            "The object_state table must use the InnoDB "
+                            "engine, but it is using the %s engine." % engine)
 
 
 class OracleSchemaInstaller(AbstractSchemaInstaller):
