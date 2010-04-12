@@ -16,7 +16,10 @@
 from relstorage.adapters.interfaces import ISchemaInstaller
 from ZODB.POSException import StorageError
 from zope.interface import implements
+import re
 import time
+
+relstorage_op_version = '1.4'
 
 history_preserving_schema = """
 
@@ -357,6 +360,7 @@ END relstorage_op;
 /
 
 CREATE OR REPLACE PACKAGE BODY relstorage_op AS
+/* Version: %s */
     PROCEDURE store_temp(
         zoids IN numlist,
         prev_tids IN numlist,
@@ -390,7 +394,7 @@ CREATE OR REPLACE PACKAGE BODY relstorage_op AS
     END restore;
 END relstorage_op;
 /
-"""
+""" % relstorage_op_version
 
 
 history_free_schema = """
@@ -584,6 +588,7 @@ END relstorage_op;
 /
 
 CREATE OR REPLACE PACKAGE BODY relstorage_op AS
+/* Version: %s */
     PROCEDURE store_temp(
         zoids IN numlist,
         prev_tids IN numlist,
@@ -610,7 +615,7 @@ CREATE OR REPLACE PACKAGE BODY relstorage_op AS
     END restore;
 END relstorage_op;
 /
-"""
+""" % relstorage_op_version
 
 
 def filter_script(script, database_name):
@@ -795,8 +800,13 @@ class OracleSchemaInstaller(AbstractSchemaInstaller):
             else:
                 self.check_compatibility(cursor, tables)
             packages = self.list_packages(cursor)
-            if not 'relstorage_op' in packages:
+            if packages.get('relstorage_op') != relstorage_op_version:
                 self.install_plsql(cursor)
+                packages = self.list_packages(cursor)
+                if packages.get('relstorage_op') != relstorage_op_version:
+                    raise AssertionError(
+                        "Could not get version information after "
+                        "installing the relstorage_op package.")
         self.connmanager.open_and_call(callback)
 
     def install_plsql(self, cursor):
@@ -824,10 +834,28 @@ class OracleSchemaInstaller(AbstractSchemaInstaller):
         return [name.lower() for (name,) in cursor]
 
     def list_packages(self, cursor):
+        """Returns {package name: version}.  version may be None."""
         stmt = """
         SELECT object_name
         FROM user_objects
         WHERE object_type = 'PACKAGE'
         """
         cursor.execute(stmt)
-        return [name.lower() for (name,) in cursor]
+        names = [name for (name,) in cursor]
+
+        res = {}
+        for name in names:
+            version = None
+            stmt = """
+            SELECT TEXT FROM USER_SOURCE
+            WHERE TYPE='PACKAGE BODY'
+                AND NAME=:1
+            """
+            cursor.execute(stmt, (name,))
+            for (text,) in cursor:
+                match = re.search(r'Version:\s*([0-9a-zA-Z.]+)', text)
+                if match is not None:
+                    version = match.group(1)
+                    break
+            res[name.lower()] = version
+        return res
