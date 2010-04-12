@@ -68,6 +68,7 @@ def read_file(*path):
 setup(
     name="RelStorage",
     version=VERSION,
+    author="Zope Foundation and Contributors",
     maintainer="Shane Hathaway",
     maintainer_email="shane@hathawaymix.org",
     url="http://pypi.python.org/pypi/RelStorage",
