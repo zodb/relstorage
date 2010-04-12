@@ -44,6 +44,7 @@ class RelStorageTestBase(StorageTestBase.StorageTestBase):
         from relstorage.storage import RelStorage
         adapter = self.make_adapter()
         self._storage = RelStorage(adapter, **kwargs)
+        self._storage._batcher_row_limit = 1
 
     def setUp(self):
         self.open(create=1)

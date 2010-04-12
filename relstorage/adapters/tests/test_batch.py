@@ -23,18 +23,29 @@ class RowBatcherTests(unittest.TestCase):
     def test_delete_defer(self):
         cursor = MockCursor()
         batcher = self.getClass()(cursor)
-        batcher.delete_from("mytable", "id", 2)
+        batcher.delete_from("mytable", id=2)
         self.assertEqual(cursor.executed, [])
         self.assertEqual(batcher.rows_added, 1)
         self.assertEqual(batcher.size_added, 0)
-        self.assertEqual(batcher.deletes, {('mytable', 'id'): set(["2"])})
+        self.assertEqual(batcher.deletes,
+            {('mytable', ('id',)): set([("2",)])})
+
+    def test_delete_multiple_column(self):
+        cursor = MockCursor()
+        batcher = self.getClass()(cursor)
+        batcher.delete_from("mytable", id=2, tid=10)
+        self.assertEqual(cursor.executed, [])
+        self.assertEqual(batcher.rows_added, 1)
+        self.assertEqual(batcher.size_added, 0)
+        self.assertEqual(batcher.deletes,
+            {('mytable', ('id', 'tid')): set([("2", "10")])})
 
     def test_delete_auto_flush(self):
         cursor = MockCursor()
         batcher = self.getClass()(cursor)
         batcher.row_limit = 2
-        batcher.delete_from("mytable", "id", 2)
-        batcher.delete_from("mytable", "id", 1)
+        batcher.delete_from("mytable", id=2)
+        batcher.delete_from("mytable", id=1)
         self.assertEqual(cursor.executed,
             [('DELETE FROM mytable WHERE id IN (1,2)', None)])
         self.assertEqual(batcher.rows_added, 0)
@@ -132,7 +143,7 @@ class RowBatcherTests(unittest.TestCase):
     def test_flush(self):
         cursor = MockCursor()
         batcher = self.getClass()(cursor)
-        batcher.delete_from("mytable", "id", 1)
+        batcher.delete_from("mytable", id=1)
         batcher.insert_into(
             "mytable (id, name)",
             "%s, id || %s",

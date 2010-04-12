@@ -16,15 +16,19 @@
 # This is copied from ZODB.tests.RecoveryStorage and expanded to fit
 # history-free storages.
 
+from relstorage.util import is_blob_record
+from transaction import Transaction
+from ZODB import DB
+from ZODB.serialize import referencesf
+from ZODB.tests.StorageTestBase import handle_serials
+from ZODB.tests.StorageTestBase import MinPO
+from ZODB.tests.StorageTestBase import snooze
+from ZODB.tests.StorageTestBase import zodb_pickle
+from ZODB.tests.StorageTestBase import zodb_unpickle
 import itertools
 import time
 import transaction
-from transaction import Transaction
-from ZODB.tests.StorageTestBase import MinPO, zodb_unpickle, snooze
-from ZODB import DB
 import ZODB.POSException
-from ZODB.serialize import referencesf
-from relstorage.util import is_blob_record
 
 
 class IteratorDeepCompare:
@@ -58,12 +62,15 @@ class IteratorDeepCompare:
             eq(e1, e2)
 
             # compare the objects in the transaction, but disregard
-            # the order of the objects since that is not important.
-            recs1 = [(r.oid, r) for r in txn1]
-            recs1.sort()
-            recs2 = [(r.oid, r) for r in txn2]
-            recs2.sort()
+            # the order of the objects and any duplicated records
+            # since those are not important.
+            recs1 = dict([(r.oid, r) for r in txn1])
+            recs2 = dict([(r.oid, r) for r in txn2])
             eq(len(recs1), len(recs2))
+            recs1 = recs1.items()
+            recs1.sort()
+            recs2 = recs2.items()
+            recs2.sort()
             for (oid1, rec1), (oid2, rec2) in itertools.izip(recs1, recs2):
                 eq(rec1.oid, rec2.oid)
                 eq(rec1.tid, rec2.tid)
@@ -178,6 +185,29 @@ class BasicRecoveryStorage(IteratorDeepCompare):
         data, serial = self._dst.load(root._p_oid, '')
         raises(KeyError, self._dst.load, obj1._p_oid, '')
         raises(KeyError, self._dst.load, obj2._p_oid, '')
+
+    def checkRestoreAfterDoubleCommit(self):
+        oid = self._storage.new_oid()
+        revid = '\0'*8
+        data1 = zodb_pickle(MinPO(11))
+        data2 = zodb_pickle(MinPO(12))
+        # Begin the transaction
+        t = transaction.Transaction()
+        try:
+            self._storage.tpc_begin(t)
+            # Store an object
+            self._storage.store(oid, revid, data1, '', t)
+            # Store it again
+            r1 = self._storage.store(oid, revid, data2, '', t)
+            # Finish the transaction
+            r2 = self._storage.tpc_vote(t)
+            revid = handle_serials(oid, r1, r2)
+            self._storage.tpc_finish(t)
+        except:
+            self._storage.tpc_abort(t)
+            raise
+        self._dst.copyTransactionsFrom(self._storage)
+        self.compare(self._storage, self._dst)
 
 
 class UndoableRecoveryStorage(BasicRecoveryStorage):

@@ -1,3 +1,9 @@
+Next Release
+------------
+
+- History-preserving storages now replace objects on restore instead of
+  just inserting them.
+
 1.4.0b3 (2010-02-02)
 --------------------
 

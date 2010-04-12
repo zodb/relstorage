@@ -377,6 +377,10 @@ CREATE OR REPLACE PACKAGE BODY relstorage_op AS
         states IN statelist) IS
     BEGIN
         FORALL indx IN zoids.first..zoids.last
+            DELETE FROM object_state
+            WHERE zoid = zoids(indx)
+                AND tid = tids(indx);
+        FORALL indx IN zoids.first..zoids.last
             INSERT INTO object_state (zoid, tid, prev_tid, md5, state) VALUES
             (zoids(indx), tids(indx),
             COALESCE((SELECT tid

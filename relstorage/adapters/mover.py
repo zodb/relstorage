@@ -385,14 +385,14 @@ class ObjectMover(object):
 
 
 
-    def postgresql_make_batcher(self, cursor):
-        return PostgreSQLRowBatcher(cursor, self.version_detector)
+    def postgresql_make_batcher(self, cursor, row_limit):
+        return PostgreSQLRowBatcher(cursor, self.version_detector, row_limit)
 
-    def mysql_make_batcher(self, cursor):
-        return MySQLRowBatcher(cursor)
+    def mysql_make_batcher(self, cursor, row_limit):
+        return MySQLRowBatcher(cursor, row_limit)
 
-    def oracle_make_batcher(self, cursor):
-        return OracleRowBatcher(cursor, self.inputsizes)
+    def oracle_make_batcher(self, cursor, row_limit):
+        return OracleRowBatcher(cursor, self.inputsizes, row_limit)
 
 
 
@@ -403,7 +403,7 @@ class ObjectMover(object):
             md5sum = compute_md5sum(data)
         else:
             md5sum = None
-        batcher.delete_from('temp_store', 'zoid', oid)
+        batcher.delete_from('temp_store', zoid=oid)
         batcher.insert_into(
             "temp_store (zoid, prev_tid, md5, state)",
             "%s, %s, %s, decode(%s, 'base64')",
@@ -480,6 +480,7 @@ class ObjectMover(object):
             encoded = None
 
         if self.keep_history:
+            batcher.delete_from("object_state", zoid=oid, tid=tid)
             row_schema = """
                 %s, %s,
                 COALESCE((SELECT tid FROM current_object WHERE zoid = %s), 0),
@@ -493,7 +494,7 @@ class ObjectMover(object):
                 size=len(data or ''),
                 )
         else:
-            batcher.delete_from('object_state', 'zoid', oid)
+            batcher.delete_from('object_state', zoid=oid)
             if data:
                 batcher.insert_into(
                     "object_state (zoid, tid, state)",
@@ -530,6 +531,7 @@ class ObjectMover(object):
                 (oid, tid, oid, md5sum, encoded),
                 rowkey=(oid, tid),
                 size=len(data or ''),
+                command='REPLACE',
                 )
         else:
             if data:
@@ -542,7 +544,7 @@ class ObjectMover(object):
                     command='REPLACE',
                     )
             else:
-                batcher.delete_from('object_state', 'zoid', oid)
+                batcher.delete_from('object_state', zoid=oid)
 
     def oracle_restore(self, cursor, batcher, oid, tid, data):
         """Store an object directly, without conflict detection.
@@ -600,7 +602,7 @@ class ObjectMover(object):
                     size=len(data or ''),
                     )
             else:
-                batcher.delete_from('object_state', 'zoid', oid)
+                batcher.delete_from('object_state', zoid=oid)
                 if data:
                     batcher.insert_into(
                         "object_state (zoid, tid, state)",

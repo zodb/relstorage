@@ -216,8 +216,12 @@ class IObjectMover(Interface):
         initialization is required.
         """
 
-    def make_batcher(cursor):
-        """Return an object to be used for batch store operations."""
+    def make_batcher(cursor, row_limit):
+        """Return an object to be used for batch store operations.
+
+        row_limit is the maximum number of rows to queue before
+        calling the database.
+        """
 
     def store_temp(cursor, batcher, oid, prev_tid, data):
         """Store an object in the temporary table.

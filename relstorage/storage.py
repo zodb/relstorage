@@ -137,6 +137,9 @@ class RelStorage(
     # so they can be executed in batch (to minimize latency).
     _batcher = None
 
+    # _batcher_row_limit: The number of rows to queue before
+    # calling the database.
+    _batcher_row_limit = 100
 
     def __init__(self, adapter, name=None, create=True,
             options=None, cache=None, **kwoptions):
@@ -632,7 +635,7 @@ class RelStorage(
             adapter = self._adapter
             self._cache.tpc_begin()
             self._batcher = self._adapter.mover.make_batcher(
-                self._store_cursor)
+                self._store_cursor, self._batcher_row_limit)
 
             if tid is not None:
                 # hold the commit lock and add the transaction now

@@ -16,6 +16,7 @@
 
 import re
 
+
 class RowBatcher(object):
     """Generic row batcher.
 
@@ -27,19 +28,27 @@ class RowBatcher(object):
     database_name = None
     support_batch_insert = True
 
-    def __init__(self, cursor):
+    def __init__(self, cursor, row_limit=None):
         self.cursor = cursor
+        if row_limit is not None:
+            self.row_limit = row_limit
         self.rows_added = 0
         self.size_added = 0
-        self.deletes = {}  # {(table, varname): set([value])}
+        self.deletes = {}  # {(table, columns_tuple): set([(column_value,)])}
         self.inserts = {}  # {(command, header, row_schema): {rowkey: [row]}}
 
-    def delete_from(self, table, varname, value):
-        key = (table, varname)
-        values = self.deletes.get(key)
-        if values is None:
-            self.deletes[key] = values = set()
-        values.add(str(value))
+    def delete_from(self, table, **kw):
+        if not kw:
+            raise AssertionError("Need at least one column value")
+        columns = kw.keys()
+        columns.sort()
+        columns = tuple(columns)
+        key = (table, columns)
+        rows = self.deletes.get(key)
+        if rows is None:
+            self.deletes[key] = rows = set()
+        row = tuple(str(kw[column]) for column in columns)
+        rows.add(row)
         self.rows_added += 1
         if self.rows_added >= self.row_limit:
             self.flush()
@@ -68,12 +77,22 @@ class RowBatcher(object):
         self.size_added = 0
 
     def _do_deletes(self):
-        for (table, varname), values in sorted(self.deletes.items()):
-            v = list(values)
-            v.sort()
-            value_str = ','.join(v)
-            stmt = "DELETE FROM %s WHERE %s IN (%s)" % (
-                table, varname, value_str)
+        for (table, columns), rows in sorted(self.deletes.items()):
+            rows = list(rows)
+            rows.sort()
+            if len(columns) == 1:
+                value_str = ','.join(v for (v,) in rows)
+                stmt = "DELETE FROM %s WHERE %s IN (%s)" % (
+                    table, columns[0], value_str)
+            else:
+                lines = []
+                for row in rows:
+                    line = []
+                    for i, column in enumerate(columns):
+                        line.append("%s = %s" % (column, row[i]))
+                    lines.append(" AND ".join(line))
+                stmt = "DELETE FROM %s WHERE %s" % (
+                    table, " OR ".join(lines))
             self.cursor.execute(stmt)
 
     def _do_inserts(self):
@@ -98,8 +117,8 @@ class RowBatcher(object):
 
 class PostgreSQLRowBatcher(RowBatcher):
 
-    def __init__(self, cursor, version_detector):
-        super(PostgreSQLRowBatcher, self).__init__(cursor)
+    def __init__(self, cursor, version_detector, row_limit=None):
+        super(PostgreSQLRowBatcher, self).__init__(cursor, row_limit)
         self.support_batch_insert = (
             version_detector.get_version(cursor) >= (8, 2))
 
@@ -116,8 +135,8 @@ class OracleRowBatcher(RowBatcher):
     Expects :name parameters and a dictionary for each row.
     """
 
-    def __init__(self, cursor, inputsizes):
-        super(OracleRowBatcher, self).__init__(cursor)
+    def __init__(self, cursor, inputsizes, row_limit=None):
+        super(OracleRowBatcher, self).__init__(cursor, row_limit)
         self.inputsizes = inputsizes
         self.array_ops = {}  # {(operation, row_schema): {rowkey: [row]}}
 
