@@ -137,13 +137,12 @@ class OracleLocker(Locker):
         # (for as short a time as possible).
         status = cursor.callfunc(
             "DBMS_LOCK.REQUEST",
-            self.inputsize_NUMBER,
-            keywordParameters={
-                'id': self.commit_lock_id,
-                'lockmode': 6,  # exclusive (X_MODE)
-                'timeout': self.commit_lock_timeout,
-                'release_on_commit': True,
-            })
+            self.inputsize_NUMBER, (
+                self.commit_lock_id,
+                6,  # exclusive (X_MODE)
+                self.commit_lock_timeout,
+                True,
+            ))
         if status != 0:
             if status >= 1 and status <= 5:
                 msg = ('', 'timeout', 'deadlock', 'parameter error',
