@@ -136,9 +136,14 @@ class OracleLocker(Locker):
         # Hold commit_lock to prevent concurrent commits
         # (for as short a time as possible).
         status = cursor.callfunc(
-            "sys.relstorage_util.request_lock",
+            "DBMS_LOCK.REQUEST",
             self.inputsize_NUMBER,
-            (self.commit_lock_id, self.commit_lock_timeout))
+            keywordParameters={
+                'id': self.commit_lock_id,
+                'lockmode': 6,  # exclusive (X_MODE)
+                'timeout': self.commit_lock_timeout,
+                'release_on_commit': True,
+            })
         if status != 0:
             if status >= 1 and status <= 5:
                 msg = ('', 'timeout', 'deadlock', 'parameter error',

@@ -53,42 +53,21 @@ can start a ``SYS`` session with the following shell commands::
     $ su - oracle
     $ sqlplus / as sysdba
 
-The commands below will create a PL/SQL package that provides limited
-access to the DBMS_LOCK package so that RelStorage can acquire user
-locks. Using ``sqlplus`` with ``SYS`` privileges, execute the
+Using ``sqlplus`` with ``SYS`` privileges, execute the
 following::
-
-    CREATE OR REPLACE PACKAGE relstorage_util AS
-        FUNCTION request_lock(id IN NUMBER, timeout IN NUMBER)
-            RETURN NUMBER;
-    END relstorage_util;
-    /
-
-    CREATE OR REPLACE PACKAGE BODY relstorage_util AS
-        FUNCTION request_lock(id IN NUMBER, timeout IN NUMBER)
-            RETURN NUMBER IS
-        BEGIN
-            RETURN DBMS_LOCK.REQUEST(
-                id => id,
-                lockmode => DBMS_LOCK.X_MODE,
-                timeout => timeout,
-                release_on_commit => TRUE);
-        END request_lock;
-    END relstorage_util;
-    /
 
     CREATE USER relstoragetest IDENTIFIED BY relstoragetest;
     GRANT CONNECT, RESOURCE, CREATE TABLE, CREATE SEQUENCE TO relstoragetest;
-    GRANT EXECUTE ON relstorage_util TO relstoragetest;
+    GRANT EXECUTE ON DBMS_LOCK TO relstoragetest;
     CREATE USER relstoragetest2 IDENTIFIED BY relstoragetest;
     GRANT CONNECT, RESOURCE, CREATE TABLE, CREATE SEQUENCE TO relstoragetest2;
-    GRANT EXECUTE ON relstorage_util TO relstoragetest2;
+    GRANT EXECUTE ON DBMS_LOCK TO relstoragetest2;
     CREATE USER relstoragetest_hf IDENTIFIED BY relstoragetest;
     GRANT CONNECT, RESOURCE, CREATE TABLE, CREATE SEQUENCE TO relstoragetest_hf;
-    GRANT EXECUTE ON relstorage_util TO relstoragetest_hf;
+    GRANT EXECUTE ON DBMS_LOCK TO relstoragetest_hf;
     CREATE USER relstoragetest2_hf IDENTIFIED BY relstoragetest;
     GRANT CONNECT, RESOURCE, CREATE TABLE, CREATE SEQUENCE TO relstoragetest2_hf;
-    GRANT EXECUTE ON relstorage_util TO relstoragetest2_hf;
+    GRANT EXECUTE ON DBMS_LOCK TO relstoragetest2_hf;
 
 When running the tests, you can use the environment variable
 ORACLE_TEST_DSN to override the data source name, which defaults to

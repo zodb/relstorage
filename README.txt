@@ -117,35 +117,13 @@ can start a ``SYS`` session with the following shell commands::
     $ su - oracle
     $ sqlplus / as sysdba
 
-The commands below will create a PL/SQL package that provides limited
-access to the DBMS_LOCK package so that RelStorage can acquire user
-locks. Using ``sqlplus`` with ``SYS`` privileges, execute the
-following::
-
-    CREATE OR REPLACE PACKAGE relstorage_util AS
-        FUNCTION request_lock(id IN NUMBER, timeout IN NUMBER)
-            RETURN NUMBER;
-    END relstorage_util;
-    /
-
-    CREATE OR REPLACE PACKAGE BODY relstorage_util AS
-        FUNCTION request_lock(id IN NUMBER, timeout IN NUMBER)
-            RETURN NUMBER IS
-        BEGIN
-            RETURN DBMS_LOCK.REQUEST(
-                id => id,
-                lockmode => DBMS_LOCK.X_MODE,
-                timeout => timeout,
-                release_on_commit => TRUE);
-        END request_lock;
-    END relstorage_util;
-    /
-
+You need to create a database user and grant execute privileges on
+the DBMS_LOCK package to that user.
 Here are some sample SQL statements for creating the database user::
 
     CREATE USER zodb IDENTIFIED BY mypassword;
     GRANT CONNECT, RESOURCE, CREATE TABLE, CREATE SEQUENCE TO zodb;
-    GRANT EXECUTE ON relstorage_util TO zodb;
+    GRANT EXECUTE ON DBMS_LOCK TO zodb;
 
 
 Configuring Plone

@@ -4,6 +4,10 @@ Next Release
 - History-preserving storages now replace objects on restore instead of
   just inserting them.
 
+- Oracle: call the DBMS_LOCK.REQUEST function directly instead of using
+  a small package.  The small relstorage_util package was confusing to DBAs
+  and provided no real security advantage.
+
 1.4.0b3 (2010-02-02)
 --------------------
 
