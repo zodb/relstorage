@@ -614,6 +614,9 @@ class RelStorage(
         self._lock_acquire()
         try:
             if self._transaction is transaction:
+                if self._options.strict_tpc:
+                    raise POSException.StorageTransactionError(
+                        "Duplicate tpc_begin calls for same transaction")
                 return
             self._lock_release()
             self._commit_lock_acquire()
@@ -759,6 +762,9 @@ class RelStorage(
         self._lock_acquire()
         try:
             if transaction is not self._transaction:
+                if self._options.strict_tpc:
+                    raise POSException.StorageTransactionError(
+                        "tpc_vote called with wrong transaction")
                 return
             try:
                 return self._vote()
@@ -819,6 +825,9 @@ class RelStorage(
         self._lock_acquire()
         try:
             if transaction is not self._transaction:
+                if self._options.strict_tpc:
+                    raise POSException.StorageTransactionError(
+                        "tpc_finish called with wrong transaction")
                 return
             try:
                 try:

@@ -12,6 +12,7 @@
 #
 ##############################################################################
 
+
 class Options(object):
     """Options for configuring and tuning RelStorage.
 
@@ -43,9 +44,21 @@ class Options(object):
         self.cache_delta_size_limit = 10000
         self.commit_lock_timeout = 30
         self.commit_lock_id = 0
+        self.strict_tpc = default_strict_tpc
 
         for key, value in kwoptions.iteritems():
             if key in self.__dict__:
                 setattr(self, key, value)
             else:
                 raise TypeError("Unknown parameter: %s" % key)
+
+
+# Detect the version of ZODB and set default options accordingly.
+# ZODB does not seem to provide version information anywhere but in
+# setup.py, so the code below is a hack.  TODO: Bring this up on zodb-dev.
+
+default_strict_tpc = False
+
+from ZEO.zrpc.connection import Connection as __Connection
+if __Connection.current_protocol >= 'Z310':
+    default_strict_tpc = True

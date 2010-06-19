@@ -119,7 +119,8 @@ can start a ``SYS`` session with the following shell commands::
 
 You need to create a database user and grant execute privileges on
 the DBMS_LOCK package to that user.
-Here are some sample SQL statements for creating the database user::
+Here are some sample SQL statements for creating the database user
+and granting the required permissions::
 
     CREATE USER zodb IDENTIFIED BY mypassword;
     GRANT CONNECT, RESOURCE, CREATE TABLE, CREATE SEQUENCE TO zodb;
@@ -476,7 +477,8 @@ underscores instead of dashes in the parameter names.
         RelStorage caches pickled objects in memory, similar to a ZEO
         cache. This cache is shared between threads. This parameter
         configures the approximate maximum amount of memory the cache
-        should consume, in megabytes.  It defaults to 10.
+        should consume, in megabytes.  It defaults to 10.  Set to
+        0 to disable the in-memory cache.
 
 ``cache-delta-size-limit``
         This is an advanced option. RelStorage uses a system of

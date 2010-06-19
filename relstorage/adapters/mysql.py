@@ -251,7 +251,7 @@ class MySQLdbConnectionManager(AbstractConnectionManager):
 
         This overrides a method.
         """
-        conn, cursor = self.open(transaction_mode=None)
+        conn, cursor = self.open()
         try:
             # This phase of packing works best with transactions
             # disabled.  It changes no user-facing data.

@@ -2,11 +2,26 @@ Next Release
 ------------
 
 - History-preserving storages now replace objects on restore instead of
-  just inserting them.
+  just inserting them.  This should solve problems people were
+  having with the zodbconvert utility.
 
 - Oracle: call the DBMS_LOCK.REQUEST function directly instead of using
-  a small package.  The small relstorage_util package was confusing to DBAs
-  and provided no real security advantage.
+  a small package named ``relstorage_util``. The ``relstorage_util``
+  package was designed as a secure way to access the DBMS_LOCK package,
+  but the package turned out to be confusing to DBAs and provided no
+  real security advantage. Existing deployments of RelStorage 1.4.x on
+  Oracle need to do the following:
+
+      GRANT EXECUTE ON DBMS_LOCK TO <zodb_user>;
+
+  You can also drop the ``relstorage_util`` package (but keep the
+  ``relstorage_op`` package).
+
+- Made compatible with ZODB 3.10.
+
+- MySQL: specify the transaction isolation mode for every connection,
+  since the default is apparently not necessarily "read committed"
+  anymore.
 
 1.4.0b3 (2010-02-02)
 --------------------

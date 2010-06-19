@@ -13,18 +13,18 @@
 ##############################################################################
 """relstorage package"""
 
-# perform a compatibility test
-try:
-    from ZODB.interfaces import IMVCCStorage
-    del IMVCCStorage
-except ImportError:
-    # see if the polling patch has been applied
-    from ZODB.Connection import Connection
-    if not hasattr(Connection, '_poll_invalidations'):
-        raise ImportError('RelStorage requires the invalidation polling '
-            'patch for ZODB.')
-    del Connection
-else:
-    # We're running a version of ZODB that knows what to do with
-    # MVCC storages, so no patch is necessary.
-    pass
+def check_compatible():
+    try:
+        from ZODB.interfaces import IMVCCStorage
+    except ImportError:
+        # see if the polling patch has been applied
+        from ZODB.Connection import Connection
+        if not hasattr(Connection, '_poll_invalidations'):
+            raise ImportError('RelStorage requires the invalidation polling '
+                'patch for ZODB.')
+    else:
+        # We're running a version of ZODB that knows what to do with
+        # MVCC storages, so no patch is necessary.
+        pass
+
+check_compatible()
