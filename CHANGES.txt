@@ -1,5 +1,5 @@
-Next Release
-------------
+1.4.0c1 (2010-06-19)
+--------------------
 
 - History-preserving storages now replace objects on restore instead of
   just inserting them.  This should solve problems people were
@@ -9,13 +9,13 @@ Next Release
   a small package named ``relstorage_util``. The ``relstorage_util``
   package was designed as a secure way to access the DBMS_LOCK package,
   but the package turned out to be confusing to DBAs and provided no
-  real security advantage. Existing deployments of RelStorage 1.4.x on
-  Oracle need to do the following:
+  real security advantage.  People who have already deployed
+  RelStorage 1.4.x on Oracle need to do the following:
 
       GRANT EXECUTE ON DBMS_LOCK TO <zodb_user>;
 
-  You can also drop the ``relstorage_util`` package (but keep the
-  ``relstorage_op`` package).
+  You can also drop the ``relstorage_util`` package.  Keep the
+  ``relstorage_op`` package.
 
 - Made compatible with ZODB 3.10.
 
