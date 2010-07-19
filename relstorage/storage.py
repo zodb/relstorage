@@ -38,6 +38,7 @@ import sys
 import tempfile
 import threading
 import time
+import transaction
 import weakref
 import ZODB.interfaces
 
@@ -79,8 +80,10 @@ class RelStorage(
     """Storage to a relational database, based on invalidation polling"""
     implements(*_relstorage_interfaces)
 
-    _transaction=None # Transaction that is being committed
-    _tstatus=' '      # Transaction status, used for copying data
+    _transaction=None   # Transaction that is being committed
+    _transactions=None  # List of pending sub-transactions when running
+                        #  a single-transaction import
+    _tstatus=' '        # Transaction status, used for copying data
     _is_read_only = False
 
     # load_conn and load_cursor are open most of the time.
@@ -578,14 +581,20 @@ class RelStorage(
             self._lock_release()
 
 
-    def restore(self, oid, serial, data, version, prev_txn, transaction):
+    def restore(self, oid, serial, data, version, prev_txn, transaction,
+                transaction_position=None):
         # Like store(), but used for importing transactions.  See the
         # comments in FileStorage.restore().  The prev_txn optimization
         # is not used.
         if self._is_read_only:
             raise POSException.ReadOnlyError()
-        if transaction is not self._transaction:
-            raise POSException.StorageTransactionError(self, transaction)
+        if self._transactions:
+            if transaction_position is None or \
+               transaction.tid != self._transactions[transaction_position]:
+                raise POSException.StorageTransactionError(self, transaction)
+        else:
+            if transaction is not self._transaction:
+                raise POSException.StorageTransactionError(self, transaction)
         if version:
             raise POSException.Unsupported("Versions aren't supported")
 
@@ -624,14 +633,6 @@ class RelStorage(
             self._clear_temp()
             self._transaction = transaction
 
-            user = str(transaction.user)
-            desc = str(transaction.description)
-            ext = transaction._extension
-            if ext:
-                ext = cPickle.dumps(ext, 1)
-            else:
-                ext = ""
-            self._ude = user, desc, ext
             self._tstatus = status
 
             self._restart_store()
@@ -642,19 +643,11 @@ class RelStorage(
 
             if tid is not None:
                 # hold the commit lock and add the transaction now
-                cursor = self._store_cursor
-                packed = (status == 'p')
-                adapter.locker.hold_commit_lock(cursor, ensure_current=True)
-                tid_int = u64(tid)
-                try:
-                    adapter.txncontrol.add_transaction(
-                        cursor, tid_int, user, desc, ext, packed)
-                except:
-                    self._drop_store_connection()
-                    raise
+                self._ude = self._add_transaction(transaction)
+            else:
+                self._ude = self._get_ude(transaction)
             # else choose the tid later
             self._tid = tid
-
         finally:
             self._lock_release()
 
@@ -1361,10 +1354,63 @@ class RelStorage(
                 ZODB.blob.remove_committed(old_filename)
         self._txn_blobs[oid] = filename
 
-    def copyTransactionsFrom(self, other):
+    def _get_ude(self, txn):
+        user = str(txn.user)
+        desc = str(txn.description)
+        ext = txn._extension
+        if ext:
+            ext = cPickle.dumps(ext, 1)
+        else:
+            ext = ""
+        return user, desc, ext
+
+    def _add_transaction(self, txn, hold_lock=True):
+        """Function to add a transaction. Assumes locks have already been taken.
+        This function is used both by tpc_begin and when restoring multiple source
+        transactions in a single destination transaction. When called in the latter
+        context, we want to avoid any modifications to external variables, etc.
+        """
+        user, desc, ext = self._get_ude(txn)
+        if not user:
+            user = '""'
+        if not desc:
+            desc = '""'
+        adapter = self._adapter
+        cursor = self._store_cursor
+        packed = (txn.status == 'p')
+        if hold_lock:
+            adapter.locker.hold_commit_lock(cursor, ensure_current=True)
+        tid_int = u64(txn.tid)
+        try:
+            adapter.txncontrol.add_transaction(
+                cursor, tid_int, user, desc, ext, packed)
+        except:
+            if hold_lock:
+                self._drop_store_connection()
+                raise
+        return user, desc, ext
+
+    def copyTransactionsFrom(self, other, single_transaction=False):
+        begin_time = time.time()
+        if single_transaction:
+            master_txn = transaction.Transaction()
+            master_txn.tid = p64(1)
+            master_txn.description = 'zodbconvert run on: %s' % time.strftime('%Y-%m-%d.%H:%M:%S')
+            self.tpc_begin(master_txn, master_txn.tid)
+        txnum = 0
+        tx_size = 0
+        self._transactions = []
+        for trans in other.iterator():
+            self._transactions.append(trans.tid)
+            if single_transaction:
+                self._add_transaction(trans, hold_lock=False)
+
+        num_txns = len(self._transactions)
         # adapted from ZODB.blob.BlobStorageMixin
         for trans in other.iterator():
-            self.tpc_begin(trans, trans.tid, trans.status)
+            if not single_transaction:
+                self.tpc_begin(trans, trans.tid, trans.status)
+            num_txn_records = 0
             for record in trans:
                 blobfilename = None
                 if self.fshelper is not None:
@@ -1383,10 +1429,32 @@ class RelStorage(
                                      name, record.data_txn, trans)
                 else:
                     self.restore(record.oid, record.tid, record.data,
-                                 '', record.data_txn, trans)
-
-            self.tpc_vote(trans)
-            self.tpc_finish(trans)
+                                 '', record.data_txn, trans, txnum)
+                num_txn_records += 1
+                tx_size += len(record.data)
+            txnum += 1
+            tx_end = time.time()
+            pct_complete = (txnum/float(num_txns))*100
+            if pct_complete < 10:
+                pct_complete = '  %1.2f%%' % pct_complete
+            elif pct_complete < 100:
+                pct_complete = ' %1.2f%%' % pct_complete
+            rate = (tx_size/float(1024*1024)) / (tx_end - begin_time)
+            #if single_transaction:
+            #    self._batcher.flush()
+            #else:
+            if not single_transaction:
+                self.tpc_vote(trans)
+                self.tpc_finish(trans)
+            #write("Restored tid %d,%5d records | %1.3fmB/s (%6d/%6d, %.2f%%)\n" %
+            #      (u64(trans.tid), num_txn_records, rate, txnum, num_txns, pct_complete))
+            log.info("Restored tid %d,%5d records | %1.3f MB/s (%6d/%6d,%s)",
+                     u64(trans.tid), num_txn_records, rate, txnum, num_txns, pct_complete)
+        if single_transaction:
+            self.tpc_vote(master_txn)
+            self.tpc_finish(master_txn)
+            self._transactions = None
+        return txnum, tx_size, tx_end - begin_time
 
     # The propagate_invalidations flag implements the old
     # invalidation polling API and is not otherwise used. Set to a

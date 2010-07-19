@@ -302,6 +302,11 @@ Options for ``zodbconvert``
     Opens both storages and analyzes what would be copied, but does not
     actually copy.
 
+  ``--single-transaction``
+    Import into the destination in a single transaction, instead of one
+    transaction per transaction in the source. This option can
+    significantly speed up conversion times on PostgreSQL.
+
 
 Migrating to a new version of RelStorage
 ----------------------------------------
