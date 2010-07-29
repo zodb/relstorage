@@ -76,6 +76,22 @@ class StorageCacheTests(unittest.TestCase):
         res = c.load(None, 2)
         self.assertEqual(res, ('abc', 55))
 
+    def test_load_using_delta_after0_inconsistent(self):
+        from relstorage.tests.fakecache import data
+        from ZODB.utils import p64
+        adapter = MockAdapter()
+        c = self.getClass()(adapter, MockOptionsWithFakeCache())
+        c.checkpoints = (50, 40)
+        c.delta_after0[2] = 55
+        adapter.mover.data[2] = ('abc', 56)
+        try:
+            c.load(None, 2)
+        except AssertionError, e:
+            print e
+            self.assertTrue('Detected an inconsistency' in e.args[0])
+        else:
+            self.fail("Failed to report cache inconsistency")
+
     def test_load_using_checkpoint0_hit(self):
         from relstorage.tests.fakecache import data
         from ZODB.utils import p64
@@ -297,10 +313,13 @@ class StorageCacheTests(unittest.TestCase):
         data['myprefix:checkpoints'] = '50 40'
         adapter = MockAdapter()
         c = self.getClass()(adapter, MockOptionsWithFakeCache())
-        adapter.poller.changes = [(3, 42), (1, 35), (2, 45)]
+        # Note that OID 3 changed twice.  list_changes is not required
+        # to provide the list of changes in order, so simulate
+        # a list of changes that is out of order.
+        adapter.poller.changes = [(3, 42), (1, 35), (2, 45), (3, 41)]
         c.checkpoints = (40, 30)
         c.current_tid = 40
-        c.after_poll(None, 40, 50, [(2, 45)])
+        c.after_poll(None, 40, 50, [(3, 42), (2, 45), (3, 41)])
         self.assertEqual(c.checkpoints, (50, 40))
         self.assertEqual(data['myprefix:checkpoints'], '50 40')
         self.assertEqual(c.delta_after0, {})

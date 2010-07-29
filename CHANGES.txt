@@ -1,3 +1,19 @@
+
+1.4.0c2 (2010-07-28)
+--------------------
+
+- Fixed a subtle bug in the cache code that could lead to an
+  AssertionError indicating a cache inconsistency.  The inconsistency
+  was caused by after_poll(), which was ignoring the randomness of
+  the order of the list of recent changes, leading it to sometimes
+  put the wrong transfer ID in the "delta_after" dicts.  Also expanded
+  the AssertionError with debugging info, since cache inconsistency
+  can still be caused by database misconfiguration and mismatched
+  client versions.
+
+- Oracle: updated the migration notes.  The relstorage_util package
+  is not needed after all.
+
 1.4.0c1 (2010-06-19)
 --------------------
 

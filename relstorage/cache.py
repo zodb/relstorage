@@ -159,7 +159,53 @@ class StorageCache(object):
             # Cache miss.
             state, actual_tid_int = self.adapter.mover.load_current(
                 cursor, oid_int)
-            assert actual_tid_int == tid_int
+            if actual_tid_int != tid_int:
+                # Uh-oh, the cache is inconsistent with the database.
+                # Possible causes:
+                #
+                # - The database MUST provide a snapshot view for each
+                #   session; this error can occur if that requirement is
+                #   violated. For example, MySQL's MyISAM engine is not
+                #   sufficient for the object_state table because MyISAM
+                #   can not provide a snapshot view. (InnoDB is
+                #   sufficient.)
+                #
+                # - Something could be writing to the database out
+                #   of order, such as a version of RelStorage that
+                #   acquires a different commit lock.
+                #
+                # - A software bug. In the past, there was a subtle bug
+                #   in after_poll() that caused it to ignore the
+                #   transaction order, leading it to sometimes put the
+                #   wrong tid in delta_after*.
+
+                cp0, cp1 = self.checkpoints
+                import os
+                import thread
+                raise AssertionError("Detected an inconsistency "
+                    "between the RelStorage cache and the database "
+                    "while loading an object using the delta_after0 dict.  "
+                    "Please verify the database is configured for "
+                    "ACID compliance and that all clients are using "
+                    "the same commit lock.  "
+                    "(oid_int=%(oid_int)r, tid_int=%(tid_int)r, "
+                    "actual_tid_int=%(actual_tid_int)r, "
+                    "current_tid=%(current_tid)r, cp0=%(cp0)r, cp1=%(cp1)r, "
+                    "len(delta_after0)=%(lda0)r, len(delta_after1)=%(lda1)r, "
+                    "pid=%(pid)r, thread_ident=%(thread_ident)r)"
+                    % {
+                        'oid_int': oid_int,
+                        'tid_int': tid_int,
+                        'actual_tid_int': actual_tid_int,
+                        'current_tid': self.current_tid,
+                        'cp0': cp0,
+                        'cp1': cp1,
+                        'lda0': len(self.delta_after0),
+                        'lda1': len(self.delta_after1),
+                        'pid': os.getpid(),
+                        'thread_ident': thread.get_ident(),
+                    })
+
             cache_data = '%s%s' % (p64(tid_int), state or '')
             for client in self.clients_local_first:
                 client.set(cachekey, cache_data)
@@ -419,11 +465,23 @@ class StorageCache(object):
                 # (oid, tid) where tid > after_tid and tid <= last_tid.
                 changes = self.adapter.poller.list_changes(
                     cursor, cp1, new_tid_int)
+
+                # Make a dictionary that contains, for each oid, the most
+                # recent tid listed in changes.
+                changes_dict = {}
+                if not isinstance(changes, list):
+                    changes = list(changes)
+                changes.sort()
                 for oid_int, tid_int in changes:
+                    changes_dict[oid_int] = tid_int
+
+                # Put the changes in new_delta_after*.
+                for oid_int, tid_int in changes_dict.iteritems():
                     if tid_int > cp0:
                         new_delta_after0[oid_int] = tid_int
                     elif tid_int > cp1:
                         new_delta_after1[oid_int] = tid_int
+
             self.checkpoints = new_checkpoints
             self.delta_after0 = new_delta_after0
             self.delta_after1 = new_delta_after1

@@ -23,13 +23,11 @@ relstorage_op_version = '1.4'
 
 history_preserving_schema = """
 
-# commit_lock: Held during commit.  Another kind of lock is used for MySQL.
+# commit_lock: Held during commit.  Another kind of lock is used for MySQL
+# and Oracle.
 
     postgresql:
         CREATE TABLE commit_lock ();
-
-    oracle:
-        CREATE TABLE commit_lock (dummy CHAR);
 
 # pack_lock: Held during pack.  Another kind of lock is used for MySQL.
 # Another kind of lock is used for PostgreSQL >= 8.2.
@@ -399,13 +397,11 @@ END relstorage_op;
 
 history_free_schema = """
 
-# commit_lock: Held during commit.  Another kind of lock is used for MySQL.
+# commit_lock: Held during commit.  Another kind of lock is used for MySQL
+# and Oracle.
 
     postgresql:
         CREATE TABLE commit_lock ();
-
-    oracle:
-        CREATE TABLE commit_lock (dummy CHAR);
 
 # pack_lock: Held during pack.  Another kind of lock is used for MySQL.
 # Another kind of lock is used for PostgreSQL >= 8.2.
