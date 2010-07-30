@@ -30,6 +30,7 @@ from ZODB.tests.MinPO import MinPO
 from ZODB.tests.StorageTestBase import zodb_pickle
 from ZODB.tests.StorageTestBase import zodb_unpickle
 from ZODB.utils import p64
+import random
 import time
 import transaction
 
@@ -537,6 +538,54 @@ class GenericRelStorageTests(
         finally:
             db.close()
 
+    def checkBTreesLengthStress(self):
+        # BTrees.Length objects are unusual Persistent objects: they
+        # set _p_independent and they frequently invoke conflict
+        # resolution. Run a stress test on them.
+        updates_per_thread = 50
+        thread_count = 4
+
+        from BTrees.Length import Length
+        db = DB(self._storage)
+        try:
+            c = db.open()
+            try:
+                c.root()['length'] = Length()
+                transaction.commit()
+            finally:
+                c.close()
+
+            def updater():
+                thread_db = DB(self._storage)
+                for i in range(updates_per_thread):
+                    thread_c = thread_db.open()
+                    try:
+                        thread_c.root()['length'].change(1)
+                        time.sleep(random.random() * 0.05)
+                        transaction.commit()
+                    finally:
+                        thread_c.close()
+
+            import threading
+            threads = []
+            for i in range(thread_count):
+                t = threading.Thread(target=updater)
+                threads.append(t)
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join(120)
+
+            c = db.open()
+            try:
+                self.assertEqual(c.root()['length'](),
+                    updates_per_thread * thread_count)
+            finally:
+                transaction.abort()
+                c.close()
+
+        finally:
+            db.close()
 
 class DoubleCommitter(Persistent):
     """A crazy persistent class that changes self in __getstate__"""
