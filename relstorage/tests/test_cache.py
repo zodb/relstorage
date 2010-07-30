@@ -87,7 +87,6 @@ class StorageCacheTests(unittest.TestCase):
         try:
             c.load(None, 2)
         except AssertionError, e:
-            print e
             self.assertTrue('Detected an inconsistency' in e.args[0])
         else:
             self.fail("Failed to report cache inconsistency")
@@ -302,7 +301,7 @@ class StorageCacheTests(unittest.TestCase):
         c.checkpoints = (40, 30)
         c.current_tid = 40
         c.delta_after1 = {1: 35}
-        c.after_poll(None, 40, 50, [(2, 45)])
+        c.after_poll(None, 40, 50, [(2, 45), (2, 41)])
         self.assertEqual(c.checkpoints, (40, 30))
         self.assertEqual(data['myprefix:checkpoints'], '40 30')
         self.assertEqual(c.delta_after0, {2: 45})
