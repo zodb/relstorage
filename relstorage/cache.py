@@ -102,8 +102,11 @@ class StorageCache(object):
 
     def new_instance(self):
         """Return a copy of this instance sharing the same local client"""
-        local_client = self.clients_local_first[0]
-        return StorageCache(self.adapter, self.options, local_client)
+        if self.options.share_local_cache:
+            local_client = self.clients_local_first[0]
+            return StorageCache(self.adapter, self.options, local_client)
+        else:
+            return StorageCache(self.adapter, self.options)
 
     def clear(self):
         """Remove all data from the cache.  Called by speed tests."""

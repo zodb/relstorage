@@ -46,6 +46,11 @@ class Options(object):
         self.commit_lock_id = 0
         self.strict_tpc = default_strict_tpc
 
+        # If share_local_cache is off, each storage instance has a private
+        # cache rather than a shared cache.  This option exists mainly for
+        # simulating disconnected caches in tests.
+        self.share_local_cache = True
+
         for key, value in kwoptions.iteritems():
             if key in self.__dict__:
                 setattr(self, key, value)

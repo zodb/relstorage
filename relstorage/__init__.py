@@ -28,3 +28,34 @@ def check_compatible():
         pass
 
 check_compatible()
+
+
+def patch_zodb_sync():
+    """Patch Connection.sync() and afterCompletion() to pass the 'force' flag.
+    """
+
+    def _storage_sync(self, *ignored, **kw):
+        sync = getattr(self._storage, 'sync', 0)
+        if sync:
+            # By default, do not force the sync, allowing RelStorage
+            # to ignore sync requests for a while.
+            force = kw.get('force', False)
+            try:
+                sync(force=force)
+            except TypeError:
+                # The 'force' parameter is not accepted.
+                sync()
+        self._flush_invalidations()
+
+    def sync(self):
+        """Manually update the view on the database."""
+        self.transaction_manager.abort()
+        self._storage_sync(force=True)
+
+    from ZODB.Connection import Connection
+    Connection._storage_sync = _storage_sync
+    Connection.afterCompletion = _storage_sync
+    Connection.newTransaction = _storage_sync
+    Connection.sync = sync
+
+patch_zodb_sync()

@@ -1,4 +1,18 @@
 
+1.4.0c3 (2010-07-31)
+--------------------
+
+- Always update the RelStorage cache when opening a database connection for
+  loading, even when no ZODB Connection is using the storage.  Otherwise,
+  code that used the storage interface directly could cause the cache
+  to fall out of sync; the effects would be seen in the next
+  ZODB.Connection.
+
+- Added a ZODB monkey patch that passes the "force" parameter to the
+  sync method.  This should help the poll-interval option do its job
+  better.
+
+
 1.4.0c2 (2010-07-28)
 --------------------
 

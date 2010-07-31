@@ -334,64 +334,112 @@ class GenericRelStorageTests(
         finally:
             db.close()
 
-    def checkPollInterval(self, using_cache=True):
+    def checkPollInterval(self, shared_cache=True):
         # Verify the poll_interval parameter causes RelStorage to
         # delay invalidation polling.
         self._storage._options.poll_interval = 3600
         db = DB(self._storage)
         try:
-            c1 = db.open()
+            tm1 = transaction.TransactionManager()
+            c1 = db.open(transaction_manager=tm1)
             r1 = c1.root()
             r1['alpha'] = 1
-            transaction.commit()
+            tm1.commit()
 
-            c2 = db.open()
+            tm2 = transaction.TransactionManager()
+            c2 = db.open(transaction_manager=tm2)
             r2 = c2.root()
             self.assertEqual(r2['alpha'], 1)
+            self.assertFalse(c2._storage.need_poll())
+            self.assertTrue(c2._storage._poll_at > 0)
 
             r1['alpha'] = 2
-            # commit c1 without triggering c2.afterCompletion().
-            storage = c1._storage
-            t = transaction.Transaction()
-            storage.tpc_begin(t)
-            c1.commit(t)
-            storage.tpc_vote(t)
-            storage.tpc_finish(t)
+            # commit c1 without committing c2.
+            tm1.commit()
 
-            # flush invalidations to c2, but the poll timer has not
-            # yet expired, so the change to r2 should not be seen yet.
-            self.assertTrue(c2._storage._poll_at > 0)
-            if using_cache:
+            if shared_cache:
                 # The cache reveals that a poll is needed even though
                 # the poll timeout has not expired.
                 self.assertTrue(c2._storage.need_poll())
-                c2._flush_invalidations()
+                tm2.commit()
                 r2 = c2.root()
                 self.assertEqual(r2['alpha'], 2)
                 self.assertFalse(c2._storage.need_poll())
             else:
-                # Now confirm that no poll is needed
+                # The poll timeout has not expired, so no poll should occur
+                # yet, even after a commit.
                 self.assertFalse(c2._storage.need_poll())
-                c2._flush_invalidations()
+                tm2.commit()
                 r2 = c2.root()
                 self.assertEqual(r2['alpha'], 1)
 
             # expire the poll timer and verify c2 sees the change
             c2._storage._poll_at -= 3601
-            c2._flush_invalidations()
+            tm2.commit()
             r2 = c2.root()
             self.assertEqual(r2['alpha'], 2)
 
-            transaction.abort()
             c2.close()
             c1.close()
 
         finally:
             db.close()
 
-    def checkPollIntervalWithoutCache(self):
-        self._storage._options.cache_local_mb = 0
-        self.checkPollInterval(using_cache=True)
+    def checkPollIntervalWithUnsharedCache(self):
+        self._storage._options.share_local_cache = False
+        self.checkPollInterval(shared_cache=False)
+
+    def checkCachePolling(self):
+        self._storage._options.poll_interval = 3600
+        self._storage._options.share_local_cache = False
+        db = DB(self._storage)
+        try:
+            # Set up the database.
+            tm1 = transaction.TransactionManager()
+            c1 = db.open(transaction_manager=tm1)
+            r1 = c1.root()
+            r1['obj'] = obj1 = PersistentMapping({'change': 0})
+            tm1.commit()
+
+            # Load and change the object in an independent connection.
+            tm2 = transaction.TransactionManager()
+            c2 = db.open(transaction_manager=tm2)
+            r2 = c2.root()
+            r2['obj']['change'] = 1
+            tm2.commit()
+            # Now c2 has delta_after0.
+            self.assertEqual(len(c2._storage._cache.delta_after0), 1)
+            c2.close()
+
+            # Change the object in the original connection.
+            c1.sync()
+            obj1['change'] = 2
+            tm1.commit()
+
+            # Close the database connection to c2.
+            c2._storage._drop_load_connection()
+
+            # Make the database connection to c2 reopen without polling.
+            c2._storage.load('\0' * 8, '')
+            self.assertTrue(c2._storage._load_transaction_open)
+
+            # Open a connection, which should be the same connection
+            # as c2.
+            c3 = db.open(transaction_manager=tm2)
+            self.assertTrue(c3 is c2)
+            self.assertEqual(len(c2._storage._cache.delta_after0), 1)
+
+            # Clear the caches (but not delta_after*)
+            c3._resetCache()
+            for client in c3._storage._cache.clients_local_first:
+                client.flush_all()
+
+            obj3 = c3.root()['obj']
+            # Should have loaded the new object.
+            self.assertEqual(obj3['change'], 2)
+
+        finally:
+            db.close()
 
     def checkDoubleCommitter(self):
         # Verify we can store an object that gets committed twice in

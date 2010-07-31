@@ -215,31 +215,21 @@ class RelStorage(
                 raise
             self._load_transaction_open = False
 
-    def _restart_load(self):
-        """Restart the load connection, creating a new connection if needed"""
-        if self._load_cursor is None:
-            self._open_load_connection()
-            return
-        try:
-            self._adapter.connmanager.restart_load(
-                self._load_conn, self._load_cursor)
-            self._load_transaction_open = True
-        except self._adapter.connmanager.disconnected_exceptions, e:
-            log.warning("Reconnecting load_conn: %s", e)
-            self._drop_load_connection()
-            try:
-                self._open_load_connection()
-            except:
-                log.exception("Reconnect failed.")
-                raise
-            else:
-                log.info("Reconnected.")
+    def _restart_load_and_call(self, f, *args, **kw):
+        """Restart the load connection and call a function.
 
-    def _with_load(self, f, *args, **kw):
-        """Call a function with the load connection and cursor."""
+        The first two function parameters are the load connection and cursor.
+        """
         if self._load_cursor is None:
+            need_restart = False
             self._open_load_connection()
+        else:
+            need_restart = True
         try:
+            if need_restart:
+                self._adapter.connmanager.restart_load(
+                    self._load_conn, self._load_cursor)
+                self._load_transaction_open = True
             return f(self._load_conn, self._load_cursor, *args, **kw)
         except self._adapter.connmanager.disconnected_exceptions, e:
             log.warning("Reconnecting load_conn: %s", e)
@@ -452,7 +442,7 @@ class RelStorage(
         self._lock_acquire()
         try:
             if not self._load_transaction_open:
-                self._restart_load()
+                self._restart_load_and_poll()
             cursor = self._load_cursor
             state, tid_int = cache.load(cursor, oid_int)
         finally:
@@ -489,7 +479,7 @@ class RelStorage(
         self._lock_acquire()
         try:
             if not self._load_transaction_open:
-                self._restart_load()
+                self._restart_load_and_poll()
             state = self._adapter.mover.load_revision(
                 self._load_cursor, oid_int, tid_int)
             if state is None and self._store_cursor is not None:
@@ -520,7 +510,7 @@ class RelStorage(
                 cursor = self._store_cursor
             else:
                 if not self._load_transaction_open:
-                    self._restart_load()
+                    self._restart_load_and_poll()
                 cursor = self._load_cursor
             if not self._adapter.mover.exists(cursor, u64(oid)):
                 raise POSKeyError(oid)
@@ -740,8 +730,7 @@ class RelStorage(
                 self._adapter.mover.replace_temp(
                     cursor, oid_int, prev_tid_int, data)
                 resolved.add(oid)
-                if cache is not None:
-                    cache.store_temp(oid_int, data)
+                cache.store_temp(oid_int, data)
 
         # Move the new states into the permanent table
         tid_int = u64(self._tid)
@@ -1220,6 +1209,27 @@ class RelStorage(
 
         return False
 
+    def _restart_load_and_poll(self):
+        """Call _restart_load, poll for changes, and update self._cache.
+        """
+        # Ignore changes made by the last transaction committed
+        # by this connection.
+        if self._ltid is not None:
+            ignore_tid = u64(self._ltid)
+        else:
+            ignore_tid = None
+        prev = self._prev_polled_tid
+
+        # get a list of changed OIDs and the most recent tid
+        changes, new_polled_tid = self._restart_load_and_call(
+            self._adapter.poller.poll_invalidations, prev, ignore_tid)
+
+        # Inform the cache of the changes.
+        self._cache.after_poll(
+            self._load_cursor, prev, new_polled_tid, changes)
+
+        return changes, new_polled_tid
+
     def poll_invalidations(self):
         """Looks for OIDs of objects that changed since _prev_polled_tid
 
@@ -1238,22 +1248,7 @@ class RelStorage(
                 # reset the timeout
                 self._poll_at = time.time() + self._options.poll_interval
 
-            self._restart_load()
-
-            # Ignore changes made by the last transaction committed
-            # by this connection.
-            if self._ltid is not None:
-                ignore_tid = u64(self._ltid)
-            else:
-                ignore_tid = None
-
-            # get a list of changed OIDs and the most recent tid
-            prev = self._prev_polled_tid
-            changes, new_polled_tid = self._with_load(
-                self._adapter.poller.poll_invalidations, prev, ignore_tid)
-
-            self._cache.after_poll(
-                self._load_cursor, prev, new_polled_tid, changes)
+            changes, new_polled_tid = self._restart_load_and_poll()
 
             self._prev_polled_tid = new_polled_tid
 

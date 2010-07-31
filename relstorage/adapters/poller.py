@@ -37,13 +37,19 @@ class Poller:
 
         Returns (changes, new_polled_tid), where changes is either
         a list of (oid, tid) that have changed, or None to indicate
-        that the changes are too complex to list.  new_polled_tid is
-        never None.
+        that the changes are too complex to list.  new_polled_tid can be
+        0 if there is no data in the database.
         """
         # find out the tid of the most recent transaction.
         cursor.execute(self.poll_query)
-        new_polled_tid = cursor.fetchone()[0]
-        assert new_polled_tid is not None
+        rows = list(cursor)
+        if not rows:
+            # No data.
+            return None, 0
+        new_polled_tid = rows[0][0]
+        if not new_polled_tid:
+            # No data.
+            return None, 0
 
         if prev_polled_tid is None:
             # This is the first time the connection has polled.
