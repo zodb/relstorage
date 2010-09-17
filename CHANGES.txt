@@ -2,6 +2,12 @@
 Next Release
 ------------
 
+- Worked around an Oracle RAC bug: apparently, in a RAC environment,
+  the read-only transaction mode does not isolate transactions in the
+  manner specified by the documentation, so Oracle users now have to
+  use serializable isolation like everyone else. It's slower but more
+  reliable.
+
 - Use the client time instead of the database server time as a factor
   in the transaction ID.  RelStorage was using the database server time
   to reduce the need for synchronized clocks, but in practice, that

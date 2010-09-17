@@ -235,7 +235,35 @@ class CXOracleScriptRunner(OracleScriptRunner):
 class CXOracleConnectionManager(AbstractConnectionManager):
 
     isolation_read_committed = "ISOLATION LEVEL READ COMMITTED"
-    isolation_read_only = "READ ONLY"
+
+    # Note: the READ ONLY mode should be sufficient according to the
+    # Oracle documentation, which says: "All subsequent queries in that
+    # transaction see only changes that were committed before the
+    # transaction began."
+    #
+    # See: http://download.oracle.com/docs/cd/B19306_01/server.102/b14200
+    #   /statements_10005.htm
+    #
+    # This would be great for performance if we could rely on it.
+    # It's like serializable isolation but with less locking.
+    #
+    # However, in testing an Oracle 10g RAC environment with
+    # RelStorage, Oracle frequently leaked subsequently committed
+    # transactions into a read only transaction, suggesting that read
+    # only in RAC actually has read committed isolation rather than
+    # serializable isolation. Switching to serializable mode solved the
+    # problem. Using a DSN that specifies a particular RAC node did
+    # *not* solve the problem. It's likely that this is a bug in RAC,
+    # but let's be on the safe side and have all Oracle users apply
+    # serializable mode instead of read only mode, since serializable
+    # is more explicit.
+    #
+    # If anyone wants to try read only mode anyway, change the
+    # class variable below.
+    #
+    #isolation_read_only = "READ ONLY"
+
+    isolation_read_only = "ISOLATION LEVEL SERIALIZABLE"
 
     disconnected_exceptions = disconnected_exceptions
     close_exceptions = close_exceptions
@@ -285,7 +313,7 @@ class CXOracleConnectionManager(AbstractConnectionManager):
         """Reinitialize a connection for loading objects."""
         self.check_replica(conn, cursor)
         conn.rollback()
-        cursor.execute("SET TRANSACTION READ ONLY")
+        cursor.execute("SET TRANSACTION %s" % self.isolation_read_only)
 
     def check_replica(self, conn, cursor):
         """Raise an exception if the connection belongs to an old replica"""
