@@ -1,6 +1,6 @@
 
-Next Release
-------------
+1.4.0c4 (2010-09-17)
+--------------------
 
 - Worked around an Oracle RAC bug: apparently, in a RAC environment,
   the read-only transaction mode does not isolate transactions in the
@@ -13,7 +13,7 @@ Next Release
   to reduce the need for synchronized clocks, but in practice, that
   policy broke tests and did not really avoid the need to synchronize
   clocks.  Also, the effect of unsynchronized clocks is predictable
-  and manageable: you'll get bunches of transactions with very similar
+  and manageable: you'll get bunches of transactions with sequential
   timestamps.
 
 - If the database returns an object from the future (which should never
