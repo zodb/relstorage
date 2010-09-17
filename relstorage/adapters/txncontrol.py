@@ -166,14 +166,6 @@ class OracleTransactionControl(TransactionControl):
             conn.prepare()
         return '-'
 
-    def _parse_dsinterval(self, s):
-        """Convert an Oracle dsinterval (as a string) to a float."""
-        mo = re.match(r'([+-]\d+) (\d+):(\d+):([0-9.]+)', s)
-        if not mo:
-            raise ValueError(s)
-        day, hour, min, sec = [float(v) for v in mo.groups()]
-        return day * 86400 + hour * 3600 + min * 60 + sec
-
     def get_tid(self, cursor):
         """Returns the most recent tid.
         """
@@ -196,7 +188,10 @@ class OracleTransactionControl(TransactionControl):
                 return 0
 
         assert len(rows) == 1
-        return rows[0][0]
+        tid = rows[0][0]
+        if tid is None:
+            tid = 0
+        return tid
 
     def add_transaction(self, cursor, tid, username, description, extension,
             packed=False):
