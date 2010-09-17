@@ -1,4 +1,20 @@
 
+Next Release
+------------
+
+- Use the client time instead of the database server time as a factor
+  in the transaction ID.  RelStorage was using the database server time
+  to reduce the need for synchronized clocks, but in practice, that
+  policy broke tests and did not really avoid the need to synchronize
+  clocks.  Also, the effect of unsynchronized clocks is predictable
+  and manageable: you'll get bunches of transactions with very similar
+  timestamps.
+
+- If the database returns an object from the future (which should never
+  happen), generate a ReadConflictError, hopefully giving the application
+  a chance to recover.  The most likely causes of this are a broken
+  database and threading bugs.
+
 1.4.0c3 (2010-07-31)
 --------------------
 
@@ -11,7 +27,6 @@
 - Added a ZODB monkey patch that passes the "force" parameter to the
   sync method.  This should help the poll-interval option do its job
   better.
-
 
 1.4.0c2 (2010-07-28)
 --------------------

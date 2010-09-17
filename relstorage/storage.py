@@ -668,10 +668,11 @@ class RelStorage(
         user, desc, ext = self._ude
 
         # Choose a transaction ID.
-        # Base the transaction ID on the database time,
-        # while ensuring that the tid of this transaction
+        # Base the transaction ID on the current time,
+        # but ensure that the tid of this transaction
         # is greater than any existing tid.
-        last_tid, now = adapter.txncontrol.get_tid_and_time(cursor)
+        last_tid = adapter.txncontrol.get_tid(cursor)
+        now = time.time()
         stamp = TimeStamp(*(time.gmtime(now)[:5] + (now % 60,)))
         stamp = stamp.laterThan(TimeStamp(p64(last_tid)))
         tid = repr(stamp)

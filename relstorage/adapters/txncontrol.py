@@ -55,14 +55,11 @@ class PostgreSQLTransactionControl(TransactionControl):
     def __init__(self, keep_history):
         self.keep_history = keep_history
 
-    def get_tid_and_time(self, cursor):
-        """Returns the most recent tid and the current database time.
-
-        The database time is the number of seconds since the epoch.
-        """
+    def get_tid(self, cursor):
+        """Returns the most recent tid."""
         if self.keep_history:
             stmt = """
-            SELECT tid, EXTRACT(EPOCH FROM CURRENT_TIMESTAMP)
+            SELECT tid
             FROM transaction
             ORDER BY tid DESC
             LIMIT 1
@@ -70,7 +67,7 @@ class PostgreSQLTransactionControl(TransactionControl):
             cursor.execute(stmt)
         else:
             stmt = """
-            SELECT tid, EXTRACT(EPOCH FROM CURRENT_TIMESTAMP)
+            SELECT tid
             FROM object_state
             ORDER BY tid DESC
             LIMIT 1
@@ -78,11 +75,10 @@ class PostgreSQLTransactionControl(TransactionControl):
             cursor.execute(stmt)
             if not cursor.rowcount:
                 # nothing has been stored yet
-                stmt = "SELECT 0, EXTRACT(EPOCH FROM CURRENT_TIMESTAMP)"
-                cursor.execute(stmt)
+                return 0
 
         assert cursor.rowcount == 1
-        return cursor.fetchone()
+        return cursor.fetchone()[0]
 
     def add_transaction(self, cursor, tid, username, description, extension,
             packed=False):
@@ -107,15 +103,12 @@ class MySQLTransactionControl(TransactionControl):
         self.keep_history = keep_history
         self.Binary = Binary
 
-    def get_tid_and_time(self, cursor):
-        """Returns the most recent tid and the current database time.
-
-        The database time is the number of seconds since the epoch.
-        """
+    def get_tid(self, cursor):
+        """Returns the most recent tid."""
         # Lock in share mode to ensure the data being read is up to date.
         if self.keep_history:
             stmt = """
-            SELECT tid, UNIX_TIMESTAMP()
+            SELECT tid
             FROM transaction
             ORDER BY tid DESC
             LIMIT 1
@@ -124,7 +117,7 @@ class MySQLTransactionControl(TransactionControl):
             cursor.execute(stmt)
         else:
             stmt = """
-            SELECT tid, UNIX_TIMESTAMP()
+            SELECT tid
             FROM object_state
             ORDER BY tid DESC
             LIMIT 1
@@ -133,18 +126,10 @@ class MySQLTransactionControl(TransactionControl):
             cursor.execute(stmt)
             if not cursor.rowcount:
                 # nothing has been stored yet
-                stmt = "SELECT 0, UNIX_TIMESTAMP()"
-                cursor.execute(stmt)
+                return 0
 
         assert cursor.rowcount == 1
-        tid, timestamp = cursor.fetchone()
-        # MySQL does not provide timestamps with more than one second
-        # precision.  To provide more precision, if the system time is
-        # within one minute of the MySQL time, use the system time instead.
-        now = time.time()
-        if abs(now - timestamp) <= 60.0:
-            timestamp = now
-        return tid, timestamp
+        return cursor.fetchone()[0]
 
     def add_transaction(self, cursor, tid, username, description, extension,
             packed=False):
@@ -189,45 +174,29 @@ class OracleTransactionControl(TransactionControl):
         day, hour, min, sec = [float(v) for v in mo.groups()]
         return day * 86400 + hour * 3600 + min * 60 + sec
 
-    def get_tid_and_time(self, cursor):
-        """Returns the most recent tid and the current database time.
-
-        The database time is the number of seconds since the epoch.
+    def get_tid(self, cursor):
+        """Returns the most recent tid.
         """
         if self.keep_history:
             stmt = """
-            SELECT MAX(tid),
-                TO_CHAR(TO_DSINTERVAL(SYSTIMESTAMP - TO_TIMESTAMP_TZ(
-                '1970-01-01 00:00:00 +00:00','YYYY-MM-DD HH24:MI:SS TZH:TZM')))
+            SELECT MAX(tid)
             FROM transaction
             """
             cursor.execute(stmt)
             rows = list(cursor)
         else:
             stmt = """
-            SELECT MAX(tid),
-                TO_CHAR(TO_DSINTERVAL(SYSTIMESTAMP - TO_TIMESTAMP_TZ(
-                '1970-01-01 00:00:00 +00:00','YYYY-MM-DD HH24:MI:SS TZH:TZM')))
+            SELECT MAX(tid)
             FROM object_state
             """
             cursor.execute(stmt)
             rows = list(cursor)
             if not rows:
                 # nothing has been stored yet
-                stmt = """
-                SELECT 0,
-                TO_CHAR(TO_DSINTERVAL(SYSTIMESTAMP - TO_TIMESTAMP_TZ(
-                '1970-01-01 00:00:00 +00:00','YYYY-MM-DD HH24:MI:SS TZH:TZM')))
-                FROM DUAL
-                """
-                cursor.execute(stmt)
-                rows = list(cursor)
+                return 0
 
         assert len(rows) == 1
-        tid, now = rows[0]
-        if tid is None:
-            tid = 0
-        return tid, self._parse_dsinterval(now)
+        return rows[0][0]
 
     def add_transaction(self, cursor, tid, username, description, extension,
             packed=False):

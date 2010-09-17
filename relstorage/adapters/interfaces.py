@@ -422,11 +422,8 @@ class IScriptRunner(Interface):
 class ITransactionControl(Interface):
     """Begin, commit, and abort transactions."""
 
-    def get_tid_and_time(cursor):
-        """Returns the most recent tid and the current database time.
-
-        The database time is the number of seconds since the epoch.
-        """
+    def get_tid(cursor):
+        """Returns the most recent tid."""
 
     def add_transaction(cursor, tid, username, description, extension,
             packed=False):

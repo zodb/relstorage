@@ -59,6 +59,7 @@ class StorageCacheTests(unittest.TestCase):
         from ZODB.utils import p64
         adapter = MockAdapter()
         c = self.getClass()(adapter, MockOptionsWithFakeCache())
+        c.current_tid = 60
         c.checkpoints = (50, 40)
         c.delta_after0[2] = 55
         data['myprefix:state:55:2'] = p64(55) + 'abc'
@@ -70,6 +71,7 @@ class StorageCacheTests(unittest.TestCase):
         from ZODB.utils import p64
         adapter = MockAdapter()
         c = self.getClass()(adapter, MockOptionsWithFakeCache())
+        c.current_tid = 60
         c.checkpoints = (50, 40)
         c.delta_after0[2] = 55
         adapter.mover.data[2] = ('abc', 55)
@@ -81,6 +83,7 @@ class StorageCacheTests(unittest.TestCase):
         from ZODB.utils import p64
         adapter = MockAdapter()
         c = self.getClass()(adapter, MockOptionsWithFakeCache())
+        c.current_tid = 60
         c.checkpoints = (50, 40)
         c.delta_after0[2] = 55
         adapter.mover.data[2] = ('abc', 56)
@@ -91,11 +94,29 @@ class StorageCacheTests(unittest.TestCase):
         else:
             self.fail("Failed to report cache inconsistency")
 
+    def test_load_using_delta_after0_future_error(self):
+        from relstorage.tests.fakecache import data
+        from ZODB.utils import p64
+        adapter = MockAdapter()
+        c = self.getClass()(adapter, MockOptionsWithFakeCache())
+        c.current_tid = 55
+        c.checkpoints = (50, 40)
+        c.delta_after0[2] = 55
+        adapter.mover.data[2] = ('abc', 56)
+        from ZODB.POSException import ReadConflictError
+        try:
+            c.load(None, 2)
+        except ReadConflictError, e:
+            self.assertTrue('future' in e.message)
+        else:
+            self.fail("Failed to generate a conflict error")
+
     def test_load_using_checkpoint0_hit(self):
         from relstorage.tests.fakecache import data
         from ZODB.utils import p64
         adapter = MockAdapter()
         c = self.getClass()(adapter, MockOptionsWithFakeCache())
+        c.current_tid = 60
         c.checkpoints = (50, 40)
         data['myprefix:state:50:2'] = p64(45) + 'xyz'
         res = c.load(None, 2)
@@ -106,6 +127,7 @@ class StorageCacheTests(unittest.TestCase):
         from ZODB.utils import p64
         adapter = MockAdapter()
         c = self.getClass()(adapter, MockOptionsWithFakeCache())
+        c.current_tid = 60
         c.checkpoints = (50, 40)
         adapter.mover.data[2] = ('xyz', 45)
         res = c.load(None, 2)
@@ -117,6 +139,7 @@ class StorageCacheTests(unittest.TestCase):
         from ZODB.utils import p64
         adapter = MockAdapter()
         c = self.getClass()(adapter, MockOptionsWithFakeCache())
+        c.current_tid = 60
         c.checkpoints = (50, 40)
         c.delta_after1[2] = 45
         data['myprefix:state:45:2'] = p64(45) + 'abc'
@@ -129,6 +152,7 @@ class StorageCacheTests(unittest.TestCase):
         from ZODB.utils import p64
         adapter = MockAdapter()
         c = self.getClass()(adapter, MockOptionsWithFakeCache())
+        c.current_tid = 60
         c.checkpoints = (50, 40)
         c.delta_after1[2] = 45
         adapter.mover.data[2] = ('abc', 45)
@@ -141,6 +165,7 @@ class StorageCacheTests(unittest.TestCase):
         from ZODB.utils import p64
         adapter = MockAdapter()
         c = self.getClass()(adapter, MockOptionsWithFakeCache())
+        c.current_tid = 60
         c.checkpoints = (50, 40)
         data['myprefix:state:40:2'] = p64(35) + '123'
         res = c.load(None, 2)
@@ -152,6 +177,7 @@ class StorageCacheTests(unittest.TestCase):
         from ZODB.utils import p64
         adapter = MockAdapter()
         c = self.getClass()(adapter, MockOptionsWithFakeCache())
+        c.current_tid = 60
         c.checkpoints = (50, 40)
         adapter.mover.data[2] = ('123', 35)
         res = c.load(None, 2)

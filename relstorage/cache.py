@@ -15,6 +15,8 @@
 from relstorage.autotemp import AutoTemporaryFile
 from ZODB.utils import p64
 from ZODB.utils import u64
+from ZODB.POSException import ReadConflictError
+from ZODB.TimeStamp import TimeStamp
 import logging
 import random
 import threading
@@ -118,6 +120,73 @@ class StorageCache(object):
         self.current_tid = 0
         self.commit_count = object()
 
+    def _check_tid_after_load(self, oid_int, actual_tid_int,
+            expect_tid_int=None):
+        """Verify the tid of an object loaded from the database is sane."""
+
+        if actual_tid_int > self.current_tid:
+            # Strangely, the database just gave us data from a future
+            # transaction.  We can't give the data to ZODB because that
+            # would be a consistency violation.  However, the cause is hard
+            # to track down, so issue a ReadConflictError and hope that
+            # the application retries successfully.
+            raise ReadConflictError("Got data for OID 0x%(oid_int)x from "
+                "future transaction %(actual_tid_int)d (%(got_ts)s).  "
+                "Current transaction is %(current_tid)d (%(current_ts)s)."
+                % {
+                    'oid_int': oid_int,
+                    'actual_tid_int': actual_tid_int,
+                    'current_tid': self.current_tid,
+                    'got_ts': str(TimeStamp(p64(actual_tid_int))),
+                    'current_ts': str(TimeStamp(p64(self.current_tid))),
+                })
+
+        if expect_tid_int is not None and actual_tid_int != expect_tid_int:
+            # Uh-oh, the cache is inconsistent with the database.
+            # Possible causes:
+            #
+            # - The database MUST provide a snapshot view for each
+            #   session; this error can occur if that requirement is
+            #   violated. For example, MySQL's MyISAM engine is not
+            #   sufficient for the object_state table because MyISAM
+            #   can not provide a snapshot view. (InnoDB is
+            #   sufficient.)
+            #
+            # - Something could be writing to the database out
+            #   of order, such as a version of RelStorage that
+            #   acquires a different commit lock.
+            #
+            # - A software bug. In the past, there was a subtle bug
+            #   in after_poll() that caused it to ignore the
+            #   transaction order, leading it to sometimes put the
+            #   wrong tid in delta_after*.
+            cp0, cp1 = self.checkpoints
+            import os
+            import thread
+            raise AssertionError("Detected an inconsistency "
+                "between the RelStorage cache and the database "
+                "while loading an object using the delta_after0 dict.  "
+                "Please verify the database is configured for "
+                "ACID compliance and that all clients are using "
+                "the same commit lock.  "
+                "(oid_int=%(oid_int)r, expect_tid_int=%(expect_tid_int)r, "
+                "actual_tid_int=%(actual_tid_int)r, "
+                "current_tid=%(current_tid)r, cp0=%(cp0)r, cp1=%(cp1)r, "
+                "len(delta_after0)=%(lda0)r, len(delta_after1)=%(lda1)r, "
+                "pid=%(pid)r, thread_ident=%(thread_ident)r)"
+                % {
+                    'oid_int': oid_int,
+                    'expect_tid_int': expect_tid_int,
+                    'actual_tid_int': actual_tid_int,
+                    'current_tid': self.current_tid,
+                    'cp0': cp0,
+                    'cp1': cp1,
+                    'lda0': len(self.delta_after0),
+                    'lda1': len(self.delta_after1),
+                    'pid': os.getpid(),
+                    'thread_ident': thread.get_ident(),
+                })
+
     def load(self, cursor, oid_int):
         """Load the given object from cache if possible.
 
@@ -162,52 +231,7 @@ class StorageCache(object):
             # Cache miss.
             state, actual_tid_int = self.adapter.mover.load_current(
                 cursor, oid_int)
-            if actual_tid_int != tid_int:
-                # Uh-oh, the cache is inconsistent with the database.
-                # Possible causes:
-                #
-                # - The database MUST provide a snapshot view for each
-                #   session; this error can occur if that requirement is
-                #   violated. For example, MySQL's MyISAM engine is not
-                #   sufficient for the object_state table because MyISAM
-                #   can not provide a snapshot view. (InnoDB is
-                #   sufficient.)
-                #
-                # - Something could be writing to the database out
-                #   of order, such as a version of RelStorage that
-                #   acquires a different commit lock.
-                #
-                # - A software bug. In the past, there was a subtle bug
-                #   in after_poll() that caused it to ignore the
-                #   transaction order, leading it to sometimes put the
-                #   wrong tid in delta_after*.
-
-                cp0, cp1 = self.checkpoints
-                import os
-                import thread
-                raise AssertionError("Detected an inconsistency "
-                    "between the RelStorage cache and the database "
-                    "while loading an object using the delta_after0 dict.  "
-                    "Please verify the database is configured for "
-                    "ACID compliance and that all clients are using "
-                    "the same commit lock.  "
-                    "(oid_int=%(oid_int)r, tid_int=%(tid_int)r, "
-                    "actual_tid_int=%(actual_tid_int)r, "
-                    "current_tid=%(current_tid)r, cp0=%(cp0)r, cp1=%(cp1)r, "
-                    "len(delta_after0)=%(lda0)r, len(delta_after1)=%(lda1)r, "
-                    "pid=%(pid)r, thread_ident=%(thread_ident)r)"
-                    % {
-                        'oid_int': oid_int,
-                        'tid_int': tid_int,
-                        'actual_tid_int': actual_tid_int,
-                        'current_tid': self.current_tid,
-                        'cp0': cp0,
-                        'cp1': cp1,
-                        'lda0': len(self.delta_after0),
-                        'lda1': len(self.delta_after1),
-                        'pid': os.getpid(),
-                        'thread_ident': thread.get_ident(),
-                    })
+            self._check_tid_after_load(oid_int, actual_tid_int, tid_int)
 
             cache_data = '%s%s' % (p64(tid_int), state or '')
             for client in self.clients_local_first:
@@ -254,6 +278,7 @@ class StorageCache(object):
         # Cache miss.
         state, tid_int = self.adapter.mover.load_current(cursor, oid_int)
         if tid_int:
+            self._check_tid_after_load(oid_int, tid_int)
             cache_data = '%s%s' % (p64(tid_int), state or '')
             for client in self.clients_local_first:
                 client.set(cp0_key, cache_data)
