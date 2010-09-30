@@ -5,12 +5,12 @@
 - Made compatible with ZODB 3.10.0b7.
 
 - Enabled ketama and compression in pylibmc_wrapper.  Both options
-  are better for clusters.
+  are better for clusters.  [Helge Tesdal]
 
-- Oracle: Use a more optimal query for POSKeyError logging.
+- Oracle: Use a more optimal query for POSKeyError logging.  [Helge Tesdal]
 
 - Fixed a NameError that occurred when getting the history of an
-  object where transaction extended info was set.
+  object where transaction extended info was set.  [Helge Tesdal]
 
 
 1.4.0c4 (2010-09-17)
