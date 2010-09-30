@@ -643,8 +643,8 @@ Q: Why should I choose RelStorage?
 Q: Can RelStorage replace ZRS (Zope Replication Services)?
 
     A: Yes, RelStorage inherits the asynchronous master/slave replication
-    capability of MySQL and other databases.  The author is currently
-    looking for funding opportunities to support master/master replication.
+    capability of MySQL and other databases.  RelStorage has also been
+    proven to work with Oracle RAC.
 
 Q: How do I set up an environment to run the RelStorage tests?
 
