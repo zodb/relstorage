@@ -1,4 +1,9 @@
 
+Next Release
+------------
+
+- ...
+
 1.4.0 (2010-09-30)
 ------------------
 
@@ -11,7 +16,6 @@
 
 - Fixed a NameError that occurred when getting the history of an
   object where transaction extended info was set.  [Helge Tesdal]
-
 
 1.4.0c4 (2010-09-17)
 --------------------
