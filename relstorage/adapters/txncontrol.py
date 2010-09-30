@@ -105,14 +105,12 @@ class MySQLTransactionControl(TransactionControl):
 
     def get_tid(self, cursor):
         """Returns the most recent tid."""
-        # Lock in share mode to ensure the data being read is up to date.
         if self.keep_history:
             stmt = """
             SELECT tid
             FROM transaction
             ORDER BY tid DESC
             LIMIT 1
-            LOCK IN SHARE MODE
             """
             cursor.execute(stmt)
         else:
@@ -121,7 +119,6 @@ class MySQLTransactionControl(TransactionControl):
             FROM object_state
             ORDER BY tid DESC
             LIMIT 1
-            LOCK IN SHARE MODE
             """
             cursor.execute(stmt)
             if not cursor.rowcount:
@@ -210,4 +207,3 @@ class OracleTransactionControl(TransactionControl):
             cursor.execute(stmt, (
                 tid, packed and 'Y' or 'N', self.Binary(username),
                 self.Binary(description), self.Binary(extension)))
-

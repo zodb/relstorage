@@ -1,4 +1,16 @@
 
+1.4.0 (2010-09-30)
+------------------
+
+- Enabled ketama and compression in pylibmc_wrapper.  Both options
+  are better for clusters.
+
+- Oracle: Use a more optimal query for POSKeyError logging.
+
+- Fixed a NameError that occurred when getting the history of an
+  object where transaction extended info was set.
+
+
 1.4.0c4 (2010-09-17)
 --------------------
 

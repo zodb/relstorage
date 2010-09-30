@@ -459,6 +459,25 @@ class GenericRelStorageTests(
         finally:
             db.close()
 
+    def checkHistoryWithExtension(self):
+        # Verify the history method works with transactions that have
+        # extended info.
+        db = DB(self._storage)
+        try:
+            conn = db.open()
+            try:
+                conn.root()['pi'] = 3.14
+                transaction.get().setExtendedInfo("digits", 3)
+                transaction.commit()
+                history = self._storage.history(conn.root()._p_oid)
+                self.assertEqual(len(history), 1)
+                if self.keep_history:
+                    self.assertEqual(history[0]['digits'], 3)
+            finally:
+                conn.close()
+        finally:
+            db.close()
+
     def checkPackDutyCycle(self):
         # Exercise the code in the pack algorithm that releases the
         # commit lock for a time to allow concurrent transactions to commit.

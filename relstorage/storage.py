@@ -29,7 +29,6 @@ from ZODB.UndoLogCompatible import UndoLogCompatible
 from ZODB.utils import p64
 from ZODB.utils import u64
 from zope.interface import implements
-from zope.interface import Interface
 import base64
 import cPickle
 import logging
@@ -399,18 +398,14 @@ class RelStorage(
         msg = ["POSKeyError on oid %d: %s" % (oid_int, reason)]
 
         if adapter.keep_history:
-            rows = adapter.dbiter.iter_transactions(cursor)
-            row = None
-            for row in rows:
-                # just get the first row
-                break
-            if not row:
+            tid = adapter.txncontrol.get_tid(cursor)
+            if not tid:
                 # This happens when initializing a new database or
                 # after packing, so it's not a warning.
                 logfunc = log.debug
                 msg.append("No previous transactions exist")
             else:
-                msg.append("Current transaction is %d" % row[0])
+                msg.append("Current transaction is %d" % tid)
 
             tids = []
             try:
@@ -980,7 +975,7 @@ class RelStorage(
             for tid_int, username, description, extension, length in rows:
                 tid = p64(tid_int)
                 if extension:
-                    d = loads(extension)
+                    d = cPickle.loads(extension)
                 else:
                     d = {}
                 d.update({"time": TimeStamp(tid).timeTime(),

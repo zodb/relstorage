@@ -22,14 +22,18 @@ from _pylibmc import MemcachedError  # pylibmc >= 0.9
 
 
 class Client(object):
+    behaviors = {
+        "tcp_nodelay": True,
+        "ketama": True,
+    }
 
     def __init__(self, servers):
         self._client = pylibmc.Client(servers, binary=True)
-        self._client.set_behaviors({
-            "tcp_nodelay": True,
-            #"no block": True,
-            #"buffer requests": True,
-            })
+        self._client.set_behaviors(self.behaviors)
+        if pylibmc.support_compression:
+            self.min_compress_len = 1000
+        else:
+            self.min_compress_len = 0
 
     def get(self, key):
         try:
@@ -45,19 +49,22 @@ class Client(object):
 
     def set(self, key, value):
         try:
-            return self._client.set(key, value)
+            return self._client.set(
+                key, value, min_compress_len=self.min_compress_len)
         except MemcachedError:
             return None
 
     def set_multi(self, d):
         try:
-            return self._client.set_multi(d)
+            return self._client.set_multi(
+                d, min_compress_len=self.min_compress_len)
         except MemcachedError:
             return None
 
     def add(self, key, value):
         try:
-            return self._client.add(key, value)
+            return self._client.add(
+                key, value, min_compress_len=self.min_compress_len)
         except MemcachedError:
             return None
 
@@ -72,4 +79,3 @@ class Client(object):
             self._client.flush_all()
         except MemcachedError:
             return None
-
