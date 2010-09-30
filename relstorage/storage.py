@@ -70,6 +70,8 @@ log = logging.getLogger("relstorage")
 # early rather than wait for an explicit abort.
 abort_early = os.environ.get('RELSTORAGE_ABORT_EARLY')
 
+z64 = '\0' * 8
+
 
 class RelStorage(
         UndoLogCompatible,
@@ -97,7 +99,7 @@ class RelStorage(
     _tid = None
 
     # _ltid is the ID of the last transaction committed by this instance.
-    _ltid = None
+    _ltid = z64
 
     # _prepared_txn is the name of the transaction to commit in the
     # second phase.
@@ -131,6 +133,10 @@ class RelStorage(
     # _txn_blobs: {oid->filename}; contains blob data for the
     # currently uncommitted transaction.
     _txn_blobs = None
+
+    # _txn_check_serials: {oid, serial}; confirms that certain objects
+    # have not changed at commit.
+    _txn_check_serials = None
 
     # _batcher: An object that accumulates store operations
     # so they can be executed in batch (to minimize latency).
@@ -430,7 +436,7 @@ class RelStorage(
 
         logfunc('; '.join(msg))
 
-    def load(self, oid, version):
+    def load(self, oid, version=''):
         oid_int = u64(oid)
         cache = self._cache
 
@@ -461,7 +467,7 @@ class RelStorage(
 
     getSerial = getTid  # ZODB 3.7
 
-    def loadEx(self, oid, version):
+    def loadEx(self, oid, version=''):
         # Since we don't support versions, just tack the empty version
         # string onto load's result.
         return self.load(oid, version) + ("",)
@@ -593,6 +599,27 @@ class RelStorage(
             self._lock_release()
 
 
+    def checkCurrentSerialInTransaction(self, oid, serial, transaction):
+        if transaction is not self._transaction:
+            raise POSException.StorageTransactionError(self, transaction)
+
+        _, committed_tid = self.load(oid, '')
+        if committed_tid != serial:
+            raise POSException.ReadConflictError(
+                oid=oid, serials=(committed_tid, serial))
+
+        if self._txn_check_serials is None:
+            self._txn_check_serials = {}
+        else:
+            # If this transaction already specified a different serial for
+            # this oid, the transaction conflicts with itself.
+            previous_serial = self._txn_check_serials.get(oid, serial)
+            if previous_serial != serial:
+                raise POSException.ReadConflictError(
+                    oid=oid, serials=(previous_serial, serial))
+        self._txn_check_serials[oid] = serial
+
+
     def tpc_begin(self, transaction, tid=None, status=' '):
         if self._is_read_only:
             raise POSException.ReadOnlyError()
@@ -688,6 +715,7 @@ class RelStorage(
         self._max_stored_oid = 0
         self._batcher = None
         self._txn_blobs = None
+        self._txn_check_serials = None
         self._cache.clear_temp()
 
 
@@ -788,6 +816,16 @@ class RelStorage(
 
         self._prepare_tid()
         tid_int = u64(self._tid)
+
+        if self._txn_check_serials:
+            oid_ints = [u64(oid) for oid in self._txn_check_serials.iterkeys()]
+            current = self._adapter.mover.current_object_tids(cursor, oid_ints)
+            for oid, expect in self._txn_check_serials.iteritems():
+                oid_int = u64(oid)
+                actual = p64(current.get(oid_int, 0))
+                if actual != expect:
+                    raise POSException.ReadConflictError(
+                        oid=oid, serials=(actual, expect))
 
         serials = self._finish_store()
         self._adapter.mover.update_current(cursor, tid_int)
@@ -892,9 +930,12 @@ class RelStorage(
                     if not os.listdir(dirname):
                         ZODB.blob.remove_committed_dir(dirname)
 
-
     def lastTransaction(self):
-        return self._ltid
+        self._lock_acquire()
+        try:
+            return self._ltid
+        finally:
+            self._lock_release()
 
     def new_oid(self):
         if self._is_read_only:

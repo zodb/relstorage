@@ -45,6 +45,7 @@ class ObjectMover(object):
         'exists',
         'load_before',
         'get_object_tid_after',
+        'current_object_tids',
         'on_store_opened',
         'make_batcher',
         'store_temp',
@@ -342,6 +343,31 @@ class ObjectMover(object):
             return rows[0][0]
         else:
             return None
+
+
+
+
+    def generic_current_object_tids(self, cursor, oids):
+        """Returns the current {oid: tid} for specified object ids."""
+        res = {}
+        if self.keep_history:
+            table = 'current_object'
+        else:
+            table = 'object_state'
+        oids = list(oids)
+        while oids:
+            oid_list = ','.join(str(oid) for oid in oids[:1000])
+            del oids[:1000]
+            stmt = "SELECT zoid, tid FROM %s WHERE zoid IN (%s)" % (
+                table, oid_list)
+            cursor.execute(stmt)
+            for oid, tid in cursor:
+                res[oid] = tid
+        return res
+
+    postgresql_current_object_tids = generic_current_object_tids
+    mysql_current_object_tids = generic_current_object_tids
+    oracle_current_object_tids = generic_current_object_tids
 
 
 

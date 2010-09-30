@@ -2,6 +2,8 @@
 1.4.0 (2010-09-30)
 ------------------
 
+- Made compatible with ZODB 3.10.0b7.
+
 - Enabled ketama and compression in pylibmc_wrapper.  Both options
   are better for clusters.
 

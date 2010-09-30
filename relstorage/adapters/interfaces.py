@@ -209,6 +209,9 @@ class IObjectMover(Interface):
         Returns None if no later state exists.
         """
 
+    def current_object_tids(cursor, oids):
+        """Returns the current {oid: tid} for specified object ids."""
+
     def on_store_opened(cursor, restart=False):
         """Create the temporary table for storing objects.
 
