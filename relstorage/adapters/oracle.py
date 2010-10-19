@@ -93,7 +93,7 @@ class OracleAdapter(object):
             )
         self.mover = ObjectMover(
             database_name='oracle',
-            keep_history=self.keep_history,
+            options=options,
             runner=self.runner,
             Binary=cx_Oracle.Binary,
             inputsizes={

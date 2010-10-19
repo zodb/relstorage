@@ -253,7 +253,7 @@ class IObjectMover(Interface):
         This happens after conflict resolution.
         """
 
-    def move_from_temp(cursor, tid):
+    def move_from_temp(cursor, tid, txn_has_blobs):
         """Moved the temporarily stored objects to permanent storage.
 
         Returns the list of oids stored.
@@ -263,6 +263,18 @@ class IObjectMover(Interface):
         """Update the current object pointers.
 
         tid is the integer tid of the transaction being committed.
+        """
+
+    def download_blob(cursor, oid, tid, filename):
+        """Download a blob into a file.
+
+        Returns the size of the blob file in bytes.
+        """
+
+    def upload_blob(cursor, oid, tid, filename):
+        """Upload a blob from a file.
+
+        If tid is None, upload to the temporary table.
         """
 
 

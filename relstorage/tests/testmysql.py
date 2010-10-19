@@ -156,38 +156,47 @@ def test_suite():
         pass
     else:
         from relstorage.tests.blob.testblob import storage_reusable_suite
-        for keep_history in (False, True):
-            def create_storage(name, blob_dir, keep_history=keep_history):
-                from relstorage.storage import RelStorage
-                from relstorage.adapters.mysql import MySQLAdapter
-                db = db_names[name]
-                if not keep_history:
-                    db += '_hf'
-                adapter = MySQLAdapter(
-                    options=Options(keep_history=keep_history),
-                    db=db,
-                    user='relstoragetest',
-                    passwd='relstoragetest',
+        for shared_blob_dir in (False, True):
+            for keep_history in (False, True):
+                def create_storage(name, blob_dir,
+                        shared_blob_dir=shared_blob_dir,
+                        keep_history=keep_history):
+                    from relstorage.storage import RelStorage
+                    from relstorage.adapters.mysql import MySQLAdapter
+                    db = db_names[name]
+                    if not keep_history:
+                        db += '_hf'
+                    options = Options(
+                        keep_history=keep_history,
+                        shared_blob_dir=shared_blob_dir,
+                        blob_dir=os.path.abspath(blob_dir),
                     )
-                storage = RelStorage(adapter, name=name, create=True,
-                    blob_dir=os.path.abspath(blob_dir))
-                storage.zap_all()
-                return storage
+                    adapter = MySQLAdapter(
+                        options=options,
+                        db=db,
+                        user='relstoragetest',
+                        passwd='relstoragetest',
+                    )
+                    storage = RelStorage(adapter, name=name, options=options)
+                    storage.zap_all()
+                    return storage
 
-            if keep_history:
-                prefix = 'HPMySQL'
-                pack_test_name = 'blob_packing.txt'
-            else:
-                prefix = 'HFMySQL'
-                pack_test_name = 'blob_packing_history_free.txt'
+                prefix = 'MySQL%s%s' % (
+                    (shared_blob_dir and 'Shared' or 'Unshared'),
+                    (keep_history and 'WithHistory' or 'NoHistory'),
+                )
+                if keep_history:
+                    pack_test_name = 'blob_packing.txt'
+                else:
+                    pack_test_name = 'blob_packing_history_free.txt'
 
-            suite.addTest(storage_reusable_suite(
-                prefix, create_storage,
-                test_blob_storage_recovery=True,
-                test_packing=True,
-                test_undo=keep_history,
-                pack_test_name=pack_test_name,
-                ))
+                suite.addTest(storage_reusable_suite(
+                    prefix, create_storage,
+                    test_blob_storage_recovery=True,
+                    test_packing=True,
+                    test_undo=keep_history,
+                    pack_test_name=pack_test_name,
+                    ))
 
     return suite
 

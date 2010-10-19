@@ -19,7 +19,7 @@ from zope.interface import implements
 import re
 import time
 
-relstorage_op_version = '1.4'
+relstorage_op_version = '1.5'
 
 history_preserving_schema = """
 
@@ -80,15 +80,16 @@ history_preserving_schema = """
     oracle:
         CREATE SEQUENCE zoid_seq;
 
-# object_state: All object states in all transactions. Note that md5
-# and state can be null to represent object uncreation.
+# object_state and blob_chunk: All object and blob states in all
+# transactions. Note that md5 and state can be null to represent object
+# uncreation.
 
     postgresql:
         CREATE TABLE object_state (
             zoid        BIGINT NOT NULL,
             tid         BIGINT NOT NULL REFERENCES transaction
                         CHECK (tid > 0),
-            PRIMARY KEY (zoid, tid),
+                        PRIMARY KEY (zoid, tid),
             prev_tid    BIGINT NOT NULL REFERENCES transaction,
             md5         CHAR(32),
             state       BYTEA
@@ -96,25 +97,51 @@ history_preserving_schema = """
         CREATE INDEX object_state_tid ON object_state (tid);
         CREATE INDEX object_state_prev_tid ON object_state (prev_tid);
 
+        CREATE TABLE blob_chunk (
+            zoid        BIGINT NOT NULL,
+            tid         BIGINT NOT NULL,
+            chunk_num   BIGINT NOT NULL,
+                        PRIMARY KEY (zoid, tid, chunk_num),
+            chunk       BYTEA NOT NULL
+        );
+        CREATE INDEX blob_chunk_lookup ON blob_chunk (zoid, tid);
+        ALTER TABLE blob_chunk ADD CONSTRAINT blob_chunk_fk
+            FOREIGN KEY (zoid, tid)
+            REFERENCES object_state (zoid, tid)
+            ON DELETE CASCADE;
+
     mysql:
         CREATE TABLE object_state (
             zoid        BIGINT NOT NULL,
             tid         BIGINT NOT NULL REFERENCES transaction,
-            PRIMARY KEY (zoid, tid),
+                        PRIMARY KEY (zoid, tid),
+                        CHECK (tid > 0),
             prev_tid    BIGINT NOT NULL REFERENCES transaction,
             md5         CHAR(32) CHARACTER SET ascii,
-            state       LONGBLOB,
-            CHECK (tid > 0)
+            state       LONGBLOB
         ) ENGINE = InnoDB;
         CREATE INDEX object_state_tid ON object_state (tid);
         CREATE INDEX object_state_prev_tid ON object_state (prev_tid);
 
+        CREATE TABLE blob_chunk (
+            zoid        BIGINT NOT NULL,
+            tid         BIGINT NOT NULL,
+            chunk_num   BIGINT NOT NULL,
+                        PRIMARY KEY (zoid, tid, chunk_num),
+            chunk       LONGBLOB NOT NULL
+        ) ENGINE = InnoDB;
+        CREATE INDEX blob_chunk_lookup ON blob_chunk (zoid, tid);
+        ALTER TABLE blob_chunk ADD CONSTRAINT blob_chunk_fk
+            FOREIGN KEY (zoid, tid)
+            REFERENCES object_state (zoid, tid)
+            ON DELETE CASCADE;
+
     oracle:
         CREATE TABLE object_state (
             zoid        NUMBER(20) NOT NULL,
-            tid         NUMBER(20) NOT NULL REFERENCES transaction
-                        CHECK (tid > 0),
-            PRIMARY KEY (zoid, tid),
+            tid         NUMBER(20) NOT NULL REFERENCES transaction,
+                        PRIMARY KEY (zoid, tid),
+                        CHECK tid_min (tid > 0),
             prev_tid    NUMBER(20) NOT NULL REFERENCES transaction,
             md5         CHAR(32),
             state       BLOB
@@ -122,13 +149,27 @@ history_preserving_schema = """
         CREATE INDEX object_state_tid ON object_state (tid);
         CREATE INDEX object_state_prev_tid ON object_state (prev_tid);
 
+        CREATE TABLE blob_chunk (
+            zoid        NUMBER(20) NOT NULL,
+            tid         NUMBER(20) NOT NULL,
+            chunk_num   NUMBER(20) NOT NULL,
+                        PRIMARY KEY (zoid, tid, chunk_num),
+            chunk       BLOB
+        );
+        CREATE INDEX blob_chunk_lookup ON blob_chunk (zoid, tid);
+        ALTER TABLE blob_chunk ADD CONSTRAINT blob_chunk_fk
+            FOREIGN KEY (zoid, tid)
+            REFERENCES object_state (zoid, tid)
+            ON DELETE CASCADE;
+
 # current_object: Pointers to the current object state
 
     postgresql:
         CREATE TABLE current_object (
             zoid        BIGINT NOT NULL PRIMARY KEY,
             tid         BIGINT NOT NULL,
-            FOREIGN KEY (zoid, tid) REFERENCES object_state
+                        FOREIGN KEY (zoid, tid)
+                            REFERENCES object_state (zoid, tid)
         );
         CREATE INDEX current_object_tid ON current_object (tid);
 
@@ -136,7 +177,8 @@ history_preserving_schema = """
         CREATE TABLE current_object (
             zoid        BIGINT NOT NULL PRIMARY KEY,
             tid         BIGINT NOT NULL,
-            FOREIGN KEY (zoid, tid) REFERENCES object_state (zoid, tid)
+                        FOREIGN KEY (zoid, tid)
+                            REFERENCES object_state (zoid, tid)
         ) ENGINE = InnoDB;
         CREATE INDEX current_object_tid ON current_object (tid);
 
@@ -144,7 +186,8 @@ history_preserving_schema = """
         CREATE TABLE current_object (
             zoid        NUMBER(20) NOT NULL PRIMARY KEY,
             tid         NUMBER(20) NOT NULL,
-            FOREIGN KEY (zoid, tid) REFERENCES object_state
+                        FOREIGN KEY (zoid, tid)
+                            REFERENCES object_state (zoid, tid)
         );
         CREATE INDEX current_object_tid ON current_object (tid);
 
@@ -288,7 +331,14 @@ history_preserving_schema = """
             zoid        NUMBER(20) NOT NULL PRIMARY KEY,
             prev_tid    NUMBER(20) NOT NULL,
             md5         CHAR(32),
-            state       BLOB
+            state       BLOB,
+            blobdata    BLOB
+        ) ON COMMIT DELETE ROWS;
+
+        CREATE GLOBAL TEMPORARY TABLE temp_blob_chunk (
+            zoid        NUMBER(20) NOT NULL,
+            chunk_num   NUMBER(20) NOT NULL,
+            chunk       BLOB
         ) ON COMMIT DELETE ROWS;
 
         # Temporary state during packing: a list of objects
@@ -422,7 +472,7 @@ history_free_schema = """
     oracle:
         CREATE SEQUENCE zoid_seq;
 
-# object_state: All object states in all transactions.
+# object_state and blob_chunk: All object states in all transactions.
 
     postgresql:
         CREATE TABLE object_state (
@@ -432,22 +482,59 @@ history_free_schema = """
         );
         CREATE INDEX object_state_tid ON object_state (tid);
 
+        CREATE TABLE blob_chunk (
+            zoid        BIGINT NOT NULL,
+            chunk_num   BIGINT NOT NULL,
+                        PRIMARY KEY (zoid, chunk_num),
+            chunk       BYTEA NOT NULL
+        );
+        CREATE INDEX blob_chunk_lookup ON blob_chunk (zoid);
+        ALTER TABLE blob_chunk ADD CONSTRAINT blob_chunk_fk
+            FOREIGN KEY (zoid)
+            REFERENCES object_state (zoid)
+            ON DELETE CASCADE;
+
     mysql:
         CREATE TABLE object_state (
             zoid        BIGINT NOT NULL PRIMARY KEY,
             tid         BIGINT NOT NULL,
-            state       LONGBLOB,
-            CHECK (tid > 0)
+                        CHECK (tid > 0),
+            state       LONGBLOB
         ) ENGINE = InnoDB;
         CREATE INDEX object_state_tid ON object_state (tid);
+
+        CREATE TABLE blob_chunk (
+            zoid        BIGINT NOT NULL,
+            chunk_num   BIGINT NOT NULL,
+                        PRIMARY KEY (zoid, chunk_num),
+            chunk       LONGBLOB NOT NULL
+        );
+        CREATE INDEX blob_chunk_lookup ON blob_chunk (zoid);
+        ALTER TABLE blob_chunk ADD CONSTRAINT blob_chunk_fk
+            FOREIGN KEY (zoid)
+            REFERENCES object_state (zoid)
+            ON DELETE CASCADE;
 
     oracle:
         CREATE TABLE object_state (
             zoid        NUMBER(20) NOT NULL PRIMARY KEY,
             tid         NUMBER(20) NOT NULL,
+                        CHECK tid_min (tid > 0),
             state       BLOB
         );
         CREATE INDEX object_state_tid ON object_state (tid);
+
+        CREATE TABLE blob_chunk (
+            zoid        NUMBER(20) NOT NULL,
+            chunk_num   NUMBER(20) NOT NULL,
+                        PRIMARY KEY (zoid, chunk_num),
+            chunk       BLOB
+        );
+        CREATE INDEX blob_chunk_lookup ON blob_chunk (zoid);
+        ALTER TABLE blob_chunk ADD CONSTRAINT blob_chunk_fk
+            FOREIGN KEY (zoid)
+            REFERENCES object_state (zoid)
+            ON DELETE CASCADE;
 
 # object_ref: A list of referenced OIDs from each object_state. This
 # table is populated as needed during packing.
@@ -544,6 +631,12 @@ history_free_schema = """
             state       BLOB
         ) ON COMMIT DELETE ROWS;
 
+        CREATE GLOBAL TEMPORARY TABLE temp_blob_chunk (
+            zoid        NUMBER(20) NOT NULL,
+            chunk_num   NUMBER(20) NOT NULL,
+            chunk       BLOB
+        ) ON COMMIT DELETE ROWS;
+
         # Temporary state during packing: a list of objects
         # whose references need to be examined.
         CREATE GLOBAL TEMPORARY TABLE temp_pack_visit (
@@ -629,6 +722,20 @@ def filter_script(script, database_name):
     return '\n'.join(res)
 
 
+def filter_statements(script, expr):
+    res = []
+    match = False
+    for line in script.splitlines():
+        line = line.strip()
+        if not match and expr.search(line) is not None:
+            match = True
+        if match:
+            res.append(line)
+            if line.rstrip().endswith(';'):
+                match = False
+    return '\n'.join(res)
+
+
 class AbstractSchemaInstaller(object):
 
     # Keep this list in the same order as the schema scripts
@@ -638,6 +745,7 @@ class AbstractSchemaInstaller(object):
         'transaction',
         'new_oid',
         'object_state',
+        'blob_chunk',
         'current_object',
         'object_ref',
         'object_refs_added',
@@ -645,9 +753,10 @@ class AbstractSchemaInstaller(object):
         'pack_state',
         'pack_state_tid',
         'temp_store',
+        'temp_blob_chunk',
         'temp_pack_visit',
         'temp_undo',
-        )
+    )
 
     database_name = None  # provided by a subclass
 
@@ -683,6 +792,7 @@ class AbstractSchemaInstaller(object):
                 self.create(cursor)
             else:
                 self.check_compatibility(cursor, tables)
+                self.update_schema(cursor, tables)
         self.connmanager.open_and_call(callback)
 
     def check_compatibility(self, cursor, tables):
@@ -692,14 +802,24 @@ class AbstractSchemaInstaller(object):
                     "Schema mismatch: a history-preserving adapter "
                     "can not connect to a history-free database. "
                     "If you need to convert, use the zodbconvert utility."
-                    )
+                )
         else:
             if 'transaction' in tables and 'current_object' in tables:
                 raise StorageError(
                     "Schema mismatch: a history-free adapter "
                     "can not connect to a history-preserving database. "
                     "If you need to convert, use the zodbconvert utility."
-                    )
+                )
+
+    def update_schema(self, cursor, tables):
+        if not 'blob_chunk' in tables:
+            # Add the blob_chunk table (RelStorage 1.5+)
+            script = filter_script(
+                self.schema_script, self.database_name)
+            expr = (r'(CREATE|ALTER)\s+(GLOBAL TEMPORARY\s+)?(TABLE|INDEX)'
+                '\s+(temp_)?blob_chunk')
+            script = filter_statements(script, re.compile(expr, re.I))
+            self.runner.run_script(cursor, script)
 
     def zap_all(self):
         """Clear all data out of the database."""
@@ -795,6 +915,7 @@ class OracleSchemaInstaller(AbstractSchemaInstaller):
                 self.create(cursor)
             else:
                 self.check_compatibility(cursor, tables)
+                self.update_schema(cursor, tables)
             packages = self.list_packages(cursor)
             if packages.get('relstorage_op') != relstorage_op_version:
                 self.install_plsql(cursor)

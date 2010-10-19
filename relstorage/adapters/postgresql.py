@@ -80,7 +80,7 @@ class PostgreSQLAdapter(object):
             )
         self.mover = ObjectMover(
             database_name='postgresql',
-            keep_history=self.keep_history,
+            options=options,
             runner=self.runner,
             version_detector=self.version_detector,
             )

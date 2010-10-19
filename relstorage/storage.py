@@ -17,9 +17,10 @@ Stores pickles in the database.
 """
 
 from persistent.TimeStamp import TimeStamp
+from relstorage.blobhelper import BlobHelper
+from relstorage.blobhelper import is_blob_record
 from relstorage.cache import StorageCache
 from relstorage.options import Options
-from relstorage.util import is_blob_record
 from ZODB.BaseStorage import DataRecord
 from ZODB.BaseStorage import TransactionRecord
 from ZODB import ConflictResolution
@@ -126,13 +127,9 @@ class RelStorage(
     # _poll_at is the time to force a poll
     _poll_at = 0
 
-    # If the blob directory is set, fshelper is a filesystem blob
-    # helper.  Otherwise, fshelper is None.
-    fshelper = None
-
-    # _txn_blobs: {oid->filename}; contains blob data for the
-    # currently uncommitted transaction.
-    _txn_blobs = None
+    # If the blob directory is set, blobhelper is a BlobHelper.
+    # Otherwise, blobhelper is None.
+    blobhelper = None
 
     # _txn_check_serials: {oid, serial}; confirms that certain objects
     # have not changed at commit.
@@ -147,7 +144,7 @@ class RelStorage(
     _batcher_row_limit = 100
 
     def __init__(self, adapter, name=None, create=True,
-            options=None, cache=None, **kwoptions):
+            options=None, cache=None, blobhelper=None, **kwoptions):
         self._adapter = adapter
 
         if options is None:
@@ -190,12 +187,32 @@ class RelStorage(
         else:
             self._cache = StorageCache(adapter, options)
 
-        if options.blob_dir:
-            from ZODB.blob import FilesystemHelper
-            self.fshelper = FilesystemHelper(options.blob_dir)
-            if create:
-                self.fshelper.create()
-                self.fshelper.checkSecure()
+        if blobhelper is not None:
+            self.blobhelper = blobhelper
+        elif options.blob_dir:
+            self.blobhelper = BlobHelper(options=options)
+
+    def new_instance(self):
+        """Creates and returns another storage instance.
+
+        See ZODB.interfaces.IMVCCStorage.
+        """
+        adapter = self._adapter.new_instance()
+        cache = self._cache.new_instance()
+        if self.blobhelper is not None:
+            blobhelper = self.blobhelper.new_instance()
+        else:
+            blobhelper = None
+        other = RelStorage(adapter=adapter, name=self.__name__,
+            create=False, options=self._options, cache=cache,
+            blobhelper=blobhelper)
+        self._instances.append(weakref.ref(other, self._instances.remove))
+        return other
+
+    @property
+    def fshelper(self):
+        """Used in tests"""
+        return self.blobhelper.fshelper
 
     def _open_load_connection(self):
         """Open the load connection to the database.  Return nothing."""
@@ -325,24 +342,14 @@ class RelStorage(
             self._closed = True
             self._drop_load_connection()
             self._drop_store_connection()
+            if self.blobhelper is not None:
+                self.blobhelper.close()
             for wref in self._instances:
                 instance = wref()
                 if instance is not None:
                     instance.close()
         finally:
             self._lock_release()
-
-    def new_instance(self):
-        """Creates and returns another storage instance.
-
-        See ZODB.interfaces.IMVCCStorage.
-        """
-        adapter = self._adapter.new_instance()
-        cache = self._cache.new_instance()
-        other = RelStorage(adapter=adapter, name=self.__name__,
-            create=False, options=self._options, cache=cache)
-        self._instances.append(weakref.ref(other))
-        return other
 
     def __len__(self):
         return self._adapter.stats.get_object_count()
@@ -714,9 +721,11 @@ class RelStorage(
         self._prepared_txn = None
         self._max_stored_oid = 0
         self._batcher = None
-        self._txn_blobs = None
         self._txn_check_serials = None
         self._cache.clear_temp()
+        blobhelper = self.blobhelper
+        if blobhelper is not None:
+            blobhelper.clear_temp()
 
 
     def _finish_store(self):
@@ -759,7 +768,11 @@ class RelStorage(
         # Move the new states into the permanent table
         tid_int = u64(self._tid)
         serials = []
-        oid_ints = adapter.mover.move_from_temp(cursor, tid_int)
+        if self.blobhelper is not None:
+            txn_has_blobs = self.blobhelper.txn_has_blobs
+        else:
+            txn_has_blobs = False
+        oid_ints = adapter.mover.move_from_temp(cursor, tid_int, txn_has_blobs)
         for oid_int in oid_ints:
             oid = p64(oid_int)
             if oid in resolved:
@@ -832,14 +845,8 @@ class RelStorage(
         self._prepared_txn = self._adapter.txncontrol.commit_phase1(
             conn, cursor, tid_int)
 
-        if self._txn_blobs:
-            # We now have a transaction ID, so rename all the blobs
-            # accordingly.
-            for oid, sourcename in self._txn_blobs.items():
-                targetname = self.fshelper.getBlobFilename(oid, self._tid)
-                if sourcename != targetname:
-                    ZODB.blob.rename_or_copy_blob(sourcename, targetname)
-                    self._txn_blobs[oid] = targetname
+        if self.blobhelper is not None:
+            self.blobhelper.vote(self._tid)
 
         return serials
 
@@ -883,22 +890,6 @@ class RelStorage(
         # including cache updates.
         self._ltid = self._tid
 
-        #if self._txn_blobs and not self._adapter.keep_history:
-            ## For each blob just committed, get the name of
-            ## one earlier revision (if any) and write the
-            ## name of the file to a log.  At pack time,
-            ## all the files in the log will be deleted and
-            ## the log will be cleared.
-            #for oid, filename in self._txn_blobs.iteritems():
-                #dirname, current_name = os.path.split(filename)
-                #names = os.listdir(dirname)
-                #names.sort()
-                #if current_name in names:
-                    #i = names.index(current_name)
-                    #if i > 0:
-                    #    to_delete = os.path.join(dirname, names[i-1])
-                    #    log.write('%s\n') % to_delete
-
 
     def tpc_abort(self, transaction):
         self._lock_acquire()
@@ -922,13 +913,8 @@ class RelStorage(
             self._adapter.txncontrol.abort(
                 self._store_conn, self._store_cursor, self._prepared_txn)
             self._adapter.locker.release_commit_lock(self._store_cursor)
-        if self._txn_blobs:
-            for oid, filename in self._txn_blobs.iteritems():
-                if os.path.exists(filename):
-                    ZODB.blob.remove_committed(filename)
-                    dirname = os.path.dirname(filename)
-                    if not os.listdir(dirname):
-                        ZODB.blob.remove_committed_dir(dirname)
+        if self.blobhelper is not None:
+            self.blobhelper.abort()
 
     def lastTransaction(self):
         self._lock_acquire()
@@ -1077,36 +1063,14 @@ class RelStorage(
                 # the new current objects.
                 adapter.mover.update_current(cursor, self_tid_int)
 
-                if self.fshelper is not None:
-                    self._copy_undone_blobs(copied)
+                if self.blobhelper is not None:
+                    self.blobhelper.copy_undone(copied, self._tid)
 
                 return self._tid, oids
             finally:
                 adapter.locker.release_pack_lock(cursor)
         finally:
             self._lock_release()
-
-    def _copy_undone_blobs(self, copied):
-        """After an undo operation, copy the matching blobs forward.
-
-        The copied parameter is a list of (integer oid, integer tid).
-        """
-        for oid_int, old_tid_int in copied:
-            oid = p64(oid_int)
-            old_tid = p64(old_tid_int)
-            orig_fn = self.fshelper.getBlobFilename(oid, old_tid)
-            if not os.path.exists(orig_fn):
-                # not a blob
-                continue
-
-            new_fn = self.fshelper.getBlobFilename(oid, self._tid)
-            orig = open(orig_fn, 'r')
-            new = open(new_fn, 'wb')
-            ZODB.utils.cp(orig, new)
-            orig.close()
-            new.close()
-
-            self._add_blob_to_transaction(oid, new_fn)
 
     def pack(self, t, referencesf, sleep=None):
         if self._is_read_only:
@@ -1157,8 +1121,8 @@ class RelStorage(
                     log.info("pack: dry run complete")
                 else:
                     # Now pack.
-                    if self.fshelper is not None:
-                        packed_func = self._after_pack
+                    if self.blobhelper is not None:
+                        packed_func = self.blobhelper.after_pack
                     else:
                         packed_func = None
                     adapter.packundo.pack(tid_int, self._options, sleep=sleep,
@@ -1172,34 +1136,11 @@ class RelStorage(
 
         self._pack_finished()
 
-    def _after_pack(self, oid_int, tid_int):
-        """Called after an object state has been removed by packing.
-
-        Removes the corresponding blob file.
-        """
-        oid = p64(oid_int)
-        tid = p64(tid_int)
-        fn = self.fshelper.getBlobFilename(oid, tid)
-        if self._adapter.keep_history:
-            # remove only the revision just packed
-            if os.path.exists(fn):
-                ZODB.blob.remove_committed(fn)
-                dirname = os.path.dirname(fn)
-                if not os.listdir(dirname):
-                    ZODB.blob.remove_committed_dir(dirname)
-        else:
-            # remove all revisions
-            dirname = os.path.dirname(fn)
-            if os.path.exists(dirname):
-                for name in os.listdir(dirname):
-                    ZODB.blob.remove_committed(os.path.join(dirname, name))
-                ZODB.blob.remove_committed_dir(dirname)
-
     def _pack_finished(self):
-        if self.fshelper is None or self._adapter.keep_history:
+        if self.blobhelper is None or self._adapter.keep_history:
             return
 
-        # Remove all old revisions of blobs.
+        # TODO: Remove all old revisions of blobs in history-free mode.
 
     def iterator(self, start=None, stop=None):
         return TransactionIterator(self._adapter, start, stop)
@@ -1268,7 +1209,7 @@ class RelStorage(
         return changes, new_polled_tid
 
     def poll_invalidations(self):
-        """Looks for OIDs of objects that changed since _prev_polled_tid
+        """Look for OIDs of objects that changed since _prev_polled_tid.
 
         Returns {oid: 1}, or None if all objects need to be invalidated
         because prev_polled_tid is not in the database (presumably it
@@ -1306,14 +1247,15 @@ class RelStorage(
 
         Raises POSKeyError if the blobfile cannot be found.
         """
-        if self.fshelper is None:
+        if self.blobhelper is None:
             raise POSException.Unsupported("No blob directory is configured.")
 
-        blob_filename = self.fshelper.getBlobFilename(oid, serial)
-        if os.path.exists(blob_filename):
-            return blob_filename
-        else:
-            raise POSKeyError("No blob file", oid, serial)
+        self._lock_acquire()
+        try:
+            cursor = self._load_cursor
+            return self.blobhelper.loadBlob(self._adapter, cursor, oid, serial)
+        finally:
+            self._lock_release()
 
     def openCommittedBlobFile(self, oid, serial, blob=None):
         """Return a file for committed data for the given object id and serial
@@ -1326,20 +1268,22 @@ class RelStorage(
         make sure that data are available at least long enough for the
         file to be opened.
         """
-        blob_filename = self.loadBlob(oid, serial)
-        if blob is None:
-            return open(blob_filename, 'rb')
-        else:
-            return ZODB.blob.BlobFile(blob_filename, 'r', blob)
+        self._lock_acquire()
+        try:
+            cursor = self._load_cursor
+            return self.blobhelper.openCommittedBlobFile(
+                self._adapter, cursor, oid, serial, blob=blob)
+        finally:
+            self._lock_release()
 
     def temporaryDirectory(self):
         """Return a directory that should be used for uncommitted blob data.
 
         If Blobs use this, then commits can be performed with a simple rename.
         """
-        return self.fshelper.temp_dir
+        return self.blobhelper.temporaryDirectory()
 
-    def storeBlob(self, oid, oldserial, data, blobfilename, version, txn):
+    def storeBlob(self, oid, serial, data, blobfilename, version, txn):
         """Stores data that has a BLOB attached.
 
         The blobfilename argument names a file containing blob data.
@@ -1350,8 +1294,14 @@ class RelStorage(
         The new serial is returned.
         """
         assert not version
-        self.store(oid, oldserial, data, '', txn)
-        self._store_blob_data(oid, oldserial, blobfilename)
+        self._lock_acquire()
+        try:
+            self._batcher.flush()
+            cursor = self._store_cursor
+            self.blobhelper.storeBlob(self._adapter, cursor, self.store,
+                oid, serial, data, blobfilename, version, txn)
+        finally:
+            self._lock_release()
         return None
 
     def restoreBlob(self, oid, serial, data, blobfilename, prev_txn, txn):
@@ -1362,36 +1312,12 @@ class RelStorage(
         self.restore(oid, serial, data, '', prev_txn, txn)
         self._lock_acquire()
         try:
-            self.fshelper.getPathForOID(oid, create=True)
-            targetname = self.fshelper.getBlobFilename(oid, serial)
-            ZODB.blob.rename_or_copy_blob(blobfilename, targetname)
+            self._batcher.flush()
+            cursor = self._store_cursor
+            self.blobhelper.restoreBlob(
+                self._adapter, cursor, oid, serial, blobfilename)
         finally:
             self._lock_release()
-
-    def _store_blob_data(self, oid, oldserial, filename):
-        self.fshelper.getPathForOID(oid, create=True)
-        fd, target = self.fshelper.blob_mkstemp(oid, oldserial)
-        os.close(fd)
-        if sys.platform == 'win32':
-            # On windows, we can't rename to an existing file.  We'll
-            # use a slightly different file name. We keep the old one
-            # until we're done to avoid conflicts. Then remove the old name.
-            target += 'w'
-            ZODB.blob.rename_or_copy_blob(filename, target)
-            os.remove(target[:-1])
-        else:
-            ZODB.blob.rename_or_copy_blob(filename, target)
-
-        self._add_blob_to_transaction(oid, target)
-
-    def _add_blob_to_transaction(self, oid, filename):
-        if self._txn_blobs is None:
-            self._txn_blobs = {}
-        else:
-            old_filename = self._txn_blobs.get(oid)
-            if old_filename is not None and old_filename != filename:
-                ZODB.blob.remove_committed(old_filename)
-        self._txn_blobs[oid] = filename
 
     def copyTransactionsFrom(self, other):
         # adapted from ZODB.blob.BlobStorageMixin
@@ -1399,7 +1325,7 @@ class RelStorage(
             self.tpc_begin(trans, trans.tid, trans.status)
             for record in trans:
                 blobfilename = None
-                if self.fshelper is not None:
+                if self.blobhelper is not None:
                     if is_blob_record(record.data):
                         try:
                             blobfilename = other.loadBlob(
@@ -1408,7 +1334,8 @@ class RelStorage(
                             pass
                 if blobfilename is not None:
                     fd, name = tempfile.mkstemp(
-                        suffix='.tmp', dir=self.fshelper.temp_dir)
+                        suffix='.tmp',
+                        dir=self.blobhelper.temporaryDirectory())
                     os.close(fd)
                     ZODB.utils.cp(open(blobfilename, 'rb'), open(name, 'wb'))
                     self.restoreBlob(record.oid, record.tid, record.data,

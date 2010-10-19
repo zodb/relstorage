@@ -54,13 +54,16 @@ class ObjectMover(object):
         'replace_temp',
         'move_from_temp',
         'update_current',
+        'download_blob',
+        'upload_blob',
         )
 
-    def __init__(self, database_name, keep_history, runner=None,
+    def __init__(self, database_name, options, runner=None,
             Binary=None, inputsizes=None, version_detector=None):
         # The inputsizes parameter is for Oracle only.
         self.database_name = database_name
-        self.keep_history = keep_history
+        self.keep_history = options.keep_history
+        self.blob_chunk_size = options.blob_chunk_size
         self.runner = runner
         self.Binary = Binary
         self.inputsizes = inputsizes
@@ -373,7 +376,7 @@ class ObjectMover(object):
 
 
     def postgresql_on_store_opened(self, cursor, restart=False):
-        """Create the temporary table for storing objects"""
+        """Create the temporary tables for storing objects"""
         # note that the md5 column is not used if self.keep_history == False.
         stmt = """
         CREATE TEMPORARY TABLE temp_store (
@@ -382,16 +385,24 @@ class ObjectMover(object):
             md5         CHAR(32),
             state       BYTEA
         ) ON COMMIT DROP;
-        CREATE UNIQUE INDEX temp_store_zoid ON temp_store (zoid)
+        CREATE UNIQUE INDEX temp_store_zoid ON temp_store (zoid);
+
+        CREATE TEMPORARY TABLE temp_blob_chunk (
+            zoid        BIGINT NOT NULL,
+            chunk_num   BIGINT NOT NULL,
+            chunk       BYTEA
+        ) ON COMMIT DROP;
+        CREATE UNIQUE INDEX temp_blob_chunk_key
+            ON temp_blob_chunk (zoid, chunk_num);
         """
         cursor.execute(stmt)
 
     def mysql_on_store_opened(self, cursor, restart=False):
         """Create the temporary table for storing objects"""
         if restart:
-            stmt = """
-            DROP TEMPORARY TABLE IF EXISTS temp_store
-            """
+            stmt = "DROP TEMPORARY TABLE IF EXISTS temp_store"
+            cursor.execute(stmt)
+            stmt = "DROP TEMPORARY TABLE IF EXISTS temp_blob_chunk"
             cursor.execute(stmt)
 
         # note that the md5 column is not used if self.keep_history == False.
@@ -401,6 +412,16 @@ class ObjectMover(object):
             prev_tid    BIGINT NOT NULL,
             md5         CHAR(32),
             state       LONGBLOB
+        ) ENGINE MyISAM
+        """
+        cursor.execute(stmt)
+
+        stmt = """
+        CREATE TEMPORARY TABLE temp_blob_chunk (
+            zoid        BIGINT NOT NULL,
+            chunk_num   BIGINT NOT NULL,
+                        PRIMARY KEY (zoid, chunk_num),
+            chunk       LONGBLOB
         ) ENGINE MyISAM
         """
         cursor.execute(stmt)
@@ -789,7 +810,7 @@ class ObjectMover(object):
 
 
 
-    def generic_move_from_temp(self, cursor, tid):
+    def generic_move_from_temp(self, cursor, tid, txn_has_blobs):
         """Moved the temporarily stored objects to permanent storage.
 
         Returns the list of oids stored.
@@ -808,6 +829,21 @@ class ObjectMover(object):
                 FROM temp_store
                 """
             cursor.execute(stmt, (tid,))
+
+            if txn_has_blobs:
+                if self.database_name == 'oracle':
+                    stmt = """
+                    INSERT INTO blob_chunk (zoid, tid, chunk_num, chunk)
+                    SELECT zoid, :1, chunk_num, chunk
+                    FROM temp_blob_chunk
+                    """
+                else:
+                    stmt = """
+                    INSERT INTO blob_chunk (zoid, tid, chunk_num, chunk)
+                    SELECT zoid, %s, chunk_num, chunk
+                    FROM temp_blob_chunk
+                    """
+                cursor.execute(stmt, (tid,))
 
         else:
             if self.database_name == 'mysql':
@@ -838,6 +874,20 @@ class ObjectMover(object):
                     FROM temp_store
                     """
                 cursor.execute(stmt, (tid,))
+
+            if txn_has_blobs:
+                stmt = """
+                DELETE FROM blob_chunk
+                WHERE zoid IN (SELECT zoid FROM temp_store)
+                """
+                cursor.execute(stmt)
+
+                stmt = """
+                INSERT INTO blob_chunk (zoid, chunk_num, chunk)
+                SELECT zoid, chunk_num, chunk
+                FROM temp_blob_chunk
+                """
+                cursor.execute(stmt)
 
         stmt = """
         SELECT zoid FROM temp_store
@@ -923,3 +973,150 @@ class ObjectMover(object):
         """
         cursor.execute(stmt, (tid,))
 
+
+
+
+    def generic_download_blob(self, cursor, oid, tid, filename):
+        """Download a blob into a file."""
+        if self.keep_history:
+            stmt = """
+            SELECT chunk
+            FROM blob_chunk
+            WHERE zoid = %s
+                AND tid = %s
+                AND chunk_num = %s
+            """
+            use_tid = True
+        else:
+            stmt = """
+            SELECT chunk
+            FROM blob_chunk
+            WHERE zoid = %s
+                AND chunk_num = %s
+            """
+            use_tid = False
+
+        use_base64 = False
+        if self.database_name == 'postgresql':
+            use_base64 = True
+            stmt = stmt.replace(
+                "SELECT chunk", "SELECT encode(chunk, 'base64')")
+        elif self.database_name == 'oracle':
+            for n in (1, 2, 3):
+                stmt = stmt.replace('%s', ':%d' % n, 1)
+
+        f = None
+        bytes = 0
+        try:
+            chunk_num = 0
+            while True:
+                if use_tid:
+                    params = (oid, tid, chunk_num)
+                else:
+                    params = (oid, chunk_num)
+                cursor.execute(stmt, params)
+                rows = list(cursor)
+                if not rows:
+                    # No more chunks. Note: if there are no chunks at
+                    # all, then this method will not write a
+                    # file.  This is by design.
+                    break
+                chunk = rows[0][0]
+                if use_base64:
+                    chunk = decodestring(chunk)
+                if f is None:
+                    f = open(filename, 'wb')
+                f.write(chunk)
+                bytes += len(chunk)
+                chunk_num += 1
+        except:
+            if f is not None:
+                f.close()
+                os.remove(filename)
+            raise
+
+        if f is not None:
+            f.close()
+        return bytes
+
+    mysql_download_blob = generic_download_blob
+    postgresql_download_blob = generic_download_blob
+    oracle_download_blob = generic_download_blob
+
+
+
+
+    def generic_upload_blob(self, cursor, oid, tid, filename):
+        """Upload a blob from a file.
+
+        If serial is None, upload to the temporary table.
+        """
+        if tid is not None:
+            if self.keep_history:
+                delete_stmt = """
+                DELETE FROM blob_chunk
+                WHERE zoid = %s
+                    AND tid = %s
+                """
+                insert_stmt = """
+                INSERT INTO blob_chunk (zoid, tid, chunk_num, chunk)
+                VALUES (%s, %s, %s, CHUNK)
+                """
+                use_tid = True
+            else:
+                delete_stmt = "DELETE FROM blob_chunk WHERE zoid = %s"
+                insert_stmt = """
+                INSERT INTO blob_chunk (zoid, chunk_num, chunk)
+                VALUES (%s, %s, CHUNK)
+                """
+                use_tid = False
+        else:
+            delete_stmt = "DELETE FROM temp_blob_chunk WHERE zoid = %s"
+            insert_stmt = """
+            INSERT INTO temp_blob_chunk (zoid, chunk_num, chunk)
+            VALUES (%s, %s, CHUNK)
+            """
+            use_tid = False
+
+        use_base64 = False
+        if self.database_name == 'postgresql':
+            use_base64 = True
+            insert_stmt = insert_stmt.replace(
+                "CHUNK", "decode(%s, 'base64')", 1)
+        else:
+            insert_stmt = insert_stmt.replace("CHUNK", "%s")
+
+        if self.database_name == 'oracle':
+            for n in (1, 2, 3, 4):
+                delete_stmt = delete_stmt.replace('%s', ':%d' % n, 1)
+                insert_stmt = insert_stmt.replace('%s', ':%d' % n, 1)
+
+        if use_tid:
+            params = (oid, tid)
+        else:
+            params = (oid,)
+        cursor.execute(delete_stmt, params)
+
+        f = open(filename, 'rb')
+        try:
+            chunk_num = 0
+            while True:
+                chunk = f.read(self.blob_chunk_size)
+                if not chunk and chunk_num > 0:
+                    # EOF.  Note that we always write at least one
+                    # chunk, even if the blob file is empty.
+                    break
+                if use_base64:
+                    chunk = encodestring(chunk)
+                if use_tid:
+                    params = (oid, tid, chunk_num, chunk)
+                else:
+                    params = (oid, chunk_num, chunk)
+                cursor.execute(insert_stmt, params)
+                chunk_num += 1
+        finally:
+            f.close()
+
+    mysql_upload_blob = generic_upload_blob
+    postgresql_upload_blob = generic_upload_blob
+    oracle_upload_blob = generic_upload_blob

@@ -28,6 +28,10 @@ class Options(object):
         self.name = None
         self.read_only = False
         self.blob_dir = None
+        self.shared_blob_dir = True
+        self.blob_cache_size = None
+        self.blob_cache_size_check = 10
+        self.blob_chunk_size = 1 << 20
         self.keep_history = True
         self.replica_conf = None
         self.replica_timeout = 600.0
@@ -38,7 +42,7 @@ class Options(object):
         self.pack_duty_cycle = 0.5
         self.pack_max_delay = 20.0
         self.cache_servers = ()  # ['127.0.0.1:11211']
-        self.cache_module_name = 'memcache'
+        self.cache_module_name = 'relstorage.pylibmc_wrapper'
         self.cache_prefix = ''
         self.cache_local_mb = 10
         self.cache_delta_size_limit = 10000

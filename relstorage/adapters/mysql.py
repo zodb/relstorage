@@ -111,7 +111,7 @@ class MySQLAdapter(object):
             )
         self.mover = ObjectMover(
             database_name='mysql',
-            keep_history=self.keep_history,
+            options=options,
             Binary=MySQLdb.Binary,
             )
         self.connmanager.set_on_store_opened(self.mover.on_store_opened)

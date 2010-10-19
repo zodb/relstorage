@@ -16,7 +16,7 @@
 # This is copied from ZODB.tests.RecoveryStorage and expanded to fit
 # history-free storages.
 
-from relstorage.util import is_blob_record
+from relstorage.blobhelper import is_blob_record
 from transaction import Transaction
 from ZODB import DB
 from ZODB.serialize import referencesf

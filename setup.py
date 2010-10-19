@@ -21,7 +21,6 @@ VERSION = "1.5dev"
 # Development Status :: 3 - Alpha
 
 classifiers = """\
-Development Status :: 5 - Production/Stable
 Intended Audience :: Developers
 License :: OSI Approved :: Zope Public License
 Programming Language :: Python
@@ -32,31 +31,7 @@ Operating System :: Unix
 """
 
 import os
-try:
-    from setuptools import setup
-except ImportError:
-    from distutils.core import setup
-    setup_args = dict(
-        scripts=['relstorage/zodbconvert.py'],
-    )
-else:
-    setup_args = dict(
-        zip_safe=False,  # otherwise ZConfig can't see component.xml
-        install_requires=[
-            'ZODB3>=3.7.0',
-            'zope.interface',
-            ],
-        extras_require={
-            'mysql':      ['MySQL-python>=1.2.2'],
-            'postgresql': ['psycopg2>=2.0'],
-            'oracle':     ['cx_Oracle>=4.3.1'],
-            },
-        entry_points = {'console_scripts': [
-            'zodbconvert = relstorage.zodbconvert:main',
-            'zodbpack = relstorage.zodbpack:main',
-            ]},
-        test_suite='relstorage.tests.alltests.make_suite',
-    )
+from setuptools import setup
 
 doclines = __doc__.split("\n")
 
@@ -78,7 +53,7 @@ setup(
         'relstorage.adapters.tests',
         'relstorage.tests',
         'relstorage.tests.blob',
-        ],
+    ],
     package_data={
         'relstorage': ['component.xml'],
     },
@@ -91,5 +66,20 @@ setup(
         "Change History\n" +
         "==============\n\n" +
         read_file("CHANGES.txt")),
-    **setup_args
-    )
+    zip_safe=False,  # otherwise ZConfig can't see component.xml
+    install_requires=[
+        'ZODB3>=3.7.0',
+        'zope.interface',
+        'zc.lockfile',
+    ],
+    extras_require={
+        'mysql':      ['MySQL-python>=1.2.2'],
+        'postgresql': ['psycopg2>=2.0'],
+        'oracle':     ['cx_Oracle>=4.3.1'],
+    },
+    entry_points = {'console_scripts': [
+        'zodbconvert = relstorage.zodbconvert:main',
+        'zodbpack = relstorage.zodbpack:main',
+    ]},
+    test_suite='relstorage.tests.alltests.make_suite',
+)

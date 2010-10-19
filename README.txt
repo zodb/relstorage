@@ -337,11 +337,42 @@ underscores instead of dashes in the parameter names.
         If true, only reads may be executed against the storage.
 
 ``blob-dir``
-        If supplied, the storage will provide blob support; this
+        If supplied, the storage will provide ZODB blob support; this
         parameter specifies the name of the directory to hold blob data.
         The directory will be created if it does not exist. If no value
         (or an empty value) is provided, then no blob support will be
         provided.
+
+``shared-blob-dir``
+        If true (the default), the blob directory is assumed to be
+        shared among all clients using NFS or similar; blob data will
+        be stored only on the filesystem and not in the database. If
+        false, blob data is stored in the relational database and the
+        blob directory holds a cache of blobs. When this parameter is
+        false, the blob directory should not be shared among clients.
+
+``blob-cache-size``
+        Maximum size of the blob cache, in bytes.  If empty (the default),
+        the cache size isn't checked and the blob directory will
+        grow without bounds.
+
+        This option is ignored if shared-blob-dir is true.
+
+``blob-cache-size-check``
+        Blob cache check size as percent of blob-cache-size. The blob
+        cache size will be checked when this many bytes have been
+        loaded into the cache. Defaults to 10% of the blob cache size.
+        This option is ignored if shared-blob-dir is true.
+
+        This option is ignored if shared-blob-dir is true.
+
+``blob-chunk-size``
+        When ZODB blobs are stored in the database, RelStorage breaks
+        them into chunks to minimize the impact on RAM.  This
+        parameter specifies the chunk size for new blobs.  The
+        default is 1048576 (1 megabyte).
+
+        This option is ignored if shared-blob-dir is true.
 
 ``keep-history``
         If this parameter is set to true (the default), the adapter
@@ -463,10 +494,12 @@ underscores instead of dashes in the parameter names.
         The default is to disable memcached integration.
 
 ``cache-module-name``
-        Specifies which Python memcache module to use.  The default is
-        "memcache", a pure Python module.  An alternative module is
-        "relstorage.pylibmc_wrapper".  This setting has no effect
-        unless cache-servers is set.
+        Specifies which Python memcache module to use. The default is
+        "relstorage.pylibmc_wrapper", which requires pylibmc. An
+        alternative module is "memcache", a pure Python module, but the
+        current version of memcache (1.45) has bugs that make it
+        unreliable. This setting has no effect unless cache-servers is
+        set.
 
 ``cache-prefix``
         The prefix for all keys in the cache.  All clients using a

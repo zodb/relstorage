@@ -2,7 +2,9 @@
 Next Release
 ------------
 
-- ...
+- Added an option to store ZODB blobs in the database.
+
+- Require setuptools or distribute.  Plain distutils is not sufficient.
 
 1.4.0 (2010-09-30)
 ------------------

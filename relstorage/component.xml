@@ -12,205 +12,70 @@
     <section type="relstorage.adapter" name="*" attribute="adapter"/>
     <key name="name" datatype="string" required="no"/>
     <key name="read-only" datatype="boolean" default="false">
-      <description>
-        If true, only reads may be executed against the storage.
-      </description>
+      <description>See the RelStorage README.txt file.</description>
     </key>
     <key name="blob-dir" required="no">
-      <description>
-        If supplied, the storage will provide blob support; this
-        parameter specifies the name of the directory to hold blob data.
-        The directory will be created if it doeesn't exist. If no value
-        (or an empty value) is provided, then no blob support will be
-        provided.
-      </description>
+      <description>See the RelStorage README.txt file.</description>
+    </key>
+    <key name="shared-blob-dir" datatype="boolean" default="true">
+      <description>See the RelStorage README.txt file.</description>
+    </key>
+    <key name="blob-cache-size" datatype="integer" required="no">
+      <description>See the RelStorage README.txt file.</description>
+    </key>
+    <key name="blob-cache-size-check" datatype="integer" required="no">
+      <description>See the RelStorage README.txt file.</description>
+    </key>
+    <key name="blob-chunk-size" datatype="integer" required="no">
+      <description>See the RelStorage README.txt file.</description>
     </key>
     <key name="keep-history" datatype="boolean" default="true">
-      <description>
-        If this parameter is set to true (the default), the adapter
-        will create and use a history-preserving database schema
-        (like FileStorage). A history-preserving schema supports
-        ZODB-level undo, but also grows more quickly and requires extensive
-        packing on a regular basis.
-
-        If this parameter is set to false, the adapter will create and
-        use a history-free database schema. Undo will not be supported,
-        but the database will not grow as quickly. The database will
-        still require regular garbage collection (which is accessible
-        through the database pack mechanism.)
-
-        This parameter must not change once the database schema has
-        been installed, because the schemas for history-preserving and
-        history-free storage are different. If you want to convert
-        between a history-preserving and a history-free database, use
-        the ``zodbconvert`` utility to copy to a new database.
-      </description>
+      <description>See the RelStorage README.txt file.</description>
     </key>
     <key name="replica-conf" datatype="string" required="no">
-      <description>
-        If this parameter is provided, it specifies a text file that
-        contains a list of database replicas this adapter can choose
-        from. For MySQL and PostgreSQL, put in the replica file a list
-        of ``host:port`` or ``host`` values, one per line. For Oracle,
-        put in a list of DSN values. Blank lines and lines starting
-        with ``#`` are ignored.
-
-        The adapter prefers the first replica specified in the file. If
-        the first is not available, the adapter automatically tries the
-        rest of the replicas, in order. If the file changes, the
-        adapter will drop existing SQL database connections and make
-        new connections when ZODB starts a new transaction.
-      </description>
+      <description>See the RelStorage README.txt file.</description>
     </key>
     <key name="replica-timeout" datatype="float" default="600.0">
-      <description>
-        If this parameter has a nonzero value, when the adapter selects
-        a replica other than the primary replica, the adapter will
-        try to revert to the primary replica after the specified
-        timeout (in seconds).  The default is 600, meaning 10 minutes.
-      </description>
+      <description>See the RelStorage README.txt file.</description>
     </key>
     <key name="poll-interval" datatype="float" required="no">
-      <description>
-        Defer polling the database for the specified maximum time interval,
-        in seconds.  Set to 0 (the default) to always poll.  Fractional
-        seconds are allowed.  Use this to lighten the database load on
-        servers with high read volume and low write volume.
-
-        The poll-interval option works best in conjunction with
-        the cache-servers option.  If both are enabled, RelStorage will
-        poll a single cache key for changes on every request.
-        The database will not be polled unless the cache indicates
-        there have been changes, or the timeout specified by poll-interval
-        has expired.  This configuration keeps clients fully up to date,
-        while removing much of the polling burden from the database.
-        A good cluster configuration is to use memcache servers
-        and a high poll-interval (say, 60 seconds).
-
-        This option can be used without the cache-servers option,
-        but a large poll-interval without cache-servers increases the
-        probability of basing transactions on stale data, which does not
-        affect database consistency, but does increase the probability
-        of conflict errors, leading to low performance.
-      </description>
+      <description>See the RelStorage README.txt file.</description>
     </key>
     <key name="pack-gc" datatype="boolean" default="true">
-      <description>
-        If pack-gc is false, pack operations do not perform
-        garbage collection.  Garbage collection is enabled by default.
-
-        If garbage collection is disabled, pack operations keep at least one
-        revision of every object.  With garbage collection disabled, the
-        pack code does not need to follow object references, making
-        packing conceivably much faster.  However, some of that benefit
-        may be lost due to an ever increasing number of unused objects.
-
-        Disabling garbage collection is also a hack that ensures
-        inter-database references never break.
-      </description>
+      <description>See the RelStorage README.txt file.</description>
     </key>
     <key name="pack-dry-run" datatype="boolean" default="false">
-      <description>
-        If pack-dry-run is true, pack operations perform a full analysis
-        of what to pack, but no data is actually removed.  After a dry run,
-        the pack_object, pack_state, and pack_state_tid tables are filled
-        with the list of object states and objects that would have been
-        removed.
-      </description>
+      <description>See the RelStorage README.txt file.</description>
     </key>
     <key name="pack-batch-timeout" datatype="float" required="no">
-      <description>
-        Packing occurs in batches of transactions; this specifies the
-        timeout in seconds for each batch.  Note that some database
-        configurations have unpredictable I/O performance
-        and might stall much longer than the timeout.
-        The default timeout is 5.0 seconds.
-      </description>
+      <description>See the RelStorage README.txt file.</description>
     </key>
     <key name="pack-duty-cycle" datatype="float" required="no">
-      <description>
-        After each batch, the pack code pauses for a time to
-        allow concurrent transactions to commit.  The pack-duty-cycle
-        specifies what fraction of time should be spent on packing.
-        For example, if the duty cycle is 0.75, then 75% of the time
-        will be spent packing: a 6 second pack batch
-        will be followed by a 2 second delay.  The duty cycle should
-        be greater than 0.0 and less than or equal to 1.0.  Specify
-        1.0 for no delay between batches.
-
-        The default is 0.5.  Raise it to finish packing faster; lower it
-        to reduce the effect of packing on transaction commit performance.
-      </description>
+      <description>See the RelStorage README.txt file.</description>
     </key>
     <key name="pack-max-delay" datatype="float" required="no">
-      <description>
-        This specifies a maximum delay between pack batches.  Sometimes
-        the database takes an extra long time to finish a pack batch; at
-        those times it is useful to cap the delay imposed by the
-        pack-duty-cycle.  The default is 20 seconds.
-      </description>
+      <description>See the RelStorage README.txt file.</description>
     </key>
     <key name="cache-servers" datatype="string" required="no">
-      <description>
-        Specifies a list of memcached servers. Using memcached with
-        RelStorage improves the speed of frequent object accesses while
-        slightly reducing the speed of other operations.
-
-        Provide a list of host:port pairs, separated by whitespace.
-        "127.0.0.1:11211" is a common setting.  Some memcached modules,
-        such as pylibmc, allow you to specify a path to a Unix socket
-        instead of a host:port pair.
-
-        The default is to disable memcached integration.
-      </description>
+      <description>See the RelStorage README.txt file.</description>
     </key>
     <key name="cache-module-name" datatype="string" required="no">
-      <description>
-        Specifies which Python memcache module to use.  The default is
-        "memcache", a pure Python module.  An alternative module is
-        "relstorage.pylibmc_wrapper".  This setting has no effect
-        unless cache-servers is set.
-      </description>
+      <description>See the RelStorage README.txt file.</description>
     </key>
     <key name="cache-prefix" datatype="string" required="no">
-      <description>
-        The prefix for all keys in the cache.  All clients using a
-        database should use the same cache-prefix.  Use this if you use
-        a single cache for multiple databases.
-      </description>
+      <description>See the RelStorage README.txt file.</description>
     </key>
     <key name="cache-local-mb" datatype="integer" required="no">
-      <description>
-        RelStorage caches pickled objects in memory, similar to a ZEO
-        cache. This cache is shared between threads. This parameter
-        configures the approximate maximum amount of memory the cache
-        should consume, in megabytes.  It defaults to 10.
-      </description>
+      <description>See the RelStorage README.txt file.</description>
     </key>
     <key name="cache-delta-size-limit" datatype="integer" required="no">
-      <description>
-        This is an advanced option. RelStorage uses a system of
-        checkpoints to improve the cache hit rate. This parameter
-        configures how many objects should be stored before creating a
-        new checkpoint in the cache. The default is 10000.
-      </description>
+      <description>See the RelStorage README.txt file.</description>
     </key>
     <key name="commit-lock-timeout" datatype="integer" required="no">
-      <description>
-        During commit, RelStorage acquires a database-wide lock. This
-        parameter specifies how long to wait for the lock before
-        failing the attempt to commit. The default is 30 seconds.
-
-        The MySQL and Oracle adapters support this parameter. The
-        PostgreSQL adapter currently does not.
-      </description>
+      <description>See the RelStorage README.txt file.</description>
     </key>
     <key name="commit-lock-id" datatype="integer" required="no">
-      <description>
-        During commit, RelStorage acquires a database-wide lock. This
-        parameter specifies the lock ID. This parameter currently
-        applies only to the Oracle adapter.
-      </description>
+      <description>See the RelStorage README.txt file.</description>
     </key>
   </sectiontype>
 
