@@ -21,6 +21,7 @@ from relstorage.adapters.batch import MySQLRowBatcher
 from relstorage.adapters.batch import OracleRowBatcher
 from relstorage.adapters.batch import PostgreSQLRowBatcher
 from zope.interface import implements
+import os
 
 try:
     from hashlib import md5
@@ -994,17 +995,25 @@ class ObjectMover(object):
             chunk_num = 0
             while True:
                 if self.database_name == 'oracle':
-                    chunk = self.runner.run_lob_stmt(
+                    row = self.runner.run_lob_stmt(
                         cursor, stmt, (oid, tid, chunk_num))
+                    if row is not None:
+                        chunk = row[0] or ''
+                    else:
+                        chunk = None
                 else:
                     cursor.execute(stmt, (oid, tid, chunk_num))
                     rows = list(cursor)
-                    if not rows:
-                        # No more chunks.  Note: if there are no chunks at
-                        # all, then this method should not write a file.
-                        break
-                    assert len(rows) == 1
-                    chunk = rows[0][0]
+                    if rows:
+                        assert len(rows) == 1
+                        chunk = rows[0][0]
+                    else:
+                        chunk = None
+
+                if chunk is None:
+                    # No more chunks.  Note: if there are no chunks at
+                    # all, then this method should not write a file.
+                    break
 
                 if use_base64:
                     chunk = decodestring(chunk)
@@ -1036,26 +1045,21 @@ class ObjectMover(object):
         If serial is None, upload to the temporary table.
         """
         if tid is not None:
-            use_tid = True
             if self.keep_history:
                 delete_stmt = """
                 DELETE FROM blob_chunk
                 WHERE zoid = %s AND tid = %s
                 """
                 cursor.execute(delete_stmt, (oid, tid))
-
-                insert_stmt = """
-                INSERT INTO blob_chunk (zoid, tid, chunk_num, chunk)
-                VALUES (%s, %s, %s, CHUNK)
-                """
             else:
                 delete_stmt = "DELETE FROM blob_chunk WHERE zoid = %s"
                 cursor.execute(delete_stmt, (oid,))
 
-                insert_stmt = """
-                INSERT INTO blob_chunk (zoid, tid, chunk_num, chunk)
-                VALUES (%s, %s, %s, CHUNK)
-                """
+            use_tid = True
+            insert_stmt = """
+            INSERT INTO blob_chunk (zoid, tid, chunk_num, chunk)
+            VALUES (%s, %s, %s, CHUNK)
+            """
         else:
             use_tid = False
             delete_stmt = "DELETE FROM temp_blob_chunk WHERE zoid = %s"
@@ -1103,30 +1107,26 @@ class ObjectMover(object):
         If serial is None, upload to the temporary table.
         """
         if tid is not None:
-            use_tid = True
             if self.keep_history:
                 delete_stmt = """
                 DELETE FROM blob_chunk
                 WHERE zoid = :1 AND tid = :2
                 """
                 cursor.execute(delete_stmt, (oid, tid))
-
-                insert_stmt = """
-                INSERT INTO blob_chunk (zoid, tid, chunk_num, chunk)
-                VALUES (:oid, :tid, :chunk_num, :blobdata)
-                """
             else:
                 delete_stmt = "DELETE FROM blob_chunk WHERE zoid = :1"
                 cursor.execute(delete_stmt, (oid,))
 
-                insert_stmt = """
-                INSERT INTO blob_chunk (zoid, tid, chunk_num, chunk)
-                VALUES (:oid, :tid, :chunk_num, :blobdata)
-                """
+            use_tid = True
+            insert_stmt = """
+            INSERT INTO blob_chunk (zoid, tid, chunk_num, chunk)
+            VALUES (:oid, :tid, :chunk_num, :blobdata)
+            """
+
         else:
             use_tid = False
             delete_stmt = "DELETE FROM temp_blob_chunk WHERE zoid = :1"
-            delete_args = (oid,)
+            cursor.execute(delete_stmt, (oid,))
 
             insert_stmt = """
             INSERT INTO temp_blob_chunk (zoid, chunk_num, chunk)
@@ -1149,7 +1149,8 @@ class ObjectMover(object):
                 }
                 if use_tid:
                     params['tid'] = tid
-                cursor.execute(stmt, params)
+                cursor.setinputsizes(blobdata=self.inputsizes['blobdata'])
+                cursor.execute(insert_stmt, params)
                 chunk_num += 1
         finally:
             f.close()

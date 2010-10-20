@@ -102,6 +102,7 @@ class OracleAdapter(object):
                 'oid': cx_Oracle.NUMBER,
                 'tid': cx_Oracle.NUMBER,
                 'prev_tid': cx_Oracle.NUMBER,
+                'chunk_num': cx_Oracle.NUMBER,
                 'md5sum': cx_Oracle.STRING,
                 },
             )
