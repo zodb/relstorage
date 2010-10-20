@@ -1037,18 +1037,15 @@ class ObjectMover(object):
                 DELETE FROM blob_chunk
                 WHERE zoid = %s AND tid = %s
                 """
-                cursor.execute(delete_stmt, (oid, tid))
+                delete_args = (oid, tid)
 
                 insert_stmt = """
                 INSERT INTO blob_chunk (zoid, tid, chunk_num, chunk)
                 VALUES (%s, %s, %s, CHUNK)
                 """
             else:
-                delete_stmt = """
-                DELETE FROM blob_chunk
-                WHERE zoid = %s
-                """
-                cursor.execute(delete_stmt, (oid,))
+                delete_stmt = "DELETE FROM blob_chunk WHERE zoid = %s"
+                delete_args = (oid,)
 
                 insert_stmt = """
                 INSERT INTO blob_chunk (zoid, tid, chunk_num, chunk)
@@ -1057,7 +1054,7 @@ class ObjectMover(object):
         else:
             use_tid = False
             delete_stmt = "DELETE FROM temp_blob_chunk WHERE zoid = %s"
-            cursor.execute(delete_stmt, (oid,))
+            delete_args = (oid,)
 
             insert_stmt = """
             INSERT INTO temp_blob_chunk (zoid, chunk_num, chunk)
@@ -1076,6 +1073,8 @@ class ObjectMover(object):
             for n in (1, 2, 3, 4):
                 delete_stmt = delete_stmt.replace('%s', ':%d' % n, 1)
                 insert_stmt = insert_stmt.replace('%s', ':%d' % n, 1)
+
+        cursor.execute(delete_stmt, delete_args)
 
         f = open(filename, 'rb')
         try:
