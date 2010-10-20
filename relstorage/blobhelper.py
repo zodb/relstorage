@@ -80,8 +80,9 @@ class BlobHelper(object):
     # currently uncommitted transaction.
     _txn_blobs = None
 
-    def __init__(self, options, fshelper=None, cache_checker=None):
+    def __init__(self, options, adapter, fshelper=None, cache_checker=None):
         self.options = options
+        self.adapter = adapter
         self.blob_dir = options.blob_dir
         self.shared_blob_dir = options.shared_blob_dir
 
@@ -103,8 +104,8 @@ class BlobHelper(object):
             cache_checker = BlobCacheChecker(options)
         self.cache_checker = cache_checker
 
-    def new_instance(self):
-        return BlobHelper(options=self.options,
+    def new_instance(self, adapter):
+        return BlobHelper(options=self.options, adapter=adapter,
             fshelper=self.fshelper, cache_checker=self.cache_checker)
 
     def clear_temp(self):
@@ -117,13 +118,13 @@ class BlobHelper(object):
     def close(self):
         self.cache_checker.close()
 
-    def download_blob(self, adapter, cursor, oid, serial, filename):
+    def download_blob(self, cursor, oid, serial, filename):
         """Download a blob into a file"""
-        bytes = adapter.mover.download_blob(
+        bytes = self.adapter.mover.download_blob(
             cursor, u64(oid), u64(serial), filename)
         self.cache_checker.loaded(bytes)
 
-    def upload_blob(self, adapter, cursor, oid, serial, filename):
+    def upload_blob(self, cursor, oid, serial, filename):
         """Upload a blob from a file.
 
         If serial is None, upload to the temporary table.
@@ -132,9 +133,9 @@ class BlobHelper(object):
             tid_int = u64(serial)
         else:
             tid_int = None
-        adapter.mover.upload_blob(cursor, u64(oid), tid_int, filename)
+        self.adapter.mover.upload_blob(cursor, u64(oid), tid_int, filename)
 
-    def loadBlob(self, adapter, cursor, oid, serial):
+    def loadBlob(self, cursor, oid, serial):
         # Load a blob.  If it isn't present and we have a shared blob
         # directory, then assume that it doesn't exist on the server
         # and return None.
@@ -168,7 +169,7 @@ class BlobHelper(object):
             if os.path.exists(blob_filename):
                 return _accessed(blob_filename)
 
-            self.download_blob(adapter, cursor, oid, serial, blob_filename)
+            self.download_blob(cursor, oid, serial, blob_filename)
 
             if os.path.exists(blob_filename):
                 return _accessed(blob_filename)
@@ -178,8 +179,8 @@ class BlobHelper(object):
         finally:
             lock.close()
 
-    def openCommittedBlobFile(self, adapter, cursor, oid, serial, blob=None):
-        blob_filename = self.loadBlob(adapter, cursor, oid, serial)
+    def openCommittedBlobFile(self, cursor, oid, serial, blob=None):
+        blob_filename = self.loadBlob(cursor, oid, serial)
         try:
             if blob is None:
                 return open(blob_filename, 'rb')
@@ -198,7 +199,7 @@ class BlobHelper(object):
                     # We're using a server shared cache.  If the file isn't
                     # here, it's not anywhere.
                     raise POSException.POSKeyError("No blob file", oid, serial)
-                self.download_blob(adapter, cursor, oid, serial, blob_filename)
+                self.download_blob(cursor, oid, serial, blob_filename)
                 if not os.path.exists(blob_filename):
                     raise POSException.POSKeyError("No blob file", oid, serial)
 
@@ -213,7 +214,7 @@ class BlobHelper(object):
     def temporaryDirectory(self):
         return self.fshelper.temp_dir
 
-    def storeBlob(self, adapter, cursor, store,
+    def storeBlob(self, cursor, store_func,
             oid, serial, data, blobfilename, version, txn):
         """Storage API: store a blob object."""
         assert not version
@@ -233,9 +234,10 @@ class BlobHelper(object):
         os.remove(target[:-1])
         self._add_blob_to_transaction(oid, target)
 
-        store(oid, serial, data, '', txn)
+        store_func(oid, serial, data, '', txn)
+
         if not self.shared_blob_dir:
-            self.upload_blob(adapter, cursor, oid, None, target)
+            self.upload_blob(cursor, oid, None, target)
 
     def _add_blob_to_transaction(self, oid, filename):
         if self._txn_blobs is None:
@@ -246,13 +248,13 @@ class BlobHelper(object):
                 ZODB.blob.remove_committed(old_filename)
         self._txn_blobs[oid] = filename
 
-    def restoreBlob(self, adapter, cursor, oid, serial, blobfilename):
+    def restoreBlob(self, cursor, oid, serial, blobfilename):
         if self.shared_blob_dir:
             self.fshelper.getPathForOID(oid, create=True)
             targetname = self.fshelper.getBlobFilename(oid, serial)
             ZODB.blob.rename_or_copy_blob(blobfilename, targetname)
         else:
-            self.upload_blob(adapter, cursor, oid, serial, blobfilename)
+            self.upload_blob(cursor, oid, serial, blobfilename)
 
     def copy_undone(self, copied, tid):
         """After an undo operation, copy the matching blobs forward.

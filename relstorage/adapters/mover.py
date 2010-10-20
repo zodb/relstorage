@@ -830,21 +830,6 @@ class ObjectMover(object):
                 """
             cursor.execute(stmt, (tid,))
 
-            if txn_has_blobs:
-                if self.database_name == 'oracle':
-                    stmt = """
-                    INSERT INTO blob_chunk (zoid, tid, chunk_num, chunk)
-                    SELECT zoid, :1, chunk_num, chunk
-                    FROM temp_blob_chunk
-                    """
-                else:
-                    stmt = """
-                    INSERT INTO blob_chunk (zoid, tid, chunk_num, chunk)
-                    SELECT zoid, %s, chunk_num, chunk
-                    FROM temp_blob_chunk
-                    """
-                cursor.execute(stmt, (tid,))
-
         else:
             if self.database_name == 'mysql':
                 stmt = """
@@ -882,12 +867,20 @@ class ObjectMover(object):
                 """
                 cursor.execute(stmt)
 
+        if txn_has_blobs:
+            if self.database_name == 'oracle':
                 stmt = """
-                INSERT INTO blob_chunk (zoid, chunk_num, chunk)
-                SELECT zoid, chunk_num, chunk
+                INSERT INTO blob_chunk (zoid, tid, chunk_num, chunk)
+                SELECT zoid, :1, chunk_num, chunk
                 FROM temp_blob_chunk
                 """
-                cursor.execute(stmt)
+            else:
+                stmt = """
+                INSERT INTO blob_chunk (zoid, tid, chunk_num, chunk)
+                SELECT zoid, %s, chunk_num, chunk
+                FROM temp_blob_chunk
+                """
+            cursor.execute(stmt, (tid,))
 
         stmt = """
         SELECT zoid FROM temp_store
@@ -978,23 +971,13 @@ class ObjectMover(object):
 
     def generic_download_blob(self, cursor, oid, tid, filename):
         """Download a blob into a file."""
-        if self.keep_history:
-            stmt = """
-            SELECT chunk
-            FROM blob_chunk
-            WHERE zoid = %s
-                AND tid = %s
-                AND chunk_num = %s
-            """
-            use_tid = True
-        else:
-            stmt = """
-            SELECT chunk
-            FROM blob_chunk
-            WHERE zoid = %s
-                AND chunk_num = %s
-            """
-            use_tid = False
+        stmt = """
+        SELECT chunk
+        FROM blob_chunk
+        WHERE zoid = %s
+            AND tid = %s
+            AND chunk_num = %s
+        """
 
         use_base64 = False
         if self.database_name == 'postgresql':
@@ -1010,17 +993,13 @@ class ObjectMover(object):
         try:
             chunk_num = 0
             while True:
-                if use_tid:
-                    params = (oid, tid, chunk_num)
-                else:
-                    params = (oid, chunk_num)
-                cursor.execute(stmt, params)
+                cursor.execute(stmt, (oid, tid, chunk_num))
                 rows = list(cursor)
                 if not rows:
-                    # No more chunks. Note: if there are no chunks at
-                    # all, then this method will not write a
-                    # file.  This is by design.
+                    # No more chunks.  Note: if there are no chunks at
+                    # all, then this method should not write a file.
                     break
+                assert len(rows) == 1
                 chunk = rows[0][0]
                 if use_base64:
                     chunk = decodestring(chunk)
@@ -1052,31 +1031,38 @@ class ObjectMover(object):
         If serial is None, upload to the temporary table.
         """
         if tid is not None:
+            use_tid = True
             if self.keep_history:
                 delete_stmt = """
                 DELETE FROM blob_chunk
-                WHERE zoid = %s
-                    AND tid = %s
+                WHERE zoid = %s AND tid = %s
                 """
+                cursor.execute(delete_stmt, (oid, tid))
+
                 insert_stmt = """
                 INSERT INTO blob_chunk (zoid, tid, chunk_num, chunk)
                 VALUES (%s, %s, %s, CHUNK)
                 """
-                use_tid = True
             else:
-                delete_stmt = "DELETE FROM blob_chunk WHERE zoid = %s"
-                insert_stmt = """
-                INSERT INTO blob_chunk (zoid, chunk_num, chunk)
-                VALUES (%s, %s, CHUNK)
+                delete_stmt = """
+                DELETE FROM blob_chunk
+                WHERE zoid = %s
                 """
-                use_tid = False
+                cursor.execute(delete_stmt, (oid,))
+
+                insert_stmt = """
+                INSERT INTO blob_chunk (zoid, tid, chunk_num, chunk)
+                VALUES (%s, %s, %s, CHUNK)
+                """
         else:
+            use_tid = False
             delete_stmt = "DELETE FROM temp_blob_chunk WHERE zoid = %s"
+            cursor.execute(delete_stmt, (oid,))
+
             insert_stmt = """
             INSERT INTO temp_blob_chunk (zoid, chunk_num, chunk)
             VALUES (%s, %s, CHUNK)
             """
-            use_tid = False
 
         use_base64 = False
         if self.database_name == 'postgresql':
@@ -1090,12 +1076,6 @@ class ObjectMover(object):
             for n in (1, 2, 3, 4):
                 delete_stmt = delete_stmt.replace('%s', ':%d' % n, 1)
                 insert_stmt = insert_stmt.replace('%s', ':%d' % n, 1)
-
-        if use_tid:
-            params = (oid, tid)
-        else:
-            params = (oid,)
-        cursor.execute(delete_stmt, params)
 
         f = open(filename, 'rb')
         try:

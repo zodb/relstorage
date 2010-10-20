@@ -314,7 +314,7 @@ Now, the serial for the existing blob should be the same:
 
 And we shouldn't be able to read the data that we saved:
 
-    >>> blob_storage.loadBlob(blob._p_oid, s1)
+    >>> import pdb; pdb.set_trace(); blob_storage.loadBlob(blob._p_oid, s1)
     Traceback (most recent call last):
     ...
     POSKeyError: 'No blob file'

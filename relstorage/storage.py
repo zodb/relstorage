@@ -190,7 +190,7 @@ class RelStorage(
         if blobhelper is not None:
             self.blobhelper = blobhelper
         elif options.blob_dir:
-            self.blobhelper = BlobHelper(options=options)
+            self.blobhelper = BlobHelper(options=options, adapter=adapter)
 
     def new_instance(self):
         """Creates and returns another storage instance.
@@ -200,7 +200,7 @@ class RelStorage(
         adapter = self._adapter.new_instance()
         cache = self._cache.new_instance()
         if self.blobhelper is not None:
-            blobhelper = self.blobhelper.new_instance()
+            blobhelper = self.blobhelper.new_instance(adapter=adapter)
         else:
             blobhelper = None
         other = RelStorage(adapter=adapter, name=self.__name__,
@@ -1253,7 +1253,7 @@ class RelStorage(
         self._lock_acquire()
         try:
             cursor = self._load_cursor
-            return self.blobhelper.loadBlob(self._adapter, cursor, oid, serial)
+            return self.blobhelper.loadBlob(cursor, oid, serial)
         finally:
             self._lock_release()
 
@@ -1272,7 +1272,7 @@ class RelStorage(
         try:
             cursor = self._load_cursor
             return self.blobhelper.openCommittedBlobFile(
-                self._adapter, cursor, oid, serial, blob=blob)
+                cursor, oid, serial, blob=blob)
         finally:
             self._lock_release()
 
@@ -1298,7 +1298,7 @@ class RelStorage(
         try:
             self._batcher.flush()
             cursor = self._store_cursor
-            self.blobhelper.storeBlob(self._adapter, cursor, self.store,
+            self.blobhelper.storeBlob(cursor, self.store,
                 oid, serial, data, blobfilename, version, txn)
         finally:
             self._lock_release()
@@ -1314,8 +1314,7 @@ class RelStorage(
         try:
             self._batcher.flush()
             cursor = self._store_cursor
-            self.blobhelper.restoreBlob(
-                self._adapter, cursor, oid, serial, blobfilename)
+            self.blobhelper.restoreBlob(cursor, oid, serial, blobfilename)
         finally:
             self._lock_release()
 

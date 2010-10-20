@@ -486,6 +486,7 @@ history_free_schema = """
             zoid        BIGINT NOT NULL,
             chunk_num   BIGINT NOT NULL,
                         PRIMARY KEY (zoid, chunk_num),
+            tid         BIGINT NOT NULL,
             chunk       BYTEA NOT NULL
         );
         CREATE INDEX blob_chunk_lookup ON blob_chunk (zoid);
@@ -507,6 +508,7 @@ history_free_schema = """
             zoid        BIGINT NOT NULL,
             chunk_num   BIGINT NOT NULL,
                         PRIMARY KEY (zoid, chunk_num),
+            tid         BIGINT NOT NULL,
             chunk       LONGBLOB NOT NULL
         );
         CREATE INDEX blob_chunk_lookup ON blob_chunk (zoid);
@@ -528,6 +530,7 @@ history_free_schema = """
             zoid        NUMBER(20) NOT NULL,
             chunk_num   NUMBER(20) NOT NULL,
                         PRIMARY KEY (zoid, chunk_num),
+            tid         BIGINT NOT NULL,
             chunk       BLOB
         );
         CREATE INDEX blob_chunk_lookup ON blob_chunk (zoid);

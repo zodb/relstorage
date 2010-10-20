@@ -396,12 +396,20 @@ class HistoryPreservingPackUndo(PackUndo):
         -- Copy old states forward.
         INSERT INTO object_state (zoid, tid, prev_tid, md5, state)
         SELECT temp_undo.zoid, %(self_tid)s, current_object.tid,
-            prev.md5, prev.state
+            md5, state
         FROM temp_undo
             JOIN current_object ON (temp_undo.zoid = current_object.zoid)
-            LEFT JOIN object_state prev
-                ON (prev.zoid = temp_undo.zoid
-                    AND prev.tid = temp_undo.prev_tid);
+            LEFT JOIN object_state
+                ON (object_state.zoid = temp_undo.zoid
+                    AND object_state.tid = temp_undo.prev_tid);
+
+        -- Copy old blob chunks forward.
+        INSERT INTO blob_chunk (zoid, tid, chunk_num, chunk)
+        SELECT temp_undo.zoid, %(self_tid)s, chunk_num, chunk
+        FROM temp_undo
+            JOIN blob_chunk
+                ON (blob_chunk.zoid = temp_undo.zoid
+                    AND blob_chunk.tid = temp_undo.prev_tid);
 
         -- List the copied states.
         SELECT zoid, prev_tid FROM temp_undo

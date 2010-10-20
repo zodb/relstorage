@@ -153,36 +153,44 @@ def test_suite():
         pass
     else:
         from relstorage.tests.blob.testblob import storage_reusable_suite
-        for keep_history in (False, True):
-            def create_storage(name, blob_dir, keep_history=keep_history):
-                from relstorage.storage import RelStorage
-                from relstorage.adapters.postgresql import PostgreSQLAdapter
-                db = db_names[name]
-                if not keep_history:
-                    db += '_hf'
-                dsn = ('dbname=%s user=relstoragetest '
-                        'password=relstoragetest' % db)
-                adapter = PostgreSQLAdapter(
-                    dsn=dsn, options=Options(keep_history=keep_history))
-                storage = RelStorage(adapter, name=name, create=True,
-                    blob_dir=os.path.abspath(blob_dir))
-                storage.zap_all()
-                return storage
+        for shared_blob_dir in (False, True):
+            for keep_history in (False, True):
+                def create_storage(name, blob_dir,
+                        shared_blob_dir=shared_blob_dir,
+                        keep_history=keep_history):
+                    from relstorage.storage import RelStorage
+                    from relstorage.adapters.postgresql import PostgreSQLAdapter
+                    db = db_names[name]
+                    if not keep_history:
+                        db += '_hf'
+                    dsn = ('dbname=%s user=relstoragetest '
+                            'password=relstoragetest' % db)
+                    options = Options(
+                        keep_history=keep_history,
+                        shared_blob_dir=shared_blob_dir,
+                        blob_dir=os.path.abspath(blob_dir),
+                    )
+                    adapter = PostgreSQLAdapter(dsn=dsn, options=options)
+                    storage = RelStorage(adapter, name=name, options=options)
+                    storage.zap_all()
+                    return storage
 
-            if keep_history:
-                prefix = 'HPPostgreSQL'
-                pack_test_name = 'blob_packing.txt'
-            else:
-                prefix = 'HFPostgreSQL'
-                pack_test_name = 'blob_packing_history_free.txt'
+                prefix = 'PostgreSQL%s%s' % (
+                    (shared_blob_dir and 'Shared' or 'Unshared'),
+                    (keep_history and 'WithHistory' or 'NoHistory'),
+                )
+                if keep_history:
+                    pack_test_name = 'blob_packing.txt'
+                else:
+                    pack_test_name = 'blob_packing_history_free.txt'
 
-            suite.addTest(storage_reusable_suite(
-                prefix, create_storage,
-                test_blob_storage_recovery=True,
-                test_packing=True,
-                test_undo=keep_history,
-                pack_test_name=pack_test_name,
-                ))
+                suite.addTest(storage_reusable_suite(
+                    prefix, create_storage,
+                    test_blob_storage_recovery=True,
+                    test_packing=True,
+                    test_undo=keep_history,
+                    pack_test_name=pack_test_name,
+                    ))
 
     return suite
 
