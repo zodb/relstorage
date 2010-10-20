@@ -993,14 +993,19 @@ class ObjectMover(object):
         try:
             chunk_num = 0
             while True:
-                cursor.execute(stmt, (oid, tid, chunk_num))
-                rows = list(cursor)
-                if not rows:
-                    # No more chunks.  Note: if there are no chunks at
-                    # all, then this method should not write a file.
-                    break
-                assert len(rows) == 1
-                chunk = rows[0][0]
+                if self.database_name == 'oracle':
+                    chunk = self.runner.run_lob_stmt(
+                        cursor, stmt, (oid, tid, chunk_num))
+                else:
+                    cursor.execute(stmt, (oid, tid, chunk_num))
+                    rows = list(cursor)
+                    if not rows:
+                        # No more chunks.  Note: if there are no chunks at
+                        # all, then this method should not write a file.
+                        break
+                    assert len(rows) == 1
+                    chunk = rows[0][0]
+
                 if use_base64:
                     chunk = decodestring(chunk)
                 if f is None:
@@ -1037,7 +1042,7 @@ class ObjectMover(object):
                 DELETE FROM blob_chunk
                 WHERE zoid = %s AND tid = %s
                 """
-                delete_args = (oid, tid)
+                cursor.execute(delete_stmt, (oid, tid))
 
                 insert_stmt = """
                 INSERT INTO blob_chunk (zoid, tid, chunk_num, chunk)
@@ -1045,7 +1050,7 @@ class ObjectMover(object):
                 """
             else:
                 delete_stmt = "DELETE FROM blob_chunk WHERE zoid = %s"
-                delete_args = (oid,)
+                cursor.execute(delete_stmt, (oid,))
 
                 insert_stmt = """
                 INSERT INTO blob_chunk (zoid, tid, chunk_num, chunk)
@@ -1054,7 +1059,7 @@ class ObjectMover(object):
         else:
             use_tid = False
             delete_stmt = "DELETE FROM temp_blob_chunk WHERE zoid = %s"
-            delete_args = (oid,)
+            cursor.execute(delete_stmt, (oid,))
 
             insert_stmt = """
             INSERT INTO temp_blob_chunk (zoid, chunk_num, chunk)
@@ -1068,13 +1073,6 @@ class ObjectMover(object):
                 "CHUNK", "decode(%s, 'base64')", 1)
         else:
             insert_stmt = insert_stmt.replace("CHUNK", "%s")
-
-        if self.database_name == 'oracle':
-            for n in (1, 2, 3, 4):
-                delete_stmt = delete_stmt.replace('%s', ':%d' % n, 1)
-                insert_stmt = insert_stmt.replace('%s', ':%d' % n, 1)
-
-        cursor.execute(delete_stmt, delete_args)
 
         f = open(filename, 'rb')
         try:
@@ -1098,4 +1096,60 @@ class ObjectMover(object):
 
     mysql_upload_blob = generic_upload_blob
     postgresql_upload_blob = generic_upload_blob
-    oracle_upload_blob = generic_upload_blob
+
+    def oracle_upload_blob(self, cursor, oid, tid, filename):
+        """Upload a blob from a file.
+
+        If serial is None, upload to the temporary table.
+        """
+        if tid is not None:
+            use_tid = True
+            if self.keep_history:
+                delete_stmt = """
+                DELETE FROM blob_chunk
+                WHERE zoid = :1 AND tid = :2
+                """
+                cursor.execute(delete_stmt, (oid, tid))
+
+                insert_stmt = """
+                INSERT INTO blob_chunk (zoid, tid, chunk_num, chunk)
+                VALUES (:oid, :tid, :chunk_num, :blobdata)
+                """
+            else:
+                delete_stmt = "DELETE FROM blob_chunk WHERE zoid = :1"
+                cursor.execute(delete_stmt, (oid,))
+
+                insert_stmt = """
+                INSERT INTO blob_chunk (zoid, tid, chunk_num, chunk)
+                VALUES (:oid, :tid, :chunk_num, :blobdata)
+                """
+        else:
+            use_tid = False
+            delete_stmt = "DELETE FROM temp_blob_chunk WHERE zoid = :1"
+            delete_args = (oid,)
+
+            insert_stmt = """
+            INSERT INTO temp_blob_chunk (zoid, chunk_num, chunk)
+            VALUES (:oid, :chunk_num, :blobdata)
+            """
+
+        f = open(filename, 'rb')
+        try:
+            chunk_num = 0
+            while True:
+                chunk = f.read(self.blob_chunk_size)
+                if not chunk and chunk_num > 0:
+                    # EOF.  Note that we always write at least one
+                    # chunk, even if the blob file is empty.
+                    break
+                params = {
+                    'oid': oid,
+                    'chunk_num': chunk_num,
+                    'blobdata': chunk,
+                }
+                if use_tid:
+                    params['tid'] = tid
+                cursor.execute(stmt, params)
+                chunk_num += 1
+        finally:
+            f.close()
