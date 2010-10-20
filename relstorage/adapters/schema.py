@@ -141,7 +141,7 @@ history_preserving_schema = """
             zoid        NUMBER(20) NOT NULL,
             tid         NUMBER(20) NOT NULL REFERENCES transaction,
                         PRIMARY KEY (zoid, tid),
-                        CHECK tid_min (tid > 0),
+                        CONSTRAINT tid_min CHECK (tid > 0),
             prev_tid    NUMBER(20) NOT NULL REFERENCES transaction,
             md5         CHAR(32),
             state       BLOB
@@ -521,7 +521,7 @@ history_free_schema = """
         CREATE TABLE object_state (
             zoid        NUMBER(20) NOT NULL PRIMARY KEY,
             tid         NUMBER(20) NOT NULL,
-                        CHECK tid_min (tid > 0),
+                        CONSTRAINT tid_min CHECK (tid > 0),
             state       BLOB
         );
         CREATE INDEX object_state_tid ON object_state (tid);
