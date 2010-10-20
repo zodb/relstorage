@@ -179,6 +179,11 @@ def test_suite():
                     (shared_blob_dir and 'Shared' or 'Unshared'),
                     (keep_history and 'WithHistory' or 'NoHistory'),
                 )
+
+                # If the blob directory is a cache, don't test packing,
+                # since packing can not remove blobs from all caches.
+                test_packing = shared_blob_dir
+
                 if keep_history:
                     pack_test_name = 'blob_packing.txt'
                 else:
@@ -187,7 +192,7 @@ def test_suite():
                 suite.addTest(storage_reusable_suite(
                     prefix, create_storage,
                     test_blob_storage_recovery=True,
-                    test_packing=True,
+                    test_packing=test_packing,
                     test_undo=keep_history,
                     pack_test_name=pack_test_name,
                     ))

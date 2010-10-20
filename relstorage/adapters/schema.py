@@ -510,7 +510,7 @@ history_free_schema = """
                         PRIMARY KEY (zoid, chunk_num),
             tid         BIGINT NOT NULL,
             chunk       LONGBLOB NOT NULL
-        );
+        ) ENGINE = InnoDB;
         CREATE INDEX blob_chunk_lookup ON blob_chunk (zoid);
         ALTER TABLE blob_chunk ADD CONSTRAINT blob_chunk_fk
             FOREIGN KEY (zoid)
