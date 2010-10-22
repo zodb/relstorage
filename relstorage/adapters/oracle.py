@@ -283,7 +283,7 @@ class CXOracleConnectionManager(AbstractConnectionManager):
 
         while True:
             try:
-                kw = {'twophase': twophase}  #, 'threaded': True}
+                kw = {'twophase': twophase, 'threaded': True}
                 conn = cx_Oracle.connect(
                     self._user, self._password, self._dsn, **kw)
                 cursor = conn.cursor()

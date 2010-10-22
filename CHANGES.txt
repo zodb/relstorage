@@ -1,3 +1,8 @@
+1.4.1 (2010-10-21)
+------------------
+
+- Oracle: always connect in threaded mode.  Without threaded mode,
+  clients of Oracle 11g sometimes segfault.
 
 1.4.0 (2010-09-30)
 ------------------
