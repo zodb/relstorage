@@ -25,6 +25,8 @@ them at the bottom, they may be overridden by other parameters)::
     local   relstoragetest2    relstoragetest   md5
     local   relstoragetest_hf  relstoragetest   md5
     local   relstoragetest2_hf relstoragetest   md5
+    host    relstoragetest     relstoragetest   127.0.0.1/32 md5
+    host    relstoragetest_hf  relstoragetest   127.0.0.1/32 md5
 
 
 MySQL
