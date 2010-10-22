@@ -153,7 +153,7 @@ class BlobHelper(object):
             return _accessed(blob_filename)
 
         # First, we'll create the directory for this oid, if it doesn't exist.
-        self.fshelper.createPathForOID(oid)
+        self.fshelper.getPathForOID(oid, create=True)
 
         # OK, it's not here and we (or someone) needs to get it.  We
         # want to avoid getting it multiple times.  We want to avoid
