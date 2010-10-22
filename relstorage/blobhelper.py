@@ -385,6 +385,17 @@ class BlobCacheChecker(object):
         self._check_blob_size_thread = check_blob_size_thread
 
 
+# Note: the following code is copied directly from ZEO.  It is copied
+# for 2 reasons:
+#
+# 1. Most of the symbols are not public (the function names start
+#    with an underscore), indicating their signature could change
+#    at any time.
+#
+# 2. No such code exists in ZODB 3.8, when blob support was first added
+#    to ZODB.
+
+
 class BlobCacheLayout(object):
 
     size = 997
@@ -507,12 +518,6 @@ def _check_blob_cache_size(blob_dir, target):
 
     finally:
         check_lock.close()
-
-def check_blob_size_script(args=None):
-    if args is None:
-        args = sys.argv[1:]
-    blob_dir, target = args
-    _check_blob_cache_size(blob_dir, int(target))
 
 def _lock_blob(path):
     lockfilename = os.path.join(os.path.dirname(path), '.lock')
