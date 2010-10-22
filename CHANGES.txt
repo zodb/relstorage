@@ -1,8 +1,11 @@
 
-Next Release
-------------
+1.5.0a1 (2010-10-21)
+--------------------
 
-- Added an option to store ZODB blobs in the database.
+- Added an option to store ZODB blobs in the database.  The option is
+  called "shared-blob-dir" and it behaves very much like the ZEO
+  option of the same name.  Blobs stored in the database are broken
+  into chunks to reduce the impact on RAM.
 
 - Require setuptools or distribute.  Plain distutils is not sufficient.
 
