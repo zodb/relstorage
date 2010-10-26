@@ -1,4 +1,9 @@
 
+Next Release
+------------
+
+- Fixed a missing import in the blob cache cleanup code.
+
 1.5.0a1 (2010-10-21)
 --------------------
 

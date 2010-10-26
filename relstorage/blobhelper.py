@@ -20,6 +20,7 @@ from ZODB import POSException
 from ZODB import utils
 from ZODB.utils import p64
 from ZODB.utils import u64
+import BTrees.OOBTree
 import logging
 import os
 import re
