@@ -101,12 +101,14 @@ def main(argv=sys.argv, write=sys.stdout.write):
 
     else:
         if options.clear:
+            log.info("Clearing old data...")
             if hasattr(destination, 'zap_all'):
                 destination.zap_all()
             else:
                 msg = ("Error: no API is known for clearing this type "
                        "of storage. Use another method.")
                 sys.exit(msg)
+            log.info("Done clearing old data.")
 
         if storage_has_data(destination):
             msg = "Error: the destination storage has data.  Try --clear."
@@ -115,7 +117,11 @@ def main(argv=sys.argv, write=sys.stdout.write):
         copy_args = [source]
         if issubclass(destination.__class__, RelStorage):
             copy_args.append(options.single_transaction)
+        log.info("Started copying transactions...")
+        log.info("This will take long...")
         num_txns, size, elapsed = destination.copyTransactionsFrom(*copy_args)
+        log.info("Done copying transactions.")
+        log.info("Closing up...")
 
         try:
             source.close()
