@@ -38,6 +38,9 @@ schema_xml = """
 """
 
 log = logging.getLogger("relstorage.zodbconvert")
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s:%(name)s: %(message)s")
 
 
 def storage_has_data(storage):
@@ -140,7 +143,4 @@ def main(argv=sys.argv, write=sys.stdout.write):
 
 
 if __name__ == '__main__':
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s:%(name)s: %(message)s")
     main()
