@@ -1431,7 +1431,11 @@ class RelStorage(
                     self.restore(record.oid, record.tid, record.data,
                                  '', record.data_txn, trans, txnum)
                 num_txn_records += 1
-                tx_size += len(record.data)
+                try:
+                    tx_size += len(record.data)
+                except TypeError:
+                    # data is probably None
+                    pass
             txnum += 1
             tx_end = time.time()
             pct_complete = (txnum/float(num_txns))*100
