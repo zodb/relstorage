@@ -13,6 +13,7 @@
 ##############################################################################
 """Database schema installers
 """
+import logging
 from relstorage.adapters.interfaces import ISchemaInstaller
 from ZODB.POSException import StorageError
 from zope.interface import implements
@@ -20,6 +21,7 @@ import re
 import time
 
 relstorage_op_version = '1.5'
+log = logging.getLogger("relstorage")
 
 history_preserving_schema = """
 
@@ -830,14 +832,20 @@ class AbstractSchemaInstaller(object):
             existent = set(self.list_tables(cursor))
             todo = list(self.all_tables)
             todo.reverse()
+            log.info("Checking tables: %r", todo)
             for table in todo:
+                log.info("Considering table %s", table)
                 if table.startswith('temp_'):
                     continue
                 if table in existent:
+                    log.info("Deleting table %s...", table)
                     cursor.execute("DELETE FROM %s" % table)
+            log.info("Done deleting tables.")
             script = filter_script(self.init_script, self.database_name)
             if script:
+                log.info("Running init script.")
                 self.runner.run_script(cursor, script)
+                log.info("Done running init script.")
         self.connmanager.open_and_call(callback)
 
     def drop_all(self):

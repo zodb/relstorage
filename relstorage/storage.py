@@ -1320,8 +1320,13 @@ class RelStorage(
 
     def copyTransactionsFrom(self, other):
         # adapted from ZODB.blob.BlobStorageMixin
+        begin_time = time.time()
+        txnum = 0
+        tx_size = 0
+        num_txns = len(list(other.iterator()))
         for trans in other.iterator():
             self.tpc_begin(trans, trans.tid, trans.status)
+            num_txn_records = 0
             for record in trans:
                 blobfilename = None
                 if self.blobhelper is not None:
@@ -1342,9 +1347,28 @@ class RelStorage(
                 else:
                     self.restore(record.oid, record.tid, record.data,
                                  '', record.data_txn, trans)
+                num_txn_records += 1
+                try:
+                    tx_size += len(record.data)
+                except TypeError:
+                    # data is probably None
+                    pass
+            txnum += 1
+            tx_end = time.time()
+            pct_complete = (txnum / float(num_txns)) * 100
+            if pct_complete < 10:
+                pct_complete = '  %1.2f%%' % pct_complete
+            elif pct_complete < 100:
+                pct_complete = ' %1.2f%%' % pct_complete
+            rate = (tx_size / float(1024 * 1024)) / (tx_end - begin_time)
 
             self.tpc_vote(trans)
             self.tpc_finish(trans)
+            log.info("Restored tid %d,%5d records | %1.3f MB/s (%6d/%6d,%s)",
+                     u64(trans.tid), num_txn_records, rate, txnum, num_txns,
+                     pct_complete)
+
+        return txnum, tx_size, tx_end - begin_time
 
     # The propagate_invalidations flag implements the old
     # invalidation polling API and is not otherwise used. Set to a
