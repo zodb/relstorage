@@ -23,7 +23,6 @@ from persistent.TimeStamp import TimeStamp
 from StringIO import StringIO
 import sys
 import ZConfig
-from ZODB.utils import oid_repr
 
 schema_xml = """
 <schema>
@@ -113,9 +112,9 @@ def main(argv=sys.argv):
         source.close()
         destination.close()
 
-        rate = (size/float(1024*1024)) / elapsed
-        log.info('All %d transactions copied successfully in %4.1f minutes at %1.3fmB/s.',
-                 num_txns, elapsed/60, rate)
+        rate = (size / float(1024 * 1024)) / elapsed
+        log.info("All %d transactions copied successfully in %4.1f minutes "
+                 "at %1.3fmB/s.", num_txns, elapsed / 60, rate)
 
 
 if __name__ == '__main__':

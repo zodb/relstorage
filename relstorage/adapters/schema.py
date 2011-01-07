@@ -18,7 +18,6 @@ from relstorage.adapters.interfaces import ISchemaInstaller
 from ZODB.POSException import StorageError
 from zope.interface import implements
 import re
-import time
 
 relstorage_op_version = '1.5'
 log = logging.getLogger("relstorage")

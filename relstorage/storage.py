@@ -34,7 +34,6 @@ import base64
 import cPickle
 import logging
 import os
-import sys
 import tempfile
 import threading
 import time
@@ -81,8 +80,8 @@ class RelStorage(
     """Storage to a relational database, based on invalidation polling"""
     implements(*_relstorage_interfaces)
 
-    _transaction=None # Transaction that is being committed
-    _tstatus=' '      # Transaction status, used for copying data
+    _transaction = None  # Transaction that is being committed
+    _tstatus = ' '  # Transaction status, used for copying data
     _is_read_only = False
 
     # load_conn and load_cursor are open most of the time.
@@ -370,7 +369,7 @@ class RelStorage(
         return self._adapter.stats.get_db_size()
 
     def registerDB(self, db, limit=None):
-        pass # we don't care
+        pass  # we don't care
 
     def isReadOnly(self):
         return self._is_read_only
@@ -540,7 +539,6 @@ class RelStorage(
         finally:
             self._lock_release()
 
-
     def store(self, oid, serial, data, version, transaction):
         if self._is_read_only:
             raise POSException.ReadOnlyError()
@@ -575,7 +573,6 @@ class RelStorage(
         finally:
             self._lock_release()
 
-
     def restore(self, oid, serial, data, version, prev_txn, transaction):
         # Like store(), but used for importing transactions.  See the
         # comments in FileStorage.restore().  The prev_txn optimization
@@ -605,7 +602,6 @@ class RelStorage(
         finally:
             self._lock_release()
 
-
     def checkCurrentSerialInTransaction(self, oid, serial, transaction):
         if transaction is not self._transaction:
             raise POSException.StorageTransactionError(self, transaction)
@@ -625,7 +621,6 @@ class RelStorage(
                 raise POSException.ReadConflictError(
                     oid=oid, serials=(previous_serial, serial))
         self._txn_check_serials[oid] = serial
-
 
     def tpc_begin(self, transaction, tid=None, status=' '):
         if self._is_read_only:
@@ -710,7 +705,6 @@ class RelStorage(
         adapter.txncontrol.add_transaction(cursor, tid_int, user, desc, ext)
         self._tid = tid
 
-
     def _clear_temp(self):
         # Clear all attributes used for transaction commit.
         # It is assumed that self._lock_acquire was called before this
@@ -726,7 +720,6 @@ class RelStorage(
         blobhelper = self.blobhelper
         if blobhelper is not None:
             blobhelper.clear_temp()
-
 
     def _finish_store(self):
         """Move stored objects from the temporary table to final storage.
@@ -782,7 +775,6 @@ class RelStorage(
             serials.append((oid, serial))
 
         return serials
-
 
     def tpc_vote(self, transaction):
         self._lock_acquire()
@@ -850,7 +842,6 @@ class RelStorage(
 
         return serials
 
-
     def tpc_finish(self, transaction, f=None):
         self._lock_acquire()
         try:
@@ -872,7 +863,6 @@ class RelStorage(
         finally:
             self._lock_release()
 
-
     def _finish(self, tid, user, desc, ext):
         """Commit the transaction."""
         # It is assumed that self._lock_acquire was called before this
@@ -889,7 +879,6 @@ class RelStorage(
         # N.B. only set _ltid after the commit succeeds,
         # including cache updates.
         self._ltid = self._tid
-
 
     def tpc_abort(self, transaction):
         self._lock_acquire()
@@ -1020,7 +1009,6 @@ class RelStorage(
         finally:
             self._lock_release()
 
-
     def undo(self, transaction_id, transaction):
         """Undo a transaction identified by transaction_id.
 
@@ -1076,7 +1064,7 @@ class RelStorage(
         if self._is_read_only:
             raise POSException.ReadOnlyError()
 
-        pack_point = repr(TimeStamp(*time.gmtime(t)[:5]+(t%60,)))
+        pack_point = repr(TimeStamp(*time.gmtime(t)[:5] + (t % 60,)))
         pack_point_int = u64(pack_point)
 
         def get_references(state):
