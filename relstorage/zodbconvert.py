@@ -56,7 +56,7 @@ def storage_has_data(storage):
     return True
 
 
-def main(argv=sys.argv, write=sys.stdout.write):
+def main(argv=sys.argv):
     parser = optparse.OptionParser(description=__doc__,
         usage="%prog [options] config_file")
     parser.add_option(
@@ -76,21 +76,17 @@ def main(argv=sys.argv, write=sys.stdout.write):
     source = config.source.open()
     destination = config.destination.open()
 
-    #write("Storages opened successfully.\n")
     log.info("Storages opened successfully.")
 
     if options.dry_run:
-        #write("Dry run mode: not changing the destination.\n")
         log.info("Dry run mode: not changing the destination.")
         if storage_has_data(destination):
-            #write("Warning: the destination storage has data\n")
             log.warning("The destination storage has data.")
         count = 0
         for txn in source.iterator():
-            write('%s user=%s description=%s\n' % (
+            log.info('%s user=%s description=%s' % (
                 TimeStamp(txn.tid), txn.user, txn.description))
             count += 1
-        #write("Would copy %d transactions.\n" % count)
         log.info("Would copy %d transactions.", count)
 
     else:
@@ -110,7 +106,6 @@ def main(argv=sys.argv, write=sys.stdout.write):
 
         log.info("Started copying transactions...")
         log.info("This will take long...")
-        #destination.copyTransactionsFrom(source)
         num_txns, size, elapsed = destination.copyTransactionsFrom(source)
         log.info("Done copying transactions.")
         log.info("Closing up...")
@@ -119,8 +114,6 @@ def main(argv=sys.argv, write=sys.stdout.write):
         destination.close()
 
         rate = (size/float(1024*1024)) / elapsed
-        #write('All %d transactions copied successfully in %4.1f minutes at %1.3fmB/s.\n' %
-        #      (num_txns, elapsed/60, rate))
         log.info('All %d transactions copied successfully in %4.1f minutes at %1.3fmB/s.',
                  num_txns, elapsed/60, rate)
 
