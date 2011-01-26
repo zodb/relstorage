@@ -35,6 +35,8 @@ def patch_zodb_sync():
     """
 
     def _storage_sync(self, *ignored, **kw):
+        if hasattr(self, '_readCurrent'):
+            self._readCurrent.clear()
         sync = getattr(self._storage, 'sync', 0)
         if sync:
             # By default, do not force the sync, allowing RelStorage
