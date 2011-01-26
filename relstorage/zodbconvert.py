@@ -36,9 +36,6 @@ schema_xml = """
 """
 
 log = logging.getLogger("relstorage.zodbconvert")
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s:%(name)s: %(message)s")
 
 
 def storage_has_data(storage):
@@ -69,6 +66,10 @@ def main(argv=sys.argv):
 
     if len(args) != 1:
         parser.error("The name of one configuration file is required.")
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(name)s] %(levelname)s %(message)s")
 
     schema = ZConfig.loadSchemaFile(StringIO(schema_xml))
     config, handler = ZConfig.loadConfig(schema, args[0])
@@ -103,18 +104,9 @@ def main(argv=sys.argv):
             msg = "Error: the destination storage has data.  Try --clear."
             sys.exit(msg)
 
-        log.info("Started copying transactions...")
-        log.info("This will take long...")
-        num_txns, size, elapsed = destination.copyTransactionsFrom(source)
-        log.info("Done copying transactions.")
-        log.info("Closing up...")
-
+        destination.copyTransactionsFrom(source)
         source.close()
         destination.close()
-
-        rate = (size / 1e6) / elapsed
-        log.info("All %d transactions copied successfully in %4.1f minutes "
-                 "at %1.3f MB/s.", num_txns, elapsed / 60, rate)
 
 
 if __name__ == '__main__':
