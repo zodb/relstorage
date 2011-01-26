@@ -112,9 +112,9 @@ def main(argv=sys.argv):
         source.close()
         destination.close()
 
-        rate = (size / float(1024 * 1024)) / elapsed
+        rate = (size / 1e6) / elapsed
         log.info("All %d transactions copied successfully in %4.1f minutes "
-                 "at %1.3fmB/s.", num_txns, elapsed / 60, rate)
+                 "at %1.3f MB/s.", num_txns, elapsed / 60, rate)
 
 
 if __name__ == '__main__':

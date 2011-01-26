@@ -75,7 +75,7 @@ class ZODBConvertTests(unittest.TestCase):
         conn.close()
         db.close()
 
-        main(['', self.cfgfile], write=lambda x: None)
+        main(['', self.cfgfile])
 
         dest = FileStorage(self.destfile)
         db2 = DB(dest)
@@ -99,7 +99,7 @@ class ZODBConvertTests(unittest.TestCase):
         conn.close()
         db.close()
 
-        main(['', '--dry-run', self.cfgfile], write=lambda x: None)
+        main(['', '--dry-run', self.cfgfile])
 
         dest = FileStorage(self.destfile)
         db2 = DB(dest)
@@ -123,8 +123,7 @@ class ZODBConvertTests(unittest.TestCase):
         db = DB(dest)  # create the root object
         db.close()
 
-        self.assertRaises(SystemExit, main, ['', self.cfgfile],
-            write=lambda x: None)
+        self.assertRaises(SystemExit, main, ['', self.cfgfile])
 
 def test_suite():
     suite = unittest.TestSuite()
