@@ -1348,7 +1348,7 @@ class RelStorage(
                 pct_complete = '  %1.2f%%' % pct_complete
             elif pct_complete < 100:
                 pct_complete = ' %1.2f%%' % pct_complete
-            rate = (tx_size / float(1024 * 1024)) / (tx_end - begin_time)
+            rate = (tx_size / 1e6) / (tx_end - begin_time)
 
             self.tpc_vote(trans)
             self.tpc_finish(trans)
