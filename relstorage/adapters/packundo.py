@@ -945,7 +945,7 @@ class HistoryFreePackUndo(PackUndo):
     def pack(self, pack_tid, options, sleep=None, packed_func=None):
         """Run garbage collection.
 
-        Requires the information provided by _pre_gc.
+        Requires the information provided by pre_pack.
         """
         # Read committed mode is sufficient.
         conn, cursor = self.connmanager.open()

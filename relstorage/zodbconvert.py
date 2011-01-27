@@ -35,7 +35,7 @@ schema_xml = """
 </schema>
 """
 
-log = logging.getLogger("relstorage.zodbconvert")
+log = logging.getLogger("zodbconvert")
 
 
 def storage_has_data(storage):

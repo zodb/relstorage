@@ -5,6 +5,8 @@ Next Release
 - Added more logging during zodbconvert to show that something is
   happening and give an indication of how far along the process is.
 
+- Enabled logging to stderr in zodbpack.
+
 - Fixed a missing import in the blob cache cleanup code.
 
 1.5.0a1 (2010-10-21)
