@@ -558,6 +558,8 @@ class GenericRelStorageTests(
             expect_oids = [child._p_oid]
 
             def inject_changes():
+                # Change the database just after the list of objects
+                # to analyze has been determined.
                 child2 = PersistentMapping()
                 root['child2'] = child2
                 transaction.commit()
@@ -569,7 +571,7 @@ class GenericRelStorageTests(
             self._storage.pack(packtime, referencesf)
 
             self.assertEqual(len(expect_oids), 2,
-                "The on_filling_object_refs hook was never called")
+                "The on_filling_object_refs hook should have been called once")
             # Both children should still exist.
             self._storage.load(expect_oids[0], '')
             self._storage.load(expect_oids[1], '')

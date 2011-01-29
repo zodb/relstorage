@@ -2,6 +2,11 @@
 Next Release
 ------------
 
+- Fixed a bug in packing history-free databases.  If changes were
+  made to the database during the pack, the pack code could delete
+  too many objects.  Thanks to Chris Withers for writing test code
+  that revealed the bug.
+
 - Added more logging during zodbconvert to show that something is
   happening and give an indication of how far along the process is.
 
