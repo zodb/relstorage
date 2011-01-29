@@ -50,6 +50,9 @@ class PackUndo(object):
         finally:
             self.connmanager.close(conn, cursor)
 
+    def on_filling_object_refs(self):
+        """Test injection point"""
+
     def fill_object_refs(self, conn, cursor, get_references):
         """Update the object_refs table by analyzing new transactions."""
         if self.keep_history:
@@ -74,6 +77,7 @@ class PackUndo(object):
         self.runner.run_script_stmt(cursor, stmt)
         tids = [tid for (tid,) in cursor]
         if tids:
+            self.on_filling_object_refs()
             added = 0
             log.info("discovering references from objects in %d "
                 "transaction(s)" % len(tids))
