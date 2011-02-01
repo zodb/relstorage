@@ -926,13 +926,10 @@ class HistoryFreePackUndo(PackUndo):
         WHERE zoid IN (%s)
         """ % oid_list
         self.runner.run_script_stmt(cursor, stmt)
-        rows = list(cursor)
-        if not rows:
-            return 0
 
         add_objects = []
         add_refs = []
-        for from_oid, tid, state in rows:
+        for from_oid, tid, state in cursor:
             if hasattr(state, 'read'):
                 # Oracle
                 state = state.read()
@@ -947,6 +944,9 @@ class HistoryFreePackUndo(PackUndo):
                     raise
                 for to_oid in to_oids:
                     add_refs.append((from_oid, tid, to_oid))
+
+        if not add_objects:
+            return 0
 
         stmt = "DELETE FROM object_refs_added WHERE zoid IN (%s)" % oid_list
         self.runner.run_script_stmt(cursor, stmt)
