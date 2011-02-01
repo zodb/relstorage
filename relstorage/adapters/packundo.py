@@ -50,99 +50,6 @@ class PackUndo(object):
         finally:
             self.connmanager.close(conn, cursor)
 
-    def fill_object_refs(self, conn, cursor, get_references):
-        """Update the object_refs table by analyzing new transactions."""
-        if self.keep_history:
-            stmt = """
-            SELECT transaction.tid
-            FROM transaction
-                LEFT JOIN object_refs_added
-                    ON (transaction.tid = object_refs_added.tid)
-            WHERE object_refs_added.tid IS NULL
-            ORDER BY transaction.tid
-            """
-        else:
-            stmt = """
-            SELECT transaction.tid
-            FROM (SELECT DISTINCT tid FROM object_state) transaction
-                LEFT JOIN object_refs_added
-                    ON (transaction.tid = object_refs_added.tid)
-            WHERE object_refs_added.tid IS NULL
-            ORDER BY transaction.tid
-            """
-
-        self.runner.run_script_stmt(cursor, stmt)
-        tids = [tid for (tid,) in cursor]
-        if tids:
-            added = 0
-            log.info("discovering references from objects in %d "
-                "transaction(s)" % len(tids))
-            for tid in tids:
-                added += self._add_refs_for_tid(cursor, tid, get_references)
-                if added >= 10000:
-                    # save the work done so far
-                    conn.commit()
-                    added = 0
-            if added:
-                conn.commit()
-
-    def _add_refs_for_tid(self, cursor, tid, get_references):
-        """Fill object_refs with all states for a transaction.
-
-        Returns the number of references added.
-        """
-        log.debug("pre_pack: transaction %d: computing references ", tid)
-        from_count = 0
-
-        stmt = """
-        SELECT zoid, state
-        FROM object_state
-        WHERE tid = %(tid)s
-        """
-        self.runner.run_script_stmt(cursor, stmt, {'tid': tid})
-
-        replace_rows = []
-        add_rows = []  # [(from_oid, tid, to_oid)]
-        for from_oid, state in cursor:
-            replace_rows.append((from_oid,))
-            if hasattr(state, 'read'):
-                # Oracle
-                state = state.read()
-            if state:
-                from_count += 1
-                try:
-                    to_oids = get_references(str(state))
-                except:
-                    log.error("pre_pack: can't unpickle "
-                        "object %d in transaction %d; state length = %d" % (
-                        from_oid, tid, len(state)))
-                    raise
-                for to_oid in to_oids:
-                    add_rows.append((from_oid, tid, to_oid))
-
-        if not self.keep_history:
-            stmt = "DELETE FROM object_ref WHERE zoid = %s"
-            self.runner.run_many(cursor, stmt, replace_rows)
-
-        stmt = """
-        INSERT INTO object_ref (zoid, tid, to_zoid)
-        VALUES (%s, %s, %s)
-        """
-        self.runner.run_many(cursor, stmt, add_rows)
-
-        # The references have been computed for this transaction.
-        stmt = """
-        INSERT INTO object_refs_added (tid)
-        VALUES (%(tid)s)
-        """
-        self.runner.run_script_stmt(cursor, stmt, {'tid': tid})
-
-        to_count = len(add_rows)
-        log.debug("pre_pack: transaction %d: has %d reference(s) "
-            "from %d object(s)", tid, to_count, from_count)
-        return to_count
-
-
     def _visit_all_references(self, cursor):
         """Visit all references in pack_object and set the keep flags.
         """
@@ -415,6 +322,91 @@ class HistoryPreservingPackUndo(PackUndo):
             self.runner.run_script(cursor, stmt)
 
         return res
+
+    def on_filling_object_refs(self):
+        """Test injection point"""
+
+    def fill_object_refs(self, conn, cursor, get_references):
+        """Update the object_refs table by analyzing new transactions."""
+        stmt = """
+        SELECT transaction.tid
+        FROM transaction
+            LEFT JOIN object_refs_added
+                ON (transaction.tid = object_refs_added.tid)
+        WHERE object_refs_added.tid IS NULL
+        ORDER BY transaction.tid
+        """
+        self.runner.run_script_stmt(cursor, stmt)
+        tids = [tid for (tid,) in cursor]
+        if tids:
+            self.on_filling_object_refs()
+            added = 0
+            log.info("discovering references from objects in %d "
+                "transaction(s)" % len(tids))
+            for tid in tids:
+                added += self._add_refs_for_tid(cursor, tid, get_references)
+                if added >= 10000:
+                    # save the work done so far
+                    conn.commit()
+                    added = 0
+            if added:
+                conn.commit()
+
+    def _add_refs_for_tid(self, cursor, tid, get_references):
+        """Fill object_refs with all states for a transaction.
+
+        Returns the number of references added.
+        """
+        log.debug("pre_pack: transaction %d: computing references ", tid)
+        from_count = 0
+
+        stmt = """
+        SELECT zoid, state
+        FROM object_state
+        WHERE tid = %(tid)s
+        """
+        self.runner.run_script_stmt(cursor, stmt, {'tid': tid})
+
+        replace_rows = []
+        add_rows = []  # [(from_oid, tid, to_oid)]
+        for from_oid, state in cursor:
+            replace_rows.append((from_oid,))
+            if hasattr(state, 'read'):
+                # Oracle
+                state = state.read()
+            if state:
+                from_count += 1
+                try:
+                    to_oids = get_references(str(state))
+                except:
+                    log.error("pre_pack: can't unpickle "
+                        "object %d in transaction %d; state length = %d" % (
+                        from_oid, tid, len(state)))
+                    raise
+                for to_oid in to_oids:
+                    add_rows.append((from_oid, tid, to_oid))
+
+        if not self.keep_history:
+            stmt = "DELETE FROM object_ref WHERE zoid = %s"
+            self.runner.run_many(cursor, stmt, replace_rows)
+
+        stmt = """
+        INSERT INTO object_ref (zoid, tid, to_zoid)
+        VALUES (%s, %s, %s)
+        """
+        self.runner.run_many(cursor, stmt, add_rows)
+
+        # The references have been computed for this transaction.
+        stmt = """
+        INSERT INTO object_refs_added (tid)
+        VALUES (%(tid)s)
+        """
+        self.runner.run_script_stmt(cursor, stmt, {'tid': tid})
+
+        to_count = len(add_rows)
+        log.debug("pre_pack: transaction %d: has %d reference(s) "
+            "from %d object(s)", tid, to_count, from_count)
+        return to_count
 
     def pre_pack(self, pack_tid, get_references, options):
         """Decide what to pack.
@@ -869,6 +861,88 @@ class HistoryFreePackUndo(PackUndo):
         """
         raise UndoError("Undo is not supported by this storage")
 
+    def on_filling_object_refs(self):
+        """Test injection point"""
+
+    def fill_object_refs(self, conn, cursor, get_references):
+        """Update the object_refs table by analyzing new object states."""
+        stmt = """
+        SELECT object_state.zoid FROM object_state
+            LEFT JOIN object_refs_added USING (zoid)
+        WHERE object_refs_added.tid IS NULL
+            OR object_refs_added.tid != object_state.tid
+        ORDER BY object_state.zoid
+        """
+        self.runner.run_script_stmt(cursor, stmt)
+        oids = [oid for (oid,) in cursor]
+        if oids:
+            self.on_filling_object_refs()
+            added = 0
+            log.info("discovering references from %d objects", len(oids))
+            while oids:
+                batch = oids[:100]
+                oids = oids[100:]
+                added += self._add_refs_for_oids(cursor, batch, get_references)
+                if added >= 10000:
+                    # save the work done so far
+                    conn.commit()
+                    added = 0
+            if added:
+                conn.commit()
+
+    def _add_refs_for_oids(self, cursor, oids, get_references):
+        """Fill object_refs with the states for some objects.
+
+        Returns the number of references added.
+        """
+        to_count = 0
+        oid_list = ','.join(str(oid) for oid in oids)
+
+        stmt = """
+        SELECT zoid, tid, state
+        FROM object_state
+        WHERE zoid IN (%s)
+        """ % oid_list
+        self.runner.run_script_stmt(cursor, stmt)
+        rows = list(cursor)
+        if not rows:
+            return 0
+
+        add_objects = []
+        add_refs = []
+        for from_oid, tid, state in rows:
+            if hasattr(state, 'read'):
+                # Oracle
+                state = state.read()
+            add_objects.append((from_oid, tid))
+            if state:
+                try:
+                    to_oids = get_references(str(state))
+                except:
+                    log.error("pre_pack: can't unpickle "
+                        "object %d in transaction %d; state length = %d" % (
+                        from_oid, tid, len(state)))
+                    raise
+                for to_oid in to_oids:
+                    add_refs.append((from_oid, tid, to_oid))
+
+        stmt = "DELETE FROM object_refs_added WHERE zoid IN (%s)" % oid_list
+        self.runner.run_script_stmt(cursor, stmt)
+        stmt = "DELETE FROM object_ref WHERE zoid IN (%s)" % oid_list
+        self.runner.run_script_stmt(cursor, stmt)
+
+        stmt = """
+        INSERT INTO object_ref (zoid, tid, to_zoid) VALUES (%s, %s, %s)
+        """
+        self.runner.run_many(cursor, stmt, add_refs)
+
+        stmt = """
+        INSERT INTO object_refs_added (zoid, tid) VALUES (%s, %s)
+        """
+        self.runner.run_many(cursor, stmt, add_objects)
+
+        return len(add_refs)
+
     def pre_pack(self, pack_tid, get_references, options):
         """Decide what the garbage collector should delete.
 
@@ -937,7 +1011,7 @@ class HistoryFreePackUndo(PackUndo):
     def pack(self, pack_tid, options, sleep=None, packed_func=None):
         """Run garbage collection.
 
-        Requires the information provided by _pre_gc.
+        Requires the information provided by pre_pack.
         """
         # Read committed mode is sufficient.
         conn, cursor = self.connmanager.open()
@@ -1010,9 +1084,10 @@ class HistoryFreePackUndo(PackUndo):
 
         stmt = """
         DELETE FROM object_refs_added
-        WHERE tid NOT IN (
-            SELECT DISTINCT tid
-            FROM object_state
+        WHERE zoid IN (
+            SELECT zoid
+            FROM pack_object
+            WHERE keep = %(FALSE)s
         );
 
         DELETE FROM object_ref

@@ -544,6 +544,40 @@ class GenericRelStorageTests(
         finally:
             db.close()
 
+    def checkPackWhileReferringObjectChanges(self):
+        # Packing should not remove objects referenced by an
+        # object that changes during packing.
+        db = DB(self._storage)
+        try:
+            # add some data to be packed
+            c = db.open()
+            root = c.root()
+            child = PersistentMapping()
+            root['child'] = child
+            transaction.commit()
+            expect_oids = [child._p_oid]
+
+            def inject_changes():
+                # Change the database just after the list of objects
+                # to analyze has been determined.
+                child2 = PersistentMapping()
+                root['child2'] = child2
+                transaction.commit()
+                expect_oids.append(child2._p_oid)
+
+            adapter = self._storage._adapter
+            adapter.packundo.on_filling_object_refs = inject_changes
+            packtime = time.time()
+            self._storage.pack(packtime, referencesf)
+
+            self.assertEqual(len(expect_oids), 2,
+                "The on_filling_object_refs hook should have been called once")
+            # Both children should still exist.
+            self._storage.load(expect_oids[0], '')
+            self._storage.load(expect_oids[1], '')
+        finally:
+            db.close()
+
     def checkPackBrokenPickle(self):
         # Verify the pack stops with the right exception if it encounters
         # a broken pickle.

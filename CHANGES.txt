@@ -5,6 +5,14 @@
   there was a problem with conflict errors.  The RelStorage patch of the
   sync() method now works with ZODB 3.10.
 
+- Fixed a bug in packing history-free databases.  If changes were
+  made to the database during the pack, the pack code could delete
+  too many objects.  Thanks to Chris Withers for writing test code
+  that revealed the bug.  A schema migration is required for history-free
+  databases; see notes/migration-to-1.4.txt.
+
+- Enabled logging to stderr in zodbpack.
+
 1.4.1 (2010-10-21)
 ------------------
 

@@ -16,6 +16,7 @@
 """
 
 from StringIO import StringIO
+import logging
 import optparse
 import sys
 import time
@@ -30,6 +31,9 @@ schema_xml = """
 </schema>
 """
 
+log = logging.getLogger("zodbpack")
+
+
 def main(argv=sys.argv):
     parser = optparse.OptionParser(description=__doc__,
         usage="%prog [options] config_file")
@@ -42,14 +46,22 @@ def main(argv=sys.argv):
     if len(args) != 1:
         parser.error("The name of one configuration file is required.")
 
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(name)s] %(levelname)s %(message)s")
+
     schema = ZConfig.loadSchemaFile(StringIO(schema_xml))
     config, handler = ZConfig.loadConfig(schema, args[0])
 
     t = time.time() - float(options.days) * 86400.0
     for s in config.storages:
+        name = '%s (%s)' % ((s.name or 'storage'), s.__class__.__name__)
+        log.info("Opening %s...", name)
         storage = s.open()
+        log.info("Packing %s.", name)
         storage.pack(t, ZODB.serialize.referencesf)
         storage.close()
+        log.info("Packed %s.", name)
 
 if __name__ == '__main__':
     main()

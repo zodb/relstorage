@@ -476,23 +476,25 @@ history_free_schema = """
             PRIMARY KEY (zoid, to_zoid)
         );
 
-# The object_refs_added table tracks whether object_refs has been
-# populated for all states in a given transaction. An entry is added
-# only when the work is finished.
+# The object_refs_added table tracks which state of each object
+# has been analyzed for references to other objects.
 
     postgresql:
         CREATE TABLE object_refs_added (
-            tid         BIGINT NOT NULL PRIMARY KEY
+            zoid        BIGINT NOT NULL PRIMARY KEY,
+            tid         BIGINT NOT NULL
         );
 
     mysql:
         CREATE TABLE object_refs_added (
-            tid         BIGINT NOT NULL PRIMARY KEY
+            zoid        BIGINT NOT NULL PRIMARY KEY,
+            tid         BIGINT NOT NULL
         ) ENGINE = MyISAM;
 
     oracle:
         CREATE TABLE object_refs_added (
-            tid         NUMBER(20) NOT NULL PRIMARY KEY
+            zoid        NUMBER(20) NOT NULL PRIMARY KEY,
+            tid         NUMBER(20) NOT NULL
         );
 
 # pack_object contains temporary state during garbage collection: The
