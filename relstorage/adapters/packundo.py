@@ -889,7 +889,7 @@ class HistoryFreePackUndo(PackUndo):
             log.info("discovering references from %d objects", len(oids))
             while oids:
                 batch = oids[:100]
-                oids = batch[100:]
+                oids = oids[100:]
                 added += self._add_refs_for_oids(cursor, batch, get_references)
                 if added >= 10000:
                     # save the work done so far
