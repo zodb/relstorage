@@ -873,30 +873,51 @@ class HistoryFreePackUndo(PackUndo):
         """Test injection point"""
 
     def fill_object_refs(self, conn, cursor, get_references):
-        """Update the object_refs table by analyzing new object states."""
-        stmt = """
-        SELECT object_state.zoid FROM object_state
-            LEFT JOIN object_refs_added USING (zoid)
-        WHERE object_refs_added.tid IS NULL
-            OR object_refs_added.tid != object_state.tid
-        ORDER BY object_state.zoid
+        """Update the object_refs table by analyzing new object states.
+
+        Note that ZODB connections can change the object states while this
+        method is running, possibly obscuring object references,
+        so this method runs repeatedly until it detects no changes between
+        two passes.
         """
-        self.runner.run_script_stmt(cursor, stmt)
-        oids = [oid for (oid,) in cursor]
-        if oids:
-            self.on_filling_object_refs()
-            added = 0
-            log.info("discovering references from %d objects", len(oids))
-            while oids:
-                batch = oids[:100]
-                oids = oids[100:]
-                added += self._add_refs_for_oids(cursor, batch, get_references)
-                if added >= 10000:
-                    # save the work done so far
+        holding_commit = False
+        attempt = 0
+        while True:
+            attempt += 1
+            if attempt >= 3 and not holding_commit:
+                # Starting with the third attempt, hold the commit lock
+                # to prevent changes.
+                holding_commit = True
+                self.locker.hold_commit_lock(cursor)
+
+            stmt = """
+            SELECT object_state.zoid FROM object_state
+                LEFT JOIN object_refs_added USING (zoid)
+            WHERE object_refs_added.tid IS NULL
+                OR object_refs_added.tid != object_state.tid
+            ORDER BY object_state.zoid
+            """
+            self.runner.run_script_stmt(cursor, stmt)
+            oids = [oid for (oid,) in cursor]
+            if oids:
+                if attempt == 1:
+                    self.on_filling_object_refs()
+                added = 0
+                log.info("discovering references from %d objects", len(oids))
+                while oids:
+                    batch = oids[:100]
+                    oids = oids[100:]
+                    added += self._add_refs_for_oids(
+                        cursor, batch, get_references)
+                    if added >= 10000:
+                        # Save the work done so far.
+                        conn.commit()
+                        added = 0
+                if added:
                     conn.commit()
-                    added = 0
-            if added:
-                conn.commit()
+            else:
+                # No changes since last pass.
+                break
 
     def _add_refs_for_oids(self, cursor, oids, get_references):
         """Fill object_refs with the states for some objects.
