@@ -1,4 +1,39 @@
 
+Migrating to RelStorage version 1.4.2
+-------------------------------------
+
+If you are using a history-free storage, you need to drop and re-create
+the object_refs_added table.  It contains only temporary state used during
+packing, so it is safe to drop and create the table at any time except while
+packing.
+
+Do not make these changes to history-preserving databases.
+
+PostgreSQL:
+
+    DROP TABLE object_refs_added;
+    CREATE TABLE object_refs_added (
+        zoid        BIGINT NOT NULL PRIMARY KEY,
+        tid         BIGINT NOT NULL
+    );
+
+MySQL:
+
+    DROP TABLE object_refs_added;
+    CREATE TABLE object_refs_added (
+        zoid        BIGINT NOT NULL PRIMARY KEY,
+        tid         BIGINT NOT NULL
+    ) ENGINE = MyISAM;
+
+Oracle:
+
+    DROP TABLE object_refs_added;
+    CREATE TABLE object_refs_added (
+        zoid        NUMBER(20) NOT NULL PRIMARY KEY,
+        tid         NUMBER(20) NOT NULL
+    );
+
+
 Migrating to RelStorage version 1.4
 -----------------------------------
 
