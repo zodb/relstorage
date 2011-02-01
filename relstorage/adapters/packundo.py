@@ -892,7 +892,8 @@ class HistoryFreePackUndo(PackUndo):
 
             stmt = """
             SELECT object_state.zoid FROM object_state
-                LEFT JOIN object_refs_added USING (zoid)
+                LEFT JOIN object_refs_added
+                    ON (object_state.zoid = object_refs_added.zoid)
             WHERE object_refs_added.tid IS NULL
                 OR object_refs_added.tid != object_state.tid
             ORDER BY object_state.zoid
