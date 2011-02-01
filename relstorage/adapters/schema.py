@@ -640,6 +640,7 @@ class AbstractSchemaInstaller(object):
         'transaction',
         'new_oid',
         'object_state',
+        'blob_chunk',  # Forward compat with RelStorage 1.5
         'current_object',
         'object_ref',
         'object_refs_added',
@@ -647,6 +648,7 @@ class AbstractSchemaInstaller(object):
         'pack_state',
         'pack_state_tid',
         'temp_store',
+        'temp_blob_chunk',  # Forward compat with RelStorage 1.5
         'temp_pack_visit',
         'temp_undo',
         )
