@@ -115,22 +115,20 @@ class PackUndo(object):
         # Traverse the object graph.  Add all of the reachable OIDs
         # to keep_set.
         log.info("pre_pack: traversing the object graph.")
-        added_oids = IISet()
-        added_oids.update(keep_set)
+        parents = IISet()
+        parents.update(keep_set)
         pass_num = 0
-        while added_oids:
+        while parents:
             pass_num += 1
-            to_visit = added_oids
-            added_oids = IISet()
-            for from_oid in to_visit:
-                to_oids = all_refs.get(from_oid)
+            children = IISet()
+            for parent in parents:
+                to_oids = all_refs.get(parent)
                 if to_oids:
-                    to_add = difference(to_oids, keep_set)
-                    if to_add:
-                        keep_set.update(to_add)
-                        added_oids.update(to_add)
+                    children.update(to_oids)
+            parents = difference(children, keep_set)
+            keep_set.update(parents)
             log.info("pre_pack: found %d more referenced object(s) in "
-                "pass %d", len(added_oids), pass_num)
+                "pass %d", len(parents), pass_num)
 
         # Set pack_object.keep for all OIDs in keep_set.
         del all_refs  # Free some RAM
