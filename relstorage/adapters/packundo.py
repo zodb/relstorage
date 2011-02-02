@@ -124,16 +124,24 @@ class PackUndo(object):
         del all_refs  # Free some RAM
         keep_list = list(keep_set)
         keep_list.sort()
-        log.info("pre_pack: marking objects reachable: %d", len(keep_set))
-        while keep_list:
-            batch = keep_list[:1000]
-            keep_list = keep_list[1000:]
+        log.info("pre_pack: marking objects reachable: %d", len(keep_list))
+        batch = []
+
+        def upload_batch():
             oids_str = ','.join(str(oid) for oid in batch)
+            del batch[:]
             stmt = """
             UPDATE pack_object SET keep = %%(TRUE)s, visited = %%(TRUE)s
             WHERE zoid IN (%s)
             """ % oids_str
             self.runner.run_script_stmt(cursor, stmt)
+
+        for oid in keep_list:
+            batch.append(oid)
+            if len(batch) >= 10000:
+                upload_batch()
+        if batch:
+            upload_batch()
 
     def _traverse_graph_sql(self, cursor):
         """Visit the entire object graph and set the pack_object.keep flags.
