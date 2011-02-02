@@ -348,8 +348,6 @@ history_preserving_schema = """
             zoid        NUMBER(20) NOT NULL PRIMARY KEY,
             keep_tid    NUMBER(20) NOT NULL
         );
-        CREATE UNIQUE INDEX temp_pack_visit_zoid ON temp_pack_visit (zoid);
-        CREATE INDEX temp_pack_keep_tid ON temp_pack_visit (keep_tid)
 
         # Temporary state during undo: a list of objects
         # to be undone and the tid of the undone state.
@@ -357,7 +355,6 @@ history_preserving_schema = """
             zoid        NUMBER(20) NOT NULL PRIMARY KEY,
             prev_tid    NUMBER(20) NOT NULL
         );
-        CREATE UNIQUE INDEX temp_undo_zoid ON temp_undo (zoid)
 """
 
 history_preserving_init = """
@@ -652,8 +649,6 @@ history_free_schema = """
             zoid        NUMBER(20) NOT NULL PRIMARY KEY,
             keep_tid    NUMBER(20) NOT NULL
         );
-        CREATE UNIQUE INDEX temp_pack_visit_zoid ON temp_pack_visit (zoid);
-        CREATE INDEX temp_pack_keep_tid ON temp_pack_visit (keep_tid)
 """
 
 history_free_init = """
