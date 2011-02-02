@@ -317,20 +317,16 @@ class IPackUndo(Interface):
         Returns None if there is nothing to pack.
         """
 
-    def pre_pack(pack_tid, get_references, options):
+    def pre_pack(pack_tid, get_references):
         """Decide what to pack.
 
         pack_tid specifies the most recent transaction to pack.
 
         get_references is a function that accepts a stored object state
         and returns a set of OIDs that state refers to.
-
-        options is an instance of relstorage.Options.
-        In particular, the options.pack_gc flag indicates whether
-        to run garbage collection.
         """
 
-    def pack(pack_tid, options, sleep=None, packed_func=None):
+    def pack(pack_tid, sleep=None, packed_func=None):
         """Pack.  Requires the information provided by pre_pack.
 
         packed_func, if provided, will be called for every object state

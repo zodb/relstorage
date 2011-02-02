@@ -192,7 +192,7 @@ class HistoryPreservingRelStorageTests(
             db.close()
 
     def checkPackGCDisabled(self):
-        self._storage._options.pack_gc = False
+        self._storage._adapter.packundo.options.pack_gc = False
         self.checkPackGC(expect_object_deleted=False)
 
     def checkPackGCDryRun(self):

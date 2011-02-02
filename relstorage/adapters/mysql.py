@@ -136,6 +136,7 @@ class MySQLAdapter(object):
                 connmanager=self.connmanager,
                 runner=self.runner,
                 locker=self.locker,
+                options=options,
                 )
             self.dbiter = HistoryPreservingDatabaseIterator(
                 runner=self.runner,
@@ -145,6 +146,7 @@ class MySQLAdapter(object):
                 connmanager=self.connmanager,
                 runner=self.runner,
                 locker=self.locker,
+                options=options,
                 )
             self.dbiter = HistoryFreeDatabaseIterator(
                 runner=self.runner,

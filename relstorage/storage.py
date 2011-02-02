@@ -1060,9 +1060,11 @@ class RelStorage(
         finally:
             self._lock_release()
 
-    def pack(self, t, referencesf, sleep=None):
+    def pack(self, t, referencesf, dry_run=False, sleep=None):
         if self._is_read_only:
             raise POSException.ReadOnlyError()
+
+        dry_run = dry_run or self._options.pack_dry_run
 
         pack_point = repr(TimeStamp(*time.gmtime(t)[:5] + (t % 60,)))
         pack_point_int = u64(pack_point)
@@ -1092,7 +1094,7 @@ class RelStorage(
                         "been packed", time.ctime(t))
                     return
 
-                if self._options.pack_dry_run:
+                if dry_run:
                     log.info("pack: beginning dry run")
 
                 s = time.ctime(TimeStamp(p64(tid_int)).timeTime())
@@ -1102,10 +1104,9 @@ class RelStorage(
                 # In pre_pack, the adapter fills tables with
                 # information about what to pack.  The adapter
                 # must not actually pack anything yet.
-                adapter.packundo.pre_pack(
-                    tid_int, get_references, self._options)
+                adapter.packundo.pre_pack(tid_int, get_references)
 
-                if self._options.pack_dry_run:
+                if dry_run:
                     log.info("pack: dry run complete")
                 else:
                     # Now pack.
@@ -1113,7 +1114,7 @@ class RelStorage(
                         packed_func = self.blobhelper.after_pack
                     else:
                         packed_func = None
-                    adapter.packundo.pack(tid_int, self._options, sleep=sleep,
+                    adapter.packundo.pack(tid_int, sleep=sleep,
                         packed_func=packed_func)
             finally:
                 adapter.locker.release_pack_lock(lock_cursor)

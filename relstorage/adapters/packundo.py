@@ -14,11 +14,20 @@
 """Pack/Undo implementations.
 """
 
+import BTrees
 from relstorage.adapters.interfaces import IPackUndo
 from ZODB.POSException import UndoError
 from zope.interface import implements
 import logging
 import time
+
+try:
+    IISet = BTrees.family64.II.Set
+    difference = BTrees.family64.II.difference
+except AttributeError:
+    # Fall back to old BTrees with no special support for 64 bit integers
+    from BTrees.OOBTree import OOSet as IISet
+    from BTrees.OOBTree import difference
 
 log = logging.getLogger(__name__)
 
@@ -28,10 +37,11 @@ class PackUndo(object):
 
     verify_sane_database = False
 
-    def __init__(self, connmanager, runner, locker):
+    def __init__(self, connmanager, runner, locker, options):
         self.connmanager = connmanager
         self.runner = runner
         self.locker = locker
+        self.options = options
 
     def choose_pack_transaction(self, pack_point):
         """Return the transaction before or at the specified pack time.
@@ -50,8 +60,94 @@ class PackUndo(object):
         finally:
             self.connmanager.close(conn, cursor)
 
-    def _visit_all_references(self, cursor):
-        """Visit all references in pack_object and set the keep flags.
+    def _traverse_graph(self, cursor):
+        """Visit the entire object graph and set the pack_object.keep flags.
+
+        Dispatches to the implementation specified in
+        self.options.pack_gc_traversal.
+        """
+        m = getattr(self,
+            '_traverse_graph_%s' % self.options.pack_gc_traversal)
+        m(cursor)
+
+    def _traverse_graph_python(self, cursor):
+        """Visit the entire object graph and set the pack_object.keep flags.
+
+        Python implementation.
+        """
+        log.info("pre_pack: downloading pack_object and object_ref.")
+
+        # Download the list of root objects to keep from pack_object.
+        keep_set = IISet([0])  # set([oid])
+        stmt = """
+        SELECT zoid
+        FROM pack_object
+        WHERE keep = %(TRUE)s
+        """
+        self.runner.run_script_stmt(cursor, stmt)
+        for from_oid, in cursor:
+            keep_set.insert(from_oid)
+
+        # Download the list of object references into all_refs.
+        # Use IISets to minimize RAM consumption.
+        all_refs = {}  # {from_oid: set([to_oid])}
+        stmt = """
+        SELECT object_ref.zoid, object_ref.to_zoid
+        FROM object_ref
+            JOIN pack_object ON (object_ref.zoid = pack_object.zoid)
+        WHERE object_ref.tid >= pack_object.keep_tid
+        ORDER BY object_ref.zoid
+        """
+        self.runner.run_script_stmt(cursor, stmt)
+        current_oid = None
+        current_refs = IISet()  # set([to_oid])
+        for from_oid, to_oid in cursor:
+            if current_oid is None:
+                current_oid = from_oid
+            elif current_oid != from_oid:
+                all_refs[current_oid] = current_refs
+                current_refs = IISet()
+            current_refs.insert(to_oid)
+        if current_oid is not None:
+            all_refs[current_oid] = current_refs
+
+        # Traverse the object graph.  Add to keep_set all of the
+        # reachable OIDs.
+        added_oids = IISet()
+        added_oids.update(keep_set)
+        pass_num = 0
+        while added_oids:
+            pass_num += 1
+            to_visit = added_oids
+            added_oids = IISet()
+            for from_oid in to_visit:
+                to_oids = all_refs.get(from_oid)
+                if to_oids:
+                    to_add = difference(to_oids, keep_set)
+                    if to_add:
+                        keep_set.update(to_add)
+                        added_oids.update(to_add)
+            log.info("pre_pack: found %d more referenced object(s) in "
+                "pass %d", len(added_oids), pass_num)
+
+        # Set pack_object.keep for all OIDs in keep_set.
+        del all_refs  # Free some RAM
+        log.info("pre_pack: uploading the list of reachable objects.")
+        keep_list = list(keep_set)
+        while keep_list:
+            batch = keep_list[:100]
+            keep_list = keep_list[100:]
+            oids_str = ','.join(str(oid) for oid in batch)
+            stmt = """
+            UPDATE pack_object SET keep = %%(TRUE)s, visited = %%(TRUE)s
+            WHERE zoid IN (%s)
+            """ % oids_str
+            self.runner.run_script_stmt(cursor, stmt)
+
+    def _traverse_graph_sql(self, cursor):
+        """Visit the entire object graph and set the pack_object.keep flags.
+
+        SQL implementation.
         """
         # Each of the objects to be kept might refer to other objects.
         # Mark the referenced objects to be kept as well. Do this
@@ -109,7 +205,7 @@ class PackUndo(object):
             else:
                 pass_num += 1
 
-    def _pause_pack(self, sleep, options, start):
+    def _pause_pack(self, sleep, start):
         """Pause packing to allow concurrent commits."""
         if sleep is None:
             sleep = time.sleep
@@ -118,9 +214,9 @@ class PackUndo(object):
             # Compensate for low timer resolution by
             # assuming that at least 10 ms elapsed.
             elapsed = 0.01
-        duty_cycle = options.pack_duty_cycle
+        duty_cycle = self.options.pack_duty_cycle
         if duty_cycle > 0.0 and duty_cycle < 1.0:
-            delay = min(options.pack_max_delay,
+            delay = min(self.options.pack_max_delay,
                 elapsed * (1.0 / duty_cycle - 1.0))
             if delay > 0:
                 log.debug('pack: sleeping %.4g second(s)', delay)
@@ -145,9 +241,10 @@ class HistoryPreservingPackUndo(PackUndo):
     _script_create_temp_pack_visit = """
         CREATE TEMPORARY TABLE temp_pack_visit (
             zoid BIGINT NOT NULL,
-            keep_tid BIGINT
+            keep_tid BIGINT NOT NULL
         );
-        CREATE UNIQUE INDEX temp_pack_visit_zoid ON temp_pack_visit (zoid)
+        CREATE UNIQUE INDEX temp_pack_visit_zoid ON temp_pack_visit (zoid);
+        CREATE INDEX temp_pack_keep_tid ON temp_pack_visit (keep_tid)
         """
 
     _script_pre_pack_follow_child_refs = """
@@ -424,7 +521,7 @@ class HistoryPreservingPackUndo(PackUndo):
             "from %d object(s)", tid, to_count, from_count)
         return to_count
 
-    def pre_pack(self, pack_tid, get_references, options):
+    def pre_pack(self, pack_tid, get_references):
         """Decide what to pack.
 
         pack_tid specifies the most recent transaction to pack.
@@ -432,8 +529,8 @@ class HistoryPreservingPackUndo(PackUndo):
         get_references is a function that accepts a pickled state and
         returns a set of OIDs that state refers to.
 
-        options is an instance of relstorage.Options.
-        The options.pack_gc flag indicates whether to run garbage collection.
+        The self.options.pack_gc flag indicates whether
+        to run garbage collection.
         If pack_gc is false, at least one revision of every object is kept,
         even if nothing refers to it.  Packing with pack_gc disabled can be
         much faster.
@@ -441,7 +538,7 @@ class HistoryPreservingPackUndo(PackUndo):
         conn, cursor = self.connmanager.open_for_pre_pack()
         try:
             try:
-                if options.pack_gc:
+                if self.options.pack_gc:
                     log.info("pre_pack: start with gc enabled")
                     self._pre_pack_with_gc(
                         conn, cursor, pack_tid, get_references)
@@ -456,7 +553,7 @@ class HistoryPreservingPackUndo(PackUndo):
                 self.runner.run_script_stmt(cursor, stmt)
                 to_remove = 0
 
-                if options.pack_gc:
+                if self.options.pack_gc:
                     # Pack objects with the keep flag set to false.
                     stmt = """
                     INSERT INTO pack_state (tid, zoid)
@@ -559,8 +656,8 @@ class HistoryPreservingPackUndo(PackUndo):
 
         -- Keep objects that have been revised since pack_tid.
         -- Use temp_pack_visit for temporary state; otherwise MySQL 5 chokes.
-        INSERT INTO temp_pack_visit (zoid)
-        SELECT zoid
+        INSERT INTO temp_pack_visit (zoid, keep_tid)
+        SELECT zoid, 0
         FROM current_object
         WHERE tid > %(pack_tid)s;
 
@@ -575,8 +672,8 @@ class HistoryPreservingPackUndo(PackUndo):
         -- Keep objects that are still referenced by object states in
         -- transactions that will not be packed.
         -- Use temp_pack_visit for temporary state; otherwise MySQL 5 chokes.
-        INSERT INTO temp_pack_visit (zoid)
-        SELECT DISTINCT to_zoid
+        INSERT INTO temp_pack_visit (zoid, keep_tid)
+        SELECT DISTINCT to_zoid, 0
         FROM object_ref
         WHERE tid > %(pack_tid)s;
 
@@ -590,11 +687,11 @@ class HistoryPreservingPackUndo(PackUndo):
         """
         self.runner.run_script(cursor, stmt, {'pack_tid': pack_tid})
 
-        # Set the 'keep' flags in pack_object
-        self._visit_all_references(cursor)
+        # Traverse the graph, setting the 'keep' flags in pack_object
+        self._traverse_graph(cursor)
 
 
-    def pack(self, pack_tid, options, sleep=None, packed_func=None):
+    def pack(self, pack_tid, sleep=None, packed_func=None):
         """Pack.  Requires the information provided by pre_pack."""
 
         # Read committed mode is sufficient.
@@ -633,14 +730,14 @@ class HistoryPreservingPackUndo(PackUndo):
                     self._pack_transaction(
                         cursor, pack_tid, tid, packed, has_removable,
                         packed_list)
-                    if time.time() >= start + options.pack_batch_timeout:
+                    if time.time() >= start + self.options.pack_batch_timeout:
                         conn.commit()
                         if packed_func is not None:
                             for oid, tid in packed_list:
                                 packed_func(oid, tid)
                         del packed_list[:]
                         self.locker.release_commit_lock(cursor)
-                        self._pause_pack(sleep, options, start)
+                        self._pause_pack(sleep, start)
                         self.locker.hold_commit_lock(cursor)
                         start = time.time()
                 if packed_func is not None:
@@ -756,9 +853,10 @@ class MySQLHistoryPreservingPackUndo(HistoryPreservingPackUndo):
     _script_create_temp_pack_visit = """
         CREATE TEMPORARY TABLE temp_pack_visit (
             zoid BIGINT UNSIGNED NOT NULL,
-            keep_tid BIGINT UNSIGNED
+            keep_tid BIGINT UNSIGNED NOT NULL
         );
         CREATE UNIQUE INDEX temp_pack_visit_zoid ON temp_pack_visit (zoid);
+        CREATE INDEX temp_pack_keep_tid ON temp_pack_visit (keep_tid);
         CREATE TEMPORARY TABLE temp_pack_child (
             zoid BIGINT UNSIGNED NOT NULL
         );
@@ -856,9 +954,10 @@ class HistoryFreePackUndo(PackUndo):
     _script_create_temp_pack_visit = """
         CREATE TEMPORARY TABLE temp_pack_visit (
             zoid BIGINT NOT NULL,
-            keep_tid BIGINT
+            keep_tid BIGINT NOT NULL
         );
-        CREATE UNIQUE INDEX temp_pack_visit_zoid ON temp_pack_visit (zoid)
+        CREATE UNIQUE INDEX temp_pack_visit_zoid ON temp_pack_visit (zoid);
+        CREATE INDEX temp_pack_keep_tid ON temp_pack_visit (keep_tid)
         """
 
     _script_pre_pack_follow_child_refs = """
@@ -995,7 +1094,7 @@ class HistoryFreePackUndo(PackUndo):
 
         return len(add_refs)
 
-    def pre_pack(self, pack_tid, get_references, options):
+    def pre_pack(self, pack_tid, get_references):
         """Decide what the garbage collector should delete.
 
         Objects created or modified after pack_tid will not be
@@ -1004,11 +1103,10 @@ class HistoryFreePackUndo(PackUndo):
         get_references is a function that accepts a pickled state and
         returns a set of OIDs that state refers to.
 
-        options is an instance of relstorage.Options.
-        The options.pack_gc flag indicates whether to run garbage collection.
-        If pack_gc is false, this method does nothing.
+        The self.options.pack_gc flag indicates whether to run garbage
+        collection.  If pack_gc is false, this method does nothing.
         """
-        if not options.pack_gc:
+        if not self.options.pack_gc:
             log.warning("pre_pack: garbage collection is disabled on a "
                 "history-free storage, so doing nothing")
             return
@@ -1056,11 +1154,11 @@ class HistoryFreePackUndo(PackUndo):
         """
         self.runner.run_script(cursor, stmt, {'pack_tid': pack_tid})
 
-        # Set the 'keep' flags in pack_object
-        self._visit_all_references(cursor)
+        # Traverse the graph, setting the 'keep' flags in pack_object
+        self._traverse_graph(cursor)
 
 
-    def pack(self, pack_tid, options, sleep=None, packed_func=None):
+    def pack(self, pack_tid, sleep=None, packed_func=None):
         """Run garbage collection.
 
         Requires the information provided by pre_pack.
@@ -1096,14 +1194,14 @@ class HistoryFreePackUndo(PackUndo):
                     self.runner.run_many(cursor, stmt, items)
                     packed_list.extend(items)
 
-                    if time.time() >= start + options.pack_batch_timeout:
+                    if time.time() >= start + self.options.pack_batch_timeout:
                         conn.commit()
                         if packed_func is not None:
                             for oid, tid in packed_list:
                                 packed_func(oid, tid)
                         del packed_list[:]
                         self.locker.release_commit_lock(cursor)
-                        self._pause_pack(sleep, options, start)
+                        self._pause_pack(sleep, start)
                         self.locker.hold_commit_lock(cursor)
                         start = time.time()
 
@@ -1159,7 +1257,7 @@ class MySQLHistoryFreePackUndo(HistoryFreePackUndo):
     _script_create_temp_pack_visit = """
         CREATE TEMPORARY TABLE temp_pack_visit (
             zoid BIGINT UNSIGNED NOT NULL,
-            keep_tid BIGINT UNSIGNED
+            keep_tid BIGINT UNSIGNED NOT NULL
         );
         CREATE UNIQUE INDEX temp_pack_visit_zoid ON temp_pack_visit (zoid);
         CREATE TEMPORARY TABLE temp_pack_child (

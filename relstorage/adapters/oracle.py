@@ -131,6 +131,7 @@ class OracleAdapter(object):
                 connmanager=self.connmanager,
                 runner=self.runner,
                 locker=self.locker,
+                options=options,
                 )
             self.dbiter = HistoryPreservingDatabaseIterator(
                 runner=self.runner,
@@ -140,6 +141,7 @@ class OracleAdapter(object):
                 connmanager=self.connmanager,
                 runner=self.runner,
                 locker=self.locker,
+                options=options,
                 )
             self.dbiter = HistoryFreeDatabaseIterator(
                 runner=self.runner,

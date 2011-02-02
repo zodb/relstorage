@@ -40,7 +40,13 @@ def main(argv=sys.argv):
     parser.add_option(
         "-d", "--days", dest="days", default="0",
         help="Days of history to keep (default 0)",
-        )
+    )
+    parser.add_option(
+        "--dry-run", dest="dry_run", default=False,
+        action="store_true",
+        help="Perform a dry run of the pack. "
+        "(Only works with some storage types)",
+    )
     options, args = parser.parse_args(argv[1:])
 
     if len(args) != 1:
@@ -59,7 +65,10 @@ def main(argv=sys.argv):
         log.info("Opening %s...", name)
         storage = s.open()
         log.info("Packing %s.", name)
-        storage.pack(t, ZODB.serialize.referencesf)
+        if options.dry_run:
+            storage.pack(t, ZODB.serialize.referencesf, dry_run=True)
+        else:
+            storage.pack(t, ZODB.serialize.referencesf)
         storage.close()
         log.info("Packed %s.", name)
 
