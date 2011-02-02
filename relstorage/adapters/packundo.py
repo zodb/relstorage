@@ -122,11 +122,12 @@ class PackUndo(object):
 
         # Set pack_object.keep for all OIDs in keep_set.
         del all_refs  # Free some RAM
-        log.info("pre_pack: uploading the list of reachable objects.")
         keep_list = list(keep_set)
+        keep_list.sort()
+        log.info("pre_pack: marking objects reachable: %d", len(keep_set))
         while keep_list:
-            batch = keep_list[:100]
-            keep_list = keep_list[100:]
+            batch = keep_list[:1000]
+            keep_list = keep_list[1000:]
             oids_str = ','.join(str(oid) for oid in batch)
             stmt = """
             UPDATE pack_object SET keep = %%(TRUE)s, visited = %%(TRUE)s
