@@ -78,7 +78,7 @@ class PackUndo(object):
         log.info("pre_pack: downloading pack_object and object_ref.")
 
         # Download the list of root objects to keep from pack_object.
-        keep_set = IISet([0])  # set([oid])
+        keep_set = IISet()  # set([oid])
         stmt = """
         SELECT zoid
         FROM pack_object
@@ -100,19 +100,21 @@ class PackUndo(object):
         """
         self.runner.run_script_stmt(cursor, stmt)
         current_oid = None
-        current_refs = IISet()  # set([to_oid])
         for from_oid, to_oid in cursor:
             if current_oid is None:
                 current_oid = from_oid
+                current_refs = IISet()  # set([to_oid])
             elif current_oid != from_oid:
                 all_refs[current_oid] = current_refs
+                current_oid = from_oid
                 current_refs = IISet()
             current_refs.insert(to_oid)
         if current_oid is not None:
             all_refs[current_oid] = current_refs
 
-        # Traverse the object graph.  Add to keep_set all of the
-        # reachable OIDs.
+        # Traverse the object graph.  Add all of the reachable OIDs
+        # to keep_set.
+        log.info("pre_pack: traversing the object graph.")
         added_oids = IISet()
         added_oids.update(keep_set)
         pass_num = 0
