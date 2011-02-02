@@ -346,19 +346,25 @@ class HistoryPreservingPackUndo(PackUndo):
         """
         self.runner.run_script_stmt(cursor, stmt)
         tids = [tid for (tid,) in cursor]
+        log_at = time.time() + 60
         if tids:
             self.on_filling_object_refs()
-            added = 0
-            log.info("discovering references from objects in %d "
-                "transaction(s)" % len(tids))
+            tid_count = len(tids)
+            txns_done = 0
+            log.info("analyzing references from objects in %d "
+                "transaction(s)", tid_count)
             for tid in tids:
-                added += self._add_refs_for_tid(cursor, tid, get_references)
-                if added >= 10000:
+                self._add_refs_for_tid(cursor, tid, get_references)
+                txns_done += 1
+                now = time.time()
+                if now >= log_at:
                     # save the work done so far
                     conn.commit()
-                    added = 0
-            if added:
-                conn.commit()
+                    log_at = now + 60
+                    log.info(
+                        "transactions analyzed: %d/%d", txns_done, tid_count)
+            conn.commit()
+            log.info("transactions analyzed: %d/%d", txns_done, tid_count)
 
     def _add_refs_for_tid(self, cursor, tid, get_references):
         """Fill object_refs with all states for a transaction.
@@ -394,10 +400,12 @@ class HistoryPreservingPackUndo(PackUndo):
                 for to_oid in to_oids:
                     add_rows.append((from_oid, tid, to_oid))
 
-        if not self.keep_history:
-            stmt = "DELETE FROM object_ref WHERE zoid = %s"
-            self.runner.run_many(cursor, stmt, replace_rows)
+        # A previous pre-pack may have been interrupted.  Delete rows
+        # from the interrupted attempt.
+        stmt = "DELETE FROM object_ref WHERE tid = %(tid)s"
+        self.runner.run_script_stmt(cursor, stmt, {'tid': tid})
 
+        # Add the new references.
         stmt = """
         INSERT INTO object_ref (zoid, tid, to_zoid)
         VALUES (%s, %s, %s)
@@ -747,12 +755,12 @@ class MySQLHistoryPreservingPackUndo(HistoryPreservingPackUndo):
     #      http://bugs.mysql.com/bug.php?id=28257
     _script_create_temp_pack_visit = """
         CREATE TEMPORARY TABLE temp_pack_visit (
-            zoid BIGINT NOT NULL,
-            keep_tid BIGINT
+            zoid BIGINT UNSIGNED NOT NULL,
+            keep_tid BIGINT UNSIGNED
         );
         CREATE UNIQUE INDEX temp_pack_visit_zoid ON temp_pack_visit (zoid);
         CREATE TEMPORARY TABLE temp_pack_child (
-            zoid BIGINT NOT NULL
+            zoid BIGINT UNSIGNED NOT NULL
         );
         CREATE UNIQUE INDEX temp_pack_child_zoid ON temp_pack_child (zoid);
         """
@@ -799,6 +807,14 @@ class MySQLHistoryPreservingPackUndo(HistoryPreservingPackUndo):
         USING object_ref
             JOIN transaction USING (tid)
         WHERE transaction.empty = true
+        """
+
+    _script_create_temp_undo = """
+        CREATE TEMPORARY TABLE temp_undo (
+            zoid BIGINT UNSIGNED NOT NULL,
+            prev_tid BIGINT UNSIGNED NOT NULL
+        );
+        CREATE UNIQUE INDEX temp_undo_zoid ON temp_undo (zoid)
         """
 
 
@@ -900,22 +916,28 @@ class HistoryFreePackUndo(PackUndo):
             """
             self.runner.run_script_stmt(cursor, stmt)
             oids = [oid for (oid,) in cursor]
+            log_at = time.time() + 60
             if oids:
                 if attempt == 1:
                     self.on_filling_object_refs()
-                added = 0
-                log.info("discovering references from %d objects", len(oids))
+                oid_count = len(oids)
+                oids_done = 0
+                log.info("analyzing references from %d object(s)", oid_count)
                 while oids:
                     batch = oids[:100]
                     oids = oids[100:]
-                    added += self._add_refs_for_oids(
-                        cursor, batch, get_references)
-                    if added >= 10000:
+                    self._add_refs_for_oids(cursor, batch, get_references)
+                    oids_done += len(batch)
+                    now = time.time()
+                    if now >= log_at:
                         # Save the work done so far.
                         conn.commit()
-                        added = 0
-                if added:
-                    conn.commit()
+                        log_at = now + 60
+                        log.info(
+                            "objects analyzed: %d/%d", oids_done, oid_count)
+                conn.commit()
+                log.info(
+                    "objects analyzed: %d/%d", oids_done, oid_count)
             else:
                 # No changes since last pass.
                 break
@@ -1136,12 +1158,12 @@ class MySQLHistoryFreePackUndo(HistoryFreePackUndo):
 
     _script_create_temp_pack_visit = """
         CREATE TEMPORARY TABLE temp_pack_visit (
-            zoid BIGINT NOT NULL,
-            keep_tid BIGINT
+            zoid BIGINT UNSIGNED NOT NULL,
+            keep_tid BIGINT UNSIGNED
         );
         CREATE UNIQUE INDEX temp_pack_visit_zoid ON temp_pack_visit (zoid);
         CREATE TEMPORARY TABLE temp_pack_child (
-            zoid BIGINT NOT NULL
+            zoid BIGINT UNSIGNED NOT NULL
         );
         CREATE UNIQUE INDEX temp_pack_child_zoid ON temp_pack_child (zoid);
         """

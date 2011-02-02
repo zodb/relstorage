@@ -409,8 +409,8 @@ class ObjectMover(object):
         # note that the md5 column is not used if self.keep_history == False.
         stmt = """
         CREATE TEMPORARY TABLE temp_store (
-            zoid        BIGINT NOT NULL PRIMARY KEY,
-            prev_tid    BIGINT NOT NULL,
+            zoid        BIGINT UNSIGNED NOT NULL PRIMARY KEY,
+            prev_tid    BIGINT UNSIGNED NOT NULL,
             md5         CHAR(32),
             state       LONGBLOB
         ) ENGINE MyISAM
@@ -419,8 +419,8 @@ class ObjectMover(object):
 
         stmt = """
         CREATE TEMPORARY TABLE temp_blob_chunk (
-            zoid        BIGINT NOT NULL,
-            chunk_num   BIGINT NOT NULL,
+            zoid        BIGINT UNSIGNED NOT NULL,
+            chunk_num   BIGINT UNSIGNED NOT NULL,
                         PRIMARY KEY (zoid, chunk_num),
             chunk       LONGBLOB
         ) ENGINE MyISAM
