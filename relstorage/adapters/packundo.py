@@ -14,20 +14,11 @@
 """Pack/Undo implementations.
 """
 
-import BTrees
 from relstorage.adapters.interfaces import IPackUndo
 from ZODB.POSException import UndoError
 from zope.interface import implements
 import logging
 import time
-
-try:
-    IISet = BTrees.family64.II.Set
-    difference = BTrees.family64.II.difference
-except AttributeError:
-    # Fall back to old BTrees with no special support for 64 bit integers
-    from BTrees.OOBTree import OOSet as IISet
-    from BTrees.OOBTree import difference
 
 log = logging.getLogger(__name__)
 
@@ -78,7 +69,7 @@ class PackUndo(object):
         log.info("pre_pack: downloading pack_object and object_ref.")
 
         # Download the list of root objects to keep from pack_object.
-        keep_set = IISet()  # set([oid])
+        keep_set = set()  # set([oid])
         stmt = """
         SELECT zoid
         FROM pack_object
@@ -86,10 +77,9 @@ class PackUndo(object):
         """
         self.runner.run_script_stmt(cursor, stmt)
         for from_oid, in cursor:
-            keep_set.insert(from_oid)
+            keep_set.add(from_oid)
 
         # Download the list of object references into all_refs.
-        # Use IISets to minimize RAM consumption.
         all_refs = {}  # {from_oid: set([to_oid])}
         stmt = """
         SELECT object_ref.zoid, object_ref.to_zoid
@@ -103,29 +93,29 @@ class PackUndo(object):
         for from_oid, to_oid in cursor:
             if current_oid is None:
                 current_oid = from_oid
-                current_refs = IISet()  # set([to_oid])
+                current_refs = set()  # set([to_oid])
             elif current_oid != from_oid:
                 all_refs[current_oid] = current_refs
                 current_oid = from_oid
-                current_refs = IISet()
-            current_refs.insert(to_oid)
+                current_refs = set()
+            current_refs.add(to_oid)
         if current_oid is not None:
             all_refs[current_oid] = current_refs
 
         # Traverse the object graph.  Add all of the reachable OIDs
         # to keep_set.
         log.info("pre_pack: traversing the object graph.")
-        parents = IISet()
+        parents = set()
         parents.update(keep_set)
         pass_num = 0
         while parents:
             pass_num += 1
-            children = IISet()
+            children = set()
             for parent in parents:
                 to_oids = all_refs.get(parent)
                 if to_oids:
                     children.update(to_oids)
-            parents = difference(children, keep_set)
+            parents = children.difference(keep_set)
             keep_set.update(parents)
             log.info("pre_pack: found %d more referenced object(s) in "
                 "pass %d", len(parents), pass_num)
