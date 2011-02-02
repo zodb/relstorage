@@ -770,8 +770,8 @@ class MySQLHistoryPreservingPackUndo(HistoryPreservingPackUndo):
     _script_pre_pack_follow_child_refs = """
         %(TRUNCATE)s temp_pack_child;
 
-        INSERT INTO temp_pack_child
-        SELECT DISTINCT to_zoid
+        INSERT IGNORE INTO temp_pack_child
+        SELECT to_zoid
         FROM object_ref
             JOIN temp_pack_visit USING (zoid)
         WHERE object_ref.tid >= temp_pack_visit.keep_tid;
@@ -1173,8 +1173,8 @@ class MySQLHistoryFreePackUndo(HistoryFreePackUndo):
     _script_pre_pack_follow_child_refs = """
         %(TRUNCATE)s temp_pack_child;
 
-        INSERT INTO temp_pack_child
-        SELECT DISTINCT to_zoid
+        INSERT IGNORE INTO temp_pack_child
+        SELECT to_zoid
         FROM object_ref
             JOIN temp_pack_visit USING (zoid);
 
