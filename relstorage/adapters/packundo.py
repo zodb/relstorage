@@ -138,7 +138,7 @@ class PackUndo(object):
 
         for oid in keep_list:
             batch.append(oid)
-            if len(batch) >= 10000:
+            if len(batch) >= 1000:
                 upload_batch()
         if batch:
             upload_batch()
