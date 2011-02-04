@@ -10,7 +10,7 @@ Next Release
 - Added a --dry-run option to zodbpack.  Set it to force a dry run
   of packing.
 
-- Replaced the object traversal portion of the pack code with
+- Replaced the graph traversal portion of the pack code with
   a more efficient implementation using Python sets (instead of SQL).
   The new code is much faster for packing databases with deeply
   nested objects.
