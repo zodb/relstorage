@@ -24,13 +24,17 @@ import logging
 import os
 import unittest
 
+
+base_dbname = os.environ.get('RELSTORAGETEST_DBNAME', 'relstoragetest')
+
+
 class UseMySQLAdapter:
     def make_adapter(self):
         from relstorage.adapters.mysql import MySQLAdapter
         if self.keep_history:
-            db = 'relstoragetest'
+            db = base_dbname
         else:
-            db = 'relstoragetest_hf'
+            db = base_dbname + '_hf'
         return MySQLAdapter(
             options=Options(keep_history=self.keep_history),
             db=db,
@@ -44,9 +48,9 @@ class ZConfigTests:
     def checkConfigureViaZConfig(self):
         replica_conf = os.path.join(os.path.dirname(__file__), 'replicas.conf')
         if self.keep_history:
-            dbname = 'relstoragetest'
+            dbname = base_dbname
         else:
-            dbname = 'relstoragetest_hf'
+            dbname = base_dbname + '_hf'
         conf = """
         %%import relstorage
         <zodb main>
@@ -124,10 +128,10 @@ class HFMySQLFromFile(UseMySQLAdapter, HistoryFreeFromFileStorage):
     pass
 
 db_names = {
-    'data': 'relstoragetest',
-    '1': 'relstoragetest',
-    '2': 'relstoragetest2',
-    'dest': 'relstoragetest2',
+    'data': base_dbname,
+    '1': base_dbname,
+    '2': base_dbname + '2',
+    'dest': base_dbname + '2',
     }
 
 def test_suite():
