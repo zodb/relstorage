@@ -52,19 +52,9 @@ class PackUndo(object):
             self.connmanager.close(conn, cursor)
 
     def _traverse_graph(self, cursor):
-        """Visit the entire object graph and set the pack_object.keep flags.
+        """Visit the entire object graph to find out what should be kept.
 
-        Dispatches to the implementation specified in
-        self.options.pack_gc_traversal.
-        """
-        m = getattr(self,
-            '_traverse_graph_%s' % self.options.pack_gc_traversal)
-        m(cursor)
-
-    def _traverse_graph_python(self, cursor):
-        """Visit the entire object graph and set the pack_object.keep flags.
-
-        Python implementation.
+        Sets the pack_object.keep flags.
         """
         log.info("pre_pack: downloading pack_object and object_ref.")
 
@@ -104,7 +94,8 @@ class PackUndo(object):
 
         # Traverse the object graph.  Add all of the reachable OIDs
         # to keep_set.
-        log.info("pre_pack: traversing the object graph.")
+        log.info("pre_pack: traversing the object graph "
+            "to find reachable objects.")
         parents = set()
         parents.update(keep_set)
         pass_num = 0
@@ -142,67 +133,6 @@ class PackUndo(object):
                 upload_batch()
         if batch:
             upload_batch()
-
-    def _traverse_graph_sql(self, cursor):
-        """Visit the entire object graph and set the pack_object.keep flags.
-
-        SQL implementation.
-        """
-        # Each of the objects to be kept might refer to other objects.
-        # Mark the referenced objects to be kept as well. Do this
-        # repeatedly until all references have been satisfied.
-        pass_num = 1
-        while True:
-            log.info("pre_pack: following references, pass %d", pass_num)
-
-            # Make a list of all parent objects that still need to be
-            # visited. Then set pack_object.visited for all pack_object
-            # rows with keep = true.
-            stmt = """
-            %(TRUNCATE)s temp_pack_visit;
-
-            INSERT INTO temp_pack_visit (zoid, keep_tid)
-            SELECT zoid, keep_tid
-            FROM pack_object
-            WHERE keep = %(TRUE)s
-                AND visited = %(FALSE)s;
-
-            UPDATE pack_object SET visited = %(TRUE)s
-            WHERE keep = %(TRUE)s
-                AND visited = %(FALSE)s
-            """
-            self.runner.run_script(cursor, stmt)
-            visit_count = cursor.rowcount
-
-            if self.verify_sane_database:
-                # Verify the update actually worked.
-                # MySQL 5.1.23 fails this test; 5.1.24 passes.
-                stmt = """
-                SELECT 1
-                FROM pack_object
-                WHERE keep = %(TRUE)s AND visited = %(FALSE)s
-                """
-                self.runner.run_script_stmt(cursor, stmt)
-                if list(cursor):
-                    raise AssertionError(
-                        "database failed to update pack_object")
-
-            log.debug("pre_pack: checking references from %d object(s)",
-                visit_count)
-
-            # Visit the children of all parent objects that were
-            # just visited.
-            stmt = self._script_pre_pack_follow_child_refs
-            self.runner.run_script(cursor, stmt)
-            found_count = cursor.rowcount
-
-            log.debug("pre_pack: found %d more referenced object(s) in "
-                "pass %d", found_count, pass_num)
-            if not found_count:
-                # No new references detected.
-                break
-            else:
-                pass_num += 1
 
     def _pause_pack(self, sleep, start):
         """Pause packing to allow concurrent commits."""
@@ -244,17 +174,6 @@ class HistoryPreservingPackUndo(PackUndo):
         );
         CREATE UNIQUE INDEX temp_pack_visit_zoid ON temp_pack_visit (zoid);
         CREATE INDEX temp_pack_keep_tid ON temp_pack_visit (keep_tid)
-        """
-
-    _script_pre_pack_follow_child_refs = """
-        UPDATE pack_object SET keep = %(TRUE)s
-        WHERE keep = %(FALSE)s
-            AND zoid IN (
-                SELECT DISTINCT to_zoid
-                FROM object_ref
-                    JOIN temp_pack_visit USING (zoid)
-                WHERE object_ref.tid >= temp_pack_visit.keep_tid
-            )
         """
 
     _script_create_temp_undo = """
@@ -447,7 +366,7 @@ class HistoryPreservingPackUndo(PackUndo):
             self.on_filling_object_refs()
             tid_count = len(tids)
             txns_done = 0
-            log.info("analyzing references from objects in %d "
+            log.info("analyzing references from objects in %d new "
                 "transaction(s)", tid_count)
             for tid in tids:
                 self._add_refs_for_tid(cursor, tid, get_references)
@@ -856,27 +775,6 @@ class MySQLHistoryPreservingPackUndo(HistoryPreservingPackUndo):
         );
         CREATE UNIQUE INDEX temp_pack_visit_zoid ON temp_pack_visit (zoid);
         CREATE INDEX temp_pack_keep_tid ON temp_pack_visit (keep_tid);
-        CREATE TEMPORARY TABLE temp_pack_child (
-            zoid BIGINT UNSIGNED NOT NULL
-        );
-        CREATE UNIQUE INDEX temp_pack_child_zoid ON temp_pack_child (zoid);
-        """
-
-    # Note: UPDATE must be the last statement in the script
-    # because it returns a value.
-    _script_pre_pack_follow_child_refs = """
-        %(TRUNCATE)s temp_pack_child;
-
-        INSERT IGNORE INTO temp_pack_child
-        SELECT to_zoid
-        FROM object_ref
-            JOIN temp_pack_visit USING (zoid)
-        WHERE object_ref.tid >= temp_pack_visit.keep_tid;
-
-        -- MySQL-specific syntax for table join in update
-        UPDATE pack_object, temp_pack_child SET keep = %(TRUE)s
-        WHERE keep = %(FALSE)s
-            AND pack_object.zoid = temp_pack_child.zoid;
         """
 
     # MySQL optimizes deletion far better when using a join syntax.
@@ -957,16 +855,6 @@ class HistoryFreePackUndo(PackUndo):
         );
         CREATE UNIQUE INDEX temp_pack_visit_zoid ON temp_pack_visit (zoid);
         CREATE INDEX temp_pack_keep_tid ON temp_pack_visit (keep_tid)
-        """
-
-    _script_pre_pack_follow_child_refs = """
-        UPDATE pack_object SET keep = %(TRUE)s
-        WHERE keep = %(FALSE)s
-            AND zoid IN (
-                SELECT DISTINCT to_zoid
-                FROM object_ref
-                    JOIN temp_pack_visit USING (zoid)
-            )
         """
 
     def verify_undoable(self, cursor, undo_tid):
@@ -1259,26 +1147,6 @@ class MySQLHistoryFreePackUndo(HistoryFreePackUndo):
             keep_tid BIGINT UNSIGNED NOT NULL
         );
         CREATE UNIQUE INDEX temp_pack_visit_zoid ON temp_pack_visit (zoid);
-        CREATE TEMPORARY TABLE temp_pack_child (
-            zoid BIGINT UNSIGNED NOT NULL
-        );
-        CREATE UNIQUE INDEX temp_pack_child_zoid ON temp_pack_child (zoid);
-        """
-
-    # Note: UPDATE must be the last statement in the script
-    # because it returns a value.
-    _script_pre_pack_follow_child_refs = """
-        %(TRUNCATE)s temp_pack_child;
-
-        INSERT IGNORE INTO temp_pack_child
-        SELECT to_zoid
-        FROM object_ref
-            JOIN temp_pack_visit USING (zoid);
-
-        -- MySQL-specific syntax for table join in update
-        UPDATE pack_object, temp_pack_child SET keep = %(TRUE)s
-        WHERE keep = %(FALSE)s
-            AND pack_object.zoid = temp_pack_child.zoid;
         """
 
 

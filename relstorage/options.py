@@ -37,7 +37,6 @@ class Options(object):
         self.replica_timeout = 600.0
         self.poll_interval = 0
         self.pack_gc = True
-        self.pack_gc_traversal = 'python'
         self.pack_dry_run = False
         self.pack_batch_timeout = 5.0
         self.pack_duty_cycle = 0.5
