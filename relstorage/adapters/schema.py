@@ -336,7 +336,6 @@ history_preserving_schema = """
             zoid        NUMBER(20) NOT NULL PRIMARY KEY,
             prev_tid    NUMBER(20) NOT NULL,
             md5         CHAR(32),
-            state_size  NUMBER(20) NOT NULL,
             state       BLOB,
             blobdata    BLOB
         ) ON COMMIT DELETE ROWS;
