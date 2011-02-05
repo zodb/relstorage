@@ -2,6 +2,11 @@
 Next Release
 ------------
 
+- Added a state_size column to object_state, making it possible
+  to query the size of objects without loading the state.  The new
+  column is intended for gathering statistics.  A schema migration
+  is required.
+
 - Added more logging during zodbconvert to show that something is
   happening and give an indication of how far along the process is.
 

@@ -19,7 +19,7 @@ from ZODB.POSException import StorageError
 from zope.interface import implements
 import re
 
-relstorage_op_version = '1.5'
+relstorage_op_version = '1.5a'
 log = logging.getLogger("relstorage")
 
 history_preserving_schema = """
@@ -50,7 +50,7 @@ history_preserving_schema = """
 
     mysql:
         CREATE TABLE transaction (
-            tid         BIGINT UNSIGNED NOT NULL PRIMARY KEY,
+            tid         BIGINT NOT NULL PRIMARY KEY,
             packed      BOOLEAN NOT NULL DEFAULT FALSE,
             empty       BOOLEAN NOT NULL DEFAULT FALSE,
             username    BLOB NOT NULL,
@@ -75,7 +75,7 @@ history_preserving_schema = """
 
     mysql:
         CREATE TABLE new_oid (
-            zoid        BIGINT UNSIGNED NOT NULL PRIMARY KEY AUTO_INCREMENT
+            zoid        BIGINT NOT NULL PRIMARY KEY AUTO_INCREMENT
         ) ENGINE = MyISAM;
 
     oracle:
@@ -93,6 +93,7 @@ history_preserving_schema = """
                         PRIMARY KEY (zoid, tid),
             prev_tid    BIGINT NOT NULL REFERENCES transaction,
             md5         CHAR(32),
+            state_size  BIGINT NOT NULL CHECK (state_size >= 0),
             state       BYTEA
         );
         CREATE INDEX object_state_tid ON object_state (tid);
@@ -113,21 +114,22 @@ history_preserving_schema = """
 
     mysql:
         CREATE TABLE object_state (
-            zoid        BIGINT UNSIGNED NOT NULL,
-            tid         BIGINT UNSIGNED NOT NULL REFERENCES transaction,
+            zoid        BIGINT NOT NULL,
+            tid         BIGINT NOT NULL REFERENCES transaction,
                         PRIMARY KEY (zoid, tid),
                         CHECK (tid > 0),
-            prev_tid    BIGINT UNSIGNED NOT NULL REFERENCES transaction,
+            prev_tid    BIGINT NOT NULL REFERENCES transaction,
             md5         CHAR(32) CHARACTER SET ascii,
+            state_size  BIGINT NOT NULL,
             state       LONGBLOB
         ) ENGINE = InnoDB;
         CREATE INDEX object_state_tid ON object_state (tid);
         CREATE INDEX object_state_prev_tid ON object_state (prev_tid);
 
         CREATE TABLE blob_chunk (
-            zoid        BIGINT UNSIGNED NOT NULL,
-            tid         BIGINT UNSIGNED NOT NULL,
-            chunk_num   BIGINT UNSIGNED NOT NULL,
+            zoid        BIGINT NOT NULL,
+            tid         BIGINT NOT NULL,
+            chunk_num   BIGINT NOT NULL,
                         PRIMARY KEY (zoid, tid, chunk_num),
             chunk       LONGBLOB NOT NULL
         ) ENGINE = InnoDB;
@@ -145,6 +147,8 @@ history_preserving_schema = """
                         CONSTRAINT tid_min CHECK (tid > 0),
             prev_tid    NUMBER(20) NOT NULL REFERENCES transaction,
             md5         CHAR(32),
+            state_size  NUMBER(20) NOT NULL,
+                        CONSTRAINT state_size_min CHECK (state_size >= 0),
             state       BLOB
         );
         CREATE INDEX object_state_tid ON object_state (tid);
@@ -176,8 +180,8 @@ history_preserving_schema = """
 
     mysql:
         CREATE TABLE current_object (
-            zoid        BIGINT UNSIGNED NOT NULL PRIMARY KEY,
-            tid         BIGINT UNSIGNED NOT NULL,
+            zoid        BIGINT NOT NULL PRIMARY KEY,
+            tid         BIGINT NOT NULL,
                         FOREIGN KEY (zoid, tid)
                             REFERENCES object_state (zoid, tid)
         ) ENGINE = InnoDB;
@@ -208,9 +212,9 @@ history_preserving_schema = """
 
     mysql:
         CREATE TABLE object_ref (
-            zoid        BIGINT UNSIGNED NOT NULL,
-            tid         BIGINT UNSIGNED NOT NULL,
-            to_zoid     BIGINT UNSIGNED NOT NULL,
+            zoid        BIGINT NOT NULL,
+            tid         BIGINT NOT NULL,
+            to_zoid     BIGINT NOT NULL,
             PRIMARY KEY (tid, zoid, to_zoid)
         ) ENGINE = MyISAM;
 
@@ -236,7 +240,7 @@ history_preserving_schema = """
 
     mysql:
         CREATE TABLE object_refs_added (
-            tid         BIGINT UNSIGNED NOT NULL PRIMARY KEY
+            tid         BIGINT NOT NULL PRIMARY KEY
         ) ENGINE = MyISAM;
 
     oracle:
@@ -265,9 +269,9 @@ history_preserving_schema = """
 
     mysql:
         CREATE TABLE pack_object (
-            zoid        BIGINT UNSIGNED NOT NULL PRIMARY KEY,
+            zoid        BIGINT NOT NULL PRIMARY KEY,
             keep        BOOLEAN NOT NULL,
-            keep_tid    BIGINT UNSIGNED NOT NULL,
+            keep_tid    BIGINT NOT NULL,
             visited     BOOLEAN NOT NULL DEFAULT FALSE
         ) ENGINE = MyISAM;
         CREATE INDEX pack_object_keep_zoid ON pack_object (keep, zoid);
@@ -293,8 +297,8 @@ history_preserving_schema = """
 
     mysql:
         CREATE TABLE pack_state (
-            tid         BIGINT UNSIGNED NOT NULL,
-            zoid        BIGINT UNSIGNED NOT NULL,
+            tid         BIGINT NOT NULL,
+            zoid        BIGINT NOT NULL,
             PRIMARY KEY (tid, zoid)
         ) ENGINE = MyISAM;
 
@@ -315,7 +319,7 @@ history_preserving_schema = """
 
     mysql:
         CREATE TABLE pack_state_tid (
-            tid         BIGINT UNSIGNED NOT NULL PRIMARY KEY
+            tid         BIGINT NOT NULL PRIMARY KEY
         ) ENGINE = MyISAM;
 
     oracle:
@@ -332,6 +336,7 @@ history_preserving_schema = """
             zoid        NUMBER(20) NOT NULL PRIMARY KEY,
             prev_tid    NUMBER(20) NOT NULL,
             md5         CHAR(32),
+            state_size  NUMBER(20) NOT NULL,
             state       BLOB,
             blobdata    BLOB
         ) ON COMMIT DELETE ROWS;
@@ -434,12 +439,13 @@ CREATE OR REPLACE PACKAGE BODY relstorage_op AS
             WHERE zoid = zoids(indx)
                 AND tid = tids(indx);
         FORALL indx IN zoids.first..zoids.last
-            INSERT INTO object_state (zoid, tid, prev_tid, md5, state) VALUES
-            (zoids(indx), tids(indx),
-            COALESCE((SELECT tid
-                      FROM current_object
-                      WHERE zoid = zoids(indx)), 0),
-            md5s(indx), states(indx));
+            INSERT INTO object_state
+                (zoid, tid, prev_tid, md5, state_size, state)
+                VALUES (zoids(indx), tids(indx),
+                    COALESCE((SELECT tid
+                        FROM current_object
+                        WHERE zoid = zoids(indx)), 0),
+                md5s(indx), COALESCE(LENGTH(states(indx)), 0), states(indx));
     END restore;
 END relstorage_op;
 /
@@ -467,7 +473,7 @@ history_free_schema = """
 
     mysql:
         CREATE TABLE new_oid (
-            zoid        BIGINT UNSIGNED NOT NULL PRIMARY KEY AUTO_INCREMENT
+            zoid        BIGINT NOT NULL PRIMARY KEY AUTO_INCREMENT
         ) ENGINE = MyISAM;
 
     oracle:
@@ -479,6 +485,7 @@ history_free_schema = """
         CREATE TABLE object_state (
             zoid        BIGINT NOT NULL PRIMARY KEY,
             tid         BIGINT NOT NULL CHECK (tid > 0),
+            state_size  BIGINT NOT NULL CHECK (state_size >= 0),
             state       BYTEA
         );
         CREATE INDEX object_state_tid ON object_state (tid);
@@ -498,18 +505,19 @@ history_free_schema = """
 
     mysql:
         CREATE TABLE object_state (
-            zoid        BIGINT UNSIGNED NOT NULL PRIMARY KEY,
-            tid         BIGINT UNSIGNED NOT NULL,
+            zoid        BIGINT NOT NULL PRIMARY KEY,
+            tid         BIGINT NOT NULL,
                         CHECK (tid > 0),
+            state_size  BIGINT NOT NULL,
             state       LONGBLOB
         ) ENGINE = InnoDB;
         CREATE INDEX object_state_tid ON object_state (tid);
 
         CREATE TABLE blob_chunk (
-            zoid        BIGINT UNSIGNED NOT NULL,
-            chunk_num   BIGINT UNSIGNED NOT NULL,
+            zoid        BIGINT NOT NULL,
+            chunk_num   BIGINT NOT NULL,
                         PRIMARY KEY (zoid, chunk_num),
-            tid         BIGINT UNSIGNED NOT NULL,
+            tid         BIGINT NOT NULL,
             chunk       LONGBLOB NOT NULL
         ) ENGINE = InnoDB;
         CREATE INDEX blob_chunk_lookup ON blob_chunk (zoid);
@@ -523,6 +531,8 @@ history_free_schema = """
             zoid        NUMBER(20) NOT NULL PRIMARY KEY,
             tid         NUMBER(20) NOT NULL,
                         CONSTRAINT tid_min CHECK (tid > 0),
+            state_size  NUMBER(20) NOT NULL,
+                        CONSTRAINT state_size_min CHECK (state_size >= 0),
             state       BLOB
         );
         CREATE INDEX object_state_tid ON object_state (tid);
@@ -553,9 +563,9 @@ history_free_schema = """
 
     mysql:
         CREATE TABLE object_ref (
-            zoid        BIGINT UNSIGNED NOT NULL,
-            to_zoid     BIGINT UNSIGNED NOT NULL,
-            tid         BIGINT UNSIGNED NOT NULL,
+            zoid        BIGINT NOT NULL,
+            to_zoid     BIGINT NOT NULL,
+            tid         BIGINT NOT NULL,
             PRIMARY KEY (zoid, to_zoid)
         ) ENGINE = MyISAM;
 
@@ -578,8 +588,8 @@ history_free_schema = """
 
     mysql:
         CREATE TABLE object_refs_added (
-            zoid        BIGINT UNSIGNED NOT NULL PRIMARY KEY,
-            tid         BIGINT UNSIGNED NOT NULL
+            zoid        BIGINT NOT NULL PRIMARY KEY,
+            tid         BIGINT NOT NULL
         ) ENGINE = MyISAM;
 
     oracle:
@@ -608,9 +618,9 @@ history_free_schema = """
 
     mysql:
         CREATE TABLE pack_object (
-            zoid        BIGINT UNSIGNED NOT NULL PRIMARY KEY,
+            zoid        BIGINT NOT NULL PRIMARY KEY,
             keep        BOOLEAN NOT NULL,
-            keep_tid    BIGINT UNSIGNED NOT NULL,
+            keep_tid    BIGINT NOT NULL,
             visited     BOOLEAN NOT NULL DEFAULT FALSE
         ) ENGINE = MyISAM;
         CREATE INDEX pack_object_keep_zoid ON pack_object (keep, zoid);

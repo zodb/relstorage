@@ -316,9 +316,9 @@ class HistoryPreservingPackUndo(PackUndo):
             AND tid = %(self_tid)s;
 
         -- Copy old states forward.
-        INSERT INTO object_state (zoid, tid, prev_tid, md5, state)
+        INSERT INTO object_state (zoid, tid, prev_tid, md5, state_size, state)
         SELECT temp_undo.zoid, %(self_tid)s, current_object.tid,
-            md5, state
+            md5, COALESCE(state_size, 0), state
         FROM temp_undo
             JOIN current_object ON (temp_undo.zoid = current_object.zoid)
             LEFT JOIN object_state

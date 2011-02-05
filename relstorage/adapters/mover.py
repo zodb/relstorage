@@ -57,7 +57,7 @@ class ObjectMover(object):
         'update_current',
         'download_blob',
         'upload_blob',
-        )
+    )
 
     def __init__(self, database_name, options, runner=None,
             Binary=None, inputsizes=None, version_detector=None):
@@ -458,7 +458,7 @@ class ObjectMover(object):
             (oid, prev_tid, md5sum, encodestring(data)),
             rowkey=oid,
             size=len(data),
-            )
+        )
 
     def mysql_store_temp(self, cursor, batcher, oid, prev_tid, data):
         """Store an object in the temporary table."""
@@ -473,7 +473,7 @@ class ObjectMover(object):
             rowkey=oid,
             size=len(data),
             command='REPLACE',
-            )
+        )
 
     def oracle_store_temp(self, cursor, batcher, oid, prev_tid, data):
         """Store an object in the temporary table."""
@@ -482,17 +482,18 @@ class ObjectMover(object):
         else:
             md5sum = None
 
-        if len(data) <= 2000:
+        size = len(data)
+        if size <= 2000:
             # Send data inline for speed.  Oracle docs say maximum size
             # of a RAW is 2000 bytes.
-            stmt = "BEGIN relstorage_op.store_temp(:1, :2, :3, :4); END;"
+            stmt = "BEGIN relstorage_op.store_temp(:1, :2, :3, :5); END;"
             batcher.add_array_op(
                 stmt,
                 'oid prev_tid md5sum rawdata',
                 (oid, prev_tid, md5sum, data),
                 rowkey=oid,
-                size=len(data),
-                )
+                size=size,
+            )
         else:
             # Send data as a BLOB
             row = {
@@ -500,14 +501,14 @@ class ObjectMover(object):
                 'prev_tid': prev_tid,
                 'md5sum': md5sum,
                 'blobdata': data,
-                }
+            }
             batcher.insert_into(
                 "temp_store (zoid, prev_tid, md5, state)",
                 ":oid, :prev_tid, :md5sum, :blobdata",
                 row,
                 rowkey=oid,
-                size=len(data),
-                )
+                size=size,
+            )
 
 
 
@@ -524,33 +525,35 @@ class ObjectMover(object):
 
         if data is not None:
             encoded = encodestring(data)
+            size = len(data)
         else:
             encoded = None
+            size = 0
 
         if self.keep_history:
             batcher.delete_from("object_state", zoid=oid, tid=tid)
             row_schema = """
                 %s, %s,
                 COALESCE((SELECT tid FROM current_object WHERE zoid = %s), 0),
-                %s, decode(%s, 'base64')
+                %s, %s, decode(%s, 'base64')
             """
             batcher.insert_into(
-                "object_state (zoid, tid, prev_tid, md5, state)",
+                "object_state (zoid, tid, prev_tid, md5, state_size, state)",
                 row_schema,
-                (oid, tid, oid, md5sum, encoded),
+                (oid, tid, oid, md5sum, size, encoded),
                 rowkey=(oid, tid),
-                size=len(data or ''),
-                )
+                size=size,
+            )
         else:
             batcher.delete_from('object_state', zoid=oid)
             if data:
                 batcher.insert_into(
-                    "object_state (zoid, tid, state)",
-                    "%s, %s, decode(%s, 'base64')",
-                    (oid, tid, encoded),
+                    "object_state (zoid, tid, state_size, state)",
+                    "%s, %s, %s, decode(%s, 'base64')",
+                    (oid, tid, size, encoded),
                     rowkey=oid,
-                    size=len(data),
-                    )
+                    size=size,
+                )
 
     def mysql_restore(self, cursor, batcher, oid, tid, data):
         """Store an object directly, without conflict detection.
@@ -564,33 +567,35 @@ class ObjectMover(object):
 
         if data is not None:
             encoded = self.Binary(data)
+            size = len(data)
         else:
             encoded = None
+            size = 0
 
         if self.keep_history:
             row_schema = """
                 %s, %s,
                 COALESCE((SELECT tid FROM current_object WHERE zoid = %s), 0),
-                %s, %s
+                %s, %s, %s
             """
             batcher.insert_into(
-                "object_state (zoid, tid, prev_tid, md5, state)",
+                "object_state (zoid, tid, prev_tid, md5, state_size, state)",
                 row_schema,
-                (oid, tid, oid, md5sum, encoded),
+                (oid, tid, oid, md5sum, size, encoded),
                 rowkey=(oid, tid),
-                size=len(data or ''),
+                size=size,
                 command='REPLACE',
-                )
+            )
         else:
             if data:
                 batcher.insert_into(
-                    "object_state (zoid, tid, state)",
-                    "%s, %s, %s",
-                    (oid, tid, encoded),
+                    "object_state (zoid, tid, state_size, state)",
+                    "%s, %s, %s, %s",
+                    (oid, tid, size, encoded),
                     rowkey=oid,
-                    size=len(data),
+                    size=size,
                     command='REPLACE',
-                    )
+                )
             else:
                 batcher.delete_from('object_state', zoid=oid)
 
@@ -604,7 +609,12 @@ class ObjectMover(object):
         else:
             md5sum = None
 
-        if not data or len(data) <= 2000:
+        if data is not None:
+            size = len(data)
+        else:
+            size = 0
+
+        if size <= 2000:
             # Send data inline for speed.  Oracle docs say maximum size
             # of a RAW is 2000 bytes.
             if self.keep_history:
@@ -614,8 +624,8 @@ class ObjectMover(object):
                     'oid tid md5sum rawdata',
                     (oid, tid, md5sum, data),
                     rowkey=(oid, tid),
-                    size=len(data or ''),
-                    )
+                    size=size,
+                )
             else:
                 stmt = "BEGIN relstorage_op.restore(:1, :2, :3); END;"
                 batcher.add_array_op(
@@ -623,8 +633,8 @@ class ObjectMover(object):
                     'oid tid rawdata',
                     (oid, tid, data),
                     rowkey=(oid, tid),
-                    size=len(data or ''),
-                    )
+                    size=size,
+                )
 
         else:
             # Send as a BLOB
@@ -633,32 +643,39 @@ class ObjectMover(object):
                     'oid': oid,
                     'tid': tid,
                     'md5sum': md5sum,
+                    'state_size': size,
                     'blobdata': data,
-                    }
+                }
                 row_schema = """
                     :oid, :tid,
                     COALESCE((SELECT tid
                               FROM current_object
                               WHERE zoid = :oid), 0),
-                    :md5sum, :blobdata
+                    :md5sum, :state_size, :blobdata
                 """
                 batcher.insert_into(
-                    "object_state (zoid, tid, prev_tid, md5, state)",
+                    "object_state (zoid, tid, prev_tid, md5, state_size, state)",
                     row_schema,
                     row,
                     rowkey=(oid, tid),
-                    size=len(data or ''),
-                    )
+                    size=size,
+                )
             else:
                 batcher.delete_from('object_state', zoid=oid)
                 if data:
+                    row = {
+                        'oid': oid,
+                        'tid': tid,
+                        'state_size': size,
+                        'blobdata': data,
+                    }
                     batcher.insert_into(
-                        "object_state (zoid, tid, state)",
-                        ":oid, :tid, :blobdata",
-                        {'oid': oid, 'tid': tid, 'blobdata': data},
+                        "object_state (zoid, tid, state_size, state)",
+                        ":oid, :tid, :state_size, :blobdata",
+                        row,
                         rowkey=oid,
-                        size=len(data),
-                        )
+                        size=size,
+                    )
 
 
 
@@ -819,14 +836,18 @@ class ObjectMover(object):
         if self.keep_history:
             if self.database_name == 'oracle':
                 stmt = """
-                INSERT INTO object_state (zoid, tid, prev_tid, md5, state)
-                SELECT zoid, :1, prev_tid, md5, state
+                INSERT INTO object_state
+                    (zoid, tid, prev_tid, md5, state_size, state)
+                SELECT zoid, :1, prev_tid, md5,
+                    COALESCE(LENGTH(state), 0), state
                 FROM temp_store
                 """
             else:
                 stmt = """
-                INSERT INTO object_state (zoid, tid, prev_tid, md5, state)
-                SELECT zoid, %s, prev_tid, md5, state
+                INSERT INTO object_state
+                    (zoid, tid, prev_tid, md5, state_size, state)
+                SELECT zoid, %s, prev_tid, md5,
+                    COALESCE(LENGTH(state), 0), state
                 FROM temp_store
                 """
             cursor.execute(stmt, (tid,))
@@ -834,8 +855,8 @@ class ObjectMover(object):
         else:
             if self.database_name == 'mysql':
                 stmt = """
-                REPLACE INTO object_state (zoid, tid, state)
-                SELECT zoid, %s, state
+                REPLACE INTO object_state (zoid, tid, state_size, state)
+                SELECT zoid, %s, COALESCE(LENGTH(state), 0), state
                 FROM temp_store
                 """
                 cursor.execute(stmt, (tid,))
@@ -849,14 +870,14 @@ class ObjectMover(object):
 
                 if self.database_name == 'oracle':
                     stmt = """
-                    INSERT INTO object_state (zoid, tid, state)
-                    SELECT zoid, :1, state
+                    INSERT INTO object_state (zoid, tid, state_size, state)
+                    SELECT zoid, :1, COALESCE(LENGTH(state), 0), state
                     FROM temp_store
                     """
                 else:
                     stmt = """
-                    INSERT INTO object_state (zoid, tid, state)
-                    SELECT zoid, %s, state
+                    INSERT INTO object_state (zoid, tid, state_size, state)
+                    SELECT zoid, %s, COALESCE(LENGTH(state), 0), state
                     FROM temp_store
                     """
                 cursor.execute(stmt, (tid,))

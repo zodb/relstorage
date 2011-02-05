@@ -309,15 +309,20 @@ Migrating to a new version of RelStorage
 Sometimes RelStorage needs a schema modification along with a software
 upgrade.  Hopefully, this will not often be necessary.
 
-No schema migration is required if you are using PostgreSQL or MySQL
-and upgrading from version 1.1.2 or later.  See the `notes subdirectory`_
-if you are upgrading from an older version.
+Migration to RelStorage version 1.5 requires a schema upgrade.
+See `migrate-to-1.5.txt`_.
 
-.. _`notes subdirectory`: http://svn.zope.org/relstorage/trunk/notes/
+.. _`migrate-to-1.5.txt`: http://svn.zope.org/*checkout*/relstorage/trunk/notes/migrate-to-1.5.txt
 
-To migrate Oracle to version 1.4, see `migrate-to-1.4.txt`_.
+Migration to RelStorage version 1.4.2 requires a schema upgrade if
+you are using a history-free database (meaning keep-history is false).
+See `migrate-to-1.4.txt`_.
 
 .. _`migrate-to-1.4.txt`: http://svn.zope.org/*checkout*/relstorage/trunk/notes/migrate-to-1.4.txt
+
+See the `notes subdirectory`_ if you are upgrading from an older version.
+
+.. _`notes subdirectory`: http://svn.zope.org/relstorage/trunk/notes/
 
 
 RelStorage Options
@@ -453,7 +458,9 @@ underscores instead of dashes in the parameter names.
         of what to pack, but no data is actually removed.  After a dry run,
         the pack_object, pack_state, and pack_state_tid tables are filled
         with the list of object states and objects that would have been
-        removed.
+        removed.  The object_ref table will also be fully populated.
+        The object_ref table can be queried to discover references
+        between stored objects.
 
 ``pack-batch-timeout``
         Packing occurs in batches of transactions; this specifies the
@@ -627,6 +634,11 @@ Options for ``zodbpack``
     meaning no history is kept. This is meaningful even for
     history-free storages, since unreferenced objects are not removed
     from the database until the specified number of days have passed.
+
+  ``--dry-run``
+    Instructs the storage to run a dry run of the pack but not actually
+    delete anything.  This is equivalent to specifying ``pack-dry-run true``
+    in the storage options.
 
 Development
 ===========

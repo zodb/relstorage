@@ -1,0 +1,45 @@
+
+Migrating to RelStorage version 1.5
+===================================
+
+All databases need a schema migration for this release.  This release
+adds a state_size column to the object_state table, making it possible
+to query the size of objects without loading the state.  The new column
+is intended for gathering statistics.
+
+Please note that if you are using the history-free schema, you need to
+first migrate to RelStorage 1.4.2 by following the instructions in
+migrate-to-1.4.txt.
+
+
+PostgreSQL
+----------
+
+    BEGIN;
+    ALTER TABLE object_state ADD COLUMN state_size BIGINT;
+    UPDATE object_state SET state_size = COALESCE(LENGTH(state), 0);
+    ALTER TABLE object_state ALTER COLUMN state_size SET NOT NULL;
+    COMMIT;
+
+
+MySQL history-preserving
+------------------------
+
+    ALTER TABLE object_state ADD COLUMN state_size BIGINT AFTER md5;
+    UPDATE object_state SET state_size = COALESCE(LENGTH(state), 0);
+    ALTER TABLE object_state MODIFY state_size BIGINT NOT NULL AFTER md5;
+
+MySQL history-free
+------------------
+
+    ALTER TABLE object_state ADD COLUMN state_size BIGINT AFTER tid;
+    UPDATE object_state SET state_size = COALESCE(LENGTH(state), 0);
+    ALTER TABLE object_state MODIFY state_size BIGINT NOT NULL AFTER tid;
+
+
+Oracle
+------
+
+    ALTER TABLE object_state ADD state_size NUMBER(20);
+    UPDATE object_state SET state_size = COALESCE(LENGTH(state), 0);
+    ALTER TABLE object_state MODIFY state_size NOT NULL;
