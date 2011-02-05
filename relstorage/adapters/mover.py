@@ -486,7 +486,7 @@ class ObjectMover(object):
         if size <= 2000:
             # Send data inline for speed.  Oracle docs say maximum size
             # of a RAW is 2000 bytes.
-            stmt = "BEGIN relstorage_op.store_temp(:1, :2, :3, :5); END;"
+            stmt = "BEGIN relstorage_op.store_temp(:1, :2, :3, :4); END;"
             batcher.add_array_op(
                 stmt,
                 'oid prev_tid md5sum rawdata',
