@@ -12,14 +12,12 @@
 
 - Fixed a missing import in the blob cache cleanup code.
 
-- Added a --dry-run option to zodbpack.  Set it to force a dry run
-  of packing.
+- Added a --dry-run option to zodbpack.
 
 - Replaced the graph traversal portion of the pack code with
   a more efficient implementation using Python sets (instead of SQL).
   The new code is much faster for packing databases with deeply
   nested objects.
-
 
 1.5.0a1 (2010-10-21)
 --------------------
