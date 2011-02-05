@@ -19,7 +19,7 @@ from ZODB.POSException import StorageError
 from zope.interface import implements
 import re
 
-relstorage_op_version = '1.5a'
+relstorage_op_version = '1.5A'
 log = logging.getLogger("relstorage")
 
 history_preserving_schema = """
@@ -715,8 +715,11 @@ CREATE OR REPLACE PACKAGE BODY relstorage_op AS
         FORALL indx IN zoids.first..zoids.last
             DELETE FROM object_state WHERE zoid = zoids(indx);
         FORALL indx IN zoids.first..zoids.last
-            INSERT INTO object_state (zoid, tid, state) VALUES
-            (zoids(indx), tids(indx), states(indx));
+            INSERT INTO object_state (zoid, tid, state_size, state) VALUES (
+                zoids(indx),
+                tids(indx),
+                COALESCE(LENGTH(states(indx)), 0),
+                states(indx));
     END restore;
 END relstorage_op;
 /
