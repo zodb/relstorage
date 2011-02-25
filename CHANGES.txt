@@ -6,6 +6,11 @@ Next Release
   but at most every .1% of the total number of transactions or objects to
   process.
 
+- Renamed the --dry-run option to --prepack and added a --use-prepack-state
+  to zodbpack. With these 2 options the pre-pack and pack phases can be run
+  separately, allowing re-use of the pre-pack analysis data or even delegating
+  the pre-pack phase off to a separate server.
+
 1.5.0b1 (2011-02-05)
 --------------------
 
