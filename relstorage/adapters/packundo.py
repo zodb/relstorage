@@ -678,7 +678,7 @@ class HistoryPreservingPackUndo(PackUndo):
                                 packed_func(oid, tid)
                         statecounter += len(packed_list)
                         if counter >= lastreport + reportstep:
-                            log.info("pack: packed %d (%.1f%%) transaction(s),"
+                            log.info("pack: packed %d (%.1f%%) transaction(s), "
                                 "affecting %d states",
                                 counter, counter/float(total)*100, 
                                 statecounter)
