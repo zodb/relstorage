@@ -19,7 +19,7 @@ class Options(object):
     These parameters can be provided as keyword options in the RelStorage
     constructor.  For example:
 
-        storage = RelStorage(adapter, pack_gc=True, pack_dry_run=True)
+        storage = RelStorage(adapter, pack_gc=True, pack_prepack_only=True)
 
     Alternatively, the RelStorage constructor accepts an options
     parameter, which should be an Options instance.
