@@ -190,14 +190,24 @@ class HistoryPreservingRelStorageTests(
                 self._storage.load(oid, '')
         finally:
             db.close()
+        return oid
 
     def checkPackGCDisabled(self):
         self._storage._adapter.packundo.options.pack_gc = False
         self.checkPackGC(expect_object_deleted=False)
 
-    def checkPackGCDryRun(self):
-        self._storage._options.pack_dry_run = True
+    def checkPackGCPrePackOnly(self):
+        self._storage._options.pack_prepack_only = True
         self.checkPackGC(expect_object_deleted=False)
+
+    def checkPackGCReusePrePackData(self):
+        self._storage._options.pack_prepack_only = True
+        oid = self.checkPackGC(expect_object_deleted=False)
+        # We now have pre-pack analysis data
+        self._storage._options.pack_prepack_only = False
+        self._storage.pack(0, referencesf, skip_prepack=True)
+        # The object should now be gone
+        self.assertRaises(KeyError, self._storage.load, oid, '')
 
     def checkPackOldUnreferenced(self):
         db = DB(self._storage)

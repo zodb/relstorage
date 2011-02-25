@@ -44,7 +44,10 @@
     <key name="pack-gc" datatype="boolean" default="true">
       <description>See the RelStorage README.txt file.</description>
     </key>
-    <key name="pack-dry-run" datatype="boolean" default="false">
+    <key name="pack-prepack-only" datatype="boolean" default="false">
+      <description>See the RelStorage README.txt file.</description>
+    </key>
+    <key name="pack-skip-prepack" datatype="boolean" default="false">
       <description>See the RelStorage README.txt file.</description>
     </key>
     <key name="pack-batch-timeout" datatype="float" required="no">

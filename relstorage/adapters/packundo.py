@@ -186,6 +186,13 @@ class HistoryPreservingPackUndo(PackUndo):
 
     _script_reset_temp_undo = "DROP TABLE temp_undo"
 
+    _script_find_pack_tid = """
+        SELECT keep_tid
+        FROM pack_object
+        ORDER BY keep_tid DESC
+        LIMIT 1
+        """
+
     _script_transaction_has_data = """
         SELECT tid
         FROM object_state
@@ -609,6 +616,16 @@ class HistoryPreservingPackUndo(PackUndo):
         self._traverse_graph(cursor)
 
 
+    def _find_pack_tid(self):
+        """If pack was not completed, find our pack tid again"""
+
+        conn, cursor = self.connmanager.open_for_pre_pack()
+        stmt = self._script_find_pack_tid
+        self.runner.run_script_stmt(cursor, stmt)
+        res = [tid for (tid,) in cursor]
+        return res and res[0] or 0
+
+
     def pack(self, pack_tid, sleep=None, packed_func=None):
         """Pack.  Requires the information provided by pre_pack."""
 
@@ -840,6 +857,11 @@ class OracleHistoryPreservingPackUndo(HistoryPreservingPackUndo):
     _script_create_temp_undo = None
     _script_reset_temp_undo = "DELETE FROM temp_undo"
 
+    _script_find_pack_tid = """
+        SELECT MAX(keep_tid)
+        FROM pack_object
+        """
+
     _script_transaction_has_data = """
         SELECT DISTINCT tid
         FROM object_state
@@ -1056,6 +1078,14 @@ class HistoryFreePackUndo(PackUndo):
 
         # Traverse the graph, setting the 'keep' flags in pack_object
         self._traverse_graph(cursor)
+
+
+    def _find_pack_tid(self):
+        """If pack was not completed, find our pack tid again"""
+
+        # pack (below) ignores it's pack_tid argument, so we can safely
+        # return None here
+        return None
 
 
     def pack(self, pack_tid, sleep=None, packed_func=None):

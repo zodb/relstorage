@@ -42,10 +42,17 @@ def main(argv=sys.argv):
         help="Days of history to keep (default 0)",
     )
     parser.add_option(
-        "--dry-run", dest="dry_run", default=False,
+        "--prepack", dest="prepack", default=False,
         action="store_true",
-        help="Perform a dry run of the pack. "
+        help="Perform only the pre-pack preparation stage of a pack. "
         "(Only works with some storage types)",
+    )
+    parser.add_option(
+        "--use-prepack-state", dest="reuse_prepack", default=False,
+        action="store_true",
+        help="Skip the preparation stage and go straight to packing. "
+        "Requires that a pre-pack has been run, or that packing was aborted "
+        "before it was completed.",
     )
     options, args = parser.parse_args(argv[1:])
 
@@ -65,9 +72,12 @@ def main(argv=sys.argv):
         log.info("Opening %s...", name)
         storage = s.open()
         log.info("Packing %s.", name)
-        if options.dry_run:
-            storage.pack(t, ZODB.serialize.referencesf, dry_run=True)
+        if options.prepack or options.reuse_prepack:
+            storage.pack(t, ZODB.serialize.referencesf,
+                prepack_only=options.prepack,
+                skip_prepack=options.reuse_prepack)
         else:
+            # Be non-relstorage Storages friendly
             storage.pack(t, ZODB.serialize.referencesf)
         storage.close()
         log.info("Packed %s.", name)

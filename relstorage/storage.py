@@ -1060,14 +1060,16 @@ class RelStorage(
         finally:
             self._lock_release()
 
-    def pack(self, t, referencesf, dry_run=False, sleep=None):
+    def pack(self, t, referencesf, prepack_only=False, skip_prepack=False,
+             sleep=None):
         if self._is_read_only:
             raise POSException.ReadOnlyError()
 
-        dry_run = dry_run or self._options.pack_dry_run
+        prepack_only = prepack_only or self._options.pack_prepack_only
+        skip_prepack = skip_prepack or self._options.pack_skip_prepack
 
-        pack_point = repr(TimeStamp(*time.gmtime(t)[:5] + (t % 60,)))
-        pack_point_int = u64(pack_point)
+        if prepack_only and skip_prepack:
+            raise ValueError('Pick either prepack_only or skip_prepack.')
 
         def get_references(state):
             """Return the set of OIDs the given state refers to."""
@@ -1086,28 +1088,34 @@ class RelStorage(
         try:
             adapter.locker.hold_pack_lock(lock_cursor)
             try:
-                # Find the latest commit before or at the pack time.
-                tid_int = adapter.packundo.choose_pack_transaction(
-                    pack_point_int)
-                if tid_int is None:
-                    log.debug("all transactions before %s have already "
-                        "been packed", time.ctime(t))
-                    return
+                if not skip_prepack:
+                    # Find the latest commit before or at the pack time.
+                    pack_point = repr(
+                        TimeStamp(*time.gmtime(t)[:5] + (t % 60,)))
+                    tid_int = adapter.packundo.choose_pack_transaction(
+                        u64(pack_point))
+                    if tid_int is None:
+                        log.debug("all transactions before %s have already "
+                            "been packed", time.ctime(t))
+                        return
 
-                if dry_run:
-                    log.info("pack: beginning dry run")
+                    if prepack_only:
+                        log.info("pack: beginning pre-pack")
 
-                s = time.ctime(TimeStamp(p64(tid_int)).timeTime())
-                log.info("pack: analyzing transactions committed "
-                    "%s or before", s)
+                    s = time.ctime(TimeStamp(p64(tid_int)).timeTime())
+                    log.info("pack: analyzing transactions committed "
+                        "%s or before", s)
 
-                # In pre_pack, the adapter fills tables with
-                # information about what to pack.  The adapter
-                # must not actually pack anything yet.
-                adapter.packundo.pre_pack(tid_int, get_references)
+                    # In pre_pack, the adapter fills tables with
+                    # information about what to pack.  The adapter
+                    # must not actually pack anything yet.
+                    adapter.packundo.pre_pack(tid_int, get_references)
+                else:
+                    # Need to determine the tid_int from the pack_object table
+                    tid_int = adapter.packundo._find_pack_tid()
 
-                if dry_run:
-                    log.info("pack: dry run complete")
+                if prepack_only:
+                    log.info("pack: pre-pack complete")
                 else:
                     # Now pack.
                     if self.blobhelper is not None:

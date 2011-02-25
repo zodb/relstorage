@@ -453,14 +453,25 @@ underscores instead of dashes in the parameter names.
         Disabling garbage collection is also a hack that ensures
         inter-database references never break.
 
-``pack-dry-run``
-        If pack-dry-run is true, pack operations perform a full analysis
-        of what to pack, but no data is actually removed.  After a dry run,
+``pack-prepack-only``
+        If pack-prepack-only is true, pack operations perform a full analysis
+        of what to pack, but no data is actually removed.  After a pre-pack,
         the pack_object, pack_state, and pack_state_tid tables are filled
         with the list of object states and objects that would have been
-        removed.  The object_ref table will also be fully populated.
-        The object_ref table can be queried to discover references
+        removed.  If pack-gc is true, the object_ref table will also be fully 
+        populated. The object_ref table can be queried to discover references
         between stored objects.
+
+``pack-skip-prepack``
+        If pack-skip-prepack is true, the pre-pack phase is skipped and it
+        is assumed the pack_object, pack_state and pack_state_tid tables have
+        been filled already. Thus packing will only affect records already
+        targeted for packing by a previous pre-pack analysis run.
+
+        Use this option together with pack-prepack-only to split packing into
+        distinct phases, where each phase can be run during different
+        timeslots, or where a pre-pack analysis is run on a copy of the
+        database to alleviate a production database load.
 
 ``pack-batch-timeout``
         Packing occurs in batches of transactions; this specifies the
@@ -635,10 +646,15 @@ Options for ``zodbpack``
     history-free storages, since unreferenced objects are not removed
     from the database until the specified number of days have passed.
 
-  ``--dry-run``
-    Instructs the storage to run a dry run of the pack but not actually
-    delete anything.  This is equivalent to specifying ``pack-dry-run true``
-    in the storage options.
+  ``--prepack``
+    Instructs the storage to only run the pre-pack phase of the pack but not
+    actually delete anything.  This is equivalent to specifying 
+    ``pack-prepack-only true`` in the storage options.
+
+  ``--use-prepack-state``
+    Instructs the storage to only run the deletion (packing) phase, skipping
+    the pre-pack analysis phase. This is equivalento to specifying
+    ``pack-skip-prepack true`` in the storage options.
 
 Development
 ===========
