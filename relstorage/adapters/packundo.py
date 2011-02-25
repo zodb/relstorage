@@ -632,7 +632,8 @@ class HistoryPreservingPackUndo(PackUndo):
                 tid_rows = list(cursor)
                 tid_rows.sort()  # oldest first
 
-                log.info("pack: will pack %d transaction(s)", len(tid_rows))
+                total = len(tid_rows)
+                log.info("pack: will pack %d transaction(s)", total)
 
                 stmt = self._script_create_temp_pack_visit
                 if stmt:
@@ -643,16 +644,28 @@ class HistoryPreservingPackUndo(PackUndo):
                 # the interruption of concurrent write operations.
                 start = time.time()
                 packed_list = []
+                counter, lastreport, statecounter = 0, 0, 0
+                # We'll report on progress in at most .1% step increments
+                reportstep = max(total / 1000, 1)
+
                 self.locker.hold_commit_lock(cursor)
                 for tid, packed, has_removable in tid_rows:
                     self._pack_transaction(
                         cursor, pack_tid, tid, packed, has_removable,
                         packed_list)
+                    counter += 1
                     if time.time() >= start + self.options.pack_batch_timeout:
                         conn.commit()
                         if packed_func is not None:
                             for oid, tid in packed_list:
                                 packed_func(oid, tid)
+                        statecounter += len(packed_list)
+                        if counter >= lastreport + reportstep:
+                            log.info("pack: packed %d (%.1f%%) transaction(s),"
+                                "affecting %d states",
+                                counter, counter/float(total)*100, 
+                                statecounter)
+                            lastreport = counter / reportstep * reportstep
                         del packed_list[:]
                         self.locker.release_commit_lock(cursor)
                         self._pause_pack(sleep, start)
@@ -1062,15 +1075,18 @@ class HistoryFreePackUndo(PackUndo):
                 self.runner.run_script_stmt(cursor, stmt)
                 to_remove = list(cursor)
 
-                log.info("pack: will remove %d object(s)", len(to_remove))
+                total = len(to_remove)
+                log.info("pack: will remove %d object(s)", total)
 
                 # Hold the commit lock while packing to prevent deadlocks.
                 # Pack in small batches of transactions in order to minimize
                 # the interruption of concurrent write operations.
                 start = time.time()
                 packed_list = []
-                self.locker.hold_commit_lock(cursor)
+                # We'll report on progress in at most .1% step increments
+                lastreport, reportstep = 0, max(total / 1000, 1)
 
+                self.locker.hold_commit_lock(cursor)
                 while to_remove:
                     items = to_remove[:100]
                     del to_remove[:100]
@@ -1087,6 +1103,11 @@ class HistoryFreePackUndo(PackUndo):
                             for oid, tid in packed_list:
                                 packed_func(oid, tid)
                         del packed_list[:]
+                        counter = total - len(to_remove)
+                        if counter >= lastreport + reportstep:
+                            log.info("pack: removed %d (%.1f%%) state(s)",
+                                counter, counter/float(total)*100)
+                            lastreport = counter / reportstep * reportstep
                         self.locker.release_commit_lock(cursor)
                         self._pause_pack(sleep, start)
                         self.locker.hold_commit_lock(cursor)
