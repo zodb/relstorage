@@ -53,10 +53,7 @@
     <key name="pack-batch-timeout" datatype="float" required="no">
       <description>See the RelStorage README.txt file.</description>
     </key>
-    <key name="pack-duty-cycle" datatype="float" required="no">
-      <description>See the RelStorage README.txt file.</description>
-    </key>
-    <key name="pack-max-delay" datatype="float" required="no">
+    <key name="pack-commit-busy-delay" datatype="float" required="no">
       <description>See the RelStorage README.txt file.</description>
     </key>
     <key name="cache-servers" datatype="string" required="no">

@@ -478,15 +478,19 @@ class GenericRelStorageTests(
         finally:
             db.close()
 
-    def checkPackDutyCycle(self):
-        # Exercise the code in the pack algorithm that releases the
-        # commit lock for a time to allow concurrent transactions to commit.
-        # pause after every txn
+    def checkPackBatchLockNoWait(self):
+        # Exercise the code in the pack algorithm that attempts to get the
+        # commit lock but will sleep if the lock is busy.
         self._storage._adapter.packundo.options.pack_batch_timeout = 0
+        adapter = self._storage._adapter
+        test_conn, test_cursor = adapter.connmanager.open()
 
         slept = []
         def sim_sleep(seconds):
             slept.append(seconds)
+            adapter.locker.release_commit_lock(test_cursor)
+            test_conn.rollback()
+            adapter.connmanager.close(test_conn, test_cursor)
 
         db = DB(self._storage)
         try:
@@ -498,10 +502,11 @@ class GenericRelStorageTests(
             del r['alpha']
             transaction.commit()
 
-            # Pack
+            # Pack, with a commit lock held
             now = packtime = time.time()
             while packtime <= now:
                 packtime = time.time()
+            adapter.locker.hold_commit_lock(test_cursor)
             self._storage.pack(packtime, referencesf, sleep=sim_sleep)
 
             self.assertTrue(len(slept) > 0)

@@ -478,26 +478,14 @@ underscores instead of dashes in the parameter names.
         timeout in seconds for each batch.  Note that some database
         configurations have unpredictable I/O performance
         and might stall much longer than the timeout.
-        The default timeout is 5.0 seconds.
+        The default timeout is 1.0 seconds.
 
-``pack-duty-cycle``
-        After each batch, the pack code pauses for a time to
-        allow concurrent transactions to commit.  The pack-duty-cycle
-        specifies what fraction of time should be spent on packing.
-        For example, if the duty cycle is 0.75, then 75% of the time
-        will be spent packing: a 6 second pack batch
-        will be followed by a 2 second delay.  The duty cycle should
-        be greater than 0.0 and less than or equal to 1.0.  Specify
-        1.0 for no delay between batches.
-
-        The default is 0.5.  Raise it to finish packing faster; lower it
-        to reduce the effect of packing on transaction commit performance.
-
-``pack-max-delay``
-        This specifies a maximum delay between pack batches.  Sometimes
-        the database takes an extra long time to finish a pack batch; at
-        those times it is useful to cap the delay imposed by the
-        pack-duty-cycle.  The default is 20 seconds.
+``pack-commit-busy-delay``
+        Before each pack batch, the commit lock is requested. If the lock is
+        already held by for a regular commit, packing is paused for a short
+        while. This option specifies how long the pack process should be
+        paused before attempting to get the commit lock again.
+        The default delay is 5.0 seconds.
 
 ``cache-servers``
         Specifies a list of memcached servers. Using memcached with

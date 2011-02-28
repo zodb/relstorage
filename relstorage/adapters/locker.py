@@ -36,26 +36,33 @@ class PostgreSQLLocker(Locker):
             options=options, lock_exceptions=lock_exceptions)
         self.version_detector = version_detector
 
-    def hold_commit_lock(self, cursor, ensure_current=False):
-        if ensure_current:
-            # Hold commit_lock to prevent concurrent commits
-            # (for as short a time as possible).
-            # Lock transaction and current_object in share mode to ensure
-            # conflict detection has the most current data.
-            if self.keep_history:
-                stmt = """
-                LOCK TABLE commit_lock IN EXCLUSIVE MODE;
-                LOCK TABLE transaction IN SHARE MODE;
-                LOCK TABLE current_object IN SHARE MODE
-                """
+    def hold_commit_lock(self, cursor, ensure_current=False, nowait=False):
+        try:
+            if ensure_current:
+                # Hold commit_lock to prevent concurrent commits
+                # (for as short a time as possible).
+                # Lock transaction and current_object in share mode to ensure
+                # conflict detection has the most current data.
+                if self.keep_history:
+                    stmt = """
+                    LOCK TABLE commit_lock IN EXCLUSIVE MODE%s;
+                    LOCK TABLE transaction IN SHARE MODE;
+                    LOCK TABLE current_object IN SHARE MODE
+                    """ % (nowait and ' NOWAIT' or '',)
+                else:
+                    stmt = """
+                    LOCK TABLE commit_lock IN EXCLUSIVE MODE%s;
+                    LOCK TABLE object_state IN SHARE MODE
+                    """ % (nowait and ' NOWAIT' or '',)
+                cursor.execute(stmt)
             else:
-                stmt = """
-                LOCK TABLE commit_lock IN EXCLUSIVE MODE;
-                LOCK TABLE object_state IN SHARE MODE
-                """
-            cursor.execute(stmt)
-        else:
-            cursor.execute("LOCK TABLE commit_lock IN EXCLUSIVE MODE")
+                cursor.execute("LOCK TABLE commit_lock IN EXCLUSIVE MODE%s" %
+                    (nowait and ' NOWAIT' or '',))
+        except self.lock_exceptions:  # psycopg2.DataseError:
+            if nowait:
+                return False
+            raise StorageError('Acquiring a commit lock failed')
+        return True
 
     def release_commit_lock(self, cursor):
         # no action needed
@@ -96,10 +103,13 @@ class PostgreSQLLocker(Locker):
 class MySQLLocker(Locker):
     implements(ILocker)
 
-    def hold_commit_lock(self, cursor, ensure_current=False):
+    def hold_commit_lock(self, cursor, ensure_current=False, nowait=False):
+        timeout = not nowait and self.commit_lock_timeout or 0
         stmt = "SELECT GET_LOCK(CONCAT(DATABASE(), '.commit'), %s)"
-        cursor.execute(stmt, (self.commit_lock_timeout,))
+        cursor.execute(stmt, (timeout,))
         locked = cursor.fetchone()[0]
+        if nowait and locked in (0, 1):
+            return bool(locked)
         if not locked:
             raise StorageError("Unable to acquire commit lock")
 
@@ -132,18 +142,21 @@ class OracleLocker(Locker):
             options=options, lock_exceptions=lock_exceptions)
         self.inputsize_NUMBER = inputsize_NUMBER
 
-    def hold_commit_lock(self, cursor, ensure_current=False):
+    def hold_commit_lock(self, cursor, ensure_current=False, nowait=False):
         # Hold commit_lock to prevent concurrent commits
         # (for as short a time as possible).
+        timeout = not nowait and self.commit_lock_timeout or 0
         status = cursor.callfunc(
             "DBMS_LOCK.REQUEST",
             self.inputsize_NUMBER, (
                 self.commit_lock_id,
                 6,  # exclusive (X_MODE)
-                self.commit_lock_timeout,
+                timeout,
                 True,
             ))
         if status != 0:
+            if nowait and status == 1:
+                return False # Lock failed due to a timeout
             if status >= 1 and status <= 5:
                 msg = ('', 'timeout', 'deadlock', 'parameter error',
                     'lock already owned', 'illegal handle')[int(status)]
@@ -163,6 +176,7 @@ class OracleLocker(Locker):
                 cursor.execute("LOCK TABLE current_object IN SHARE MODE")
             else:
                 cursor.execute("LOCK TABLE object_state IN SHARE MODE")
+        return True
 
     def release_commit_lock(self, cursor):
         # no action needed

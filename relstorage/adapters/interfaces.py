@@ -156,7 +156,7 @@ class IDatabaseIterator(Interface):
 class ILocker(Interface):
     """Acquire and release the commit and pack locks."""
 
-    def hold_commit_lock(cursor, ensure_current=False):
+    def hold_commit_lock(cursor, ensure_current=False, nowait=False):
         """Acquire the commit lock.
 
         If ensure_current is True, other tables may be locked as well, to
@@ -164,6 +164,10 @@ class ILocker(Interface):
 
         May raise StorageError if the lock can not be acquired before
         some timeout.
+
+        With nowait set to True, only try to obtain the lock without waiting
+        and return a boolean indicating if the lock was successful.
+
         """
 
     def release_commit_lock(cursor):

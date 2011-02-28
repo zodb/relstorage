@@ -39,9 +39,8 @@ class Options(object):
         self.pack_gc = True
         self.pack_prepack_only = False
         self.pack_skip_prepack = False
-        self.pack_batch_timeout = 5.0
-        self.pack_duty_cycle = 0.5
-        self.pack_max_delay = 20.0
+        self.pack_batch_timeout = 1.0
+        self.pack_commit_busy_delay = 5.0
         self.cache_servers = ()  # ['127.0.0.1:11211']
         self.cache_module_name = 'relstorage.pylibmc_wrapper'
         self.cache_prefix = ''

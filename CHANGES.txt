@@ -11,6 +11,12 @@ Next Release
   separately, allowing re-use of the pre-pack analysis data or even delegating
   the pre-pack phase off to a separate server.
 
+- Replaced the packing duty cycle with a nowait locking strategy. The pack
+  operation will now request the commit lock but pauses if it is already taken.
+  It releases the lock after every batch (defaulting to 1 second processing).
+  This makes the packing process faster while at the same time yielding to
+  regular ZODB commits when busy.
+
 1.5.0b1 (2011-02-05)
 --------------------
 

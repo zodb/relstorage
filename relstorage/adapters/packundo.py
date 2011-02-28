@@ -134,22 +134,15 @@ class PackUndo(object):
         if batch:
             upload_batch()
 
-    def _pause_pack(self, sleep, start):
-        """Pause packing to allow concurrent commits."""
+    def _pause_pack_until_lock(self, cursor, sleep):
+        """Pause until we can obtain a nowait commit lock."""
         if sleep is None:
             sleep = time.sleep
-        elapsed = time.time() - start
-        if elapsed == 0.0:
-            # Compensate for low timer resolution by
-            # assuming that at least 10 ms elapsed.
-            elapsed = 0.01
-        duty_cycle = self.options.pack_duty_cycle
-        if duty_cycle > 0.0 and duty_cycle < 1.0:
-            delay = min(self.options.pack_max_delay,
-                elapsed * (1.0 / duty_cycle - 1.0))
-            if delay > 0:
-                log.debug('pack: sleeping %.4g second(s)', delay)
-                sleep(delay)
+        delay = self.options.pack_commit_busy_delay
+        while not self.locker.hold_commit_lock(cursor, nowait=True):
+            cursor.connection.rollback()
+            log.debug('pack: commit lock busy, sleeping %.4g second(s)', delay)
+            sleep(delay)
 
 
 class HistoryPreservingPackUndo(PackUndo):
@@ -657,15 +650,16 @@ class HistoryPreservingPackUndo(PackUndo):
                     self.runner.run_script(cursor, stmt)
 
                 # Hold the commit lock while packing to prevent deadlocks.
-                # Pack in small batches of transactions in order to minimize
-                # the interruption of concurrent write operations.
+                # Pack in small batches of transactions only after we are able
+                # to obtain a commit lock in order to minimize the
+                # interruption of concurrent write operations.
                 start = time.time()
                 packed_list = []
                 counter, lastreport, statecounter = 0, 0, 0
                 # We'll report on progress in at most .1% step increments
                 reportstep = max(total / 1000, 1)
 
-                self.locker.hold_commit_lock(cursor)
+                self._pause_pack_until_lock(cursor, sleep)
                 for tid, packed, has_removable in tid_rows:
                     self._pack_transaction(
                         cursor, pack_tid, tid, packed, has_removable,
@@ -685,8 +679,7 @@ class HistoryPreservingPackUndo(PackUndo):
                             lastreport = counter / reportstep * reportstep
                         del packed_list[:]
                         self.locker.release_commit_lock(cursor)
-                        self._pause_pack(sleep, start)
-                        self.locker.hold_commit_lock(cursor)
+                        self._pause_pack_until_lock(cursor, sleep)
                         start = time.time()
                 if packed_func is not None:
                     for oid, tid in packed_list:
@@ -1109,14 +1102,15 @@ class HistoryFreePackUndo(PackUndo):
                 log.info("pack: will remove %d object(s)", total)
 
                 # Hold the commit lock while packing to prevent deadlocks.
-                # Pack in small batches of transactions in order to minimize
-                # the interruption of concurrent write operations.
+                # Pack in small batches of transactions only after we are able
+                # to obtain a commit lock in order to minimize the
+                # interruption of concurrent write operations.
                 start = time.time()
                 packed_list = []
                 # We'll report on progress in at most .1% step increments
                 lastreport, reportstep = 0, max(total / 1000, 1)
 
-                self.locker.hold_commit_lock(cursor)
+                self._pause_pack_until_lock(cursor, sleep)
                 while to_remove:
                     items = to_remove[:100]
                     del to_remove[:100]
@@ -1139,8 +1133,7 @@ class HistoryFreePackUndo(PackUndo):
                                 counter, counter/float(total)*100)
                             lastreport = counter / reportstep * reportstep
                         self.locker.release_commit_lock(cursor)
-                        self._pause_pack(sleep, start)
-                        self.locker.hold_commit_lock(cursor)
+                        self._pause_pack_until_lock(cursor, sleep)
                         start = time.time()
 
                 if packed_func is not None:
