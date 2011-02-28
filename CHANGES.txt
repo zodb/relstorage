@@ -21,6 +21,10 @@ Next Release
   the object reference tables; these tables are pack-specific and regular
   ZODB commits never touch these.
 
+- Add an option to control schema creation / updating on startup. Setting the
+  ``create-schema`` option to false will let you use RelStorage without a
+  schema update.
+
 1.5.0b1 (2011-02-05)
 --------------------
 

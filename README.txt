@@ -538,6 +538,11 @@ underscores instead of dashes in the parameter names.
         parameter specifies the lock ID. This parameter currently
         applies only to the Oracle adapter.
 
+``create-schema``
+        Normally, RelStorage will create or update the database schema on
+        start-up. Set this option to false if you need to connect to a
+        RelStorage database without automatic creation or updates.
+
 Adapter Options
 ===============
 

@@ -48,6 +48,7 @@ class Options(object):
         self.cache_delta_size_limit = 10000
         self.commit_lock_timeout = 30
         self.commit_lock_id = 0
+        self.create_schema = True
         self.strict_tpc = default_strict_tpc
 
         # If share_local_cache is off, each storage instance has a private

@@ -142,7 +142,7 @@ class RelStorage(
     # calling the database.
     _batcher_row_limit = 100
 
-    def __init__(self, adapter, name=None, create=True,
+    def __init__(self, adapter, name=None, create=None,
             options=None, cache=None, blobhelper=None, **kwoptions):
         self._adapter = adapter
 
@@ -161,6 +161,8 @@ class RelStorage(
 
         self._is_read_only = options.read_only
 
+        if create is None:
+            create = options.create_schema
         if create:
             self._adapter.schema.prepare()
 
