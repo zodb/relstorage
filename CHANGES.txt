@@ -17,6 +17,10 @@ Next Release
   This makes the packing process faster while at the same time yielding to
   regular ZODB commits when busy.
 
+- Do not hold the commit lock during pack cleanup while deleting rows from
+  the object reference tables; these tables are pack-specific and regular
+  ZODB commits never touch these.
+
 1.5.0b1 (2011-02-05)
 --------------------
 

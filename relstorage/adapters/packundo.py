@@ -761,13 +761,18 @@ class HistoryPreservingPackUndo(PackUndo):
         # commit the work done so far
         conn.commit()
         self.locker.release_commit_lock(cursor)
-        self.locker.hold_commit_lock(cursor)
         log.info("pack: cleaning up")
 
+        # This section does not need to hold the commit lock, as it only
+        # touches pack-specific tables. We already hold a pack lock for that.
         log.debug("pack: removing unused object references")
         stmt = self._script_pack_object_ref
         self.runner.run_script(cursor, stmt)
 
+        # Do we need to hold the commit lock for this section? RelStorage
+        # normally ignores transactions where packed = TRUE. We hold the
+        # commit lock during packing to set the packed flag already.
+        self.locker.hold_commit_lock(cursor)
         log.debug("pack: removing empty packed transactions")
         stmt = """
         DELETE FROM transaction
@@ -1160,9 +1165,10 @@ class HistoryFreePackUndo(PackUndo):
         # commit the work done so far
         conn.commit()
         self.locker.release_commit_lock(cursor)
-        self.locker.hold_commit_lock(cursor)
         log.info("pack: cleaning up")
 
+        # This section does not need to hold the commit lock, as it only
+        # touches pack-specific tables. We already hold a pack lock for that.
         stmt = """
         DELETE FROM object_refs_added
         WHERE zoid IN (
