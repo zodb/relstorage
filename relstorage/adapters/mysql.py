@@ -139,6 +139,7 @@ class MySQLAdapter(object):
                 options=options,
                 )
             self.dbiter = HistoryPreservingDatabaseIterator(
+                database_name='mysql',
                 runner=self.runner,
                 )
         else:
@@ -149,6 +150,7 @@ class MySQLAdapter(object):
                 options=options,
                 )
             self.dbiter = HistoryFreeDatabaseIterator(
+                database_name='mysql',
                 runner=self.runner,
                 )
 

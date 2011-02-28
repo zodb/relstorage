@@ -28,7 +28,6 @@ class ScriptRunner(object):
     script_vars = {
         'TRUE':         'TRUE',
         'FALSE':        'FALSE',
-        'OCTET_LENGTH': 'OCTET_LENGTH',
         'TRUNCATE':     'TRUNCATE',
         'oid':          '%(oid)s',
         'tid':          '%(tid)s',
@@ -95,7 +94,6 @@ class OracleScriptRunner(ScriptRunner):
     script_vars = {
         'TRUE':         "'Y'",
         'FALSE':        "'N'",
-        'OCTET_LENGTH': 'LENGTH',
         'TRUNCATE':     'TRUNCATE TABLE',
         'oid':          ':oid',
         'tid':          ':tid',

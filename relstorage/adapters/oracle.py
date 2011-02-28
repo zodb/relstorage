@@ -134,6 +134,7 @@ class OracleAdapter(object):
                 options=options,
                 )
             self.dbiter = HistoryPreservingDatabaseIterator(
+                database_name='oracle',
                 runner=self.runner,
                 )
         else:
@@ -144,6 +145,7 @@ class OracleAdapter(object):
                 options=options,
                 )
             self.dbiter = HistoryFreeDatabaseIterator(
+                database_name='oracle',
                 runner=self.runner,
                 )
 

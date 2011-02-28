@@ -1,29 +1,39 @@
 Next Release
 ------------
 
-- Added more feedback to the packing process. It'll now report
-  during batch commit how much of the total work has been completed,
-  but at most every .1% of the total number of transactions or objects to
-  process.
+- Better packing based on experience with large databases.  Thanks
+  to Martijn Pieters!
 
-- Renamed the --dry-run option to --prepack and added a --use-prepack-state
-  to zodbpack. With these 2 options the pre-pack and pack phases can be run
-  separately, allowing re-use of the pre-pack analysis data or even delegating
-  the pre-pack phase off to a separate server.
+    - Added more feedback to the packing process. It'll now report
+      during batch commit how much of the total work has been
+      completed, but at most every .1% of the total number of
+      transactions or objects to process.
 
-- Replaced the packing duty cycle with a nowait locking strategy. The pack
-  operation will now request the commit lock but pauses if it is already taken.
-  It releases the lock after every batch (defaulting to 1 second processing).
-  This makes the packing process faster while at the same time yielding to
-  regular ZODB commits when busy.
+    - Renamed the --dry-run option to --prepack and added a
+      --use-prepack-state to zodbpack. With these 2 options the
+      pre-pack and pack phases can be run separately, allowing re-use
+      of the pre-pack analysis data or even delegating the pre-pack
+      phase off to a separate server.
 
-- Do not hold the commit lock during pack cleanup while deleting rows from
-  the object reference tables; these tables are pack-specific and regular
-  ZODB commits never touch these.
+    - Replaced the packing duty cycle with a nowait locking strategy.
+      The pack operation will now request the commit lock but pauses if
+      it is already taken. It releases the lock after every batch
+      (defaulting to 1 second processing). This makes the packing
+      process faster while at the same time yielding to regular ZODB
+      commits when busy.
 
-- Add an option to control schema creation / updating on startup. Setting the
-  ``create-schema`` option to false will let you use RelStorage without a
-  schema update.
+    - Do not hold the commit lock during pack cleanup while deleting
+      rows from the object reference tables; these tables are
+      pack-specific and regular ZODB commits never touch these.
+
+- Add an option to control schema creation / updating on startup.
+  Setting the ``create-schema`` option to false will let you use
+  RelStorage without a schema update.
+
+- Fixed compatibility with PostgreSQL 9.0, which is capable of
+  returning a new 'hex' type to the client. Some builds of psycopg2
+  return garbage or raise an error when they see the new type. The fix
+  was to encode more SQL query responses using base 64.
 
 1.5.0b1 (2011-02-05)
 --------------------

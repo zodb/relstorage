@@ -104,6 +104,7 @@ class PostgreSQLAdapter(object):
                 options=options,
                 )
             self.dbiter = HistoryPreservingDatabaseIterator(
+                database_name='postgresql',
                 runner=self.runner,
                 )
         else:
@@ -114,6 +115,7 @@ class PostgreSQLAdapter(object):
                 options=options,
                 )
             self.dbiter = HistoryFreeDatabaseIterator(
+                database_name='postgresql',
                 runner=self.runner,
                 )
 
