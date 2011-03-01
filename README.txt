@@ -138,7 +138,7 @@ article:
 Plone uses the ``plone.recipe.zope2instance`` Buildout recipe to
 generate zope.conf, so the easiest way to configure RelStorage in a
 Plone site is to set the ``rel-storage`` parameter in ``buildout.cfg``.
-The ``rel-storage`` parameter contains settings separated by newlines,
+The ``rel-storage`` parameter contains options separated by newlines,
 with these values:
 
     * ``type``: any database type supported (``postgresql``, ``mysql``,
@@ -200,7 +200,7 @@ For Oracle (10g XE in this example)::
      </relstorage>
     </zodb_db>
 
-To add ZODB blob support, provide a blob-dir parameter that specifies
+To add ZODB blob support, provide a blob-dir option that specifies
 where to store the blobs.  For example::
 
     %import relstorage
@@ -235,20 +235,20 @@ contents similar to the following::
 ``zconfig://path/to/configuration#main``.
 
 
-Migrating Existing Data
-=======================
+Included Utilities
+==================
 
-The ``zodbconvert`` Utility
----------------------------
+``zodbconvert``
+---------------
 
 RelStorage comes with a script named ``zodbconvert`` that converts
-databases to different formats. Use it to convert a FileStorage
-instance to RelStorage and back, or to convert between different kinds
-of RelStorage instances, or to convert other kinds of storages that
+databases between formats. Use it to convert a FileStorage instance to
+RelStorage and back, or to convert between different kinds of
+RelStorage instances, or to convert other kinds of storages that
 support the storage iterator protocol.
 
 When converting between two history-preserving databases (note that
-FileStorage uses a history-preserving format), ``zodbconvert`` utility
+FileStorage uses a history-preserving format), ``zodbconvert``
 preserves all objects and transactions, meaning you can still use the
 ZODB undo feature after the conversion, and you can convert back using
 the same process in reverse. When converting from a history-free
@@ -287,7 +287,7 @@ Here is a sample ``zodbconvert`` configuration file::
 This configuration file specifies that the utility should copy all of
 the transactions from Data.fs to a MySQL database called "zodb". If you
 want to reverse the conversion, exchange the names "source" and
-"destination". All storage types and storage parameters available in
+"destination". All storage types and storage options available in
 zope.conf are also available in this configuration file.
 
 Options for ``zodbconvert``
@@ -303,8 +303,45 @@ Options for ``zodbconvert``
     actually copy.
 
 
+``zodbpack``
+------------
+
+RelStorage also comes with a script named ``zodbpack`` that packs any
+ZODB storage that allows concurrent connections (including RelStorage
+and ZEO, but not including FileStorage). Use ``zodbpack`` in ``cron``
+scripts. Pass the script the name of a configuration file that lists
+the storages to pack, in ZConfig format. An example configuration file::
+
+  <relstorage>
+    pack-gc true
+    pack-duty-cycle 0.9
+    <mysql>
+      db zodb
+    </mysql>
+  </relstorage>
+
+Options for ``zodbpack``
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+  ``--days`` or ``-d``
+    Specifies how many days of historical data to keep. Defaults to 0,
+    meaning no history is kept. This is meaningful even for
+    history-free storages, since unreferenced objects are not removed
+    from the database until the specified number of days have passed.
+
+  ``--prepack``
+    Instructs the storage to only run the pre-pack phase of the pack but not
+    actually delete anything.  This is equivalent to specifying
+    ``pack-prepack-only true`` in the storage options.
+
+  ``--use-prepack-state``
+    Instructs the storage to only run the deletion (packing) phase, skipping
+    the pre-pack analysis phase. This is equivalento to specifying
+    ``pack-skip-prepack true`` in the storage options.
+
+
 Migrating to a new version of RelStorage
-----------------------------------------
+========================================
 
 Sometimes RelStorage needs a schema modification along with a software
 upgrade.  Hopefully, this will not often be necessary.
@@ -331,7 +368,7 @@ RelStorage Options
 Specify these options in zope.conf, as parameters for the
 ``relstorage.storage.RelStorage`` constructor, or as attributes of a
 ``relstorage.storage.Options`` instance. In the latter two cases, use
-underscores instead of dashes in the parameter names.
+underscores instead of dashes in the option names.
 
 ``name``
         The name of the storage. Defaults to a descriptive name that
@@ -343,7 +380,7 @@ underscores instead of dashes in the parameter names.
 
 ``blob-dir``
         If supplied, the storage will provide ZODB blob support; this
-        parameter specifies the name of the directory to hold blob data.
+        option specifies the name of the directory to hold blob data.
         The directory will be created if it does not exist. If no value
         (or an empty value) is provided, then no blob support will be
         provided.
@@ -353,53 +390,60 @@ underscores instead of dashes in the parameter names.
         shared among all clients using NFS or similar; blob data will
         be stored only on the filesystem and not in the database. If
         false, blob data is stored in the relational database and the
-        blob directory holds a cache of blobs. When this parameter is
+        blob directory holds a cache of blobs. When this option is
         false, the blob directory should not be shared among clients.
 
 ``blob-cache-size``
-        Maximum size of the blob cache, in bytes.  If empty (the default),
-        the cache size isn't checked and the blob directory will
-        grow without bounds.
+        Maximum size of the blob cache, in bytes. If empty (the
+        default), the cache size isn't checked and the blob directory
+        will grow without bounds. This should be either empty or
+        significantly larger than the largest blob you store. At least
+        1 gigabyte is recommended for typical databases. More is
+        recommended if you store videos, CD/DVD images, or virtual
+        machine images. If this option is set too small, blobs could
+        be evicted from the cache before application code can get them,
+        resulting in POSExceptions.
 
+        This option allows suffixes such as "mb" or "gb".
         This option is ignored if shared-blob-dir is true.
 
 ``blob-cache-size-check``
         Blob cache check size as percent of blob-cache-size. The blob
         cache size will be checked when this many bytes have been
         loaded into the cache. Defaults to 10% of the blob cache size.
-        This option is ignored if shared-blob-dir is true.
 
         This option is ignored if shared-blob-dir is true.
 
 ``blob-chunk-size``
         When ZODB blobs are stored in the database, RelStorage breaks
         them into chunks to minimize the impact on RAM.  This
-        parameter specifies the chunk size for new blobs.  The
-        default is 1048576 (1 megabyte).
+        option specifies the chunk size for new blobs.  The
+        default is 1048576 (1 mebibyte).
 
+        This option allows suffixes such as "mb" or "gb".
         This option is ignored if shared-blob-dir is true.
 
 ``keep-history``
-        If this parameter is set to true (the default), the adapter
+        If this option is set to true (the default), the adapter
         will create and use a history-preserving database schema
         (like FileStorage). A history-preserving schema supports
         ZODB-level undo, but also grows more quickly and requires extensive
         packing on a regular basis.
 
-        If this parameter is set to false, the adapter will create and
+        If this option is set to false, the adapter will create and
         use a history-free database schema. Undo will not be supported,
         but the database will not grow as quickly. The database will
         still require regular garbage collection (which is accessible
         through the database pack mechanism.)
 
-        This parameter must not change once the database schema has
+        This option must not change once the database schema has
         been installed, because the schemas for history-preserving and
         history-free storage are different. If you want to convert
         between a history-preserving and a history-free database, use
         the ``zodbconvert`` utility to copy to a new database.
 
 ``replica-conf``
-        If this parameter is provided, it specifies a text file that
+        If this option is provided, it specifies a text file that
         contains a list of database replicas the adapter can choose
         from. For MySQL and PostgreSQL, put in the replica file a list
         of ``host:port`` or ``host`` values, one per line. For Oracle,
@@ -413,7 +457,7 @@ underscores instead of dashes in the parameter names.
         new connections when ZODB starts a new transaction.
 
 ``replica-timeout``
-        If this parameter has a nonzero value, when the adapter selects
+        If this option has a nonzero value, when the adapter selects
         a replica other than the primary replica, the adapter will
         try to revert to the primary replica after the specified
         timeout (in seconds).  The default is 600, meaning 10 minutes.
@@ -502,10 +546,9 @@ underscores instead of dashes in the parameter names.
 ``cache-module-name``
         Specifies which Python memcache module to use. The default is
         "relstorage.pylibmc_wrapper", which requires pylibmc. An
-        alternative module is "memcache", a pure Python module, but the
-        current version of memcache (1.45) has bugs that make it
-        unreliable. This setting has no effect unless cache-servers is
-        set.
+        alternative module is "memcache", a pure Python module. If you
+        use the memcache module, use at least version 1.47. This
+        option has no effect unless cache-servers is set.
 
 ``cache-prefix``
         The prefix for all keys in the cache.  All clients using a
@@ -514,29 +557,29 @@ underscores instead of dashes in the parameter names.
 
 ``cache-local-mb``
         RelStorage caches pickled objects in memory, similar to a ZEO
-        cache. This cache is shared between threads. This parameter
+        cache. This cache is shared between threads. This option
         configures the approximate maximum amount of memory the cache
         should consume, in megabytes.  It defaults to 10.  Set to
         0 to disable the in-memory cache.
 
 ``cache-delta-size-limit``
         This is an advanced option. RelStorage uses a system of
-        checkpoints to improve the cache hit rate. This parameter
+        checkpoints to improve the cache hit rate. This option
         configures how many objects should be stored before creating a
         new checkpoint. The default is 10000.
 
 ``commit-lock-timeout``
         During commit, RelStorage acquires a database-wide lock. This
-        parameter specifies how long to wait for the lock before
+        option specifies how long to wait for the lock before
         failing the attempt to commit. The default is 30 seconds.
 
-        The MySQL and Oracle adapters support this parameter. The
+        The MySQL and Oracle adapters support this option. The
         PostgreSQL adapter currently does not.
 
 ``commit-lock-id``
         During commit, RelStorage acquires a database-wide lock. This
-        parameter specifies the lock ID. This parameter currently
-        applies only to the Oracle adapter.
+        option specifies the lock ID. This option currently applies
+        only to the Oracle adapter.
 
 ``create-schema``
         Normally, RelStorage will create or update the database schema on
@@ -612,42 +655,6 @@ The Oracle adapter accepts:
 ``dsn``
         The Oracle data source name.  The Oracle client library will
         normally expect to find the DSN in /etc/oratab.
-
-The ``zodbpack`` Script
-=======================
-
-RelStorage also comes with a script named ``zodbpack`` that packs any
-ZODB storage that allows concurrent connections (including RelStorage
-and ZEO, but not including FileStorage). Use ``zodbpack`` in ``cron``
-scripts. Pass the script the name of a configuration file that lists
-the storages to pack, in ZConfig format. An example configuration file::
-
-  <relstorage>
-    pack-gc true
-    pack-duty-cycle 0.9
-    <mysql>
-      db zodb
-    </mysql>
-  </relstorage>
-
-Options for ``zodbpack``
-------------------------
-
-  ``--days`` or ``-d``
-    Specifies how many days of historical data to keep. Defaults to 0,
-    meaning no history is kept. This is meaningful even for
-    history-free storages, since unreferenced objects are not removed
-    from the database until the specified number of days have passed.
-
-  ``--prepack``
-    Instructs the storage to only run the pre-pack phase of the pack but not
-    actually delete anything.  This is equivalent to specifying 
-    ``pack-prepack-only true`` in the storage options.
-
-  ``--use-prepack-state``
-    Instructs the storage to only run the deletion (packing) phase, skipping
-    the pre-pack analysis phase. This is equivalento to specifying
-    ``pack-skip-prepack true`` in the storage options.
 
 Development
 ===========

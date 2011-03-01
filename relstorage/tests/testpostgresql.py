@@ -60,6 +60,7 @@ class ZConfigTests:
             read-only false
             keep-history %s
             replica-conf %s
+            blob-chunk-size 10MB
             <postgresql>
                 dsn %s
             </postgresql>
@@ -98,6 +99,7 @@ class ZConfigTests:
             self.assertEqual(
                 adapter.connmanager.replica_selector.replica_conf,
                 replica_conf)
+            self.assertEqual(storage._options.blob_chunk_size, 10485760)
         finally:
             db.close()
 

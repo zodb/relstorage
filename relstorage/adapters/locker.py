@@ -58,7 +58,7 @@ class PostgreSQLLocker(Locker):
             else:
                 cursor.execute("LOCK TABLE commit_lock IN EXCLUSIVE MODE%s" %
                     (nowait and ' NOWAIT' or '',))
-        except self.lock_exceptions:  # psycopg2.DataseError:
+        except self.lock_exceptions:
             if nowait:
                 return False
             raise StorageError('Acquiring a commit lock failed')
