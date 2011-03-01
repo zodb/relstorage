@@ -152,8 +152,8 @@ class BlobHelper(object):
             if os.path.exists(blob_filename):
                 return blob_filename
             else:
-                # We're using a server shared cache.  If the file isn't
-                # here, it's not anywhere.
+                # All the blobs are in a shared directory.  If the
+                # file isn't here, it's not anywhere.
                 raise POSException.POSKeyError("No blob file", oid, serial)
 
         if os.path.exists(blob_filename):
@@ -203,8 +203,8 @@ class BlobHelper(object):
             blob_filename = self.fshelper.getBlobFilename(oid, serial)
             if not os.path.exists(blob_filename):
                 if self.shared_blob_dir:
-                    # We're using a server shared cache.  If the file isn't
-                    # here, it's not anywhere.
+                    # All the blobs are in a shared directory.  If the
+                    # file isn't here, it's not anywhere.
                     raise POSException.POSKeyError("No blob file", oid, serial)
                 self.download_blob(cursor, oid, serial, blob_filename)
                 if not os.path.exists(blob_filename):
