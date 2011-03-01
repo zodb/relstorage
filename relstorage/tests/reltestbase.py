@@ -694,6 +694,7 @@ class GenericRelStorageTests(
         finally:
             db.close()
 
+
 class DoubleCommitter(Persistent):
     """A crazy persistent class that changes self in __getstate__"""
     def __getstate__(self):

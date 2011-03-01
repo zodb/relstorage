@@ -71,6 +71,25 @@ except ImportError:
             return False
 
 
+try:
+    from ZEO.ClientStorage import BlobCacheLayout
+except ImportError:
+
+    class BlobCacheLayout(object):
+
+        size = 997
+
+        def oid_to_path(self, oid):
+            return str(utils.u64(oid) % self.size)
+
+        def getBlobFilePath(self, oid, tid):
+            base, rem = divmod(utils.u64(oid), self.size)
+            return os.path.join(
+                str(rem),
+                "%s.%s%s" % (base, tid.encode('hex'), ZODB.blob.BLOB_SUFFIX)
+            )
+
+
 class BlobHelper(object):
     """Blob support for RelStorage.
 
@@ -402,21 +421,6 @@ class BlobCacheChecker(object):
 # 2. No such code exists in ZODB 3.8, when blob support was first added
 #    to ZODB, but RelStorage needs to continue to support ZODB 3.8
 #    and 3.7 for a few years.
-
-
-class BlobCacheLayout(object):
-
-    size = 997
-
-    def oid_to_path(self, oid):
-        return str(utils.u64(oid) % self.size)
-
-    def getBlobFilePath(self, oid, tid):
-        base, rem = divmod(utils.u64(oid), self.size)
-        return os.path.join(
-            str(rem),
-            "%s.%s%s" % (base, tid.encode('hex'), ZODB.blob.BLOB_SUFFIX)
-        )
 
 
 def _accessed(filename):

@@ -494,6 +494,7 @@ def storage_reusable_suite(prefix, factory,
                            test_undo=True,
                            keep_history=True,
                            pack_test_name='blob_packing.txt',
+                           test_blob_cache=False,
                            ):
     """Return a test suite for a generic IBlobStorage.
 
@@ -502,10 +503,10 @@ def storage_reusable_suite(prefix, factory,
 
     def setup(test):
         setUp(test)
-        def create_storage(name='data', blob_dir=None):
+        def create_storage(name='data', blob_dir=None, **kw):
             if blob_dir is None:
                 blob_dir = '%s.bobs' % name
-            return factory(name, blob_dir)
+            return factory(name, blob_dir, **kw)
 
         test.globs['create_storage'] = create_storage
     
@@ -521,6 +522,11 @@ def storage_reusable_suite(prefix, factory,
             pack_test_name,
             setUp=setup, tearDown=tearDown,
             ))
+    if test_blob_cache:
+        suite.addTest(doctest.DocFileSuite(
+            "blob_cache.test",
+            setUp=setup, tearDown=tearDown,
+        ))
     suite.addTest(doctest.DocTestSuite(
         setUp=setup, tearDown=tearDown,
         checker = zope.testing.renormalizing.RENormalizing([
@@ -529,10 +535,10 @@ def storage_reusable_suite(prefix, factory,
             ]),
         ))
 
-    def create_storage(self, name='data', blob_dir=None):
+    def create_storage(self, name='data', blob_dir=None, **kw):
         if blob_dir is None:
             blob_dir = '%s.bobs' % name
-        return factory(name, blob_dir)
+        return factory(name, blob_dir, **kw)
 
     def add_test_based_on_test_class(class_):
         new_class = class_.__class__(

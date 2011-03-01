@@ -371,54 +371,6 @@ class BlobHelperTest(unittest.TestCase):
         self.assertFalse(os.path.exists(fn2))
 
 
-class BlobCacheCheckerTest(unittest.TestCase):
-
-    def _class(self):
-        from relstorage.blobhelper import BlobCacheChecker
-        return BlobCacheChecker
-
-    def _make(self, *args, **kw):
-        return self._class()(*args, **kw)
-
-
-class BlobCacheLayoutTest(unittest.TestCase):
-
-    def _class(self):
-        from relstorage.blobhelper import BlobCacheLayout
-        return BlobCacheLayout
-
-    def _make(self, *args, **kw):
-        return self._class()(*args, **kw)
-
-
-class AccessedTest(unittest.TestCase):
-
-    def _call(self, *args, **kw):
-        from relstorage.blobhelper import _accessed
-        return _accessed(*args, **kw)
-
-
-class CheckBlobCacheSizeTest(unittest.TestCase):
-
-    def _call(self, *args, **kw):
-        from relstorage.blobhelper import _check_blob_cache_size
-        return _check_blob_cache_size(*args, **kw)
-
-
-class LockBlobTest(unittest.TestCase):
-
-    def _call(self, *args, **kw):
-        from relstorage.blobhelper import _lock_blob
-        return _lock_blob(*args, **kw)
-
-
-class HasFilesTest(unittest.TestCase):
-
-    def _call(self, *args, **kw):
-        from relstorage.blobhelper import _has_files
-        return _has_files(*args, **kw)
-
-
 def test_suite():
     try:
         import ZODB.blob
@@ -430,12 +382,6 @@ def test_suite():
     for klass in [
             IsBlobRecordTest,
             BlobHelperTest,
-            BlobCacheCheckerTest,
-            BlobCacheLayoutTest,
-            AccessedTest,
-            CheckBlobCacheSizeTest,
-            LockBlobTest,
-            HasFilesTest,
         ]:
         suite.addTest(unittest.makeSuite(klass, "test"))
 

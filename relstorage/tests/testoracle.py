@@ -175,7 +175,7 @@ def test_suite():
             for keep_history in (False, True):
                 def create_storage(name, blob_dir,
                         shared_blob_dir=shared_blob_dir,
-                        keep_history=keep_history):
+                        keep_history=keep_history, **kw):
                     from relstorage.storage import RelStorage
                     from relstorage.adapters.oracle import OracleAdapter
                     db = db_names[name]
@@ -185,7 +185,7 @@ def test_suite():
                         keep_history=keep_history,
                         shared_blob_dir=shared_blob_dir,
                         blob_dir=os.path.abspath(blob_dir),
-                    )
+                        **kw)
                     adapter = OracleAdapter(
                         user=db,
                         password='relstoragetest',
@@ -216,7 +216,8 @@ def test_suite():
                     test_packing=test_packing,
                     test_undo=keep_history,
                     pack_test_name=pack_test_name,
-                    ))
+                    test_blob_cache=(not shared_blob_dir),
+                ))
 
     return suite
 
