@@ -769,9 +769,7 @@ class HistoryPreservingPackUndo(PackUndo):
         stmt = self._script_pack_object_ref
         self.runner.run_script(cursor, stmt)
 
-        # Do we need to hold the commit lock for this section? RelStorage
-        # normally ignores transactions where packed = TRUE. We hold the
-        # commit lock during packing to set the packed flag already.
+        # We need a commit lock when touching the transaction table though.
         self.locker.hold_commit_lock(cursor)
         log.debug("pack: removing empty packed transactions")
         stmt = """
