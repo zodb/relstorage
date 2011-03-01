@@ -35,6 +35,10 @@ Next Release
   return garbage or raise an error when they see the new type. The fix
   was to encode more SQL query responses using base 64.
 
+- With the new shared-blob-dir option set to false, it was possible
+  for a thread to read a partially downloaded blob.  Fixed.  Thanks for
+  the report from Maurits van Rees.
+
 1.5.0b1 (2011-02-05)
 --------------------
 

@@ -33,16 +33,16 @@ import zc.lockfile
 try:
     import ZODB.blob
     from ZODB.blob import is_blob_record
-    # ZODB 3.9
+    # Using ZODB 3.9 or above
 except ImportError:
     try:
         from ZODB.blob import Blob
     except ImportError:
-        # ZODB < 3.8
+        # Using ZODB < 3.8
         def is_blob_record(record):
             False
     else:
-        # ZODB 3.8
+        # Using ZODB 3.8
         import cPickle
         import cStringIO
 
@@ -74,7 +74,10 @@ except ImportError:
 class BlobHelper(object):
     """Blob support for RelStorage.
 
-    There is one BlobHelper per storage instance.
+    There is one BlobHelper per storage instance.  Each BlobHelper
+    instance has access to the associated adapter as well as shared
+    instances of fshelper (a ZODB.blob.FilesystemHelper) and
+    cache_checker (a BlobCacheChecker).
     """
 
     # _txn_blobs: {oid->filename}; contains blob data for the
@@ -121,8 +124,11 @@ class BlobHelper(object):
 
     def download_blob(self, cursor, oid, serial, filename):
         """Download a blob into a file"""
+        tmp_fn = filename + ".tmp"
         bytes = self.adapter.mover.download_blob(
-            cursor, u64(oid), u64(serial), filename)
+            cursor, u64(oid), u64(serial), tmp_fn)
+        if os.path.exists(tmp_fn):
+            os.rename(tmp_fn, filename)
         self.cache_checker.loaded(bytes)
 
     def upload_blob(self, cursor, oid, serial, filename):
@@ -222,7 +228,7 @@ class BlobHelper(object):
 
         # Grab the file right away. That way, if we don't have enough
         # room for a copy, we'll know now rather than in tpc_finish.
-        # Also, this releaves the client of having to manage the file
+        # Also, this relieves the client of having to manage the file
         # (or the directory contianing it).
         self.fshelper.getPathForOID(oid, create=True)
         fd, target = self.fshelper.blob_mkstemp(oid, serial)
@@ -386,15 +392,16 @@ class BlobCacheChecker(object):
         self._check_blob_size_thread = check_blob_size_thread
 
 
-# Note: the following code is copied directly from ZEO.  It is copied
-# for 2 reasons:
+# Note: the following code is copied directly from ZEO.ClientStorage.
+# It is copied for two reasons:
 #
 # 1. Most of the symbols are not public (the function names start
 #    with an underscore), indicating their signature could change
 #    at any time.
 #
 # 2. No such code exists in ZODB 3.8, when blob support was first added
-#    to ZODB.
+#    to ZODB, but RelStorage needs to continue to support ZODB 3.8
+#    and 3.7 for a few years.
 
 
 class BlobCacheLayout(object):
