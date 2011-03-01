@@ -72,22 +72,11 @@ except ImportError:
 
 
 try:
-    from ZEO.ClientStorage import BlobCacheLayout
+    from ZEO.ClientStorage import BlobCacheLayout, _check_blob_cache_size
 except ImportError:
-
-    class BlobCacheLayout(object):
-
-        size = 997
-
-        def oid_to_path(self, oid):
-            return str(utils.u64(oid) % self.size)
-
-        def getBlobFilePath(self, oid, tid):
-            base, rem = divmod(utils.u64(oid), self.size)
-            return os.path.join(
-                str(rem),
-                "%s.%s%s" % (base, tid.encode('hex'), ZODB.blob.BLOB_SUFFIX)
-            )
+    # ZODB 3.8 or older
+    BlobCacheLayout = None
+    _check_blob_cache_size = None
 
 
 class BlobHelper(object):
@@ -113,6 +102,13 @@ class BlobHelper(object):
             if self.shared_blob_dir:
                 # Share files over NFS or similar
                 fshelper = ZODB.blob.FilesystemHelper(self.blob_dir)
+            elif BlobCacheLayout is None:
+                # BlobCacheLayout is required for 'shared_blob_dir=False',
+                # but BlobCacheLayout is incompatible with ZODB 3.8 because
+                # ZODB 3.8 constructs blob filenames in an inflexible way.
+                raise ValueError(
+                    "The shared_blob_dir option must be true when "
+                    "RelStorage is used with ZODB 3.8.")
             else:
                 # The blob directory is a cache of the blobs
                 if 'zeocache' not in ZODB.blob.LAYOUTS:
@@ -414,7 +410,7 @@ class BlobCacheChecker(object):
 # Note: the following code is copied directly from ZEO.ClientStorage.
 # It is copied for two reasons:
 #
-# 1. Most of the symbols are not public (the function names start
+# 1. The symbols are not public (the function names start
 #    with an underscore), indicating their signature could change
 #    at any time.
 #
@@ -429,107 +425,6 @@ def _accessed(filename):
     except OSError:
         pass # We tried. :)
     return filename
-
-cache_file_name = re.compile(r'\d+$').match
-def _check_blob_cache_size(blob_dir, target):
-
-    logger = logging.getLogger(__name__+'.check_blob_cache')
-
-    layout = open(os.path.join(blob_dir, ZODB.blob.LAYOUT_MARKER)
-                  ).read().strip()
-    if not layout == 'zeocache':
-        logger.critical("Invalid blob directory layout %s", layout)
-        raise ValueError("Invalid blob directory layout", layout)
-
-    attempt_path = os.path.join(blob_dir, 'check_size.attempt')
-
-    try:
-        check_lock = zc.lockfile.LockFile(
-            os.path.join(blob_dir, 'check_size.lock'))
-    except zc.lockfile.LockError:
-        try:
-            time.sleep(1)
-            check_lock = zc.lockfile.LockFile(
-                os.path.join(blob_dir, 'check_size.lock'))
-        except zc.lockfile.LockError:
-            # Someone is already cleaning up, so don't bother
-            logger.debug("%s Another thread is checking the blob cache size.",
-                         thread.get_ident())
-            open(attempt_path, 'w').close() # Mark that we tried
-            return
-
-    logger.debug("%s Checking blob cache size. (target: %s)",
-                 thread.get_ident(), target)
-
-    try:
-        while 1:
-            size = 0
-            blob_suffix = ZODB.blob.BLOB_SUFFIX
-            files_by_atime = BTrees.OOBTree.BTree()
-
-            for dirname in os.listdir(blob_dir):
-                if not cache_file_name(dirname):
-                    continue
-                base = os.path.join(blob_dir, dirname)
-                if not os.path.isdir(base):
-                    continue
-                for file_name in os.listdir(base):
-                    if not file_name.endswith(blob_suffix):
-                        continue
-                    file_path = os.path.join(base, file_name)
-                    if not os.path.isfile(file_path):
-                        continue
-                    stat = os.stat(file_path)
-                    size += stat.st_size
-                    t = stat.st_atime
-                    if t not in files_by_atime:
-                        files_by_atime[t] = []
-                    files_by_atime[t].append(os.path.join(dirname, file_name))
-
-            logger.debug("%s   blob cache size: %s", thread.get_ident(), size)
-
-            if size <= target:
-                if os.path.isfile(attempt_path):
-                    try:
-                        os.remove(attempt_path)
-                    except OSError:
-                        pass # Sigh, windows
-                    continue
-                logger.debug("%s   -->", thread.get_ident())
-                break
-
-            while size > target and files_by_atime:
-                for file_name in files_by_atime.pop(files_by_atime.minKey()):
-                    file_name = os.path.join(blob_dir, file_name)
-                    lockfilename = os.path.join(os.path.dirname(file_name),
-                                                '.lock')
-                    try:
-                        lock = zc.lockfile.LockFile(lockfilename)
-                    except zc.lockfile.LockError:
-                        logger.debug("%s Skipping locked %s",
-                                     thread.get_ident(),
-                                     os.path.basename(file_name))
-                        continue  # In use, skip
-
-                    try:
-                        fsize = os.stat(file_name).st_size
-                        try:
-                            ZODB.blob.remove_committed(file_name)
-                        except OSError, v:
-                            pass # probably open on windows
-                        else:
-                            size -= fsize
-                    finally:
-                        lock.close()
-
-                    if size <= target:
-                        break
-
-            logger.debug("%s   reduced blob cache size: %s",
-                         thread.get_ident(), size)
-
-    finally:
-        check_lock.close()
 
 def _lock_blob(path):
     lockfilename = os.path.join(os.path.dirname(path), '.lock')

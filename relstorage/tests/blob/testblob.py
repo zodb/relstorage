@@ -500,7 +500,6 @@ def storage_reusable_suite(prefix, factory,
 
     Pass a factory taking a name and a blob directory name.
     """
-
     def setup(test):
         setUp(test)
         def create_storage(name='data', blob_dir=None, **kw):
@@ -555,3 +554,13 @@ def storage_reusable_suite(prefix, factory,
     suite.layer = MinimalTestLayer(prefix+'BlobTests')
 
     return suite
+
+
+try:
+    from ZEO.ClientStorage import BlobCacheLayout
+except ImportError:
+    # ZODB 3.8.  The blob directory must be shared.
+    shared_blob_dir_choices = (True,)
+else:
+    # ZODB >= 3.9.  The blob directory can be a private cache.
+    shared_blob_dir_choices = (False, True)

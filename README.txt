@@ -393,24 +393,28 @@ underscores instead of dashes in the option names.
         blob directory holds a cache of blobs. When this option is
         false, the blob directory should not be shared among clients.
 
+        This option must be true when using ZODB 3.8, because ZODB 3.8
+        is not compatible with the file layout required for a blob
+        cache.  Use ZODB 3.9 or later if you want to store blobs in
+        the relational database.
+
 ``blob-cache-size``
         Maximum size of the blob cache, in bytes. If empty (the
         default), the cache size isn't checked and the blob directory
         will grow without bounds. This should be either empty or
         significantly larger than the largest blob you store. At least
         1 gigabyte is recommended for typical databases. More is
-        recommended if you store videos, CD/DVD images, or virtual
-        machine images. If this option is set too small, blobs could
-        be evicted from the cache before application code can get them,
-        resulting in POSExceptions.
+        recommended if you store large files such as videos, CD/DVD
+        images, or virtual machine images.
 
         This option allows suffixes such as "mb" or "gb".
         This option is ignored if shared-blob-dir is true.
 
 ``blob-cache-size-check``
-        Blob cache check size as percent of blob-cache-size. The blob
-        cache size will be checked when this many bytes have been
-        loaded into the cache. Defaults to 10% of the blob cache size.
+        Blob cache check size as percent of blob-cache-size: "10" means
+        "10%". The blob cache size will be checked when this many bytes
+        have been loaded into the cache. Defaults to 10% of the blob
+        cache size.
 
         This option is ignored if shared-blob-dir is true.
 

@@ -26,7 +26,7 @@ Next Release
       rows from the object reference tables; these tables are
       pack-specific and regular ZODB commits never touch these.
 
-- Add an option to control schema creation / updating on startup.
+- Added an option to control schema creation / updating on startup.
   Setting the ``create-schema`` option to false will let you use
   RelStorage without a schema update.
 
@@ -38,6 +38,10 @@ Next Release
 - With the new shared-blob-dir option set to false, it was possible
   for a thread to read a partially downloaded blob.  Fixed.  Thanks for
   the report from Maurits van Rees.
+
+- Support for "shared-blob-dir false" now requires ZODB 3.9 or better.
+  The code in the ZODB 3.8 version of ZODB.blob is not compatible with
+  BlobCacheLayout, leading to blob filename collisions.
 
 1.5.0b1 (2011-02-05)
 --------------------

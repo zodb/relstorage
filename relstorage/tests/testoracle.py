@@ -171,7 +171,8 @@ def test_suite():
     else:
         from relstorage.tests.blob.testblob import storage_reusable_suite
         dsn = os.environ.get('ORACLE_TEST_DSN', 'XE')
-        for shared_blob_dir in (False, True):
+        from relstorage.tests.blob.testblob import shared_blob_dir_choices
+        for shared_blob_dir in shared_blob_dir_choices:
             for keep_history in (False, True):
                 def create_storage(name, blob_dir,
                         shared_blob_dir=shared_blob_dir,
