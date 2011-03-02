@@ -159,7 +159,7 @@ def test_suite():
         pass
     else:
         from relstorage.tests.blob.testblob import storage_reusable_suite
-        from relstorage.tests.blob.testblob import shared_blob_dir_choices
+        from relstorage.tests.util import shared_blob_dir_choices
         for shared_blob_dir in shared_blob_dir_choices:
             for keep_history in (False, True):
                 def create_storage(name, blob_dir,

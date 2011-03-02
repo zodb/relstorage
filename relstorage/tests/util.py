@@ -24,3 +24,15 @@ def wait_until(label=None, func=None, timeout=30, onfail=None):
             else:
                 return onfail()
         time.sleep(0.01)
+
+
+try:
+    from ZEO.ClientStorage import BlobCacheLayout
+except ImportError:
+    # ZODB 3.8.  The blob directory must be shared.
+    shared_blob_dir_choices = (True,)
+    support_blob_cache = False
+else:
+    # ZODB >= 3.9.  The blob directory can be a private cache.
+    shared_blob_dir_choices = (False, True)
+    support_blob_cache = True
