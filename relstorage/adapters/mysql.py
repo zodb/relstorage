@@ -133,6 +133,7 @@ class MySQLAdapter(object):
 
         if self.keep_history:
             self.packundo = MySQLHistoryPreservingPackUndo(
+                database_name='mysql',
                 connmanager=self.connmanager,
                 runner=self.runner,
                 locker=self.locker,
@@ -144,6 +145,7 @@ class MySQLAdapter(object):
                 )
         else:
             self.packundo = MySQLHistoryFreePackUndo(
+                database_name='mysql',
                 connmanager=self.connmanager,
                 runner=self.runner,
                 locker=self.locker,

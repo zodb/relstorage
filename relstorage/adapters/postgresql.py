@@ -98,6 +98,7 @@ class PostgreSQLAdapter(object):
 
         if self.keep_history:
             self.packundo = HistoryPreservingPackUndo(
+                database_name='postgresql',
                 connmanager=self.connmanager,
                 runner=self.runner,
                 locker=self.locker,
@@ -109,6 +110,7 @@ class PostgreSQLAdapter(object):
                 )
         else:
             self.packundo = HistoryFreePackUndo(
+                database_name='postgresql',
                 connmanager=self.connmanager,
                 runner=self.runner,
                 locker=self.locker,

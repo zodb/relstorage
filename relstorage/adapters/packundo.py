@@ -14,6 +14,7 @@
 """Pack/Undo implementations.
 """
 
+from base64 import decodestring
 from relstorage.adapters.interfaces import IPackUndo
 from ZODB.POSException import UndoError
 from zope.interface import implements
@@ -28,7 +29,8 @@ class PackUndo(object):
 
     verify_sane_database = False
 
-    def __init__(self, connmanager, runner, locker, options):
+    def __init__(self, database_name, connmanager, runner, locker, options):
+        self.database_name = database_name
         self.connmanager = connmanager
         self.runner = runner
         self.locker = locker
@@ -388,12 +390,20 @@ class HistoryPreservingPackUndo(PackUndo):
         """
         log.debug("pre_pack: transaction %d: computing references ", tid)
         from_count = 0
+        use_base64 = (self.database_name == 'postgresql')
 
-        stmt = """
-        SELECT zoid, state
-        FROM object_state
-        WHERE tid = %(tid)s
-        """
+        if use_base64:
+            stmt = """
+            SELECT zoid, encode(state, 'base64')
+            FROM object_state
+            WHERE tid = %(tid)s
+            """
+        else:
+            stmt = """
+            SELECT zoid, state
+            FROM object_state
+            WHERE tid = %(tid)s
+            """
         self.runner.run_script_stmt(cursor, stmt, {'tid': tid})
 
         replace_rows = []
@@ -404,9 +414,12 @@ class HistoryPreservingPackUndo(PackUndo):
                 # Oracle
                 state = state.read()
             if state:
+                state = str(state)
+                if use_base64:
+                    state = decodestring(state)
                 from_count += 1
                 try:
-                    to_oids = get_references(str(state))
+                    to_oids = get_references(state)
                 except:
                     log.error("pre_pack: can't unpickle "
                         "object %d in transaction %d; state length = %d" % (
@@ -964,14 +977,21 @@ class HistoryFreePackUndo(PackUndo):
 
         Returns the number of references added.
         """
-        to_count = 0
         oid_list = ','.join(str(oid) for oid in oids)
+        use_base64 = (self.database_name == 'postgresql')
 
-        stmt = """
-        SELECT zoid, tid, state
-        FROM object_state
-        WHERE zoid IN (%s)
-        """ % oid_list
+        if use_base64:
+            stmt = """
+            SELECT zoid, tid, encode(state, 'base64')
+            FROM object_state
+            WHERE zoid IN (%s)
+            """ % oid_list
+        else:
+            stmt = """
+            SELECT zoid, tid, state
+            FROM object_state
+            WHERE zoid IN (%s)
+            """ % oid_list
         self.runner.run_script_stmt(cursor, stmt)
 
         add_objects = []
@@ -982,8 +1002,11 @@ class HistoryFreePackUndo(PackUndo):
                 state = state.read()
             add_objects.append((from_oid, tid))
             if state:
+                state = str(state)
+                if use_base64:
+                    state = decodestring(state)
                 try:
-                    to_oids = get_references(str(state))
+                    to_oids = get_references(state)
                 except:
                     log.error("pre_pack: can't unpickle "
                         "object %d in transaction %d; state length = %d" % (

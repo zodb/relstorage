@@ -128,6 +128,7 @@ class OracleAdapter(object):
 
         if self.keep_history:
             self.packundo = OracleHistoryPreservingPackUndo(
+                database_name='oracle',
                 connmanager=self.connmanager,
                 runner=self.runner,
                 locker=self.locker,
@@ -139,6 +140,7 @@ class OracleAdapter(object):
                 )
         else:
             self.packundo = OracleHistoryFreePackUndo(
+                database_name='oracle',
                 connmanager=self.connmanager,
                 runner=self.runner,
                 locker=self.locker,
