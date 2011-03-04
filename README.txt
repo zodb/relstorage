@@ -314,7 +314,6 @@ the storages to pack, in ZConfig format. An example configuration file::
 
   <relstorage>
     pack-gc true
-    pack-duty-cycle 0.9
     <mysql>
       db zodb
     </mysql>

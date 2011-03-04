@@ -338,8 +338,8 @@ class IPackUndo(Interface):
         accept two parameters, oid and tid (64 bit integers).
 
         The sleep function defaults to time.sleep(). It can be
-        overridden to do something else instead of sleep during pauses
-        configured by the duty cycle.
+        overridden to do something else instead of sleep during
+        pauses.
         """
 
 
