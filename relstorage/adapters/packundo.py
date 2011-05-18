@@ -406,10 +406,8 @@ class HistoryPreservingPackUndo(PackUndo):
             """
         self.runner.run_script_stmt(cursor, stmt, {'tid': tid})
 
-        replace_rows = []
         add_rows = []  # [(from_oid, tid, to_oid)]
         for from_oid, state in cursor:
-            replace_rows.append((from_oid,))
             if hasattr(state, 'read'):
                 # Oracle
                 state = state.read()
