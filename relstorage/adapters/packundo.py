@@ -15,6 +15,8 @@
 """
 
 from base64 import decodestring
+from itertools import groupby
+from operator import itemgetter
 from relstorage.adapters.interfaces import IPackUndo
 from ZODB.POSException import UndoError
 from zope.interface import implements
@@ -81,18 +83,9 @@ class PackUndo(object):
         ORDER BY object_ref.zoid
         """
         self.runner.run_script_stmt(cursor, stmt)
-        current_oid = None
-        for from_oid, to_oid in cursor:
-            if current_oid is None:
-                current_oid = from_oid
-                current_refs = set()  # set([to_oid])
-            elif current_oid != from_oid:
-                all_refs[current_oid] = current_refs
-                current_oid = from_oid
-                current_refs = set()
-            current_refs.add(to_oid)
-        if current_oid is not None:
-            all_refs[current_oid] = current_refs
+        # Grouped by object_ref.zoid, store all object_ref.to_zoid in sets
+        for from_oid, rows in groupby(cursor, itemgetter(0)):
+            all_refs[from_oid] = set(row[1] for row in rows)
 
         # Traverse the object graph.  Add all of the reachable OIDs
         # to keep_set.
