@@ -223,6 +223,18 @@ class HistoryPreservingPackUndo(PackUndo):
             )
         """
 
+    # See http://www.postgres.cz/index.php/PostgreSQL_SQL_Tricks#Fast_first_n_rows_removing
+    # for = any(array(...)) rationale.
+    _script_delete_empty_transactions_batch = """
+        DELETE FROM transaction
+        WHERE tid = any(array(
+            SELECT tid FROM transaction
+            WHERE packed = %(TRUE)s
+              AND empty = %(TRUE)s
+            LIMIT 1000
+        ))
+        """
+
     def verify_undoable(self, cursor, undo_tid):
         """Raise UndoError if it is not safe to undo the specified txn."""
         stmt = """
@@ -690,7 +702,7 @@ class HistoryPreservingPackUndo(PackUndo):
                         packed_func(oid, tid)
                 packed_list = None
 
-                self._pack_cleanup(conn, cursor)
+                self._pack_cleanup(conn, cursor, sleep)
 
             except:
                 log.exception("pack: failed")
@@ -760,7 +772,7 @@ class HistoryPreservingPackUndo(PackUndo):
             tid, state, removed_objects, removed_states)
 
 
-    def _pack_cleanup(self, conn, cursor):
+    def _pack_cleanup(self, conn, cursor, sleep=None):
         """Remove unneeded table rows after packing"""
         # commit the work done so far
         conn.commit()
@@ -774,19 +786,20 @@ class HistoryPreservingPackUndo(PackUndo):
         self.runner.run_script(cursor, stmt)
 
         # We need a commit lock when touching the transaction table though.
-        self.locker.hold_commit_lock(cursor)
+        # We'll do it in batches of 1000 rows.
         log.debug("pack: removing empty packed transactions")
-        stmt = """
-        DELETE FROM transaction
-        WHERE packed = %(TRUE)s
-            AND empty = %(TRUE)s
-        """
-        self.runner.run_script_stmt(cursor, stmt)
+        while True:
+            self._pause_pack_until_lock(cursor, sleep)
+            stmt = self._script_delete_empty_transactions_batch
+            self.runner.run_script_stmt(cursor, stmt)
+            deleted = cursor.rowcount
+            conn.commit()
+            self.locker.release_commit_lock(cursor)
+            if deleted < 1000:
+                # Last set of deletions complete
+                break
 
         # perform cleanup that does not require the commit lock
-        conn.commit()
-        self.locker.release_commit_lock(cursor)
-
         log.debug("pack: clearing temporary pack state")
         for _table in ('pack_object', 'pack_state', 'pack_state_tid'):
             stmt = '%(TRUNCATE)s ' + _table
@@ -842,6 +855,13 @@ class MySQLHistoryPreservingPackUndo(HistoryPreservingPackUndo):
         CREATE UNIQUE INDEX temp_undo_zoid ON temp_undo (zoid)
         """
 
+    _script_delete_empty_transactions_batch = """
+        DELETE FROM transaction
+        WHERE packed = %(TRUE)s
+          AND empty = %(TRUE)s
+        LIMIT 1000
+        """
+
 
 class OracleHistoryPreservingPackUndo(HistoryPreservingPackUndo):
 
@@ -866,6 +886,13 @@ class OracleHistoryPreservingPackUndo(HistoryPreservingPackUndo):
         SELECT DISTINCT tid
         FROM object_state
         WHERE tid = %(tid)s
+        """
+
+    _script_delete_empty_transactions_batch = """
+        DELETE FROM transaction
+        WHERE packed = %(TRUE)s
+          AND empty = %(TRUE)s
+          AND rownum <= 1000
         """
 
 

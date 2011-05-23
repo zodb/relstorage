@@ -4,6 +4,10 @@ Next Release
 - Fixed another minor compatibility issue with PostgreSQL 9.0.  Packing
   raised an error when the client used old an version of libpq.
 
+- Delete empty transactions in batches of 1000 rows instead of all in one
+  go, to prevent holding the transaction lock for longer than absolutely
+  necessary.
+
 1.5.0b2 (2011-03-02)
 --------------------
 
