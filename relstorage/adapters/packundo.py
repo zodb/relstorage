@@ -75,8 +75,16 @@ class PackUndo(object):
 
         # Download the list of object references into all_refs.
         all_refs = {}  # {from_oid: set([to_oid])}
+        # Note the Oracle optimizer hints in the following statement; MySQL
+        # and PostgreSQL ignore these. Oracle fails to notice that pack_object
+        # is now filled and chooses the wrong execution plan, completely
+        # killing this query on large RelStorage databases, unless these hints
+        # are included.
         stmt = """
-        SELECT object_ref.zoid, object_ref.to_zoid
+        SELECT 
+            /*+ FULL(object_ref) */ 
+            /*+ FULL(pack_object) */ 
+            object_ref.zoid, object_ref.to_zoid
         FROM object_ref
             JOIN pack_object ON (object_ref.zoid = pack_object.zoid)
         WHERE object_ref.tid >= pack_object.keep_tid
