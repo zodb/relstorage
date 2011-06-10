@@ -11,6 +11,13 @@ Next Release
 - Fix object reference downloading performance for large Oracle RelStorage
   database during the garbage collection phase of a pack.
 
+- Switch to storing the whole ZODB blob in one chunk on Oracle to maximize
+  blob reading and writing performance. Databases already using 1.5b2 or
+  before and storing blobs in an Oracle database are still supported.
+  
+  Note that due to limitations in the current release of cx_Oracle the maximum
+  BLOB size is limited to 2GB on 32-bit systems, and 4GB on 64-bit systems.
+
 1.5.0b2 (2011-03-02)
 --------------------
 

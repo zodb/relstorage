@@ -126,6 +126,8 @@ and granting the required permissions::
     GRANT CONNECT, RESOURCE, CREATE TABLE, CREATE SEQUENCE TO zodb;
     GRANT EXECUTE ON DBMS_LOCK TO zodb;
 
+Note that due to limitations in cx_Oracle, the maximum ZODB blob size is
+either sys.maxint on 32-bit systems (2GB - 1 byte) or 4GB on 64-bit systems.
 
 Configuring Plone
 -----------------

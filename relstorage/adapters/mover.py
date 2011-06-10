@@ -22,6 +22,7 @@ from relstorage.adapters.batch import OracleRowBatcher
 from relstorage.adapters.batch import PostgreSQLRowBatcher
 from zope.interface import implements
 import os
+import sys
 
 try:
     from hashlib import md5
@@ -1006,32 +1007,18 @@ class ObjectMover(object):
             use_base64 = True
             stmt = stmt.replace(
                 "SELECT chunk", "SELECT encode(chunk, 'base64')")
-        elif self.database_name == 'oracle':
-            for n in (1, 2, 3):
-                stmt = stmt.replace('%s', ':%d' % n, 1)
 
         f = None
         bytes = 0
         try:
             chunk_num = 0
             while True:
-                if self.database_name == 'oracle':
-                    row = self.runner.run_lob_stmt(
-                        cursor, stmt, (oid, tid, chunk_num))
-                    if row is not None:
-                        chunk = row[0] or ''
-                    else:
-                        chunk = None
+                cursor.execute(stmt, (oid, tid, chunk_num))
+                rows = list(cursor)
+                if rows:
+                    assert len(rows) == 1
+                    chunk = rows[0][0]
                 else:
-                    cursor.execute(stmt, (oid, tid, chunk_num))
-                    rows = list(cursor)
-                    if rows:
-                        assert len(rows) == 1
-                        chunk = rows[0][0]
-                    else:
-                        chunk = None
-
-                if chunk is None:
                     # No more chunks.  Note: if there are no chunks at
                     # all, then this method should not write a file.
                     break
@@ -1055,8 +1042,68 @@ class ObjectMover(object):
 
     mysql_download_blob = generic_download_blob
     postgresql_download_blob = generic_download_blob
-    oracle_download_blob = generic_download_blob
 
+    def oracle_download_blob(self, cursor, oid, tid, filename):
+        """Download a blob into a file."""
+        stmt = """
+        SELECT chunk
+        FROM blob_chunk
+        WHERE zoid = :1
+            AND tid = :2
+            AND chunk_num = :3
+        """
+
+        f = None
+        bytes = 0
+        chunk_num = 0
+        # XXX Current versions of cx_Oracle only support offsets up
+        # to sys.maxint or 4GB, whichever comes first.
+        maxsize = min(sys.maxint, 1<<32)
+        try:
+            # We still support the 1.5b2 case where we used chunks in
+            # the blob_chunk database; later versions no longer chunk blobs
+            # and there should be only one row with all the data in one blob.
+            while True:
+                cursor.execute(stmt, (oid, tid, chunk_num))
+                try:
+                    blob, = cursor.fetchone()
+                except TypeError:
+                    # No more chunks.  Note: if there are no chunks at
+                    # all, then this method should not write a file.
+                    break 
+
+                if f is None:
+                    f = open(filename, 'wb')
+                # round off the chunk-size to be a multiple of the oracle
+                # blob chunk size to maximize performance
+                chunk_size = int(max(round(
+                    1.0 * self.blob_chunk_size / blob.getchunksize()), 1) * 
+                    blob.getchunksize())
+                offset = 1 # Oracle still uses 1-based indexing.
+                while True:
+                    chunk = blob.read(offset, chunk_size)
+                    if chunk:
+                        f.write(chunk)
+                        bytes += len(chunk)
+                        offset += len(chunk)
+                        if offset > maxsize:
+                            # We have already read the maximum we can store
+                            # so we can assume we are done. If we do not break
+                            # off here, cx_Oracle will throw an overflow
+                            # exception anyway.
+                            break
+                    else:
+                        break
+                chunk_num += 1
+        except:
+            if f is not None:
+                f.close()
+                os.remove(filename)
+            raise
+
+        if f is not None:
+            f.close()
+        return bytes
 
 
 
@@ -1141,7 +1188,10 @@ class ObjectMover(object):
             use_tid = True
             insert_stmt = """
             INSERT INTO blob_chunk (zoid, tid, chunk_num, chunk)
-            VALUES (:oid, :tid, :chunk_num, :blobdata)
+            VALUES (:oid, :tid, 0, empty_blob())
+            """
+            select_stmt = """
+            SELECT chunk FROM blob_chunk WHERE zoid=:oid AND tid=:tid
             """
 
         else:
@@ -1151,27 +1201,37 @@ class ObjectMover(object):
 
             insert_stmt = """
             INSERT INTO temp_blob_chunk (zoid, chunk_num, chunk)
-            VALUES (:oid, :chunk_num, :blobdata)
+            VALUES (:oid, 0, empty_blob())
+            """
+            select_stmt = """
+            SELECT chunk FROM temp_blob_chunk WHERE zoid=:oid
             """
 
         f = open(filename, 'rb')
+        blob = None
+        offset = 1 # Oracle still uses 1-based indexing.
+        # XXX Current versions of cx_Oracle only support offsets up
+        # to sys.maxint or 4GB, whichever comes first.
+        maxsize = min(sys.maxint, 1<<32)
         try:
-            chunk_num = 0
+            params = dict(oid=oid)
+            if use_tid:
+                params['tid'] = tid
+            cursor.execute(insert_stmt, params)
+            cursor.execute(select_stmt, params)
+            blob, = cursor.fetchone()
+            blob.open()
+            chunk_size = int(max(round(
+                1.0 * self.blob_chunk_size / blob.getchunksize()), 1) * 
+                blob.getchunksize())
             while True:
-                chunk = f.read(self.blob_chunk_size)
-                if not chunk and chunk_num > 0:
-                    # EOF.  Note that we always write at least one
-                    # chunk, even if the blob file is empty.
+                chunk = f.read(chunk_size)
+                if not blob.write(chunk, offset):
+                    # EOF.
                     break
-                params = {
-                    'oid': oid,
-                    'chunk_num': chunk_num,
-                    'blobdata': chunk,
-                }
-                if use_tid:
-                    params['tid'] = tid
-                cursor.setinputsizes(blobdata=self.inputsizes['blobdata'])
-                cursor.execute(insert_stmt, params)
-                chunk_num += 1
+                offset += len(chunk)
+                assert offset <= maxsize, "File too large"
         finally:
             f.close()
+            if blob is not None and blob.isopen():
+                blob.close()
