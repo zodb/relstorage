@@ -992,7 +992,10 @@ class ObjectMover(object):
 
 
 
-    def generic_download_blob(self, cursor, oid, tid, filename):
+    def postgresql_download_blob(self, cursor, oid, tid, filename):
+        """Download a blob into a file."""
+
+    def mysql_download_blob(self, cursor, oid, tid, filename):
         """Download a blob into a file."""
         stmt = """
         SELECT chunk
@@ -1001,12 +1004,6 @@ class ObjectMover(object):
             AND tid = %s
             AND chunk_num = %s
         """
-
-        use_base64 = False
-        if self.database_name == 'postgresql':
-            use_base64 = True
-            stmt = stmt.replace(
-                "SELECT chunk", "SELECT encode(chunk, 'base64')")
 
         f = None
         bytes = 0
@@ -1023,8 +1020,6 @@ class ObjectMover(object):
                     # all, then this method should not write a file.
                     break
 
-                if use_base64:
-                    chunk = decodestring(chunk)
                 if f is None:
                     f = open(filename, 'wb')
                 f.write(chunk)
@@ -1039,9 +1034,6 @@ class ObjectMover(object):
         if f is not None:
             f.close()
         return bytes
-
-    mysql_download_blob = generic_download_blob
-    postgresql_download_blob = generic_download_blob
 
     def oracle_download_blob(self, cursor, oid, tid, filename):
         """Download a blob into a file."""
@@ -1104,7 +1096,13 @@ class ObjectMover(object):
 
 
 
-    def generic_upload_blob(self, cursor, oid, tid, filename):
+    def postgresql_upload_blob(self, cursor, oid, tid, filename):
+        """Upload a blob from a file.
+
+        If serial is None, upload to the temporary table.
+        """
+
+    def mysql_upload_blob(self, cursor, oid, tid, filename):
         """Upload a blob from a file.
 
         If serial is None, upload to the temporary table.
@@ -1123,7 +1121,7 @@ class ObjectMover(object):
             use_tid = True
             insert_stmt = """
             INSERT INTO blob_chunk (zoid, tid, chunk_num, chunk)
-            VALUES (%s, %s, %s, CHUNK)
+            VALUES (%s, %s, %s, %s)
             """
         else:
             use_tid = False
@@ -1132,16 +1130,8 @@ class ObjectMover(object):
 
             insert_stmt = """
             INSERT INTO temp_blob_chunk (zoid, chunk_num, chunk)
-            VALUES (%s, %s, CHUNK)
+            VALUES (%s, %s, %s)
             """
-
-        use_base64 = False
-        if self.database_name == 'postgresql':
-            use_base64 = True
-            insert_stmt = insert_stmt.replace(
-                "CHUNK", "decode(%s, 'base64')", 1)
-        else:
-            insert_stmt = insert_stmt.replace("CHUNK", "%s")
 
         f = open(filename, 'rb')
         try:
@@ -1152,8 +1142,6 @@ class ObjectMover(object):
                     # EOF.  Note that we always write at least one
                     # chunk, even if the blob file is empty.
                     break
-                if use_base64:
-                    chunk = encodestring(chunk)
                 if use_tid:
                     params = (oid, tid, chunk_num, chunk)
                 else:
@@ -1162,9 +1150,6 @@ class ObjectMover(object):
                 chunk_num += 1
         finally:
             f.close()
-
-    mysql_upload_blob = generic_upload_blob
-    postgresql_upload_blob = generic_upload_blob
 
     def oracle_upload_blob(self, cursor, oid, tid, filename):
         """Upload a blob from a file.
