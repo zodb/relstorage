@@ -392,7 +392,7 @@ class ObjectMover(object):
         CREATE TEMPORARY TABLE temp_blob_chunk (
             zoid        BIGINT NOT NULL,
             chunk_num   BIGINT NOT NULL,
-            chunk       BYTEA
+            chunk       OID
         ) ON COMMIT DROP;
         CREATE UNIQUE INDEX temp_blob_chunk_key
             ON temp_blob_chunk (zoid, chunk_num);
