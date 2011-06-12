@@ -1060,9 +1060,6 @@ class ObjectMover(object):
         # to sys.maxint or 4GB, whichever comes first.
         maxsize = min(sys.maxint, 1<<32)
         try:
-            # We still support the 1.5b2 case where we used chunks in
-            # the blob_chunk database; later versions no longer chunk blobs
-            # and there should be only one row with all the data in one blob.
             while True:
                 cursor.execute(stmt, (oid, tid, chunk_num))
                 try:
@@ -1076,16 +1073,16 @@ class ObjectMover(object):
                     f = open(filename, 'wb')
                 # round off the chunk-size to be a multiple of the oracle
                 # blob chunk size to maximize performance
-                chunk_size = int(max(round(
+                read_chunk_size = int(max(round(
                     1.0 * self.blob_chunk_size / blob.getchunksize()), 1) * 
                     blob.getchunksize())
                 offset = 1 # Oracle still uses 1-based indexing.
                 while True:
-                    chunk = blob.read(offset, chunk_size)
-                    if chunk:
-                        f.write(chunk)
-                        bytes += len(chunk)
-                        offset += len(chunk)
+                    read_chunk = blob.read(offset, read_chunk_size)
+                    if read_chunk:
+                        f.write(read_chunk)
+                        bytes += len(read_chunk)
+                        offset += len(read_chunk)
                         if offset > maxsize:
                             # We have already read the maximum we can store
                             # so we can assume we are done. If we do not break
@@ -1188,10 +1185,11 @@ class ObjectMover(object):
             use_tid = True
             insert_stmt = """
             INSERT INTO blob_chunk (zoid, tid, chunk_num, chunk)
-            VALUES (:oid, :tid, 0, empty_blob())
+            VALUES (:oid, :tid, :chunk_num, empty_blob())
             """
             select_stmt = """
-            SELECT chunk FROM blob_chunk WHERE zoid=:oid AND tid=:tid
+            SELECT chunk FROM blob_chunk
+            WHERE zoid=:oid AND tid=:tid AND chunk_num=:chunk_num
             """
 
         else:
@@ -1200,37 +1198,43 @@ class ObjectMover(object):
             cursor.execute(delete_stmt, (oid,))
 
             insert_stmt = """
-            INSERT INTO temp_blob_chunk (zoid, chunk_num, chunk)
-            VALUES (:oid, 0, empty_blob())
+            INSERT INTO temp_blob_chunk (zoid,:chunk_num, chunk)
+            VALUES (:oid, :chunk_num, empty_blob())
             """
             select_stmt = """
-            SELECT chunk FROM temp_blob_chunk WHERE zoid=:oid
+            SELECT chunk FROM temp_blob_chunk 
+            WHERE zoid=:oid AND chunk_num=:chunk_num
             """
 
         f = open(filename, 'rb')
-        blob = None
-        offset = 1 # Oracle still uses 1-based indexing.
         # XXX Current versions of cx_Oracle only support offsets up
-        # to sys.maxint or 4GB, whichever comes first.
+        # to sys.maxint or 4GB, whichever comes first. We divide up our
+        # upload into chunks within this limit.
         maxsize = min(sys.maxint, 1<<32)
         try:
-            params = dict(oid=oid)
-            if use_tid:
-                params['tid'] = tid
-            cursor.execute(insert_stmt, params)
-            cursor.execute(select_stmt, params)
-            blob, = cursor.fetchone()
-            blob.open()
-            chunk_size = int(max(round(
-                1.0 * self.blob_chunk_size / blob.getchunksize()), 1) * 
-                blob.getchunksize())
+            chunk_num = 0
             while True:
-                chunk = f.read(chunk_size)
-                if not blob.write(chunk, offset):
-                    # EOF.
-                    break
-                offset += len(chunk)
-                assert offset <= maxsize, "File too large"
+                blob = None
+                params = dict(oid=oid, chunk_num=chunk_num)
+                if use_tid:
+                    params['tid'] = tid
+                cursor.execute(insert_stmt, params)
+                cursor.execute(select_stmt, params)
+                blob, = cursor.fetchone()
+                blob.open()
+                write_chunk_size = int(max(round(
+                    1.0 * self.blob_chunk_size / blob.getchunksize()), 1) * 
+                    blob.getchunksize())
+                offset = 1 # Oracle still uses 1-based indexing.
+                for i in xrange(maxsize / write_chunk_size):
+                    write_chunk = f.read(write_chunk_size)
+                    if not blob.write(write_chunk, offset):
+                        # EOF.
+                        return
+                    offset += len(write_chunk)
+                if blob is not None and blob.isopen():
+                    blob.close()
+                chunk_num += 1
         finally:
             f.close()
             if blob is not None and blob.isopen():
