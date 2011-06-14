@@ -396,12 +396,15 @@ history_preserving_init = """
 
 postgresql_history_preserving_plpgsql = """
 CREATE OR REPLACE FUNCTION blob_chunk_delete_trigger() RETURNS TRIGGER 
-AS $blob_chunk_delete_trigger$
+AS $blob_chunk_ delete_trigger$
     -- Version: %s
     -- Unlink large object data file after blob_chunck row deletion
     BEGIN
         PERFORM lo_unlink(OLD.chunk);
         RETURN NULL;
+    EXCEPTION
+        WHEN undefined_object THEN
+            RETURN NULL;
     END;
 $blob_chunk_delete_trigger$ LANGUAGE plpgsql;
 /
