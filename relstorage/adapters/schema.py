@@ -974,6 +974,7 @@ class PostgreSQLSchemaInstaller(AbstractSchemaInstaller):
             if match is not None:
                 version = match.group(1)
             res[name.lower()] = version
+        return res
 
 
 class MySQLSchemaInstaller(AbstractSchemaInstaller):
