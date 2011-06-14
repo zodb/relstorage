@@ -1050,18 +1050,17 @@ class ObjectMover(object):
         FROM blob_chunk
         WHERE zoid = :1
             AND tid = :2
-            AND chunk_num = :3
+        ORDER BY chunk_num
         """
 
         f = None
         bytes = 0
-        chunk_num = 0
         # XXX Current versions of cx_Oracle only support offsets up
         # to sys.maxint or 4GB, whichever comes first.
         maxsize = min(sys.maxint, 1<<32)
         try:
+            cursor.execute(stmt, (oid, tid))
             while True:
-                cursor.execute(stmt, (oid, tid, chunk_num))
                 try:
                     blob, = cursor.fetchone()
                 except TypeError:
@@ -1091,7 +1090,6 @@ class ObjectMover(object):
                             break
                     else:
                         break
-                chunk_num += 1
         except:
             if f is not None:
                 f.close()
