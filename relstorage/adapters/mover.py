@@ -1196,7 +1196,7 @@ class ObjectMover(object):
             cursor.execute(delete_stmt, (oid,))
 
             insert_stmt = """
-            INSERT INTO temp_blob_chunk (zoid,:chunk_num, chunk)
+            INSERT INTO temp_blob_chunk (zoid, chunk_num, chunk)
             VALUES (:oid, :chunk_num, empty_blob())
             """
             select_stmt = """
