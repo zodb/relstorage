@@ -401,10 +401,15 @@ AS $blob_chunk_delete_trigger$
     -- Version: %s
     -- Unlink large object data file after blob_chunck row deletion
     DECLARE
+        expect integer;
         cnt integer;
     BEGIN
+        expect = 1; -- The number of rows where we'll unlink the oid
+        IF (TG_TABLE_NAME != 'blob_chunk') THEN
+            expect = 0; -- Deleting from elsewhere means we expect 0
+        END IF;
         SELECT count(*) into cnt FROM blob_chunk WHERE chunk=OLD.chunk;
-        IF (cnt = 1) THEN
+        IF (cnt = expect) THEN
             -- Last reference to this oid, unlink
             PERFORM lo_unlink(OLD.chunk);
         END IF;
