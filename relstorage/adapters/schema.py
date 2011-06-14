@@ -107,6 +107,7 @@ history_preserving_schema = """
             chunk       OID NOT NULL
         );
         CREATE INDEX blob_chunk_lookup ON blob_chunk (zoid, tid);
+        CREATE INDEX blob_chunk_loid ON blob_chunk (chunk);
         ALTER TABLE blob_chunk ADD CONSTRAINT blob_chunk_fk
             FOREIGN KEY (zoid, tid)
             REFERENCES object_state (zoid, tid)
@@ -396,15 +397,18 @@ history_preserving_init = """
 
 postgresql_history_preserving_plpgsql = """
 CREATE OR REPLACE FUNCTION blob_chunk_delete_trigger() RETURNS TRIGGER 
-AS $blob_chunk_ delete_trigger$
+AS $blob_chunk_delete_trigger$
     -- Version: %s
     -- Unlink large object data file after blob_chunck row deletion
+    DECLARE
+        cnt integer;
     BEGIN
-        PERFORM lo_unlink(OLD.chunk);
-        RETURN NULL;
-    EXCEPTION
-        WHEN undefined_object THEN
-            RETURN NULL;
+        SELECT count(*) into cnt FROM blob_chunk WHERE chunk=OLD.chunk;
+        IF (cnt = 1) THEN
+            -- Last reference to this oid, unlink
+            PERFORM lo_unlink(OLD.chunk);
+        END IF;
+        RETURN OLD;
     END;
 $blob_chunk_delete_trigger$ LANGUAGE plpgsql;
 /
@@ -412,7 +416,7 @@ $blob_chunk_delete_trigger$ LANGUAGE plpgsql;
 DROP TRIGGER IF EXISTS blob_chunk_delete ON blob_chunk;
 /
 CREATE TRIGGER blob_chunk_delete 
-    AFTER DELETE ON blob_chunk
+    BEFORE DELETE ON blob_chunk
     FOR EACH ROW
     EXECUTE PROCEDURE blob_chunk_delete_trigger();
 /
@@ -978,6 +982,14 @@ class PostgreSQLSchemaInstaller(AbstractSchemaInstaller):
                 version = match.group(1)
             res[name.lower()] = version
         return res
+
+    def drop_all(self):
+        def callback(conn, cursor):
+            # make sure we clean up our blob oids first
+            if 'blob_chunk' in self.list_tables(cursor):
+                cursor.execute("DELETE FROM blob_chunk")
+        self.connmanager.open_and_call(callback)
+        super(PostgreSQLSchemaInstaller, self).drop_all()
 
 
 class MySQLSchemaInstaller(AbstractSchemaInstaller):
