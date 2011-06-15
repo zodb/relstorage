@@ -203,6 +203,8 @@ def test_suite():
                     test_undo=keep_history,
                     pack_test_name=pack_test_name,
                     test_blob_cache=(not shared_blob_dir),
+                    # PostgreSQL blob chunks are max 2GB in size
+                    large_blob_size=(not shared_blob_dir) and (1<<31) + 100,
                 ))
 
     return suite

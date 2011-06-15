@@ -22,6 +22,7 @@ from relstorage.tests.hptestbase import HistoryPreservingRelStorageTests
 from relstorage.tests.hptestbase import HistoryPreservingToFileStorage
 import logging
 import os
+import sys
 import unittest
 
 
@@ -211,6 +212,10 @@ def test_suite():
                 else:
                     pack_test_name = 'blob_packing_history_free.txt'
 
+                # cx_Oracle blob support can only address up to sys.maxint on
+                # 32-bit systems, 4GB otherwise.
+                blob_size = min(sys.maxint, 1<<32)
+
                 suite.addTest(storage_reusable_suite(
                     prefix, create_storage,
                     test_blob_storage_recovery=True,
@@ -218,6 +223,7 @@ def test_suite():
                     test_undo=keep_history,
                     pack_test_name=pack_test_name,
                     test_blob_cache=(not shared_blob_dir),
+                    large_blob_size=(not shared_blob_dir) and blob_size + 100,
                 ))
 
     return suite
