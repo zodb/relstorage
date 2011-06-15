@@ -31,8 +31,9 @@ migrate your blob_chunk table schema:
         SELECT oid FROM (
             SELECT oid, lowrite(lo_open(oid, 131072), bc.oldbytea)
             FROM lo_create(0) o(oid)) x);
-    ALTER TABLE blob_chunk ALTER COLUMN chunk SET NOT NULL;
-    ALTER TABLE blob_chunk DROP COLUMN oldbytea;
+    ALTER TABLE blob_chunk 
+        ALTER COLUMN chunk SET NOT NULL
+        DROP COLUMN oldbytea;
     COMMIT;
 
 MySQL history-preserving
