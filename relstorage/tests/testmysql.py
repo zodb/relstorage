@@ -202,6 +202,10 @@ def test_suite():
                 else:
                     pack_test_name = 'blob_packing_history_free.txt'
 
+                # MySQL is limited to the blob_chunk_size as there is no
+                # native blob streaming support.
+                blob_size = Options().blob_chunk_size
+
                 suite.addTest(storage_reusable_suite(
                     prefix, create_storage,
                     test_blob_storage_recovery=True,
@@ -209,6 +213,7 @@ def test_suite():
                     test_undo=keep_history,
                     pack_test_name=pack_test_name,
                     test_blob_cache=(not shared_blob_dir),
+                    large_blob_size=(not shared_blob_dir) and blob_size + 100
                 ))
 
     return suite

@@ -11,8 +11,12 @@ Next Release
 - Fix object reference downloading performance for large Oracle RelStorage
   database during the garbage collection phase of a pack.
 
-- On Oracle, switch to storing ZODB blob in chunks up to 4GB, (the maximum
-  supported by cx_Oracle) to maximize blob reading and writing performance.
+- On Oracle and PostgreSQL, switch to storing ZODB blob in chunks up to 4GB
+  (the maximum supported by cx_Oracle) or 2GB (PostgreSQL maximum blob size)
+  to maximize blob reading and writing performance.
+  
+  The PostgreSQL blob_chunk schema changed to support this, see 
+  notes/migrate-to-1.5.txt to update existing databases.
 
 1.5.0b2 (2011-03-02)
 --------------------

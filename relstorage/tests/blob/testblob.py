@@ -17,6 +17,8 @@ from ZODB.DB import DB
 from zope.testing import doctest
 
 import atexit
+import collections
+import datetime
 import os
 import random
 import re
@@ -34,6 +36,12 @@ import ZODB.tests.StorageTestBase
 import ZODB.tests.util
 import zope.testing.renormalizing
 
+try:
+    from hashlib import md5
+except ImportError:
+    from md5 import new as md5
+
+
 def new_time():
     """Create a _new_ time stamp.
 
@@ -47,6 +55,51 @@ def new_time():
         new_time = time.time()
     time.sleep(1)
     return new_time
+
+
+def random_file(size, fd):
+    """Create a random data of at least the given size, writing to fd.
+
+    See http://jessenoller.com/2008/05/30/making-re-creatable-random-data-files-really-fast-in-python/
+    for the technique used.
+
+    Returns the md5 sum of the file contents for easy comparison.
+
+    """
+    def fdata():
+        seed = "1092384956781341341234656953214543219"
+        # Just use the this module as the source of our data
+        words = open(__file__, "r").read().replace("\n", '').split()
+        a = collections.deque(words)
+        b = collections.deque(seed)
+        while True:
+            yield ' '.join(list(a)[0:1024])
+            a.rotate(int(b[0]))
+            b.rotate(1)
+    datagen = fdata()
+    bytes = 0
+    md5sum = md5()
+    while bytes < size:
+        data = datagen.next()
+        md5sum.update(data)
+        fd.write(data)
+        bytes += len(data)
+    return md5sum.hexdigest()
+
+
+def md5sum(fd):
+    md5sum = md5()
+    blocksize = md5sum.block_size << 8
+    for data in iter(lambda: fd.read(blocksize), ''):
+        md5sum.update(data)
+    return md5sum.hexdigest()
+
+
+def sizeof_fmt(num):
+    for x in ['bytes', 'KB', 'MB', 'GB', 'TB']:
+        if num < 1024.0:
+            return "%3.1f%s" % (num, x)
+        num /= 1024.0
 
 
 class BlobTestBase(ZODB.tests.StorageTestBase.StorageTestBase):
@@ -209,6 +262,47 @@ class RecoveryBlobStorage(BlobTestBase,
         self._dst.copyTransactionsFrom(self._storage)
         self.compare(self._storage, self._dst)
     
+
+class LargeBlobTest(BlobTestBase):
+    """Test large blob upload and download.
+
+    Note that this test excercises the blob storage and only makes sense
+    when shared_blob_support=False.
+
+    """
+    level = 2 # Only run when selecting -a 2 or higher, or --all
+    testsize = 0 # Set on the auto-generated parent class
+
+    def _log(self, msg):
+        print '%s [%s]: %s' % (
+            datetime.datetime.now().isoformat(' '),
+            self.__class__.__name__, msg)
+
+    def testLargeBlob(self):
+        # Large blobs are chunked into multiple pieces, we want to know
+        # if they come out the same way they went in.
+        db = DB(self._storage)
+        conn = db.open()
+        blob = conn.root()[1] = ZODB.blob.Blob()
+        size = sizeof_fmt(self.testsize)
+        self._log('Creating %s blob file' % size)
+        signature = random_file(self.testsize, blob.open('w'))
+        self._log('Committing %s blob file' % size)
+        transaction.commit()
+
+        # Clear the cache
+        for base, dir, files in os.walk('.'):
+            for f in files:
+                if f.endswith('.blob'):
+                    ZODB.blob.remove_committed(os.path.join(base, f))
+
+        # Re-download blob
+        self._log('Caching %s blob file' % size)
+        conn = db.open()
+        blob = conn.root()[1].open('r')
+        self._log('Creating signature for %s blob cache' % size)
+        self.assertEqual(md5sum(blob), signature)
+
 
 def packing_with_uncommitted_data_non_undoing():
     """
@@ -495,6 +589,7 @@ def storage_reusable_suite(prefix, factory,
                            keep_history=True,
                            pack_test_name='blob_packing.txt',
                            test_blob_cache=False,
+                           large_blob_size=None
                            ):
     """Return a test suite for a generic IBlobStorage.
 
@@ -539,10 +634,11 @@ def storage_reusable_suite(prefix, factory,
             blob_dir = '%s.bobs' % name
         return factory(name, blob_dir, **kw)
 
-    def add_test_based_on_test_class(class_):
+    def add_test_based_on_test_class(class_, **attr):
+        attr.update(create_storage=create_storage)
         new_class = class_.__class__(
             prefix+class_.__name__, (class_, ),
-            dict(create_storage=create_storage),
+            attr,
             )
         suite.addTest(unittest.makeSuite(new_class))
 
@@ -550,6 +646,8 @@ def storage_reusable_suite(prefix, factory,
         add_test_based_on_test_class(RecoveryBlobStorage)
     if test_undo:
         add_test_based_on_test_class(BlobUndoTests)
+    if large_blob_size:
+        add_test_based_on_test_class(LargeBlobTest, testsize=large_blob_size)
 
     suite.layer = MinimalTestLayer(prefix+'BlobTests')
 

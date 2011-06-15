@@ -104,9 +104,10 @@ history_preserving_schema = """
             tid         BIGINT NOT NULL,
             chunk_num   BIGINT NOT NULL,
                         PRIMARY KEY (zoid, tid, chunk_num),
-            chunk       BYTEA NOT NULL
+            chunk       OID NOT NULL
         );
         CREATE INDEX blob_chunk_lookup ON blob_chunk (zoid, tid);
+        CREATE INDEX blob_chunk_loid ON blob_chunk (chunk);
         ALTER TABLE blob_chunk ADD CONSTRAINT blob_chunk_fk
             FOREIGN KEY (zoid, tid)
             REFERENCES object_state (zoid, tid)
@@ -394,6 +395,38 @@ history_preserving_init = """
         CREATE SEQUENCE zoid_seq;
 """
 
+postgresql_history_preserving_plpgsql = """
+CREATE OR REPLACE FUNCTION blob_chunk_delete_trigger() RETURNS TRIGGER 
+AS $blob_chunk_delete_trigger$
+    -- Version: %s
+    -- Unlink large object data file after blob_chunck row deletion
+    DECLARE
+        expect integer;
+        cnt integer;
+    BEGIN
+        expect = 1; -- The number of rows where we'll unlink the oid
+        IF (TG_TABLE_NAME != 'blob_chunk') THEN
+            expect = 0; -- Deleting from elsewhere means we expect 0
+        END IF;
+        SELECT count(*) into cnt FROM blob_chunk WHERE chunk=OLD.chunk;
+        IF (cnt = expect) THEN
+            -- Last reference to this oid, unlink
+            PERFORM lo_unlink(OLD.chunk);
+        END IF;
+        RETURN OLD;
+    END;
+$blob_chunk_delete_trigger$ LANGUAGE plpgsql;
+/
+
+DROP TRIGGER IF EXISTS blob_chunk_delete ON blob_chunk;
+/
+CREATE TRIGGER blob_chunk_delete 
+    BEFORE DELETE ON blob_chunk
+    FOR EACH ROW
+    EXECUTE PROCEDURE blob_chunk_delete_trigger();
+/
+""" % relstorage_op_version
+
 oracle_history_preserving_plsql = """
 CREATE OR REPLACE PACKAGE relstorage_op AS
     TYPE numlist IS TABLE OF NUMBER(20) INDEX BY BINARY_INTEGER;
@@ -494,7 +527,7 @@ history_free_schema = """
             chunk_num   BIGINT NOT NULL,
                         PRIMARY KEY (zoid, chunk_num),
             tid         BIGINT NOT NULL,
-            chunk       BYTEA NOT NULL
+            chunk       OID NOT NULL
         );
         CREATE INDEX blob_chunk_lookup ON blob_chunk (zoid);
         ALTER TABLE blob_chunk ADD CONSTRAINT blob_chunk_fk
@@ -673,6 +706,8 @@ history_free_init = """
         DROP SEQUENCE zoid_seq;
         CREATE SEQUENCE zoid_seq;
 """
+
+postgresql_history_free_plpgsql = postgresql_history_preserving_plpgsql
 
 oracle_history_free_plsql = """
 CREATE OR REPLACE PACKAGE relstorage_op AS
@@ -885,6 +920,41 @@ class PostgreSQLSchemaInstaller(AbstractSchemaInstaller):
             connmanager, runner, keep_history)
         self.locker = locker
 
+    def prepare(self):
+        """Create the database schema if it does not already exist."""
+        def callback(conn, cursor):
+            tables = self.list_tables(cursor)
+            if not 'object_state' in tables:
+                self.create(cursor)
+            else:
+                self.check_compatibility(cursor, tables)
+                self.update_schema(cursor, tables)
+            triggers = self.list_triggers(cursor)
+            if triggers.get('blob_chunk_delete_trigger') != relstorage_op_version:
+                self.install_triggers(cursor)
+                triggers = self.list_triggers(cursor)
+                if triggers.get('blob_chunk_delete_trigger') != relstorage_op_version:
+                    raise AssertionError(
+                        "Could not get version information after "
+                        "installing the blob_chunk_delete_trigger trigger.")
+        self.connmanager.open_and_call(callback)
+
+    def install_triggers(self, cursor):
+        """Install the PL/pgSQL triggers"""
+        if self.keep_history:
+            plpgsql = postgresql_history_preserving_plpgsql
+        else:
+            plpgsql = postgresql_history_free_plpgsql
+
+        lines = []
+        for line in plpgsql.splitlines():
+            if line.strip() == '/':
+                # end of a statement
+                cursor.execute('\n'.join(lines))
+                lines = []
+            elif line.strip():
+                lines.append(line)
+
     def create(self, cursor):
         """Create the database tables."""
         super(PostgreSQLSchemaInstaller, self).create(cursor)
@@ -898,6 +968,33 @@ class PostgreSQLSchemaInstaller(AbstractSchemaInstaller):
     def list_sequences(self, cursor):
         cursor.execute("SELECT relname FROM pg_class WHERE relkind = 'S'")
         return [name for (name,) in cursor]
+
+    def list_triggers(self, cursor):
+        """Returns {trigger name: version}.  version may be None."""
+        stmt = """
+        SELECT proname, prosrc
+        FROM pg_catalog.pg_namespace n
+        JOIN pg_catalog.pg_proc p ON pronamespace = n.oid
+        JOIN pg_catalog.pg_type t ON prorettype = t.oid
+        WHERE nspname = 'public' AND typname = 'trigger'
+        """
+        cursor.execute(stmt)
+        res = {}
+        for (name, text) in cursor:
+            version = None
+            match = re.search(r'Version:\s*([0-9a-zA-Z.]+)', text)
+            if match is not None:
+                version = match.group(1)
+            res[name.lower()] = version
+        return res
+
+    def drop_all(self):
+        def callback(conn, cursor):
+            # make sure we clean up our blob oids first
+            if 'blob_chunk' in self.list_tables(cursor):
+                cursor.execute("DELETE FROM blob_chunk")
+        self.connmanager.open_and_call(callback)
+        super(PostgreSQLSchemaInstaller, self).drop_all()
 
 
 class MySQLSchemaInstaller(AbstractSchemaInstaller):

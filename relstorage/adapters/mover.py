@@ -389,13 +389,19 @@ class ObjectMover(object):
         ) ON COMMIT DROP;
         CREATE UNIQUE INDEX temp_store_zoid ON temp_store (zoid);
 
+        DROP TABLE IF EXISTS temp_blob_chunk;
         CREATE TEMPORARY TABLE temp_blob_chunk (
             zoid        BIGINT NOT NULL,
             chunk_num   BIGINT NOT NULL,
-            chunk       BYTEA
-        ) ON COMMIT DROP;
+            chunk       OID
+        ) ON COMMIT DELETE ROWS;
         CREATE UNIQUE INDEX temp_blob_chunk_key
             ON temp_blob_chunk (zoid, chunk_num);
+        -- Trigger to clean out oids that did not get copied to blob_chunk
+        CREATE TRIGGER temp_blob_chunk_delete 
+            BEFORE DELETE ON temp_blob_chunk
+            FOR EACH ROW
+            EXECUTE PROCEDURE blob_chunk_delete_trigger();
         """
         cursor.execute(stmt)
 
@@ -992,7 +998,52 @@ class ObjectMover(object):
 
 
 
-    def generic_download_blob(self, cursor, oid, tid, filename):
+    def postgresql_download_blob(self, cursor, oid, tid, filename):
+        """Download a blob into a file."""
+        stmt = """
+        SELECT chunk_num, chunk
+        FROM blob_chunk
+        WHERE zoid = %s
+            AND tid = %s
+        ORDER BY chunk_num
+        """
+
+        f = None
+        bytes = 0
+        
+        try:
+            cursor.execute(stmt, (oid, tid))
+            for chunk_num, loid in cursor.fetchall():
+                blob = cursor.connection.lobject(loid, 'rb')
+
+                if chunk_num == 0:
+                    # Use the native psycopg2 blob export functionality
+                    blob.export(filename)
+                    blob.close()
+                    bytes = os.path.getsize(filename)
+                    continue
+
+                if f is None:
+                    f = open(filename, 'ab') # Append, chunk 0 was an export
+                read_chunk_size = self.blob_chunk_size
+                while True:
+                    read_chunk = blob.read(read_chunk_size)
+                    if read_chunk:
+                        f.write(read_chunk)
+                        bytes += len(read_chunk)
+                    else:
+                        break
+        except:
+            if f is not None:
+                f.close()
+                os.remove(filename)
+            raise
+
+        if f is not None:
+            f.close()
+        return bytes
+
+    def mysql_download_blob(self, cursor, oid, tid, filename):
         """Download a blob into a file."""
         stmt = """
         SELECT chunk
@@ -1001,12 +1052,6 @@ class ObjectMover(object):
             AND tid = %s
             AND chunk_num = %s
         """
-
-        use_base64 = False
-        if self.database_name == 'postgresql':
-            use_base64 = True
-            stmt = stmt.replace(
-                "SELECT chunk", "SELECT encode(chunk, 'base64')")
 
         f = None
         bytes = 0
@@ -1023,8 +1068,6 @@ class ObjectMover(object):
                     # all, then this method should not write a file.
                     break
 
-                if use_base64:
-                    chunk = decodestring(chunk)
                 if f is None:
                     f = open(filename, 'wb')
                 f.write(chunk)
@@ -1039,9 +1082,6 @@ class ObjectMover(object):
         if f is not None:
             f.close()
         return bytes
-
-    mysql_download_blob = generic_download_blob
-    postgresql_download_blob = generic_download_blob
 
     def oracle_download_blob(self, cursor, oid, tid, filename):
         """Download a blob into a file."""
@@ -1102,7 +1142,7 @@ class ObjectMover(object):
 
 
 
-    def generic_upload_blob(self, cursor, oid, tid, filename):
+    def postgresql_upload_blob(self, cursor, oid, tid, filename):
         """Upload a blob from a file.
 
         If serial is None, upload to the temporary table.
@@ -1121,7 +1161,80 @@ class ObjectMover(object):
             use_tid = True
             insert_stmt = """
             INSERT INTO blob_chunk (zoid, tid, chunk_num, chunk)
-            VALUES (%s, %s, %s, CHUNK)
+            VALUES (%(oid)s, %(tid)s, %(chunk_num)s, %(loid)s)
+            """
+
+        else:
+            use_tid = False
+            delete_stmt = "DELETE FROM temp_blob_chunk WHERE zoid = %s"
+            cursor.execute(delete_stmt, (oid,))
+
+            insert_stmt = """
+            INSERT INTO temp_blob_chunk (zoid, chunk_num, chunk)
+            VALUES (%(oid)s, %(chunk_num)s, %(loid)s)
+            """
+
+        blob = None
+        # PostgreSQL only supports up to 2GB of data per BLOB.
+        maxsize = 1<<31
+        filesize = os.path.getsize(filename)
+
+        if filesize <= maxsize:
+            # File is small enough to fit in one chunk, just use
+            # psycopg2 native file copy support
+            blob = cursor.connection.lobject(0, 'wb', 0, filename)
+            blob.close()
+            params = dict(oid=oid, chunk_num=0, loid=blob.oid)
+            if use_tid:
+                params['tid'] = tid
+            cursor.execute(insert_stmt, params)
+            return
+
+        # We need to divide this up into multiple chunks
+        f = open(filename, 'rb')
+        try:
+            chunk_num = 0
+            while True:
+                blob = cursor.connection.lobject(0, 'wb')
+                params = dict(oid=oid, chunk_num=chunk_num, loid=blob.oid)
+                if use_tid:
+                    params['tid'] = tid
+                cursor.execute(insert_stmt, params)
+                
+                write_chunk_size = self.blob_chunk_size
+                for i in xrange(maxsize / write_chunk_size):
+                    write_chunk = f.read(write_chunk_size)
+                    if not blob.write(write_chunk):
+                        # EOF.
+                        return
+                if not blob.closed:
+                    blob.close()
+                chunk_num += 1
+        finally:
+            f.close()
+            if blob is not None and not blob.closed:
+                blob.close()
+
+    def mysql_upload_blob(self, cursor, oid, tid, filename):
+        """Upload a blob from a file.
+
+        If serial is None, upload to the temporary table.
+        """
+        if tid is not None:
+            if self.keep_history:
+                delete_stmt = """
+                DELETE FROM blob_chunk
+                WHERE zoid = %s AND tid = %s
+                """
+                cursor.execute(delete_stmt, (oid, tid))
+            else:
+                delete_stmt = "DELETE FROM blob_chunk WHERE zoid = %s"
+                cursor.execute(delete_stmt, (oid,))
+
+            use_tid = True
+            insert_stmt = """
+            INSERT INTO blob_chunk (zoid, tid, chunk_num, chunk)
+            VALUES (%s, %s, %s, %s)
             """
         else:
             use_tid = False
@@ -1130,16 +1243,8 @@ class ObjectMover(object):
 
             insert_stmt = """
             INSERT INTO temp_blob_chunk (zoid, chunk_num, chunk)
-            VALUES (%s, %s, CHUNK)
+            VALUES (%s, %s, %s)
             """
-
-        use_base64 = False
-        if self.database_name == 'postgresql':
-            use_base64 = True
-            insert_stmt = insert_stmt.replace(
-                "CHUNK", "decode(%s, 'base64')", 1)
-        else:
-            insert_stmt = insert_stmt.replace("CHUNK", "%s")
 
         f = open(filename, 'rb')
         try:
@@ -1150,8 +1255,6 @@ class ObjectMover(object):
                     # EOF.  Note that we always write at least one
                     # chunk, even if the blob file is empty.
                     break
-                if use_base64:
-                    chunk = encodestring(chunk)
                 if use_tid:
                     params = (oid, tid, chunk_num, chunk)
                 else:
@@ -1160,9 +1263,6 @@ class ObjectMover(object):
                 chunk_num += 1
         finally:
             f.close()
-
-    mysql_upload_blob = generic_upload_blob
-    postgresql_upload_blob = generic_upload_blob
 
     def oracle_upload_blob(self, cursor, oid, tid, filename):
         """Upload a blob from a file.
