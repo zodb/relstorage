@@ -36,6 +36,19 @@ migrate your blob_chunk table schema:
         DROP COLUMN oldbytea;
     COMMIT;
 
+Note that DROP COLUMN does not reclaim the space occupied by the oldbytea
+column. If there is a large amount of data in the blob_chunk table, you may
+want to re-initialize the whole table by moving the data to a temporary table
+and then copying it back:
+
+    BEGIN;
+    CREATE TEMP TABLE blob_chunk_copy (LIKE blob_chunk) ON COMMIT DROP;
+    INSERT INTO blob_chunk_copy SELECT * FROM blob_chunk;
+    TRUNCATE blob_chunk;
+    INSERT INTO blob_chunk SELECT * FROM blob_chunk_copy;
+    COMMIT;
+    
+
 MySQL history-preserving
 ------------------------
 
