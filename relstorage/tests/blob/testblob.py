@@ -17,6 +17,7 @@ from ZODB.DB import DB
 from zope.testing import doctest
 
 import atexit
+import collections
 import os
 import random
 import re
@@ -34,6 +35,12 @@ import ZODB.tests.StorageTestBase
 import ZODB.tests.util
 import zope.testing.renormalizing
 
+try:
+    from hashlib import md5
+except ImportError:
+    from md5 import new as md5
+
+
 def new_time():
     """Create a _new_ time stamp.
 
@@ -47,6 +54,38 @@ def new_time():
         new_time = time.time()
     time.sleep(1)
     return new_time
+
+
+def random_file(size, filename):
+    """Create a random data file of at least the given size.
+
+    See http://jessenoller.com/2008/05/30/making-re-creatable-random-data-files-really-fast-in-python/
+    for the technique used.
+
+    Returns the md5 sum of the file contents for easy comparison.
+
+    """
+    def fdata():
+        seed = "1092384956781341341234656953214543219"
+        # Just use the this module as the source of our data
+        words = open(__file__, "r").read().replace("\n", '').split()
+        a = collections.deque(words)
+        b = collections.deque(seed)
+        while True:
+            yield ' '.join(list(a)[0:1024])
+            a.rotate(int(b[0]))
+            b.rotate(1)
+    datagen = fdata()
+    output = open(filename, 'wb')
+    bytes = 0
+    md5sum = md5()
+    while bytes < size:
+        data = datagen.next()
+        md5sum.update(data)
+        output.write(data)
+        bytes += len(data)
+    output.close()
+    return md5sum.hexdigest()
 
 
 class BlobTestBase(ZODB.tests.StorageTestBase.StorageTestBase):

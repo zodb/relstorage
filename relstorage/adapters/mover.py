@@ -389,11 +389,12 @@ class ObjectMover(object):
         ) ON COMMIT DROP;
         CREATE UNIQUE INDEX temp_store_zoid ON temp_store (zoid);
 
+        DROP TABLE IF EXISTS temp_blob_chunk;
         CREATE TEMPORARY TABLE temp_blob_chunk (
             zoid        BIGINT NOT NULL,
             chunk_num   BIGINT NOT NULL,
             chunk       OID
-        ) ON COMMIT DROP;
+        ) ON COMMIT DELETE ROWS;
         CREATE UNIQUE INDEX temp_blob_chunk_key
             ON temp_blob_chunk (zoid, chunk_num);
         -- Trigger to clean out oids that did not get copied to blob_chunk
