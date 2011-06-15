@@ -47,7 +47,11 @@ and then copying it back:
     TRUNCATE blob_chunk;
     INSERT INTO blob_chunk SELECT * FROM blob_chunk_copy;
     COMMIT;
-    
+
+Do this **before** running this version RelStorage against this database for
+the first time, as this will install a trigger that'll delete the blob data
+when truncating blob_chunk!
+ 
 
 MySQL history-preserving
 ------------------------
