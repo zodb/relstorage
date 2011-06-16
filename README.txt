@@ -417,9 +417,10 @@ underscores instead of dashes in the option names.
         This option is ignored if shared-blob-dir is true.
 
 ``blob-chunk-size``
-        When ZODB blobs are stored in the database, RelStorage breaks
-        them into chunks to minimize the impact on RAM.  This
-        option specifies the chunk size for new blobs.  The
+        When ZODB blobs are stored in MySQL, RelStorage breaks them into
+        chunks to minimize the impact on RAM.  This option specifies the chunk
+        size for new blobs. On PostgreSQL and Oracle, this value is used as
+        the memory buffer size for blob up- and download operations. The
         default is 1048576 (1 mebibyte).
 
         This option allows suffixes such as "mb" or "gb".
