@@ -1026,13 +1026,10 @@ class ObjectMover(object):
                 if f is None:
                     f = open(filename, 'ab') # Append, chunk 0 was an export
                 read_chunk_size = self.blob_chunk_size
-                while True:
-                    read_chunk = blob.read(read_chunk_size)
-                    if read_chunk:
-                        f.write(read_chunk)
-                        bytes += len(read_chunk)
-                    else:
-                        break
+                reader = iter(lambda: blob.read(read_chunk_size), '')
+                for read_chunk in reader:
+                    f.write(read_chunk)
+                    bytes += len(read_chunk)
         except:
             if f is not None:
                 f.close()
@@ -1116,19 +1113,16 @@ class ObjectMover(object):
                     1.0 * self.blob_chunk_size / blob.getchunksize()), 1) * 
                     blob.getchunksize())
                 offset = 1 # Oracle still uses 1-based indexing.
-                while True:
-                    read_chunk = blob.read(offset, read_chunk_size)
-                    if read_chunk:
-                        f.write(read_chunk)
-                        bytes += len(read_chunk)
-                        offset += len(read_chunk)
-                        if offset > maxsize:
-                            # We have already read the maximum we can store
-                            # so we can assume we are done. If we do not break
-                            # off here, cx_Oracle will throw an overflow
-                            # exception anyway.
-                            break
-                    else:
+                reader = iter(lambda: blob.read(offset, read_chunk_size), '')
+                for read_chunk in reader:
+                    f.write(read_chunk)
+                    bytes += len(read_chunk)
+                    offset += len(read_chunk)
+                    if offset > maxsize:
+                        # We have already read the maximum we can store
+                        # so we can assume we are done. If we do not break
+                        # off here, cx_Oracle will throw an overflow
+                        # exception anyway.
                         break
         except:
             if f is not None:
