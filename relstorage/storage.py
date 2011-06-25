@@ -1331,20 +1331,23 @@ class RelStorage(
 
             self.tpc_begin(trans, trans.tid, trans.status)
             for record in trans:
-                blobfilename = None
+                blobfile = None
                 if self.blobhelper is not None:
                     if is_blob_record(record.data):
                         try:
-                            blobfilename = other.loadBlob(
+                            blobfile = other.openCommittedBlobFile(
                                 record.oid, record.tid)
                         except POSKeyError:
                             pass
-                if blobfilename is not None:
+                if blobfile is not None:
                     fd, name = tempfile.mkstemp(
                         suffix='.tmp',
                         dir=self.blobhelper.temporaryDirectory())
                     os.close(fd)
-                    ZODB.utils.cp(open(blobfilename, 'rb'), open(name, 'wb'))
+                    target = open(name, 'wb')
+                    ZODB.utils.cp(blobfile, target)
+                    blobfile.close()
+                    target.close()
                     self.restoreBlob(record.oid, record.tid, record.data,
                                      name, record.data_txn, trans)
                 else:

@@ -1,22 +1,25 @@
 Next Release
 ------------
 
-- Fixed another minor compatibility issue with PostgreSQL 9.0.  Packing
-  raised an error when the client used old an version of libpq.
+- PostgreSQL: Fixed another minor compatibility issue with PostgreSQL 9.0.
+  Packing raised an error when the client used old an version of libpq.
 
 - Delete empty transactions in batches of 1000 rows instead of all in one
   go, to prevent holding the transaction lock for longer than absolutely
   necessary.
 
-- Fix object reference downloading performance for large Oracle RelStorage
-  database during the garbage collection phase of a pack.
+- Oracle: Fix object reference downloading performance for large RelStorage
+  databases during the garbage collection phase of a pack.
 
-- On Oracle and PostgreSQL, switch to storing ZODB blob in chunks up to 4GB
+- Oracle, PostgreSQL: Switch to storing ZODB blob in chunks up to 4GB
   (the maximum supported by cx_Oracle) or 2GB (PostgreSQL maximum blob size)
   to maximize blob reading and writing performance.
   
   The PostgreSQL blob_chunk schema changed to support this, see 
   notes/migrate-to-1.5.txt to update existing databases.
+
+- zodbconvert: When copying a database containing blobs, ensure the source
+  blob file exists long enough to copy it.
 
 1.5.0b2 (2011-03-02)
 --------------------

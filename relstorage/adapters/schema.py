@@ -19,7 +19,10 @@ from ZODB.POSException import StorageError
 from zope.interface import implements
 import re
 
-relstorage_op_version = '1.5A'
+# Version of installed stored procedures
+oracle_sproc_version = '1.5A'
+postgresql_sproc_version = '1.5A'
+
 log = logging.getLogger("relstorage")
 
 history_preserving_schema = """
@@ -399,7 +402,7 @@ postgresql_history_preserving_plpgsql = """
 CREATE OR REPLACE FUNCTION blob_chunk_delete_trigger() RETURNS TRIGGER 
 AS $blob_chunk_delete_trigger$
     -- Version: %s
-    -- Unlink large object data file after blob_chunck row deletion
+    -- Unlink large object data file after blob_chunk row deletion
     DECLARE
         expect integer;
         cnt integer;
@@ -425,7 +428,7 @@ CREATE TRIGGER blob_chunk_delete
     FOR EACH ROW
     EXECUTE PROCEDURE blob_chunk_delete_trigger();
 /
-""" % relstorage_op_version
+""" % postgresql_sproc_version
 
 oracle_history_preserving_plsql = """
 CREATE OR REPLACE PACKAGE relstorage_op AS
@@ -481,7 +484,7 @@ CREATE OR REPLACE PACKAGE BODY relstorage_op AS
     END restore;
 END relstorage_op;
 /
-""" % relstorage_op_version
+""" % oracle_sproc_version
 
 
 history_free_schema = """
@@ -530,6 +533,7 @@ history_free_schema = """
             chunk       OID NOT NULL
         );
         CREATE INDEX blob_chunk_lookup ON blob_chunk (zoid);
+        CREATE INDEX blob_chunk_loid ON blob_chunk (chunk);
         ALTER TABLE blob_chunk ADD CONSTRAINT blob_chunk_fk
             FOREIGN KEY (zoid)
             REFERENCES object_state (zoid)
@@ -757,7 +761,7 @@ CREATE OR REPLACE PACKAGE BODY relstorage_op AS
     END restore;
 END relstorage_op;
 /
-""" % relstorage_op_version
+""" % oracle_sproc_version
 
 
 def filter_script(script, database_name):
@@ -880,20 +884,20 @@ class AbstractSchemaInstaller(object):
             existent = set(self.list_tables(cursor))
             todo = list(self.all_tables)
             todo.reverse()
-            log.info("Checking tables: %r", todo)
+            log.debug("Checking tables: %r", todo)
             for table in todo:
-                log.info("Considering table %s", table)
+                log.debug("Considering table %s", table)
                 if table.startswith('temp_'):
                     continue
                 if table in existent:
-                    log.info("Deleting table %s...", table)
+                    log.debug("Deleting from table %s...", table)
                     cursor.execute("DELETE FROM %s" % table)
-            log.info("Done deleting tables.")
+            log.debug("Done deleting from tables.")
             script = filter_script(self.init_script, self.database_name)
             if script:
-                log.info("Running init script.")
+                log.debug("Running init script.")
                 self.runner.run_script(cursor, script)
-                log.info("Done running init script.")
+                log.debug("Done running init script.")
         self.connmanager.open_and_call(callback)
 
     def drop_all(self):
@@ -930,30 +934,36 @@ class PostgreSQLSchemaInstaller(AbstractSchemaInstaller):
                 self.check_compatibility(cursor, tables)
                 self.update_schema(cursor, tables)
             triggers = self.list_triggers(cursor)
-            if triggers.get('blob_chunk_delete_trigger') != relstorage_op_version:
+            trigger_name = 'blob_chunk_delete_trigger'
+            if triggers.get(trigger_name) != postgresql_sproc_version:
                 self.install_triggers(cursor)
                 triggers = self.list_triggers(cursor)
-                if triggers.get('blob_chunk_delete_trigger') != relstorage_op_version:
+                if triggers.get(trigger_name) != postgresql_sproc_version:
                     raise AssertionError(
                         "Could not get version information after "
-                        "installing the blob_chunk_delete_trigger trigger.")
+                        "installing %s." % trigger_name)
         self.connmanager.open_and_call(callback)
+
+    def list_languages(self, cursor):
+        cursor.execute("SELECT lanname FROM pg_catalog.pg_language")
+        return [name for (name,) in cursor]
+
+    def install_languages(self, cursor):
+        if 'plpgsql' not in self.list_languages(cursor):
+            cursor.execute("CREATE LANGUAGE plpgsql")
 
     def install_triggers(self, cursor):
         """Install the PL/pgSQL triggers"""
+        self.install_languages(cursor)
+
         if self.keep_history:
             plpgsql = postgresql_history_preserving_plpgsql
         else:
             plpgsql = postgresql_history_free_plpgsql
 
-        lines = []
-        for line in plpgsql.splitlines():
-            if line.strip() == '/':
-                # end of a statement
-                cursor.execute('\n'.join(lines))
-                lines = []
-            elif line.strip():
-                lines.append(line)
+        for stmt in plpgsql.split('\n/\n'):
+            if stmt.strip():
+                cursor.execute(stmt)
 
     def create(self, cursor):
         """Create the database tables."""
@@ -1038,13 +1048,14 @@ class OracleSchemaInstaller(AbstractSchemaInstaller):
                 self.check_compatibility(cursor, tables)
                 self.update_schema(cursor, tables)
             packages = self.list_packages(cursor)
-            if packages.get('relstorage_op') != relstorage_op_version:
+            package_name = 'relstorage_op'
+            if packages.get(package_name) != oracle_sproc_version:
                 self.install_plsql(cursor)
                 packages = self.list_packages(cursor)
-                if packages.get('relstorage_op') != relstorage_op_version:
+                if packages.get(package_name) != oracle_sproc_version:
                     raise AssertionError(
                         "Could not get version information after "
-                        "installing the relstorage_op package.")
+                        "installing the %s package." % package_name)
         self.connmanager.open_and_call(callback)
 
     def install_plsql(self, cursor):
@@ -1054,14 +1065,9 @@ class OracleSchemaInstaller(AbstractSchemaInstaller):
         else:
             plsql = oracle_history_free_plsql
 
-        lines = []
-        for line in plsql.splitlines():
-            if line.strip() == '/':
-                # end of a statement
-                cursor.execute('\n'.join(lines))
-                lines = []
-            elif line.strip():
-                lines.append(line)
+        for stmt in plsql.split('\n/\n'):
+            if stmt.strip():
+                cursor.execute(stmt)
 
     def list_tables(self, cursor):
         cursor.execute("SELECT table_name FROM user_tables")

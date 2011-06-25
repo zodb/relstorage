@@ -15,13 +15,15 @@ migrate-to-1.4.txt.
 PostgreSQL
 ----------
 
+1. Migrate the object_state table.
+
     BEGIN;
     ALTER TABLE object_state ADD COLUMN state_size BIGINT;
     UPDATE object_state SET state_size = COALESCE(LENGTH(state), 0);
     ALTER TABLE object_state ALTER COLUMN state_size SET NOT NULL;
     COMMIT;
 
-If you used RelStorage a 1.5.0 version before version b3 you'll need to
+2. If you used a RelStorage 1.5.0 version before version b3 you'll need to
 migrate your blob_chunk table schema:
 
     BEGIN;
