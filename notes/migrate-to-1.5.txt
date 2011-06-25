@@ -34,7 +34,7 @@ migrate your blob_chunk table schema:
             SELECT oid, lowrite(lo_open(oid, 131072), bc.oldbytea)
             FROM lo_create(0) o(oid)) x);
     ALTER TABLE blob_chunk 
-        ALTER COLUMN chunk SET NOT NULL
+        ALTER COLUMN chunk SET NOT NULL,
         DROP COLUMN oldbytea;
     COMMIT;
 
@@ -44,16 +44,14 @@ want to re-initialize the whole table by moving the data to a temporary table
 and then copying it back:
 
     BEGIN;
+    ALTER TABLE blob_chunk DISABLE TRIGGER USER;
     CREATE TEMP TABLE blob_chunk_copy (LIKE blob_chunk) ON COMMIT DROP;
     INSERT INTO blob_chunk_copy SELECT * FROM blob_chunk;
     TRUNCATE blob_chunk;
     INSERT INTO blob_chunk SELECT * FROM blob_chunk_copy;
+    ALTER TABLE blob_chunk ENABLE TRIGGER USER;
     COMMIT;
 
-Do this **before** running this version RelStorage against this database for
-the first time, as this will install a trigger that'll delete the blob data
-when truncating blob_chunk!
- 
 
 MySQL history-preserving
 ------------------------

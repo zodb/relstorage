@@ -19,9 +19,10 @@ from ZODB.POSException import StorageError
 from zope.interface import implements
 import re
 
-# Version of installed stored procedures
-oracle_sproc_version = '1.5A'
-postgresql_sproc_version = '1.5A'
+# Versions of the installed stored procedures. Change these when
+# the corresponding code changes.
+oracle_package_version = '1.5A'
+postgresql_proc_version = '1.5A'
 
 log = logging.getLogger("relstorage")
 
@@ -398,10 +399,10 @@ history_preserving_init = """
         CREATE SEQUENCE zoid_seq;
 """
 
-postgresql_history_preserving_plpgsql = """
+postgresql_procedures = """
 CREATE OR REPLACE FUNCTION blob_chunk_delete_trigger() RETURNS TRIGGER 
 AS $blob_chunk_delete_trigger$
-    -- Version: %s
+    -- Version: %(postgresql_proc_version)s
     -- Unlink large object data file after blob_chunk row deletion
     DECLARE
         expect integer;
@@ -419,18 +420,9 @@ AS $blob_chunk_delete_trigger$
         RETURN OLD;
     END;
 $blob_chunk_delete_trigger$ LANGUAGE plpgsql;
-/
+""" % globals()
 
-DROP TRIGGER IF EXISTS blob_chunk_delete ON blob_chunk;
-/
-CREATE TRIGGER blob_chunk_delete 
-    BEFORE DELETE ON blob_chunk
-    FOR EACH ROW
-    EXECUTE PROCEDURE blob_chunk_delete_trigger();
-/
-""" % postgresql_sproc_version
-
-oracle_history_preserving_plsql = """
+oracle_history_preserving_package = """
 CREATE OR REPLACE PACKAGE relstorage_op AS
     TYPE numlist IS TABLE OF NUMBER(20) INDEX BY BINARY_INTEGER;
     TYPE md5list IS TABLE OF VARCHAR2(32) INDEX BY BINARY_INTEGER;
@@ -449,7 +441,7 @@ END relstorage_op;
 /
 
 CREATE OR REPLACE PACKAGE BODY relstorage_op AS
-/* Version: %s */
+/* Version: %(oracle_package_version)s */
     PROCEDURE store_temp(
         zoids IN numlist,
         prev_tids IN numlist,
@@ -484,7 +476,7 @@ CREATE OR REPLACE PACKAGE BODY relstorage_op AS
     END restore;
 END relstorage_op;
 /
-""" % oracle_sproc_version
+""" % globals()
 
 
 history_free_schema = """
@@ -711,9 +703,7 @@ history_free_init = """
         CREATE SEQUENCE zoid_seq;
 """
 
-postgresql_history_free_plpgsql = postgresql_history_preserving_plpgsql
-
-oracle_history_free_plsql = """
+oracle_history_free_package = """
 CREATE OR REPLACE PACKAGE relstorage_op AS
     TYPE numlist IS TABLE OF NUMBER(20) INDEX BY BINARY_INTEGER;
     TYPE md5list IS TABLE OF VARCHAR2(32) INDEX BY BINARY_INTEGER;
@@ -731,7 +721,7 @@ END relstorage_op;
 /
 
 CREATE OR REPLACE PACKAGE BODY relstorage_op AS
-/* Version: %s */
+/* Version: %(oracle_package_version)s */
     PROCEDURE store_temp(
         zoids IN numlist,
         prev_tids IN numlist,
@@ -761,7 +751,7 @@ CREATE OR REPLACE PACKAGE BODY relstorage_op AS
     END restore;
 END relstorage_op;
 /
-""" % oracle_sproc_version
+""" % globals()
 
 
 def filter_script(script, database_name):
@@ -933,37 +923,19 @@ class PostgreSQLSchemaInstaller(AbstractSchemaInstaller):
             else:
                 self.check_compatibility(cursor, tables)
                 self.update_schema(cursor, tables)
-            triggers = self.list_triggers(cursor)
-            trigger_name = 'blob_chunk_delete_trigger'
-            if triggers.get(trigger_name) != postgresql_sproc_version:
-                self.install_triggers(cursor)
-                triggers = self.list_triggers(cursor)
-                if triggers.get(trigger_name) != postgresql_sproc_version:
+
+            if not self.all_procedures_installed(cursor):
+                self.install_procedures(cursor)
+                if not self.all_procedures_installed(cursor):
                     raise AssertionError(
                         "Could not get version information after "
-                        "installing %s." % trigger_name)
+                        "installing the stored procedures.")
+
+            triggers = self.list_triggers(cursor)
+            if not 'blob_chunk_delete' in triggers:
+                self.install_triggers(cursor)
+
         self.connmanager.open_and_call(callback)
-
-    def list_languages(self, cursor):
-        cursor.execute("SELECT lanname FROM pg_catalog.pg_language")
-        return [name for (name,) in cursor]
-
-    def install_languages(self, cursor):
-        if 'plpgsql' not in self.list_languages(cursor):
-            cursor.execute("CREATE LANGUAGE plpgsql")
-
-    def install_triggers(self, cursor):
-        """Install the PL/pgSQL triggers"""
-        self.install_languages(cursor)
-
-        if self.keep_history:
-            plpgsql = postgresql_history_preserving_plpgsql
-        else:
-            plpgsql = postgresql_history_free_plpgsql
-
-        for stmt in plpgsql.split('\n/\n'):
-            if stmt.strip():
-                cursor.execute(stmt)
 
     def create(self, cursor):
         """Create the database tables."""
@@ -979,14 +951,22 @@ class PostgreSQLSchemaInstaller(AbstractSchemaInstaller):
         cursor.execute("SELECT relname FROM pg_class WHERE relkind = 'S'")
         return [name for (name,) in cursor]
 
-    def list_triggers(self, cursor):
-        """Returns {trigger name: version}.  version may be None."""
+    def list_languages(self, cursor):
+        cursor.execute("SELECT lanname FROM pg_catalog.pg_language")
+        return [name for (name,) in cursor]
+
+    def install_languages(self, cursor):
+        if 'plpgsql' not in self.list_languages(cursor):
+            cursor.execute("CREATE LANGUAGE plpgsql")
+
+    def list_procedures(self, cursor):
+        """Returns {procedure name: version}.  version may be None."""
         stmt = """
         SELECT proname, prosrc
         FROM pg_catalog.pg_namespace n
         JOIN pg_catalog.pg_proc p ON pronamespace = n.oid
         JOIN pg_catalog.pg_type t ON prorettype = t.oid
-        WHERE nspname = 'public' AND typname = 'trigger'
+        WHERE nspname = 'public'
         """
         cursor.execute(stmt)
         res = {}
@@ -998,10 +978,41 @@ class PostgreSQLSchemaInstaller(AbstractSchemaInstaller):
             res[name.lower()] = version
         return res
 
+    def all_procedures_installed(self, cursor):
+        """Check whether all required stored procedures are installed.
+
+        Returns True only if all required procedures are installed and
+        up to date.
+        """
+        expect = ['blob_chunk_delete_trigger']
+        current_procs = self.list_procedures(cursor)
+        for proc in expect:
+            if current_procs.get(proc) != postgresql_proc_version:
+                return False
+        return True
+
+    def install_procedures(self, cursor):
+        """Install the stored procedures"""
+        self.install_languages(cursor)
+        cursor.execute(postgresql_procedures)
+
+    def list_triggers(self, cursor):
+        cursor.execute("SELECT tgname FROM pg_trigger")
+        return [name for (name,) in cursor]
+
+    def install_triggers(self, cursor):
+        stmt = """
+        CREATE TRIGGER blob_chunk_delete
+            BEFORE DELETE ON blob_chunk
+            FOR EACH ROW
+            EXECUTE PROCEDURE blob_chunk_delete_trigger()
+        """
+        cursor.execute(stmt)
+
     def drop_all(self):
         def callback(conn, cursor):
-            # make sure we clean up our blob oids first
             if 'blob_chunk' in self.list_tables(cursor):
+                # Trigger deletion of blob OIDs.
                 cursor.execute("DELETE FROM blob_chunk")
         self.connmanager.open_and_call(callback)
         super(PostgreSQLSchemaInstaller, self).drop_all()
@@ -1049,23 +1060,23 @@ class OracleSchemaInstaller(AbstractSchemaInstaller):
                 self.update_schema(cursor, tables)
             packages = self.list_packages(cursor)
             package_name = 'relstorage_op'
-            if packages.get(package_name) != oracle_sproc_version:
-                self.install_plsql(cursor)
+            if packages.get(package_name) != oracle_package_version:
+                self.install_package(cursor)
                 packages = self.list_packages(cursor)
-                if packages.get(package_name) != oracle_sproc_version:
+                if packages.get(package_name) != oracle_package_version:
                     raise AssertionError(
                         "Could not get version information after "
                         "installing the %s package." % package_name)
         self.connmanager.open_and_call(callback)
 
-    def install_plsql(self, cursor):
-        """Install the unprivileged PL/SQL package"""
+    def install_package(self, cursor):
+        """Install the package containing stored procedures"""
         if self.keep_history:
-            plsql = oracle_history_preserving_plsql
+            code = oracle_history_preserving_package
         else:
-            plsql = oracle_history_free_plsql
+            code = oracle_history_free_package
 
-        for stmt in plsql.split('\n/\n'):
+        for stmt in code.split('\n/\n'):
             if stmt.strip():
                 cursor.execute(stmt)
 
@@ -1078,7 +1089,10 @@ class OracleSchemaInstaller(AbstractSchemaInstaller):
         return [name.lower() for (name,) in cursor]
 
     def list_packages(self, cursor):
-        """Returns {package name: version}.  version may be None."""
+        """List installed stored procedure packages.
+
+        Returns {package name: version}.  version may be None.
+        """
         stmt = """
         SELECT object_name
         FROM user_objects
