@@ -15,7 +15,7 @@ migrate-to-1.4.txt.
 PostgreSQL
 ----------
 
-1. Migrate the object_state table.
+1. Migrate the object_state table::
 
     BEGIN;
     ALTER TABLE object_state ADD COLUMN state_size BIGINT;
@@ -23,25 +23,48 @@ PostgreSQL
     ALTER TABLE object_state ALTER COLUMN state_size SET NOT NULL;
     COMMIT;
 
-2. If you used a RelStorage 1.5.0 version before version b3 you'll need to
-migrate your blob_chunk table schema:
+2. The "plpgsql" language is now required and must be enabled in
+   your database.  Depending on your version of PostgreSQL, you may have
+   to execute the following psql command as the database superuser::
 
+    CREATE LANGUAGE plpgsql;
+
+3. If you used a RelStorage 1.5.0 version before version b3, you need to
+   migrate your blob_chunk table schema::
+
+    CREATE OR REPLACE FUNCTION blob_write(data bytea) RETURNS oid
+    AS $blob_write$
+        DECLARE
+            new_oid OID;
+            fd INTEGER;
+            bytes INTEGER;
+        BEGIN
+            new_oid := lo_create(0);
+            fd := lo_open(new_oid, 131072);
+            bytes := lowrite(fd, data);
+            IF (bytes != LENGTH(data)) THEN
+                RAISE EXCEPTION 'Not all data copied to blob';
+            END IF;
+            PERFORM lo_close(fd);
+            RETURN new_oid;
+        END;
+    $blob_write$ LANGUAGE plpgsql;
     BEGIN;
     ALTER TABLE blob_chunk RENAME COLUMN chunk TO oldbytea;    
     ALTER TABLE blob_chunk ADD COLUMN chunk OID;
-    UPDATE blob_chunk bc SET chunk = (
-        SELECT oid FROM (
-            SELECT oid, lowrite(lo_open(oid, 131072), bc.oldbytea)
-            FROM lo_create(0) o(oid)) x);
-    ALTER TABLE blob_chunk 
+    UPDATE blob_chunk SET chunk = blob_write(oldbytea);
+    ALTER TABLE blob_chunk
         ALTER COLUMN chunk SET NOT NULL,
         DROP COLUMN oldbytea;
     COMMIT;
 
-Note that DROP COLUMN does not reclaim the space occupied by the oldbytea
+If the conversion succeeded, the psql prompt will respond with "COMMIT".  If
+something went wrong, psql will respond with "ROLLBACK".
+
+3A. The script in step 3 does not reclaim the space occupied by the oldbytea
 column. If there is a large amount of data in the blob_chunk table, you may
 want to re-initialize the whole table by moving the data to a temporary table
-and then copying it back:
+and then copying it back::
 
     BEGIN;
     ALTER TABLE blob_chunk DISABLE TRIGGER USER;
