@@ -389,15 +389,17 @@ class ObjectMover(object):
         ) ON COMMIT DROP;
         CREATE UNIQUE INDEX temp_store_zoid ON temp_store (zoid);
 
-        DROP TABLE IF EXISTS temp_blob_chunk;
         CREATE TEMPORARY TABLE temp_blob_chunk (
             zoid        BIGINT NOT NULL,
             chunk_num   BIGINT NOT NULL,
             chunk       OID
-        ) ON COMMIT DELETE ROWS;
+        ) ON COMMIT DROP;
         CREATE UNIQUE INDEX temp_blob_chunk_key
             ON temp_blob_chunk (zoid, chunk_num);
-        -- Trigger to clean out oids that did not get copied to blob_chunk
+
+        -- This trigger removes blobs that get replaced before being
+        -- moved to blob_chunk.  Note that it is never called when
+        -- the temp_blob_chunk table is being dropped or truncated.
         CREATE TRIGGER temp_blob_chunk_delete 
             BEFORE DELETE ON temp_blob_chunk
             FOR EACH ROW
@@ -1010,7 +1012,7 @@ class ObjectMover(object):
 
         f = None
         bytes = 0
-        
+
         try:
             cursor.execute(stmt, (oid, tid))
             for chunk_num, loid in cursor.fetchall():
@@ -1092,7 +1094,7 @@ class ObjectMover(object):
 
         f = None
         bytes = 0
-        # XXX Current versions of cx_Oracle only support offsets up
+        # Current versions of cx_Oracle only support offsets up
         # to sys.maxint or 4GB, whichever comes first.
         maxsize = min(sys.maxint, 1<<32)
         try:
@@ -1194,7 +1196,7 @@ class ObjectMover(object):
                 if use_tid:
                     params['tid'] = tid
                 cursor.execute(insert_stmt, params)
-                
+
                 write_chunk_size = self.blob_chunk_size
                 for i in xrange(maxsize / write_chunk_size):
                     write_chunk = f.read(write_chunk_size)
@@ -1299,7 +1301,7 @@ class ObjectMover(object):
             """
 
         f = open(filename, 'rb')
-        # XXX Current versions of cx_Oracle only support offsets up
+        # Current versions of cx_Oracle only support offsets up
         # to sys.maxint or 4GB, whichever comes first. We divide up our
         # upload into chunks within this limit.
         maxsize = min(sys.maxint, 1<<32)
