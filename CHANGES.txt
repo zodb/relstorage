@@ -1,5 +1,5 @@
-Next Release
-------------
+1.5.0 (2011-06-30)
+------------------
 
 - PostgreSQL: Fixed another minor compatibility issue with PostgreSQL 9.0.
   Packing raised an error when the client used old an version of libpq.

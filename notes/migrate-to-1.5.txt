@@ -29,8 +29,8 @@ PostgreSQL
 
     CREATE LANGUAGE plpgsql;
 
-3. If you used a RelStorage 1.5.0 version before version b3, you need to
-   migrate your blob_chunk table schema::
+3. If you used a beta version of RelStorage 1.5.0, you need to migrate
+   your blob_chunk table schema::
 
     CREATE OR REPLACE FUNCTION blob_write(data bytea) RETURNS oid
     AS $blob_write$
