@@ -41,8 +41,8 @@ class BlobHelperTest(unittest.TestCase):
         self.blob_dir = tempfile.mkdtemp()
 
     def tearDown(self):
-        import shutil
-        shutil.rmtree(self.blob_dir)
+        from ZODB.blob import remove_committed_dir
+        remove_committed_dir(self.blob_dir)
 
     def _class(self):
         from relstorage.blobhelper import BlobHelper
