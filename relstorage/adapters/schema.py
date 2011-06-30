@@ -22,7 +22,7 @@ import re
 # Versions of the installed stored procedures. Change these when
 # the corresponding code changes.
 oracle_package_version = '1.5A'
-postgresql_proc_version = '1.5A'
+postgresql_proc_version = '1.5B'
 
 log = logging.getLogger("relstorage")
 
@@ -405,21 +405,32 @@ AS $blob_chunk_delete_trigger$
     -- Version: %(postgresql_proc_version)s
     -- Unlink large object data file after blob_chunk row deletion
     DECLARE
-        expect integer;
         cnt integer;
     BEGIN
-        expect = 1; -- The number of rows where we'll unlink the oid
-        IF (TG_TABLE_NAME != 'blob_chunk') THEN
-            expect = 0; -- Deleting from elsewhere means we expect 0
-        END IF;
         SELECT count(*) into cnt FROM blob_chunk WHERE chunk=OLD.chunk;
-        IF (cnt = expect) THEN
+        IF (cnt = 1) THEN
             -- Last reference to this oid, unlink
             PERFORM lo_unlink(OLD.chunk);
         END IF;
         RETURN OLD;
     END;
 $blob_chunk_delete_trigger$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION temp_blob_chunk_delete_trigger() RETURNS TRIGGER
+AS $temp_blob_chunk_delete_trigger$
+    -- Version: %(postgresql_proc_version)s
+    -- Unlink large object data file after temp_blob_chunk row deletion
+    DECLARE
+        cnt integer;
+    BEGIN
+        SELECT count(*) into cnt FROM blob_chunk WHERE chunk=OLD.chunk;
+        IF (cnt = 0) THEN
+            -- No more references to this oid, unlink
+            PERFORM lo_unlink(OLD.chunk);
+        END IF;
+        RETURN OLD;
+    END;
+$temp_blob_chunk_delete_trigger$ LANGUAGE plpgsql;
 """ % globals()
 
 oracle_history_preserving_package = """
@@ -984,7 +995,10 @@ class PostgreSQLSchemaInstaller(AbstractSchemaInstaller):
         Returns True only if all required procedures are installed and
         up to date.
         """
-        expect = ['blob_chunk_delete_trigger']
+        expect = [
+            'blob_chunk_delete_trigger',
+            'temp_blob_chunk_delete_trigger',
+        ]
         current_procs = self.list_procedures(cursor)
         for proc in expect:
             if current_procs.get(proc) != postgresql_proc_version:

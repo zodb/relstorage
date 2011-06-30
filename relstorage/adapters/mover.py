@@ -403,7 +403,7 @@ class ObjectMover(object):
         CREATE TRIGGER temp_blob_chunk_delete 
             BEFORE DELETE ON temp_blob_chunk
             FOR EACH ROW
-            EXECUTE PROCEDURE blob_chunk_delete_trigger();
+            EXECUTE PROCEDURE temp_blob_chunk_delete_trigger();
         """
         cursor.execute(stmt)
 
