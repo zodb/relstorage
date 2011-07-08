@@ -1,7 +1,9 @@
 Next Release
 ------------
 
-- ...
+- Packing: Lowered garbage collection object reference finding log level to
+  debug; this stage takes mere seconds, even in large sites, but could produce
+  10s of thousands of lines of log output.
 
 1.5.0 (2011-06-30)
 ------------------
