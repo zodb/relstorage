@@ -23,6 +23,7 @@ from persistent.TimeStamp import TimeStamp
 from StringIO import StringIO
 import sys
 import ZConfig
+from ZODB.utils import p64, readable_tid_repr
 
 schema_xml = """
 <schema>
@@ -61,6 +62,13 @@ def main(argv=sys.argv):
     parser.add_option(
         "--clear", dest="clear", action="store_true",
         help="Clear the contents of the destination storage before copying")
+    parser.add_option(
+        "--incremental", dest="incremental", action="store_true",
+        help="Assume the destination contains a partial copy of the source "
+             "and resume copying from the last transaction. WARNING: no "
+             "effort is made to verify that the destination holds the same "
+             "transaction data before this point! Use at your own risk. "
+             "Currently only supports RelStorage destinations.")
     parser.set_defaults(dry_run=False, clear=False)
     options, args = parser.parse_args(argv[1:])
 
@@ -77,6 +85,22 @@ def main(argv=sys.argv):
     destination = config.destination.open()
 
     log.info("Storages opened successfully.")
+
+    if options.incremental:
+        if not hasattr(destination, '_adapter'):
+            msg = ("Error: no API is known for determining the last committed "
+                   "transaction of the destination storage. Aborting "
+                   "conversion.")
+            sys.exit(msg)
+        if not storage_has_data(destination):
+            log.warning("Destination empty, start conversion from the beginning.")
+        else:
+            last_tid = destination._adapter.txncontrol.get_tid(
+                destination._load_cursor)
+            next_tid = p64(last_tid+1)
+            source = source.iterator(start=next_tid)
+            log.info("Resuming ZODB copy from %s", readable_tid_repr(next_tid))
+
 
     if options.dry_run:
         log.info("Dry run mode: not changing the destination.")

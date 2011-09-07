@@ -5,6 +5,10 @@ Next Release
   debug; this stage takes mere seconds, even in large sites, but could produce
   10s of thousands of lines of log output.
 
+- Add an --incremental option to the zodbconvert script, letting you convert
+  additional transactions at a later date, or update a non-live copy of your
+  database, copying over missing transactions.
+
 1.5.0 (2011-06-30)
 ------------------
 
