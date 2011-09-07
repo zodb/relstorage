@@ -1323,7 +1323,10 @@ class RelStorage(
         txnum = 0
         total_size = 0
         log.info("Counting the transactions to copy.")
-        num_txns = len(list(other.iterator()))
+        if isinstance(other, TransactionIterator):
+            num_txns = len(other)
+        else:
+            num_txns = len(list(other.iterator()))
         log.info("Copying the transactions.")
         for trans in other.iterator():
             txnum += 1
