@@ -56,10 +56,34 @@ class AbstractConnectionManagerTests(unittest.TestCase):
         self.assertRaises(ReplicaClosedException,
             cm.restart_store, conn, MockCursor())
 
+    def test_with_ro_replica_conf(self):
+        import os
+        import relstorage.tests
+        tests_dir = relstorage.tests.__file__
+        replica_conf = os.path.join(os.path.dirname(tests_dir),
+            'replicas.conf')
+        ro_replica_conf = os.path.join(os.path.dirname(tests_dir),
+            'ro_replicas.conf')
+        options = MockOptions(replica_conf, ro_replica_conf)
+
+        from relstorage.adapters.connmanager \
+            import AbstractConnectionManager
+        from relstorage.adapters.interfaces import ReplicaClosedException
+        cm = AbstractConnectionManager(options)
+
+        conn = MockConnection()
+        conn.replica = 'readonlyhost'
+        cm.restart_load(conn, MockCursor())
+        self.assertTrue(conn.rolled_back)
+        conn.replica = 'other'
+        self.assertRaises(ReplicaClosedException,
+            cm.restart_load, conn, MockCursor())
+
 
 class MockOptions:
-    def __init__(self, fn=None):
+    def __init__(self, fn=None, ro_fn=None):
         self.replica_conf = fn
+        self.ro_replica_conf = ro_fn
         self.replica_timeout = 600.0
 
 class MockConnection:

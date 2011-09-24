@@ -40,9 +40,16 @@ class AbstractConnectionManager(object):
     def __init__(self, options):
         # options is a relstorage.options.Options instance
         if options.replica_conf:
-            self.replica_selector = ReplicaSelector(options)
+            self.replica_selector = ReplicaSelector(
+                options.replica_conf, options.replica_timeout)
         else:
             self.replica_selector = None
+
+        if options.ro_replica_conf:
+            self.ro_replica_selector = ReplicaSelector(
+                options.ro_replica_conf, options.replica_timeout)
+        else:
+            self.ro_replica_selector = self.replica_selector
 
     def set_on_store_opened(self, f):
         """Set the on_store_opened hook"""
@@ -88,13 +95,17 @@ class AbstractConnectionManager(object):
 
     def restart_load(self, conn, cursor):
         """Reinitialize a connection for loading objects."""
-        self.check_replica(conn, cursor)
+        self.check_replica(conn, cursor,
+            replica_selector=self.ro_replica_selector)
         conn.rollback()
 
-    def check_replica(self, conn, cursor):
+    def check_replica(self, conn, cursor, replica_selector=None):
         """Raise an exception if the connection belongs to an old replica"""
-        if self.replica_selector is not None:
-            current = self.replica_selector.current()
+        if replica_selector is None:
+            replica_selector = self.replica_selector
+
+        if replica_selector is not None:
+            current = replica_selector.current()
             if conn.replica != current:
                 # Prompt the change to a new replica by raising an exception.
                 self.close(conn, cursor)

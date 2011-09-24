@@ -35,6 +35,9 @@
     <key name="replica-conf" datatype="string" required="no">
       <description>See the RelStorage README.txt file.</description>
     </key>
+    <key name="ro-replica-conf" datatype="string" required="no">
+      <description>See the RelStorage README.txt file.</description>
+    </key>
     <key name="replica-timeout" datatype="float" default="600.0">
       <description>See the RelStorage README.txt file.</description>
     </key>

@@ -45,6 +45,7 @@ class Options(object):
         self.blob_chunk_size = 1 << 20
         self.keep_history = True
         self.replica_conf = None
+        self.ro_replica_conf = None
         self.replica_timeout = 600.0
         self.poll_interval = 0
         self.pack_gc = True

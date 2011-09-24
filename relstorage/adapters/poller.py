@@ -106,7 +106,7 @@ class Poller:
         else:
             # We moved backward in time. This can happen after failover
             # to an asynchronous slave that is not fully up to date. If
-            # this was not caused by failover, it suggests that
+            # this was not caused by failover, this condition suggests that
             # transaction IDs are not being created in order, which can
             # lead to consistency violations.
             log.warning(

@@ -456,6 +456,26 @@ underscores instead of dashes in the option names.
         adapter will drop existing SQL database connections and make
         new connections when ZODB starts a new transaction.
 
+``ro-replica-conf``
+        Like the ``replica-conf`` option, but the referenced text file
+        provides a list of database replicas to use only for read-only
+        load connections. This allows RelStorage to load objects from
+        read-only database replicas, while using read-write replicas
+        for all other database interactions.
+
+        If this option is not provided, load connections will fall back
+        to the replica pool specified by ``replica-conf``. If
+        ``ro-replica-conf`` is provided but ``replica-conf`` is not,
+        RelStorage will use replicas for load connections but not for
+        other database interactions.
+
+        Note that if read-only replicas are asynchronous, the next
+        interaction after a write operation might not be up to date.
+        When that happens, RelStorage will log a "backward time travel"
+        warning and clear the ZODB cache to prevent consistency errors.
+        This will likely result in temporarily reduced performance as
+        the ZODB cache is repopulated.
+
 ``replica-timeout``
         If this option has a nonzero value, when the adapter selects
         a replica other than the primary replica, the adapter will

@@ -24,7 +24,6 @@ class ReplicaSelectorTests(unittest.TestCase):
             "# Replicas\n\nexample.com:1234\nlocalhost:4321\n"
             "\nlocalhost:9999\n")
         os.close(fd)
-        self.options = MockOptions(self.fn)
 
     def tearDown(self):
         import os
@@ -32,19 +31,19 @@ class ReplicaSelectorTests(unittest.TestCase):
 
     def test__read_config_normal(self):
         from relstorage.adapters.replica import ReplicaSelector
-        rs = ReplicaSelector(self.options)
+        rs = ReplicaSelector(self.fn, 600.0)
         self.assertEqual(rs._replicas,
             ['example.com:1234', 'localhost:4321', 'localhost:9999'])
 
     def test__read_config_empty(self):
         from relstorage.adapters.replica import ReplicaSelector
         open(self.fn, 'w').close()  # truncate the replica list file
-        self.assertRaises(IndexError, ReplicaSelector, self.options)
+        self.assertRaises(IndexError, ReplicaSelector, self.fn, 600.0)
 
     def test__is_config_modified(self):
         from relstorage.adapters.replica import ReplicaSelector
         import time
-        rs = ReplicaSelector(self.options)
+        rs = ReplicaSelector(self.fn, 600.0)
         self.assertEqual(rs._is_config_modified(), False)
         # change the file
         rs._config_modified = 0
@@ -57,7 +56,7 @@ class ReplicaSelectorTests(unittest.TestCase):
 
     def test__select(self):
         from relstorage.adapters.replica import ReplicaSelector
-        rs = ReplicaSelector(self.options)
+        rs = ReplicaSelector(self.fn, 600.0)
         rs._select(0)
         self.assertEqual(rs._current_replica, 'example.com:1234')
         self.assertEqual(rs._current_index, 0)
@@ -69,7 +68,7 @@ class ReplicaSelectorTests(unittest.TestCase):
 
     def test_current(self):
         from relstorage.adapters.replica import ReplicaSelector
-        rs = ReplicaSelector(self.options)
+        rs = ReplicaSelector(self.fn, 600.0)
         self.assertEqual(rs.current(), 'example.com:1234')
         # change the file and get the new current replica
         f = open(self.fn, 'w')
@@ -87,7 +86,7 @@ class ReplicaSelectorTests(unittest.TestCase):
 
     def test_next_iteration(self):
         from relstorage.adapters.replica import ReplicaSelector
-        rs = ReplicaSelector(self.options)
+        rs = ReplicaSelector(self.fn, 600.0)
 
         # test forward iteration
         self.assertEqual(rs.current(), 'example.com:1234')
@@ -109,13 +108,13 @@ class ReplicaSelectorTests(unittest.TestCase):
         f = open(self.fn, 'w')
         f.write('localhost\n')
         f.close()
-        rs = ReplicaSelector(self.options)
+        rs = ReplicaSelector(self.fn, 600.0)
         self.assertEqual(rs.current(), 'localhost')
         self.assertEqual(rs.next(), None)
 
     def test_next_with_new_conf(self):
         from relstorage.adapters.replica import ReplicaSelector
-        rs = ReplicaSelector(self.options)
+        rs = ReplicaSelector(self.fn, 600.0)
         self.assertEqual(rs.current(), 'example.com:1234')
         self.assertEqual(rs.next(), 'localhost:4321')
         # interrupt the iteration by changing the replica conf file
@@ -127,11 +126,6 @@ class ReplicaSelectorTests(unittest.TestCase):
         self.assertEqual(rs.next(), 'example.com:9999')
         self.assertEqual(rs.next(), None)
 
-
-class MockOptions:
-    def __init__(self, fn):
-        self.replica_conf = fn
-        self.replica_timeout = 600.0
 
 def test_suite():
     suite = unittest.TestSuite()

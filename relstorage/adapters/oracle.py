@@ -283,16 +283,20 @@ class CXOracleConnectionManager(AbstractConnectionManager):
         super(CXOracleConnectionManager, self).__init__(options)
 
     def open(self, transaction_mode="ISOLATION LEVEL READ COMMITTED",
-            twophase=False):
+            twophase=False, replica_selector=None):
         """Open a database connection and return (conn, cursor)."""
-        if self.replica_selector is not None:
-            self._dsn = self.replica_selector.current()
+        if replica_selector is None:
+            replica_selector = self.replica_selector
+
+        if replica_selector is not None:
+            dsn = replica_selector.current()
+        else:
+            dsn = self._dsn
 
         while True:
             try:
                 kw = {'twophase': twophase, 'threaded': True}
-                conn = cx_Oracle.connect(
-                    self._user, self._password, self._dsn, **kw)
+                conn = cx_Oracle.connect(self._user, self._password, dsn, **kw)
                 cursor = conn.cursor()
                 cursor.arraysize = 64
                 if transaction_mode:
@@ -300,12 +304,12 @@ class CXOracleConnectionManager(AbstractConnectionManager):
                 return conn, cursor
 
             except cx_Oracle.OperationalError, e:
-                log.warning("Unable to connect to DSN %s: %s", self._dsn, e)
-                if self.replica_selector is not None:
-                    replica = self.replica_selector.next()
+                log.warning("Unable to connect to DSN %s: %s", dsn, e)
+                if replica_selector is not None:
+                    replica = replica_selector.next()
                     if replica is not None:
                         # try the new replica
-                        self._dsn = replica
+                        dsn = replica
                         continue
                 raise
 
@@ -314,23 +318,28 @@ class CXOracleConnectionManager(AbstractConnectionManager):
 
         Returns (conn, cursor).
         """
-        return self.open(self.isolation_read_only)
+        return self.open(self.isolation_read_only,
+            replica_selector=self.ro_replica_selector)
 
     def restart_load(self, conn, cursor):
         """Reinitialize a connection for loading objects."""
-        self.check_replica(conn, cursor)
+        self.check_replica(conn, cursor,
+            replica_selector=self.ro_replica_selector)
         conn.rollback()
         cursor.execute("SET TRANSACTION %s" % self.isolation_read_only)
 
-    def check_replica(self, conn, cursor):
+    def check_replica(self, conn, cursor, replica_selector=None):
         """Raise an exception if the connection belongs to an old replica"""
-        if self.replica_selector is not None:
-            current = self.replica_selector.current()
+        if replica_selector is None:
+            replica_selector = self.replica_selector
+
+        if replica_selector is not None:
+            current = replica_selector.current()
             if conn.dsn != current:
                 # Prompt the change to a new replica by raising an exception.
                 self.close(conn, cursor)
                 raise ReplicaClosedException(
-                    "Switching replica from %s to %s" % (conn.dsn, current))
+                    "Switched replica from %s to %s" % (conn.dsn, current))
 
     def _set_xid(self, conn, cursor):
         """Set up a distributed transaction"""

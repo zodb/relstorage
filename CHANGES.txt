@@ -9,6 +9,10 @@ Next Release
   additional transactions at a later date, or update a non-live copy of your
   database, copying over missing transactions.
 
+- Added the ro-replica-conf option, which tells RelStorage to use a
+  read-only database replica for load connections. This allows
+  RelStorage to use read-only database replicas whenever possible.
+
 1.5.0 (2011-06-30)
 ------------------
 

@@ -17,12 +17,13 @@ from zope.interface import implements
 import os
 import time
 
+
 class ReplicaSelector(object):
     implements(IReplicaSelector)
 
-    def __init__(self, options):
-        self.replica_conf = options.replica_conf
-        self.alt_timeout = options.replica_timeout
+    def __init__(self, fn, replica_timeout):
+        self.replica_conf = fn
+        self.replica_timeout = replica_timeout
         self._read_config()
         self._select(0)
         self._iterating = False
@@ -59,8 +60,8 @@ class ReplicaSelector(object):
     def _select(self, index):
         self._current_replica = self._replicas[index]
         self._current_index = index
-        if index > 0 and self.alt_timeout:
-            self._expiration = time.time() + self.alt_timeout
+        if index > 0 and self.replica_timeout:
+            self._expiration = time.time() + self.replica_timeout
         else:
             self._expiration = None
 
