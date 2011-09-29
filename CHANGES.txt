@@ -13,6 +13,8 @@ Next Release
   read-only database replica for load connections. This allows
   RelStorage to use read-only database replicas whenever possible.
 
+TODO: provide a default random memcache prefix that is consistent per database.
+
 1.5.0 (2011-06-30)
 ------------------
 
