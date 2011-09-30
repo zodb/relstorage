@@ -27,7 +27,7 @@ class PostgreSQLOIDAllocator(object):
 
     def set_min_oid(self, cursor, oid):
         """Ensure the next OID is at least the given OID."""
-        n = (oid + 15) / 16
+        n = (oid + 15) // 16
         cursor.execute("""
         SELECT CASE WHEN %s > nextval('zoid_seq')
             THEN setval('zoid_seq', %s)
@@ -48,7 +48,7 @@ class MySQLOIDAllocator(object):
 
     def set_min_oid(self, cursor, oid):
         """Ensure the next OID is at least the given OID."""
-        n = (oid + 15) / 16
+        n = (oid + 15) // 16
         cursor.execute("REPLACE INTO new_oid VALUES(%s)", (n,))
 
     def new_oids(self, cursor):
@@ -71,7 +71,7 @@ class OracleOIDAllocator(object):
 
     def set_min_oid(self, cursor, oid):
         """Ensure the next OID is at least the given OID."""
-        n = (oid + 15) / 16
+        n = (oid + 15) // 16
         stmt = "SELECT zoid_seq.nextval FROM DUAL"
         cursor.execute(stmt)
         next_n = cursor.fetchone()[0]
