@@ -60,10 +60,10 @@ class ObjectMover(object):
         'upload_blob',
     )
 
-    def __init__(self, database_name, options, runner=None,
+    def __init__(self, database_type, options, runner=None,
             Binary=None, inputsizes=None, version_detector=None):
         # The inputsizes parameter is for Oracle only.
-        self.database_name = database_name
+        self.database_type = database_type
         self.keep_history = options.keep_history
         self.blob_chunk_size = options.blob_chunk_size
         self.runner = runner
@@ -72,7 +72,7 @@ class ObjectMover(object):
         self.version_detector = version_detector
 
         for method_name in self._method_names:
-            method = getattr(self, '%s_%s' % (database_name, method_name))
+            method = getattr(self, '%s_%s' % (database_type, method_name))
             setattr(self, method_name, method)
 
 
@@ -843,7 +843,7 @@ class ObjectMover(object):
         Returns the list of oids stored.
         """
         if self.keep_history:
-            if self.database_name == 'oracle':
+            if self.database_type == 'oracle':
                 stmt = """
                 INSERT INTO object_state
                     (zoid, tid, prev_tid, md5, state_size, state)
@@ -862,7 +862,7 @@ class ObjectMover(object):
             cursor.execute(stmt, (tid,))
 
         else:
-            if self.database_name == 'mysql':
+            if self.database_type == 'mysql':
                 stmt = """
                 REPLACE INTO object_state (zoid, tid, state_size, state)
                 SELECT zoid, %s, COALESCE(LENGTH(state), 0), state
@@ -877,7 +877,7 @@ class ObjectMover(object):
                 """
                 cursor.execute(stmt)
 
-                if self.database_name == 'oracle':
+                if self.database_type == 'oracle':
                     stmt = """
                     INSERT INTO object_state (zoid, tid, state_size, state)
                     SELECT zoid, :1, COALESCE(LENGTH(state), 0), state
@@ -899,7 +899,7 @@ class ObjectMover(object):
                 cursor.execute(stmt)
 
         if txn_has_blobs:
-            if self.database_name == 'oracle':
+            if self.database_type == 'oracle':
                 stmt = """
                 INSERT INTO blob_chunk (zoid, tid, chunk_num, chunk)
                 SELECT zoid, :1, chunk_num, chunk

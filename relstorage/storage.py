@@ -191,7 +191,12 @@ class RelStorage(
         if cache is not None:
             self._cache = cache
         else:
-            self._cache = StorageCache(adapter, options)
+            prefix = options.cache_prefix
+            if not prefix:
+                # Use the database name as the cache prefix.
+                prefix = adapter.schema.get_database_name(self._load_cursor)
+                prefix = prefix.replace(' ', '_')
+            self._cache = StorageCache(adapter, options, prefix)
 
         if blobhelper is not None:
             self.blobhelper = blobhelper

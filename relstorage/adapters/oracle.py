@@ -92,7 +92,7 @@ class OracleAdapter(object):
             keep_history=self.keep_history,
             )
         self.mover = ObjectMover(
-            database_name='oracle',
+            database_type='oracle',
             options=options,
             runner=self.runner,
             Binary=cx_Oracle.Binary,
@@ -129,26 +129,26 @@ class OracleAdapter(object):
 
         if self.keep_history:
             self.packundo = OracleHistoryPreservingPackUndo(
-                database_name='oracle',
+                database_type='oracle',
                 connmanager=self.connmanager,
                 runner=self.runner,
                 locker=self.locker,
                 options=options,
                 )
             self.dbiter = HistoryPreservingDatabaseIterator(
-                database_name='oracle',
+                database_type='oracle',
                 runner=self.runner,
                 )
         else:
             self.packundo = OracleHistoryFreePackUndo(
-                database_name='oracle',
+                database_type='oracle',
                 connmanager=self.connmanager,
                 runner=self.runner,
                 locker=self.locker,
                 options=options,
                 )
             self.dbiter = HistoryFreeDatabaseIterator(
-                database_name='oracle',
+                database_type='oracle',
                 runner=self.runner,
                 )
 

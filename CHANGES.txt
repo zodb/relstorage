@@ -5,30 +5,34 @@ Next Release
   debug; this stage takes mere seconds, even in large sites, but could produce
   10s of thousands of lines of log output.
 
-- Add an --incremental option to the zodbconvert script, letting you convert
-  additional transactions at a later date, or update a non-live copy of your
-  database, copying over missing transactions.
+- zodbconvert: Add an --incremental option to the zodbconvert script,
+  letting you convert additional transactions at a later date, or
+  update a non-live copy of your database, copying over missing
+  transactions.
 
-- Added the ro-replica-conf option, which tells RelStorage to use a
-  read-only database replica for load connections. This allows
-  RelStorage to use read-only database replicas whenever possible.
+- Replication: Added the ro-replica-conf option, which tells RelStorage
+  to use a read-only database replica for load connections. This makes
+  it easy for RelStorage clients to take advantage of read-only
+  database replicas.
 
-- When the database connection is stale (such as when RelStorage switches
-  to an asynchronous replica that is not yet up to date), RelStorage will
-  now raise ReadConflictError by default. Ideally, the application will
-  react to the error by transparently retrying the transaction, while
-  the database gets up to date. A subsequent transaction will no longer
-  be stale.
+- Replication: When the database connection is stale (such as when
+  RelStorage switches to an asynchronous replica that is not yet up to
+  date), RelStorage will now raise ReadConflictError by default.
+  Ideally, the application will react to the error by transparently
+  retrying the transaction, while the database gets up to date. A
+  subsequent transaction will no longer be stale.
 
-- Added the revert-when-stale option. When the option is true and the
-  database connection is stale, RelStorage reverts the ZODB connection
-  to the stale state rather than raise ReadConflictError. This is the
-  old behavior. This option is intended for highly available, read-only
-  ZODB clients. This option would probably confuse users of read-write
-  ZODB clients, whose changes would seem to be temporarily reverted
-  sometimes.
+- Replication: Added the revert-when-stale option. When this option is
+  true and the database connection is stale, RelStorage reverts the
+  ZODB connection to the stale state rather than raise
+  ReadConflictError. This option is intended for highly available,
+  read-only ZODB clients. This option would probably confuse users of
+  read-write ZODB clients, whose changes would sometimes seem to be
+  temporarily reverted.
 
-TODO: provide a default random memcache prefix that is consistent per database.
+- Caching: Use the database name as the cache-prefix by default. This
+  will hopefully help people who accidentally use a single cache for
+  multiple databases.
 
 1.5.0 (2011-06-30)
 ------------------

@@ -79,7 +79,7 @@ class PostgreSQLAdapter(object):
             keep_history=self.keep_history,
             )
         self.mover = ObjectMover(
-            database_name='postgresql',
+            database_type='postgresql',
             options=options,
             runner=self.runner,
             version_detector=self.version_detector,
@@ -99,26 +99,26 @@ class PostgreSQLAdapter(object):
 
         if self.keep_history:
             self.packundo = HistoryPreservingPackUndo(
-                database_name='postgresql',
+                database_type='postgresql',
                 connmanager=self.connmanager,
                 runner=self.runner,
                 locker=self.locker,
                 options=options,
                 )
             self.dbiter = HistoryPreservingDatabaseIterator(
-                database_name='postgresql',
+                database_type='postgresql',
                 runner=self.runner,
                 )
         else:
             self.packundo = HistoryFreePackUndo(
-                database_name='postgresql',
+                database_type='postgresql',
                 connmanager=self.connmanager,
                 runner=self.runner,
                 locker=self.locker,
                 options=options,
                 )
             self.dbiter = HistoryFreeDatabaseIterator(
-                database_name='postgresql',
+                database_type='postgresql',
                 runner=self.runner,
                 )
 

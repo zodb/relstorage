@@ -25,7 +25,6 @@ class RowBatcher(object):
 
     row_limit = 100
     size_limit = 1<<20
-    database_name = None
     support_batch_insert = True
 
     def __init__(self, cursor, row_limit=None):

@@ -110,7 +110,7 @@ class MySQLAdapter(object):
             keep_history=self.keep_history,
             )
         self.mover = ObjectMover(
-            database_name='mysql',
+            database_type='mysql',
             options=options,
             Binary=MySQLdb.Binary,
             )
@@ -134,26 +134,26 @@ class MySQLAdapter(object):
 
         if self.keep_history:
             self.packundo = MySQLHistoryPreservingPackUndo(
-                database_name='mysql',
+                database_type='mysql',
                 connmanager=self.connmanager,
                 runner=self.runner,
                 locker=self.locker,
                 options=options,
                 )
             self.dbiter = HistoryPreservingDatabaseIterator(
-                database_name='mysql',
+                database_type='mysql',
                 runner=self.runner,
                 )
         else:
             self.packundo = MySQLHistoryFreePackUndo(
-                database_name='mysql',
+                database_type='mysql',
                 connmanager=self.connmanager,
                 runner=self.runner,
                 locker=self.locker,
                 options=options,
                 )
             self.dbiter = HistoryFreeDatabaseIterator(
-                database_name='mysql',
+                database_type='mysql',
                 runner=self.runner,
                 )
 

@@ -59,9 +59,10 @@ class StorageCache(object):
     # responding stores the value.
     commit_count = object()
 
-    def __init__(self, adapter, options, local_client=None):
+    def __init__(self, adapter, options, prefix, local_client=None):
         self.adapter = adapter
         self.options = options
+        self.prefix = prefix or ''
         if local_client is None:
             local_client = LocalClient(options)
         self.clients_local_first = [local_client]
@@ -78,9 +79,6 @@ class StorageCache(object):
         # while self.clients_global_first is in order from global to local.
         self.clients_global_first = list(self.clients_local_first)
         self.clients_global_first.reverse()
-
-        # every cache key has a prefix
-        self.prefix = options.cache_prefix or ''
 
         # commit_count_key contains a number that is incremented
         # for every commit.  See tpc_finish().
@@ -106,9 +104,10 @@ class StorageCache(object):
         """Return a copy of this instance sharing the same local client"""
         if self.options.share_local_cache:
             local_client = self.clients_local_first[0]
-            return StorageCache(self.adapter, self.options, local_client)
+            return StorageCache(self.adapter, self.options, self.prefix,
+                local_client)
         else:
-            return StorageCache(self.adapter, self.options)
+            return StorageCache(self.adapter, self.options, self.prefix)
 
     def clear(self):
         """Remove all data from the cache.  Called by speed tests."""
@@ -735,4 +734,3 @@ class LocalClient(object):
             return res
         finally:
             self._lock_release()
-

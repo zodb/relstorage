@@ -21,8 +21,8 @@ class DatabaseIterator(object):
     """Abstract base class for database iteration.
     """
 
-    def __init__(self, database_name, runner):
-        self.use_base64 = (database_name == 'postgresql')
+    def __init__(self, database_type, runner):
+        self.use_base64 = (database_type == 'postgresql')
         self.runner = runner
 
     def iter_objects(self, cursor, tid):

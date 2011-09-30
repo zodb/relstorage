@@ -27,7 +27,8 @@ class StorageCacheTests(unittest.TestCase):
         return StorageCache
 
     def _makeOne(self):
-        return self.getClass()(MockAdapter(), MockOptionsWithFakeCache())
+        return self.getClass()(MockAdapter(), MockOptionsWithFakeCache(),
+            'myprefix')
 
     def test_ctor(self):
         from relstorage.tests.fakecache import Client
@@ -58,7 +59,7 @@ class StorageCacheTests(unittest.TestCase):
         from relstorage.tests.fakecache import data
         from ZODB.utils import p64
         adapter = MockAdapter()
-        c = self.getClass()(adapter, MockOptionsWithFakeCache())
+        c = self.getClass()(adapter, MockOptionsWithFakeCache(), 'myprefix')
         c.current_tid = 60
         c.checkpoints = (50, 40)
         c.delta_after0[2] = 55
@@ -70,7 +71,7 @@ class StorageCacheTests(unittest.TestCase):
         from relstorage.tests.fakecache import data
         from ZODB.utils import p64
         adapter = MockAdapter()
-        c = self.getClass()(adapter, MockOptionsWithFakeCache())
+        c = self.getClass()(adapter, MockOptionsWithFakeCache(), 'myprefix')
         c.current_tid = 60
         c.checkpoints = (50, 40)
         c.delta_after0[2] = 55
@@ -82,7 +83,7 @@ class StorageCacheTests(unittest.TestCase):
         from relstorage.tests.fakecache import data
         from ZODB.utils import p64
         adapter = MockAdapter()
-        c = self.getClass()(adapter, MockOptionsWithFakeCache())
+        c = self.getClass()(adapter, MockOptionsWithFakeCache(), 'myprefix')
         c.current_tid = 60
         c.checkpoints = (50, 40)
         c.delta_after0[2] = 55
@@ -98,7 +99,7 @@ class StorageCacheTests(unittest.TestCase):
         from relstorage.tests.fakecache import data
         from ZODB.utils import p64
         adapter = MockAdapter()
-        c = self.getClass()(adapter, MockOptionsWithFakeCache())
+        c = self.getClass()(adapter, MockOptionsWithFakeCache(), 'myprefix')
         c.current_tid = 55
         c.checkpoints = (50, 40)
         c.delta_after0[2] = 55
@@ -115,7 +116,7 @@ class StorageCacheTests(unittest.TestCase):
         from relstorage.tests.fakecache import data
         from ZODB.utils import p64
         adapter = MockAdapter()
-        c = self.getClass()(adapter, MockOptionsWithFakeCache())
+        c = self.getClass()(adapter, MockOptionsWithFakeCache(), 'myprefix')
         c.current_tid = 60
         c.checkpoints = (50, 40)
         data['myprefix:state:50:2'] = p64(45) + 'xyz'
@@ -126,7 +127,7 @@ class StorageCacheTests(unittest.TestCase):
         from relstorage.tests.fakecache import data
         from ZODB.utils import p64
         adapter = MockAdapter()
-        c = self.getClass()(adapter, MockOptionsWithFakeCache())
+        c = self.getClass()(adapter, MockOptionsWithFakeCache(), 'myprefix')
         c.current_tid = 60
         c.checkpoints = (50, 40)
         adapter.mover.data[2] = ('xyz', 45)
@@ -138,7 +139,7 @@ class StorageCacheTests(unittest.TestCase):
         from relstorage.tests.fakecache import data
         from ZODB.utils import p64
         adapter = MockAdapter()
-        c = self.getClass()(adapter, MockOptionsWithFakeCache())
+        c = self.getClass()(adapter, MockOptionsWithFakeCache(), 'myprefix')
         c.current_tid = 60
         c.checkpoints = (50, 40)
         c.delta_after1[2] = 45
@@ -151,7 +152,7 @@ class StorageCacheTests(unittest.TestCase):
         from relstorage.tests.fakecache import data
         from ZODB.utils import p64
         adapter = MockAdapter()
-        c = self.getClass()(adapter, MockOptionsWithFakeCache())
+        c = self.getClass()(adapter, MockOptionsWithFakeCache(), 'myprefix')
         c.current_tid = 60
         c.checkpoints = (50, 40)
         c.delta_after1[2] = 45
@@ -164,7 +165,7 @@ class StorageCacheTests(unittest.TestCase):
         from relstorage.tests.fakecache import data
         from ZODB.utils import p64
         adapter = MockAdapter()
-        c = self.getClass()(adapter, MockOptionsWithFakeCache())
+        c = self.getClass()(adapter, MockOptionsWithFakeCache(), 'myprefix')
         c.current_tid = 60
         c.checkpoints = (50, 40)
         data['myprefix:state:40:2'] = p64(35) + '123'
@@ -176,7 +177,7 @@ class StorageCacheTests(unittest.TestCase):
         from relstorage.tests.fakecache import data
         from ZODB.utils import p64
         adapter = MockAdapter()
-        c = self.getClass()(adapter, MockOptionsWithFakeCache())
+        c = self.getClass()(adapter, MockOptionsWithFakeCache(), 'myprefix')
         c.current_tid = 60
         c.checkpoints = (50, 40)
         adapter.mover.data[2] = ('123', 35)
@@ -337,7 +338,7 @@ class StorageCacheTests(unittest.TestCase):
         from relstorage.tests.fakecache import data
         data['myprefix:checkpoints'] = '50 40'
         adapter = MockAdapter()
-        c = self.getClass()(adapter, MockOptionsWithFakeCache())
+        c = self.getClass()(adapter, MockOptionsWithFakeCache(), 'myprefix')
         # Note that OID 3 changed twice.  list_changes is not required
         # to provide the list of changes in order, so simulate
         # a list of changes that is out of order.
@@ -354,7 +355,7 @@ class StorageCacheTests(unittest.TestCase):
         from relstorage.tests.fakecache import data
         data['myprefix:checkpoints'] = '40 30'
         adapter = MockAdapter()
-        c = self.getClass()(adapter, MockOptionsWithFakeCache())
+        c = self.getClass()(adapter, MockOptionsWithFakeCache(), 'myprefix')
         adapter.poller.changes = [(3, 42), (1, 35), (2, 45)]
         c.checkpoints = (40, 30)
         c.current_tid = 40
@@ -540,14 +541,12 @@ class LocalClientTests(unittest.TestCase):
 class MockOptions:
     cache_module_name = ''
     cache_servers = ''
-    cache_prefix = ''
     cache_local_mb = 1
     cache_delta_size_limit = 10000
 
 class MockOptionsWithFakeCache:
     cache_module_name = 'relstorage.tests.fakecache'
     cache_servers = 'host:9999'
-    cache_prefix = 'myprefix'
     cache_local_mb = 1
     cache_delta_size_limit = 10000
 

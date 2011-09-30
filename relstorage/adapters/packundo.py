@@ -31,8 +31,8 @@ class PackUndo(object):
 
     verify_sane_database = False
 
-    def __init__(self, database_name, connmanager, runner, locker, options):
-        self.database_name = database_name
+    def __init__(self, database_type, connmanager, runner, locker, options):
+        self.database_type = database_type
         self.connmanager = connmanager
         self.runner = runner
         self.locker = locker
@@ -403,7 +403,7 @@ class HistoryPreservingPackUndo(PackUndo):
         """
         log.debug("pre_pack: transaction %d: computing references ", tid)
         from_count = 0
-        use_base64 = (self.database_name == 'postgresql')
+        use_base64 = (self.database_type == 'postgresql')
 
         if use_base64:
             stmt = """
@@ -1004,7 +1004,7 @@ class HistoryFreePackUndo(PackUndo):
         Returns the number of references added.
         """
         oid_list = ','.join(str(oid) for oid in oids)
-        use_base64 = (self.database_name == 'postgresql')
+        use_base64 = (self.database_type == 'postgresql')
 
         if use_base64:
             stmt = """

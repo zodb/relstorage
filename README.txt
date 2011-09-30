@@ -596,9 +596,11 @@ underscores instead of dashes in the option names.
         option has no effect unless cache-servers is set.
 
 ``cache-prefix``
-        The prefix for all keys in the cache.  All clients using a
-        database should use the same cache-prefix.  Use this if you use
-        a single cache for multiple databases.
+        The prefix for all keys in the cache. All clients using a
+        database should use the same cache-prefix. Defaults to the
+        database name. (For example, in PostgreSQL, the database
+        name is determined by executing ``SELECT current_database()``.)
+        Set this if you have multiple databases with the same name.
 
 ``cache-local-mb``
         RelStorage caches pickled objects in memory, similar to a ZEO

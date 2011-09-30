@@ -765,7 +765,7 @@ END relstorage_op;
 """ % globals()
 
 
-def filter_script(script, database_name):
+def filter_script(script, database_type):
     res = []
     match = False
     for line in script.splitlines():
@@ -773,7 +773,7 @@ def filter_script(script, database_name):
         if not line or line.startswith('#'):
             continue
         if line.endswith(':'):
-            match = (database_name in line[:-1].split())
+            match = (database_type in line[:-1].split())
             continue
         if match:
             res.append(line)
@@ -816,7 +816,7 @@ class AbstractSchemaInstaller(object):
         'temp_undo',
     )
 
-    database_name = None  # provided by a subclass
+    database_type = None  # provided by a subclass
 
     def __init__(self, connmanager, runner, keep_history):
         self.connmanager = connmanager
@@ -835,11 +835,14 @@ class AbstractSchemaInstaller(object):
     def list_sequences(self, cursor):
         raise NotImplementedError()
 
+    def get_database_name(self, cursor):
+        raise NotImplementedError()
+
     def create(self, cursor):
         """Create the database tables."""
-        script = filter_script(self.schema_script, self.database_name)
+        script = filter_script(self.schema_script, self.database_type)
         self.runner.run_script(cursor, script)
-        script = filter_script(self.init_script, self.database_name)
+        script = filter_script(self.init_script, self.database_type)
         self.runner.run_script(cursor, script)
         tables = self.list_tables(cursor)
         self.check_compatibility(cursor, tables)
@@ -875,7 +878,7 @@ class AbstractSchemaInstaller(object):
         if not 'blob_chunk' in tables:
             # Add the blob_chunk table (RelStorage 1.5+)
             script = filter_script(
-                self.schema_script, self.database_name)
+                self.schema_script, self.database_type)
             expr = (r'(CREATE|ALTER)\s+(GLOBAL TEMPORARY\s+)?(TABLE|INDEX)'
                 '\s+(temp_)?blob_chunk')
             script = filter_statements(script, re.compile(expr, re.I))
@@ -896,7 +899,7 @@ class AbstractSchemaInstaller(object):
                     log.debug("Deleting from table %s...", table)
                     cursor.execute("DELETE FROM %s" % table)
             log.debug("Done deleting from tables.")
-            script = filter_script(self.init_script, self.database_name)
+            script = filter_script(self.init_script, self.database_type)
             if script:
                 log.debug("Running init script.")
                 self.runner.run_script(cursor, script)
@@ -920,12 +923,17 @@ class AbstractSchemaInstaller(object):
 class PostgreSQLSchemaInstaller(AbstractSchemaInstaller):
     implements(ISchemaInstaller)
 
-    database_name = 'postgresql'
+    database_type = 'postgresql'
 
     def __init__(self, connmanager, runner, locker, keep_history):
         super(PostgreSQLSchemaInstaller, self).__init__(
             connmanager, runner, keep_history)
         self.locker = locker
+
+    def get_database_name(self, cursor):
+        cursor.execute("SELECT current_database()")
+        for (name,) in cursor:
+            return name
 
     def prepare(self):
         """Create the database schema if it does not already exist."""
@@ -1037,7 +1045,12 @@ class PostgreSQLSchemaInstaller(AbstractSchemaInstaller):
 class MySQLSchemaInstaller(AbstractSchemaInstaller):
     implements(ISchemaInstaller)
 
-    database_name = 'mysql'
+    database_type = 'mysql'
+
+    def get_database_name(self, cursor):
+        cursor.execute("SELECT DATABASE()")
+        for (name,) in cursor:
+            return name
 
     def list_tables(self, cursor):
         cursor.execute("SHOW TABLES")
@@ -1063,7 +1076,12 @@ class MySQLSchemaInstaller(AbstractSchemaInstaller):
 class OracleSchemaInstaller(AbstractSchemaInstaller):
     implements(ISchemaInstaller)
 
-    database_name = 'oracle'
+    database_type = 'oracle'
+
+    def get_database_name(self, cursor):
+        cursor.execute("SELECT ora_database_name FROM DUAL")
+        for (name,) in cursor:
+            return name
 
     def prepare(self):
         """Create the database schema if it does not already exist."""
