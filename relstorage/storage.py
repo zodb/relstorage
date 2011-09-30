@@ -1235,9 +1235,8 @@ class RelStorage(
             # The database connection is stale, but postpone this
             # error until the application tries to read or write something.
             self._stale_error = e
-            # Always poll (override the poll_interval option).
-            self._poll_at = 0
-            return None, prev
+            self._poll_at = 0  # Don't defer polling.
+            return (), prev
 
         self._stale_error = None
 
