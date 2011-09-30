@@ -363,6 +363,10 @@ class IPoller(Interface):
         a list of (oid, tid) that have changed, or None to indicate
         that the changes are too complex to list.  new_polled_tid is
         never None.
+
+        This method may raise ReadConflictError if the database has
+        reverted to an earlier transaction, which can happen
+        in an asynchronously replicated database.
         """
 
     def list_changes(cursor, after_tid, last_tid):
@@ -466,4 +470,3 @@ class ITransactionControl(Interface):
 
 class ReplicaClosedException(Exception):
     """The connection to the replica has been closed"""
-

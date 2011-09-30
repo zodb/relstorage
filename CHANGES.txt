@@ -13,6 +13,18 @@ Next Release
   read-only database replica for load connections. This allows
   RelStorage to use read-only database replicas whenever possible.
 
+- When the database connection is stale (such as when RelStorage switches
+  to an asynchronous replica that is not yet up to date), RelStorage will
+  now raise ReadConflictError by default. Ideally, the application will
+  react to the error by transparently retrying the transaction, while
+  the database gets up to date. A subsequent transaction will no longer
+  be stale.
+
+- Added the revert-when-stale option, which can disable the new
+  behavior for stale database connections.  This option is intended
+  for highly available, read-only ZODB clients.  It would
+  confuse users of read-write ZODB clients.
+
 TODO: provide a default random memcache prefix that is consistent per database.
 
 1.5.0 (2011-06-30)
@@ -31,8 +43,8 @@ TODO: provide a default random memcache prefix that is consistent per database.
 - Oracle, PostgreSQL: Switch to storing ZODB blob in chunks up to 4GB
   (the maximum supported by cx_Oracle) or 2GB (PostgreSQL maximum blob size)
   to maximize blob reading and writing performance.
-  
-  The PostgreSQL blob_chunk schema changed to support this, see 
+
+  The PostgreSQL blob_chunk schema changed to support this, see
   notes/migrate-to-1.5.txt to update existing databases.
 
 - zodbconvert: When copying a database containing blobs, ensure the source

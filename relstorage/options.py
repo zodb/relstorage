@@ -47,6 +47,7 @@ class Options(object):
         self.replica_conf = None
         self.ro_replica_conf = None
         self.replica_timeout = 600.0
+        self.revert_when_stale = False
         self.poll_interval = 0
         self.pack_gc = True
         self.pack_prepack_only = False

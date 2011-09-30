@@ -41,6 +41,9 @@
     <key name="replica-timeout" datatype="float" default="600.0">
       <description>See the RelStorage README.txt file.</description>
     </key>
+    <key name="revert_when_stale" datatype="boolean" default="false">
+      <description>See the RelStorage README.txt file.</description>
+    </key>
     <key name="poll-interval" datatype="float" required="no">
       <description>See the RelStorage README.txt file.</description>
     </key>

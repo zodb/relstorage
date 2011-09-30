@@ -12,19 +12,23 @@
 #
 ##############################################################################
 
+from ZODB.POSException import ReadConflictError
 from relstorage.adapters.interfaces import IPoller
 from zope.interface import implements
 import logging
+
 log = logging.getLogger(__name__)
+
 
 class Poller:
     """Database change notification poller"""
     implements(IPoller)
 
-    def __init__(self, poll_query, keep_history, runner):
+    def __init__(self, poll_query, keep_history, runner, revert_when_stale):
         self.poll_query = poll_query
         self.keep_history = keep_history
         self.runner = runner
+        self.revert_when_stale = revert_when_stale
 
     def poll_invalidations(self, conn, cursor, prev_polled_tid, ignore_tid):
         """Polls for new transactions.
@@ -59,27 +63,29 @@ class Poller:
             # No transactions have been committed since prev_polled_tid.
             return (), new_polled_tid
 
-        if self.keep_history:
-            # If the previously polled transaction no longer exists,
-            # the cache is too old and needs to be cleared.
-            # XXX Do we actually need to detect this condition? I think
-            # if we delete this block of code, all the unreachable
-            # objects will be garbage collected anyway. So, as a test,
-            # there is no equivalent of this block of code for
-            # history-free storage. If something goes wrong, then we'll
-            # know there's some other edge condition we have to account
-            # for.
-            stmt = "SELECT 1 FROM transaction WHERE tid = %(tid)s"
-            cursor.execute(intern(stmt % self.runner.script_vars),
-                {'tid': prev_polled_tid})
-            rows = cursor.fetchall()
-            if not rows:
-                # Transaction not found; perhaps it has been packed.
-                # The connection cache needs to be cleared.
-                return None, new_polled_tid
+        elif new_polled_tid > prev_polled_tid:
+            # New transaction(s) have been added.
 
-        # Get the list of changed OIDs and return it.
-        if new_polled_tid > prev_polled_tid:
+            if self.keep_history:
+                # If the previously polled transaction no longer exists,
+                # the cache is too old and needs to be cleared.
+                # XXX Do we actually need to detect this condition? I think
+                # if we delete this block of code, all the unreachable
+                # objects will be garbage collected anyway. So, as a test,
+                # there is no equivalent of this block of code for
+                # history-free storage. If something goes wrong, then we'll
+                # know there's some other edge condition we have to account
+                # for.
+                stmt = "SELECT 1 FROM transaction WHERE tid = %(tid)s"
+                cursor.execute(intern(stmt % self.runner.script_vars),
+                    {'tid': prev_polled_tid})
+                rows = cursor.fetchall()
+                if not rows:
+                    # Transaction not found; perhaps it has been packed.
+                    # The connection cache should be cleared.
+                    return None, new_polled_tid
+
+            # Get the list of changed OIDs and return it.
             if self.keep_history:
                 stmt = """
                 SELECT zoid, tid
@@ -104,21 +110,28 @@ class Poller:
             return changes, new_polled_tid
 
         else:
-            # We moved backward in time. This can happen after failover
-            # to an asynchronous slave that is not fully up to date. If
-            # this was not caused by failover, this condition suggests that
-            # transaction IDs are not being created in order, which can
-            # lead to consistency violations.
-            log.warning(
-                "Detected backward time travel (old tid %d, new tid %d). "
-                "This is acceptable if it was caused by failover to a "
-                "read-only asynchronous slave, but otherwise it may "
-                "indicate a problem.",
-                prev_polled_tid, new_polled_tid)
-            # Although we could handle this situation by looking at the
-            # whole cPickleCache and invalidating only certain objects,
-            # invalidating the whole cache is simpler.
-            return None, new_polled_tid
+            # The database connection is stale. This can happen after
+            # reading an asynchronous slave that is not fully up to date.
+            # (It may also suggest that transaction IDs are not being created
+            # in order, which would be a serious bug leading to consistency
+            # violations.)
+            if self.revert_when_stale:
+                # This client prefers to revert to the old state.
+                log.warning(
+                    "Reverting to stale transaction ID %d and clearing cache. "
+                    "(prev_polled_tid=%d)",
+                    new_polled_tid, prev_polled_tid)
+                # We have to invalidate the whole cPickleCache, otherwise
+                # the cache would be inconsistent with the reverted state.
+                return None, new_polled_tid
+            else:
+                # This client never wants to revert to stale data, so
+                # raise ReadConflictError to trigger a retry.
+                # We're probably just waiting for async replication
+                # to catch up, so retrying could do the trick.
+                raise ReadConflictError(
+                    "The database connection is stale: new_polled_tid=%d, "
+                    "prev_polled_tid=%d." % (new_polled_tid, prev_polled_tid))
 
     def list_changes(self, cursor, after_tid, last_tid):
         """Return the (oid, tid) values changed in a range of transactions.

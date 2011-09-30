@@ -257,8 +257,7 @@ class HistoryFreeToFileStorage(
     keep_history = False
 
     def setUp(self):
-        self.open(create=1)
-        self._storage.zap_all()
+        self._storage = self.make_storage()
         self._dst = FileStorage("Dest.fs", create=True)
 
     def tearDown(self):
@@ -279,8 +278,6 @@ class HistoryFreeFromFileStorage(
     keep_history = False
 
     def setUp(self):
-        self.open(create=1)
-        self._storage.zap_all()
         self._dst = self._storage
         self._storage = FileStorage("Source.fs", create=True)
 

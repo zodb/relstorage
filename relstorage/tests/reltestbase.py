@@ -13,10 +13,8 @@
 ##############################################################################
 """A foundation for RelStorage tests"""
 
-from persistent import Persistent
-from persistent.mapping import PersistentMapping
-from relstorage.tests import fakecache
 from ZODB.DB import DB
+from ZODB.POSException import ReadConflictError
 from ZODB.serialize import referencesf
 from ZODB.tests import BasicStorage
 from ZODB.tests import ConflictResolution
@@ -26,10 +24,11 @@ from ZODB.tests import PersistentStorage
 from ZODB.tests import ReadOnlyStorage
 from ZODB.tests import StorageTestBase
 from ZODB.tests import Synchronization
-from ZODB.tests.MinPO import MinPO
 from ZODB.tests.StorageTestBase import zodb_pickle
 from ZODB.tests.StorageTestBase import zodb_unpickle
-from ZODB.utils import p64
+from persistent import Persistent
+from persistent.mapping import PersistentMapping
+from relstorage.tests import fakecache
 import random
 import time
 import transaction
@@ -37,24 +36,59 @@ import transaction
 
 class RelStorageTestBase(StorageTestBase.StorageTestBase):
 
-    def make_adapter(self):
-        # abstract method
-        raise NotImplementedError
-
-    def open(self, **kwargs):
-        from relstorage.storage import RelStorage
-        adapter = self.make_adapter()
-        self._storage = RelStorage(adapter, **kwargs)
-        self._storage._batcher_row_limit = 1
+    keep_history = None  # Override
+    _storage_created = None
 
     def setUp(self):
-        self.open(create=1)
-        self._storage.zap_all()
+        pass
 
     def tearDown(self):
         transaction.abort()
-        self._storage.close()
-        self._storage.cleanup()
+        storage = self._storage
+        if storage is not None:
+            self._storage = None
+            storage.close()
+            storage.cleanup()
+
+    def get_storage(self):
+        # Create a storage with default options
+        # if it has not been created already.
+        storage = self._storage_created
+        if storage is None:
+            storage = self.make_storage()
+            self._storage_created = storage
+        return storage
+
+    def set_storage(self, storage):
+        self._storage_created = storage
+
+    _storage = property(get_storage, set_storage)
+
+    def make_adapter(self, options):
+        # abstract method
+        raise NotImplementedError()
+
+    def make_storage(self, zap=True, **kw):
+        from relstorage.options import Options
+        from relstorage.storage import RelStorage
+        options = Options(keep_history=self.keep_history, **kw)
+        adapter = self.make_adapter(options)
+        storage = RelStorage(adapter, options=options)
+        storage._batcher_row_limit = 1
+        if zap:
+            storage.zap_all()
+        return storage
+
+    def open(self, read_only=False):
+        # This is used by a few ZODB tests that close and reopen the storage.
+        storage = self._storage
+        if storage is not None:
+            self._storage = None
+            storage.close()
+            storage.cleanup()
+        self._storage = storage = self.make_storage(
+            read_only=read_only, zap=False)
+        return storage
 
 
 class GenericRelStorageTests(
@@ -248,15 +282,18 @@ class GenericRelStorageTests(
 
     def checkUseCache(self):
         # Store an object, cache it, then retrieve it from the cache
-        self._storage._options.cache_servers = 'x:1 y:2'
-        self._storage._options.cache_module_name = fakecache.__name__
-        self._storage._options.cache_prefix = 'zzz'
+        self._storage = self.make_storage(
+            cache_servers='x:1 y:2',
+            cache_module_name=fakecache.__name__,
+            cache_prefix='zzz',
+        )
 
         fakecache.data.clear()
         db = DB(self._storage)
         try:
             c1 = db.open()
-            self.assert_(c1._storage._cache.clients_global_first[0].servers,
+            self.assertEqual(
+                c1._storage._cache.clients_global_first[0].servers,
                 ['x:1', 'y:2'])
             r1 = c1.root()
             # The root state and checkpoints should now be cached.
@@ -337,7 +374,9 @@ class GenericRelStorageTests(
     def checkPollInterval(self, shared_cache=True):
         # Verify the poll_interval parameter causes RelStorage to
         # delay invalidation polling.
-        self._storage._options.poll_interval = 3600
+        self._storage = self.make_storage(
+            poll_interval=3600, share_local_cache=shared_cache)
+
         db = DB(self._storage)
         try:
             tm1 = transaction.TransactionManager()
@@ -386,12 +425,12 @@ class GenericRelStorageTests(
             db.close()
 
     def checkPollIntervalWithUnsharedCache(self):
-        self._storage._options.share_local_cache = False
         self.checkPollInterval(shared_cache=False)
 
     def checkCachePolling(self):
-        self._storage._options.poll_interval = 3600
-        self._storage._options.share_local_cache = False
+        self._storage = self.make_storage(
+            poll_interval=3600, share_local_cache=False)
+
         db = DB(self._storage)
         try:
             # Set up the database.
@@ -481,7 +520,8 @@ class GenericRelStorageTests(
     def checkPackBatchLockNoWait(self):
         # Exercise the code in the pack algorithm that attempts to get the
         # commit lock but will sleep if the lock is busy.
-        self._storage._adapter.packundo.options.pack_batch_timeout = 0
+        self._storage = self.make_storage(pack_batch_timeout=0)
+
         adapter = self._storage._adapter
         test_conn, test_cursor = adapter.connmanager.open()
 
@@ -592,13 +632,63 @@ class GenericRelStorageTests(
         self.assertRaises(UnpicklingError, self._storage.pack,
             time.time() + 10000, referencesf)
 
-    def checkBackwardTimeTravel(self):
-        # When a failover event causes the storage to switch to an
-        # asynchronous slave that is not fully up to date, the poller
+    def checkBackwardTimeTravelWithoutRevertWhenStale(self):
+        # If revert_when_stale is false (the default), when the database
+        # connection is stale (such as through failover to an
+        # asynchronous slave that is not fully up to date), the poller
         # should notice that backward time travel has occurred and
-        # handle the situation by invalidating all objects that have
-        # changed in the interval. (Currently, we simply invalidate all
-        # objects when backward time travel occurs.)
+        # raise a ReadConflictError.
+        self._storage = self.make_storage(revert_when_stale=False)
+
+        import os
+        import shutil
+        import tempfile
+        from ZODB.FileStorage import FileStorage
+        db = DB(self._storage)
+        try:
+            c = db.open()
+            r = c.root()
+            r['alpha'] = PersistentMapping()
+            transaction.commit()
+
+            # To simulate failover to an out of date async slave, take
+            # a snapshot of the database at this point, change some
+            # object, then restore the database to its earlier state.
+
+            d = tempfile.mkdtemp()
+            try:
+                fs = FileStorage(os.path.join(d, 'Data.fs'))
+                fs.copyTransactionsFrom(c._storage)
+
+                r['beta'] = PersistentMapping()
+                transaction.commit()
+                self.assertTrue('beta' in r)
+
+                c._storage.zap_all()
+                c._storage.copyTransactionsFrom(fs)
+
+                fs.close()
+            finally:
+                shutil.rmtree(d)
+
+            # Sync, which will call poll_invalidations().
+            c.sync()
+
+            # Try to load an object, which should cause ReadConflictError.
+            r._p_deactivate()
+            self.assertRaises(ReadConflictError, lambda: r['beta'])
+
+        finally:
+            db.close()
+
+    def checkBackwardTimeTravelWithRevertWhenStale(self):
+        # If revert_when_stale is true, when the database
+        # connection is stale (such as through failover to an
+        # asynchronous slave that is not fully up to date), the poller
+        # should notice that backward time travel has occurred and
+        # invalidate all objects that have changed in the interval.
+        self._storage = self.make_storage(revert_when_stale=True)
+
         import os
         import shutil
         import tempfile

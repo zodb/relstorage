@@ -16,21 +16,22 @@
 Stores pickles in the database.
 """
 
-from persistent.TimeStamp import TimeStamp
-from relstorage.blobhelper import BlobHelper
-from relstorage.blobhelper import is_blob_record
-from relstorage.cache import StorageCache
-from relstorage.options import Options
-from ZODB.BaseStorage import DataRecord
-from ZODB.BaseStorage import TransactionRecord
 from ZODB import ConflictResolution
 from ZODB import POSException
+from ZODB.BaseStorage import DataRecord
+from ZODB.BaseStorage import TransactionRecord
 from ZODB.FileStorage import FileIterator
 from ZODB.POSException import POSKeyError
 from ZODB.UndoLogCompatible import UndoLogCompatible
 from ZODB.utils import p64
 from ZODB.utils import u64
+from persistent.TimeStamp import TimeStamp
+from relstorage.blobhelper import BlobHelper
+from relstorage.blobhelper import is_blob_record
+from relstorage.cache import StorageCache
+from relstorage.options import Options
 from zope.interface import implements
+import ZODB.interfaces
 import base64
 import cPickle
 import logging
@@ -39,7 +40,6 @@ import tempfile
 import threading
 import time
 import weakref
-import ZODB.interfaces
 
 try:
     from ZODB.interfaces import StorageStopIteration
@@ -142,6 +142,10 @@ class RelStorage(
     # _batcher_row_limit: The number of rows to queue before
     # calling the database.
     _batcher_row_limit = 100
+
+    # _stale_error is None most of the time.  It's a ReadConflictError
+    # when the database connection is stale (due to async replication).
+    _stale_error = None
 
     def __init__(self, adapter, name=None, create=None,
             options=None, cache=None, blobhelper=None, **kwoptions):
@@ -328,7 +332,7 @@ class RelStorage(
         self._cache.clear()
 
     def release(self):
-        """Release back end database sessions used by this storage instance.
+        """Release database sessions used by this storage instance.
         """
         self._lock_acquire()
         try:
@@ -446,6 +450,9 @@ class RelStorage(
         logfunc('; '.join(msg))
 
     def load(self, oid, version=''):
+        if self._stale_error is not None:
+            raise self._stale_error
+
         oid_int = u64(oid)
         cache = self._cache
 
@@ -471,7 +478,10 @@ class RelStorage(
             raise POSKeyError(oid)
 
     def getTid(self, oid):
-        state, serial = self.load(oid, '')
+        if self._stale_error is not None:
+            raise self._stale_error
+
+        _state, serial = self.load(oid, '')
         return serial
 
     getSerial = getTid  # ZODB 3.7
@@ -510,6 +520,9 @@ class RelStorage(
 
     def loadBefore(self, oid, tid):
         """Return the most recent revision of oid before tid committed."""
+        if self._stale_error is not None:
+            raise self._stale_error
+
         oid_int = u64(oid)
 
         self._lock_acquire()
@@ -543,6 +556,8 @@ class RelStorage(
             self._lock_release()
 
     def store(self, oid, serial, data, version, transaction):
+        if self._stale_error is not None:
+            raise self._stale_error
         if self._is_read_only:
             raise POSException.ReadOnlyError()
         if transaction is not self._transaction:
@@ -580,6 +595,8 @@ class RelStorage(
         # Like store(), but used for importing transactions.  See the
         # comments in FileStorage.restore().  The prev_txn optimization
         # is not used.
+        if self._stale_error is not None:
+            raise self._stale_error
         if self._is_read_only:
             raise POSException.ReadOnlyError()
         if transaction is not self._transaction:
@@ -606,6 +623,8 @@ class RelStorage(
             self._lock_release()
 
     def checkCurrentSerialInTransaction(self, oid, serial, transaction):
+        if self._stale_error is not None:
+            raise self._stale_error
         if transaction is not self._transaction:
             raise POSException.StorageTransactionError(self, transaction)
 
@@ -626,6 +645,8 @@ class RelStorage(
         self._txn_check_serials[oid] = serial
 
     def tpc_begin(self, transaction, tid=None, status=' '):
+        if self._stale_error is not None:
+            raise self._stale_error
         if self._is_read_only:
             raise POSException.ReadOnlyError()
         self._lock_acquire()
@@ -916,6 +937,8 @@ class RelStorage(
             self._lock_release()
 
     def new_oid(self):
+        if self._stale_error is not None:
+            raise self._stale_error
         if self._is_read_only:
             raise POSException.ReadOnlyError()
         self._lock_acquire()
@@ -950,6 +973,8 @@ class RelStorage(
         return self._adapter.keep_history
 
     def undoLog(self, first=0, last=-20, filter=None):
+        if self._stale_error is not None:
+            raise self._stale_error
         if last < 0:
             last = first - last
 
@@ -980,6 +1005,8 @@ class RelStorage(
             adapter.connmanager.close(conn, cursor)
 
     def history(self, oid, version=None, size=1, filter=None):
+        if self._stale_error is not None:
+            raise self._stale_error
         self._lock_acquire()
         try:
             cursor = self._load_cursor
@@ -1020,6 +1047,8 @@ class RelStorage(
         the transaction.
         """
 
+        if self._stale_error is not None:
+            raise self._stale_error
         if self._is_read_only:
             raise POSException.ReadOnlyError()
         if transaction is not self._transaction:
@@ -1199,8 +1228,18 @@ class RelStorage(
         prev = self._prev_polled_tid
 
         # get a list of changed OIDs and the most recent tid
-        changes, new_polled_tid = self._restart_load_and_call(
-            self._adapter.poller.poll_invalidations, prev, ignore_tid)
+        try:
+            changes, new_polled_tid = self._restart_load_and_call(
+                self._adapter.poller.poll_invalidations, prev, ignore_tid)
+        except POSException.ReadConflictError, e:
+            # The database connection is stale, but postpone this
+            # error until the application tries to read or write something.
+            self._stale_error = e
+            # Always poll (override the poll_interval option).
+            self._poll_at = 0
+            return None, prev
+
+        self._stale_error = None
 
         # Inform the cache of the changes.
         self._cache.after_poll(
@@ -1329,7 +1368,7 @@ class RelStorage(
         elif isinstance(other, FileIterator):
             # Create copy and ask for that for it's length so we do not
             # exhaust the original iterator
-            copy = FileIterator(other._file_name, other._start, other._stop, 
+            copy = FileIterator(other._file_name, other._start, other._stop,
                 other._pos)
             num_txns = len(list(copy))
         else:

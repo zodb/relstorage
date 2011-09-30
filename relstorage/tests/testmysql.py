@@ -29,18 +29,19 @@ base_dbname = os.environ.get('RELSTORAGETEST_DBNAME', 'relstoragetest')
 
 
 class UseMySQLAdapter:
-    def make_adapter(self):
+
+    def make_adapter(self, options):
         from relstorage.adapters.mysql import MySQLAdapter
         if self.keep_history:
             db = base_dbname
         else:
             db = base_dbname + '_hf'
         return MySQLAdapter(
-            options=Options(keep_history=self.keep_history),
+            options=options,
             db=db,
             user='relstoragetest',
             passwd='relstoragetest',
-            )
+        )
 
 
 class ZConfigTests:

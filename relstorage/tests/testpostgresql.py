@@ -29,7 +29,8 @@ base_dbname = os.environ.get('RELSTORAGETEST_DBNAME', 'relstoragetest')
 
 
 class UsePostgreSQLAdapter:
-    def make_adapter(self):
+
+    def make_adapter(self, options):
         from relstorage.adapters.postgresql import PostgreSQLAdapter
         if self.keep_history:
             db = base_dbname
@@ -37,8 +38,8 @@ class UsePostgreSQLAdapter:
             db = base_dbname + '_hf'
         return PostgreSQLAdapter(
             dsn='dbname=%s user=relstoragetest password=relstoragetest' % db,
-            options=Options(keep_history=self.keep_history),
-            )
+            options=options,
+        )
 
 
 class ZConfigTests:

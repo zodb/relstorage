@@ -482,6 +482,31 @@ underscores instead of dashes in the option names.
         try to revert to the primary replica after the specified
         timeout (in seconds).  The default is 600, meaning 10 minutes.
 
+``revert-when-stale``
+        Specifies what to do when a database connection is stale.
+        This is especially applicable to asynchronously replicated
+        databases: RelStorage could switch to a replica that is not
+        yet up to date.
+
+        When ``revert-when-stale`` is ``false`` (the default) and the
+        database connection is stale, RelStorage will raise a
+        ReadConflictError if the application tries to read or write
+        anything. The application should react to the
+        ReadConflictError by retrying the transaction after a delay
+        (possibly multiple times.) Once the database catches
+        up, a subsequent transaction will see the update and the
+        ReadConflictError will not occur again.
+
+        When ``revert-when-stale`` is ``true`` and the database connection
+        is stale, RelStorage will log a warning, clear the affected
+        ZODB connection cache (to prevent consistency errors), and let
+        the application continue with database state from
+        an earlier transaction. This behavior is intended to be useful
+        for highly available, read-only ZODB clients. Enabling this
+        option on ZODB clients that read and write the database is
+        likely to cause confusion for users whose changes
+        seem to be temporarily reverted.
+
 ``poll-interval``
         Defer polling the database for the specified maximum time interval,
         in seconds.  Set to 0 (the default) to always poll.  Fractional
@@ -522,7 +547,7 @@ underscores instead of dashes in the option names.
         of what to pack, but no data is actually removed.  After a pre-pack,
         the pack_object, pack_state, and pack_state_tid tables are filled
         with the list of object states and objects that would have been
-        removed.  If pack-gc is true, the object_ref table will also be fully 
+        removed.  If pack-gc is true, the object_ref table will also be fully
         populated. The object_ref table can be queried to discover references
         between stored objects.
 

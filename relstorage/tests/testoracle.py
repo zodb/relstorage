@@ -30,7 +30,8 @@ base_dbname = os.environ.get('RELSTORAGETEST_DBNAME', 'relstoragetest')
 
 
 class UseOracleAdapter:
-    def make_adapter(self):
+
+    def make_adapter(self, options):
         from relstorage.adapters.oracle import OracleAdapter
         dsn = os.environ.get('ORACLE_TEST_DSN', 'XE')
         if self.keep_history:
@@ -41,8 +42,8 @@ class UseOracleAdapter:
             user=db,
             password='relstoragetest',
             dsn=dsn,
-            options=Options(keep_history=self.keep_history),
-            )
+            options=options,
+        )
 
 
 class ZConfigTests:

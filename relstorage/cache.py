@@ -467,13 +467,17 @@ class StorageCache(object):
                 new_checkpoints = (new_tid_int, new_tid_int)
             allow_shift = False
 
+        # We want to keep the current checkpoints for speed, but we
+        # have to replace them (to avoid consistency violations)
+        # if certain conditions happen (like emptying the ZODB cache).
         if (new_checkpoints == self.checkpoints
                 and changes is not None
                 and prev_tid_int
                 and prev_tid_int <= self.current_tid
                 and new_tid_int >= self.current_tid
                 ):
-            # Keep the checkpoints and update self.delta_after0.
+            # All the conditions for keeping the checkpoints were met,
+            # so just update self.delta_after0 and self.current_tid.
             m = self.delta_after0
             m_get = m.get
             for oid_int, tid_int in changes:
@@ -482,6 +486,7 @@ class StorageCache(object):
                     m[oid_int] = tid_int
             self.current_tid = new_tid_int
         else:
+            # We have to replace the checkpoints.
             cp0, cp1 = new_checkpoints
             log.debug("Using new checkpoints: %d %d", cp0, cp1)
             # Use the checkpoints specified by the cache.
@@ -491,20 +496,20 @@ class StorageCache(object):
             if cp1 < new_tid_int:
                 # poller.list_changes provides an iterator of
                 # (oid, tid) where tid > after_tid and tid <= last_tid.
-                changes = self.adapter.poller.list_changes(
+                change_list = self.adapter.poller.list_changes(
                     cursor, cp1, new_tid_int)
 
                 # Make a dictionary that contains, for each oid, the most
                 # recent tid listed in changes.
-                changes_dict = {}
-                if not isinstance(changes, list):
-                    changes = list(changes)
-                changes.sort()
-                for oid_int, tid_int in changes:
-                    changes_dict[oid_int] = tid_int
+                change_dict = {}
+                if not isinstance(change_list, list):
+                    change_list = list(change_list)
+                change_list.sort()
+                for oid_int, tid_int in change_list:
+                    change_dict[oid_int] = tid_int
 
                 # Put the changes in new_delta_after*.
-                for oid_int, tid_int in changes_dict.iteritems():
+                for oid_int, tid_int in change_dict.iteritems():
                     if tid_int > cp0:
                         new_delta_after0[oid_int] = tid_int
                     elif tid_int > cp1:

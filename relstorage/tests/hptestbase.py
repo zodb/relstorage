@@ -193,15 +193,15 @@ class HistoryPreservingRelStorageTests(
         return oid
 
     def checkPackGCDisabled(self):
-        self._storage._adapter.packundo.options.pack_gc = False
+        self._storage = self.make_storage(pack_gc=False)
         self.checkPackGC(expect_object_deleted=False)
 
     def checkPackGCPrePackOnly(self):
-        self._storage._options.pack_prepack_only = True
+        self._storage = self.make_storage(pack_prepack_only=True)
         self.checkPackGC(expect_object_deleted=False)
 
     def checkPackGCReusePrePackData(self):
-        self._storage._options.pack_prepack_only = True
+        self._storage = self.make_storage(pack_prepack_only=True)
         oid = self.checkPackGC(expect_object_deleted=False)
         # We now have pre-pack analysis data
         self._storage._options.pack_prepack_only = False
@@ -243,13 +243,12 @@ class HistoryPreservingRelStorageTests(
 class HistoryPreservingToFileStorage(
         RelStorageTestBase,
         UndoableRecoveryStorage,
-        ):
+    ):
 
     keep_history = True
 
     def setUp(self):
-        self.open(create=1)
-        self._storage.zap_all()
+        self._storage = self.make_storage()
         self._dst = FileStorage("Dest.fs", create=True)
 
     def tearDown(self):
@@ -265,14 +264,12 @@ class HistoryPreservingToFileStorage(
 class HistoryPreservingFromFileStorage(
         RelStorageTestBase,
         UndoableRecoveryStorage,
-        ):
+    ):
 
     keep_history = True
 
     def setUp(self):
-        self.open(create=1)
-        self._storage.zap_all()
-        self._dst = self._storage
+        self._dst = self.make_storage()
         self._storage = FileStorage("Source.fs", create=True)
 
     def tearDown(self):

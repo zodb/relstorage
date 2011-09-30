@@ -129,7 +129,8 @@ class MySQLAdapter(object):
             poll_query=poll_query,
             keep_history=self.keep_history,
             runner=self.runner,
-            )
+            revert_when_stale=options.revert_when_stale,
+        )
 
         if self.keep_history:
             self.packundo = MySQLHistoryPreservingPackUndo(
