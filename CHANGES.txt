@@ -20,10 +20,13 @@ Next Release
   the database gets up to date. A subsequent transaction will no longer
   be stale.
 
-- Added the revert-when-stale option, which can disable the new
-  behavior for stale database connections.  This option is intended
-  for highly available, read-only ZODB clients.  It would
-  confuse users of read-write ZODB clients.
+- Added the revert-when-stale option. When the option is true and the
+  database connection is stale, RelStorage reverts the ZODB connection
+  to the stale state rather than raise ReadConflictError. This is the
+  old behavior. This option is intended for highly available, read-only
+  ZODB clients. This option would probably confuse users of read-write
+  ZODB clients, whose changes would seem to be temporarily reverted
+  sometimes.
 
 TODO: provide a default random memcache prefix that is consistent per database.
 

@@ -198,15 +198,14 @@ class Psycopg2ConnectionManager(AbstractConnectionManager):
                 return conn, cursor
             except psycopg2.OperationalError, e:
                 if replica is not None:
-                    log.warning("Unable to connect to replica %s: %s",
-                        replica, e)
-                    replica = replica_selector.next()
-                    if replica is not None:
-                        # try the new replica
+                    next_replica = replica_selector.next()
+                    if next_replica is not None:
+                        log.warning("Unable to connect to replica %s: %s, "
+                            "now trying %s", replica, e, next_replica)
+                        replica = next_replica
                         dsn = self._alter_dsn(replica)
                         continue
-                else:
-                    log.warning("Unable to connect: %s", e)
+                log.warning("Unable to connect: %s", e)
                 raise
 
     def open_for_load(self):

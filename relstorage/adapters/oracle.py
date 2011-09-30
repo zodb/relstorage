@@ -305,13 +305,14 @@ class CXOracleConnectionManager(AbstractConnectionManager):
                 return conn, cursor
 
             except cx_Oracle.OperationalError, e:
-                log.warning("Unable to connect to DSN %s: %s", dsn, e)
                 if replica_selector is not None:
-                    replica = replica_selector.next()
-                    if replica is not None:
-                        # try the new replica
-                        dsn = replica
+                    next_dsn = replica_selector.next()
+                    if next_dsn is not None:
+                        log.warning("Unable to connect to DSN %s: %s, "
+                            "now trying %s", dsn, e, next_dsn)
+                        dsn = next_dsn
                         continue
+                log.warning("Unable to connect: %s", e)
                 raise
 
     def open_for_load(self):
