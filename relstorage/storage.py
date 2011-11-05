@@ -88,7 +88,14 @@ class RelStorage(
     # load_conn and load_cursor are open most of the time.
     _load_conn = None
     _load_cursor = None
-    _load_transaction_open = False
+
+    # _load_transaction_open is:
+    # - an empty string when the load transaction is not open.
+    # - 'active' when the load connection has begun a read-only transaction.
+    # - 'idle' when the load transaction has been left open but nothing
+    #   is using it. At those times, the load transaction can be closed
+    #   by another thread (with the protection of the lock).
+    _load_transaction_open = ''
 
     # store_conn and store_cursor are open during commit,
     # but not necessarily open at other times.
@@ -230,14 +237,14 @@ class RelStorage(
         conn, cursor = self._adapter.connmanager.open_for_load()
         self._drop_load_connection()
         self._load_conn, self._load_cursor = conn, cursor
-        self._load_transaction_open = True
+        self._load_transaction_open = 'active'
 
     def _drop_load_connection(self):
         """Unconditionally drop the load connection"""
         conn, cursor = self._load_conn, self._load_cursor
         self._load_conn, self._load_cursor = None, None
         self._adapter.connmanager.close(conn, cursor)
-        self._load_transaction_open = False
+        self._load_transaction_open = ''
 
     def _rollback_load_connection(self):
         if self._load_conn is not None:
@@ -246,7 +253,7 @@ class RelStorage(
             except:
                 self._drop_load_connection()
                 raise
-            self._load_transaction_open = False
+            self._load_transaction_open = ''
 
     def _restart_load_and_call(self, f, *args, **kw):
         """Restart the load connection and call a function.
@@ -262,7 +269,7 @@ class RelStorage(
             if need_restart:
                 self._adapter.connmanager.restart_load(
                     self._load_conn, self._load_cursor)
-                self._load_transaction_open = True
+                self._load_transaction_open = 'active'
             return f(self._load_conn, self._load_cursor, *args, **kw)
         except self._adapter.connmanager.disconnected_exceptions, e:
             log.warning("Reconnecting load_conn: %s", e)
@@ -454,6 +461,13 @@ class RelStorage(
 
         logfunc('; '.join(msg))
 
+    def _before_load(self):
+        state = self._load_transaction_open
+        if not state:
+            self._restart_load_and_poll()
+        elif state == 'idle':
+            self._load_transaction_open = 'active'
+
     def load(self, oid, version=''):
         if self._stale_error is not None:
             raise self._stale_error
@@ -463,8 +477,7 @@ class RelStorage(
 
         self._lock_acquire()
         try:
-            if not self._load_transaction_open:
-                self._restart_load_and_poll()
+            self._before_load()
             cursor = self._load_cursor
             state, tid_int = cache.load(cursor, oid_int)
         finally:
@@ -503,8 +516,7 @@ class RelStorage(
 
         self._lock_acquire()
         try:
-            if not self._load_transaction_open:
-                self._restart_load_and_poll()
+            self._before_load()
             state = self._adapter.mover.load_revision(
                 self._load_cursor, oid_int, tid_int)
             if state is None and self._store_cursor is not None:
@@ -537,8 +549,7 @@ class RelStorage(
                 # for conflict resolution.
                 cursor = self._store_cursor
             else:
-                if not self._load_transaction_open:
-                    self._restart_load_and_poll()
+                self._before_load()
                 cursor = self._load_cursor
             if not self._adapter.mover.exists(cursor, u64(oid)):
                 raise POSKeyError(oid)
@@ -1190,13 +1201,15 @@ class RelStorage(
         sync with the database only if enough time has elapsed since
         the last poll.
         """
-        if not force and self._options.poll_interval:
-            # keep the load transaction open so that it's possible
-            # to ignore the next poll.
-            return
         self._lock_acquire()
         try:
-            if self._load_transaction_open:
+            if not self._load_transaction_open:
+                return
+            elif not force and self._options.poll_interval:
+                # keep the load transaction open and idle so
+                # that it's possible to ignore the next poll.
+                self._load_transaction_open = 'idle'
+            else:
                 self._rollback_load_connection()
         finally:
             self._lock_release()
@@ -1265,6 +1278,8 @@ class RelStorage(
 
             if self._options.poll_interval:
                 if not self.need_poll():
+                    if self._load_transaction_open == 'idle':
+                        self._load_transaction_open = 'active'
                     return {}
                 # reset the timeout
                 self._poll_at = time.time() + self._options.poll_interval
