@@ -841,6 +841,8 @@ class AbstractSchemaInstaller(object):
         self.runner.run_script(cursor, script)
         script = filter_script(self.init_script, self.database_name)
         self.runner.run_script(cursor, script)
+        tables = self.list_tables(cursor)
+        self.check_compatibility(cursor, tables)
 
     def prepare(self):
         """Create the database schema if it does not already exist."""

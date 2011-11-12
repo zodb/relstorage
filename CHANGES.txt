@@ -1,3 +1,19 @@
+1.5.1 (2011-11-12)
+------------------
+
+- Packing: Lowered garbage collection object reference finding log level to
+  debug; this stage takes mere seconds, even in large sites, but could produce
+  10s of thousands of lines of log output.
+
+- RelStorage was opening a test database connection (and was leaving it
+  idle in a transaction with recent ZODB versions that support
+  IMVCCStorage.) RelStorage no longer opens that test connection.
+
+- zodbconvert: Avoid holding a list of all transactions in memory.
+
+- Just after installing the database schema, verify the schema was
+  created correctly. This affects MySQL in particular.
+
 1.5.0 (2011-06-30)
 ------------------
 

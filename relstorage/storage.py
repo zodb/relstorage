@@ -166,8 +166,6 @@ class RelStorage(
         if create:
             self._adapter.schema.prepare()
 
-        self._open_load_connection()
-
         self.__lock = threading.RLock()
         self.__commit_lock = threading.Lock()
         self._lock_acquire = self.__lock.acquire
@@ -444,14 +442,17 @@ class RelStorage(
 
         logfunc('; '.join(msg))
 
+    def _before_load(self):
+        if not self._load_transaction_open:
+            self._restart_load_and_poll()
+
     def load(self, oid, version=''):
         oid_int = u64(oid)
         cache = self._cache
 
         self._lock_acquire()
         try:
-            if not self._load_transaction_open:
-                self._restart_load_and_poll()
+            self._before_load()
             cursor = self._load_cursor
             state, tid_int = cache.load(cursor, oid_int)
         finally:
@@ -487,8 +488,7 @@ class RelStorage(
 
         self._lock_acquire()
         try:
-            if not self._load_transaction_open:
-                self._restart_load_and_poll()
+            self._before_load()
             state = self._adapter.mover.load_revision(
                 self._load_cursor, oid_int, tid_int)
             if state is None and self._store_cursor is not None:
@@ -518,8 +518,7 @@ class RelStorage(
                 # for conflict resolution.
                 cursor = self._store_cursor
             else:
-                if not self._load_transaction_open:
-                    self._restart_load_and_poll()
+                self._before_load()
                 cursor = self._load_cursor
             if not self._adapter.mover.exists(cursor, u64(oid)):
                 raise POSKeyError(oid)
@@ -981,6 +980,7 @@ class RelStorage(
     def history(self, oid, version=None, size=1, filter=None):
         self._lock_acquire()
         try:
+            self._before_load()
             cursor = self._load_cursor
             oid_int = u64(oid)
             try:
@@ -1251,6 +1251,7 @@ class RelStorage(
 
         self._lock_acquire()
         try:
+            self._before_load()
             cursor = self._load_cursor
             return self.blobhelper.loadBlob(cursor, oid, serial)
         finally:
@@ -1269,6 +1270,7 @@ class RelStorage(
         """
         self._lock_acquire()
         try:
+            self._before_load()
             cursor = self._load_cursor
             return self.blobhelper.openCommittedBlobFile(
                 cursor, oid, serial, blob=blob)
@@ -1323,7 +1325,9 @@ class RelStorage(
         txnum = 0
         total_size = 0
         log.info("Counting the transactions to copy.")
-        num_txns = len(list(other.iterator()))
+        num_txns = 0
+        for _ in other.iterator():
+            num_txns += 1
         log.info("Copying the transactions.")
         for trans in other.iterator():
             txnum += 1

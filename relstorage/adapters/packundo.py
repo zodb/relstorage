@@ -111,7 +111,7 @@ class PackUndo(object):
                     children.update(to_oids)
             parents = children.difference(keep_set)
             keep_set.update(parents)
-            log.info("pre_pack: found %d more referenced object(s) in "
+            log.debug("pre_pack: found %d more referenced object(s) in "
                 "pass %d", len(parents), pass_num)
 
         # Set pack_object.keep for all OIDs in keep_set.

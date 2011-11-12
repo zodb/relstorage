@@ -44,10 +44,7 @@ versions of ZODB with the patch already applied here:
 The patches are also included in the source distribution of RelStorage.
 
 You need the Python database adapter that corresponds with your database.
-Install psycopg2, MySQLdb 1.2.2+, or cx_Oracle 4.3+.  Note that Debian Etch
-ships MySQLdb 1.2.1, but that version has a bug in BLOB handling that manifests
-itself only with certain character set configurations.  MySQLdb 1.2.2 fixes the
-bug.
+Install psycopg2, MySQLdb 1.2.2+, or cx_Oracle 4.3+.
 
 Configuring Your Database
 -------------------------
@@ -205,8 +202,8 @@ where to store the blobs.  For example::
     %import relstorage
     <zodb_db main>
       mount-point /
-      blob-dir ./blobs
       <relstorage>
+        blob-dir ./blobs
         <postgresql>
           dsn dbname='zodb' user='username' host='localhost' password='pass'
         </postgresql>
@@ -365,7 +362,7 @@ RelStorage Options
 
 Specify these options in zope.conf, as parameters for the
 ``relstorage.storage.RelStorage`` constructor, or as attributes of a
-``relstorage.storage.Options`` instance. In the latter two cases, use
+``relstorage.options.Options`` instance. In the latter two cases, use
 underscores instead of dashes in the option names.
 
 ``name``
