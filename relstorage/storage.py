@@ -20,7 +20,6 @@ from ZODB import ConflictResolution
 from ZODB import POSException
 from ZODB.BaseStorage import DataRecord
 from ZODB.BaseStorage import TransactionRecord
-from ZODB.FileStorage import FileIterator
 from ZODB.POSException import POSKeyError
 from ZODB.UndoLogCompatible import UndoLogCompatible
 from ZODB.utils import p64
@@ -1385,16 +1384,9 @@ class RelStorage(
         txnum = 0
         total_size = 0
         log.info("Counting the transactions to copy.")
-        if isinstance(other, TransactionIterator):
-            num_txns = len(other)
-        elif isinstance(other, FileIterator):
-            # Create copy and ask for that for it's length so we do not
-            # exhaust the original iterator
-            copy = FileIterator(other._file_name, other._start, other._stop,
-                other._pos)
-            num_txns = len(list(copy))
-        else:
-            num_txns = len(list(other.iterator()))
+        num_txns = 0
+        for _ in other.iterator():
+            num_txns += 1
         log.info("Copying the transactions.")
         for trans in other.iterator():
             txnum += 1
