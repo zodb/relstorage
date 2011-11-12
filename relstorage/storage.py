@@ -178,8 +178,6 @@ class RelStorage(
         if create:
             self._adapter.schema.prepare()
 
-        self._open_load_connection()
-
         self.__lock = threading.RLock()
         self.__commit_lock = threading.Lock()
         self._lock_acquire = self.__lock.acquire
@@ -201,7 +199,9 @@ class RelStorage(
             prefix = options.cache_prefix
             if not prefix:
                 # Use the database name as the cache prefix.
+                self._open_load_connection()
                 prefix = adapter.schema.get_database_name(self._load_cursor)
+                self._drop_load_connection()
                 prefix = prefix.replace(' ', '_')
             self._cache = StorageCache(adapter, options, prefix)
 
@@ -1025,6 +1025,7 @@ class RelStorage(
             raise self._stale_error
         self._lock_acquire()
         try:
+            self._before_load()
             cursor = self._load_cursor
             oid_int = u64(oid)
             try:
@@ -1310,6 +1311,7 @@ class RelStorage(
 
         self._lock_acquire()
         try:
+            self._before_load()
             cursor = self._load_cursor
             return self.blobhelper.loadBlob(cursor, oid, serial)
         finally:
@@ -1328,6 +1330,7 @@ class RelStorage(
         """
         self._lock_acquire()
         try:
+            self._before_load()
             cursor = self._load_cursor
             return self.blobhelper.openCommittedBlobFile(
                 cursor, oid, serial, blob=blob)

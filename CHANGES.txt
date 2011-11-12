@@ -34,6 +34,13 @@ Next Release
   will hopefully help people who accidentally use a single cache for
   multiple databases.
 
+1.5.1 (2011-11-12)
+------------------
+
+- RelStorage was opening a test database connection (and was leaving it
+  idle in a transaction with recent ZODB versions that support
+  IMVCCStorage.) RelStorage no longer opens that test connection.
+
 1.5.0 (2011-06-30)
 ------------------
 
