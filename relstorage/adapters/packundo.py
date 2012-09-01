@@ -14,11 +14,12 @@
 """Pack/Undo implementations.
 """
 
+from ZODB.POSException import UndoError
 from base64 import decodestring
 from itertools import groupby
 from operator import itemgetter
+from perfmetrics import metricmethod
 from relstorage.adapters.interfaces import IPackUndo
-from ZODB.POSException import UndoError
 from zope.interface import implements
 import logging
 import time
@@ -81,9 +82,9 @@ class PackUndo(object):
         # killing this query on large RelStorage databases, unless these hints
         # are included.
         stmt = """
-        SELECT 
-            /*+ FULL(object_ref) */ 
-            /*+ FULL(pack_object) */ 
+        SELECT
+            /*+ FULL(object_ref) */
+            /*+ FULL(pack_object) */
             object_ref.zoid, object_ref.to_zoid
         FROM object_ref
             JOIN pack_object ON (object_ref.zoid = pack_object.zoid)
@@ -243,6 +244,7 @@ class HistoryPreservingPackUndo(PackUndo):
         ))
         """
 
+    @metricmethod
     def verify_undoable(self, cursor, undo_tid):
         """Raise UndoError if it is not safe to undo the specified txn."""
         stmt = """
@@ -290,6 +292,7 @@ class HistoryPreservingPackUndo(PackUndo):
             raise UndoError("Can't undo the creation of the root object")
 
 
+    @metricmethod
     def undo(self, cursor, undo_tid, self_tid):
         """Undo a transaction.
 
@@ -463,6 +466,7 @@ class HistoryPreservingPackUndo(PackUndo):
             "from %d object(s)", tid, to_count, from_count)
         return to_count
 
+    @metricmethod
     def pre_pack(self, pack_tid, get_references):
         """Decide what to pack.
 
@@ -635,14 +639,17 @@ class HistoryPreservingPackUndo(PackUndo):
 
     def _find_pack_tid(self):
         """If pack was not completed, find our pack tid again"""
-
         conn, cursor = self.connmanager.open_for_pre_pack()
-        stmt = self._script_find_pack_tid
-        self.runner.run_script_stmt(cursor, stmt)
-        res = [tid for (tid,) in cursor]
+        try:
+            stmt = self._script_find_pack_tid
+            self.runner.run_script_stmt(cursor, stmt)
+            res = [tid for (tid,) in cursor]
+        finally:
+            self.connmanager.close(conn, cursor)
         return res and res[0] or 0
 
 
+    @metricmethod
     def pack(self, pack_tid, sleep=None, packed_func=None):
         """Pack.  Requires the information provided by pre_pack."""
 
@@ -698,7 +705,7 @@ class HistoryPreservingPackUndo(PackUndo):
                         if counter >= lastreport + reportstep:
                             log.info("pack: packed %d (%.1f%%) transaction(s), "
                                 "affecting %d states",
-                                counter, counter/float(total)*100, 
+                                counter, counter/float(total)*100,
                                 statecounter)
                             lastreport = counter / reportstep * reportstep
                         del packed_list[:]
@@ -1061,6 +1068,7 @@ class HistoryFreePackUndo(PackUndo):
 
         return len(add_refs)
 
+    @metricmethod
     def pre_pack(self, pack_tid, get_references):
         """Decide what the garbage collector should delete.
 
@@ -1133,6 +1141,7 @@ class HistoryFreePackUndo(PackUndo):
         return None
 
 
+    @metricmethod
     def pack(self, pack_tid, sleep=None, packed_func=None):
         """Run garbage collection.
 

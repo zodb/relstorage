@@ -3,6 +3,8 @@
 
 - MySQL 5.5: The test suite was freezing in checkBackwardTimeTravel. Fixed.
 
+- Added performance metrics using the perfmetrics package.
+
 1.5.1 (2011-11-12)
 ------------------
 

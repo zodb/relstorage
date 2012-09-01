@@ -13,7 +13,7 @@
 ##############################################################################
 """A backend for ZODB that stores pickles in a relational database."""
 
-VERSION = "1.5.2dev"
+VERSION = "1.5.1-perfmetrics"
 
 # The choices for the Trove Development Status line:
 # Development Status :: 5 - Production/Stable
@@ -68,6 +68,7 @@ setup(
         read_file("CHANGES.txt")),
     zip_safe=False,  # otherwise ZConfig can't see component.xml
     install_requires=[
+        'perfmetrics',
         'ZODB3>=3.7.0',
         'zope.interface',
         'zc.lockfile',

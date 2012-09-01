@@ -11,14 +11,7 @@
 # FOR A PARTICULAR PURPOSE.
 #
 ##############################################################################
-"""PostgreSQL adapter for RelStorage."""
-
-import logging
-import psycopg2
-import psycopg2.extensions
-import re
-from zope.interface import implements
-
+from perfmetrics import metricmethod
 from relstorage.adapters.connmanager import AbstractConnectionManager
 from relstorage.adapters.dbiter import HistoryFreeDatabaseIterator
 from relstorage.adapters.dbiter import HistoryPreservingDatabaseIterator
@@ -35,6 +28,14 @@ from relstorage.adapters.scriptrunner import ScriptRunner
 from relstorage.adapters.stats import PostgreSQLStats
 from relstorage.adapters.txncontrol import PostgreSQLTransactionControl
 from relstorage.options import Options
+from zope.interface import implements
+import logging
+import psycopg2
+import psycopg2.extensions
+import re
+"""PostgreSQL adapter for RelStorage."""
+
+
 
 log = logging.getLogger(__name__)
 
@@ -178,6 +179,7 @@ class Psycopg2ConnectionManager(AbstractConnectionManager):
                 self._dsn = self._orig_dsn + ' host=%s' % replica
             self._dsn_derived_from_replica = replica
 
+    @metricmethod
     def open(self,
             isolation=psycopg2.extensions.ISOLATION_LEVEL_READ_COMMITTED):
         """Open a database connection and return (conn, cursor)."""

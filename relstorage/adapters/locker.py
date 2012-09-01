@@ -14,8 +14,9 @@
 """Locker implementations.
 """
 
-from relstorage.adapters.interfaces import ILocker
 from ZODB.POSException import StorageError
+from perfmetrics import metricmethod
+from relstorage.adapters.interfaces import ILocker
 from zope.interface import implements
 
 
@@ -36,6 +37,7 @@ class PostgreSQLLocker(Locker):
             options=options, lock_exceptions=lock_exceptions)
         self.version_detector = version_detector
 
+    @metricmethod
     def hold_commit_lock(self, cursor, ensure_current=False, nowait=False):
         try:
             if ensure_current:
@@ -103,6 +105,7 @@ class PostgreSQLLocker(Locker):
 class MySQLLocker(Locker):
     implements(ILocker)
 
+    @metricmethod
     def hold_commit_lock(self, cursor, ensure_current=False, nowait=False):
         timeout = not nowait and self.commit_lock_timeout or 0
         stmt = "SELECT GET_LOCK(CONCAT(DATABASE(), '.commit'), %s)"
@@ -142,6 +145,7 @@ class OracleLocker(Locker):
             options=options, lock_exceptions=lock_exceptions)
         self.inputsize_NUMBER = inputsize_NUMBER
 
+    @metricmethod
     def hold_commit_lock(self, cursor, ensure_current=False, nowait=False):
         # Hold commit_lock to prevent concurrent commits
         # (for as short a time as possible).

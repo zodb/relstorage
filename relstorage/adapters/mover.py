@@ -11,15 +11,16 @@
 # FOR A PARTICULAR PURPOSE.
 #
 ##############################################################################
-"""History preserving IObjectMover implementation.
+"""IObjectMover implementation.
 """
 
 from base64 import decodestring
 from base64 import encodestring
-from relstorage.adapters.interfaces import IObjectMover
+from perfmetrics import metricmethod
 from relstorage.adapters.batch import MySQLRowBatcher
 from relstorage.adapters.batch import OracleRowBatcher
 from relstorage.adapters.batch import PostgreSQLRowBatcher
+from relstorage.adapters.interfaces import IObjectMover
 from zope.interface import implements
 import os
 import sys
@@ -78,6 +79,7 @@ class ObjectMover(object):
 
 
 
+    @metricmethod
     def postgresql_load_current(self, cursor, oid):
         """Returns the current pickle and integer tid for an object.
 
@@ -109,6 +111,7 @@ class ObjectMover(object):
         else:
             return None, None
 
+    @metricmethod
     def mysql_load_current(self, cursor, oid):
         """Returns the current pickle and integer tid for an object.
 
@@ -134,6 +137,7 @@ class ObjectMover(object):
         else:
             return None, None
 
+    @metricmethod
     def oracle_load_current(self, cursor, oid):
         """Returns the current pickle and integer tid for an object.
 
@@ -158,6 +162,7 @@ class ObjectMover(object):
 
 
 
+    @metricmethod
     def postgresql_load_revision(self, cursor, oid, tid):
         """Returns the pickle for an object on a particular transaction.
 
@@ -177,6 +182,7 @@ class ObjectMover(object):
                 return decodestring(state64)
         return None
 
+    @metricmethod
     def mysql_load_revision(self, cursor, oid, tid):
         """Returns the pickle for an object on a particular transaction.
 
@@ -195,6 +201,7 @@ class ObjectMover(object):
             return state
         return None
 
+    @metricmethod
     def oracle_load_revision(self, cursor, oid, tid):
         """Returns the pickle for an object on a particular transaction.
 
@@ -213,6 +220,7 @@ class ObjectMover(object):
 
 
 
+    @metricmethod
     def generic_exists(self, cursor, oid):
         """Returns a true value if the given object exists."""
         if self.keep_history:
@@ -225,6 +233,7 @@ class ObjectMover(object):
     postgresql_exists = generic_exists
     mysql_exists = generic_exists
 
+    @metricmethod
     def oracle_exists(self, cursor, oid):
         """Returns a true value if the given object exists."""
         if self.keep_history:
@@ -232,13 +241,14 @@ class ObjectMover(object):
         else:
             stmt = "SELECT 1 FROM object_state WHERE zoid = :1"
         cursor.execute(stmt, (oid,))
-        for row in cursor:
+        for _row in cursor:
             return True
         return False
 
 
 
 
+    @metricmethod
     def postgresql_load_before(self, cursor, oid, tid):
         """Returns the pickle and tid of an object before transaction tid.
 
@@ -265,6 +275,7 @@ class ObjectMover(object):
         else:
             return None, None
 
+    @metricmethod
     def mysql_load_before(self, cursor, oid, tid):
         """Returns the pickle and tid of an object before transaction tid.
 
@@ -285,6 +296,7 @@ class ObjectMover(object):
         else:
             return None, None
 
+    @metricmethod
     def oracle_load_before(self, cursor, oid, tid):
         """Returns the pickle and tid of an object before transaction tid.
 
@@ -307,6 +319,7 @@ class ObjectMover(object):
 
 
 
+    @metricmethod
     def generic_get_object_tid_after(self, cursor, oid, tid):
         """Returns the tid of the next change after an object revision.
 
@@ -330,6 +343,7 @@ class ObjectMover(object):
     postgresql_get_object_tid_after = generic_get_object_tid_after
     mysql_get_object_tid_after = generic_get_object_tid_after
 
+    @metricmethod
     def oracle_get_object_tid_after(self, cursor, oid, tid):
         """Returns the tid of the next change after an object revision.
 
@@ -352,6 +366,7 @@ class ObjectMover(object):
 
 
 
+    @metricmethod
     def generic_current_object_tids(self, cursor, oids):
         """Returns the current {oid: tid} for specified object ids."""
         res = {}
@@ -377,6 +392,7 @@ class ObjectMover(object):
 
 
 
+    @metricmethod
     def postgresql_on_store_opened(self, cursor, restart=False):
         """Create the temporary tables for storing objects"""
         # note that the md5 column is not used if self.keep_history == False.
@@ -400,13 +416,14 @@ class ObjectMover(object):
         -- This trigger removes blobs that get replaced before being
         -- moved to blob_chunk.  Note that it is never called when
         -- the temp_blob_chunk table is being dropped or truncated.
-        CREATE TRIGGER temp_blob_chunk_delete 
+        CREATE TRIGGER temp_blob_chunk_delete
             BEFORE DELETE ON temp_blob_chunk
             FOR EACH ROW
             EXECUTE PROCEDURE temp_blob_chunk_delete_trigger();
         """
         cursor.execute(stmt)
 
+    @metricmethod
     def mysql_on_store_opened(self, cursor, restart=False):
         """Create the temporary table for storing objects"""
         if restart:
@@ -442,18 +459,22 @@ class ObjectMover(object):
 
 
 
+    @metricmethod
     def postgresql_make_batcher(self, cursor, row_limit):
         return PostgreSQLRowBatcher(cursor, self.version_detector, row_limit)
 
+    @metricmethod
     def mysql_make_batcher(self, cursor, row_limit):
         return MySQLRowBatcher(cursor, row_limit)
 
+    @metricmethod
     def oracle_make_batcher(self, cursor, row_limit):
         return OracleRowBatcher(cursor, self.inputsizes, row_limit)
 
 
 
 
+    @metricmethod
     def postgresql_store_temp(self, cursor, batcher, oid, prev_tid, data):
         """Store an object in the temporary table."""
         if self.keep_history:
@@ -469,6 +490,7 @@ class ObjectMover(object):
             size=len(data),
         )
 
+    @metricmethod
     def mysql_store_temp(self, cursor, batcher, oid, prev_tid, data):
         """Store an object in the temporary table."""
         if self.keep_history:
@@ -484,6 +506,7 @@ class ObjectMover(object):
             command='REPLACE',
         )
 
+    @metricmethod
     def oracle_store_temp(self, cursor, batcher, oid, prev_tid, data):
         """Store an object in the temporary table."""
         if self.keep_history:
@@ -522,6 +545,7 @@ class ObjectMover(object):
 
 
 
+    @metricmethod
     def postgresql_restore(self, cursor, batcher, oid, tid, data):
         """Store an object directly, without conflict detection.
 
@@ -564,6 +588,7 @@ class ObjectMover(object):
                     size=size,
                 )
 
+    @metricmethod
     def mysql_restore(self, cursor, batcher, oid, tid, data):
         """Store an object directly, without conflict detection.
 
@@ -608,6 +633,7 @@ class ObjectMover(object):
             else:
                 batcher.delete_from('object_state', zoid=oid)
 
+    @metricmethod
     def oracle_restore(self, cursor, batcher, oid, tid, data):
         """Store an object directly, without conflict detection.
 
@@ -689,6 +715,7 @@ class ObjectMover(object):
 
 
 
+    @metricmethod
     def postgresql_detect_conflict(self, cursor):
         """Find one conflict in the data about to be committed.
 
@@ -719,6 +746,7 @@ class ObjectMover(object):
             return oid, prev_tid, attempted_prev_tid, decodestring(data)
         return None
 
+    @metricmethod
     def mysql_detect_conflict(self, cursor):
         """Find one conflict in the data about to be committed.
 
@@ -751,6 +779,7 @@ class ObjectMover(object):
             return cursor.fetchone()
         return None
 
+    @metricmethod
     def oracle_detect_conflict(self, cursor):
         """Find one conflict in the data about to be committed.
 
@@ -778,6 +807,7 @@ class ObjectMover(object):
 
 
 
+    @metricmethod
     def postgresql_replace_temp(self, cursor, oid, prev_tid, data):
         """Replace an object in the temporary table.
 
@@ -796,6 +826,7 @@ class ObjectMover(object):
         """
         cursor.execute(stmt, (prev_tid, md5sum, encodestring(data), oid))
 
+    @metricmethod
     def mysql_replace_temp(self, cursor, oid, prev_tid, data):
         """Replace an object in the temporary table.
 
@@ -814,6 +845,7 @@ class ObjectMover(object):
         """
         cursor.execute(stmt, (prev_tid, md5sum, self.Binary(data), oid))
 
+    @metricmethod
     def oracle_replace_temp(self, cursor, oid, prev_tid, data):
         """Replace an object in the temporary table.
 
@@ -837,6 +869,7 @@ class ObjectMover(object):
 
 
 
+    @metricmethod
     def generic_move_from_temp(self, cursor, tid, txn_has_blobs):
         """Moved the temporarily stored objects to permanent storage.
 
@@ -926,6 +959,7 @@ class ObjectMover(object):
 
 
 
+    @metricmethod
     def postgresql_update_current(self, cursor, tid):
         """Update the current object pointers.
 
@@ -953,6 +987,7 @@ class ObjectMover(object):
         )
         """, {'tid': tid})
 
+    @metricmethod
     def mysql_update_current(self, cursor, tid):
         """Update the current object pointers.
 
@@ -968,6 +1003,7 @@ class ObjectMover(object):
         WHERE tid = %s
         """, (tid,))
 
+    @metricmethod
     def oracle_update_current(self, cursor, tid):
         """Update the current object pointers.
 
@@ -1000,6 +1036,7 @@ class ObjectMover(object):
 
 
 
+    @metricmethod
     def postgresql_download_blob(self, cursor, oid, tid, filename):
         """Download a blob into a file."""
         stmt = """
@@ -1011,7 +1048,7 @@ class ObjectMover(object):
         """
 
         f = None
-        bytes = 0
+        bytecount = 0
 
         try:
             cursor.execute(stmt, (oid, tid))
@@ -1022,7 +1059,7 @@ class ObjectMover(object):
                     # Use the native psycopg2 blob export functionality
                     blob.export(filename)
                     blob.close()
-                    bytes = os.path.getsize(filename)
+                    bytecount = os.path.getsize(filename)
                     continue
 
                 if f is None:
@@ -1031,7 +1068,7 @@ class ObjectMover(object):
                 reader = iter(lambda: blob.read(read_chunk_size), '')
                 for read_chunk in reader:
                     f.write(read_chunk)
-                    bytes += len(read_chunk)
+                    bytecount += len(read_chunk)
         except:
             if f is not None:
                 f.close()
@@ -1040,8 +1077,9 @@ class ObjectMover(object):
 
         if f is not None:
             f.close()
-        return bytes
+        return bytecount
 
+    @metricmethod
     def mysql_download_blob(self, cursor, oid, tid, filename):
         """Download a blob into a file."""
         stmt = """
@@ -1053,7 +1091,7 @@ class ObjectMover(object):
         """
 
         f = None
-        bytes = 0
+        bytecount = 0
         try:
             chunk_num = 0
             while True:
@@ -1070,7 +1108,7 @@ class ObjectMover(object):
                 if f is None:
                     f = open(filename, 'wb')
                 f.write(chunk)
-                bytes += len(chunk)
+                bytecount += len(chunk)
                 chunk_num += 1
         except:
             if f is not None:
@@ -1080,8 +1118,9 @@ class ObjectMover(object):
 
         if f is not None:
             f.close()
-        return bytes
+        return bytecount
 
+    @metricmethod
     def oracle_download_blob(self, cursor, oid, tid, filename):
         """Download a blob into a file."""
         stmt = """
@@ -1093,7 +1132,7 @@ class ObjectMover(object):
         """
 
         f = None
-        bytes = 0
+        bytecount = 0
         # Current versions of cx_Oracle only support offsets up
         # to sys.maxint or 4GB, whichever comes first.
         maxsize = min(sys.maxint, 1<<32)
@@ -1105,20 +1144,20 @@ class ObjectMover(object):
                 except TypeError:
                     # No more chunks.  Note: if there are no chunks at
                     # all, then this method should not write a file.
-                    break 
+                    break
 
                 if f is None:
                     f = open(filename, 'wb')
                 # round off the chunk-size to be a multiple of the oracle
                 # blob chunk size to maximize performance
                 read_chunk_size = int(max(round(
-                    1.0 * self.blob_chunk_size / blob.getchunksize()), 1) * 
+                    1.0 * self.blob_chunk_size / blob.getchunksize()), 1) *
                     blob.getchunksize())
                 offset = 1 # Oracle still uses 1-based indexing.
                 reader = iter(lambda: blob.read(offset, read_chunk_size), '')
                 for read_chunk in reader:
                     f.write(read_chunk)
-                    bytes += len(read_chunk)
+                    bytecount += len(read_chunk)
                     offset += len(read_chunk)
                     if offset > maxsize:
                         # We have already read the maximum we can store
@@ -1134,10 +1173,11 @@ class ObjectMover(object):
 
         if f is not None:
             f.close()
-        return bytes
+        return bytecount
 
 
 
+    @metricmethod
     def postgresql_upload_blob(self, cursor, oid, tid, filename):
         """Upload a blob from a file.
 
@@ -1198,7 +1238,7 @@ class ObjectMover(object):
                 cursor.execute(insert_stmt, params)
 
                 write_chunk_size = self.blob_chunk_size
-                for i in xrange(maxsize / write_chunk_size):
+                for _i in xrange(maxsize / write_chunk_size):
                     write_chunk = f.read(write_chunk_size)
                     if not blob.write(write_chunk):
                         # EOF.
@@ -1211,6 +1251,7 @@ class ObjectMover(object):
             if blob is not None and not blob.closed:
                 blob.close()
 
+    @metricmethod
     def mysql_upload_blob(self, cursor, oid, tid, filename):
         """Upload a blob from a file.
 
@@ -1260,6 +1301,7 @@ class ObjectMover(object):
         finally:
             f.close()
 
+    @metricmethod
     def oracle_upload_blob(self, cursor, oid, tid, filename):
         """Upload a blob from a file.
 
@@ -1296,7 +1338,7 @@ class ObjectMover(object):
             VALUES (:oid, :chunk_num, empty_blob())
             """
             select_stmt = """
-            SELECT chunk FROM temp_blob_chunk 
+            SELECT chunk FROM temp_blob_chunk
             WHERE zoid=:oid AND chunk_num=:chunk_num
             """
 
@@ -1317,10 +1359,10 @@ class ObjectMover(object):
                 blob, = cursor.fetchone()
                 blob.open()
                 write_chunk_size = int(max(round(
-                    1.0 * self.blob_chunk_size / blob.getchunksize()), 1) * 
+                    1.0 * self.blob_chunk_size / blob.getchunksize()), 1) *
                     blob.getchunksize())
                 offset = 1 # Oracle still uses 1-based indexing.
-                for i in xrange(maxsize / write_chunk_size):
+                for _i in xrange(maxsize / write_chunk_size):
                     write_chunk = f.read(write_chunk_size)
                     if not blob.write(write_chunk, offset):
                         # EOF.
