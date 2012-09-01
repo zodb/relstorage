@@ -315,12 +315,12 @@ class RelStorage(
             log.info("Reconnected.")
             return f(self._store_conn, self._store_cursor, *args, **kw)
 
-    def zap_all(self):
+    def zap_all(self, reset_oid=True):
         """Clear all objects and transactions out of the database.
 
         Used by the test suite and the ZODBConvert script.
         """
-        self._adapter.schema.zap_all()
+        self._adapter.schema.zap_all(reset_oid=reset_oid)
         self._rollback_load_connection()
         self._cache.clear()
 

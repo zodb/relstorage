@@ -385,9 +385,9 @@ history_preserving_init = """
             UTL_I18N.STRING_TO_RAW('system', 'US7ASCII'),
             UTL_I18N.STRING_TO_RAW(
                 'special transaction for object creation', 'US7ASCII'));
+"""
 
-# Reset the OID counter.
-
+history_preserving_reset_oid = """
     postgresql:
         ALTER SEQUENCE zoid_seq RESTART WITH 1;
 
@@ -400,7 +400,7 @@ history_preserving_init = """
 """
 
 postgresql_procedures = """
-CREATE OR REPLACE FUNCTION blob_chunk_delete_trigger() RETURNS TRIGGER 
+CREATE OR REPLACE FUNCTION blob_chunk_delete_trigger() RETURNS TRIGGER
 AS $blob_chunk_delete_trigger$
     -- Version: %(postgresql_proc_version)s
     -- Unlink large object data file after blob_chunk row deletion
@@ -700,9 +700,7 @@ history_free_schema = """
         );
 """
 
-history_free_init = """
-# Reset the OID counter.
-
+history_free_reset_oid = """
     postgresql:
         ALTER SEQUENCE zoid_seq RESTART WITH 1;
 
@@ -825,9 +823,11 @@ class AbstractSchemaInstaller(object):
         if keep_history:
             self.schema_script = history_preserving_schema
             self.init_script = history_preserving_init
+            self.reset_oid_script = history_preserving_reset_oid
         else:
             self.schema_script = history_free_schema
-            self.init_script = history_free_init
+            self.init_script = ''
+            self.reset_oid_script = history_free_reset_oid
 
     def list_tables(self, cursor):
         raise NotImplementedError()
@@ -881,7 +881,7 @@ class AbstractSchemaInstaller(object):
             script = filter_statements(script, re.compile(expr, re.I))
             self.runner.run_script(cursor, script)
 
-    def zap_all(self):
+    def zap_all(self, reset_oid=True):
         """Clear all data out of the database."""
         def callback(conn, cursor):
             existent = set(self.list_tables(cursor))
@@ -896,11 +896,21 @@ class AbstractSchemaInstaller(object):
                     log.debug("Deleting from table %s...", table)
                     cursor.execute("DELETE FROM %s" % table)
             log.debug("Done deleting from tables.")
+
             script = filter_script(self.init_script, self.database_name)
             if script:
                 log.debug("Running init script.")
                 self.runner.run_script(cursor, script)
                 log.debug("Done running init script.")
+
+            if reset_oid:
+                script = filter_script(self.reset_oid_script,
+                                       self.database_name)
+                if script:
+                    log.debug("Running OID reset script.")
+                    self.runner.run_script(cursor, script)
+                    log.debug("Done running OID reset script.")
+
         self.connmanager.open_and_call(callback)
 
     def drop_all(self):
