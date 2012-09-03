@@ -4,6 +4,7 @@
 *.pyc
 bin/
 develop-eggs/
+dist/
 eggs/
 include/
 lib/
