@@ -24,6 +24,7 @@ from ZODB.POSException import POSKeyError
 from ZODB.UndoLogCompatible import UndoLogCompatible
 from ZODB.utils import p64
 from ZODB.utils import u64
+from perfmetrics import Metric
 from perfmetrics import metricmethod
 from persistent.TimeStamp import TimeStamp
 from relstorage.blobhelper import BlobHelper
@@ -447,7 +448,7 @@ class RelStorage(
         if not self._load_transaction_open:
             self._restart_load_and_poll()
 
-    @metricmethod
+    @Metric(method=True, rate=0.1)
     def load(self, oid, version=''):
         oid_int = u64(oid)
         cache = self._cache
@@ -483,7 +484,7 @@ class RelStorage(
         # string onto load's result.
         return self.load(oid, version) + ("",)
 
-    @metricmethod
+    @Metric(method=True, rate=0.1)
     def loadSerial(self, oid, serial):
         """Load a specific revision of an object"""
         oid_int = u64(oid)
@@ -510,7 +511,7 @@ class RelStorage(
         else:
             raise POSKeyError(oid)
 
-    @metricmethod
+    @Metric(method=True, rate=0.1)
     def loadBefore(self, oid, tid):
         """Return the most recent revision of oid before tid committed."""
         oid_int = u64(oid)
@@ -544,7 +545,7 @@ class RelStorage(
         finally:
             self._lock_release()
 
-    @metricmethod
+    @Metric(method=True, rate=0.1)
     def store(self, oid, serial, data, version, transaction):
         if self._is_read_only:
             raise POSException.ReadOnlyError()

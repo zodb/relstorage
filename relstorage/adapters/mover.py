@@ -16,7 +16,7 @@
 
 from base64 import decodestring
 from base64 import encodestring
-from perfmetrics import metricmethod
+from perfmetrics import Metric
 from relstorage.adapters.batch import MySQLRowBatcher
 from relstorage.adapters.batch import OracleRowBatcher
 from relstorage.adapters.batch import PostgreSQLRowBatcher
@@ -37,6 +37,9 @@ def compute_md5sum(data):
     else:
         # George Bailey object
         return None
+
+
+metricmethod_sampled = Metric(method=True, rate=0.1)
 
 
 class ObjectMover(object):
@@ -79,7 +82,7 @@ class ObjectMover(object):
 
 
 
-    @metricmethod
+    @metricmethod_sampled
     def postgresql_load_current(self, cursor, oid):
         """Returns the current pickle and integer tid for an object.
 
@@ -111,7 +114,7 @@ class ObjectMover(object):
         else:
             return None, None
 
-    @metricmethod
+    @metricmethod_sampled
     def mysql_load_current(self, cursor, oid):
         """Returns the current pickle and integer tid for an object.
 
@@ -137,7 +140,7 @@ class ObjectMover(object):
         else:
             return None, None
 
-    @metricmethod
+    @metricmethod_sampled
     def oracle_load_current(self, cursor, oid):
         """Returns the current pickle and integer tid for an object.
 
@@ -162,7 +165,7 @@ class ObjectMover(object):
 
 
 
-    @metricmethod
+    @metricmethod_sampled
     def postgresql_load_revision(self, cursor, oid, tid):
         """Returns the pickle for an object on a particular transaction.
 
@@ -182,7 +185,7 @@ class ObjectMover(object):
                 return decodestring(state64)
         return None
 
-    @metricmethod
+    @metricmethod_sampled
     def mysql_load_revision(self, cursor, oid, tid):
         """Returns the pickle for an object on a particular transaction.
 
@@ -201,7 +204,7 @@ class ObjectMover(object):
             return state
         return None
 
-    @metricmethod
+    @metricmethod_sampled
     def oracle_load_revision(self, cursor, oid, tid):
         """Returns the pickle for an object on a particular transaction.
 
@@ -220,7 +223,7 @@ class ObjectMover(object):
 
 
 
-    @metricmethod
+    @metricmethod_sampled
     def generic_exists(self, cursor, oid):
         """Returns a true value if the given object exists."""
         if self.keep_history:
@@ -233,7 +236,7 @@ class ObjectMover(object):
     postgresql_exists = generic_exists
     mysql_exists = generic_exists
 
-    @metricmethod
+    @metricmethod_sampled
     def oracle_exists(self, cursor, oid):
         """Returns a true value if the given object exists."""
         if self.keep_history:
@@ -248,7 +251,7 @@ class ObjectMover(object):
 
 
 
-    @metricmethod
+    @metricmethod_sampled
     def postgresql_load_before(self, cursor, oid, tid):
         """Returns the pickle and tid of an object before transaction tid.
 
@@ -275,7 +278,7 @@ class ObjectMover(object):
         else:
             return None, None
 
-    @metricmethod
+    @metricmethod_sampled
     def mysql_load_before(self, cursor, oid, tid):
         """Returns the pickle and tid of an object before transaction tid.
 
@@ -296,7 +299,7 @@ class ObjectMover(object):
         else:
             return None, None
 
-    @metricmethod
+    @metricmethod_sampled
     def oracle_load_before(self, cursor, oid, tid):
         """Returns the pickle and tid of an object before transaction tid.
 
@@ -319,7 +322,7 @@ class ObjectMover(object):
 
 
 
-    @metricmethod
+    @metricmethod_sampled
     def generic_get_object_tid_after(self, cursor, oid, tid):
         """Returns the tid of the next change after an object revision.
 
@@ -343,7 +346,7 @@ class ObjectMover(object):
     postgresql_get_object_tid_after = generic_get_object_tid_after
     mysql_get_object_tid_after = generic_get_object_tid_after
 
-    @metricmethod
+    @metricmethod_sampled
     def oracle_get_object_tid_after(self, cursor, oid, tid):
         """Returns the tid of the next change after an object revision.
 
@@ -366,7 +369,7 @@ class ObjectMover(object):
 
 
 
-    @metricmethod
+    @metricmethod_sampled
     def generic_current_object_tids(self, cursor, oids):
         """Returns the current {oid: tid} for specified object ids."""
         res = {}
@@ -392,7 +395,7 @@ class ObjectMover(object):
 
 
 
-    @metricmethod
+    @metricmethod_sampled
     def postgresql_on_store_opened(self, cursor, restart=False):
         """Create the temporary tables for storing objects"""
         # note that the md5 column is not used if self.keep_history == False.
@@ -423,7 +426,7 @@ class ObjectMover(object):
         """
         cursor.execute(stmt)
 
-    @metricmethod
+    @metricmethod_sampled
     def mysql_on_store_opened(self, cursor, restart=False):
         """Create the temporary table for storing objects"""
         if restart:
@@ -459,22 +462,22 @@ class ObjectMover(object):
 
 
 
-    @metricmethod
+    @metricmethod_sampled
     def postgresql_make_batcher(self, cursor, row_limit):
         return PostgreSQLRowBatcher(cursor, self.version_detector, row_limit)
 
-    @metricmethod
+    @metricmethod_sampled
     def mysql_make_batcher(self, cursor, row_limit):
         return MySQLRowBatcher(cursor, row_limit)
 
-    @metricmethod
+    @metricmethod_sampled
     def oracle_make_batcher(self, cursor, row_limit):
         return OracleRowBatcher(cursor, self.inputsizes, row_limit)
 
 
 
 
-    @metricmethod
+    @metricmethod_sampled
     def postgresql_store_temp(self, cursor, batcher, oid, prev_tid, data):
         """Store an object in the temporary table."""
         if self.keep_history:
@@ -490,7 +493,7 @@ class ObjectMover(object):
             size=len(data),
         )
 
-    @metricmethod
+    @metricmethod_sampled
     def mysql_store_temp(self, cursor, batcher, oid, prev_tid, data):
         """Store an object in the temporary table."""
         if self.keep_history:
@@ -506,7 +509,7 @@ class ObjectMover(object):
             command='REPLACE',
         )
 
-    @metricmethod
+    @metricmethod_sampled
     def oracle_store_temp(self, cursor, batcher, oid, prev_tid, data):
         """Store an object in the temporary table."""
         if self.keep_history:
@@ -545,7 +548,7 @@ class ObjectMover(object):
 
 
 
-    @metricmethod
+    @metricmethod_sampled
     def postgresql_restore(self, cursor, batcher, oid, tid, data):
         """Store an object directly, without conflict detection.
 
@@ -588,7 +591,7 @@ class ObjectMover(object):
                     size=size,
                 )
 
-    @metricmethod
+    @metricmethod_sampled
     def mysql_restore(self, cursor, batcher, oid, tid, data):
         """Store an object directly, without conflict detection.
 
@@ -633,7 +636,7 @@ class ObjectMover(object):
             else:
                 batcher.delete_from('object_state', zoid=oid)
 
-    @metricmethod
+    @metricmethod_sampled
     def oracle_restore(self, cursor, batcher, oid, tid, data):
         """Store an object directly, without conflict detection.
 
@@ -715,7 +718,7 @@ class ObjectMover(object):
 
 
 
-    @metricmethod
+    @metricmethod_sampled
     def postgresql_detect_conflict(self, cursor):
         """Find one conflict in the data about to be committed.
 
@@ -746,7 +749,7 @@ class ObjectMover(object):
             return oid, prev_tid, attempted_prev_tid, decodestring(data)
         return None
 
-    @metricmethod
+    @metricmethod_sampled
     def mysql_detect_conflict(self, cursor):
         """Find one conflict in the data about to be committed.
 
@@ -779,7 +782,7 @@ class ObjectMover(object):
             return cursor.fetchone()
         return None
 
-    @metricmethod
+    @metricmethod_sampled
     def oracle_detect_conflict(self, cursor):
         """Find one conflict in the data about to be committed.
 
@@ -807,7 +810,7 @@ class ObjectMover(object):
 
 
 
-    @metricmethod
+    @metricmethod_sampled
     def postgresql_replace_temp(self, cursor, oid, prev_tid, data):
         """Replace an object in the temporary table.
 
@@ -826,7 +829,7 @@ class ObjectMover(object):
         """
         cursor.execute(stmt, (prev_tid, md5sum, encodestring(data), oid))
 
-    @metricmethod
+    @metricmethod_sampled
     def mysql_replace_temp(self, cursor, oid, prev_tid, data):
         """Replace an object in the temporary table.
 
@@ -845,7 +848,7 @@ class ObjectMover(object):
         """
         cursor.execute(stmt, (prev_tid, md5sum, self.Binary(data), oid))
 
-    @metricmethod
+    @metricmethod_sampled
     def oracle_replace_temp(self, cursor, oid, prev_tid, data):
         """Replace an object in the temporary table.
 
@@ -869,7 +872,7 @@ class ObjectMover(object):
 
 
 
-    @metricmethod
+    @metricmethod_sampled
     def generic_move_from_temp(self, cursor, tid, txn_has_blobs):
         """Moved the temporarily stored objects to permanent storage.
 
@@ -959,7 +962,7 @@ class ObjectMover(object):
 
 
 
-    @metricmethod
+    @metricmethod_sampled
     def postgresql_update_current(self, cursor, tid):
         """Update the current object pointers.
 
@@ -987,7 +990,7 @@ class ObjectMover(object):
         )
         """, {'tid': tid})
 
-    @metricmethod
+    @metricmethod_sampled
     def mysql_update_current(self, cursor, tid):
         """Update the current object pointers.
 
@@ -1003,7 +1006,7 @@ class ObjectMover(object):
         WHERE tid = %s
         """, (tid,))
 
-    @metricmethod
+    @metricmethod_sampled
     def oracle_update_current(self, cursor, tid):
         """Update the current object pointers.
 
@@ -1036,7 +1039,7 @@ class ObjectMover(object):
 
 
 
-    @metricmethod
+    @metricmethod_sampled
     def postgresql_download_blob(self, cursor, oid, tid, filename):
         """Download a blob into a file."""
         stmt = """
@@ -1079,7 +1082,7 @@ class ObjectMover(object):
             f.close()
         return bytecount
 
-    @metricmethod
+    @metricmethod_sampled
     def mysql_download_blob(self, cursor, oid, tid, filename):
         """Download a blob into a file."""
         stmt = """
@@ -1120,7 +1123,7 @@ class ObjectMover(object):
             f.close()
         return bytecount
 
-    @metricmethod
+    @metricmethod_sampled
     def oracle_download_blob(self, cursor, oid, tid, filename):
         """Download a blob into a file."""
         stmt = """
@@ -1177,7 +1180,7 @@ class ObjectMover(object):
 
 
 
-    @metricmethod
+    @metricmethod_sampled
     def postgresql_upload_blob(self, cursor, oid, tid, filename):
         """Upload a blob from a file.
 
@@ -1251,7 +1254,7 @@ class ObjectMover(object):
             if blob is not None and not blob.closed:
                 blob.close()
 
-    @metricmethod
+    @metricmethod_sampled
     def mysql_upload_blob(self, cursor, oid, tid, filename):
         """Upload a blob from a file.
 
@@ -1301,7 +1304,7 @@ class ObjectMover(object):
         finally:
             f.close()
 
-    @metricmethod
+    @metricmethod_sampled
     def oracle_upload_blob(self, cursor, oid, tid, filename):
         """Upload a blob from a file.
 
