@@ -700,7 +700,7 @@ class RelStorage(
         now = time.time()
         stamp = TimeStamp(*(time.gmtime(now)[:5] + (now % 60,)))
         stamp = stamp.laterThan(TimeStamp(p64(last_tid)))
-        tid = repr(stamp)
+        tid = stamp.raw()
 
         tid_int = u64(tid)
         adapter.txncontrol.add_transaction(cursor, tid_int, user, desc, ext)
@@ -1092,8 +1092,7 @@ class RelStorage(
             try:
                 if not skip_prepack:
                     # Find the latest commit before or at the pack time.
-                    pack_point = repr(
-                        TimeStamp(*time.gmtime(t)[:5] + (t % 60,)))
+                    pack_point = TimeStamp(*time.gmtime(t)[:5] + (t % 60,)).raw()
                     tid_int = adapter.packundo.choose_pack_transaction(
                         u64(pack_point))
                     if tid_int is None:

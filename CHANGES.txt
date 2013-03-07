@@ -3,6 +3,8 @@
 
 - MySQL 5.5: The test suite was freezing in checkBackwardTimeTravel. Fixed.
 
+- Fixed compatibility with persistent 4.0.5 and above.
+
 1.5.1 (2011-11-12)
 ------------------
 
