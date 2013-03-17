@@ -24,6 +24,7 @@ from ZODB.POSException import POSKeyError
 from ZODB.UndoLogCompatible import UndoLogCompatible
 from ZODB.utils import p64
 from ZODB.utils import u64
+from perfmetrics import Metric
 from perfmetrics import metricmethod
 from persistent.TimeStamp import TimeStamp
 from relstorage.blobhelper import BlobHelper
@@ -468,7 +469,7 @@ class RelStorage(
         elif state == 'idle':
             self._load_transaction_open = 'active'
 
-    @metricmethod
+    @Metric(method=True, rate=0.1)
     def load(self, oid, version=''):
         if self._stale_error is not None:
             raise self._stale_error
@@ -510,7 +511,7 @@ class RelStorage(
         # string onto load's result.
         return self.load(oid, version) + ("",)
 
-    @metricmethod
+    @Metric(method=True, rate=0.1)
     def loadSerial(self, oid, serial):
         """Load a specific revision of an object"""
         oid_int = u64(oid)
@@ -537,7 +538,7 @@ class RelStorage(
         else:
             raise POSKeyError(oid)
 
-    @metricmethod
+    @Metric(method=True, rate=0.1)
     def loadBefore(self, oid, tid):
         """Return the most recent revision of oid before tid committed."""
         if self._stale_error is not None:
@@ -574,7 +575,7 @@ class RelStorage(
         finally:
             self._lock_release()
 
-    @metricmethod
+    @Metric(method=True, rate=0.1)
     def store(self, oid, serial, data, version, transaction):
         if self._stale_error is not None:
             raise self._stale_error
