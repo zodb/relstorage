@@ -35,6 +35,8 @@ Next Major Release
   will hopefully help people who accidentally use a single memcached for
   multiple databases.
 
+- Fixed compatibility with persistent 4.0.5 and above.
+
 1.5.1 (2011-11-12)
 ------------------
 
