@@ -1,5 +1,10 @@
-Next Release
-------------
+
+Next Major Release
+------------------
+
+- MySQL 5.5: The test suite was freezing in checkBackwardTimeTravel. Fixed.
+
+- Added performance metrics using the perfmetrics package.
 
 - zodbconvert: Add an --incremental option to the zodbconvert script,
   letting you convert additional transactions at a later date, or
@@ -27,7 +32,7 @@ Next Release
   temporarily reverted.
 
 - Caching: Use the database name as the cache-prefix by default. This
-  will hopefully help people who accidentally use a single cache for
+  will hopefully help people who accidentally use a single memcached for
   multiple databases.
 
 1.5.1 (2011-11-12)

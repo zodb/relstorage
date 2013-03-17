@@ -24,6 +24,7 @@ from ZODB.POSException import POSKeyError
 from ZODB.UndoLogCompatible import UndoLogCompatible
 from ZODB.utils import p64
 from ZODB.utils import u64
+from perfmetrics import metricmethod
 from persistent.TimeStamp import TimeStamp
 from relstorage.blobhelper import BlobHelper
 from relstorage.blobhelper import is_blob_record
@@ -333,12 +334,12 @@ class RelStorage(
             log.info("Reconnected.")
             return f(self._store_conn, self._store_cursor, *args, **kw)
 
-    def zap_all(self):
+    def zap_all(self, reset_oid=True):
         """Clear all objects and transactions out of the database.
 
         Used by the test suite and the ZODBConvert script.
         """
-        self._adapter.schema.zap_all()
+        self._adapter.schema.zap_all(reset_oid=reset_oid)
         self._rollback_load_connection()
         self._cache.clear()
 
@@ -467,6 +468,7 @@ class RelStorage(
         elif state == 'idle':
             self._load_transaction_open = 'active'
 
+    @metricmethod
     def load(self, oid, version=''):
         if self._stale_error is not None:
             raise self._stale_error
@@ -508,6 +510,7 @@ class RelStorage(
         # string onto load's result.
         return self.load(oid, version) + ("",)
 
+    @metricmethod
     def loadSerial(self, oid, serial):
         """Load a specific revision of an object"""
         oid_int = u64(oid)
@@ -534,6 +537,7 @@ class RelStorage(
         else:
             raise POSKeyError(oid)
 
+    @metricmethod
     def loadBefore(self, oid, tid):
         """Return the most recent revision of oid before tid committed."""
         if self._stale_error is not None:
@@ -570,6 +574,7 @@ class RelStorage(
         finally:
             self._lock_release()
 
+    @metricmethod
     def store(self, oid, serial, data, version, transaction):
         if self._stale_error is not None:
             raise self._stale_error
@@ -659,6 +664,7 @@ class RelStorage(
                     oid=oid, serials=(previous_serial, serial))
         self._txn_check_serials[oid] = serial
 
+    @metricmethod
     def tpc_begin(self, transaction, tid=None, status=' '):
         if self._stale_error is not None:
             raise self._stale_error
@@ -815,6 +821,7 @@ class RelStorage(
 
         return serials
 
+    @metricmethod
     def tpc_vote(self, transaction):
         self._lock_acquire()
         try:
@@ -881,6 +888,7 @@ class RelStorage(
 
         return serials
 
+    @metricmethod
     def tpc_finish(self, transaction, f=None):
         self._lock_acquire()
         try:
@@ -919,6 +927,7 @@ class RelStorage(
         # including cache updates.
         self._ltid = self._tid
 
+    @metricmethod
     def tpc_abort(self, transaction):
         self._lock_acquire()
         try:
@@ -987,6 +996,7 @@ class RelStorage(
     def supportsTransactionalUndo(self):
         return self._adapter.keep_history
 
+    @metricmethod
     def undoLog(self, first=0, last=-20, filter=None):
         if self._stale_error is not None:
             raise self._stale_error
@@ -1019,6 +1029,7 @@ class RelStorage(
         finally:
             adapter.connmanager.close(conn, cursor)
 
+    @metricmethod
     def history(self, oid, version=None, size=1, filter=None):
         if self._stale_error is not None:
             raise self._stale_error
@@ -1055,6 +1066,7 @@ class RelStorage(
         finally:
             self._lock_release()
 
+    @metricmethod
     def undo(self, transaction_id, transaction):
         """Undo a transaction identified by transaction_id.
 
@@ -1108,6 +1120,7 @@ class RelStorage(
         finally:
             self._lock_release()
 
+    @metricmethod
     def pack(self, t, referencesf, prepack_only=False, skip_prepack=False,
              sleep=None):
         if self._is_read_only:
@@ -1298,6 +1311,7 @@ class RelStorage(
         finally:
             self._lock_release()
 
+    @metricmethod
     def loadBlob(self, oid, serial):
         """Return the filename of the Blob data for this OID and serial.
 
@@ -1316,6 +1330,7 @@ class RelStorage(
         finally:
             self._lock_release()
 
+    @metricmethod
     def openCommittedBlobFile(self, oid, serial, blob=None):
         """Return a file for committed data for the given object id and serial
 
@@ -1343,6 +1358,7 @@ class RelStorage(
         """
         return self.blobhelper.temporaryDirectory()
 
+    @metricmethod
     def storeBlob(self, oid, serial, data, blobfilename, version, txn):
         """Stores data that has a BLOB attached.
 

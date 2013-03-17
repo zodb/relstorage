@@ -17,8 +17,6 @@ from base64 import encodestring
 from relstorage.adapters.interfaces import ITransactionControl
 from zope.interface import implements
 import logging
-import re
-import time
 
 log = logging.getLogger(__name__)
 

@@ -12,6 +12,7 @@
 #
 ##############################################################################
 
+from perfmetrics import metricmethod
 from relstorage.adapters.interfaces import IConnectionManager
 from relstorage.adapters.interfaces import ReplicaClosedException
 from relstorage.adapters.replica import ReplicaSelector
@@ -59,6 +60,7 @@ class AbstractConnectionManager(object):
         """Open a database connection and return (conn, cursor)."""
         raise NotImplementedError()
 
+    @metricmethod
     def close(self, conn, cursor):
         """Close a connection and cursor, ignoring certain errors.
         """
@@ -138,4 +140,3 @@ class AbstractConnectionManager(object):
         Returns (conn, cursor).
         """
         return self.open()
-

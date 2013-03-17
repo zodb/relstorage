@@ -13,10 +13,7 @@
 ##############################################################################
 """Oracle adapter for RelStorage."""
 
-import logging
-import cx_Oracle
-from zope.interface import implements
-
+from perfmetrics import metricmethod
 from relstorage.adapters.connmanager import AbstractConnectionManager
 from relstorage.adapters.dbiter import HistoryFreeDatabaseIterator
 from relstorage.adapters.dbiter import HistoryPreservingDatabaseIterator
@@ -33,6 +30,9 @@ from relstorage.adapters.scriptrunner import OracleScriptRunner
 from relstorage.adapters.stats import OracleStats
 from relstorage.adapters.txncontrol import OracleTransactionControl
 from relstorage.options import Options
+from zope.interface import implements
+import cx_Oracle
+import logging
 
 log = logging.getLogger(__name__)
 
@@ -283,6 +283,7 @@ class CXOracleConnectionManager(AbstractConnectionManager):
         self._twophase = twophase
         super(CXOracleConnectionManager, self).__init__(options)
 
+    @metricmethod
     def open(self, transaction_mode="ISOLATION LEVEL READ COMMITTED",
             twophase=False, replica_selector=None):
         """Open a database connection and return (conn, cursor)."""

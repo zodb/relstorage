@@ -12,6 +12,7 @@
 #
 ##############################################################################
 
+from perfmetrics import metricmethod
 from relstorage.adapters.interfaces import IReplicaSelector
 from zope.interface import implements
 import os
@@ -75,6 +76,7 @@ class ReplicaSelector(object):
             self._select(0)
         return self._current_replica
 
+    @metricmethod
     def next(self):
         """Return the next replica to try.
 

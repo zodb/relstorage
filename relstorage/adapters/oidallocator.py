@@ -19,6 +19,7 @@
 # value 1 represents OID block 1-16, 2 represents OID block 17-32,
 # and so on.
 
+from perfmetrics import metricmethod
 from relstorage.adapters.interfaces import IOIDAllocator
 from zope.interface import implements
 
@@ -35,6 +36,7 @@ class PostgreSQLOIDAllocator(object):
             END
         """, (n, n))
 
+    @metricmethod
     def new_oids(self, cursor):
         """Return a sequence of new, unused OIDs."""
         stmt = "SELECT NEXTVAL('zoid_seq')"
@@ -51,6 +53,7 @@ class MySQLOIDAllocator(object):
         n = (oid + 15) // 16
         cursor.execute("REPLACE INTO new_oid VALUES(%s)", (n,))
 
+    @metricmethod
     def new_oids(self, cursor):
         """Return a sequence of new, unused OIDs."""
         stmt = "INSERT INTO new_oid VALUES ()"
@@ -94,10 +97,10 @@ class OracleOIDAllocator(object):
             finally:
                 self.connmanager.close(conn2, cursor2)
 
+    @metricmethod
     def new_oids(self, cursor):
         """Return a sequence of new, unused OIDs."""
         stmt = "SELECT zoid_seq.nextval FROM DUAL"
         cursor.execute(stmt)
         n = cursor.fetchone()[0]
         return range(n * 16 - 15, n * 16 + 1)
-

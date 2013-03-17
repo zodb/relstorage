@@ -713,7 +713,7 @@ class GenericRelStorageTests(
                 transaction.commit()
                 self.assertTrue('beta' in r)
 
-                c._storage.zap_all()
+                c._storage.zap_all(reset_oid=False)
                 c._storage.copyTransactionsFrom(fs)
 
                 fs.close()
