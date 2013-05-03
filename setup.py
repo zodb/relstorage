@@ -73,6 +73,7 @@ setup(
         'zope.interface',
         'zc.lockfile',
     ],
+    tests_require=['mock'],
     extras_require={
         'mysql':      ['MySQL-python>=1.2.2'],
         'postgresql': ['psycopg2>=2.0'],
@@ -81,6 +82,11 @@ setup(
     entry_points = {'console_scripts': [
         'zodbconvert = relstorage.zodbconvert:main',
         'zodbpack = relstorage.zodbpack:main',
+    ],
+    'zodburi.resolvers': [
+        'postgres = relstorage.zodburi_resolver:postgresql_resolver [postgresql]',
+        'mysql = relstorage.zodburi_resolver:mysql_resolver [mysql]',
+        'oracle = relstorage.zodburi_resolver:oracle_resolver [oracle]'
     ]},
     test_suite='relstorage.tests.alltests.make_suite',
 )
