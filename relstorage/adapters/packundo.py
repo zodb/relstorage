@@ -21,6 +21,7 @@ from operator import itemgetter
 from perfmetrics import metricmethod
 from relstorage.adapters.interfaces import IPackUndo
 from zope.interface import implements
+import BTrees
 import logging
 import time
 
@@ -31,6 +32,7 @@ class PackUndo(object):
     """Abstract base class for pack/undo"""
 
     verify_sane_database = False
+    traverse_batch_size = 100000
 
     def __init__(self, database_type, connmanager, runner, locker, options):
         self.database_type = database_type
@@ -63,8 +65,17 @@ class PackUndo(object):
         """
         log.info("pre_pack: downloading pack_object and object_ref.")
 
+        # Note: TreeSet can be updated at random much faster than Set,
+        # but TreeSet consumes more memory. (Random TreeSet updates are
+        # probably O(log n) while random Set updates are probably O(n).
+        # OTOH, adding to Sets or TreeSets in order is an O(1) operation.)
+        Set = BTrees.family64.II.Set
+        TreeSet = BTrees.family64.II.TreeSet
+        Bucket = BTrees.family64.IO.Bucket
+        set_difference = BTrees.family64.II.difference
+
         # Download the list of root objects to keep from pack_object.
-        keep_set = set()  # set([oid])
+        keep_set = TreeSet()
         stmt = """
         SELECT zoid
         FROM pack_object
@@ -72,10 +83,10 @@ class PackUndo(object):
         """
         self.runner.run_script_stmt(cursor, stmt)
         for from_oid, in cursor:
-            keep_set.add(from_oid)
+            keep_set.insert(from_oid)
 
         # Download the list of object references into all_refs.
-        all_refs = {}  # {from_oid: set([to_oid])}
+        all_refs = Bucket()  # {from_oid: set([to_oid])}
         # Note the Oracle optimizer hints in the following statement; MySQL
         # and PostgreSQL ignore these. Oracle fails to notice that pack_object
         # is now filled and chooses the wrong execution plan, completely
@@ -89,37 +100,54 @@ class PackUndo(object):
         FROM object_ref
             JOIN pack_object ON (object_ref.zoid = pack_object.zoid)
         WHERE object_ref.tid >= pack_object.keep_tid
-        ORDER BY object_ref.zoid
+        ORDER BY object_ref.zoid, object_ref.to_zoid
+        LIMIT %d
+        OFFSET %d
         """
-        self.runner.run_script_stmt(cursor, stmt)
-        # Grouped by object_ref.zoid, store all object_ref.to_zoid in sets
-        for from_oid, rows in groupby(cursor, itemgetter(0)):
-            all_refs[from_oid] = set(row[1] for row in rows)
+        # Download in batches to avoid eating up all RAM.
+        # While downloading the OIDs, move them to Set and Bucket
+        # objects. A Set takes a lot less RAM than Python integer sets.
+        offset = 0
+        batch_size = self.traverse_batch_size
+        while True:
+            # Grouped by object_ref.zoid, store all object_ref.to_zoid in sets
+            self.runner.run_script_stmt(cursor, stmt % (batch_size, offset))
+            added = False
+
+            for from_oid, rows in groupby(cursor, itemgetter(0)):
+                added = True
+                d = all_refs.get(from_oid)
+                if d is None:
+                    all_refs[from_oid] = d = Set()
+                d.update(row[1] for row in rows)
+
+            if added:
+                offset += batch_size
+            else:
+                # Finished download
+                break
 
         # Traverse the object graph.  Add all of the reachable OIDs
         # to keep_set.
         log.info("pre_pack: traversing the object graph "
-            "to find reachable objects.")
-        parents = set()
-        parents.update(keep_set)
+                 "to find reachable objects.")
+        parents = Set(keep_set)
         pass_num = 0
         while parents:
             pass_num += 1
-            children = set()
+            children = TreeSet()
             for parent in parents:
                 to_oids = all_refs.get(parent)
                 if to_oids:
                     children.update(to_oids)
-            parents = children.difference(keep_set)
+            parents = set_difference(children, keep_set)
             keep_set.update(parents)
             log.debug("pre_pack: found %d more referenced object(s) in "
-                "pass %d", len(parents), pass_num)
+                      "pass %d", len(parents), pass_num)
 
         # Set pack_object.keep for all OIDs in keep_set.
         del all_refs  # Free some RAM
-        keep_list = list(keep_set)
-        keep_list.sort()
-        log.info("pre_pack: marking objects reachable: %d", len(keep_list))
+        log.info("pre_pack: marking objects reachable: %d", len(keep_set))
         batch = []
 
         def upload_batch():
@@ -131,7 +159,7 @@ class PackUndo(object):
             """ % oids_str
             self.runner.run_script_stmt(cursor, stmt)
 
-        for oid in keep_list:
+        for oid in keep_set:
             batch.append(oid)
             if len(batch) >= 1000:
                 upload_batch()
