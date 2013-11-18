@@ -1032,6 +1032,8 @@ class HistoryFreePackUndo(PackUndo):
             else:
                 # No changes since last pass.
                 break
+        if holding_commit:
+            self.locker.release_commit_lock(cursor)            
 
     def _add_refs_for_oids(self, cursor, oids, get_references):
         """Fill object_refs with the states for some objects.
