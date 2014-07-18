@@ -39,6 +39,11 @@ class PostgreSQLLocker(Locker):
 
     @metricmethod
     def hold_commit_lock(self, cursor, ensure_current=False, nowait=False):
+        # in PostgreSQL 9.3+, lock_timeout in ms; if nowait, then ignored
+        timeout = (not nowait and self.commit_lock_timeout or 0) * 1000  # ms
+        timeout_stmt = ''
+        if self._pg_has_lock_timeout(cursor):
+            timeout_stmt = 'SET lock_timeout = %d; ' % timeout
         try:
             if ensure_current:
                 # Hold commit_lock to prevent concurrent commits
@@ -47,19 +52,21 @@ class PostgreSQLLocker(Locker):
                 # conflict detection has the most current data.
                 if self.keep_history:
                     stmt = """
+                    %s
                     LOCK TABLE commit_lock IN EXCLUSIVE MODE%s;
                     LOCK TABLE transaction IN SHARE MODE;
                     LOCK TABLE current_object IN SHARE MODE
-                    """ % (nowait and ' NOWAIT' or '',)
+                    """ % (timeout_stmt, nowait and ' NOWAIT' or '',)
                 else:
                     stmt = """
+                    %s
                     LOCK TABLE commit_lock IN EXCLUSIVE MODE%s;
                     LOCK TABLE object_state IN SHARE MODE
-                    """ % (nowait and ' NOWAIT' or '',)
+                    """ % (timeout_stmt, nowait and ' NOWAIT' or '',)
                 cursor.execute(stmt)
             else:
-                cursor.execute("LOCK TABLE commit_lock IN EXCLUSIVE MODE%s" %
-                    (nowait and ' NOWAIT' or '',))
+                cursor.execute("%sLOCK TABLE commit_lock IN EXCLUSIVE MODE%s" %
+                    (timeout_stmt, nowait and ' NOWAIT' or '',))
         except self.lock_exceptions:
             if nowait:
                 return False
@@ -69,6 +76,10 @@ class PostgreSQLLocker(Locker):
     def release_commit_lock(self, cursor):
         # no action needed
         pass
+
+    def _pg_has_lock_timeout(self, cursor):
+        """Returns True if PostgreSQL 9.3+, supporting lock_timeout"""
+        return self.version_detector.get_version(cursor) >= (9, 3)
 
     def _pg_has_advisory_locks(self, cursor):
         """Return true if this version of PostgreSQL supports advisory locks"""
