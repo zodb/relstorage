@@ -23,6 +23,7 @@ from relstorage.tests.hptestbase import HistoryPreservingToFileStorage
 import logging
 import os
 import unittest
+import sys
 
 
 base_dbname = os.environ.get('RELSTORAGETEST_DBNAME', 'relstoragetest')
@@ -81,9 +82,9 @@ class ZConfigTests:
         </schema>
         """
         import ZConfig
-        from StringIO import StringIO
-        schema = ZConfig.loadSchemaFile(StringIO(schema_xml))
-        config, handler = ZConfig.loadConfigFile(schema, StringIO(conf))
+        from BytesIO import BytesIO
+        schema = ZConfig.loadSchemaFile(BytesIO(schema_xml))
+        config, handler = ZConfig.loadConfigFile(schema, BytesIO(conf))
 
         db = config.database.open()
         try:
@@ -140,7 +141,9 @@ db_names = {
 def test_suite():
     try:
         import MySQLdb
-    except ImportError, e:
+    except ImportError:
+        e = sys.exc_info()[1]
+
         import warnings
         warnings.warn("MySQLdb is not importable, so MySQL tests disabled")
         return unittest.TestSuite()

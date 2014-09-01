@@ -20,9 +20,11 @@ from relstorage.tests.hftestbase import HistoryFreeToFileStorage
 from relstorage.tests.hptestbase import HistoryPreservingFromFileStorage
 from relstorage.tests.hptestbase import HistoryPreservingRelStorageTests
 from relstorage.tests.hptestbase import HistoryPreservingToFileStorage
+import sys
 import logging
 import os
 import unittest
+from relstorage.compat import b
 
 
 base_dbname = os.environ.get('RELSTORAGETEST_DBNAME', 'relstoragetest')
@@ -53,8 +55,7 @@ class ZConfigTests:
         dsn = (
             "dbname='%s' user='relstoragetest' password='relstoragetest'"
             % dbname)
-        conf = """
-        %%import relstorage
+        conf = """%%import relstorage
         <zodb main>
             <relstorage>
             name xyz
@@ -80,7 +81,7 @@ class ZConfigTests:
         </schema>
         """
         import ZConfig
-        from StringIO import StringIO
+        from relstorage.compat import StringIO
         schema = ZConfig.loadSchemaFile(StringIO(schema_xml))
         config, handler = ZConfig.loadConfigFile(schema, StringIO(conf))
 
@@ -136,7 +137,9 @@ db_names = {
 def test_suite():
     try:
         import psycopg2
-    except ImportError, e:
+    except ImportError:
+        e = sys.exc_info()[1]
+
         import warnings
         warnings.warn(
             "psycopg2 is not importable, so PostgreSQL tests disabled")

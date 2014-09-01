@@ -16,8 +16,7 @@ from perfmetrics import metricmethod
 from relstorage.adapters.interfaces import IConnectionManager
 from relstorage.adapters.interfaces import ReplicaClosedException
 from relstorage.adapters.replica import ReplicaSelector
-from zope.interface import implements
-
+from relstorage.compat import implements, implementer
 
 class AbstractConnectionManager(object):
     """Abstract base class for connection management.
@@ -140,3 +139,6 @@ class AbstractConnectionManager(object):
         Returns (conn, cursor).
         """
         return self.open()
+
+AbstractConnectionManager = implementer(IConnectionManager)(AbstractConnectionManager)
+

@@ -48,6 +48,7 @@ load_infile
     int, non-zero enables LOAD LOCAL INFILE, zero disables
 """
 
+import sys
 import logging
 import MySQLdb
 from zope.interface import implements
@@ -230,7 +231,8 @@ class MySQLdbConnectionManager(AbstractConnectionManager):
                     conn.autocommit(False)
                 conn.replica = replica
                 return conn, cursor
-            except MySQLdb.OperationalError, e:
+            except MySQLdb.OperationalError:
+                e = sys.exc_info()[1]
                 if replica is not None:
                     next_replica = replica_selector.next()
                     if next_replica is not None:

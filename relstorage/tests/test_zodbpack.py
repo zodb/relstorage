@@ -13,6 +13,7 @@
 ##############################################################################
 
 import unittest
+from relstorage.compat import b
 
 class ZODBPackScriptTests(unittest.TestCase):
 
@@ -23,11 +24,11 @@ class ZODBPackScriptTests(unittest.TestCase):
         fd, self.db_fn = tempfile.mkstemp()
         os.close(fd)
 
-        cfg = """
+        cfg = b("""
         <filestorage>
             path %s
         </filestorage>
-        """ % self.db_fn
+        """ % self.db_fn, 'UTF-8')
 
         fd, self.cfg_fn = tempfile.mkstemp()
         os.write(fd, cfg)
@@ -53,8 +54,8 @@ class ZODBPackScriptTests(unittest.TestCase):
         conn = db.open()
         conn.root()['x'] = 1
         transaction.commit()
-        oid = '\0' * 8
-        state, serial = storage.load(oid, '')
+        oid = b('\0' * 8)
+        state, serial = storage.load(oid, b(''))
         time.sleep(0.1)
         conn.root()['x'] = 2
         transaction.commit()
@@ -83,8 +84,8 @@ class ZODBPackScriptTests(unittest.TestCase):
         conn = db.open()
         conn.root()['x'] = 1
         transaction.commit()
-        oid = '\0' * 8
-        state, serial = storage.load(oid, '')
+        oid = b('\0' * 8)
+        state, serial = storage.load(oid, b(''))
         time.sleep(0.1)
         conn.root()['x'] = 2
         transaction.commit()

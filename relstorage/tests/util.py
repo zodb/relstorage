@@ -1,3 +1,4 @@
+from relstorage.compat import basestring
 
 import time
 

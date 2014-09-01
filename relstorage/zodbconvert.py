@@ -20,12 +20,13 @@ See README.txt for details.
 import logging
 import optparse
 from persistent.TimeStamp import TimeStamp
-from StringIO import StringIO
 import sys
 import ZConfig
 from ZODB.utils import p64, readable_tid_repr
+from relstorage.compat import BytesIO, b
 
-schema_xml = """
+
+schema_xml = b("""
 <schema>
   <import package="ZODB"/>
   <import package="relstorage"/>
@@ -34,7 +35,7 @@ schema_xml = """
   <section type="ZODB.storage" name="destination" attribute="destination"
     required="yes" />
 </schema>
-"""
+""")
 
 log = logging.getLogger("zodbconvert")
 
@@ -79,7 +80,7 @@ def main(argv=sys.argv):
         level=logging.INFO,
         format="%(asctime)s [%(name)s] %(levelname)s %(message)s")
 
-    schema = ZConfig.loadSchemaFile(StringIO(schema_xml))
+    schema = ZConfig.loadSchemaFile(BytesIO(schema_xml))
     config, handler = ZConfig.loadConfig(schema, args[0])
     source = config.source.open()
     destination = config.destination.open()

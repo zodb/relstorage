@@ -15,7 +15,7 @@
 """ZODB storage packing utility.
 """
 
-from StringIO import StringIO
+from relstorage.compat import BytesIO, b
 import logging
 import optparse
 import sys
@@ -23,13 +23,14 @@ import time
 import ZConfig
 import ZODB.serialize
 
-schema_xml = """
+
+schema_xml = b("""
 <schema>
   <import package="ZODB"/>
   <import package="relstorage"/>
   <multisection type="ZODB.storage" attribute="storages" />
 </schema>
-"""
+""")
 
 log = logging.getLogger("zodbpack")
 
@@ -63,7 +64,7 @@ def main(argv=sys.argv):
         level=logging.INFO,
         format="%(asctime)s [%(name)s] %(levelname)s %(message)s")
 
-    schema = ZConfig.loadSchemaFile(StringIO(schema_xml))
+    schema = ZConfig.loadSchemaFile(BytesIO(schema_xml))
     config, handler = ZConfig.loadConfig(schema, args[0])
 
     t = time.time() - float(options.days) * 86400.0

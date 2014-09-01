@@ -3,9 +3,11 @@
 from relstorage.tests.util import support_blob_cache
 import os
 import unittest
+from relstorage.compat import b
 
-test_oid = '\0' * 7 + '\x01'
-test_tid = '\0' * 7 + '\x02'
+
+test_oid = b('\0' * 7 + '\x01')
+test_tid = b('\0' * 7 + '\x02')
 
 
 class IsBlobRecordTest(unittest.TestCase):
@@ -16,7 +18,7 @@ class IsBlobRecordTest(unittest.TestCase):
 
     def test_true(self):
         from ZODB.blob import Blob
-        import cPickle
+        from relstorage.compat import cPickle
         p = cPickle.dumps(Blob)
         self.assertTrue(self._call(p))
 
@@ -24,12 +26,12 @@ class IsBlobRecordTest(unittest.TestCase):
         self.assertFalse(self._call(''))
 
     def test_obviously_false(self):
-        import cPickle
+        from relstorage.compat import cPickle
         p = cPickle.dumps('x')
         self.assertFalse(self._call(p))
 
     def test_still_false(self):
-        import cPickle
+        from relstorage.compat import cPickle
         p = cPickle.dumps('ZODB.blob')
         self.assertFalse(self._call(p))
 
@@ -63,7 +65,7 @@ class BlobHelperTest(unittest.TestCase):
         class DummyMover:
             def download_blob(self, cursor, oid_int, tid_int, filename):
                 if download_action == 'write':
-                    write_file(filename, 'blob here')
+                    write_file(filename, b('blob here'))
                     return 9
                 else:
                     return 0
@@ -136,7 +138,7 @@ class BlobHelperTest(unittest.TestCase):
         obj = self._make_default()
         fn = obj.fshelper.getBlobFilename(test_oid, test_tid)
         os.makedirs(os.path.dirname(fn))
-        write_file(fn, 'blob here')
+        write_file(fn, b('blob here'))
         res = obj.loadBlob(None, test_oid, test_tid)
         self.assertEqual(fn, res)
 
@@ -152,7 +154,7 @@ class BlobHelperTest(unittest.TestCase):
         obj = self._make_default(shared=False)
         fn = obj.fshelper.getBlobFilename(test_oid, test_tid)
         os.makedirs(os.path.dirname(fn))
-        write_file(fn, 'blob here')
+        write_file(fn, b('blob here'))
         res = obj.loadBlob(None, test_oid, test_tid)
         self.assertEqual(fn, res)
 
@@ -179,8 +181,8 @@ class BlobHelperTest(unittest.TestCase):
 
         obj = self._make_default(shared=False)
         f = obj.openCommittedBlobFile(None, test_oid, test_tid)
-        self.assertEqual(f.__class__, file)
-        self.assertEqual(f.read(), 'blob here')
+        self.assertEqual(f.fileno().__class__, int)
+        self.assertEqual(f.read(), b('blob here'))
 
     def test_openCommittedBlobFile_as_blobfile(self):
         if not support_blob_cache:
@@ -189,10 +191,10 @@ class BlobHelperTest(unittest.TestCase):
         obj = self._make_default(shared=False)
         from ZODB.blob import Blob
         from ZODB.blob import BlobFile
-        b = Blob()
-        f = obj.openCommittedBlobFile(None, test_oid, test_tid, blob=b)
+        blob = Blob()
+        f = obj.openCommittedBlobFile(None, test_oid, test_tid, blob=blob)
         self.assertEqual(f.__class__, BlobFile)
-        self.assertEqual(f.read(), 'blob here')
+        self.assertEqual(f.read(), b('blob here'))
 
     def test_openCommittedBlobFile_retry_as_file(self):
         if not support_blob_cache:
@@ -210,8 +212,8 @@ class BlobHelperTest(unittest.TestCase):
         loadBlob, obj.loadBlob = obj.loadBlob, loadBlob_wrapper
         f = obj.openCommittedBlobFile(None, test_oid, test_tid)
         self.assertEqual(loadBlob_calls, [1])
-        self.assertEqual(f.__class__, file)
-        self.assertEqual(f.read(), 'blob here')
+        self.assertEqual(f.fileno().__class__, int)
+        self.assertEqual(f.read(), b('blob here'))
 
     def test_openCommittedBlobFile_retry_as_blobfile(self):
         if not support_blob_cache:
@@ -229,11 +231,11 @@ class BlobHelperTest(unittest.TestCase):
         loadBlob, obj.loadBlob = obj.loadBlob, loadBlob_wrapper
         from ZODB.blob import Blob
         from ZODB.blob import BlobFile
-        b = Blob()
-        f = obj.openCommittedBlobFile(None, test_oid, test_tid, b)
+        blob = Blob()
+        f = obj.openCommittedBlobFile(None, test_oid, test_tid, blob)
         self.assertEqual(loadBlob_calls, [1])
         self.assertEqual(f.__class__, BlobFile)
-        self.assertEqual(f.read(), 'blob here')
+        self.assertEqual(f.read(), b('blob here'))
 
     def test_openCommittedBlobFile_retry_fail_on_shared(self):
         if not support_blob_cache:
@@ -250,7 +252,7 @@ class BlobHelperTest(unittest.TestCase):
         obj = self._make_default(shared=True)
         fn = obj.fshelper.getBlobFilename(test_oid, test_tid)
         os.makedirs(os.path.dirname(fn))
-        write_file(fn, 'blob here')
+        write_file(fn, b('blob here'))
 
         loadBlob, obj.loadBlob = obj.loadBlob, loadBlob_wrapper
         from ZODB.POSException import POSKeyError
@@ -266,7 +268,7 @@ class BlobHelperTest(unittest.TestCase):
             called.append((oid, tid, data, version, txn))
 
         fn = os.path.join(self.blob_dir, 'newblob')
-        write_file(fn, 'here a blob')
+        write_file(fn, b('here a blob'))
 
         obj = self._make_default()
         self.assertFalse(obj.txn_has_blobs)
@@ -288,7 +290,7 @@ class BlobHelperTest(unittest.TestCase):
             called.append((oid, tid, data, version, txn))
 
         fn = os.path.join(self.blob_dir, 'newblob')
-        write_file(fn, 'here a blob')
+        write_file(fn, b('here a blob'))
 
         obj = self._make_default(shared=False)
         self.assertFalse(obj.txn_has_blobs)
@@ -300,7 +302,7 @@ class BlobHelperTest(unittest.TestCase):
             [(test_oid, test_tid, 'blob pickle', '', dummy_txn)])
         self.assertEqual(self.uploaded[:2], (1, None))
         target_fn = self.uploaded[2]
-        self.assertEqual(read_file(target_fn), 'here a blob')
+        self.assertEqual(read_file(target_fn), b('here a blob'))
 
     def test_storeBlob_replace(self):
         called = []
@@ -310,9 +312,9 @@ class BlobHelperTest(unittest.TestCase):
             called.append((oid, tid, data, version, txn))
 
         fn1 = os.path.join(self.blob_dir, 'newblob')
-        write_file(fn1, 'here a blob')
+        write_file(fn1, b('here a blob'))
         fn2 = os.path.join(self.blob_dir, 'newblob2')
-        write_file(fn2, 'there a blob')
+        write_file(fn2, b('there a blob'))
 
         obj = self._make_default()
         self.assertFalse(obj.txn_has_blobs)
@@ -324,28 +326,28 @@ class BlobHelperTest(unittest.TestCase):
         self.assertFalse(os.path.exists(fn2))
         self.assertTrue(obj.txn_has_blobs)
         target_fn = obj._txn_blobs[test_oid]
-        self.assertEqual(read_file(target_fn), 'there a blob')
+        self.assertEqual(read_file(target_fn), b('there a blob'))
 
     def test_restoreBlob_shared(self):
         fn = os.path.join(self.blob_dir, 'newblob')
-        write_file(fn, 'here a blob')
+        write_file(fn, b('here a blob'))
         obj = self._make_default()
         obj.restoreBlob(None, test_oid, test_tid, fn)
         self.assertFalse(os.path.exists(fn))
         target_fn = obj.fshelper.getBlobFilename(test_oid, test_tid)
-        self.assertEqual(read_file(target_fn), 'here a blob')
+        self.assertEqual(read_file(target_fn), b('here a blob'))
 
     def test_restoreBlob_unshared(self):
         if not support_blob_cache:
             return
 
         fn = os.path.join(self.blob_dir, 'newblob')
-        write_file(fn, 'here a blob')
+        write_file(fn, b('here a blob'))
         obj = self._make_default(shared=False)
         obj.restoreBlob(None, test_oid, test_tid, fn)
         self.assertEqual(self.uploaded[:2], (1, 2))
         target_fn = self.uploaded[2]
-        self.assertEqual(read_file(target_fn), 'here a blob')
+        self.assertEqual(read_file(target_fn), b('here a blob'))
 
     def test_copy_undone_unshared(self):
         if not support_blob_cache:
@@ -360,11 +362,11 @@ class BlobHelperTest(unittest.TestCase):
         copied = [(1, 1), (11, 1)]
         fn = obj.fshelper.getBlobFilename(test_oid, test_oid)
         os.makedirs(os.path.dirname(fn))
-        write_file(fn, 'blob here')
+        write_file(fn, b('blob here'))
         obj.copy_undone(copied, test_tid)
         self.assertTrue(obj.txn_has_blobs)
         fn2 = obj.fshelper.getBlobFilename(test_oid, test_tid)
-        self.assertEqual(read_file(fn2), 'blob here')
+        self.assertEqual(read_file(fn2), b('blob here'))
 
     def test_after_pack_unshared(self):
         if not support_blob_cache:
@@ -377,7 +379,7 @@ class BlobHelperTest(unittest.TestCase):
         obj = self._make_default()
         fn = obj.fshelper.getBlobFilename(test_oid, test_tid)
         os.makedirs(os.path.dirname(fn))
-        write_file(fn, 'blob here')
+        write_file(fn, b('blob here'))
         obj.after_pack(1, 2)
         self.assertFalse(os.path.exists(fn))
 
@@ -385,7 +387,7 @@ class BlobHelperTest(unittest.TestCase):
         obj = self._make_default(keep_history=False)
         fn = obj.fshelper.getBlobFilename(test_oid, test_tid)
         os.makedirs(os.path.dirname(fn))
-        write_file(fn, 'blob here')
+        write_file(fn, b('blob here'))
         obj.after_pack(1, 2)
         self.assertFalse(os.path.exists(fn))
 
@@ -393,17 +395,17 @@ class BlobHelperTest(unittest.TestCase):
         obj = self._make_default()
         d = obj.fshelper.getPathForOID(test_oid, create=True)
         fn1 = os.path.join(d, 'newblob')
-        write_file(fn1, 'here a blob')
+        write_file(fn1, b('here a blob'))
         obj._txn_blobs = {test_oid: fn1}
         obj.vote(test_tid)
         fn2 = obj.fshelper.getBlobFilename(test_oid, test_tid)
-        self.assertEqual(read_file(fn2), 'here a blob')
+        self.assertEqual(read_file(fn2), b('here a blob'))
 
     def test_abort(self):
         obj = self._make_default()
         d = obj.fshelper.getPathForOID(test_oid, create=True)
         fn1 = os.path.join(d, 'newblob')
-        write_file(fn1, 'here a blob')
+        write_file(fn1, b('here a blob'))
         obj._txn_blobs = {test_oid: fn1}
         obj.abort()
         fn2 = obj.fshelper.getBlobFilename(test_oid, test_tid)
@@ -414,7 +416,9 @@ class BlobHelperTest(unittest.TestCase):
 def test_suite():
     try:
         import ZODB.blob
-    except ImportError, e:
+    except ImportError:
+        e = sys.exc_info()[1]
+
         # Disable these tests for ZODB < 3.8.
         return unittest.TestSuite()
 

@@ -20,6 +20,10 @@ Set up:
     >>> import ZODB.blob, transaction
     >>> from persistent.mapping import PersistentMapping
 
+For Python 2 and 3 polyglotting code - binary strings
+
+    >>> from relstorage.compat import b
+
 We need an database with an undoing blob supporting storage:
 
     >>> database1 = ZODB.DB(create_storage('1'))
@@ -34,12 +38,12 @@ Put a couple blob objects in our database1 and on the filesystem:
 
     >>> import time, os
     >>> nothing = transaction.begin()
-    >>> data1 = 'x'*100000
+    >>> data1 = b('x')*100000
     >>> blob1 = ZODB.blob.Blob()
-    >>> blob1.open('w').write(data1)
-    >>> data2 = 'y'*100000
+    >>> _ = blob1.open('w').write(data1)
+    >>> data2 = b('y')*100000
     >>> blob2 = ZODB.blob.Blob()
-    >>> blob2.open('w').write(data2)
+    >>> _ = blob2.open('w').write(data2)
     >>> d = PersistentMapping({'blob1':blob1, 'blob2':blob2})
     >>> root1['blobdata'] = d
     >>> transaction.commit()

@@ -20,6 +20,7 @@ from ZODB.TimeStamp import TimeStamp
 import logging
 import random
 import threading
+from relstorage.compat import basestring, iteritems, bytes, b
 
 log = logging.getLogger(__name__)
 
@@ -161,7 +162,7 @@ class StorageCache(object):
             #   wrong tid in delta_after*.
             cp0, cp1 = self.checkpoints
             import os
-            import thread
+            from relstorage.compat import thread
             raise AssertionError("Detected an inconsistency "
                 "between the RelStorage cache and the database "
                 "while loading an object using the delta_after0 dict.  "
@@ -232,7 +233,7 @@ class StorageCache(object):
                 cursor, oid_int)
             self._check_tid_after_load(oid_int, actual_tid_int, tid_int)
 
-            cache_data = '%s%s' % (p64(tid_int), state or '')
+            cache_data = p64(tid_int) + (state or b(''))
             for client in self.clients_local_first:
                 client.set(cachekey, cache_data)
             return state, tid_int
@@ -278,7 +279,7 @@ class StorageCache(object):
         state, tid_int = self.adapter.mover.load_current(cursor, oid_int)
         if tid_int:
             self._check_tid_after_load(oid_int, tid_int)
-            cache_data = '%s%s' % (p64(tid_int), state or '')
+            cache_data = p64(tid_int) + (state or b(''))
             for client in self.clients_local_first:
                 client.set(cp0_key, cache_data)
         return state, tid_int
@@ -295,7 +296,7 @@ class StorageCache(object):
         Typically, we can't actually cache the object yet, because its
         transaction ID is not yet chosen.
         """
-        assert isinstance(state, str)
+        assert isinstance(state, bytes)
         queue = self.queue
         queue.seek(0, 2)  # seek to end
         startpos = queue.tell()
@@ -331,7 +332,7 @@ class StorageCache(object):
                     client.set_multi(to_send)
                 to_send.clear()
                 send_size = 0
-            to_send[cachekey] = '%s%s' % (tid, state)
+            to_send[cachekey] = tid + state  # '%s%s' % (tid, state)
             send_size += item_size
 
         if to_send:
@@ -508,7 +509,7 @@ class StorageCache(object):
                     change_dict[oid_int] = tid_int
 
                 # Put the changes in new_delta_after*.
-                for oid_int, tid_int in change_dict.iteritems():
+                for oid_int, tid_int in iteritems(change_dict):
                     if tid_int > cp0:
                         new_delta_after0[oid_int] = tid_int
                     elif tid_int > cp1:
@@ -693,7 +694,7 @@ class LocalClient(object):
             return
         self._lock_acquire()
         try:
-            for key, value in d.iteritems():
+            for key, value in iteritems(d):
                 if isinstance(value, basestring):
                     if len(value) >= self._value_limit:
                         # This value is too big, so don't cache it.

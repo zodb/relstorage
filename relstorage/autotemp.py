@@ -12,18 +12,18 @@
 #
 ##############################################################################
 
-from cStringIO import StringIO
+from relstorage.compat import BytesIO
 import tempfile
 
 class AutoTemporaryFile(object):
-    """Initially a StringIO, but becomes a TemporaryFile if it grows large.
+    """Initially a BytesIO, but becomes a TemporaryFile if it grows large.
 
     Not thread safe.
     """
 
     def __init__(self, threshold=10*1024*1024):
         self._threshold = threshold
-        self._f = StringIO()
+        self._f = BytesIO()
 
     def read(self, n=None):
         if n is not None:

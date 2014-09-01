@@ -1,15 +1,21 @@
 Connection support for Blobs tests
 ==================================
 
-Connections handle Blobs specially. To demonstrate that, we first need a Blob
-with some data:
+Connections handle Blobs specially.
 
     >>> from ZODB.interfaces import IBlob
     >>> from ZODB.blob import Blob
     >>> import transaction
+
+For Python 2 and 3 polyglotting code - binary strings
+
+    >>> from relstorage.compat import b
+
+We first need a Blob with some data:
+
     >>> blob = Blob()
     >>> data = blob.open("w")
-    >>> data.write("I'm a happy Blob.")
+    >>> _ = data.write(b("I'm a happy Blob."))
     >>> data.close()
 
 We also need a database with a blob supporting storage.  (We're going to use
@@ -43,8 +49,8 @@ Getting stuff out of there works similarly:
     >>> blob2 = root['myblob']
     >>> IBlob.providedBy(blob2)
     True
-    >>> blob2.open("r").read()
-    "I'm a happy Blob."
+    >>> blob2.open("r").read() == b("I'm a happy Blob.")
+    True
     >>> transaction2.abort()
 
 MVCC also works.
@@ -52,11 +58,11 @@ MVCC also works.
     >>> transaction3 = transaction.TransactionManager()
     >>> connection3 = database.open(transaction_manager=transaction3)
     >>> f = connection.root()['myblob'].open('w')
-    >>> f.write('I am an ecstatic Blob.')
+    >>> _ = f.write(b('I am an ecstatic Blob.'))
     >>> f.close()
     >>> transaction.commit()
-    >>> connection3.root()['myblob'].open('r').read()
-    "I'm a happy Blob."
+    >>> connection3.root()['myblob'].open('r').read() == b("I'm a happy Blob.")
+    True
 
     >>> transaction2.abort()
     >>> transaction3.abort()
@@ -71,7 +77,7 @@ You can't put blobs into a database that has uses a Non-Blob-Storage, though:
     >>> connection2 = database2.open(transaction_manager=transaction2)
     >>> root = connection2.root()
     >>> root['myblob'] = Blob()
-    >>> transaction2.commit()        # doctest: +ELLIPSIS
+    >>> transaction2.commit()        # doctest: +ELLIPSIS, +IGNORE_EXCEPTION_DETAIL
     Traceback (most recent call last):
         ...
     Unsupported: Storing Blobs in <ZODB.MappingStorage.MappingStorage ...> is not supported.

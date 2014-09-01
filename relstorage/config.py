@@ -35,7 +35,7 @@ class RelStorageFactory(BaseConfig):
 
 class PostgreSQLAdapterFactory(BaseConfig):
     def create(self, options):
-        from adapters.postgresql import PostgreSQLAdapter
+        from relstorage.adapters.postgresql import PostgreSQLAdapter
         return PostgreSQLAdapter(
             dsn=self.config.dsn,
             options=options,
@@ -44,7 +44,7 @@ class PostgreSQLAdapterFactory(BaseConfig):
 
 class OracleAdapterFactory(BaseConfig):
     def create(self, options):
-        from adapters.oracle import OracleAdapter
+        from relstorage.adapters.oracle import OracleAdapter
         config = self.config
         return OracleAdapter(
             user=config.user,
@@ -56,7 +56,7 @@ class OracleAdapterFactory(BaseConfig):
 
 class MySQLAdapterFactory(BaseConfig):
     def create(self, options):
-        from adapters.mysql import MySQLAdapter
+        from relstorage.adapters.mysql import MySQLAdapter
         params = {}
         for key in self.config.getSectionAttributes():
             value = getattr(self.config, key)

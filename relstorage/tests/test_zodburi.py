@@ -1,7 +1,7 @@
 import mock
 import unittest
 from pkg_resources import DistributionNotFound
-
+import sys
 
 class TestPostgreSQLURIResolver(unittest.TestCase):
 
@@ -111,7 +111,9 @@ class TestEntryPoints(unittest.TestCase):
                 target = load_entry_point('relstorage', 'zodburi.resolvers', name)
                 self.assertTrue(isinstance(target, cls))
                 self.assertTrue(isinstance(target.adapter_helper, helper_cls))
-            except DistributionNotFound as e:
+            except DistributionNotFound:
+                e = sys.exc_info()[1]
+
                 import warnings
                 warnings.warn('%s not found, skipping the zodburi test for %s'%
                               (e[0], name))

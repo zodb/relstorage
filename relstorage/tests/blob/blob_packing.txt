@@ -13,6 +13,10 @@ A helper method to assure a unique timestamp across multiple platforms:
 
     >>> from relstorage.tests.blob.testblob import new_time
 
+A helper method to allow Python 2 and 3 compatibility in one code base
+
+    >>> from relstorage.compat import b
+
 UNDOING
 =======
 
@@ -34,32 +38,32 @@ Put some revisions of a blob object in our database and on the filesystem:
     >>> nothing = transaction.begin()
     >>> times.append(new_time())
     >>> blob = Blob()
-    >>> blob.open('w').write('this is blob data 0')
+    >>> _ = blob.open('w').write(b('this is blob data 0'))
     >>> root['blob'] = blob
     >>> transaction.commit()
     >>> tids.append(blob._p_serial)
 
     >>> nothing = transaction.begin()
     >>> times.append(new_time())
-    >>> root['blob'].open('w').write('this is blob data 1')
+    >>> _ = root['blob'].open('w').write(b('this is blob data 1'))
     >>> transaction.commit()
     >>> tids.append(blob._p_serial)
 
     >>> nothing = transaction.begin()
     >>> times.append(new_time())
-    >>> root['blob'].open('w').write('this is blob data 2')
+    >>> _ = root['blob'].open('w').write(b('this is blob data 2'))
     >>> transaction.commit()
     >>> tids.append(blob._p_serial)
 
     >>> nothing = transaction.begin()
     >>> times.append(new_time())
-    >>> root['blob'].open('w').write('this is blob data 3')
+    >>> _ = root['blob'].open('w').write(b('this is blob data 3'))
     >>> transaction.commit()
     >>> tids.append(blob._p_serial)
 
     >>> nothing = transaction.begin()
     >>> times.append(new_time())
-    >>> root['blob'].open('w').write('this is blob data 4')
+    >>> _ = root['blob'].open('w').write(b('this is blob data 4'))
     >>> transaction.commit()
     >>> tids.append(blob._p_serial)
 

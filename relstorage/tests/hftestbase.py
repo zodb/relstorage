@@ -26,7 +26,7 @@ from ZODB.tests.PackableStorage import Root
 from ZODB.tests.PackableStorage import ZERO
 from ZODB.tests.StorageTestBase import zodb_pickle
 from ZODB.tests.StorageTestBase import zodb_unpickle
-import cPickle
+from relstorage.compat import cPickle
 import time
 
 

@@ -35,6 +35,8 @@ from relstorage.tests.RecoveryStorage import IteratorDeepCompare
 import ZODB.tests.StorageTestBase
 import ZODB.tests.util
 import zope.testing.renormalizing
+from relstorage.compat import b, next
+
 
 try:
     from hashlib import md5
@@ -69,22 +71,25 @@ def random_file(size, fd):
     def fdata():
         seed = "1092384956781341341234656953214543219"
         # Just use the this module as the source of our data
-        words = open(__file__, "r").read().replace("\n", '').split()
-        a = collections.deque(words)
-        b = collections.deque(seed)
+        words = open(__file__, "rb").read().replace(b("\n"), b('')).split()
+        w = collections.deque(words)
+        s = collections.deque(seed)
         while True:
-            yield ' '.join(list(a)[0:1024])
-            a.rotate(int(b[0]))
-            b.rotate(1)
+            yield b(' ').join(list(w)[0:1024])
+            w.rotate(int(s[0]))
+            s.rotate(1)
+
     datagen = fdata()
-    bytes = 0
-    md5sum = md5()
-    while bytes < size:
-        data = datagen.next()
-        md5sum.update(data)
+    n_bytes = 0
+    md5hash = md5()
+
+    while n_bytes < size:
+        data = next(datagen)
+        md5hash.update(data)
         fd.write(data)
-        bytes += len(data)
-    return md5sum.hexdigest()
+        n_bytes += len(data)
+
+    return md5hash.hexdigest()
 
 
 def md5sum(fd):
@@ -132,19 +137,19 @@ class BlobUndoTests(BlobTestBase):
         root = connection.root()
         transaction.begin()
         blob = Blob()
-        blob.open('w').write('this is state 1')
+        blob.open('w').write(b('this is state 1'))
         root['blob'] = blob
         transaction.commit()
 
         transaction.begin()
         blob = root['blob']
-        blob.open('w').write('this is state 2')
+        blob.open('w').write(b('this is state 2'))
         transaction.commit()
 
 
         database.undo(database.undoLog(0, 1)[0]['id'])
         transaction.commit()
-        self.assertEqual(blob.open('r').read(), 'this is state 1')
+        self.assertEqual(blob.open('r').read(), b('this is state 1'))
 
         database.close()
 
@@ -153,7 +158,7 @@ class BlobUndoTests(BlobTestBase):
         connection = database.open()
         root = connection.root()
         transaction.begin()
-        open('consume1', 'w').write('this is state 1')
+        open('consume1', 'wb').write(b('this is state 1'))
         blob = Blob()
         blob.consumeFile('consume1')
         root['blob'] = blob
@@ -161,14 +166,14 @@ class BlobUndoTests(BlobTestBase):
         
         transaction.begin()
         blob = root['blob']
-        open('consume2', 'w').write('this is state 2')
+        open('consume2', 'wb').write(b('this is state 2'))
         blob.consumeFile('consume2')
         transaction.commit()
 
         database.undo(database.undoLog(0, 1)[0]['id'])
         transaction.commit()
 
-        self.assertEqual(blob.open('r').read(), 'this is state 1')
+        self.assertEqual(blob.open('r').read(), b('this is state 1'))
 
         database.close()
 
@@ -179,24 +184,24 @@ class BlobUndoTests(BlobTestBase):
         blob = Blob()
 
         transaction.begin()
-        blob.open('w').write('this is state 1')
+        blob.open('w').write(b('this is state 1'))
         root['blob'] = blob
         transaction.commit()
 
         transaction.begin()
         blob = root['blob']
-        blob.open('w').write('this is state 2')
+        blob.open('w').write(b('this is state 2'))
         transaction.commit()
 
         database.undo(database.undoLog(0, 1)[0]['id'])
         transaction.commit()
 
-        self.assertEqual(blob.open('r').read(), 'this is state 1')
+        self.assertEqual(blob.open('r').read(), b('this is state 1'))
 
         database.undo(database.undoLog(0, 1)[0]['id'])
         transaction.commit()
 
-        self.assertEqual(blob.open('r').read(), 'this is state 2')
+        self.assertEqual(blob.open('r').read(), b('this is state 2'))
 
         database.close()
 
@@ -207,7 +212,7 @@ class BlobUndoTests(BlobTestBase):
         blob = Blob()
 
         transaction.begin()
-        blob.open('w').write('this is state 1')
+        blob.open('w').write(b('this is state 1'))
         root['blob'] = blob
         transaction.commit()
 
@@ -219,7 +224,7 @@ class BlobUndoTests(BlobTestBase):
         database.undo(database.undoLog(0, 1)[0]['id'])
         transaction.commit()
 
-        self.assertEqual(blob.open('r').read(), 'this is state 1')
+        self.assertEqual(blob.open('r').read(), b('this is state 1'))
 
         database.close()
 
@@ -247,7 +252,7 @@ class RecoveryBlobStorage(BlobTestBase,
         conn.root()[1] = ZODB.blob.Blob()
         transaction.commit()
         conn.root()[2] = ZODB.blob.Blob()
-        conn.root()[2].open('w').write('some data')
+        conn.root()[2].open('w').write(b('some data'))
         transaction.commit()
         conn.root()[3] = ZODB.blob.Blob()
         conn.root()[3].open('w').write(
@@ -257,7 +262,7 @@ class RecoveryBlobStorage(BlobTestBase,
             )
         transaction.commit()
         conn.root()[2] = ZODB.blob.Blob()
-        conn.root()[2].open('w').write('some other data')
+        conn.root()[2].open('w').write(b('some other data'))
         transaction.commit()
         self._dst.copyTransactionsFrom(self._storage)
         self.compare(self._storage, self._dst)
@@ -274,9 +279,9 @@ class LargeBlobTest(BlobTestBase):
     testsize = 0 # Set on the auto-generated parent class
 
     def _log(self, msg):
-        print '%s [%s]: %s' % (
+        print('%s [%s]: %s' % (
             datetime.datetime.now().isoformat(' '),
-            self.__class__.__name__, msg)
+            self.__class__.__name__, msg))
 
     def testLargeBlob(self):
         # Large blobs are chunked into multiple pieces, we want to know
@@ -323,8 +328,7 @@ def packing_with_uncommitted_data_non_undoing():
     >>> from ZODB.blob import Blob
     >>> root['blob'] = Blob()
     >>> connection.add(root['blob'])
-    >>> root['blob'].open('w').write('test')
-
+    >>> _ = root['blob'].open('w').write(b('test'))
     >>> blob_storage.pack(new_time(), referencesf)
 
     Clean up:
@@ -350,7 +354,7 @@ def packing_with_uncommitted_data_undoing():
     >>> from ZODB.blob import Blob
     >>> root['blob'] = Blob()
     >>> connection.add(root['blob'])
-    >>> root['blob'].open('w').write('test')
+    >>> _ = root['blob'].open('w').write(b('test'))
 
     >>> blob_storage.pack(new_time(), referencesf)
 
@@ -377,10 +381,10 @@ def secure_blob_directory():
 
     They are only accessible by the owner:
 
-    >>> oct(os.stat('blobs').st_mode)
-    '040700'
-    >>> oct(os.stat(tmp_dir).st_mode)
-    '040700'
+    >>> os.stat('blobs').st_mode == int('040700', 8)
+    True
+    >>> os.stat(tmp_dir).st_mode == int('040700', 8)
+    True
 
     These settings are recognized as secure:
 
@@ -392,7 +396,7 @@ def secure_blob_directory():
     After making the permissions of tmp_dir more liberal, the directory is
     recognized as insecure:
 
-    >>> os.chmod(tmp_dir, 040711)
+    >>> os.chmod(tmp_dir, int('040711', 8))
     >>> blob_storage.fshelper.isSecure(tmp_dir)
     False
 
@@ -422,7 +426,7 @@ def loadblob_tmpstore():
     >>> from ZODB.blob import Blob
     >>> root['blob'] = Blob()
     >>> connection.add(root['blob'])
-    >>> root['blob'].open('w').write('test')
+    >>> _ = root['blob'].open('w').write(b('test'))
     >>> import transaction
     >>> transaction.commit()
     >>> blob_oid = root['blob']._p_oid
@@ -459,11 +463,11 @@ def do_not_depend_on_cwd():
     >>> db = DB(bs)
     >>> conn = db.open()
     >>> conn.root()['blob'] = ZODB.blob.Blob()
-    >>> conn.root()['blob'].open('w').write('data')
+    >>> _ = conn.root()['blob'].open('w').write(b('data'))
     >>> transaction.commit()
     >>> os.chdir(here)
-    >>> conn.root()['blob'].open().read()
-    'data'
+    >>> conn.root()['blob'].open().read() == b('data')
+    True
 
     >>> bs.close()
     """
@@ -478,23 +482,20 @@ if False:
         >>> db = DB(bs)
         >>> conn = db.open()
         >>> conn.root().b = ZODB.blob.Blob()
-        >>> conn.root().b.open('w').write('initial')
+        >>> _ = conn.root().b.open('w').write(b('initial'))
         >>> transaction.commit()
-        >>> conn.root().b.open('w').write('1')
+        >>> _ = conn.root().b.open('w').write(b('1'))
         >>> _ = transaction.savepoint()
         >>> tm = transaction.TransactionManager()
         >>> conn2 = db.open(transaction_manager=tm)
-        >>> conn2.root().b.open('w').write('2')
+        >>> _ = conn2.root().b.open('w').write(b('2'))
         >>> _ = tm.savepoint()
-        >>> conn.root().b.open().read()
-        '1'
-        >>> conn2.root().b.open().read()
-        '2'
+        >>> conn.root().b.open().read() == b('1')
+        >>> conn2.root().b.open().read() == b('2')
         >>> transaction.abort()
         >>> tm.commit()
         >>> conn.sync()
-        >>> conn.root().b.open().read()
-        '2'
+        >>> conn.root().b.open().read() == b('2')
         >>> db.close()
         """
 
@@ -509,7 +510,7 @@ def savepoint_cleanup():
     >>> db = DB(bs)
     >>> conn = db.open()
     >>> conn.root().b = ZODB.blob.Blob()
-    >>> conn.root().b.open('w').write('initial')
+    >>> _ = conn.root().b.open('w').write(b('initial'))
     >>> _ = transaction.savepoint()
     >>> len(os.listdir(tdir))
     1
@@ -518,9 +519,9 @@ def savepoint_cleanup():
     >>> os.path.exists(savepoint_dir) and len(os.listdir(savepoint_dir)) > 0
     False
     >>> conn.root().b = ZODB.blob.Blob()
-    >>> conn.root().b.open('w').write('initial')
+    >>> _ = conn.root().b.open('w').write(b('initial'))
     >>> transaction.commit()
-    >>> conn.root().b.open('w').write('1')
+    >>> _ = conn.root().b.open('w').write(b('1'))
     >>> _ = transaction.savepoint()
     >>> transaction.abort()
     >>> os.path.exists(savepoint_dir) and len(os.listdir(savepoint_dir)) > 0

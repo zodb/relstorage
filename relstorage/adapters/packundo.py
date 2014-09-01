@@ -15,17 +15,36 @@
 """
 
 from ZODB.POSException import UndoError
-from base64 import decodestring
 from itertools import groupby
 from operator import itemgetter
 from perfmetrics import metricmethod
 from relstorage.adapters.interfaces import IPackUndo
-from zope.interface import implements
+from relstorage.compat import implements, implementer, PY3, decodestring
 import BTrees
 import logging
 import time
 
 log = logging.getLogger(__name__)
+
+
+if PY3:
+    def decode_bytes_param(value, use_base64):
+        if not isinstance(value, bytes):
+            value = value.encode('latin1')
+
+        if use_base64:
+            value = decodestring(value)
+
+        return value
+
+
+else:
+    def decode_bytes_param(value, use_base64):
+        value = str(value)
+        if use_base64:
+            value = decodestring(value)
+
+        return value
 
 
 class PackUndo(object):
@@ -456,9 +475,7 @@ class HistoryPreservingPackUndo(PackUndo):
                 # Oracle
                 state = state.read()
             if state:
-                state = str(state)
-                if use_base64:
-                    state = decodestring(state)
+                state = decode_bytes_param(state, use_base64)
                 from_count += 1
                 try:
                     to_oids = get_references(state)
@@ -849,6 +866,9 @@ class HistoryPreservingPackUndo(PackUndo):
             self.runner.run_script_stmt(cursor, stmt)
 
 
+HistoryPreservingPackUndo = implementer(IPackUndo)(HistoryPreservingPackUndo)
+
+
 class MySQLHistoryPreservingPackUndo(HistoryPreservingPackUndo):
 
     # Work around a MySQL performance bug by avoiding an expensive subquery.
@@ -1063,9 +1083,7 @@ class HistoryFreePackUndo(PackUndo):
                 state = state.read()
             add_objects.append((from_oid, tid))
             if state:
-                state = str(state)
-                if use_base64:
-                    state = decodestring(state)
+                state = decode_bytes_param(state, use_base64)
                 try:
                     to_oids = get_references(state)
                 except:
@@ -1271,6 +1289,9 @@ class HistoryFreePackUndo(PackUndo):
         %(TRUNCATE)s pack_object
         """
         self.runner.run_script(cursor, stmt)
+
+
+HistoryFreePackUndo = implementer(IPackUndo)(HistoryFreePackUndo)
 
 
 class MySQLHistoryFreePackUndo(HistoryFreePackUndo):

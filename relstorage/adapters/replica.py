@@ -14,7 +14,7 @@
 
 from perfmetrics import metricmethod
 from relstorage.adapters.interfaces import IReplicaSelector
-from zope.interface import implements
+from relstorage.compat import implements, implementer
 import os
 import time
 
@@ -112,3 +112,7 @@ class ReplicaSelector(object):
             self._select(i)
 
         return self._current_replica
+
+ReplicaSelector = implementer(IReplicaSelector)(ReplicaSelector)
+
+

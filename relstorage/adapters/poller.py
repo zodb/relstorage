@@ -14,7 +14,7 @@
 
 from ZODB.POSException import ReadConflictError
 from relstorage.adapters.interfaces import IPoller
-from zope.interface import implements
+from relstorage.compat import implementer, implements, intern
 import logging
 
 log = logging.getLogger(__name__)
@@ -158,3 +158,6 @@ class Poller:
 
         cursor.execute(stmt, params)
         return list(cursor)
+
+Poller = implementer(IPoller)(Poller)
+

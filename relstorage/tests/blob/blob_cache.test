@@ -17,6 +17,10 @@ non-shared
 In this test, we'll demonstrate that blobs data are removed from a blob
 cache when the amount of data stored exceeds a given limit.
 
+First, we need to import a Py2/Py3 compatibility method for bytestrings:
+
+    >>> from relstorage.compat import b
+
 Let's start by setting up some data:
 
     >>> blob_storage = create_storage(blob_dir='blobs',
@@ -52,7 +56,7 @@ Now, let's write some data:
     >>> conn = db.open()
     >>> for i in range(1, 101):
     ...     conn.root()[i] = ZODB.blob.Blob()
-    ...     conn.root()[i].open('w').write(chr(i)*100)
+    ...     _ = conn.root()[i].open('w').write(b(chr(i))*100)
     >>> transaction.commit()
 
 We've committed 10000 bytes of data, but our target size is 3000.  We
@@ -88,20 +92,20 @@ target:
 
     >>> for i in range(1, 101):
     ...     data = conn.root()[i].open().read()
-    ...     if data != chr(i)*100:
-    ...         print 'bad data', `chr(i)`, `data`
+    ...     if data != b(chr(i)) * 100:
+    ...         print('bad data %r %r' % (chr(i), data))
 
     >>> wait_until("size is reduced", check, 99, onfail)
 
     >>> for i in range(1, 101):
     ...     data = conn.root()[i].open().read()
-    ...     if data != chr(i)*100:
-    ...         print 'bad data', `chr(i)`, `data`
+    ...     if data != b(chr(i)) * 100:
+    ...         print('bad data %r %r' % (chr(i), data))
 
     >>> for i in range(1, 101):
     ...     data = conn.root()[i].open('c').read()
-    ...     if data != chr(i)*100:
-    ...         print 'bad data', `chr(i)`, `data`
+    ...     if data != b(chr(i))*100:
+    ...         print('bad data %r %r' % (chr(i), data))
 
     >>> wait_until("size is reduced", check, 99, onfail)
 
@@ -116,12 +120,12 @@ provoke problems:
     ...         time.sleep(0)
     ...         i = random.randint(1, 100)
     ...         data = conn.root()[i].open().read()
-    ...         if data != chr(i)*100:
-    ...             print 'bad data', `chr(i)`, `data`
+    ...         if data != b(chr(i)) * 100:
+    ...             print('bad data %r %r' % (chr(i), data))
     ...         i = random.randint(1, 100)
     ...         data = conn.root()[i].open('c').read()
-    ...         if data != chr(i)*100:
-    ...             print 'bad data', `chr(i)`, `data`
+    ...         if data != b(chr(i)) * 100:
+    ...             print('bad data %r %r' % (chr(i), data))
     ...     conn.close()
 
     >>> threads = [threading.Thread(target=run) for i in range(10)]
@@ -132,7 +136,7 @@ provoke problems:
     >>> for thread in threads:
     ...     thread.join(99)
     ...     if thread.isAlive():
-    ...        print "Can't join thread."
+    ...        print("Can't join thread.")
 
     >>> wait_until("size is reduced", check, 99, onfail)
 

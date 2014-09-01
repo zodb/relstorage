@@ -28,11 +28,13 @@ from relstorage.adapters.scriptrunner import ScriptRunner
 from relstorage.adapters.stats import PostgreSQLStats
 from relstorage.adapters.txncontrol import PostgreSQLTransactionControl
 from relstorage.options import Options
-from zope.interface import implements
+from relstorage.compat import implements, implementer
 import logging
 import psycopg2
 import psycopg2.extensions
 import re
+import sys
+
 """PostgreSQL adapter for RelStorage."""
 
 
@@ -142,6 +144,9 @@ class PostgreSQLAdapter(object):
         return ", ".join(parts)
 
 
+PostgreSQLAdapter = implementer(IRelStorageAdapter)(PostgreSQLAdapter)
+
+
 class Psycopg2Connection(psycopg2.extensions.connection):
     # The replica attribute holds the name of the replica this
     # connection is bound to.
@@ -198,7 +203,8 @@ class Psycopg2ConnectionManager(AbstractConnectionManager):
                 cursor.arraysize = 64
                 conn.replica = replica
                 return conn, cursor
-            except psycopg2.OperationalError, e:
+            except psycopg2.OperationalError:
+                e = sys.exc_info()[1]
                 if replica is not None:
                     next_replica = replica_selector.next()
                     if next_replica is not None:

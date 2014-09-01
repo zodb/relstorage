@@ -21,7 +21,8 @@
 
 from perfmetrics import metricmethod
 from relstorage.adapters.interfaces import IOIDAllocator
-from zope.interface import implements
+from relstorage.compat import implements, implementer
+
 
 class PostgreSQLOIDAllocator(object):
     implements(IOIDAllocator)
@@ -45,6 +46,9 @@ class PostgreSQLOIDAllocator(object):
         return range(n * 16 - 15, n * 16 + 1)
 
 
+PostgreSQLOIDAllocator = implementer(IOIDAllocator)(PostgreSQLOIDAllocator)
+
+
 class MySQLOIDAllocator(object):
     implements(IOIDAllocator)
 
@@ -64,6 +68,9 @@ class MySQLOIDAllocator(object):
             stmt = "DELETE FROM new_oid WHERE zoid < %s"
             cursor.execute(stmt, (n,))
         return range(n * 16 - 15, n * 16 + 1)
+
+
+MySQLOIDAllocator = implementer(IOIDAllocator)(MySQLOIDAllocator)
 
 
 class OracleOIDAllocator(object):
@@ -104,3 +111,6 @@ class OracleOIDAllocator(object):
         cursor.execute(stmt)
         n = cursor.fetchone()[0]
         return range(n * 16 - 15, n * 16 + 1)
+
+
+OracleOIDAllocator = implementer(IOIDAllocator)(OracleOIDAllocator)

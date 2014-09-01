@@ -12,7 +12,9 @@
 #
 ##############################################################################
 
+from relstorage.compat import basestring, b
 import unittest
+import sys
 
 class StorageCacheTests(unittest.TestCase):
 
@@ -63,9 +65,9 @@ class StorageCacheTests(unittest.TestCase):
         c.current_tid = 60
         c.checkpoints = (50, 40)
         c.delta_after0[2] = 55
-        data['myprefix:state:55:2'] = p64(55) + 'abc'
+        data['myprefix:state:55:2'] = p64(55) + b('abc')
         res = c.load(None, 2)
-        self.assertEqual(res, ('abc', 55))
+        self.assertEqual(res, (b('abc'), 55))
 
     def test_load_using_delta_after0_miss(self):
         from relstorage.tests.fakecache import data
@@ -75,9 +77,9 @@ class StorageCacheTests(unittest.TestCase):
         c.current_tid = 60
         c.checkpoints = (50, 40)
         c.delta_after0[2] = 55
-        adapter.mover.data[2] = ('abc', 55)
+        adapter.mover.data[2] = (b('abc'), 55)
         res = c.load(None, 2)
-        self.assertEqual(res, ('abc', 55))
+        self.assertEqual(res, (b('abc'), 55))
 
     def test_load_using_delta_after0_inconsistent(self):
         from relstorage.tests.fakecache import data
@@ -87,10 +89,12 @@ class StorageCacheTests(unittest.TestCase):
         c.current_tid = 60
         c.checkpoints = (50, 40)
         c.delta_after0[2] = 55
-        adapter.mover.data[2] = ('abc', 56)
+        adapter.mover.data[2] = (b('abc'), 56)
         try:
             c.load(None, 2)
-        except AssertionError, e:
+        except AssertionError:
+            e = sys.exc_info()[1]
+
             self.assertTrue('Detected an inconsistency' in e.args[0])
         else:
             self.fail("Failed to report cache inconsistency")
@@ -103,11 +107,13 @@ class StorageCacheTests(unittest.TestCase):
         c.current_tid = 55
         c.checkpoints = (50, 40)
         c.delta_after0[2] = 55
-        adapter.mover.data[2] = ('abc', 56)
+        adapter.mover.data[2] = (b('abc'), 56)
         from ZODB.POSException import ReadConflictError
         try:
             c.load(None, 2)
-        except ReadConflictError, e:
+        except ReadConflictError:
+            e = sys.exc_info()[1]
+
             self.assertTrue('future' in e.message)
         else:
             self.fail("Failed to generate a conflict error")
@@ -119,9 +125,9 @@ class StorageCacheTests(unittest.TestCase):
         c = self.getClass()(adapter, MockOptionsWithFakeCache(), 'myprefix')
         c.current_tid = 60
         c.checkpoints = (50, 40)
-        data['myprefix:state:50:2'] = p64(45) + 'xyz'
+        data['myprefix:state:50:2'] = p64(45) + b('xyz')
         res = c.load(None, 2)
-        self.assertEqual(res, ('xyz', 45))
+        self.assertEqual(res, (b('xyz'), 45))
 
     def test_load_using_checkpoint0_miss(self):
         from relstorage.tests.fakecache import data
@@ -130,10 +136,10 @@ class StorageCacheTests(unittest.TestCase):
         c = self.getClass()(adapter, MockOptionsWithFakeCache(), 'myprefix')
         c.current_tid = 60
         c.checkpoints = (50, 40)
-        adapter.mover.data[2] = ('xyz', 45)
+        adapter.mover.data[2] = (b('xyz'), 45)
         res = c.load(None, 2)
-        self.assertEqual(res, ('xyz', 45))
-        self.assertEqual(data.get('myprefix:state:50:2'), p64(45) + 'xyz')
+        self.assertEqual(res, (b('xyz'), 45))
+        self.assertEqual(data.get('myprefix:state:50:2'), p64(45) + b('xyz'))
 
     def test_load_using_delta_after1_hit(self):
         from relstorage.tests.fakecache import data
@@ -143,10 +149,10 @@ class StorageCacheTests(unittest.TestCase):
         c.current_tid = 60
         c.checkpoints = (50, 40)
         c.delta_after1[2] = 45
-        data['myprefix:state:45:2'] = p64(45) + 'abc'
+        data['myprefix:state:45:2'] = p64(45) + b('abc')
         res = c.load(None, 2)
-        self.assertEqual(res, ('abc', 45))
-        self.assertEqual(data.get('myprefix:state:50:2'), p64(45) + 'abc')
+        self.assertEqual(res, (b('abc'), 45))
+        self.assertEqual(data.get('myprefix:state:50:2'), p64(45) + b('abc'))
 
     def test_load_using_delta_after1_miss(self):
         from relstorage.tests.fakecache import data
@@ -156,10 +162,10 @@ class StorageCacheTests(unittest.TestCase):
         c.current_tid = 60
         c.checkpoints = (50, 40)
         c.delta_after1[2] = 45
-        adapter.mover.data[2] = ('abc', 45)
+        adapter.mover.data[2] = (b('abc'), 45)
         res = c.load(None, 2)
-        self.assertEqual(res, ('abc', 45))
-        self.assertEqual(data.get('myprefix:state:50:2'), p64(45) + 'abc')
+        self.assertEqual(res, (b('abc'), 45))
+        self.assertEqual(data.get('myprefix:state:50:2'), p64(45) + b('abc'))
 
     def test_load_using_checkpoint1_hit(self):
         from relstorage.tests.fakecache import data
@@ -168,10 +174,10 @@ class StorageCacheTests(unittest.TestCase):
         c = self.getClass()(adapter, MockOptionsWithFakeCache(), 'myprefix')
         c.current_tid = 60
         c.checkpoints = (50, 40)
-        data['myprefix:state:40:2'] = p64(35) + '123'
+        data['myprefix:state:40:2'] = p64(35) + b('123')
         res = c.load(None, 2)
-        self.assertEqual(res, ('123', 35))
-        self.assertEqual(data.get('myprefix:state:50:2'), p64(35) + '123')
+        self.assertEqual(res, (b('123'), 35))
+        self.assertEqual(data.get('myprefix:state:50:2'), p64(35) + b('123'))
 
     def test_load_using_checkpoint1_miss(self):
         from relstorage.tests.fakecache import data
@@ -180,33 +186,33 @@ class StorageCacheTests(unittest.TestCase):
         c = self.getClass()(adapter, MockOptionsWithFakeCache(), 'myprefix')
         c.current_tid = 60
         c.checkpoints = (50, 40)
-        adapter.mover.data[2] = ('123', 35)
+        adapter.mover.data[2] = (b('123'), 35)
         res = c.load(None, 2)
-        self.assertEqual(res, ('123', 35))
-        self.assertEqual(data.get('myprefix:state:50:2'), p64(35) + '123')
+        self.assertEqual(res, (b('123'), 35))
+        self.assertEqual(data.get('myprefix:state:50:2'), p64(35) + b('123'))
 
     def test_store_temp(self):
         c = self._makeOne()
         c.tpc_begin()
-        c.store_temp(2, 'abc')
-        c.store_temp(1, 'def')
-        c.store_temp(2, 'ghi')
+        c.store_temp(2, b('abc'))
+        c.store_temp(1, b('def'))
+        c.store_temp(2, b('ghi'))
         self.assertEqual(c.queue_contents, {1: (3, 6), 2: (6, 9)})
         c.queue.seek(0)
-        self.assertEqual(c.queue.read(), 'abcdefghi')
+        self.assertEqual(c.queue.read(), b('abcdefghi'))
 
     def test_send_queue_small(self):
         from relstorage.tests.fakecache import data
         from ZODB.utils import p64
         c = self._makeOne()
         c.tpc_begin()
-        c.store_temp(2, 'abc')
-        c.store_temp(3, 'def')
+        c.store_temp(2, b('abc'))
+        c.store_temp(3, b('def'))
         tid = p64(55)
         c.send_queue(tid)
         self.assertEqual(data, {
-            'myprefix:state:55:2': tid + 'abc',
-            'myprefix:state:55:3': tid + 'def',
+            'myprefix:state:55:2': tid + b('abc'),
+            'myprefix:state:55:3': tid + b('def'),
             })
 
     def test_send_queue_large(self):
@@ -215,13 +221,13 @@ class StorageCacheTests(unittest.TestCase):
         c = self._makeOne()
         c.send_limit = 100
         c.tpc_begin()
-        c.store_temp(2, 'abc')
-        c.store_temp(3, 'def' * 100)
+        c.store_temp(2, b('abc'))
+        c.store_temp(3, b('def' * 100))
         tid = p64(55)
         c.send_queue(tid)
         self.assertEqual(data, {
-            'myprefix:state:55:2': tid + 'abc',
-            'myprefix:state:55:3': tid + ('def' * 100),
+            'myprefix:state:55:2': tid + b('abc'),
+            'myprefix:state:55:3': tid + (b('def') * 100),
             })
 
     def test_send_queue_none(self):

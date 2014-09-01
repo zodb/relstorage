@@ -25,7 +25,7 @@ from ZODB.tests.StorageTestBase import MinPO
 from ZODB.tests.StorageTestBase import snooze
 from ZODB.tests.StorageTestBase import zodb_pickle
 from ZODB.tests.StorageTestBase import zodb_unpickle
-import itertools
+from relstorage.compat import izip
 import time
 import transaction
 import ZODB.POSException
@@ -44,7 +44,7 @@ class IteratorDeepCompare:
         missing = object()
         iter1 = storage1.iterator()
         iter2 = storage2.iterator()
-        for txn1, txn2 in itertools.izip(iter1, iter2):
+        for txn1, txn2 in izip(iter1, iter2):
             eq(txn1.tid,         txn2.tid)
             eq(txn1.status,      txn2.status)
             eq(txn1.user,        txn2.user)
@@ -71,7 +71,7 @@ class IteratorDeepCompare:
             recs1.sort()
             recs2 = recs2.items()
             recs2.sort()
-            for (oid1, rec1), (oid2, rec2) in itertools.izip(recs1, recs2):
+            for (oid1, rec1), (oid2, rec2) in izip(recs1, recs2):
                 eq(rec1.oid, rec2.oid)
                 eq(rec1.tid, rec2.tid)
                 eq(rec1.data, rec2.data)

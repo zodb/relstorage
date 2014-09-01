@@ -13,9 +13,8 @@
 ##############################################################################
 """TransactionControl implementations"""
 
-from base64 import encodestring
 from relstorage.adapters.interfaces import ITransactionControl
-from zope.interface import implements
+from relstorage.compat import implements, implementer, encodestring, PY3
 import logging
 
 log = logging.getLogger(__name__)
@@ -45,6 +44,25 @@ class TransactionControl(object):
     def abort(self, conn, cursor, txn=None):
         """Abort the commit.  If txn is not None, phase 1 is also aborted."""
         conn.rollback()
+
+
+
+if PY3:
+    def encode_bytes_param(value, use_base64):
+        if isinstance(value, str):
+            value = value.encode('latin1')
+        if use_base64:
+            value = encodestring(value)
+
+        return value
+
+
+else:
+    def encode_bytes_param(value, use_base64):
+        if use_base64:
+            value = encodestring(value)
+
+        return value
 
 
 class PostgreSQLTransactionControl(TransactionControl):
@@ -90,8 +108,11 @@ class PostgreSQLTransactionControl(TransactionControl):
                 decode(%s, 'base64'))
             """
             cursor.execute(stmt, (tid, packed,
-                encodestring(username), encodestring(description),
-                encodestring(extension)))
+                encode_bytes_param(username, True), encode_bytes_param(description, True),
+                encode_bytes_param(extension, True)))
+
+
+PostgreSQLTransactionControl = implementer(ITransactionControl)(PostgreSQLTransactionControl)
 
 
 class MySQLTransactionControl(TransactionControl):
@@ -138,6 +159,9 @@ class MySQLTransactionControl(TransactionControl):
             cursor.execute(stmt, (
                 tid, packed, self.Binary(username),
                 self.Binary(description), self.Binary(extension)))
+
+
+MySQLTransactionControl = implementer(ITransactionControl)(MySQLTransactionControl)
 
 
 class OracleTransactionControl(TransactionControl):
@@ -205,3 +229,6 @@ class OracleTransactionControl(TransactionControl):
             cursor.execute(stmt, (
                 tid, packed and 'Y' or 'N', self.Binary(username),
                 self.Binary(description), self.Binary(extension)))
+
+
+OracleTransactionControl = implementer(ITransactionControl)(OracleTransactionControl)

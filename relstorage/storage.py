@@ -23,7 +23,6 @@ from ZODB.BaseStorage import TransactionRecord
 from ZODB.POSException import POSKeyError
 from ZODB.UndoLogCompatible import UndoLogCompatible
 from ZODB.utils import p64
-from ZODB.utils import u64
 from perfmetrics import Metric
 from perfmetrics import metricmethod
 from persistent.TimeStamp import TimeStamp
@@ -31,16 +30,17 @@ from relstorage.blobhelper import BlobHelper
 from relstorage.blobhelper import is_blob_record
 from relstorage.cache import StorageCache
 from relstorage.options import Options
-from zope.interface import implements
 import ZODB.interfaces
 import base64
-import cPickle
+from relstorage.compat import cPickle, u64, bytes, iterkeys, iteritems
 import logging
 import os
 import tempfile
 import threading
 import time
 import weakref
+import sys
+from relstorage.compat import implements, implementer, b
 
 try:
     from ZODB.interfaces import StorageStopIteration
@@ -72,7 +72,7 @@ log = logging.getLogger("relstorage")
 # early rather than wait for an explicit abort.
 abort_early = os.environ.get('RELSTORAGE_ABORT_EARLY')
 
-z64 = '\0' * 8
+z64 = b('\0' * 8)
 
 
 class RelStorage(
@@ -272,7 +272,9 @@ class RelStorage(
                     self._load_conn, self._load_cursor)
                 self._load_transaction_open = 'active'
             return f(self._load_conn, self._load_cursor, *args, **kw)
-        except self._adapter.connmanager.disconnected_exceptions, e:
+        except self._adapter.connmanager.disconnected_exceptions:
+            e = sys.exc_info()[1]
+
             log.warning("Reconnecting load_conn: %s", e)
             self._drop_load_connection()
             try:
@@ -303,7 +305,9 @@ class RelStorage(
         try:
             self._adapter.connmanager.restart_store(
                 self._store_conn, self._store_cursor)
-        except self._adapter.connmanager.disconnected_exceptions, e:
+        except self._adapter.connmanager.disconnected_exceptions:
+            e = sys.exc_info()[1]
+
             log.warning("Reconnecting store_conn: %s", e)
             self._drop_store_connection()
             try:
@@ -320,7 +324,9 @@ class RelStorage(
             self._open_store_connection()
         try:
             return f(self._store_conn, self._store_cursor, *args, **kw)
-        except self._adapter.connmanager.disconnected_exceptions, e:
+        except self._adapter.connmanager.disconnected_exceptions:
+            e = sys.exc_info()[1]
+
             if self._transaction is not None:
                 # If transaction commit is in progress, it's too late
                 # to reconnect.
@@ -491,7 +497,7 @@ class RelStorage(
                 # an object whose creation has been undone.
                 self._log_keyerror(oid_int, "creation has been undone")
                 raise POSKeyError(oid)
-            state = str(state or '')
+            state = bytes(state or b(''))
             return state, p64(tid_int)
         else:
             self._log_keyerror(oid_int, "no tid found")
@@ -531,7 +537,7 @@ class RelStorage(
             self._lock_release()
 
         if state is not None:
-            state = str(state)
+            state = bytes(state)
             if not state:
                 raise POSKeyError(oid)
             return state
@@ -568,7 +574,7 @@ class RelStorage(
                 else:
                     end = None
                 if state is not None:
-                    state = str(state)
+                    state = bytes(state)
                 return state, p64(start_tid), end
             else:
                 return None
@@ -870,9 +876,9 @@ class RelStorage(
         tid_int = u64(self._tid)
 
         if self._txn_check_serials:
-            oid_ints = [u64(oid) for oid in self._txn_check_serials.iterkeys()]
+            oid_ints = [u64(oid) for oid in iterkeys(self._txn_check_serials)]
             current = self._adapter.mover.current_object_tids(cursor, oid_ints)
-            for oid, expect in self._txn_check_serials.iteritems():
+            for oid, expect in iteritems(self._txn_check_serials):
                 oid_int = u64(oid)
                 actual = p64(current.get(oid_int, 0))
                 if actual != expect:
@@ -1083,7 +1089,7 @@ class RelStorage(
         if transaction is not self._transaction:
             raise POSException.StorageTransactionError(self, transaction)
 
-        undo_tid = base64.decodestring(transaction_id + '\n')
+        undo_tid = base64.decodestring(transaction_id)
         assert len(undo_tid) == 8
         undo_tid_int = u64(undo_tid)
 
@@ -1137,7 +1143,7 @@ class RelStorage(
             """Return the set of OIDs the given state refers to."""
             refs = set()
             if state:
-                for oid in referencesf(str(state)):
+                for oid in referencesf(bytes(state)):
                     refs.add(u64(oid))
             return refs
 
@@ -1262,7 +1268,9 @@ class RelStorage(
         try:
             changes, new_polled_tid = self._restart_load_and_call(
                 self._adapter.poller.poll_invalidations, prev, ignore_tid)
-        except POSException.ReadConflictError, e:
+        except POSException.ReadConflictError:
+            e = sys.exc_info()[1]
+
             # The database connection is stale, but postpone this
             # error until the application tries to read or write something.
             self._stale_error = e
@@ -1478,6 +1486,9 @@ class RelStorage(
         self.sync(False)
 
 
+RelStorage = implementer(*_relstorage_interfaces)(RelStorage)
+
+
 class TransactionIterator(object):
     """Iterate over the transactions in a RelStorage instance."""
 
@@ -1526,6 +1537,8 @@ class TransactionIterator(object):
         res = RelStorageTransactionRecord(self, *params)
         self._index += 1
         return res
+
+    __next__ = next
 
 
 class RelStorageTransactionRecord(TransactionRecord):
@@ -1583,6 +1596,7 @@ class RecordIterator(object):
         self._index += 1
         return res
 
+    __next__ = next
 
 class Record(DataRecord):
     """An object state in a transaction"""
@@ -1593,6 +1607,6 @@ class Record(DataRecord):
         self.tid = tid
         self.oid = p64(oid_int)
         if data is not None:
-            self.data = str(data)
+            self.data = bytes(data)
         else:
             self.data = None

@@ -13,6 +13,7 @@
 ##############################################################################
 
 import unittest
+from relstorage.compat import b
 
 class ZODBConvertTests(unittest.TestCase):
 
@@ -28,14 +29,14 @@ class ZODBConvertTests(unittest.TestCase):
         os.close(fd)
         os.remove(self.destfile)
 
-        cfg = """
+        cfg = b("""
         <filestorage source>
             path %s
         </filestorage>
         <filestorage destination>
             path %s
         </filestorage>
-        """ % (self.srcfile, self.destfile)
+        """ % (self.srcfile, self.destfile), 'UTF-8')
 
         fd, self.cfgfile = tempfile.mkstemp()
         os.write(fd, cfg)

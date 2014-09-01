@@ -24,11 +24,10 @@ import BTrees.OOBTree
 import logging
 import os
 import re
-import thread
 import threading
 import time
 import zc.lockfile
-
+from relstorage.compat import thread, iteritems
 
 try:
     import ZODB.blob
@@ -44,7 +43,7 @@ except ImportError:
     else:
         # Using ZODB 3.8
         import cPickle
-        import cStringIO
+        import cBytesIO
 
         def find_global_Blob(module, class_):
             if module == 'ZODB.blob' and class_ == 'Blob':
@@ -58,7 +57,7 @@ except ImportError:
 
             """
             if record and ('ZODB.blob' in record):
-                unpickler = cPickle.Unpickler(cStringIO.StringIO(record))
+                unpickler = cPickle.Unpickler(cBytesIO.BytesIO(record))
                 unpickler.find_global = find_global_Blob
 
                 try:
@@ -296,7 +295,7 @@ class BlobHelper(object):
                 continue
 
             new_fn = self.fshelper.getBlobFilename(oid, tid)
-            orig = open(orig_fn, 'r')
+            orig = open(orig_fn, 'rb')
             new = open(new_fn, 'wb')
             ZODB.utils.cp(orig, new)
             orig.close()
@@ -350,7 +349,7 @@ class BlobHelper(object):
 
     def abort(self):
         if self._txn_blobs:
-            for oid, filename in self._txn_blobs.iteritems():
+            for oid, filename in iteritems(self._txn_blobs):
                 if os.path.exists(filename):
                     ZODB.blob.remove_committed(filename)
                     if self.shared_blob_dir:

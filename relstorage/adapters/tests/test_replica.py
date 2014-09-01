@@ -13,6 +13,8 @@
 ##############################################################################
 
 import unittest
+from relstorage.compat import b
+
 
 class ReplicaSelectorTests(unittest.TestCase):
 
@@ -21,8 +23,8 @@ class ReplicaSelectorTests(unittest.TestCase):
         import tempfile
         fd, self.fn = tempfile.mkstemp()
         os.write(fd,
-            "# Replicas\n\nexample.com:1234\nlocalhost:4321\n"
-            "\nlocalhost:9999\n")
+            b("# Replicas\n\nexample.com:1234\nlocalhost:4321\n"
+            "\nlocalhost:9999\n"))
         os.close(fd)
 
     def tearDown(self):

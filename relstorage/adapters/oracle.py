@@ -33,6 +33,7 @@ from relstorage.options import Options
 from zope.interface import implements
 import cx_Oracle
 import logging
+import sys
 
 log = logging.getLogger(__name__)
 
@@ -220,7 +221,9 @@ class CXOracleScriptRunner(OracleScriptRunner):
                         return row
                 finally:
                     del cursor.outputtypehandler
-            except cx_Oracle.DatabaseError, e:
+            except cx_Oracle.DatabaseError:
+                e = sys.exc_info()[1]
+
                 # ORA-01406: fetched column value was truncated
                 error, = e
                 if ((isinstance(error, str) and not error.endswith(' 1406'))
@@ -305,7 +308,9 @@ class CXOracleConnectionManager(AbstractConnectionManager):
                     cursor.execute("SET TRANSACTION %s" % transaction_mode)
                 return conn, cursor
 
-            except cx_Oracle.OperationalError, e:
+            except cx_Oracle.OperationalError:
+                e = sys.exc_info()[1]
+
                 if replica_selector is not None:
                     next_dsn = replica_selector.next()
                     if next_dsn is not None:

@@ -17,7 +17,7 @@
 from ZODB.POSException import StorageError
 from perfmetrics import metricmethod
 from relstorage.adapters.interfaces import ILocker
-from zope.interface import implements
+from relstorage.compat import implements, implementer
 
 
 class Locker(object):
@@ -101,6 +101,8 @@ class PostgreSQLLocker(Locker):
             cursor.execute("SELECT pg_advisory_unlock(1)")
         # else no action needed since the lock will be released at txn commit
 
+PostgreSQLLocker = implementer(ILocker)(PostgreSQLLocker)
+
 
 class MySQLLocker(Locker):
     implements(ILocker)
@@ -135,6 +137,8 @@ class MySQLLocker(Locker):
         """Release the pack lock."""
         stmt = "SELECT RELEASE_LOCK(CONCAT(DATABASE(), '.pack'))"
         cursor.execute(stmt)
+
+MySQLLocker = implementer(ILocker)(MySQLLocker)
 
 
 class OracleLocker(Locker):
@@ -203,3 +207,6 @@ class OracleLocker(Locker):
         """Release the pack lock."""
         # No action needed
         pass
+
+OracleLocker = implementer(ILocker)(OracleLocker)
+

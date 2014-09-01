@@ -13,7 +13,7 @@
 ##############################################################################
 
 from relstorage.adapters.interfaces import IScriptRunner
-from zope.interface import implements
+from relstorage.compat import implements, implementer, intern
 import logging
 import re
 
@@ -87,6 +87,9 @@ class ScriptRunner(object):
         stmt should use '%s' parameter format.
         """
         cursor.executemany(stmt, items)
+
+
+ScriptRunner = implementer(IScriptRunner)(ScriptRunner)
 
 
 class OracleScriptRunner(ScriptRunner):

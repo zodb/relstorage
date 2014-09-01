@@ -14,14 +14,12 @@
 """IObjectMover implementation.
 """
 
-from base64 import decodestring
-from base64 import encodestring
 from perfmetrics import Metric
 from relstorage.adapters.batch import MySQLRowBatcher
 from relstorage.adapters.batch import OracleRowBatcher
 from relstorage.adapters.batch import PostgreSQLRowBatcher
 from relstorage.adapters.interfaces import IObjectMover
-from zope.interface import implements
+from relstorage.compat import implements, implementer, encodestring, decodestring, xrange
 import os
 import sys
 
@@ -1378,3 +1376,5 @@ class ObjectMover(object):
             f.close()
             if blob is not None and blob.isopen():
                 blob.close()
+
+ObjectMover = implementer(IObjectMover)(ObjectMover)

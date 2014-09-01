@@ -1,5 +1,9 @@
 import cgi
-import urlparse
+try:
+    import urlparse
+except ImportError:
+    from urllib import parse as urlparse
+
 from ZODB.DemoStorage import DemoStorage
 
 from relstorage.options import Options

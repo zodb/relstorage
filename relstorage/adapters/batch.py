@@ -39,7 +39,7 @@ class RowBatcher(object):
     def delete_from(self, table, **kw):
         if not kw:
             raise AssertionError("Need at least one column value")
-        columns = kw.keys()
+        columns = list(kw.keys())
         columns.sort()
         columns = tuple(columns)
         key = (table, columns)
@@ -155,7 +155,7 @@ class OracleRowBatcher(RowBatcher):
 
             if len(rows) == 1:
                 # use the single insert syntax
-                row = rows.values()[0]
+                row = list(rows.values())[0]
                 stmt = "INSERT INTO %s VALUES (%s)" % (header, row_schema)
                 for name in self.inputsizes:
                     if name in row:

@@ -12,10 +12,8 @@
 #
 ##############################################################################
 
-from base64 import decodestring
 from relstorage.adapters.interfaces import IDatabaseIterator
-from zope.interface import implements
-
+from relstorage.compat import implements, implementer, b, decodestring, decodebytes, PY3
 
 class DatabaseIterator(object):
     """Abstract base class for database iteration.
@@ -49,9 +47,30 @@ class DatabaseIterator(object):
             if hasattr(state, 'read'):
                 # Oracle
                 state = state.read()
-            if state is not None and self.use_base64:
-                state = decodestring(state)
+            if state is not None:
+                state = decode_bytes_param(state, self.use_base64)
+
             yield oid, state
+
+
+if PY3:
+    def decode_bytes_param(value, use_base64):
+        if not isinstance(value, bytes):
+            value = value.encode('latin1')
+
+        if use_base64:
+            value = decodestring(value)
+
+        return value
+
+
+else:
+    def decode_bytes_param(value, use_base64):
+        value = str(value)
+        if use_base64:
+            value = base64_decode(value)
+
+        return value
 
 
 class HistoryPreservingDatabaseIterator(DatabaseIterator):
@@ -66,24 +85,22 @@ class HistoryPreservingDatabaseIterator(DatabaseIterator):
         use_base64 = self.use_base64
         for row in cursor:
             tid, username, description, ext = row[:4]
+
             if username is None:
-                username = ''
+                username = b('')
             else:
-                username = str(username)
-                if use_base64:
-                    username = decodestring(username)
+                username = decode_bytes_param(username, use_base64)
+
             if description is None:
-                description = ''
+                description = b('')
             else:
-                description = str(description)
-                if use_base64:
-                    description = decodestring(description)
+                description = decode_bytes_param(description, use_base64)
+
             if ext is None:
-                ext = ''
+                ext = b('')
             else:
-                ext = str(ext)
-                if use_base64:
-                    ext = decodestring(ext)
+                ext = decode_bytes_param(ext, use_base64)
+
             yield (tid, username, description, ext) + tuple(row[4:])
 
 
@@ -181,6 +198,9 @@ class HistoryPreservingDatabaseIterator(DatabaseIterator):
         return self._transaction_iterator(cursor)
 
 
+HistoryPreservingDatabaseIterator = implementer(IDatabaseIterator)(HistoryPreservingDatabaseIterator)
+
+
 class HistoryFreeDatabaseIterator(DatabaseIterator):
     implements(IDatabaseIterator)
 
@@ -227,3 +247,7 @@ class HistoryFreeDatabaseIterator(DatabaseIterator):
         """
         self.runner.run_script_stmt(cursor, stmt, {'oid': oid})
         return ((tid, '', '', '', size) for (tid, size) in cursor)
+
+
+HistoryFreeDatabaseIterator = implementer(IDatabaseIterator)(HistoryFreeDatabaseIterator)
+

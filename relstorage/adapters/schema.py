@@ -16,7 +16,7 @@
 import logging
 from relstorage.adapters.interfaces import ISchemaInstaller
 from ZODB.POSException import StorageError
-from zope.interface import implements
+from relstorage.compat import implements, implementer
 import re
 
 # Versions of the installed stored procedures. Change these when
@@ -1051,6 +1051,8 @@ class PostgreSQLSchemaInstaller(AbstractSchemaInstaller):
         self.connmanager.open_and_call(callback)
         super(PostgreSQLSchemaInstaller, self).drop_all()
 
+PostgreSQLSchemaInstaller = implementer(ISchemaInstaller)(PostgreSQLSchemaInstaller)
+
 
 class MySQLSchemaInstaller(AbstractSchemaInstaller):
     implements(ISchemaInstaller)
@@ -1081,6 +1083,9 @@ class MySQLSchemaInstaller(AbstractSchemaInstaller):
                         raise StorageError(
                             "The object_state table must use the InnoDB "
                             "engine, but it is using the %s engine." % engine)
+
+
+MySQLSchemaInstaller = implementer(ISchemaInstaller)(MySQLSchemaInstaller)
 
 
 class OracleSchemaInstaller(AbstractSchemaInstaller):
@@ -1161,3 +1166,6 @@ class OracleSchemaInstaller(AbstractSchemaInstaller):
                     break
             res[name.lower()] = version
         return res
+
+
+OracleSchemaInstaller = implementer(ISchemaInstaller)(OracleSchemaInstaller)

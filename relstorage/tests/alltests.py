@@ -15,9 +15,9 @@
 
 import unittest
 
-from testpostgresql import test_suite as postgresql_test_suite
-from testmysql import test_suite as mysql_test_suite
-from testoracle import test_suite as oracle_test_suite
+from relstorage.tests.testpostgresql import test_suite as postgresql_test_suite
+from relstorage.tests.testmysql import test_suite as mysql_test_suite
+from relstorage.tests.testoracle import test_suite as oracle_test_suite
 
 def make_suite():
     suite = unittest.TestSuite()
