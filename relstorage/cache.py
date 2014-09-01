@@ -261,6 +261,10 @@ class StorageCache(object):
                 cache_data = response.get(cp0_key)
                 if cache_data and len(cache_data) >= 8:
                     # Cache hit on the preferred cache key.
+                    local_client = self.clients_local_first[0]
+                    if client is not local_client:
+                        # Copy to the local client.
+                        local_client.set(cp0_key, cache_data)
                     return cache_data[8:], u64(cache_data[:8])
 
                 if da1_key:
