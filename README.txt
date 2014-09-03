@@ -604,10 +604,23 @@ underscores instead of dashes in the option names.
 
 ``cache-local-mb``
         RelStorage caches pickled objects in memory, similar to a ZEO
-        cache. This cache is shared between threads. This option
+        cache. The "local" cache is shared between threads. This option
         configures the approximate maximum amount of memory the cache
         should consume, in megabytes.  It defaults to 10.  Set to
         0 to disable the in-memory cache.
+
+``cache-local-object-max``
+        This option configures the maximum size of an object's pickle
+        (in bytes) that can qualify for the "local" cache.  The size is
+        measured before compression. Larger objects can still qualify
+        for memcache.  The default is 16384 (1 << 14) bytes.
+
+``cache-local-compression``
+        This option configures compression within the "local" cache.
+        This option names a Python module that provides two functions,
+        ``compress()`` and ``decompress()``.  Supported values include
+        ``zlib``, ``bz2``, and ``none`` (no compression).  The default is
+        ``zlib``.
 
 ``cache-delta-size-limit``
         This is an advanced option. RelStorage uses a system of

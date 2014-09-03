@@ -262,6 +262,10 @@ class StorageCache(object):
                 cache_data = response.get(cp0_key)
                 if cache_data and len(cache_data) >= 8:
                     # Cache hit on the preferred cache key.
+                    local_client = self.clients_local_first[0]
+                    if client is not local_client:
+                        # Copy to the local client.
+                        local_client.set(cp0_key, cache_data)
                     return cache_data[8:], u64(cache_data[:8])
 
                 if da1_key:
@@ -621,9 +625,19 @@ class LocalClient(object):
         self._lock_acquire = self._lock.acquire
         self._lock_release = self._lock.release
         self._bucket_limit = int(1000000 * options.cache_local_mb / 2)
-        self._value_limit = self._bucket_limit / 10
+        self._value_limit = options.cache_local_object_max
         self._bucket0 = LocalClientBucket(self._bucket_limit)
         self._bucket1 = LocalClientBucket(self._bucket_limit)
+
+        compression_module = options.cache_local_compression
+        if compression_module in ('', None, 'none'):
+            self._compress = None
+            self._decompress = None
+        else:
+            module = __import__(
+                compression_module, {}, {}, ['compress', 'decompress'])
+            self._compress = module.compress
+            self._decompress = module.decompress
 
     def flush_all(self):
         self._lock_acquire()
@@ -634,41 +648,39 @@ class LocalClient(object):
             self._lock_release()
 
     def get(self, key):
-        self._lock_acquire()
-        try:
-            value = self._bucket0.get(key)
-            if value is None:
-                value = self._bucket1.get(key)
-                if value is None:
-                    return None
-                # This key is active, so move it to bucket0.
-                del self._bucket1[key]
-                self._set_one(key, value)
-            return value
-        finally:
-            self._lock_release()
+        return self.get_multi([key]).get(key)
 
     def get_multi(self, keys):
         res = {}
+        decompress = self._decompress
         self._lock_acquire()
         try:
             for key in keys:
-                value = self._bucket0.get(key)
-                if value is None:
-                    value = self._bucket1.get(key)
-                    if value is None:
+                cvalue = self._bucket0.get(key)
+                if cvalue is None:
+                    cvalue = self._bucket1.get(key)
+                    if cvalue is None:
                         continue
                     # This key is active, so move it to bucket0.
                     del self._bucket1[key]
-                    self._set_one(key, value)
+                    self._set_one(key, cvalue)
+
+                if decompress is not None:
+                    if isinstance(cvalue, basestring):
+                        value = decompress(cvalue)
+                    else:
+                        value = cvalue
+                else:
+                    value = cvalue
+
                 res[key] = value
         finally:
             self._lock_release()
         return res
 
-    def _set_one(self, key, value):
+    def _set_one(self, key, cvalue):
         try:
-            self._bucket0[key] = value
+            self._bucket0[key] = cvalue
         except SizeOverflow:
             # Shift bucket0 to bucket1.
             self._bucket1 = self._bucket0
@@ -680,7 +692,7 @@ class LocalClient(object):
             log.debug("LocalClient buckets shifted")
 
             try:
-                self._bucket0[key] = value
+                self._bucket0[key] = cvalue
             except SizeOverflow:
                 # The value doesn't fit in the cache at all, apparently.
                 pass
@@ -692,6 +704,7 @@ class LocalClient(object):
         if not self._bucket_limit:
             # don't bother
             return
+        compress = self._compress
         self._lock_acquire()
         try:
             for key, value in iteritems(d):
@@ -699,6 +712,13 @@ class LocalClient(object):
                     if len(value) >= self._value_limit:
                         # This value is too big, so don't cache it.
                         continue
+                    if compress is not None:
+                        cvalue = compress(value)
+                    else:
+                        cvalue = value
+
+                else:
+                    cvalue = value
 
                 if key in self._bucket0:
                     if not allow_replace:
@@ -710,7 +730,7 @@ class LocalClient(object):
                         continue
                     del self._bucket1[key]
 
-                self._set_one(key, value)
+                self._set_one(key, cvalue)
         finally:
             self._lock_release()
 
@@ -721,15 +741,25 @@ class LocalClient(object):
         if not self._bucket_limit:
             # don't bother
             return None
+        decompress = self._decompress
         self._lock_acquire()
         try:
-            value = self._bucket0.get(key)
-            if value is None:
-                value = self._bucket1.get(key)
-                if value is None:
+            cvalue = self._bucket0.get(key)
+            if cvalue is None:
+                cvalue = self._bucket1.get(key)
+                if cvalue is None:
                     return None
                 # this key is active, so move it to bucket0
                 del self._bucket1[key]
+
+            if decompress is not None:
+                if isinstance(cvalue, basestring):
+                    value = decompress(cvalue)
+                else:
+                    value = cvalue
+            else:
+                value = cvalue
+
             res = int(value) + 1
             self._set_one(key, res)
             return res

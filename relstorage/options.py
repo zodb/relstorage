@@ -59,6 +59,8 @@ class Options(object):
         self.cache_module_name = 'relstorage.pylibmc_wrapper'
         self.cache_prefix = ''
         self.cache_local_mb = 10
+        self.cache_local_object_max = 16384
+        self.cache_local_compression = 'zlib'
         self.cache_delta_size_limit = 10000
         self.commit_lock_timeout = 30
         self.commit_lock_id = 0
