@@ -17,6 +17,7 @@
 from ZODB.POSException import StorageError
 from perfmetrics import metricmethod
 from relstorage.adapters.interfaces import ILocker
+from relstorage.adapters.interfaces import UnableToAcquireCommitLockError
 from zope.interface import implements
 
 
@@ -63,7 +64,7 @@ class PostgreSQLLocker(Locker):
         except self.lock_exceptions:
             if nowait:
                 return False
-            raise StorageError('Acquiring a commit lock failed')
+            raise UnableToAcquireCommitLockError('Acquiring a commit lock failed')
         return True
 
     def release_commit_lock(self, cursor):
@@ -114,7 +115,7 @@ class MySQLLocker(Locker):
         if nowait and locked in (0, 1):
             return bool(locked)
         if not locked:
-            raise StorageError("Unable to acquire commit lock")
+            raise UnableToAcquireCommitLockError("Unable to acquire commit lock")
 
     def release_commit_lock(self, cursor):
         stmt = "SELECT RELEASE_LOCK(CONCAT(DATABASE(), '.commit'))"
@@ -166,7 +167,7 @@ class OracleLocker(Locker):
                     'lock already owned', 'illegal handle')[int(status)]
             else:
                 msg = str(status)
-            raise StorageError(
+            raise UnableToAcquireCommitLockError(
                 "Unable to acquire commit lock (%s)" % msg)
 
         # Alternative:

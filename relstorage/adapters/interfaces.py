@@ -13,6 +13,7 @@
 ##############################################################################
 """Interfaces provided by RelStorage database adapters"""
 
+from ZODB.POSException import StorageError
 from zope.interface import Attribute
 from zope.interface import Interface
 
@@ -470,3 +471,6 @@ class ITransactionControl(Interface):
 
 class ReplicaClosedException(Exception):
     """The connection to the replica has been closed"""
+
+class UnableToAcquireCommitLockError(StorageError):
+    """The commit lock cannot be acquired."""
