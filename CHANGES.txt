@@ -1,6 +1,15 @@
 
-Next Major Release
-------------------
+1.6.0b1 (2014-09-04)
+--------------------
+
+- The local cache is now more configurable and uses ``zlib`` compression
+  by default.
+
+- Added support for ``zodburi``, which means you can open a storage
+  using "postgres:", "mysql:", or "oracle:" URIs.
+
+- Packing: Reduced RAM consumption while packing by using IIBTree.Set
+  instead of built-in set objects.
 
 - MySQL 5.5: The test suite was freezing in checkBackwardTimeTravel. Fixed.
 
