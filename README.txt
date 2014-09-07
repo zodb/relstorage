@@ -724,7 +724,7 @@ and ``oracle://`` URI schemes for zodburi_.
 For more information about zodburi, please refer to its documentation. This
 section contains information specific to the these schemes.
 
-.. zodburi_ : http://pypi.python.org/pypi/zodburi
+.. _zodburi: http://pypi.python.org/pypi/zodburi
 
 URI schemes
 --------------------------
