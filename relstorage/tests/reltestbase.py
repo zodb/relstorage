@@ -34,7 +34,6 @@ import random
 import time
 import transaction
 
-
 class RelStorageTestBase(StorageTestBase.StorageTestBase):
 
     keep_history = None  # Override
@@ -629,8 +628,17 @@ class GenericRelStorageTests(
         # Verify the pack stops with the right exception if it encounters
         # a broken pickle.
         from relstorage.compat import cPickle
+        unpickling_errors = (cPickle.UnpicklingError,)
+
+        # The actual pickling error can be from zodbpickle too!
+        try:
+            from zodbpickle._pickle import UnpicklingError
+            unpickling_errors += (UnpicklingError,)
+        except:
+            pass
+
         self._dostoreNP(self._storage.new_oid(), data=b('brokenpickle'))
-        self.assertRaises(cPickle.UnpicklingError, self._storage.pack,
+        self.assertRaises(unpickling_errors, self._storage.pack,
             time.time() + 10000, referencesf)
 
     def checkBackwardTimeTravelWithoutRevertWhenStale(self):

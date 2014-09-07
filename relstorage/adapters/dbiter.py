@@ -68,7 +68,7 @@ else:
     def decode_bytes_param(value, use_base64):
         value = str(value)
         if use_base64:
-            value = base64_decode(value)
+            value = decodestring(value)
 
         return value
 

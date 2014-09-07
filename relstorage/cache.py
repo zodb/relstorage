@@ -20,7 +20,12 @@ from ZODB.TimeStamp import TimeStamp
 import logging
 import random
 import threading
-from relstorage.compat import basestring, iteritems, bytes, b
+from relstorage.compat import basestring, iteritems, bytes, b, PY3
+
+if PY3:
+    compressible = bytes
+else:
+    compressible = basestring
 
 log = logging.getLogger(__name__)
 
@@ -243,6 +248,7 @@ class StorageCache(object):
         cp0, cp1 = self.checkpoints
         cachekeys = []
         cp0_key = '%s:state:%d:%d' % (prefix, cp0, oid_int)
+
         cachekeys.append(cp0_key)
         da1_key = None
         cp1_key = None
@@ -666,7 +672,7 @@ class LocalClient(object):
                     self._set_one(key, cvalue)
 
                 if decompress is not None:
-                    if isinstance(cvalue, basestring):
+                    if isinstance(cvalue, compressible):
                         value = decompress(cvalue)
                     else:
                         value = cvalue
@@ -708,7 +714,7 @@ class LocalClient(object):
         self._lock_acquire()
         try:
             for key, value in iteritems(d):
-                if isinstance(value, basestring):
+                if isinstance(value, compressible):
                     if len(value) >= self._value_limit:
                         # This value is too big, so don't cache it.
                         continue
@@ -753,7 +759,7 @@ class LocalClient(object):
                 del self._bucket1[key]
 
             if decompress is not None:
-                if isinstance(cvalue, basestring):
+                if isinstance(cvalue, compressible):
                     value = decompress(cvalue)
                 else:
                     value = cvalue

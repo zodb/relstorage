@@ -28,6 +28,7 @@ from ZODB.tests import TransactionalUndoStorage
 from ZODB.tests.MinPO import MinPO
 from ZODB.tests.StorageTestBase import zodb_pickle
 from ZODB.utils import p64
+from relstorage.compat import b, PY3
 import time
 import transaction
 
@@ -138,27 +139,30 @@ class HistoryPreservingRelStorageTests(
 
         self.assertRaises(IndexError, iter.__getitem__, offset)
 
-    def checkNonASCIITransactionMetadata(self):
-        # Verify the database stores and retrieves non-ASCII text
-        # in transaction metadata.
-        ugly_string = ''.join(chr(c) for c in range(256))
+    if PY3:
+        print("Skipping the checkNonASCIITransactionMetadata test as setUser() does not support non-ascii characters")
+    else:
+        def checkNonASCIITransactionMetadata(self):
+            # Verify the database stores and retrieves non-ASCII text / bytes
+            # in transaction metadata.
+            ugly_string = ''.join(chr(c) for c in range(256))
 
-        db = DB(self._storage)
-        try:
-            c1 = db.open()
-            r1 = c1.root()
-            r1['alpha'] = 1
-            transaction.get().setUser(ugly_string)
-            transaction.commit()
-            r1['alpha'] = 2
-            transaction.get().note(ugly_string)
-            transaction.commit()
+            db = DB(self._storage)
+            try:
+                c1 = db.open()
+                r1 = c1.root()
+                r1['alpha'] = 1
+                transaction.get().setUser(ugly_string)
+                transaction.commit()
+                r1['alpha'] = 2
+                transaction.get().note(ugly_string)
+                transaction.commit()
 
-            info = self._storage.undoInfo()
-            self.assertEqual(info[0]['description'], ugly_string)
-            self.assertEqual(info[1]['user_name'], '/ ' + ugly_string)
-        finally:
-            db.close()
+                info = self._storage.undoInfo()
+                self.assertEqual(info[0]['description'], ugly_string)
+                self.assertEqual(info[1]['user_name'], '/ ' + ugly_string)
+            finally:
+                db.close()
 
     def checkPackGC(self, expect_object_deleted=True):
         db = DB(self._storage)

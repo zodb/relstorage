@@ -3,24 +3,18 @@ import sys as _sys
 PY3 = _sys.version_info[0] == 3
 
 if PY3:
+    import builtins as builtins
+
     izip = zip
     intern = _sys.intern
-else:
-    from itertools import izip
-
-try:
-    basestring
-except NameError:
     basestring = (str,)
-
-try:
-    import builtins as builtins
-except ImportError:
+    bytes = builtins.bytes
+else:
     import __builtin__ as builtins
 
-try:
-    bytes = builtins.bytes
-except:
+    from itertools import izip
+    intern = builtins.intern
+    basestring = builtins.basestring
     bytes = str
 
 try:
@@ -43,7 +37,7 @@ if isinstance('', u''.__class__):
     def u64(v):
         """Unpack an 8-byte string into a 64-bit long integer."""
         if v.__class__ == str:
-            return unpack(">Q", v.encode('latin1'))
+            return unpack(">Q", v.encode('latin1'))[0]
 
         return unpack(">Q", v)[0]
 
@@ -56,7 +50,11 @@ else:
 
 try:
     from io import BytesIO
-    from io import StringIO
+    if PY3:  # PY2 str does not work with StringIO initial value
+        from io import StringIO
+    else:
+        from StringIO import StringIO
+
 except ImportError:
     from cStringIO import StringIO as BytesIO
     from StringIO import StringIO
@@ -109,3 +107,13 @@ try:
 except ImportError:
     from base64 import encodestring, decodestring
     decodebytes = decodestring
+
+if PY3:
+    def ensurebytes(str_or_bytes):
+        if isinstance(str_or_bytes, bytes):
+            return str_or_bytes
+
+        return str_or_bytes.encode('ascii')
+else:
+    def ensurebytes(str_or_bytes):
+        return str(str_or_bytes)

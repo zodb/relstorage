@@ -67,9 +67,9 @@ class IteratorDeepCompare:
             recs1 = dict([(r.oid, r) for r in txn1])
             recs2 = dict([(r.oid, r) for r in txn2])
             eq(len(recs1), len(recs2))
-            recs1 = recs1.items()
+            recs1 = list(recs1.items())
             recs1.sort()
-            recs2 = recs2.items()
+            recs2 = list(recs2.items())
             recs2.sort()
             for (oid1, rec1), (oid2, rec2) in izip(recs1, recs2):
                 eq(rec1.oid, rec2.oid)

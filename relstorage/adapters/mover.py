@@ -19,7 +19,7 @@ from relstorage.adapters.batch import MySQLRowBatcher
 from relstorage.adapters.batch import OracleRowBatcher
 from relstorage.adapters.batch import PostgreSQLRowBatcher
 from relstorage.adapters.interfaces import IObjectMover
-from relstorage.compat import implements, implementer, encodestring, decodestring, xrange
+from relstorage.compat import implements, implementer, encodestring, decodestring, xrange, b
 import os
 import sys
 
@@ -1066,7 +1066,7 @@ class ObjectMover(object):
                 if f is None:
                     f = open(filename, 'ab') # Append, chunk 0 was an export
                 read_chunk_size = self.blob_chunk_size
-                reader = iter(lambda: blob.read(read_chunk_size), '')
+                reader = iter(lambda: blob.read(read_chunk_size), b(''))
                 for read_chunk in reader:
                     f.write(read_chunk)
                     bytecount += len(read_chunk)
@@ -1155,7 +1155,7 @@ class ObjectMover(object):
                     1.0 * self.blob_chunk_size / blob.getchunksize()), 1) *
                     blob.getchunksize())
                 offset = 1 # Oracle still uses 1-based indexing.
-                reader = iter(lambda: blob.read(offset, read_chunk_size), '')
+                reader = iter(lambda: blob.read(offset, read_chunk_size), b(''))
                 for read_chunk in reader:
                     f.write(read_chunk)
                     bytecount += len(read_chunk)
@@ -1239,7 +1239,7 @@ class ObjectMover(object):
                 cursor.execute(insert_stmt, params)
 
                 write_chunk_size = self.blob_chunk_size
-                for _i in xrange(maxsize / write_chunk_size):
+                for _i in xrange(int(maxsize / write_chunk_size)):
                     write_chunk = f.read(write_chunk_size)
                     if not blob.write(write_chunk):
                         # EOF.
@@ -1363,7 +1363,7 @@ class ObjectMover(object):
                     1.0 * self.blob_chunk_size / blob.getchunksize()), 1) *
                     blob.getchunksize())
                 offset = 1 # Oracle still uses 1-based indexing.
-                for _i in xrange(maxsize / write_chunk_size):
+                for _i in xrange(int(maxsize / write_chunk_size)):
                     write_chunk = f.read(write_chunk_size)
                     if not blob.write(write_chunk, offset):
                         # EOF.

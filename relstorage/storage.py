@@ -32,7 +32,7 @@ from relstorage.cache import StorageCache
 from relstorage.options import Options
 import ZODB.interfaces
 import base64
-from relstorage.compat import cPickle, u64, bytes, iterkeys, iteritems
+from relstorage.compat import cPickle, u64, bytes, iterkeys, iteritems, ensurebytes
 import logging
 import os
 import tempfile
@@ -690,13 +690,13 @@ class RelStorage(
             self._clear_temp()
             self._transaction = transaction
 
-            user = str(transaction.user)
-            desc = str(transaction.description)
+            user = ensurebytes(transaction.user)
+            desc = ensurebytes(transaction.description)
             ext = transaction._extension
             if ext:
                 ext = cPickle.dumps(ext, 1)
             else:
-                ext = ""
+                ext = b('')
             self._ude = user, desc, ext
             self._tstatus = status
 
@@ -1021,8 +1021,8 @@ class RelStorage(
                 tid = p64(tid_int)
                 d = {'id': base64.encodestring(tid)[:-1],
                      'time': TimeStamp(tid).timeTime(),
-                     'user_name': user or '',
-                     'description': desc or ''}
+                     'user_name': user or b(''),
+                     'description': desc or b('')}
                 if ext:
                     d.update(cPickle.loads(ext))
                 if filter is None or filter(d):
@@ -1059,8 +1059,8 @@ class RelStorage(
                 else:
                     d = {}
                 d.update({"time": TimeStamp(tid).timeTime(),
-                          "user_name": username or '',
-                          "description": description or '',
+                          "user_name": username or b(''),
+                          "description": description or b(''),
                           "tid": tid,
                           "version": '',
                           "size": length,
@@ -1548,8 +1548,8 @@ class RelStorageTransactionRecord(TransactionRecord):
         self._tid_int = tid_int
         self.tid = p64(tid_int)
         self.status = packed and 'p' or ' '
-        self.user = user or ''
-        self.description = desc or ''
+        self.user = user or b('')
+        self.description = desc or b('')
         if ext:
             self.extension = cPickle.loads(ext)
         else:

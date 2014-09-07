@@ -50,7 +50,7 @@ class TransactionControl(object):
 if PY3:
     def encode_bytes_param(value, use_base64):
         if isinstance(value, str):
-            value = value.encode('latin1')
+            value = value.encode('ascii')
         if use_base64:
             value = encodestring(value)
 

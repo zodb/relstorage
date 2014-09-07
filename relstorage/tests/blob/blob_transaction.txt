@@ -288,9 +288,8 @@ stored are discarded.
     >>> blob_fh.close()
     >>> root6['blob'] = blob
     >>> transaction.commit()
-    >>> open(blob.committed()).read() == b("I'm a happy blob.")
+    >>> open(blob.committed(), 'rb').read() == b("I'm a happy blob.")
     True
-
     >>> olddata, oldserial = blob_storage.load(blob._p_oid, '')
     >>> t = transaction.get()
     >>> blob_storage.tpc_begin(t)
@@ -324,7 +323,7 @@ And we shouldn't be able to read the data that we saved:
 
 Of course the old data should be unaffected:
 
-    >>> open(blob_storage.loadBlob(blob._p_oid, oldserial)).read() == b("I'm a happy blob.")
+    >>> open(blob_storage.loadBlob(blob._p_oid, oldserial), 'rb').read() == b("I'm a happy blob.")
     True
 
 Similarly, the new object wasn't added to the storage:

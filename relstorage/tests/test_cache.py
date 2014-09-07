@@ -466,7 +466,7 @@ class LocalClientTests(unittest.TestCase):
 
     def test_set_and_get_object_too_large(self):
         c = self._makeOne(cache_local_compression='none')
-        c.set('abc', 'abcdefgh' * 10000)
+        c.set('abc', 'abcdefgh' * 100000)
         self.assertEqual(c.get('abc'), None)
 
     def test_set_with_zero_space(self):
@@ -535,30 +535,30 @@ class LocalClientTests(unittest.TestCase):
         c._bucket_limit = 21 * 2 + 1
         c.flush_all()
 
-        c.set('k0', '01234567' * 10)
+        c.set('k0', b('01234567') * 10)
         self.assertEqual(c._bucket0.size, 21)
         self.assertEqual(c._bucket1.size, 0)
 
-        c.set('k1', '76543210' * 10)
+        c.set('k1', b('76543210') * 10)
         self.assertEqual(c._bucket0.size, 21 * 2)
         self.assertEqual(c._bucket1.size, 0)
 
-        c.set('k2', 'abcdefgh' * 10)
+        c.set('k2', b('abcdefgh') * 10)
         self.assertEqual(c._bucket0.size, 21)
         self.assertEqual(c._bucket1.size, 21 * 2)
 
         v = c.get('k0')
-        self.assertEqual(v, '01234567' * 10)
+        self.assertEqual(v, b('01234567') * 10)
         self.assertEqual(c._bucket0.size, 21 * 2)
         self.assertEqual(c._bucket1.size, 21)
 
         v = c.get('k1')
-        self.assertEqual(v, '76543210' * 10)
+        self.assertEqual(v, b('76543210') * 10)
         self.assertEqual(c._bucket0.size, 21)
         self.assertEqual(c._bucket1.size, 21 * 2)
 
         v = c.get('k2')
-        self.assertEqual(v, 'abcdefgh' * 10)
+        self.assertEqual(v, b('abcdefgh') * 10)
         self.assertEqual(c._bucket0.size, 21 * 2)
         self.assertEqual(c._bucket1.size, 21)
 

@@ -95,7 +95,7 @@ def random_file(size, fd):
 def md5sum(fd):
     md5sum = md5()
     blocksize = md5sum.block_size << 8
-    for data in iter(lambda: fd.read(blocksize), ''):
+    for data in iter(lambda: fd.read(blocksize), b('')):
         md5sum.update(data)
     return md5sum.hexdigest()
 
@@ -256,7 +256,7 @@ class RecoveryBlobStorage(BlobTestBase,
         transaction.commit()
         conn.root()[3] = ZODB.blob.Blob()
         conn.root()[3].open('w').write(
-            (''.join(struct.pack(">I", random.randint(0, (1<<32)-1))
+            (b('').join(struct.pack(">I", random.randint(0, (1<<32)-1))
                      for i in range(random.randint(10000,20000)))
              )[:-random.randint(1,4)]
             )
