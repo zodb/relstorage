@@ -1,5 +1,5 @@
 
-1.6.0b2 (Unrleeased)
+1.6.0b2 (Unreleased)
 --------------------
 
 - fix incremental zodbconvert
