@@ -1,10 +1,13 @@
-
-1.6.0b2 (Unrleeased)
+1.6.0b3 (Unrleeased)
 --------------------
 
 - fix incremental zodbconvert
   [mamico]
 
+1.6.0b2 (2014-10-03)
+--------------------
+
+- Packing: Used cursor.fetchmany() to make packing more efficient.
 
 1.6.0b1 (2014-09-04)
 --------------------
