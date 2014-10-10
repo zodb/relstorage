@@ -1,4 +1,9 @@
 
+1.6.0b3 (unreleased)
+--------------------
+
+- commit-lock-timeout support for PostgreSQL 9.3+.
+
 1.6.0b2 (2014-10-03)
 --------------------
 
@@ -15,8 +20,6 @@
 
 - Packing: Reduced RAM consumption while packing by using IIBTree.Set
   instead of built-in set objects.
-
-- commit-lock-timeout support for PostgreSQL 9.3+.
 
 - MySQL 5.5: The test suite was freezing in checkBackwardTimeTravel. Fixed.
 
