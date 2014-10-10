@@ -431,26 +431,44 @@ class LocalClientTests(unittest.TestCase):
         from relstorage.cache import LocalClient
         return LocalClient
 
-    def _makeOne(self):
-        return self.getClass()(MockOptions())
+    def _makeOne(self, **kw):
+        options = MockOptions()
+        vars(options).update(kw)
+        return self.getClass()(options)
 
     def test_ctor(self):
         c = self._makeOne()
         self.assertEqual(c._bucket_limit, 500000)
-        self.assertEqual(c._value_limit, 50000)
+        self.assertEqual(c._value_limit, 16384)
 
-    def test_set_and_get(self):
-        c = self._makeOne()
+    def test_set_and_get_string_compressed(self):
+        c = self._makeOne(cache_local_compression='zlib')
         c.set('abc', 'def')
         self.assertEqual(c.get('abc'), 'def')
         self.assertEqual(c.get('xyz'), None)
+
+    def test_set_and_get_string_uncompressed(self):
+        c = self._makeOne(cache_local_compression='none')
+        c.set('abc', 'def')
+        self.assertEqual(c.get('abc'), 'def')
+        self.assertEqual(c.get('xyz'), None)
+
+    def test_set_and_get_tuple_compressed(self):
+        c = self._makeOne(cache_local_compression='zlib')
+        c.set('abc', ('one', 'two'))
+        self.assertEqual(c.get('abc'), ('one', 'two'))
+
+    def test_set_and_get_object_too_large(self):
+        c = self._makeOne(cache_local_compression='none')
+        c.set('abc', 'abcdefgh' * 10000)
+        self.assertEqual(c.get('abc'), None)
 
     def test_set_with_zero_space(self):
         options = MockOptions()
         options.cache_local_mb = 0
         c = self.getClass()(options)
         self.assertEqual(c._bucket_limit, 0)
-        self.assertEqual(c._value_limit, 0)
+        self.assertEqual(c._value_limit, 16384)
         c.set('abc', 1)
         c.set('def', '')
         self.assertEqual(c.get('abc'), None)
@@ -463,9 +481,9 @@ class LocalClientTests(unittest.TestCase):
         self.assertEqual(c.get_multi(['k0', 'k2']), {'k0': 'abc'})
         self.assertEqual(c.get_multi(['k2', 'k3']), {})
 
-    def test_lru(self):
+    def test_bucket_sizes_without_compression(self):
         # LocalClient is a simple LRU cache.  Confirm it keeps the right keys.
-        c = self._makeOne()
+        c = self._makeOne(cache_local_compression='none')
         c._bucket_limit = 51
         c.flush_all()
         for i in range(5):
@@ -506,6 +524,38 @@ class LocalClientTests(unittest.TestCase):
         self.assertEqual(c._bucket0.size, 20)
         self.assertEqual(c._bucket1.size, 50)
 
+    def test_bucket_sizes_with_compression(self):
+        c = self._makeOne(cache_local_compression='zlib')
+        c._bucket_limit = 21 * 2 + 1
+        c.flush_all()
+
+        c.set('k0', '01234567' * 10)
+        self.assertEqual(c._bucket0.size, 21)
+        self.assertEqual(c._bucket1.size, 0)
+
+        c.set('k1', '76543210' * 10)
+        self.assertEqual(c._bucket0.size, 21 * 2)
+        self.assertEqual(c._bucket1.size, 0)
+
+        c.set('k2', 'abcdefgh' * 10)
+        self.assertEqual(c._bucket0.size, 21)
+        self.assertEqual(c._bucket1.size, 21 * 2)
+
+        v = c.get('k0')
+        self.assertEqual(v, '01234567' * 10)
+        self.assertEqual(c._bucket0.size, 21 * 2)
+        self.assertEqual(c._bucket1.size, 21)
+
+        v = c.get('k1')
+        self.assertEqual(v, '76543210' * 10)
+        self.assertEqual(c._bucket0.size, 21)
+        self.assertEqual(c._bucket1.size, 21 * 2)
+
+        v = c.get('k2')
+        self.assertEqual(v, 'abcdefgh' * 10)
+        self.assertEqual(c._bucket0.size, 21 * 2)
+        self.assertEqual(c._bucket1.size, 21)
+
     def test_add(self):
         c = self._makeOne()
         c.set('k0', 'abc')
@@ -516,6 +566,18 @@ class LocalClientTests(unittest.TestCase):
     def test_incr_normal(self):
         c = self._makeOne()
         c.set('k0', 41)
+        self.assertEqual(c.incr('k0'), 42)
+        self.assertEqual(c.incr('k1'), None)
+
+    def test_incr_string_with_compression(self):
+        c = self._makeOne(cache_local_compression='zlib')
+        c.set('k0', '41')
+        self.assertEqual(c.incr('k0'), 42)
+        self.assertEqual(c.incr('k1'), None)
+
+    def test_incr_string_without_compression(self):
+        c = self._makeOne(cache_local_compression='none')
+        c.set('k0', '41')
         self.assertEqual(c.incr('k0'), 42)
         self.assertEqual(c.incr('k1'), None)
 
@@ -542,12 +604,16 @@ class MockOptions:
     cache_module_name = ''
     cache_servers = ''
     cache_local_mb = 1
+    cache_local_object_max = 16384
+    cache_local_compression = 'zlib'
     cache_delta_size_limit = 10000
 
 class MockOptionsWithFakeCache:
     cache_module_name = 'relstorage.tests.fakecache'
     cache_servers = 'host:9999'
     cache_local_mb = 1
+    cache_local_object_max = 16384
+    cache_local_compression = 'zlib'
     cache_delta_size_limit = 10000
 
 class MockAdapter:

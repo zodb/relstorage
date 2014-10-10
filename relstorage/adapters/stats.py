@@ -48,7 +48,7 @@ class MySQLStats(object):
         try:
             cursor.execute("SHOW TABLE STATUS")
             description = [i[0] for i in cursor.description]
-            rows = list(cursor)
+            rows = cursor.fetchall()
         finally:
             self.connmanager.close(conn, cursor)
         data_column = description.index('Data_length')

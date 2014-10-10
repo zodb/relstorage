@@ -20,6 +20,7 @@ from itertools import groupby
 from operator import itemgetter
 from perfmetrics import metricmethod
 from relstorage.adapters.interfaces import IPackUndo
+from relstorage.iter import fetchmany
 from zope.interface import implements
 import BTrees
 import logging
@@ -32,7 +33,6 @@ class PackUndo(object):
     """Abstract base class for pack/undo"""
 
     verify_sane_database = False
-    traverse_batch_size = 100000
 
     def __init__(self, database_type, connmanager, runner, locker, options):
         self.database_type = database_type
@@ -82,7 +82,7 @@ class PackUndo(object):
         WHERE keep = %(TRUE)s
         """
         self.runner.run_script_stmt(cursor, stmt)
-        for from_oid, in cursor:
+        for from_oid, in fetchmany(cursor):
             keep_set.insert(from_oid)
 
         # Download the list of object references into all_refs.
@@ -101,31 +101,17 @@ class PackUndo(object):
             JOIN pack_object ON (object_ref.zoid = pack_object.zoid)
         WHERE object_ref.tid >= pack_object.keep_tid
         ORDER BY object_ref.zoid, object_ref.to_zoid
-        LIMIT %d
-        OFFSET %d
         """
-        # Download in batches to avoid eating up all RAM.
         # While downloading the OIDs, move them to Set and Bucket
         # objects. A Set takes a lot less RAM than Python integer sets.
-        offset = 0
-        batch_size = self.traverse_batch_size
-        while True:
-            # Grouped by object_ref.zoid, store all object_ref.to_zoid in sets
-            self.runner.run_script_stmt(cursor, stmt % (batch_size, offset))
-            added = False
 
-            for from_oid, rows in groupby(cursor, itemgetter(0)):
-                added = True
-                d = all_refs.get(from_oid)
-                if d is None:
-                    all_refs[from_oid] = d = Set()
-                d.update(row[1] for row in rows)
-
-            if added:
-                offset += batch_size
-            else:
-                # Finished download
-                break
+        # Grouped by object_ref.zoid, store all object_ref.to_zoid in sets.
+        self.runner.run_script_stmt(cursor, stmt)
+        for from_oid, rows in groupby(fetchmany(cursor), itemgetter(0)):
+            d = all_refs.get(from_oid)
+            if d is None:
+                all_refs[from_oid] = d = Set()
+            d.update(row[1] for row in rows)
 
         # Traverse the object graph.  Add all of the reachable OIDs
         # to keep_set.
@@ -451,7 +437,7 @@ class HistoryPreservingPackUndo(PackUndo):
         self.runner.run_script_stmt(cursor, stmt, {'tid': tid})
 
         add_rows = []  # [(from_oid, tid, to_oid)]
-        for from_oid, state in cursor:
+        for from_oid, state in fetchmany(cursor):
             if hasattr(state, 'read'):
                 # Oracle
                 state = state.read()
@@ -698,7 +684,7 @@ class HistoryPreservingPackUndo(PackUndo):
                 """
                 self.runner.run_script_stmt(
                     cursor, stmt, {'pack_tid': pack_tid})
-                tid_rows = list(cursor)
+                tid_rows = list(fetchmany(cursor))
                 tid_rows.sort()  # oldest first
 
                 total = len(tid_rows)
@@ -791,7 +777,7 @@ class HistoryPreservingPackUndo(PackUndo):
             WHERE pack_state.tid = %(tid)s
             """
             self.runner.run_script_stmt(cursor, stmt, {'tid': tid})
-            for (oid,) in cursor:
+            for (oid,) in fetchmany(cursor):
                 packed_list.append((oid, tid))
 
         # Find out whether the transaction is empty
@@ -1006,7 +992,7 @@ class HistoryFreePackUndo(PackUndo):
             ORDER BY object_state.zoid
             """
             self.runner.run_script_stmt(cursor, stmt)
-            oids = [oid for (oid,) in cursor]
+            oids = [oid for (oid,) in fetchmany(cursor)]
             log_at = time.time() + 60
             if oids:
                 if attempt == 1:
@@ -1057,7 +1043,7 @@ class HistoryFreePackUndo(PackUndo):
 
         add_objects = []
         add_refs = []
-        for from_oid, tid, state in cursor:
+        for from_oid, tid, state in fetchmany(cursor):
             if hasattr(state, 'read'):
                 # Oracle
                 state = state.read()
@@ -1185,7 +1171,7 @@ class HistoryFreePackUndo(PackUndo):
                 WHERE keep = %(FALSE)s
                 """
                 self.runner.run_script_stmt(cursor, stmt)
-                to_remove = list(cursor)
+                to_remove = list(fetchmany(cursor))
 
                 total = len(to_remove)
                 log.info("pack: will remove %d object(s)", total)

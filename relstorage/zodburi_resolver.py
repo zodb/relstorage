@@ -150,14 +150,14 @@ class OracleAdapterHelper(Resolver):
 
 class RelStorageURIResolver(Resolver):
     _int_args = ('poll_interval', 'cache_local_mb', 'commit_lock_timeout',
-                'commit_lock_id', 'read_only', 'shared_blob_dir',
-                'keep_history', 'pack_gc', 'pack_dry_run', 'strict_tpc',
-                'create', 'demostorage',)
+                 'commit_lock_id', 'read_only', 'shared_blob_dir',
+                 'keep_history', 'pack_gc', 'pack_dry_run', 'strict_tpc',
+                 'create', 'demostorage',)
     _string_args = ('name', 'blob_dir', 'replica_conf',
                     'cache_module_name', 'cache_prefix',
-                    'cache_delta_size_limit')
+                    'cache_delta_size_limit', 'cache_local_compression')
     _bytesize_args = ('blob_cache_size', 'blob_cache_size_check',
-                      'blob_cache_chunk_size')
+                      'blob_cache_chunk_size', 'cache_local_object_max')
     _float_args = ('replica_timeout', 'pack_batch_timeout',
                    'pack_duty_cycle', 'pack_max_delay')
     _tuple_args = ('cache_servers',)
