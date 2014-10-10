@@ -88,6 +88,20 @@ class OracleStats(object):
 
     def get_db_size(self):
         """Returns the approximate size of the database in bytes"""
-        # May not be possible without access to the dba_* objects
-        return 0
+        conn, cursor = self.connmanager.open(
+            self.connmanager.isolation_read_only)
+        try:
+            stmt = """
+            SELECT SUM(BYTES)
+            FROM USER_SEGMENTS
+            """
+            cursor.execute(stmt)
+            res = cursor.fetchone()[0]
+            if res is None:
+                res = 0
+            else:
+                res = int(res)
+            return res
+        finally:
+            self.connmanager.close(conn, cursor)
 
