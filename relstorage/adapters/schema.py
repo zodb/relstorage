@@ -976,15 +976,15 @@ class PostgreSQLSchemaInstaller(AbstractSchemaInstaller):
 
     def list_tables(self, cursor):
         cursor.execute("SELECT tablename FROM pg_tables")
-        return [name for (name,) in cursor]
+        return [name for (name,) in cursor.fetchall()]
 
     def list_sequences(self, cursor):
         cursor.execute("SELECT relname FROM pg_class WHERE relkind = 'S'")
-        return [name for (name,) in cursor]
+        return [name for (name,) in cursor.fetchall()]
 
     def list_languages(self, cursor):
         cursor.execute("SELECT lanname FROM pg_catalog.pg_language")
-        return [name for (name,) in cursor]
+        return [name for (name,) in cursor.fetchall()]
 
     def install_languages(self, cursor):
         if 'plpgsql' not in self.list_languages(cursor):
@@ -1001,7 +1001,7 @@ class PostgreSQLSchemaInstaller(AbstractSchemaInstaller):
         """
         cursor.execute(stmt)
         res = {}
-        for (name, text) in cursor:
+        for (name, text) in cursor.fetchall():
             version = None
             match = re.search(r'Version:\s*([0-9a-zA-Z.]+)', text)
             if match is not None:
@@ -1066,7 +1066,7 @@ class MySQLSchemaInstaller(AbstractSchemaInstaller):
 
     def list_tables(self, cursor):
         cursor.execute("SHOW TABLES")
-        return [name for (name,) in cursor]
+        return [name for (name,) in cursor.fetchall()]
 
     def list_sequences(self, cursor):
         return []
@@ -1131,11 +1131,11 @@ class OracleSchemaInstaller(AbstractSchemaInstaller):
 
     def list_tables(self, cursor):
         cursor.execute("SELECT table_name FROM user_tables")
-        return [name.lower() for (name,) in cursor]
+        return [name.lower() for (name,) in cursor.fetchall()]
 
     def list_sequences(self, cursor):
         cursor.execute("SELECT sequence_name FROM user_sequences")
-        return [name.lower() for (name,) in cursor]
+        return [name.lower() for (name,) in cursor.fetchall()]
 
     def list_packages(self, cursor):
         """List installed stored procedure packages.
@@ -1148,7 +1148,7 @@ class OracleSchemaInstaller(AbstractSchemaInstaller):
         WHERE object_type = 'PACKAGE'
         """
         cursor.execute(stmt)
-        names = [name for (name,) in cursor]
+        names = [name for (name,) in cursor.fetchall()]
 
         res = {}
         for name in names:

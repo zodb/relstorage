@@ -20,6 +20,7 @@ from relstorage.adapters.batch import OracleRowBatcher
 from relstorage.adapters.batch import PostgreSQLRowBatcher
 from relstorage.adapters.interfaces import IObjectMover
 from relstorage.compat import implements, implementer, encodestring, decodestring, xrange, b
+from relstorage.iter import fetchmany
 import os
 import sys
 
@@ -382,7 +383,7 @@ class ObjectMover(object):
             stmt = "SELECT zoid, tid FROM %s WHERE zoid IN (%s)" % (
                 table, oid_list)
             cursor.execute(stmt)
-            for oid, tid in cursor:
+            for oid, tid in fetchmany(cursor):
                 res[oid] = tid
         return res
 
@@ -951,7 +952,7 @@ class ObjectMover(object):
         SELECT zoid FROM temp_store
         """
         cursor.execute(stmt)
-        return [oid for (oid,) in cursor]
+        return [oid for (oid,) in fetchmany(cursor)]
 
     postgresql_move_from_temp = generic_move_from_temp
     mysql_move_from_temp = generic_move_from_temp

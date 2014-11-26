@@ -77,7 +77,8 @@ class Poller:
                 # know there's some other edge condition we have to account
                 # for.
                 stmt = "SELECT 1 FROM transaction WHERE tid = %(tid)s"
-                cursor.execute(intern(stmt % self.runner.script_vars),
+                cursor.execute(
+                    intern(stmt % self.runner.script_vars),
                     {'tid': prev_polled_tid})
                 rows = cursor.fetchall()
                 if not rows:
@@ -105,7 +106,7 @@ class Poller:
             stmt = intern(stmt % self.runner.script_vars)
 
             cursor.execute(stmt, params)
-            changes = list(cursor)
+            changes = cursor.fetchall()
 
             return changes, new_polled_tid
 
@@ -157,7 +158,6 @@ class Poller:
         stmt = intern(stmt % self.runner.script_vars)
 
         cursor.execute(stmt, params)
-        return list(cursor)
+        return cursor.fetchall()
 
 Poller = implementer(IPoller)(Poller)
-
