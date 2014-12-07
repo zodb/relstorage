@@ -1,22 +1,11 @@
 
 """OID tree traversal for the garbage collection phase of packing.
 
-Optimized for memory efficiency.  Uses sets and arrays of 31 bit integers
+Optimized for memory efficiency.  Uses sets of native integers
 rather than Python integers because native integers take up a lot less
 room in RAM.
-
-This could probably be dramatically faster in C or Cython.  In particular,
-the bisect_left and bisect_right functions are implemented in C, but they
-require many unnecessary integer conversions.  Replacing those two
-functions would probably make a significant difference.  Also,
-collections.defaultdict and IISet have unknown performance characteristics.
-Patches welcome. :-)
 """
 
-from bisect import bisect_left
-from bisect import bisect_right
-from itertools import islice
-import array
 import BTrees
 import collections
 import gc
@@ -24,14 +13,8 @@ import logging
 
 
 IISet32 = BTrees.family32.II.Set
+IISet64 = BTrees.family64.II.Set
 log = logging.getLogger(__name__)
-
-
-def get_typecode32():
-    for c in ('i', 'l', 'h'):
-        if array.array(c).itemsize == 4:
-            return c
-    raise ValueError("No array typecode provides an array of 32 bit integers")
 
 
 class TreeMarker(object):
@@ -39,18 +22,17 @@ class TreeMarker(object):
     """
 
     # This class groups OIDs by their upper 33 bits.  Why 33 instead
-    # of 32?  Because IISet is signed, it won't accept positive integers with
-    # the high bit set, so we simply add an extra grouping bit.
+    # of 32?  Because IISet and IIBucket are signed, they can not accept
+    # positive integers >= (1 << 31). The solution is to simply
+    # add an extra grouping bit.
     hi = 0xffffffff80000000  # 33 high bits
     lo = 0x000000007fffffff  # 31 low bits
 
     def __init__(self):
-        code32 = get_typecode32()
         # self._refs:
-        # {from_oid_hi: {to_oid_hi: (from_oids_lo, to_oids_lo)}}
+        # {from_oid_hi: {to_oid_hi: IISet64([from_oid_lo << 32 | to_oid_lo])}}
         self._refs = collections.defaultdict(
-            lambda: collections.defaultdict(
-                lambda: (array.array(code32), array.array(code32))))
+            lambda: collections.defaultdict(IISet64))
         # self._reachable: {oid_hi: IISet32}
         self._reachable = collections.defaultdict(IISet32)
         self.reachable_count = 0
@@ -59,16 +41,13 @@ class TreeMarker(object):
         """Add a list of (from_oid, to_oid) reference pairs.
 
         `from_oid` and `to_oid` must be 64 bit integers.
-        The pairs *must be sorted already* by `from_oid`!
-        If they aren't, mark() will produce incorrect results.
         """
         refs = self._refs
         hi = self.hi
         lo = self.lo
         for from_oid, to_oid in pairs:
-            from_oids_lo, to_oids_lo = refs[from_oid & hi][to_oid & hi]
-            from_oids_lo.append(from_oid & lo)
-            to_oids_lo.append(to_oid & lo)
+            s = refs[from_oid & hi][to_oid & hi]
+            s.add(((from_oid & lo) << 32) | (to_oid & lo))
 
     def mark(self, oids):
         """Mark specific OIDs and descendants of those OIDs as reachable."""
@@ -105,6 +84,7 @@ class TreeMarker(object):
         found = 0
         refs = self._refs
         reachable = self._reachable
+        lo = self.lo
 
         for oid_hi, oids_lo in this_pass.iteritems():
             from_reachable_set = reachable[oid_hi]
@@ -122,17 +102,19 @@ class TreeMarker(object):
                     continue
 
                 # Add the children of this OID to next_pass.
-                for item in refs[oid_hi].iteritems():
-                    to_oid_hi, (from_oids_lo, to_oids_lo) = item
-                    left = bisect_left(from_oids_lo, oid_lo)
-                    right = bisect_right(from_oids_lo, oid_lo)
-                    if left >= right:
+                for to_oid_hi, s in refs[oid_hi].iteritems():
+                    min_key = oid_lo << 32
+                    max_key = min_key | 0xffffffff
+                    keys = s.keys(min=min_key, max=max_key)
+                    if not keys:
                         # No references found here.
                         continue
                     to_reachable_set = reachable[to_oid_hi]
-                    child_oids_lo = islice(to_oids_lo, left, right)
-                    next_pass[to_oid_hi].update(
-                        x for x in child_oids_lo if x not in to_reachable_set)
+                    next_pass_add = next_pass[to_oid_hi].add
+                    for key in keys:
+                        child_oid_lo = key & lo
+                        if child_oid_lo not in to_reachable_set:
+                            next_pass_add(child_oid_lo)
 
         return found, next_pass
 
