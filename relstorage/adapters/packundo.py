@@ -80,6 +80,7 @@ class PackUndo(object):
         FROM object_ref
             JOIN pack_object ON (object_ref.zoid = pack_object.zoid)
         WHERE object_ref.tid >= pack_object.keep_tid
+        ORDER BY object_ref.zoid, object_ref.to_zoid
         """
         self.runner.run_script_stmt(cursor, stmt)
         while True:
