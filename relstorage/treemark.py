@@ -12,14 +12,42 @@ import gc
 import logging
 
 
+IIunion32 = BTrees.family32.II.union
 IISet32 = BTrees.family32.II.Set
 IISet64 = BTrees.family64.II.Set
 log = logging.getLogger(__name__)
 
 
+class IISet32X(object):
+    """An IISet32 extended with a Python set layer for efficient inserts."""
+
+    def __init__(self):
+        self._base = IISet32()
+        self._layer = set()
+
+    def add(self, key):
+        layer = self._layer
+        if key not in layer and key not in self._base:
+            layer.add(key)
+            if len(layer) > 10000:
+                self._apply()
+
+    def _apply(self):
+        """Add the layer to the base and reset the layer."""
+        if self._layer:
+            self._base = IIunion32(self._base, IISet32(self._layer))
+            self._layer.clear()
+
+    def __iter__(self):
+        self._apply()
+        return iter(self._base)
+
+    def __contains__(self, key):
+        return key in self._layer or key in self._base
+
+
 class TreeMarker(object):
-    """Find all OIDs reachable from a set of root OIDs.
-    """
+    """Finds all OIDs reachable from a set of root OIDs."""
 
     # This class groups OIDs by their upper 33 bits.  Why 33 instead
     # of 32?  Because IISet and IIBucket are signed, they can not accept
@@ -33,8 +61,8 @@ class TreeMarker(object):
         # {from_oid_hi: {to_oid_hi: IISet64([from_oid_lo << 32 | to_oid_lo])}}
         self._refs = collections.defaultdict(
             lambda: collections.defaultdict(IISet64))
-        # self._reachable: {oid_hi: IISet32}
-        self._reachable = collections.defaultdict(IISet32)
+        # self._reachable: {oid_hi: IISet32X}
+        self._reachable = collections.defaultdict(IISet32X)
         self.reachable_count = 0
 
     def add_refs(self, pairs):
@@ -55,8 +83,9 @@ class TreeMarker(object):
         lo = self.lo
         pass_count = 1
 
-        this_pass = collections.defaultdict(IISet32)  # {oid_hi: IISet32}
-        for oid in oids:
+        # this_pass: {oid_hi: IISet32X}
+        this_pass = collections.defaultdict(IISet32X)
+        for oid in sorted(oids):
             this_pass[oid & hi].add(int(oid & lo))
 
         while this_pass:
@@ -80,7 +109,8 @@ class TreeMarker(object):
         new OIDs marked and `next_pass` is the collection of OIDs to
         follow in the next pass.
         """
-        next_pass = collections.defaultdict(IISet32)  # {oid_hi: IISet32}
+        # next_pass: {oid_hi: IISet32X}
+        next_pass = collections.defaultdict(IISet32X)
         found = 0
         refs = self._refs
         reachable = self._reachable
@@ -112,7 +142,7 @@ class TreeMarker(object):
                     to_reachable_set = reachable[to_oid_hi]
                     next_pass_add = next_pass[to_oid_hi].add
                     for key in keys:
-                        child_oid_lo = key & lo
+                        child_oid_lo = int(key & lo)
                         if child_oid_lo not in to_reachable_set:
                             next_pass_add(child_oid_lo)
 
