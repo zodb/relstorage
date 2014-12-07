@@ -1,5 +1,7 @@
 
 """Test a big tree of random OID references.
+
+Run like this: bin/py -m cProfile -- -s tottime relstorage/tests/bigmark.py
 """
 
 from random import randint
