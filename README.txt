@@ -826,18 +826,9 @@ An example that combines a path with a query string::
 Development
 ===========
 
-You can check out from Subversion using the following command::
+RelStorage is hosted at GitHub:
 
-    svn co svn://svn.zope.org/repos/main/relstorage/trunk RelStorage
-
-You can also browse the code:
-
-    http://svn.zope.org/relstorage/trunk/
-
-The best place to discuss development of RelStorage is on the zodb-dev
-mailing list.
-
-
+    https://github.com/zodb/relstorage
 
 FAQs
 ====
@@ -870,9 +861,8 @@ Q: Why should I choose RelStorage?
 
 Q: Can RelStorage replace ZRS (Zope Replication Services)?
 
-    A: Yes, RelStorage inherits the asynchronous master/slave replication
-    capability of MySQL and other databases.  RelStorage has also been
-    proven to work with Oracle RAC.
+    A: Yes, RelStorage inherits the replication capabilities of PostgreSQL,
+    MySQL, and Oracle.
 
 Q: How do I set up an environment to run the RelStorage tests?
 
