@@ -2,6 +2,7 @@
 .pydevproject
 *.egg-info
 *.pyc
+*.sublime-*
 bin/
 develop-eggs/
 dist/

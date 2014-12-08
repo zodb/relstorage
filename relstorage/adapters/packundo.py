@@ -378,7 +378,8 @@ class HistoryPreservingPackUndo(PackUndo):
             self.on_filling_object_refs()
             tid_count = len(tids)
             txns_done = 0
-            log.info("analyzing references from objects in %d new "
+            log.info(
+                "pre_pack: analyzing references from objects in %d new "
                 "transaction(s)", tid_count)
             for tid in tids:
                 self._add_refs_for_tid(cursor, tid, get_references)
@@ -389,9 +390,11 @@ class HistoryPreservingPackUndo(PackUndo):
                     conn.commit()
                     log_at = now + 60
                     log.info(
-                        "transactions analyzed: %d/%d", txns_done, tid_count)
+                        "pre_pack: transactions analyzed: %d/%d",
+                        txns_done, tid_count)
             conn.commit()
-            log.info("transactions analyzed: %d/%d", txns_done, tid_count)
+            log.info(
+                "pre_pack: transactions analyzed: %d/%d", txns_done, tid_count)
 
     def _add_refs_for_tid(self, cursor, tid, get_references):
         """Fill object_refs with all states for a transaction.
@@ -429,9 +432,10 @@ class HistoryPreservingPackUndo(PackUndo):
                 try:
                     to_oids = get_references(state)
                 except:
-                    log.error("pre_pack: can't unpickle "
+                    log.error(
+                        "pre_pack: can't unpickle "
                         "object %d in transaction %d; state length = %d" % (
-                        from_oid, tid, len(state)))
+                            from_oid, tid, len(state)))
                     raise
                 for to_oid in to_oids:
                     add_rows.append((from_oid, tid, to_oid))
@@ -979,7 +983,9 @@ class HistoryFreePackUndo(PackUndo):
                     self.on_filling_object_refs()
                 oid_count = len(oids)
                 oids_done = 0
-                log.info("analyzing references from %d object(s)", oid_count)
+                log.info(
+                    "pre_pack: analyzing references from %d object(s)",
+                    oid_count)
                 while oids:
                     batch = oids[:100]
                     oids = oids[100:]
@@ -991,10 +997,11 @@ class HistoryFreePackUndo(PackUndo):
                         conn.commit()
                         log_at = now + 60
                         log.info(
-                            "objects analyzed: %d/%d", oids_done, oid_count)
+                            "pre_pack: objects analyzed: %d/%d",
+                            oids_done, oid_count)
                 conn.commit()
                 log.info(
-                    "objects analyzed: %d/%d", oids_done, oid_count)
+                    "pre_pack: objects analyzed: %d/%d", oids_done, oid_count)
             else:
                 # No changes since last pass.
                 break
