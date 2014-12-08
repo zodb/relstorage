@@ -1,4 +1,11 @@
 
+1.6.0b3 (2014-12-08)
+--------------------
+
+- Packing: Significantly reduced the RAM consumed by graph traversal during
+  the pre_pack phase.  (Tried several methods; encoded 64 bit IISets turned
+  out to be the most optimal.)
+
 1.6.0b2 (2014-10-03)
 --------------------
 

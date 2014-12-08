@@ -13,7 +13,7 @@
 ##############################################################################
 """A backend for ZODB that stores pickles in a relational database."""
 
-VERSION = "1.6.0b2"
+VERSION = "1.6.0b3"
 
 # The choices for the Trove Development Status line:
 # Development Status :: 5 - Production/Stable
@@ -34,6 +34,7 @@ import os
 from setuptools import setup
 
 doclines = __doc__.split("\n")
+
 
 def read_file(*path):
     base_dir = os.path.dirname(__file__)
@@ -61,7 +62,7 @@ setup(
     platforms=["any"],
     description=doclines[0],
     classifiers=filter(None, classifiers.split("\n")),
-    long_description = (
+    long_description=(
         read_file("README.txt") + "\n\n" +
         "Change History\n" +
         "==============\n\n" +
@@ -75,18 +76,20 @@ setup(
     ],
     tests_require=['mock'],
     extras_require={
-        'mysql':      ['MySQL-python>=1.2.2'],
+        'mysql': ['MySQL-python>=1.2.2'],
         'postgresql': ['psycopg2>=2.0'],
-        'oracle':     ['cx_Oracle>=4.3.1'],
+        'oracle': ['cx_Oracle>=4.3.1'],
     },
-    entry_points = {'console_scripts': [
-        'zodbconvert = relstorage.zodbconvert:main',
-        'zodbpack = relstorage.zodbpack:main',
-    ],
-    'zodburi.resolvers': [
-        'postgres = relstorage.zodburi_resolver:postgresql_resolver [postgresql]',
-        'mysql = relstorage.zodburi_resolver:mysql_resolver [mysql]',
-        'oracle = relstorage.zodburi_resolver:oracle_resolver [oracle]'
-    ]},
+    entry_points = {
+        'console_scripts': [
+            'zodbconvert = relstorage.zodbconvert:main',
+            'zodbpack = relstorage.zodbpack:main',
+        ],
+        'zodburi.resolvers': [
+            ('postgres = '
+             'relstorage.zodburi_resolver:postgresql_resolver [postgresql]'),
+            'mysql = relstorage.zodburi_resolver:mysql_resolver [mysql]',
+            'oracle = relstorage.zodburi_resolver:oracle_resolver [oracle]'
+        ]},
     test_suite='relstorage.tests.alltests.make_suite',
 )
