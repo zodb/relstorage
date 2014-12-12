@@ -86,6 +86,7 @@ def main(argv=sys.argv):
 
     log.info("Storages opened successfully.")
 
+    next_tid = None
     if options.incremental:
         if not hasattr(destination, '_adapter'):
             msg = ("Error: no API is known for determining the last committed "
@@ -95,24 +96,23 @@ def main(argv=sys.argv):
         if not storage_has_data(destination):
             log.warning("Destination empty, start conversion from the beginning.")
         else:
+            destination._open_load_connection()
             last_tid = destination._adapter.txncontrol.get_tid(
                 destination._load_cursor)
             next_tid = p64(last_tid+1)
             source = source.iterator(start=next_tid)
             log.info("Resuming ZODB copy from %s", readable_tid_repr(next_tid))
 
-
     if options.dry_run:
         log.info("Dry run mode: not changing the destination.")
         if storage_has_data(destination):
             log.warning("The destination storage has data.")
         count = 0
-        for txn in source.iterator():
+        for txn in source.iterator(start=next_tid):
             log.info('%s user=%s description=%s' % (
                 TimeStamp(txn.tid), txn.user, txn.description))
             count += 1
         log.info("Would copy %d transactions.", count)
-
     else:
         if options.clear:
             log.info("Clearing old data...")
@@ -124,11 +124,11 @@ def main(argv=sys.argv):
                 sys.exit(msg)
             log.info("Done clearing old data.")
 
-        if storage_has_data(destination):
+        if not options.incremental and storage_has_data(destination):
             msg = "Error: the destination storage has data.  Try --clear."
             sys.exit(msg)
 
-        destination.copyTransactionsFrom(source)
+        destination.copyTransactionsFrom(source, next_tid)
         source.close()
         destination.close()
 

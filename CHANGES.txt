@@ -1,3 +1,8 @@
+1.6.0b3 (Unrleeased)
+--------------------
+
+- fix incremental zodbconvert
+  [mamico]
 
 1.6.0b3 (2014-12-08)
 --------------------
