@@ -1394,17 +1394,17 @@ class RelStorage(
         finally:
             self._lock_release()
 
-    def copyTransactionsFrom(self, other, start=None):
+    def copyTransactionsFrom(self, other):
         # adapted from ZODB.blob.BlobStorageMixin
         begin_time = time.time()
         txnum = 0
         total_size = 0
         log.info("Counting the transactions to copy.")
         num_txns = 0
-        for _ in other.iterator(start=start):
+        for _ in other.iterator():
             num_txns += 1
         log.info("Copying the transactions.")
-        for trans in other.iterator(start=start):
+        for trans in other.iterator():
             txnum += 1
             num_txn_records = 0
 

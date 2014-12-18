@@ -53,6 +53,19 @@ def storage_has_data(storage):
     return True
 
 
+class IteratorWithDefaultStart(object):
+
+    def __init__(self, original, start):
+        self.__original = original
+        self.__start = start
+
+    def iterator(self, start=None, end=None):
+        return self.__original.iterator(start or self.__start, end)
+
+    def __getattr__(self, name):
+        return getattr(self.__original, name)
+
+
 def main(argv=sys.argv):
     parser = optparse.OptionParser(description=__doc__,
         usage="%prog [options] config_file")
@@ -88,11 +101,6 @@ def main(argv=sys.argv):
     log.info("Storages opened successfully.")
 
     if options.incremental:
-        if not hasattr(destination, '_adapter'):
-            msg = ("Error: no API is known for determining the last committed "
-                   "transaction of the destination storage. Aborting "
-                   "conversion.")
-            sys.exit(msg)
         if not storage_has_data(destination):
             log.warning(
                 "Destination empty, start conversion from the beginning.")
@@ -100,8 +108,8 @@ def main(argv=sys.argv):
             iterator = destination.iterator()
             for trans in iterator:
                 last = trans.tid
-            iterator.close()
             start = p64(u64(last)+1)
+            source = IteratorWithDefaultStart(source, start)
             log.info("Resuming ZODB copy from %s", u64(start))
 
     if options.dry_run:
@@ -130,7 +138,7 @@ def main(argv=sys.argv):
             msg = "Error: the destination storage has data.  Try --clear."
             sys.exit(msg)
 
-        destination.copyTransactionsFrom(source, start=start)
+        destination.copyTransactionsFrom(source)
         source.close()
         destination.close()
 
