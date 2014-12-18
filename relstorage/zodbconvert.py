@@ -23,7 +23,7 @@ from persistent.TimeStamp import TimeStamp
 from StringIO import StringIO
 import sys
 import ZConfig
-from ZODB.utils import p64, readable_tid_repr
+from ZODB.utils import p64, u64
 
 schema_xml = """
 <schema>
@@ -83,6 +83,7 @@ def main(argv=sys.argv):
     config, handler = ZConfig.loadConfig(schema, args[0])
     source = config.source.open()
     destination = config.destination.open()
+    start = None
 
     log.info("Storages opened successfully.")
 
@@ -93,14 +94,15 @@ def main(argv=sys.argv):
                    "conversion.")
             sys.exit(msg)
         if not storage_has_data(destination):
-            log.warning("Destination empty, start conversion from the beginning.")
+            log.warning(
+                "Destination empty, start conversion from the beginning.")
         else:
-            last_tid = destination._adapter.txncontrol.get_tid(
-                destination._load_cursor)
-            next_tid = p64(last_tid+1)
-            source = source.iterator(start=next_tid)
-            log.info("Resuming ZODB copy from %s", readable_tid_repr(next_tid))
-
+            iterator = destination.iterator()
+            for trans in iterator:
+                last = trans.tid
+            iterator.close()
+            start = p64(u64(last)+1)
+            log.info("Resuming ZODB copy from %s", u64(start))
 
     if options.dry_run:
         log.info("Dry run mode: not changing the destination.")
@@ -124,11 +126,11 @@ def main(argv=sys.argv):
                 sys.exit(msg)
             log.info("Done clearing old data.")
 
-        if storage_has_data(destination):
+        if start is None and storage_has_data(destination):
             msg = "Error: the destination storage has data.  Try --clear."
             sys.exit(msg)
 
-        destination.copyTransactionsFrom(source)
+        destination.copyTransactionsFrom(source, start=start)
         source.close()
         destination.close()
 
