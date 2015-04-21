@@ -143,6 +143,14 @@ db_names = {
     'dest': base_dbname + '2',
     }
 
+# XXX: Do this properly
+import pymysql
+pymysql.install_as_MySQLdb()
+
+from relstorage.adapters import mysql
+mysql.close_exceptions += (pymysql.err.Error,)
+mysql.MySQLdbConnectionManager.close_exceptions = mysql.close_exceptions
+
 def test_suite():
     try:
         import MySQLdb

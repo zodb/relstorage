@@ -36,10 +36,10 @@ Put a couple blob objects in our database1 and on the filesystem:
     >>> nothing = transaction.begin()
     >>> data1 = 'x'*100000
     >>> blob1 = ZODB.blob.Blob()
-    >>> blob1.open('w').write(data1)
+    >>> with blob1.open('w') as f: _ = f.write(data1)
     >>> data2 = 'y'*100000
     >>> blob2 = ZODB.blob.Blob()
-    >>> blob2.open('w').write(data2)
+    >>> with blob2.open('w') as f: _ = f.write(data2)
     >>> d = PersistentMapping({'blob1':blob1, 'blob2':blob2})
     >>> root1['blobdata'] = d
     >>> transaction.commit()
@@ -49,7 +49,7 @@ Export our blobs from a database1 connection:
     >>> conn = root1['blobdata']._p_jar
     >>> oid = root1['blobdata']._p_oid
     >>> exportfile = 'export'
-    >>> nothing = connection1.exportFile(oid, exportfile)
+    >>> nothing = connection1.exportFile(oid, exportfile).close()
 
 Import our exported data into database2:
 

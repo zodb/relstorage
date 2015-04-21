@@ -52,7 +52,7 @@ Now, let's write some data:
     >>> conn = db.open()
     >>> for i in range(1, 101):
     ...     conn.root()[i] = ZODB.blob.Blob()
-    ...     conn.root()[i].open('w').write(chr(i)*100)
+    ...     with conn.root()[i].open('w') as f: _ = f.write(chr(i)*100)
     >>> transaction.commit()
 
 We've committed 10000 bytes of data, but our target size is 3000.  We
