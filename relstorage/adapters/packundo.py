@@ -16,12 +16,11 @@
 
 from ZODB.POSException import UndoError
 from base64 import decodestring
-from itertools import groupby
-from operator import itemgetter
 from perfmetrics import metricmethod
 from relstorage.adapters.interfaces import IPackUndo
+from relstorage.iter import fetchmany
+from relstorage.treemark import TreeMarker
 from zope.interface import implements
-import BTrees
 import logging
 import time
 
@@ -32,7 +31,6 @@ class PackUndo(object):
     """Abstract base class for pack/undo"""
 
     verify_sane_database = False
-    traverse_batch_size = 100000
 
     def __init__(self, database_type, connmanager, runner, locker, options):
         self.database_type = database_type
@@ -65,28 +63,10 @@ class PackUndo(object):
         """
         log.info("pre_pack: downloading pack_object and object_ref.")
 
-        # Note: TreeSet can be updated at random much faster than Set,
-        # but TreeSet consumes more memory. (Random TreeSet updates are
-        # probably O(log n) while random Set updates are probably O(n).
-        # OTOH, adding to Sets or TreeSets in order is an O(1) operation.)
-        Set = BTrees.family64.II.Set
-        TreeSet = BTrees.family64.II.TreeSet
-        Bucket = BTrees.family64.IO.Bucket
-        set_difference = BTrees.family64.II.difference
+        marker = TreeMarker()
 
-        # Download the list of root objects to keep from pack_object.
-        keep_set = TreeSet()
-        stmt = """
-        SELECT zoid
-        FROM pack_object
-        WHERE keep = %(TRUE)s
-        """
-        self.runner.run_script_stmt(cursor, stmt)
-        for from_oid, in cursor:
-            keep_set.insert(from_oid)
+        # Download the list of object references into the TreeMarker.
 
-        # Download the list of object references into all_refs.
-        all_refs = Bucket()  # {from_oid: set([to_oid])}
         # Note the Oracle optimizer hints in the following statement; MySQL
         # and PostgreSQL ignore these. Oracle fails to notice that pack_object
         # is now filled and chooses the wrong execution plan, completely
@@ -101,53 +81,38 @@ class PackUndo(object):
             JOIN pack_object ON (object_ref.zoid = pack_object.zoid)
         WHERE object_ref.tid >= pack_object.keep_tid
         ORDER BY object_ref.zoid, object_ref.to_zoid
-        LIMIT %d
-        OFFSET %d
         """
-        # Download in batches to avoid eating up all RAM.
-        # While downloading the OIDs, move them to Set and Bucket
-        # objects. A Set takes a lot less RAM than Python integer sets.
-        offset = 0
-        batch_size = self.traverse_batch_size
+        self.runner.run_script_stmt(cursor, stmt)
         while True:
-            # Grouped by object_ref.zoid, store all object_ref.to_zoid in sets
-            self.runner.run_script_stmt(cursor, stmt % (batch_size, offset))
-            added = False
-
-            for from_oid, rows in groupby(cursor, itemgetter(0)):
-                added = True
-                d = all_refs.get(from_oid)
-                if d is None:
-                    all_refs[from_oid] = d = Set()
-                d.update(row[1] for row in rows)
-
-            if added:
-                offset += batch_size
-            else:
-                # Finished download
+            rows = cursor.fetchmany(10000)
+            if not rows:
                 break
+            marker.add_refs(rows)
 
-        # Traverse the object graph.  Add all of the reachable OIDs
-        # to keep_set.
+        # Use the TreeMarker to find all reachable objects.
+
         log.info("pre_pack: traversing the object graph "
                  "to find reachable objects.")
-        parents = Set(keep_set)
-        pass_num = 0
-        while parents:
-            pass_num += 1
-            children = TreeSet()
-            for parent in parents:
-                to_oids = all_refs.get(parent)
-                if to_oids:
-                    children.update(to_oids)
-            parents = set_difference(children, keep_set)
-            keep_set.update(parents)
-            log.debug("pre_pack: found %d more referenced object(s) in "
-                      "pass %d", len(parents), pass_num)
+        stmt = """
+        SELECT zoid
+        FROM pack_object
+        WHERE keep = %(TRUE)s
+        """
+        self.runner.run_script_stmt(cursor, stmt)
+        while True:
+            rows = cursor.fetchmany(10000)
+            if not rows:
+                break
+            marker.mark(oid for (oid,) in rows)
 
-        # Set pack_object.keep for all OIDs in keep_set.
-        del all_refs  # Free some RAM
-        log.info("pre_pack: marking objects reachable: %d", len(keep_set))
+        marker.free_refs()
+
+        # Upload the TreeMarker results to the database.
+
+        log.info(
+            "pre_pack: marking objects reachable: %d",
+            marker.reachable_count)
+
         batch = []
 
         def upload_batch():
@@ -159,8 +124,9 @@ class PackUndo(object):
             """ % oids_str
             self.runner.run_script_stmt(cursor, stmt)
 
-        for oid in keep_set:
-            batch.append(oid)
+        batch_append = batch.append
+        for oid in marker.reachable:
+            batch_append(oid)
             if len(batch) >= 1000:
                 upload_batch()
         if batch:
@@ -412,7 +378,8 @@ class HistoryPreservingPackUndo(PackUndo):
             self.on_filling_object_refs()
             tid_count = len(tids)
             txns_done = 0
-            log.info("analyzing references from objects in %d new "
+            log.info(
+                "pre_pack: analyzing references from objects in %d new "
                 "transaction(s)", tid_count)
             for tid in tids:
                 self._add_refs_for_tid(cursor, tid, get_references)
@@ -423,9 +390,11 @@ class HistoryPreservingPackUndo(PackUndo):
                     conn.commit()
                     log_at = now + 60
                     log.info(
-                        "transactions analyzed: %d/%d", txns_done, tid_count)
+                        "pre_pack: transactions analyzed: %d/%d",
+                        txns_done, tid_count)
             conn.commit()
-            log.info("transactions analyzed: %d/%d", txns_done, tid_count)
+            log.info(
+                "pre_pack: transactions analyzed: %d/%d", txns_done, tid_count)
 
     def _add_refs_for_tid(self, cursor, tid, get_references):
         """Fill object_refs with all states for a transaction.
@@ -451,7 +420,7 @@ class HistoryPreservingPackUndo(PackUndo):
         self.runner.run_script_stmt(cursor, stmt, {'tid': tid})
 
         add_rows = []  # [(from_oid, tid, to_oid)]
-        for from_oid, state in cursor:
+        for from_oid, state in fetchmany(cursor):
             if hasattr(state, 'read'):
                 # Oracle
                 state = state.read()
@@ -463,9 +432,10 @@ class HistoryPreservingPackUndo(PackUndo):
                 try:
                     to_oids = get_references(state)
                 except:
-                    log.error("pre_pack: can't unpickle "
+                    log.error(
+                        "pre_pack: can't unpickle "
                         "object %d in transaction %d; state length = %d" % (
-                        from_oid, tid, len(state)))
+                            from_oid, tid, len(state)))
                     raise
                 for to_oid in to_oids:
                     add_rows.append((from_oid, tid, to_oid))
@@ -698,7 +668,7 @@ class HistoryPreservingPackUndo(PackUndo):
                 """
                 self.runner.run_script_stmt(
                     cursor, stmt, {'pack_tid': pack_tid})
-                tid_rows = list(cursor)
+                tid_rows = list(fetchmany(cursor))
                 tid_rows.sort()  # oldest first
 
                 total = len(tid_rows)
@@ -791,7 +761,7 @@ class HistoryPreservingPackUndo(PackUndo):
             WHERE pack_state.tid = %(tid)s
             """
             self.runner.run_script_stmt(cursor, stmt, {'tid': tid})
-            for (oid,) in cursor:
+            for (oid,) in fetchmany(cursor):
                 packed_list.append((oid, tid))
 
         # Find out whether the transaction is empty
@@ -1006,14 +976,16 @@ class HistoryFreePackUndo(PackUndo):
             ORDER BY object_state.zoid
             """
             self.runner.run_script_stmt(cursor, stmt)
-            oids = [oid for (oid,) in cursor]
+            oids = [oid for (oid,) in fetchmany(cursor)]
             log_at = time.time() + 60
             if oids:
                 if attempt == 1:
                     self.on_filling_object_refs()
                 oid_count = len(oids)
                 oids_done = 0
-                log.info("analyzing references from %d object(s)", oid_count)
+                log.info(
+                    "pre_pack: analyzing references from %d object(s)",
+                    oid_count)
                 while oids:
                     batch = oids[:100]
                     oids = oids[100:]
@@ -1025,10 +997,11 @@ class HistoryFreePackUndo(PackUndo):
                         conn.commit()
                         log_at = now + 60
                         log.info(
-                            "objects analyzed: %d/%d", oids_done, oid_count)
+                            "pre_pack: objects analyzed: %d/%d",
+                            oids_done, oid_count)
                 conn.commit()
                 log.info(
-                    "objects analyzed: %d/%d", oids_done, oid_count)
+                    "pre_pack: objects analyzed: %d/%d", oids_done, oid_count)
             else:
                 # No changes since last pass.
                 break
@@ -1057,7 +1030,7 @@ class HistoryFreePackUndo(PackUndo):
 
         add_objects = []
         add_refs = []
-        for from_oid, tid, state in cursor:
+        for from_oid, tid, state in fetchmany(cursor):
             if hasattr(state, 'read'):
                 # Oracle
                 state = state.read()
@@ -1185,7 +1158,7 @@ class HistoryFreePackUndo(PackUndo):
                 WHERE keep = %(FALSE)s
                 """
                 self.runner.run_script_stmt(cursor, stmt)
-                to_remove = list(cursor)
+                to_remove = list(fetchmany(cursor))
 
                 total = len(to_remove)
                 log.info("pack: will remove %d object(s)", total)
