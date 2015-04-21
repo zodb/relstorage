@@ -56,6 +56,7 @@ def new_time():
     time.sleep(1)
     return new_time
 
+
 with open(__file__) as _f:
     # Just use the this module as the source of our data
     # Capture it at import time because test cases may
@@ -63,6 +64,7 @@ with open(__file__) as _f:
     # depending on how they are run.
     _random_file_data = _f.read().replace('\n', '').split()
 del _f
+
 
 def random_file(size, fd):
     """Create a random data of at least the given size, writing to fd.
@@ -305,7 +307,9 @@ class LargeBlobTest(BlobTestBase):
         blob = conn.root()[1] = ZODB.blob.Blob()
         size = sizeof_fmt(self.testsize)
         self._log('Creating %s blob file' % size)
-        signature = random_file(self.testsize, blob.open('w'))
+        blob_file = blob.open('w')
+        signature = random_file(self.testsize, blob_file)
+        blob_file.close()
         self._log('Committing %s blob file' % size)
         transaction.commit()
 
@@ -318,9 +322,9 @@ class LargeBlobTest(BlobTestBase):
         # Re-download blob
         self._log('Caching %s blob file' % size)
         conn = db.open()
-        blob = conn.root()[1].open('r')
-        self._log('Creating signature for %s blob cache' % size)
-        self.assertEqual(md5sum(blob), signature)
+        with conn.root()[1].open('r') as blob:
+            self._log('Creating signature for %s blob cache' % size)
+            self.assertEqual(md5sum(blob), signature)
 
 
 def packing_with_uncommitted_data_non_undoing():
