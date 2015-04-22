@@ -49,7 +49,17 @@ load_infile
 """
 
 import logging
-import MySQLdb
+try:
+    import MySQLdb
+except ImportError:
+    import sys
+    t, v, tb = sys.exc_info()
+    try:
+        import pymysql
+        pymysql.install_as_MySQLdb()
+    except ImportError:
+        pass
+    raise t, v, tb
 from zope.interface import implements
 
 from relstorage.adapters.connmanager import AbstractConnectionManager
@@ -83,6 +93,29 @@ disconnected_exceptions = (
 # when the adapter attempts to close a database connection.
 close_exceptions = disconnected_exceptions + (MySQLdb.ProgrammingError,)
 
+try:
+    # Under PyMySql 0.6.6, closing an already closed
+    # connection raises a plain pymysql.err.Error.
+    # It can also raise a DatabaseError, and sometimes
+    # an IOError doesn't get mapped to a type
+    import pymysql.err
+    close_exceptions += (
+        pymysql.err.Error,
+        IOError,
+        pymysql.err.DatabaseError
+        )
+    disconnected_exceptions += (
+        IOError, # This one can escape mapping;
+        # This one has only been seen as its subclass,
+        # InternalError, as (0, 'Socket receive buffer full'),
+        # which should probably be taken as disconnect
+        pymysql.err.DatabaseError,
+        )
+except ImportError:
+    pass
+
+except ImportError:
+	pass
 
 class MySQLAdapter(object):
     """MySQL adapter for RelStorage."""

@@ -24,6 +24,8 @@ classifiers = """\
 Intended Audience :: Developers
 License :: OSI Approved :: Zope Public License
 Programming Language :: Python
+Programming Language :: Python :: Implementation :: CPython
+Programming Language :: Python :: Implementation :: PyPy
 Topic :: Database
 Topic :: Software Development :: Libraries :: Python Modules
 Operating System :: Microsoft :: Windows
@@ -31,7 +33,12 @@ Operating System :: Unix
 """
 
 import os
+import platform
 from setuptools import setup
+
+py_impl = getattr(platform, 'python_implementation', lambda: None)
+is_pypy = py_impl() == 'PyPy'
+is_pure = os.environ.get('PURE_PYTHON')
 
 doclines = __doc__.split("\n")
 
@@ -39,7 +46,10 @@ doclines = __doc__.split("\n")
 def read_file(*path):
     base_dir = os.path.dirname(__file__)
     file_path = (base_dir, ) + tuple(path)
-    return file(os.path.join(*file_path)).read()
+    f = file(os.path.join(*file_path))
+    result = f.read()
+    f.close()
+    return result
 
 setup(
     name="RelStorage",
@@ -81,7 +91,7 @@ setup(
         'zope.testing',
     ],
     extras_require={
-        'mysql': ['MySQL-python>=1.2.2'],
+        'mysql': ['MySQL-python>=1.2.2' if not is_pypy and not is_pure else 'PyMySQL>=0.6.6'],
         'postgresql': ['psycopg2>=2.0'],
         'oracle': ['cx_Oracle>=4.3.1'],
     },

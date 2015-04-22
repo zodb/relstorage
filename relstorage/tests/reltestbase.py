@@ -102,11 +102,21 @@ class GenericRelStorageTests(
     ReadOnlyStorage.ReadOnlyStorage,
     ):
 
-    # XXX: Fails with PyMySql; hangs dropping the table.
-    # skip this properly
-    #def checkDropAndPrepare(self):
-    #    self._storage._adapter.schema.drop_all()
-    #    self._storage._adapter.schema.prepare()
+    def checkDropAndPrepare(self):
+        # XXX: Hangs with PyMySql; hangs dropping the object_state table,
+        # the 8th table to drop
+        import sys
+        if sys.modules.get("MySQLdb") == sys.modules.get('pymysql', self) \
+           and 'MySQL' in str(type(self._storage._adapter.schema)):
+            try:
+                from unittest import SkipTest
+                raise SkipTest("PyMySQL hangs dropping a table.")
+            except ImportError:
+                # Py2.6; nothing to do but return
+                return
+
+        self._storage._adapter.schema.drop_all()
+        self._storage._adapter.schema.prepare()
 
     def checkCrossConnectionInvalidation(self):
         # Verify connections see updated state at txn boundaries

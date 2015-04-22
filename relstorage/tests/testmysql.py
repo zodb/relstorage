@@ -143,21 +143,17 @@ db_names = {
     'dest': base_dbname + '2',
     }
 
-# XXX: Do this properly
-import pymysql
-pymysql.install_as_MySQLdb()
-
-from relstorage.adapters import mysql
-mysql.close_exceptions += (pymysql.err.Error,)
-mysql.MySQLdbConnectionManager.close_exceptions = mysql.close_exceptions
-
 def test_suite():
     try:
         import MySQLdb
-    except ImportError, e:
-        import warnings
-        warnings.warn("MySQLdb is not importable, so MySQL tests disabled")
-        return unittest.TestSuite()
+    except ImportError:
+        try:
+            import pymysql
+            pymysql.install_as_MySQLdb()
+        except ImportError:
+            import warnings
+            warnings.warn("MySQLdb is not importable, so MySQL tests disabled")
+            return unittest.TestSuite()
 
     suite = unittest.TestSuite()
     for klass in [
