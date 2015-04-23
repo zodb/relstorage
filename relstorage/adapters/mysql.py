@@ -57,9 +57,9 @@ except ImportError:
     try:
         import pymysql
         pymysql.install_as_MySQLdb()
+        import MySQLdb
     except ImportError:
-        pass
-    raise t, v, tb
+        raise t, v, tb
 from zope.interface import implements
 
 from relstorage.adapters.connmanager import AbstractConnectionManager
