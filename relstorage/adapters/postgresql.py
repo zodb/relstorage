@@ -30,7 +30,16 @@ from relstorage.adapters.txncontrol import PostgreSQLTransactionControl
 from relstorage.options import Options
 from zope.interface import implements
 import logging
-import psycopg2
+try:
+    import psycopg2
+except ImportError:
+    import sys
+    t, v, tb = sys.exc_info()
+    try:
+        import psycopg2cffi.compat
+        psycopg2cffi.compat.register()
+    except ImportError:
+        raise t, v, tb
 import psycopg2.extensions
 import re
 """PostgreSQL adapter for RelStorage."""

@@ -104,13 +104,24 @@ class GenericRelStorageTests(
 
     def checkDropAndPrepare(self):
         # XXX: Hangs with PyMySql; hangs dropping the object_state table,
-        # the 8th table to drop
+        # the 8th table to drop.
+        # XXX: Also hangs with psycopg2cffi
+
         import sys
         if sys.modules.get("MySQLdb") == sys.modules.get('pymysql', self) \
            and 'MySQL' in str(type(self._storage._adapter.schema)):
             try:
                 from unittest import SkipTest
                 raise SkipTest("PyMySQL hangs dropping a table.")
+            except ImportError:
+                # Py2.6; nothing to do but return
+                return
+
+        if sys.modules.get("psycopg2") == sys.modules.get("psycopg2cffi", self) \
+           and "PostgreSQL" in str(type(self._storage._adapter.schema)):
+            try:
+                from unittest import SkipTest
+                raise SkipTest("psycopg2cffi hangs dropping a table.")
             except ImportError:
                 # Py2.6; nothing to do but return
                 return
