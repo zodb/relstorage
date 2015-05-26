@@ -38,6 +38,7 @@ except ImportError:
     try:
         import psycopg2cffi.compat
         psycopg2cffi.compat.register()
+        import psycopg2
     except ImportError:
         raise t, v, tb
 import psycopg2.extensions

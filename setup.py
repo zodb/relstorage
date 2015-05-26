@@ -92,7 +92,7 @@ setup(
     ],
     extras_require={
         'mysql': ['MySQL-python>=1.2.2' if not is_pypy and not is_pure else 'PyMySQL>=0.6.6'],
-        'postgresql': ['psycopg2>=2.0'],
+        'postgresql': ['psycopg2>=2.0' if not is_pypy and not is_pure else 'psycopg2cffi>=2.7.0'],
         'oracle': ['cx_Oracle>=4.3.1'],
     },
     entry_points = {
