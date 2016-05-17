@@ -437,7 +437,11 @@ def loadblob_tmpstore():
     ...     tmpstore = TmpStore(blob_storage)
     ... except TypeError:
     ...     # ZODB 3.8
-    ...     tmpstore = TmpStore('', blob_storage)
+    ...     try:
+    ...         tmpstore = TmpStore('', blob_storage)
+    ...     except AttributeError:
+    ...         # ZODB >=5
+    ...         tmpstore = TmpStore(blob_storage, connection._txn_time)
 
     We can access the blob correctly:
 
