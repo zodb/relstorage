@@ -1203,7 +1203,7 @@ class RelStorage(
     def iterator(self, start=None, stop=None):
         return TransactionIterator(self._adapter, start, stop)
 
-    def sync(self, force=True):
+    def sync(self, force=False):
         """Updates to a current view of the database.
 
         This is implemented by rolling back the relational database
