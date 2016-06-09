@@ -957,7 +957,7 @@ class RelStorage(
     def lastTransaction(self):
         self._lock_acquire()
         try:
-            return self._ltid
+            return max(self._ltid, p64(self._prev_polled_tid or 0))
         finally:
             self._lock_release()
 
@@ -1203,7 +1203,7 @@ class RelStorage(
     def iterator(self, start=None, stop=None):
         return TransactionIterator(self._adapter, start, stop)
 
-    def sync(self, force=True):
+    def sync(self, force=False):
         """Updates to a current view of the database.
 
         This is implemented by rolling back the relational database
