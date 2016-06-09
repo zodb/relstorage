@@ -1,3 +1,8 @@
+1.6.0 (2016-06-09)
+------------------
+
+- Tests: Use the standard library ``doctest`` module for compatibility
+  with newer ``zope.testing`` releases.
 
 1.6.0b3 (2014-12-08)
 --------------------
