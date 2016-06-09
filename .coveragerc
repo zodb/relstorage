@@ -1,0 +1,21 @@
+[run]
+source = relstorage
+omit = relstorage/tests/*
+
+[report]
+# Coverage is run on Linux under cPython 2, so
+# exclude branches that are windows specific or pypy/python3
+# specific
+exclude_lines =
+    pragma: no cover
+    def __repr__
+    raise AssertionError
+    raise NotImplementedError
+    except ImportError:
+    if __name__ == .__main__.:
+    if PYPY:
+    if PY3:
+    if sys.platform == 'win32':
+    if mswindows:
+    if is_windows:
+    if sys.version_info.*>=.*3

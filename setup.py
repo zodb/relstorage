@@ -74,7 +74,10 @@ setup(
         'zope.interface',
         'zc.lockfile',
     ],
-    tests_require=['mock'],
+    tests_require=[
+        'mock',
+        'zope.testing',
+    ],
     extras_require={
         'mysql': ['MySQL-python>=1.2.2'],
         'postgresql': ['psycopg2>=2.0'],
