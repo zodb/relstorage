@@ -1,0 +1,33 @@
+language: python
+sudo: false
+services:
+  - mysql
+  - postgresql
+env:
+  matrix:
+    - ENV=mysql
+    - ENV=postgres
+matrix:
+  fast_finish: true
+script:
+  - coverage run -m relstorage.tests.alltests
+after_success:
+  - coveralls
+notifications:
+  email: false
+
+install:
+  - pip install -U pip
+  - pip install -U tox coveralls zope.testing mock coverage
+  - pip install -U -e .
+  - .travis/setup-$ENV.sh
+# cache: pip seems not to work if `install` is replaced (https://github.com/travis-ci/travis-ci/issues/3239)
+cache:
+  directories:
+    - $HOME/.cache/pip
+    - $HOME/.venv
+    - $HOME/.runtimes
+    - $HOME/.wheelhouse
+
+before_cache:
+    - rm -f $HOME/.cache/pip/log/debug.log
