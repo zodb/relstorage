@@ -1,3 +1,11 @@
+1.7.0a1 (Unreleased)
+--------------------
+
+- Update the ZODB dependency from ZODB3 3.7.0 to ZODB 4.3.0.
+
+- Fixed ``loadBefore`` of a deleted/undone object to correctly raise a
+  POSKeyError instead of returning an empty state. (Revealed by
+  updated tests for FileStorage in ZODB 4.3.1.)
 
 1.6.0b3 (2014-12-08)
 --------------------

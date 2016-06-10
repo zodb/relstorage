@@ -129,3 +129,6 @@ def test_suite():
     suite = unittest.TestSuite()
     suite.addTest(unittest.makeSuite(ZODBConvertTests))
     return suite
+
+if __name__ == '__main__':
+    unittest.main()

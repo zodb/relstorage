@@ -19,9 +19,11 @@ import logging
 from .testpostgresql import test_suite as postgresql_test_suite
 from .testmysql import test_suite as mysql_test_suite
 from .testoracle import test_suite as oracle_test_suite
+from .test_zodbconvert import test_suite as zodbconvert_test_suite
 
 def make_suite():
     suite = unittest.TestSuite()
+    suite.addTest(zodbconvert_test_suite())
     suite.addTest(postgresql_test_suite())
     suite.addTest(mysql_test_suite())
     suite.addTest(oracle_test_suite())

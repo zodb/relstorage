@@ -14,7 +14,7 @@
 
 from ZODB.blob import Blob
 from ZODB.DB import DB
-from zope.testing import doctest
+import doctest
 
 import atexit
 import collections
