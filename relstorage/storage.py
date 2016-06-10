@@ -566,6 +566,13 @@ class RelStorage(
                 if end_int is not None:
                     end = p64(end_int)
                 else:
+                    if state is None:
+                        # This can happen if something attempts to load
+                        # an object whose creation has been undone, see load()
+                        # XXX: Is this the only place? What if just state is None?
+                        # This change fixes the test in TransactionalUndoStorage.checkUndoCreationBranch1
+                        self._log_keyerror(oid_int, "creation has been undone")
+                        raise POSKeyError(oid)
                     end = None
                 if state is not None:
                     state = str(state)
