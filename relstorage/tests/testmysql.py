@@ -20,6 +20,7 @@ from relstorage.tests.hftestbase import HistoryFreeToFileStorage
 from relstorage.tests.hptestbase import HistoryPreservingFromFileStorage
 from relstorage.tests.hptestbase import HistoryPreservingRelStorageTests
 from relstorage.tests.hptestbase import HistoryPreservingToFileStorage
+from .util import skipOnCI
 import logging
 import os
 import unittest
@@ -111,8 +112,10 @@ class ZConfigTests:
 
 
 class HPMySQLTests(UseMySQLAdapter, HistoryPreservingRelStorageTests,
-        ZConfigTests):
-    pass
+                   ZConfigTests):
+    @skipOnCI("Travis MySQL goes away error 2006")
+    def check16MObject(self):
+        super(HPMySQLTests,self).check16MObject()
 
 class HPMySQLToFile(UseMySQLAdapter, HistoryPreservingToFileStorage):
     pass
@@ -121,8 +124,11 @@ class HPMySQLFromFile(UseMySQLAdapter, HistoryPreservingFromFileStorage):
     pass
 
 class HFMySQLTests(UseMySQLAdapter, HistoryFreeRelStorageTests,
-        ZConfigTests):
-    pass
+                   ZConfigTests):
+
+    @skipOnCI("Travis MySQL goes away error 2006")
+    def check16MObject(self):
+        super(HFMySQLTests,self).check16MObject()
 
 class HFMySQLToFile(UseMySQLAdapter, HistoryFreeToFileStorage):
     pass
@@ -222,4 +228,3 @@ def test_suite():
 if __name__=='__main__':
     logging.basicConfig()
     unittest.main(defaultTest="test_suite")
-
