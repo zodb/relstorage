@@ -560,22 +560,21 @@ class RelStorage(
 
             state, start_tid = self._adapter.mover.load_before(
                 cursor, oid_int, u64(tid))
+
             if start_tid is not None:
+                if state is None:
+                    # This can happen if something attempts to load
+                    # an object whose creation has been undone, see load()
+                    # This change fixes the test in TransactionalUndoStorage.checkUndoCreationBranch1
+                    # self._log_keyerror doesn't work here, only in certain states.
+                    raise POSKeyError(oid)
                 end_int = self._adapter.mover.get_object_tid_after(
                     cursor, oid_int, start_tid)
                 if end_int is not None:
                     end = p64(end_int)
                 else:
-                    if state is None:
-                        # This can happen if something attempts to load
-                        # an object whose creation has been undone, see load()
-                        # XXX: Is this the only place? What if just state is None?
-                        # This change fixes the test in TransactionalUndoStorage.checkUndoCreationBranch1
-                        self._log_keyerror(oid_int, "creation has been undone")
-                        raise POSKeyError(oid)
                     end = None
-                if state is not None:
-                    state = str(state)
+                state = str(state)
                 return state, p64(start_tid), end
             else:
                 return None
