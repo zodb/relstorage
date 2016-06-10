@@ -159,6 +159,19 @@ def test_suite():
         # ZODB < 3.8
         pass
     else:
+        from .util import RUNNING_ON_CI
+        if RUNNING_ON_CI:
+            # Avoid creating 2GB blobs to be friendly to neighbors
+            # and to run fast (2GB blobs take about 4 minutes on Travis
+            # CI as-of June 2016)
+            # XXX: This is dirty.
+            from relstorage.adapters.mover import ObjectMover
+            assert hasattr(ObjectMover, 'postgresql_blob_chunk_maxsize')
+            ObjectMover.postgresql_blob_chunk_maxsize = 1024 * 1024 * 100
+            large_blob_size = ObjectMover.postgresql_blob_chunk_maxsize * 2
+        else:
+            large_blob_size = 1<<31
+
         from relstorage.tests.blob.testblob import storage_reusable_suite
         from relstorage.tests.util import shared_blob_dir_choices
         for shared_blob_dir in shared_blob_dir_choices:
@@ -205,7 +218,7 @@ def test_suite():
                     pack_test_name=pack_test_name,
                     test_blob_cache=(not shared_blob_dir),
                     # PostgreSQL blob chunks are max 2GB in size
-                    large_blob_size=(not shared_blob_dir) and (1<<31) + 100,
+                    large_blob_size=(not shared_blob_dir) and (large_blob_size) + 100,
                 ))
 
     return suite
@@ -213,4 +226,3 @@ def test_suite():
 if __name__=='__main__':
     logging.basicConfig()
     unittest.main(defaultTest="test_suite")
-
