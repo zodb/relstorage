@@ -410,12 +410,7 @@ class GenericRelStorageTests(
                 self.assertFalse(c2._storage.need_poll())
                 tm2.commit()
                 r2 = c2.root()
-                try:
-                    self.assertEqual(r2['alpha'], 1)
-                except AssertionError:
-                    if hasattr(c1, '_flush_invalidations'):
-                        # Only fail with ZODB <5
-                        raise
+                self.assertEqual(r2['alpha'], 1)
 
             # expire the poll timer and verify c2 sees the change
             c2._storage._poll_at -= 3601

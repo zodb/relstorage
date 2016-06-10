@@ -14,7 +14,7 @@
 
 from ZODB.blob import Blob
 from ZODB.DB import DB
-import doctest
+from zope.testing import doctest
 
 import atexit
 import collections
@@ -443,11 +443,7 @@ def loadblob_tmpstore():
     ...     tmpstore = TmpStore(blob_storage)
     ... except TypeError:
     ...     # ZODB 3.8
-    ...     try:
-    ...         tmpstore = TmpStore('', blob_storage)
-    ...     except AttributeError:
-    ...         # ZODB >=5
-    ...         tmpstore = TmpStore(blob_storage, connection._txn_time)
+    ...     tmpstore = TmpStore('', blob_storage)
 
     We can access the blob correctly:
 
