@@ -60,6 +60,8 @@ except ImportError:
         import MySQLdb
     except ImportError:
         raise t, v, tb
+    else:
+        del t, v, b
 from zope.interface import implements
 
 from relstorage.adapters.connmanager import AbstractConnectionManager

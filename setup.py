@@ -41,9 +41,8 @@ doclines = __doc__.split("\n")
 def read_file(*path):
     base_dir = os.path.dirname(__file__)
     file_path = (base_dir, ) + tuple(path)
-    f = file(os.path.join(*file_path))
-    result = f.read()
-    f.close()
+    with open(os.path.join(*file_path)) as f:
+        result = f.read()
     return result
 
 setup(

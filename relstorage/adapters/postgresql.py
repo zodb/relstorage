@@ -41,6 +41,8 @@ except ImportError:
         import psycopg2
     except ImportError:
         raise t, v, tb
+    else:
+        del t, v, tb
 import psycopg2.extensions
 import re
 """PostgreSQL adapter for RelStorage."""
