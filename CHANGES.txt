@@ -8,7 +8,10 @@
   updated tests for FileStorage in ZODB 4.3.1.)
 
 - Add support for PyPy on MySQL and PostgreSQL using PyMySQL and
-  psycopg2cffi respectively.
+  psycopg2cffi respectively. PyPy can be substantially faster than
+  CPython in some scenarios; see `PR 23`_.
+
+.. _`PR 23`: https://github.com/zodb/relstorage/pull/23/
 
 1.6.0b3 (2014-12-08)
 --------------------
