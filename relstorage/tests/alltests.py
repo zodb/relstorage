@@ -11,20 +11,30 @@
 # FOR A PARTICULAR PURPOSE.
 #
 ##############################################################################
-"""Combines the tests of all adapters"""
-from __future__ import absolute_import
+"""Combines all the tests"""
+from __future__ import absolute_import, print_function
 import unittest
 import logging
 
-from .testpostgresql import test_suite as postgresql_test_suite
-from .testmysql import test_suite as mysql_test_suite
-from .testoracle import test_suite as oracle_test_suite
-
 def make_suite():
     suite = unittest.TestSuite()
-    suite.addTest(postgresql_test_suite())
-    suite.addTest(mysql_test_suite())
-    suite.addTest(oracle_test_suite())
+    test_modules = [
+        'test_autotemp',
+        'test_blobhelper',
+        'test_cache',
+        'test_treemark',
+        'test_zodbconvert',
+        'test_zodbpack',
+        'test_zodburi',
+        'testpostgresql',
+        'testmysql',
+        'testoracle',
+    ]
+
+    for mod_name in test_modules:
+        mod = __import__(mod_name, globals())
+        suite.addTest(mod.test_suite())
+
     return suite
 
 if __name__ == '__main__':
