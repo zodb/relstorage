@@ -3,6 +3,9 @@ sudo: false
 services:
   - mysql
   - postgresql
+python:
+  - 2.7
+  - pypy
 env:
   matrix:
     - ENV=mysql
