@@ -18,7 +18,10 @@ class TestPostgreSQLURIResolver(unittest.TestCase):
         self.patcher1 = mock.patch('relstorage.zodburi_resolver.RelStorage')
         self.patcher2 = mock.patch('relstorage.adapters.postgresql.PostgreSQLAdapter')
         self.RelStorage = self.patcher1.start()
-        self.PostgreSQLAdapter = self.patcher2.start()
+        try:
+            self.PostgreSQLAdapter = self.patcher2.start()
+        except ImportError as e:
+            raise unittest.SkipTest(str(e))
 
     def tearDown(self):
         self.patcher1.stop()
@@ -115,3 +118,9 @@ class TestEntryPoints(unittest.TestCase):
                 import warnings
                 warnings.warn('%s not found, skipping the zodburi test for %s'%
                               (e[0], name))
+
+def test_suite():
+    suite = unittest.TestSuite()
+    suite.addTest(unittest.makeSuite(TestPostgreSQLURIResolver))
+    suite.addTest(unittest.makeSuite(TestEntryPoints))
+    return suite
