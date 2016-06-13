@@ -33,12 +33,7 @@ Operating System :: Unix
 """
 
 import os
-import platform
 from setuptools import setup
-
-py_impl = getattr(platform, 'python_implementation', lambda: None)
-is_pypy = py_impl() == 'PyPy'
-is_pure = os.environ.get('PURE_PYTHON')
 
 doclines = __doc__.split("\n")
 
@@ -91,9 +86,21 @@ setup(
         'zope.testing',
     ],
     extras_require={
-        'mysql': ['MySQL-python>=1.2.2' if not is_pypy and not is_pure else 'PyMySQL>=0.6.6'],
-        'postgresql': ['psycopg2>=2.0' if not is_pypy and not is_pure else 'psycopg2cffi>=2.7.0'],
-        'oracle': ['cx_Oracle>=4.3.1'],
+        'mysql:platform_python_implementation=="CPython"': [
+            'MySQL-python>=1.2.2',
+        ],
+        'mysql:platform_python_implementation=="PyPy"' : [
+            'PyMySQL>=0.6.6',
+        ],
+        'postgresql: platform_python_implementation == "CPython"': [
+            'psycopg2>=2.0',
+        ],
+        'postgresql: platform_python_implementation == "PyPy"': [
+            'psycopg2cffi>=2.7.0',
+        ],
+        'oracle': [
+            'cx_Oracle>=4.3.1'
+        ],
     },
     entry_points = {
         'console_scripts': [
