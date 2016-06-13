@@ -43,6 +43,11 @@
 - ``RelStorage.lastTransaction()`` is more consistent with FileStorage
   and ClientStorage, returning a useful value in more cases.
 
+- Oracle: Add support for getting the database size. Contributed in
+  `PR 21`_ by Mauro Amico.
+
+.. _`PR 21`: https://github.com/zodb/relstorage/pull/21
+
 1.6.0b3 (2014-12-08)
 --------------------
 
