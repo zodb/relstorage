@@ -13,7 +13,9 @@ env:
 matrix:
   fast_finish: true
 script:
-  - coverage run -m relstorage.tests.alltests
+# coverage slows PyPy down from 2minutes to 12+.
+  - if [[ $TRAVIS_PYTHON_VERSION == 'pypy' ]]; then python -m relstorage.tests.alltests; fi
+  - if [[ $TRAVIS_PYTHON_VERSION != 'pypy' ]]; then coverage run -m relstorage.tests.alltests; fi
 after_success:
   - coveralls
 notifications:
