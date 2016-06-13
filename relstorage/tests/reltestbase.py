@@ -651,9 +651,10 @@ class GenericRelStorageTests(
         # Verify the pack stops with the right exception if it encounters
         # a broken pickle.
         # Under Python 2, with zodbpickle, there may be a difference depending
-        # on whether the accelerated implementation is in use.
+        # on whether the accelerated implementation is in use. Also ,the pure-python
+        # version on PyPy can raise IndexError
         from zodbpickle.pickle import UnpicklingError as pUnpickErr
-        unpick_errs = (pUnpickErr,)
+        unpick_errs = (pUnpickErr,IndexError)
         try:
             from zodbpickle.fastpickle import UnpicklingError as fUnpickErr
         except ImportError:
