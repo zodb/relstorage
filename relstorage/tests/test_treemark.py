@@ -84,3 +84,8 @@ class TestTreeMarker(unittest.TestCase):
         ])
         obj.mark([5])
         self.assertEqual(set(obj.reachable), set([5, 7, 8 << 32, 9 << 32]))
+
+def test_suite():
+    suite = unittest.TestSuite()
+    suite.addTest(unittest.makeSuite(TestTreeMarker))
+    return suite
