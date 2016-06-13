@@ -114,6 +114,19 @@ try:
 except ImportError:
     pass
 
+try:
+    import pymysql.converters
+    # PyPy up through at least 5.3.0 has a bug that raises spurious
+    # MemoryErrors when run under PyMySQL >= 0.7.
+    # (https://bitbucket.org/pypy/pypy/issues/2324/bytearray-replace-a-bc-raises-memoryerror)
+    # Patch around it.
+    if hasattr(pymysql.converters, 'escape_string'):
+        orig_escape_string = pymysql.converters.escape_string
+        def escape_string(value, mapping=None):
+            if isinstance(value, bytearray) and not(value):
+                return value
+            return orig_escape_string(value, mapping)
+        pymysql.converters.escape_string = escape_string
 except ImportError:
 	pass
 
