@@ -43,8 +43,11 @@ versions of ZODB with the patch already applied here:
 
 The patches are also included in the source distribution of RelStorage.
 
-You need the Python database adapter that corresponds with your database.
-Install psycopg2/psycopg2cffi, MySQLdb 1.2.2+/PyMySQL 0.6.6+, or cx_Oracle 4.3+.
+You need the Python database adapter that corresponds with your
+database. On CPython, install psycopg2, MySQLdb 1.2.2+, or cx_Oracle
+4.3+. On PyPy, install psycopg2cffi or PyMySQL (PyPy will generally
+work with psycopg2 and MySQLdb, but it will be *much* slower);
+cx_Oracle is untested.
 
 
 Configuring Your Database
