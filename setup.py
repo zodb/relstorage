@@ -76,7 +76,7 @@ setup(
     zip_safe=False,  # otherwise ZConfig can't see component.xml
     install_requires=[
         'perfmetrics',
-        'ZODB >= 4.3.0, <5.0',
+        'ZODB >= 4.3.0',
         # ZEO is needed for blob layout
         'ZEO >= 4.2.0b1, <5.0',
         'zope.interface',
