@@ -45,6 +45,8 @@ def read_file(*path):
         result = f.read()
     return result
 
+tests_require = ['mock', 'zope.testing', 'ZODB [test]']
+
 setup(
     name="RelStorage",
     version=VERSION,
@@ -80,10 +82,7 @@ setup(
         'zope.interface',
         'zc.lockfile',
     ],
-    tests_require=[
-        'mock',
-        'zope.testing',
-    ],
+    tests_require = tests_require,
     extras_require={
         'mysql:platform_python_implementation=="CPython"': [
             'MySQL-python>=1.2.2',
@@ -100,6 +99,7 @@ setup(
         'oracle': [
             'cx_Oracle>=4.3.1'
         ],
+        'test': tests_require,
     },
     entry_points = {
         'console_scripts': [

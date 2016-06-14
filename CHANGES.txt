@@ -11,6 +11,9 @@
   psycopg2cffi respectively. PyPy can be substantially faster than
   CPython in some scenarios; see `PR 23`_.
 
+- Updated the buildout configuration to just run relstorage tests and
+  to select which databases to use at build time.
+
 .. _`PR 23`: https://github.com/zodb/relstorage/pull/23/
 
 1.6.0b3 (2014-12-08)
