@@ -163,8 +163,9 @@ def test_suite():
             HFPostgreSQLFromFile,
             ]:
         suite.addTest(unittest.makeSuite(klass, "check"))
-    suite.addTest(unittest.makeSuite(HPPostgreSQLDestZODBConvertTests))
-    suite.addTest(unittest.makeSuite(HPPostgreSQLSrcZODBConvertTests))
+    # TODO: The base class needs more refactoring to be able to write appropriate configs.
+    #suite.addTest(unittest.makeSuite(HPPostgreSQLDestZODBConvertTests))
+    #suite.addTest(unittest.makeSuite(HPPostgreSQLSrcZODBConvertTests))
 
     try:
         import ZODB.blob
