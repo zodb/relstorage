@@ -253,7 +253,7 @@ class RelStorage(
                 self._load_conn.rollback()
             except:
                 self._drop_load_connection()
-                raise
+                #raise
             self._load_transaction_open = ''
 
     def _restart_load_and_call(self, f, *args, **kw):
