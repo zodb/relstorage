@@ -52,6 +52,10 @@
 - Packing: Reduced RAM consumption while packing by using IIBTree.Set
   instead of built-in set objects.
 
+- Raise a specific exception,
+  relstorage.adapters.interfaces.UnableToAcquireCommitLockError, when
+  acquiring the commit lock fails.
+
 - MySQL 5.5: The test suite was freezing in checkBackwardTimeTravel. Fixed.
 
 - Added performance metrics using the perfmetrics package.
