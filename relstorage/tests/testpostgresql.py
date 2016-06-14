@@ -106,11 +106,21 @@ class ZConfigTests:
         finally:
             db.close()
 
-class HPPostgreSQLDestZODBConvertTests(UsePostgreSQLAdapter, AbstractRSDestZodbConvertTests):
-    adapter_name = 'postgresql'
 
-class HPPostgreSQLSrcZODBConvertTests(UsePostgreSQLAdapter, AbstractRSSrcZodbConvertTests):
-    adapter_name = 'postgresql'
+class _PgSQLCfgMixin(object):
+
+    def _relstorage_contents(self):
+        return """
+                <postgresql>
+                   dsn dbname='relstoragetest' user='relstoragetest' password='relstoragetest'
+                </postgresql>
+        """
+
+class HPPostgreSQLDestZODBConvertTests(UsePostgreSQLAdapter, _PgSQLCfgMixin, AbstractRSDestZodbConvertTests):
+    pass
+
+class HPPostgreSQLSrcZODBConvertTests(UsePostgreSQLAdapter, _PgSQLCfgMixin, AbstractRSSrcZodbConvertTests):
+    pass
 
 class HPPostgreSQLTests(UsePostgreSQLAdapter, HistoryPreservingRelStorageTests,
         ZConfigTests):
@@ -163,9 +173,8 @@ def test_suite():
             HFPostgreSQLFromFile,
             ]:
         suite.addTest(unittest.makeSuite(klass, "check"))
-    # TODO: The base class needs more refactoring to be able to write appropriate configs.
-    #suite.addTest(unittest.makeSuite(HPPostgreSQLDestZODBConvertTests))
-    #suite.addTest(unittest.makeSuite(HPPostgreSQLSrcZODBConvertTests))
+    suite.addTest(unittest.makeSuite(HPPostgreSQLDestZODBConvertTests))
+    suite.addTest(unittest.makeSuite(HPPostgreSQLSrcZODBConvertTests))
 
     try:
         import ZODB.blob

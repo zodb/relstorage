@@ -112,11 +112,22 @@ class ZConfigTests:
         finally:
             db.close()
 
-class HPMySQLDestZODBConvertTests(UseMySQLAdapter, AbstractRSDestZodbConvertTests):
-    adapter_name = 'mysql'
+class _MySQLCfgMixin(object):
 
-class HPMySQLSrcZODBConvertTests(UseMySQLAdapter, AbstractRSSrcZodbConvertTests):
-    adapter_name = 'mysql'
+    def _relstorage_contents(self):
+        return """
+                <mysql>
+                   db relstoragetest
+                   user relstoragetest
+                   passwd relstoragetest
+                </mysql>
+        """
+
+class HPMySQLDestZODBConvertTests(UseMySQLAdapter, _MySQLCfgMixin, AbstractRSDestZodbConvertTests):
+    pass
+
+class HPMySQLSrcZODBConvertTests(UseMySQLAdapter, _MySQLCfgMixin, AbstractRSSrcZodbConvertTests):
+    pass
 
 
 class HPMySQLTests(UseMySQLAdapter, HistoryPreservingRelStorageTests,
