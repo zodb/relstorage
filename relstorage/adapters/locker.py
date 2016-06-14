@@ -14,10 +14,10 @@
 """Locker implementations.
 """
 
-from ZODB.POSException import StorageError
 from perfmetrics import metricmethod
 from relstorage.adapters.interfaces import ILocker
-from relstorage.adapters.interfaces import UnableToAcquireCommitLockError
+from .interfaces import UnableToAcquireCommitLockError
+from .interfaces import UnableToAcquirePackUndoLockError
 from zope.interface import implements
 
 
@@ -88,13 +88,13 @@ class PostgreSQLLocker(Locker):
             cursor.execute("SELECT pg_try_advisory_lock(1)")
             locked = cursor.fetchone()[0]
             if not locked:
-                raise StorageError('A pack or undo operation is in progress')
+                raise UnableToAcquirePackUndoLockError('A pack or undo operation is in progress')
         else:
             # b/w compat
             try:
                 cursor.execute("LOCK pack_lock IN EXCLUSIVE MODE NOWAIT")
             except self.lock_exceptions:  # psycopg2.DatabaseError:
-                raise StorageError('A pack or undo operation is in progress')
+                raise UnableToAcquirePackUndoLockError('A pack or undo operation is in progress')
 
     def release_pack_lock(self, cursor):
         """Release the pack lock."""
@@ -130,7 +130,7 @@ class MySQLLocker(Locker):
         cursor.execute(stmt)
         res = cursor.fetchone()[0]
         if not res:
-            raise StorageError('A pack or undo operation is in progress')
+            raise UnableToAcquirePackUndoLockError('A pack or undo operation is in progress')
 
     def release_pack_lock(self, cursor):
         """Release the pack lock."""
@@ -198,7 +198,7 @@ class OracleLocker(Locker):
         try:
             cursor.execute(stmt)
         except self.lock_exceptions:  # cx_Oracle.DatabaseError:
-            raise StorageError('A pack or undo operation is in progress')
+            raise UnableToAcquirePackUndoLockError('A pack or undo operation is in progress')
 
     def release_pack_lock(self, cursor):
         """Release the pack lock."""
