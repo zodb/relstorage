@@ -33,8 +33,26 @@ import random
 import time
 import transaction
 
+class StorageCreatingMixin(object):
 
-class RelStorageTestBase(StorageTestBase.StorageTestBase):
+    def make_adapter(self, options):
+        # abstract method
+        raise NotImplementedError()
+
+    def make_storage(self, zap=True, **kw):
+        from relstorage.options import Options
+        from relstorage.storage import RelStorage
+        options = Options(keep_history=self.keep_history, **kw)
+        adapter = self.make_adapter(options)
+        storage = RelStorage(adapter, options=options)
+        storage._batcher_row_limit = 1
+        if zap:
+            storage.zap_all()
+        return storage
+
+
+class RelStorageTestBase(StorageCreatingMixin,
+                         StorageTestBase.StorageTestBase):
 
     keep_history = None  # Override
     _storage_created = None
@@ -63,21 +81,6 @@ class RelStorageTestBase(StorageTestBase.StorageTestBase):
         self._storage_created = storage
 
     _storage = property(get_storage, set_storage)
-
-    def make_adapter(self, options):
-        # abstract method
-        raise NotImplementedError()
-
-    def make_storage(self, zap=True, **kw):
-        from relstorage.options import Options
-        from relstorage.storage import RelStorage
-        options = Options(keep_history=self.keep_history, **kw)
-        adapter = self.make_adapter(options)
-        storage = RelStorage(adapter, options=options)
-        storage._batcher_row_limit = 1
-        if zap:
-            storage.zap_all()
-        return storage
 
     def open(self, read_only=False):
         # This is used by a few ZODB tests that close and reopen the storage.
@@ -818,6 +821,63 @@ class GenericRelStorageTests(
 
         finally:
             db.close()
+
+from .test_zodbconvert import FSZODBConvertTests
+
+class AbstractRSDestZodbConvertTests(StorageCreatingMixin,
+                                     FSZODBConvertTests):
+    adapter_name = ''
+    keep_history = True
+
+    def setUp(self):
+        super(AbstractRSDestZodbConvertTests, self).setUp()
+        cfg = """
+        %%import relstorage
+        <filestorage source>
+            path %s
+        </filestorage>
+        <relstorage destination>
+          <%s>
+             db relstoragetest
+             user relstoragetest
+             passwd relstoragetest
+          </%s>
+        </relstorage>
+        """ % (self.srcfile, self.adapter_name, self.adapter_name)
+        self._write_cfg(cfg)
+        self.make_storage(zap=True)
+
+
+    def _create_dest_storage(self):
+        return self.make_storage(zap=False)
+
+class AbstractRSSrcZodbConvertTests(StorageCreatingMixin,
+                                     FSZODBConvertTests):
+    adapter_name = ''
+    keep_history = True
+
+    def setUp(self):
+        super(AbstractRSSrcZodbConvertTests, self).setUp()
+        cfg = """
+        %%import relstorage
+        <filestorage destination>
+            path %s
+        </filestorage>
+        <relstorage source>
+          <%s>
+             db relstoragetest
+             user relstoragetest
+             passwd relstoragetest
+          </%s>
+        </relstorage>
+        """ % (self.srcfile, self.adapter_name, self.adapter_name)
+        self._write_cfg(cfg)
+        self.make_storage(zap=True)
+
+
+    def _create_src_storage(self):
+        return self.make_storage(zap=False)
+
 
 
 class DoubleCommitter(Persistent):
