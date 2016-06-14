@@ -23,7 +23,7 @@ from persistent.TimeStamp import TimeStamp
 from StringIO import StringIO
 import sys
 import ZConfig
-from ZODB.utils import p64, readable_tid_repr
+from ZODB.utils import p64, u64
 
 schema_xml = """
 <schema>
@@ -51,6 +51,19 @@ def storage_has_data(storage):
     except (IndexError, StopIteration):
         return False
     return True
+
+
+class IteratorWithDefaultStart(object):
+
+    def __init__(self, original, start):
+        self.__original = original
+        self.__start = start
+
+    def iterator(self, start=None, end=None):
+        return self.__original.iterator(start or self.__start, end)
+
+    def __getattr__(self, name):
+        return getattr(self.__original, name)
 
 
 def main(argv=sys.argv):
@@ -83,24 +96,21 @@ def main(argv=sys.argv):
     config, handler = ZConfig.loadConfig(schema, args[0])
     source = config.source.open()
     destination = config.destination.open()
+    start = None
 
     log.info("Storages opened successfully.")
 
     if options.incremental:
-        if not hasattr(destination, '_adapter'):
-            msg = ("Error: no API is known for determining the last committed "
-                   "transaction of the destination storage. Aborting "
-                   "conversion.")
-            sys.exit(msg)
         if not storage_has_data(destination):
-            log.warning("Destination empty, start conversion from the beginning.")
+            log.warning(
+                "Destination empty, start conversion from the beginning.")
         else:
-            last_tid = destination._adapter.txncontrol.get_tid(
-                destination._load_cursor)
-            next_tid = p64(last_tid+1)
-            source = source.iterator(start=next_tid)
-            log.info("Resuming ZODB copy from %s", readable_tid_repr(next_tid))
-
+            iterator = destination.iterator()
+            for trans in iterator:
+                last = trans.tid
+            start = p64(u64(last)+1)
+            source = IteratorWithDefaultStart(source, start)
+            log.info("Resuming ZODB copy from %s", u64(start))
 
     if options.dry_run:
         log.info("Dry run mode: not changing the destination.")
@@ -125,7 +135,7 @@ def main(argv=sys.argv):
                 sys.exit(msg)
             log.info("Done clearing old data.")
 
-        if storage_has_data(destination):
+        if start is None and storage_has_data(destination):
             msg = "Error: the destination storage has data.  Try --clear."
             sys.exit(msg)
 
