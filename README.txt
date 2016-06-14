@@ -1,9 +1,9 @@
 
 RelStorage is a storage implementation for ZODB that stores pickles in
-a relational database. PostgreSQL 8.1 and above (via psycopg2), MySQL
-5.0.32+ / 5.1.34+ (via MySQLdb 1.2.2 and above), and Oracle 10g and 11g
-(via cx_Oracle) are currently supported. RelStorage replaced the
-PGStorage project.
+a relational database. PostgreSQL 8.1 and above (via psycopg2 or
+psycopg2cffi), MySQL 5.0.32+ / 5.1.34+ (via MySQLdb 1.2.2 or PyMySQL),
+and Oracle 10g and 11g (via cx_Oracle) are currently supported.
+RelStorage replaced the PGStorage project.
 
 .. contents::
 
@@ -43,8 +43,12 @@ versions of ZODB with the patch already applied here:
 
 The patches are also included in the source distribution of RelStorage.
 
-You need the Python database adapter that corresponds with your database.
-Install psycopg2, MySQLdb 1.2.2+, or cx_Oracle 4.3+.
+You need the Python database adapter that corresponds with your
+database. On CPython, install psycopg2, MySQLdb 1.2.2+, or cx_Oracle
+4.3+. On PyPy, install psycopg2cffi or PyMySQL (PyPy will generally
+work with psycopg2 and MySQLdb, but it will be *much* slower);
+cx_Oracle is untested.
+
 
 Configuring Your Database
 -------------------------

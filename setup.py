@@ -24,6 +24,8 @@ classifiers = """\
 Intended Audience :: Developers
 License :: OSI Approved :: Zope Public License
 Programming Language :: Python
+Programming Language :: Python :: Implementation :: CPython
+Programming Language :: Python :: Implementation :: PyPy
 Topic :: Database
 Topic :: Software Development :: Libraries :: Python Modules
 Operating System :: Microsoft :: Windows
@@ -39,7 +41,9 @@ doclines = __doc__.split("\n")
 def read_file(*path):
     base_dir = os.path.dirname(__file__)
     file_path = (base_dir, ) + tuple(path)
-    return file(os.path.join(*file_path)).read()
+    with open(os.path.join(*file_path)) as f:
+        result = f.read()
+    return result
 
 setup(
     name="RelStorage",
@@ -81,9 +85,21 @@ setup(
         'zope.testing',
     ],
     extras_require={
-        'mysql': ['MySQL-python>=1.2.2'],
-        'postgresql': ['psycopg2>=2.0'],
-        'oracle': ['cx_Oracle>=4.3.1'],
+        'mysql:platform_python_implementation=="CPython"': [
+            'MySQL-python>=1.2.2',
+        ],
+        'mysql:platform_python_implementation=="PyPy"' : [
+            'PyMySQL>=0.6.6',
+        ],
+        'postgresql: platform_python_implementation == "CPython"': [
+            'psycopg2>=2.0',
+        ],
+        'postgresql: platform_python_implementation == "PyPy"': [
+            'psycopg2cffi>=2.7.0',
+        ],
+        'oracle': [
+            'cx_Oracle>=4.3.1'
+        ],
     },
     entry_points = {
         'console_scripts': [

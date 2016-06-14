@@ -1,4 +1,4 @@
-pip install -U psycopg2
+pip install -U -e ".[postgresql]"
 psql -U postgres -c "CREATE USER relstoragetest WITH PASSWORD 'relstoragetest';"
 psql -U postgres -c "CREATE DATABASE relstoragetest OWNER relstoragetest;"
 psql -U postgres -c "CREATE DATABASE relstoragetest2 OWNER relstoragetest;"

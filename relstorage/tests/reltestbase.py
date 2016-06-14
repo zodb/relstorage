@@ -103,6 +103,29 @@ class GenericRelStorageTests(
     ):
 
     def checkDropAndPrepare(self):
+        # XXX: Hangs with PyMySql; hangs dropping the object_state table,
+        # the 8th table to drop.
+        # XXX: Also hangs with psycopg2cffi
+
+        import sys
+        if sys.modules.get("MySQLdb") == sys.modules.get('pymysql', self) \
+           and 'MySQL' in str(type(self._storage._adapter.schema)):
+            try:
+                from unittest import SkipTest
+                raise SkipTest("PyMySQL hangs dropping a table.")
+            except ImportError:
+                # Py2.6; nothing to do but return
+                return
+
+        if sys.modules.get("psycopg2") == sys.modules.get("psycopg2cffi", self) \
+           and "PostgreSQL" in str(type(self._storage._adapter.schema)):
+            try:
+                from unittest import SkipTest
+                raise SkipTest("psycopg2cffi hangs dropping a table.")
+            except ImportError:
+                # Py2.6; nothing to do but return
+                return
+
         self._storage._adapter.schema.drop_all()
         self._storage._adapter.schema.prepare()
 
@@ -628,9 +651,10 @@ class GenericRelStorageTests(
         # Verify the pack stops with the right exception if it encounters
         # a broken pickle.
         # Under Python 2, with zodbpickle, there may be a difference depending
-        # on whether the accelerated implementation is in use.
+        # on whether the accelerated implementation is in use. Also ,the pure-python
+        # version on PyPy can raise IndexError
         from zodbpickle.pickle import UnpicklingError as pUnpickErr
-        unpick_errs = (pUnpickErr,)
+        unpick_errs = (pUnpickErr,IndexError)
         try:
             from zodbpickle.fastpickle import UnpicklingError as fUnpickErr
         except ImportError:

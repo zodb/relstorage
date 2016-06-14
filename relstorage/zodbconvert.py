@@ -112,7 +112,8 @@ def main(argv=sys.argv):
                 TimeStamp(txn.tid), txn.user, txn.description))
             count += 1
         log.info("Would copy %d transactions.", count)
-
+        source.close()
+        destination.close()
     else:
         if options.clear:
             log.info("Clearing old data...")

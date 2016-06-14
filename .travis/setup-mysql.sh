@@ -1,4 +1,4 @@
-pip install -U MySQL-python
+pip install -U -e ".[mysql]"
 mysql -uroot -e "CREATE USER 'relstoragetest'@'localhost' IDENTIFIED BY 'relstoragetest';"
 mysql -uroot -e "CREATE DATABASE relstoragetest;"
 mysql -uroot -e "GRANT ALL ON relstoragetest.* TO 'relstoragetest'@'localhost';"

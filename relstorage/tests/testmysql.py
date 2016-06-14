@@ -146,10 +146,14 @@ db_names = {
 def test_suite():
     try:
         import MySQLdb
-    except ImportError, e:
-        import warnings
-        warnings.warn("MySQLdb is not importable, so MySQL tests disabled")
-        return unittest.TestSuite()
+    except ImportError:
+        try:
+            import pymysql
+            pymysql.install_as_MySQLdb()
+        except ImportError:
+            import warnings
+            warnings.warn("MySQLdb is not importable, so MySQL tests disabled")
+            return unittest.TestSuite()
 
     suite = unittest.TestSuite()
     for klass in [
