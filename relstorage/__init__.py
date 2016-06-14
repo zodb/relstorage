@@ -60,4 +60,15 @@ def patch_zodb_sync():
     Connection.newTransaction = _storage_sync
     Connection.sync = sync
 
+try:
+    from ZODB import mvccadapter
+except ImportError:
+    # Prior to ZODB 5, we need the patch
+    pass
+else:
+    del mvccadapter
+    # Nothing to do on ZODB 5
+    def patch_zodb_sync():
+        pass
+
 patch_zodb_sync()
