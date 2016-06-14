@@ -106,11 +106,21 @@ class ZConfigTests:
         finally:
             db.close()
 
-class HPPostgreSQLDestZODBConvertTests(UsePostgreSQLAdapter, AbstractRSDestZodbConvertTests):
-    adapter_name = 'postgresql'
 
-class HPPostgreSQLSrcZODBConvertTests(UsePostgreSQLAdapter, AbstractRSSrcZodbConvertTests):
-    adapter_name = 'postgresql'
+class _PgSQLCfgMixin(object):
+
+    def _relstorage_contents(self):
+        return """
+                <postgresql>
+                   dsn dbname='relstoragetest' user='relstoragetest' password='relstoragetest'
+                </postgresql>
+        """
+
+class HPPostgreSQLDestZODBConvertTests(UsePostgreSQLAdapter, _PgSQLCfgMixin, AbstractRSDestZodbConvertTests):
+    pass
+
+class HPPostgreSQLSrcZODBConvertTests(UsePostgreSQLAdapter, _PgSQLCfgMixin, AbstractRSSrcZodbConvertTests):
+    pass
 
 class HPPostgreSQLTests(UsePostgreSQLAdapter, HistoryPreservingRelStorageTests,
         ZConfigTests):

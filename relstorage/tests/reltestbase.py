@@ -813,61 +813,52 @@ class GenericRelStorageTests(
 
 from .test_zodbconvert import FSZODBConvertTests
 
-class AbstractRSDestZodbConvertTests(StorageCreatingMixin,
-                                     FSZODBConvertTests):
-    adapter_name = ''
+class AbstractRSZodbConvertTests(StorageCreatingMixin,
+                                 FSZODBConvertTests):
     keep_history = True
+    filestorage_name = 'source'
+    relstorage_name = 'destination'
+
+    def _relstorage_contents(self):
+        raise NotImplementedError()
 
     def setUp(self):
-        super(AbstractRSDestZodbConvertTests, self).setUp()
+        super(AbstractRSZodbConvertTests, self).setUp()
         cfg = """
         %%import relstorage
-        <filestorage source>
+        <filestorage %s>
             path %s
         </filestorage>
-        <relstorage destination>
-          <%s>
-             db relstoragetest
-             user relstoragetest
-             passwd relstoragetest
-          </%s>
+        <relstorage %s>
+            %s
         </relstorage>
-        """ % (self.srcfile, self.adapter_name, self.adapter_name)
+        """ % (self.filestorage_name, self.filestorage_file,
+               self.relstorage_name, self._relstorage_contents())
         self._write_cfg(cfg)
         self.make_storage(zap=True)
 
+
+class AbstractRSDestZodbConvertTests(AbstractRSZodbConvertTests):
+
+    @property
+    def filestorage_file(self):
+        return self.srcfile
 
     def _create_dest_storage(self):
         return self.make_storage(zap=False)
 
-class AbstractRSSrcZodbConvertTests(StorageCreatingMixin,
-                                     FSZODBConvertTests):
-    adapter_name = ''
-    keep_history = True
+class AbstractRSSrcZodbConvertTests(AbstractRSZodbConvertTests):
 
-    def setUp(self):
-        super(AbstractRSSrcZodbConvertTests, self).setUp()
-        cfg = """
-        %%import relstorage
-        <filestorage destination>
-            path %s
-        </filestorage>
-        <relstorage source>
-          <%s>
-             db relstoragetest
-             user relstoragetest
-             passwd relstoragetest
-          </%s>
-        </relstorage>
-        """ % (self.destfile, self.adapter_name, self.adapter_name)
-        self._write_cfg(cfg)
-        self.make_storage(zap=True)
+    filestorage_name = 'destination'
+    relstorage_name = 'source'
+
+    @property
+    def filestorage_file(self):
+        return self.destfile
 
 
     def _create_src_storage(self):
         return self.make_storage(zap=False)
-
-
 
 class DoubleCommitter(Persistent):
     """A crazy persistent class that changes self in __getstate__"""
