@@ -16,6 +16,7 @@
 
 See README.txt for details.
 """
+from __future__ import print_function
 
 import logging
 import optparse
@@ -23,7 +24,7 @@ from persistent.TimeStamp import TimeStamp
 from StringIO import StringIO
 import sys
 import ZConfig
-from ZODB.utils import p64, readable_tid_repr
+from ZODB.utils import p64, u64, readable_tid_repr
 
 schema_xml = """
 <schema>
@@ -87,7 +88,7 @@ def main(argv=sys.argv):
     log.info("Storages opened successfully.")
 
     if options.incremental:
-        if not hasattr(destination, '_adapter'):
+        if not hasattr(destination, '_adapter') and not hasattr(destination, 'lastTransaction'):
             msg = ("Error: no API is known for determining the last committed "
                    "transaction of the destination storage. Aborting "
                    "conversion.")
@@ -95,8 +96,17 @@ def main(argv=sys.argv):
         if not storage_has_data(destination):
             log.warning("Destination empty, start conversion from the beginning.")
         else:
-            last_tid = destination._adapter.txncontrol.get_tid(
-                destination._load_cursor)
+            if hasattr(destination, '_adapter'):
+                # RelStorage. Note that we implement lastTransaction(), but
+                # only in-memory, local to the particular object. (We should probably
+                # change that?) So order matters.
+                last_tid = destination._adapter.txncontrol.get_tid(
+                    destination._load_cursor)
+            else:
+                # IStorage, like FileStorage
+                last_tid_s = destination.lastTransaction()
+                last_tid = u64(last_tid_s)
+
             next_tid = p64(last_tid+1)
             source = source.iterator(start=next_tid)
             log.info("Resuming ZODB copy from %s", readable_tid_repr(next_tid))
@@ -124,7 +134,7 @@ def main(argv=sys.argv):
                 sys.exit(msg)
             log.info("Done clearing old data.")
 
-        if storage_has_data(destination):
+        if storage_has_data(destination) and not options.incremental:
             msg = "Error: the destination storage has data.  Try --clear."
             sys.exit(msg)
 

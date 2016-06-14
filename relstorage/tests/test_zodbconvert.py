@@ -11,7 +11,7 @@
 # FOR A PARTICULAR PURPOSE.
 #
 ##############################################################################
-
+from __future__ import print_function
 import unittest
 
 class ZODBConvertTests(unittest.TestCase):
@@ -64,7 +64,6 @@ class ZODBConvertTests(unittest.TestCase):
         from ZODB.DB import DB
         from ZODB.FileStorage import FileStorage
         from relstorage.zodbconvert import main
-        from relstorage.zodbconvert import storage_has_data
         import transaction
 
         src = FileStorage(self.srcfile)
@@ -88,7 +87,6 @@ class ZODBConvertTests(unittest.TestCase):
         from ZODB.DB import DB
         from ZODB.FileStorage import FileStorage
         from relstorage.zodbconvert import main
-        from relstorage.zodbconvert import storage_has_data
         import transaction
 
         src = FileStorage(self.srcfile)
@@ -107,6 +105,42 @@ class ZODBConvertTests(unittest.TestCase):
         self.assertEqual(conn2.root().get('x'), None)
         conn2.close()
         db2.close()
+
+    def test_incremental(self):
+        from ZODB.DB import DB
+        from ZODB.utils import u64, readable_tid_repr
+        from ZODB.FileStorage import FileStorage
+        from relstorage.zodbconvert import main
+        import transaction
+
+        def write_value_for_x_in_src(x):
+            src = FileStorage(self.srcfile)
+            db = DB(src)
+            conn = db.open()
+            conn.root()['x'] = x
+            transaction.commit()
+            conn.close()
+            db.close()
+
+        def check_value_of_x_in_dest(x):
+            dest = FileStorage(self.destfile)
+            db2 = DB(dest)
+            conn2 = db2.open()
+            db_x = conn2.root().get('x')
+            conn2.close()
+            db2.close()
+            self.assertEqual(db_x, x)
+
+        x = 10
+        write_value_for_x_in_src(x)
+        main(['', self.cfgfile])
+        check_value_of_x_in_dest(x)
+
+        x = "hi"
+        write_value_for_x_in_src(x)
+        main(['', '--incremental', self.cfgfile])
+        check_value_of_x_in_dest(x)
+
 
     def test_no_overwrite(self):
         from ZODB.DB import DB

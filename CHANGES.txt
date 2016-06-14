@@ -10,6 +10,11 @@
 - Tests: Use the standard library ``doctest`` module for compatibility
   with newer ``zope.testing`` releases.
 
+- zodbconvert: The ``--incremental`` option is supported with a
+  FileStorage (or any storage that implements
+  ``IStorage.lastTransaction()``)
+  as a destination, not just RelStorages.
+
 1.6.0b3 (2014-12-08)
 --------------------
 
