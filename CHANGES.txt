@@ -16,6 +16,18 @@
 
 .. _`PR 23`: https://github.com/zodb/relstorage/pull/23/
 
+- zodbconvert: The ``--incremental`` option is supported with a
+  FileStorage (or any storage that implements
+  ``IStorage.lastTransaction()``)
+  as a destination, not just RelStorages.
+
+- zodbconvert: The ``--incremental`` option is supported with a
+  RelStorage as a destination. See `PR 22`. With contributions by
+  Sylvain Viollon, Mauro Amico, and Peter Jacobs. Originally reported
+  by Jan-Wijbrand Kolman.
+
+.. _`PR 22`: https://github.com/zodb/relstorage/pull/22
+
 1.6.0b3 (2014-12-08)
 --------------------
 

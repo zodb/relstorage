@@ -11,14 +11,95 @@
 # FOR A PARTICULAR PURPOSE.
 #
 ##############################################################################
+from __future__ import print_function
 
+from contextlib import contextmanager
+import os
+import tempfile
+import transaction
 import unittest
 
-class ZODBConvertTests(unittest.TestCase):
+
+from relstorage.zodbconvert import main
+
+class AbstractZODBConvertBase(unittest.TestCase):
+    cfgfile = None
+
+    def _create_src_storage(self):
+        raise NotImplementedError()
+
+    def _create_dest_storage(self):
+        raise NotImplementedError()
+
+    def _create_src_db(self):
+        from ZODB.DB import DB
+        return DB(self._create_src_storage())
+
+    def _create_dest_db(self):
+        from ZODB.DB import DB
+        return DB(self._create_dest_storage())
+
+    @contextmanager
+    def __conn(self, name):
+        db = getattr(self, '_create_' + name + '_db')()
+        conn = db.open()
+        try:
+            yield conn
+        finally:
+            conn.close()
+            db.close()
+
+    def _src_conn(self):
+        return self.__conn('src')
+
+    def _dest_conn(self):
+        return self.__conn('dest')
+
+    def _write_value_for_x_in_src(self, x):
+        with self._src_conn() as conn:
+            conn.root()['x'] = x
+            transaction.commit()
+
+    def _check_value_of_x_in_dest(self, x):
+        with self._dest_conn() as conn2:
+            db_x = conn2.root().get('x')
+            self.assertEqual(db_x, x)
+
+    def test_convert(self):
+        self._write_value_for_x_in_src(10)
+        main(['', self.cfgfile])
+        self._check_value_of_x_in_dest(10)
+
+
+    def test_dry_run(self):
+        self._write_value_for_x_in_src(10)
+        main(['', '--dry-run', self.cfgfile])
+        self._check_value_of_x_in_dest(None)
+
+
+    def test_incremental(self):
+        x = 10
+        self._write_value_for_x_in_src(x)
+        main(['', self.cfgfile])
+        self._check_value_of_x_in_dest(x)
+
+        x = "hi"
+        self._write_value_for_x_in_src(x)
+        main(['', '--incremental', self.cfgfile])
+        self._check_value_of_x_in_dest(x)
+
+
+    def test_no_overwrite(self):
+        db = self._create_src_db() # create the root object
+        db.close()
+        db = self._create_dest_db() # create the root object
+        db.close()
+        self.assertRaises(SystemExit, main, ['', self.cfgfile])
+
+class FSZODBConvertTests(AbstractZODBConvertBase):
 
     def setUp(self):
-        import os
-        import tempfile
+        super(FSZODBConvertTests, self).setUp()
 
         fd, self.srcfile = tempfile.mkstemp()
         os.close(fd)
@@ -36,19 +117,29 @@ class ZODBConvertTests(unittest.TestCase):
             path %s
         </filestorage>
         """ % (self.srcfile, self.destfile)
+        self._write_cfg(cfg)
 
+    def _write_cfg(self, cfg):
         fd, self.cfgfile = tempfile.mkstemp()
         os.write(fd, cfg)
         os.close(fd)
 
     def tearDown(self):
-        import os
         if os.path.exists(self.destfile):
             os.remove(self.destfile)
         if os.path.exists(self.srcfile):
             os.remove(self.srcfile)
         if os.path.exists(self.cfgfile):
             os.remove(self.cfgfile)
+        super(FSZODBConvertTests, self).tearDown()
+
+    def _create_src_storage(self):
+        from ZODB.FileStorage import FileStorage
+        return FileStorage(self.srcfile)
+
+    def _create_dest_storage(self):
+        from ZODB.FileStorage import FileStorage
+        return FileStorage(self.destfile)
 
     def test_storage_has_data(self):
         from ZODB.DB import DB
@@ -60,75 +151,11 @@ class ZODBConvertTests(unittest.TestCase):
         db.close()
         self.assertTrue(storage_has_data(src))
 
-    def test_convert(self):
-        from ZODB.DB import DB
-        from ZODB.FileStorage import FileStorage
-        from relstorage.zodbconvert import main
-        from relstorage.zodbconvert import storage_has_data
-        import transaction
-
-        src = FileStorage(self.srcfile)
-        db = DB(src)
-        conn = db.open()
-        conn.root()['x'] = 10
-        transaction.commit()
-        conn.close()
-        db.close()
-
-        main(['', self.cfgfile])
-
-        dest = FileStorage(self.destfile)
-        db2 = DB(dest)
-        conn2 = db2.open()
-        self.assertEqual(conn2.root().get('x'), 10)
-        conn2.close()
-        db2.close()
-
-    def test_dry_run(self):
-        from ZODB.DB import DB
-        from ZODB.FileStorage import FileStorage
-        from relstorage.zodbconvert import main
-        from relstorage.zodbconvert import storage_has_data
-        import transaction
-
-        src = FileStorage(self.srcfile)
-        db = DB(src)
-        conn = db.open()
-        conn.root()['x'] = 10
-        transaction.commit()
-        conn.close()
-        db.close()
-
-        main(['', '--dry-run', self.cfgfile])
-
-        dest = FileStorage(self.destfile)
-        db2 = DB(dest)
-        conn2 = db2.open()
-        self.assertEqual(conn2.root().get('x'), None)
-        conn2.close()
-        db2.close()
-
-    def test_no_overwrite(self):
-        from ZODB.DB import DB
-        from ZODB.FileStorage import FileStorage
-        from relstorage.zodbconvert import main
-        from relstorage.zodbconvert import storage_has_data
-        import transaction
-
-        src = FileStorage(self.srcfile)
-        db = DB(src)  # create the root object
-        db.close()
-
-        dest = FileStorage(self.destfile)
-        db = DB(dest)  # create the root object
-        db.close()
-
-        self.assertRaises(SystemExit, main, ['', self.cfgfile])
 
 def test_suite():
     suite = unittest.TestSuite()
-    suite.addTest(unittest.makeSuite(ZODBConvertTests))
+    suite.addTest(unittest.makeSuite(FSZODBConvertTests))
     return suite
 
 if __name__ == '__main__':
-    unittest.main()
+    unittest.main(defaultTest='test_suite')

@@ -12,7 +12,7 @@
 #
 ##############################################################################
 """Tests of relstorage.adapters.mysql"""
-
+from __future__ import absolute_import
 from relstorage.options import Options
 from relstorage.tests.hftestbase import HistoryFreeFromFileStorage
 from relstorage.tests.hftestbase import HistoryFreeRelStorageTests
@@ -21,6 +21,8 @@ from relstorage.tests.hptestbase import HistoryPreservingFromFileStorage
 from relstorage.tests.hptestbase import HistoryPreservingRelStorageTests
 from relstorage.tests.hptestbase import HistoryPreservingToFileStorage
 from .util import skipOnCI
+from .reltestbase import AbstractRSDestZodbConvertTests
+from .reltestbase import AbstractRSSrcZodbConvertTests
 import logging
 import os
 import unittest
@@ -110,6 +112,23 @@ class ZConfigTests:
         finally:
             db.close()
 
+class _MySQLCfgMixin(object):
+
+    def _relstorage_contents(self):
+        return """
+                <mysql>
+                   db relstoragetest
+                   user relstoragetest
+                   passwd relstoragetest
+                </mysql>
+        """
+
+class HPMySQLDestZODBConvertTests(UseMySQLAdapter, _MySQLCfgMixin, AbstractRSDestZodbConvertTests):
+    pass
+
+class HPMySQLSrcZODBConvertTests(UseMySQLAdapter, _MySQLCfgMixin, AbstractRSSrcZodbConvertTests):
+    pass
+
 
 class HPMySQLTests(UseMySQLAdapter, HistoryPreservingRelStorageTests,
                    ZConfigTests):
@@ -165,6 +184,8 @@ def test_suite():
             HFMySQLFromFile,
             ]:
         suite.addTest(unittest.makeSuite(klass, "check"))
+    suite.addTest(unittest.makeSuite(HPMySQLDestZODBConvertTests))
+    suite.addTest(unittest.makeSuite(HPMySQLSrcZODBConvertTests))
 
     try:
         import ZODB.blob

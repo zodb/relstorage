@@ -1207,6 +1207,8 @@ class RelStorage(
         # TODO: Remove all old revisions of blobs in history-free mode.
 
     def iterator(self, start=None, stop=None):
+        # XXX: This is broken for purposes of copyTransactionsFrom() because
+        # it can only be iterated over once. zodbconvert works around this.
         return TransactionIterator(self._adapter, start, stop)
 
     def sync(self, force=True):
