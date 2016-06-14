@@ -14,8 +14,11 @@
 from __future__ import print_function
 
 from contextlib import contextmanager
-import unittest
+import os
+import tempfile
 import transaction
+import unittest
+
 
 from relstorage.zodbconvert import main
 
@@ -97,8 +100,6 @@ class FSZODBConvertTests(AbstractZODBConvertBase):
 
     def setUp(self):
         super(FSZODBConvertTests, self).setUp()
-        import os
-        import tempfile
 
         fd, self.srcfile = tempfile.mkstemp()
         os.close(fd)
@@ -116,13 +117,14 @@ class FSZODBConvertTests(AbstractZODBConvertBase):
             path %s
         </filestorage>
         """ % (self.srcfile, self.destfile)
+        self._write_cfg(cfg)
 
+    def _write_cfg(self, cfg):
         fd, self.cfgfile = tempfile.mkstemp()
         os.write(fd, cfg)
         os.close(fd)
 
     def tearDown(self):
-        import os
         if os.path.exists(self.destfile):
             os.remove(self.destfile)
         if os.path.exists(self.srcfile):

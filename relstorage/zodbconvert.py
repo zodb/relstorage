@@ -24,7 +24,7 @@ from persistent.TimeStamp import TimeStamp
 from StringIO import StringIO
 import sys
 import ZConfig
-from ZODB.utils import p64, u64, readable_tid_repr
+from ZODB.utils import p64, u64, z64, readable_tid_repr
 
 schema_xml = """
 <schema>
@@ -53,6 +53,23 @@ def storage_has_data(storage):
         return False
     return True
 
+
+class _DefaultStartStorageIteration(object):
+    # At IStorageIteration instance that keeps a default start value.
+    # This is needed because RelStorage.iterator() does return an object with an
+    # iterator() method, but that object returns itself, so it can only be iterated
+    # once! This breaks some implementations of copyTransactionsFrom, notably
+    # our own. See #22
+
+    def __init__(self, source, start):
+        self._source = source
+        self._start = start
+
+    def iterator(self, start=None, end=None):
+        return self._source.iterator(start or self._start, end)
+
+    def __getattr__(self, name):
+        return getattr(self._source, name)
 
 def main(argv=sys.argv):
     parser = optparse.OptionParser(description=__doc__,
@@ -96,10 +113,13 @@ def main(argv=sys.argv):
         if not storage_has_data(destination):
             log.warning("Destination empty, start conversion from the beginning.")
         else:
+            wrap_source = False
             if hasattr(destination, '_adapter'):
                 # RelStorage. Note that we implement lastTransaction(), but
                 # only in-memory, local to the particular object. (We should probably
                 # change that?) So order matters.
+                destination.load(z64) # prime the connection
+                wrap_source = True # compensate for our bug
                 last_tid = destination._adapter.txncontrol.get_tid(
                     destination._load_cursor)
             else:
@@ -108,7 +128,10 @@ def main(argv=sys.argv):
                 last_tid = u64(last_tid_s)
 
             next_tid = p64(last_tid+1)
-            source = source.iterator(start=next_tid)
+            if wrap_source:
+                source = _DefaultStartStorageIteration(source, next_tid)
+            else:
+                source = source.iterator(start=next_tid)
             log.info("Resuming ZODB copy from %s", readable_tid_repr(next_tid))
 
 

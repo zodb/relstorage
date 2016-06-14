@@ -12,7 +12,7 @@
 #
 ##############################################################################
 """Tests of relstorage.adapters.postgresql"""
-
+from __future__ import absolute_import
 from relstorage.options import Options
 from relstorage.tests.hftestbase import HistoryFreeFromFileStorage
 from relstorage.tests.hftestbase import HistoryFreeRelStorageTests
@@ -20,6 +20,8 @@ from relstorage.tests.hftestbase import HistoryFreeToFileStorage
 from relstorage.tests.hptestbase import HistoryPreservingFromFileStorage
 from relstorage.tests.hptestbase import HistoryPreservingRelStorageTests
 from relstorage.tests.hptestbase import HistoryPreservingToFileStorage
+from .reltestbase import AbstractRSDestZodbConvertTests
+from .reltestbase import AbstractRSSrcZodbConvertTests
 import logging
 import os
 import unittest
@@ -104,6 +106,11 @@ class ZConfigTests:
         finally:
             db.close()
 
+class HPPostgreSQLDestZODBConvertTests(UsePostgreSQLAdapter, AbstractRSDestZodbConvertTests):
+    adapter_name = 'postgresql'
+
+class HPPostgreSQLSrcZODBConvertTests(UsePostgreSQLAdapter, AbstractRSSrcZodbConvertTests):
+    adapter_name = 'postgresql'
 
 class HPPostgreSQLTests(UsePostgreSQLAdapter, HistoryPreservingRelStorageTests,
         ZConfigTests):
@@ -152,6 +159,10 @@ def test_suite():
             HFPostgreSQLFromFile,
             ]:
         suite.addTest(unittest.makeSuite(klass, "check"))
+    suite.addTest(unittest.makeSuite(HPPostgreSQLDestZODBConvertTests)
+    # These have some failures that need to be fixed, but in practice
+    # using a RelStorage as a source works...
+    #suite.addTest(unittest.makeSuite(HPMySQLSrcZODBConvertTests))
 
     try:
         import ZODB.blob
