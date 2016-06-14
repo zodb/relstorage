@@ -385,9 +385,12 @@ class GenericRelStorageTests(
 
             c1._storage._load_conn.close()
             c1._storage._store_conn.close()
-
+            # ZODB5 implicitly calls sync
+            # immediately when a connection is opened;
+            # fake that here for older releases.
             c2 = db.open()
             self.assert_(c2 is c1)
+            c2.sync()
             r = c2.root()
             self.assertEqual(r['alpha'], 1)
             r['beta'] = PersistentMapping()
@@ -396,6 +399,42 @@ class GenericRelStorageTests(
             c2.close()
         finally:
             db.close()
+
+    def checkAutoReconnectOnSync(self):
+        # Verify auto-reconnect.
+        db = DB(self._storage)
+        try:
+            c1 = db.open()
+            r = c1.root()
+
+            c1._storage._load_conn.close()
+            c1._storage.sync()
+            # ZODB5 calls sync when a connection is opened. Our monkey
+            # patch on a Connection makes sure that works in earlier
+            # versions, but we don't have that patch on ZODB5. So test
+            # the storage directly. NOTE: The load connection must be open.
+            # to trigger the actual sync.
+
+            r = c1.root()
+            r['alpha'] = 1
+            transaction.commit()
+            c1.close()
+
+            c1._storage._load_conn.close()
+            c1._storage._store_conn.close()
+
+            c2 = db.open()
+            self.assert_(c2 is c1)
+
+            r = c2.root()
+            self.assertEqual(r['alpha'], 1)
+            r['beta'] = PersistentMapping()
+            c2.add(r['beta'])
+            transaction.commit()
+            c2.close()
+        finally:
+            db.close()
+
 
     def checkPollInterval(self, shared_cache=True):
         # Verify the poll_interval parameter causes RelStorage to

@@ -1231,7 +1231,13 @@ class RelStorage(
                 # that it's possible to ignore the next poll.
                 self._load_transaction_open = 'idle'
             else:
-                self._rollback_load_connection()
+                try:
+                    self._rollback_load_connection()
+                except self._adapter.connmanager.disconnected_exceptions:
+                    # disconnected. Well, the rollback happens automatically in that case.
+                    if self._transaction:
+                        raise
+                    self._drop_load_connection()
         finally:
             self._lock_release()
 
