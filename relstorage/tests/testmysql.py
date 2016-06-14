@@ -170,9 +170,7 @@ def test_suite():
             ]:
         suite.addTest(unittest.makeSuite(klass, "check"))
     suite.addTest(unittest.makeSuite(HPMySQLDestZODBConvertTests))
-    # These have some failures that need to be fixed, but in practice
-    # using a RelStorage as a source works...
-    #suite.addTest(unittest.makeSuite(HPMySQLSrcZODBConvertTests))
+    suite.addTest(unittest.makeSuite(HPMySQLSrcZODBConvertTests))
 
     try:
         import ZODB.blob

@@ -159,10 +159,8 @@ def test_suite():
             HFPostgreSQLFromFile,
             ]:
         suite.addTest(unittest.makeSuite(klass, "check"))
-    suite.addTest(unittest.makeSuite(HPPostgreSQLDestZODBConvertTests)
-    # These have some failures that need to be fixed, but in practice
-    # using a RelStorage as a source works...
-    #suite.addTest(unittest.makeSuite(HPMySQLSrcZODBConvertTests))
+    suite.addTest(unittest.makeSuite(HPPostgreSQLDestZODBConvertTests))
+    suite.addTest(unittest.makeSuite(HPPostgreSQLSrcZODBConvertTests))
 
     try:
         import ZODB.blob

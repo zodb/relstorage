@@ -859,7 +859,7 @@ class AbstractRSSrcZodbConvertTests(StorageCreatingMixin,
              passwd relstoragetest
           </%s>
         </relstorage>
-        """ % (self.srcfile, self.adapter_name, self.adapter_name)
+        """ % (self.destfile, self.adapter_name, self.adapter_name)
         self._write_cfg(cfg)
         self.make_storage(zap=True)
 
