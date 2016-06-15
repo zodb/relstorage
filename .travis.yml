@@ -3,6 +3,9 @@ sudo: false
 services:
   - mysql
   - postgresql
+addons:
+# Use postgresql 9.3 to get commit-lock testing
+  postgresql: "9.3"
 python:
   - 2.7
   - pypy
