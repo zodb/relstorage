@@ -228,6 +228,18 @@ class RelStorage(
         self._instances.append(weakref.ref(other, self._instances.remove))
         return other
 
+    try:
+        from ZODB.mvccadapter import HistoricalStorageAdapter
+    except ImportError:
+        pass
+    else:
+        def before_instance(self, before):
+            # Implement this method of MVCCAdapterInstance
+            # (possibly destined for IMVCCStorage) as a small optimization
+            # in ZODB5 that can eventually simplify ZODB.Connection.Connection
+            return self.HistoricalStorageAdapter(self.new_instance(), before)
+
+
     @property
     def fshelper(self):
         """Used in tests"""
