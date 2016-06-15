@@ -969,7 +969,7 @@ class RelStorage(
                 # so our MVCC state is "floating".
                 # Read directly from the database to get the latest value,
                 self._before_load() # connect if needed
-                return self._adapter.txncontrol.get_tid(self._load_cursor)
+                return p64(self._adapter.txncontrol.get_tid(self._load_cursor))
 
             return max(self._ltid, p64(self._prev_polled_tid or 0))
         finally:

@@ -117,8 +117,7 @@ def main(argv=sys.argv):
             # anything is loaded with it.
             last_tid = destination.lastTransaction()
             if isinstance(last_tid, bytes):
-                # FileStorage returns a byte string, everything else
-                # returns an int
+                # This *should* be a byte string.
                 last_tid = u64(last_tid)
 
             next_tid = p64(last_tid+1)
