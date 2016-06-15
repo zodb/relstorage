@@ -4,16 +4,13 @@
 - Tests: Basic integration testing is done on Travis CI. Thanks to
   Mauro Amico.
 
-1.6.0 (2016-06-09)
-------------------
-
-- Tests: Use the standard library ``doctest`` module for compatibility
-  with newer ``zope.testing`` releases.
+- ``RelStorage.lastTransaction()`` is more consistent with FileStorage
+  and ClientStorage, returning a useful value in more cases.
 
 - zodbconvert: The ``--incremental`` option is supported with a
   FileStorage (or any storage that implements
-  ``IStorage.lastTransaction()``)
-  as a destination, not just RelStorages.
+  ``IStorage.lastTransaction()``) as a destination, not just
+  RelStorages.
 
 - zodbconvert: The ``--incremental`` option is supported with a
   RelStorage as a destination. See `PR 22`. With contributions by
@@ -21,6 +18,12 @@
   by Jan-Wijbrand Kolman.
 
 .. _`PR 22`: https://github.com/zodb/relstorage/pull/22
+
+1.6.0 (2016-06-09)
+------------------
+
+- Tests: Use the standard library ``doctest`` module for compatibility
+  with newer ``zope.testing`` releases.
 
 1.6.0b3 (2014-12-08)
 --------------------

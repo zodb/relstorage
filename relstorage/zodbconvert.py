@@ -105,7 +105,7 @@ def main(argv=sys.argv):
     log.info("Storages opened successfully.")
 
     if options.incremental:
-        if not hasattr(destination, '_adapter') and not hasattr(destination, 'lastTransaction'):
+        if not hasattr(destination, 'lastTransaction'):
             msg = ("Error: no API is known for determining the last committed "
                    "transaction of the destination storage. Aborting "
                    "conversion.")

@@ -957,7 +957,16 @@ class RelStorage(
     def lastTransaction(self):
         self._lock_acquire()
         try:
-            return self._ltid
+            if (self._ltid == z64
+                and self._prev_polled_tid is None
+                and self._load_transaction_open):
+                # We haven't committed *or* polled for transactions,
+                # so our MVCC state is "floating".
+                # Read directly from the database to get the latest value,
+                # but don't force a connection just to do that (just like ClientStorage).
+                return self._adapter.txncontrol.get_tid(self._load_cursor)
+
+            return max(self._ltid, p64(self._prev_polled_tid or 0))
         finally:
             self._lock_release()
 
