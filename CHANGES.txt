@@ -34,6 +34,10 @@
 
 .. _`PR 18`: https://github.com/zodb/relstorage/pull/18/
 
+- PostgreSQL 9.3: Support ``commit-lock-timeout``. Contributed in `PR
+  20`_ by Sean Upton.
+
+.. _`PR 20`: https://github.com/zodb/relstorage/pull/20
 
 1.6.0b3 (2014-12-08)
 --------------------
