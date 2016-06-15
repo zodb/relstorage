@@ -76,7 +76,6 @@ class AbstractZODBConvertBase(unittest.TestCase):
         main(['', '--dry-run', self.cfgfile])
         self._check_value_of_x_in_dest(None)
 
-
     def test_incremental(self):
         x = 10
         self._write_value_for_x_in_src(x)
@@ -88,6 +87,10 @@ class AbstractZODBConvertBase(unittest.TestCase):
         main(['', '--incremental', self.cfgfile])
         self._check_value_of_x_in_dest(x)
 
+    def test_incremental_empty_src_dest(self):
+        # Should work and not raise a POSKeyError
+        main(['', '--incremental', self.cfgfile])
+        self._check_value_of_x_in_dest(None)
 
     def test_no_overwrite(self):
         db = self._create_src_db() # create the root object

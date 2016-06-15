@@ -116,6 +116,8 @@ def main(argv=sys.argv):
             # First, make sure the connection is fully connected. This
             # matters for ClientStorage (connects async) and RelStorage
             # (connects on demand).
+            # If we hadn't already checked that the destination has data,
+            # this would raise a POSKeyError.
             destination.load(z64)
             last_tid = destination.lastTransaction()
             if isinstance(last_tid, bytes):
