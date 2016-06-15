@@ -302,3 +302,8 @@ class MockCursor:
         self.inputsizes.update(kw)
     def execute(self, stmt, params=None):
         self.executed.append((stmt, params))
+
+def test_suite():
+    suite = unittest.TestSuite()
+    suite.addTest(unittest.makeSuite(RowBatcherTests))
+    return suite

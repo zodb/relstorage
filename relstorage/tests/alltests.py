@@ -19,6 +19,9 @@ import logging
 def make_suite():
     suite = unittest.TestSuite()
     test_modules = [
+        'relstorage.adapters.tests.test_batch',
+        'relstorage.adapters.tests.test_connmanager',
+        'relstorage.adapters.tests.test_replica',
         'test_autotemp',
         'test_blobhelper',
         'test_cache',
@@ -32,7 +35,8 @@ def make_suite():
     ]
 
     for mod_name in test_modules:
-        mod = __import__(mod_name, globals())
+        mod = __import__(mod_name, globals(),
+                         fromlist=['chicken'] if '.' in mod_name else [])
         suite.addTest(mod.test_suite())
 
     return suite
