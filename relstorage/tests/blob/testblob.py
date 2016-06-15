@@ -1,3 +1,4 @@
+from __future__ import print_function
 ##############################################################################
 #
 # Copyright (c) 2004 Zope Foundation and Contributors.
@@ -88,7 +89,7 @@ def random_file(size, fd):
     bytes = 0
     md5sum = md5()
     while bytes < size:
-        data = datagen.next()
+        data = next(datagen)
         md5sum.update(data)
         fd.write(data)
         bytes += len(data)
@@ -295,9 +296,9 @@ class LargeBlobTest(BlobTestBase):
     testsize = 0 # Set on the auto-generated parent class
 
     def _log(self, msg):
-        print '%s [%s]: %s' % (
+        print('%s [%s]: %s' % (
             datetime.datetime.now().isoformat(' '),
-            self.__class__.__name__, msg)
+            self.__class__.__name__, msg))
 
     def testLargeBlob(self):
         # Large blobs are chunked into multiple pieces, we want to know
