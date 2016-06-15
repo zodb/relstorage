@@ -18,8 +18,8 @@
 
 - zodbconvert: The ``--incremental`` option is supported with a
   FileStorage (or any storage that implements
-  ``IStorage.lastTransaction()``)
-  as a destination, not just RelStorages.
+  ``IStorage.lastTransaction()``) as a destination, not just
+  RelStorages.
 
 - zodbconvert: The ``--incremental`` option is supported with a
   RelStorage as a destination. See `PR 22`_. With contributions by
@@ -34,10 +34,14 @@
 
 .. _`PR 18`: https://github.com/zodb/relstorage/pull/18/
 
+
 - PostgreSQL 9.3: Support ``commit-lock-timeout``. Contributed in `PR
   20`_ by Sean Upton.
 
 .. _`PR 20`: https://github.com/zodb/relstorage/pull/20
+
+- ``RelStorage.lastTransaction()`` is more consistent with FileStorage
+  and ClientStorage, returning a useful value in more cases.
 
 1.6.0b3 (2014-12-08)
 --------------------
