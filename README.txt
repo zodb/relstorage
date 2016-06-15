@@ -638,7 +638,8 @@ underscores instead of dashes in the option names.
         failing the attempt to commit. The default is 30 seconds.
 
         The MySQL and Oracle adapters support this option. The
-        PostgreSQL adapter currently does not.
+        PostgreSQL adapter supports this when the PostgreSQL server is
+		at least version 9.3; otherwise it is ignored.
 
 ``commit-lock-id``
         During commit, RelStorage acquires a database-wide lock. This
