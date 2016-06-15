@@ -13,6 +13,7 @@
 ##############################################################################
 """Interfaces provided by RelStorage database adapters"""
 
+from ZODB.POSException import StorageError
 from zope.interface import Attribute
 from zope.interface import Interface
 
@@ -162,7 +163,7 @@ class ILocker(Interface):
         If ensure_current is True, other tables may be locked as well, to
         ensure the most current data is available.
 
-        May raise StorageError if the lock can not be acquired before
+        May raise UnableToAcquireCommitLockError if the lock can not be acquired before
         some timeout.
 
         With nowait set to True, only try to obtain the lock without waiting
@@ -176,7 +177,7 @@ class ILocker(Interface):
     def hold_pack_lock(cursor):
         """Try to acquire the pack lock.
 
-        Raise StorageError if packing or undo is already in progress.
+        Raise UnableToAcquirePackUndoLockError if packing or undo is already in progress.
         """
 
     def release_pack_lock(cursor):
@@ -470,3 +471,9 @@ class ITransactionControl(Interface):
 
 class ReplicaClosedException(Exception):
     """The connection to the replica has been closed"""
+
+class UnableToAcquireCommitLockError(StorageError):
+    """The commit lock cannot be acquired."""
+
+class UnableToAcquirePackUndoLockError(StorageError):
+    """A pack or undo operation is in progress."""

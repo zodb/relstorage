@@ -14,9 +14,10 @@
 """Locker implementations.
 """
 
-from ZODB.POSException import StorageError
 from perfmetrics import metricmethod
 from relstorage.adapters.interfaces import ILocker
+from .interfaces import UnableToAcquireCommitLockError
+from .interfaces import UnableToAcquirePackUndoLockError
 from zope.interface import implements
 
 
@@ -63,7 +64,7 @@ class PostgreSQLLocker(Locker):
         except self.lock_exceptions:
             if nowait:
                 return False
-            raise StorageError('Acquiring a commit lock failed')
+            raise UnableToAcquireCommitLockError('Acquiring a commit lock failed')
         return True
 
     def release_commit_lock(self, cursor):
@@ -87,13 +88,13 @@ class PostgreSQLLocker(Locker):
             cursor.execute("SELECT pg_try_advisory_lock(1)")
             locked = cursor.fetchone()[0]
             if not locked:
-                raise StorageError('A pack or undo operation is in progress')
+                raise UnableToAcquirePackUndoLockError('A pack or undo operation is in progress')
         else:
             # b/w compat
             try:
                 cursor.execute("LOCK pack_lock IN EXCLUSIVE MODE NOWAIT")
             except self.lock_exceptions:  # psycopg2.DatabaseError:
-                raise StorageError('A pack or undo operation is in progress')
+                raise UnableToAcquirePackUndoLockError('A pack or undo operation is in progress')
 
     def release_pack_lock(self, cursor):
         """Release the pack lock."""
@@ -114,7 +115,7 @@ class MySQLLocker(Locker):
         if nowait and locked in (0, 1):
             return bool(locked)
         if not locked:
-            raise StorageError("Unable to acquire commit lock")
+            raise UnableToAcquireCommitLockError("Unable to acquire commit lock")
 
     def release_commit_lock(self, cursor):
         stmt = "SELECT RELEASE_LOCK(CONCAT(DATABASE(), '.commit'))"
@@ -129,7 +130,7 @@ class MySQLLocker(Locker):
         cursor.execute(stmt)
         res = cursor.fetchone()[0]
         if not res:
-            raise StorageError('A pack or undo operation is in progress')
+            raise UnableToAcquirePackUndoLockError('A pack or undo operation is in progress')
 
     def release_pack_lock(self, cursor):
         """Release the pack lock."""
@@ -166,7 +167,7 @@ class OracleLocker(Locker):
                     'lock already owned', 'illegal handle')[int(status)]
             else:
                 msg = str(status)
-            raise StorageError(
+            raise UnableToAcquireCommitLockError(
                 "Unable to acquire commit lock (%s)" % msg)
 
         # Alternative:
@@ -197,7 +198,7 @@ class OracleLocker(Locker):
         try:
             cursor.execute(stmt)
         except self.lock_exceptions:  # cx_Oracle.DatabaseError:
-            raise StorageError('A pack or undo operation is in progress')
+            raise UnableToAcquirePackUndoLockError('A pack or undo operation is in progress')
 
     def release_pack_lock(self, cursor):
         """Release the pack lock."""
