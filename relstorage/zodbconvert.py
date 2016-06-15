@@ -113,12 +113,8 @@ def main(argv=sys.argv):
         if not storage_has_data(destination):
             log.warning("Destination empty, start conversion from the beginning.")
         else:
-            # First, make sure the connection is fully connected. This
-            # matters for ClientStorage (connects async) and RelStorage
-            # (connects on demand).
-            # If we hadn't already checked that the destination has data,
-            # this would raise a POSKeyError.
-            destination.load(z64)
+            # This requires that the storage produce a valid (not z64) value before
+            # anything is loaded with it.
             last_tid = destination.lastTransaction()
             if isinstance(last_tid, bytes):
                 # FileStorage returns a byte string, everything else
