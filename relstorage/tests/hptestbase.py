@@ -239,6 +239,50 @@ class HistoryPreservingRelStorageTests(
         finally:
             db.close()
 
+    def checkHistoricalConnection(self):
+        import datetime, persistent, ZODB.POSException
+        db = DB(self._storage)
+        conn = db.open()
+        root = conn.root()
+
+        root['first'] = persistent.mapping.PersistentMapping(count=0)
+        transaction.commit()
+
+        time.sleep(.02)
+        now = datetime.datetime.utcnow()
+        time.sleep(.02)
+
+        root['second'] = persistent.mapping.PersistentMapping()
+        root['first']['count'] += 1
+        transaction.commit()
+
+        transaction1 = transaction.TransactionManager()
+
+        historical_conn = db.open(transaction_manager=transaction1, at=now)
+
+        eq = self.assertEqual
+
+        # regular connection sees present:
+
+        eq(sorted(conn.root().keys()), ['first', 'second'])
+        eq(conn.root()['first']['count'], 1)
+
+        # historical connection sees past:
+
+        eq(sorted(historical_conn.root().keys()), ['first'])
+        eq(historical_conn.root()['first']['count'], 0)
+
+        # Can't change history:
+
+        historical_conn.root()['first']['count'] += 1
+        eq(historical_conn.root()['first']['count'], 1)
+        self.assertRaises(ZODB.POSException.ReadOnlyHistoryError,
+                          transaction1.commit)
+        transaction1.abort()
+        eq(historical_conn.root()['first']['count'], 0)
+
+        db.close()
+
 
 class HistoryPreservingToFileStorage(
         RelStorageTestBase,
