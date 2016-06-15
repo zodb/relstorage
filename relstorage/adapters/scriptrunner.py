@@ -13,7 +13,7 @@
 ##############################################################################
 
 from relstorage.adapters.interfaces import IScriptRunner
-from zope.interface import implements
+from zope.interface import implementer
 import logging
 import re
 import sys
@@ -21,8 +21,8 @@ import sys
 log = logging.getLogger(__name__)
 
 
+@implementer(IScriptRunner)
 class ScriptRunner(object):
-    implements(IScriptRunner)
 
     # script_vars contains replacements for parts of scripts.
     # These are correct for PostgreSQL and MySQL but not for Oracle.

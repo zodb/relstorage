@@ -16,7 +16,7 @@
 import logging
 from relstorage.adapters.interfaces import ISchemaInstaller
 from ZODB.POSException import StorageError
-from zope.interface import implements
+from zope.interface import implementer
 import re
 
 # Versions of the installed stored procedures. Change these when
@@ -930,8 +930,8 @@ class AbstractSchemaInstaller(object):
         self.connmanager.open_and_call(callback)
 
 
+@implementer(ISchemaInstaller)
 class PostgreSQLSchemaInstaller(AbstractSchemaInstaller):
-    implements(ISchemaInstaller)
 
     database_type = 'postgresql'
 
@@ -1052,8 +1052,8 @@ class PostgreSQLSchemaInstaller(AbstractSchemaInstaller):
         super(PostgreSQLSchemaInstaller, self).drop_all()
 
 
+@implementer(ISchemaInstaller)
 class MySQLSchemaInstaller(AbstractSchemaInstaller):
-    implements(ISchemaInstaller)
 
     database_type = 'mysql'
 
@@ -1083,8 +1083,8 @@ class MySQLSchemaInstaller(AbstractSchemaInstaller):
                             "engine, but it is using the %s engine." % engine)
 
 
+@implementer(ISchemaInstaller)
 class OracleSchemaInstaller(AbstractSchemaInstaller):
-    implements(ISchemaInstaller)
 
     database_type = 'oracle'
 

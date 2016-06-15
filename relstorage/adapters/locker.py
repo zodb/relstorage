@@ -18,7 +18,7 @@ from perfmetrics import metricmethod
 from relstorage.adapters.interfaces import ILocker
 from .interfaces import UnableToAcquireCommitLockError
 from .interfaces import UnableToAcquirePackUndoLockError
-from zope.interface import implements
+from zope.interface import implementer
 
 
 class Locker(object):
@@ -30,8 +30,8 @@ class Locker(object):
         self.lock_exceptions = lock_exceptions
 
 
+@implementer(ILocker)
 class PostgreSQLLocker(Locker):
-    implements(ILocker)
 
     def __init__(self, options, lock_exceptions, version_detector):
         super(PostgreSQLLocker, self).__init__(
@@ -114,8 +114,8 @@ class PostgreSQLLocker(Locker):
         # else no action needed since the lock will be released at txn commit
 
 
+@implementer(ILocker)
 class MySQLLocker(Locker):
-    implements(ILocker)
 
     @metricmethod
     def hold_commit_lock(self, cursor, ensure_current=False, nowait=False):
@@ -149,8 +149,8 @@ class MySQLLocker(Locker):
         cursor.execute(stmt)
 
 
+@implementer(ILocker)
 class OracleLocker(Locker):
-    implements(ILocker)
 
     def __init__(self, options, lock_exceptions, inputsize_NUMBER):
         super(OracleLocker, self).__init__(

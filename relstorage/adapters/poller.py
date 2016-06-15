@@ -14,16 +14,16 @@
 
 from ZODB.POSException import ReadConflictError
 from relstorage.adapters.interfaces import IPoller
-from zope.interface import implements
+from zope.interface import implementer
 import logging
 import sys
 
 log = logging.getLogger(__name__)
 
 
+@implementer(IPoller)
 class Poller:
     """Database change notification poller"""
-    implements(IPoller)
 
     def __init__(self, poll_query, keep_history, runner, revert_when_stale):
         self.poll_query = poll_query

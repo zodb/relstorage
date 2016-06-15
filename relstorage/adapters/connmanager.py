@@ -16,15 +16,15 @@ from perfmetrics import metricmethod
 from relstorage.adapters.interfaces import IConnectionManager
 from relstorage.adapters.interfaces import ReplicaClosedException
 from relstorage.adapters.replica import ReplicaSelector
-from zope.interface import implements
+from zope.interface import implementer
 
 
+@implementer(IConnectionManager)
 class AbstractConnectionManager(object):
     """Abstract base class for connection management.
 
     Responsible for opening and closing database connections.
     """
-    implements(IConnectionManager)
 
     # disconnected_exceptions contains the exception types that might be
     # raised when the connection to the database has been broken.

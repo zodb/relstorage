@@ -14,7 +14,7 @@
 
 from base64 import decodestring
 from relstorage.adapters.interfaces import IDatabaseIterator
-from zope.interface import implements
+from zope.interface import implementer
 
 
 class DatabaseIterator(object):
@@ -54,8 +54,8 @@ class DatabaseIterator(object):
             yield oid, state
 
 
+@implementer(IDatabaseIterator)
 class HistoryPreservingDatabaseIterator(DatabaseIterator):
-    implements(IDatabaseIterator)
 
     def _transaction_iterator(self, cursor):
         """Iterate over a list of transactions returned from the database.
@@ -181,8 +181,8 @@ class HistoryPreservingDatabaseIterator(DatabaseIterator):
         return self._transaction_iterator(cursor)
 
 
+@implementer(IDatabaseIterator)
 class HistoryFreeDatabaseIterator(DatabaseIterator):
-    implements(IDatabaseIterator)
 
     def iter_transactions(self, cursor):
         """Iterate over the transaction log, newest first.

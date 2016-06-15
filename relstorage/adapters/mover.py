@@ -22,7 +22,7 @@ from relstorage.adapters.batch import OracleRowBatcher
 from relstorage.adapters.batch import PostgreSQLRowBatcher
 from relstorage.adapters.interfaces import IObjectMover
 from relstorage.iter import fetchmany
-from zope.interface import implements
+from zope.interface import implementer
 import os
 import sys
 
@@ -43,8 +43,8 @@ def compute_md5sum(data):
 metricmethod_sampled = Metric(method=True, rate=0.1)
 
 
+@implementer(IObjectMover)
 class ObjectMover(object):
-    implements(IObjectMover)
 
     _method_names = (
         'load_current',

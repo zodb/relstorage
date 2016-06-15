@@ -31,7 +31,7 @@ from relstorage.blobhelper import BlobHelper
 from relstorage.blobhelper import is_blob_record
 from relstorage.cache import StorageCache
 from relstorage.options import Options
-from zope.interface import implements
+from zope.interface import implementer
 import ZODB.interfaces
 import base64
 import cPickle
@@ -75,12 +75,12 @@ abort_early = os.environ.get('RELSTORAGE_ABORT_EARLY')
 z64 = '\0' * 8
 
 
+@implementer(*_relstorage_interfaces)
 class RelStorage(
         UndoLogCompatible,
         ConflictResolution.ConflictResolvingStorage
         ):
     """Storage to a relational database, based on invalidation polling"""
-    implements(*_relstorage_interfaces)
 
     _transaction = None  # Transaction that is being committed
     _tstatus = ' '  # Transaction status, used for copying data

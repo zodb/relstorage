@@ -28,7 +28,7 @@ from relstorage.adapters.scriptrunner import ScriptRunner
 from relstorage.adapters.stats import PostgreSQLStats
 from relstorage.adapters.txncontrol import PostgreSQLTransactionControl
 from relstorage.options import Options
-from zope.interface import implements
+from zope.interface import implementer
 import logging
 try:
     import psycopg2
@@ -63,9 +63,9 @@ disconnected_exceptions = (
 # when the adapter attempts to close a database connection.
 close_exceptions = disconnected_exceptions
 
+@implementer(IRelStorageAdapter)
 class PostgreSQLAdapter(object):
     """PostgreSQL adapter for RelStorage."""
-    implements(IRelStorageAdapter)
 
     def __init__(self, dsn='', options=None):
         # options is a relstorage.options.Options or None

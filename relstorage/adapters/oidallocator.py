@@ -21,10 +21,10 @@
 
 from perfmetrics import metricmethod
 from relstorage.adapters.interfaces import IOIDAllocator
-from zope.interface import implements
+from zope.interface import implementer
 
+@implementer(IOIDAllocator)
 class PostgreSQLOIDAllocator(object):
-    implements(IOIDAllocator)
 
     def set_min_oid(self, cursor, oid):
         """Ensure the next OID is at least the given OID."""
@@ -45,8 +45,8 @@ class PostgreSQLOIDAllocator(object):
         return range(n * 16 - 15, n * 16 + 1)
 
 
+@implementer(IOIDAllocator)
 class MySQLOIDAllocator(object):
-    implements(IOIDAllocator)
 
     def set_min_oid(self, cursor, oid):
         """Ensure the next OID is at least the given OID."""
@@ -66,8 +66,8 @@ class MySQLOIDAllocator(object):
         return range(n * 16 - 15, n * 16 + 1)
 
 
+@implementer(IOIDAllocator)
 class OracleOIDAllocator(object):
-    implements(IOIDAllocator)
 
     def __init__(self, connmanager):
         self.connmanager = connmanager

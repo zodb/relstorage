@@ -20,7 +20,7 @@ from perfmetrics import metricmethod
 from relstorage.adapters.interfaces import IPackUndo
 from relstorage.iter import fetchmany
 from relstorage.treemark import TreeMarker
-from zope.interface import implements
+from zope.interface import implementer
 import logging
 import time
 
@@ -143,8 +143,8 @@ class PackUndo(object):
             sleep(delay)
 
 
+@implementer(IPackUndo)
 class HistoryPreservingPackUndo(PackUndo):
-    implements(IPackUndo)
 
     keep_history = True
 
@@ -909,8 +909,8 @@ class OracleHistoryPreservingPackUndo(HistoryPreservingPackUndo):
         """
 
 
+@implementer(IPackUndo)
 class HistoryFreePackUndo(PackUndo):
-    implements(IPackUndo)
 
     keep_history = False
 

@@ -62,7 +62,7 @@ except ImportError:
         raise t, v, tb
     else:
         del t, v, b
-from zope.interface import implements
+from zope.interface import implementer
 
 from relstorage.adapters.connmanager import AbstractConnectionManager
 from relstorage.adapters.dbiter import HistoryFreeDatabaseIterator
@@ -132,9 +132,9 @@ try:
 except ImportError:
 	pass
 
+@implementer(IRelStorageAdapter)
 class MySQLAdapter(object):
     """MySQL adapter for RelStorage."""
-    implements(IRelStorageAdapter)
 
     def __init__(self, options=None, **params):
         if options is None:

@@ -15,7 +15,7 @@
 
 from base64 import encodestring
 from relstorage.adapters.interfaces import ITransactionControl
-from zope.interface import implements
+from zope.interface import implementer
 import logging
 
 log = logging.getLogger(__name__)
@@ -47,8 +47,8 @@ class TransactionControl(object):
         conn.rollback()
 
 
+@implementer(ITransactionControl)
 class PostgreSQLTransactionControl(TransactionControl):
-    implements(ITransactionControl)
 
     def __init__(self, keep_history):
         self.keep_history = keep_history
@@ -94,8 +94,8 @@ class PostgreSQLTransactionControl(TransactionControl):
                 encodestring(extension)))
 
 
+@implementer(ITransactionControl)
 class MySQLTransactionControl(TransactionControl):
-    implements(ITransactionControl)
 
     def __init__(self, keep_history, Binary):
         self.keep_history = keep_history
@@ -140,8 +140,8 @@ class MySQLTransactionControl(TransactionControl):
                 self.Binary(description), self.Binary(extension)))
 
 
+@implementer(ITransactionControl)
 class OracleTransactionControl(TransactionControl):
-    implements(ITransactionControl)
 
     def __init__(self, keep_history, Binary, twophase):
         self.keep_history = keep_history
