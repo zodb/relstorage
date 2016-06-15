@@ -21,7 +21,7 @@ from __future__ import print_function
 import logging
 import optparse
 from persistent.TimeStamp import TimeStamp
-from StringIO import StringIO
+from ZODB._compat import BytesIO as StringIO
 import sys
 import ZConfig
 from ZODB.utils import p64, u64, z64, readable_tid_repr

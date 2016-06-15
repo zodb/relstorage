@@ -26,7 +26,7 @@ from ZODB.tests.PackableStorage import Root
 from ZODB.tests.PackableStorage import ZERO
 from ZODB.tests.StorageTestBase import zodb_pickle
 from ZODB.tests.StorageTestBase import zodb_unpickle
-import cPickle
+from ZODB._compat import loads
 import time
 
 
@@ -57,7 +57,7 @@ class HistoryFreeRelStorageTests(
         raises(KeyError, self._storage.loadSerial, oid, revid1)
         raises(KeyError, self._storage.loadSerial, oid, revid2)
         data = self._storage.loadSerial(oid, revid3)
-        pobj = cPickle.loads(data)
+        pobj = loads(data)
         eq(pobj.getoid(), oid)
         eq(pobj.value, 3)
         # Now pack all transactions; need to sleep a second to make
@@ -106,7 +106,7 @@ class HistoryFreeRelStorageTests(
         raises(KeyError, self._storage.loadSerial, oid, revid1)
         raises(KeyError, self._storage.loadSerial, oid, revid2)
         data = self._storage.loadSerial(oid, revid3)
-        pobj = cPickle.loads(data)
+        pobj = loads(data)
         eq(pobj.getoid(), oid)
         eq(pobj.value, 3)
         # Now pack.  The object should stay alive because it's pointed
@@ -123,12 +123,12 @@ class HistoryFreeRelStorageTests(
         raises(KeyError, self._storage.loadSerial, oid, revid1)
         raises(KeyError, self._storage.loadSerial, oid, revid2)
         data = self._storage.loadSerial(oid, revid3)
-        pobj = cPickle.loads(data)
+        pobj = loads(data)
         eq(pobj.getoid(), oid)
         eq(pobj.value, 3)
         data, revid = self._storage.load(oid, '')
         eq(revid, revid3)
-        pobj = cPickle.loads(data)
+        pobj = loads(data)
         eq(pobj.getoid(), oid)
         eq(pobj.value, 3)
 
@@ -168,7 +168,7 @@ class HistoryFreeRelStorageTests(
         raises(KeyError, self._storage.loadSerial, oid1, revid1)
         raises(KeyError, self._storage.loadSerial, oid1, revid2)
         data = self._storage.loadSerial(oid1, revid3)
-        pobj = cPickle.loads(data)
+        pobj = loads(data)
         eq(pobj.getoid(), oid1)
         eq(pobj.value, 3)
         # Now commit a revision of the second object
@@ -176,7 +176,7 @@ class HistoryFreeRelStorageTests(
         revid4 = self._dostoreNP(oid2, data=pdumps(obj2))
         # And make sure the revision can be extracted
         data = self._storage.loadSerial(oid2, revid4)
-        pobj = cPickle.loads(data)
+        pobj = loads(data)
         eq(pobj.getoid(), oid2)
         eq(pobj.value, 11)
         # Now pack just revisions 1 and 2 of object1.  Object1's current
@@ -194,19 +194,19 @@ class HistoryFreeRelStorageTests(
         raises(KeyError, self._storage.loadSerial, oid1, revid1)
         raises(KeyError, self._storage.loadSerial, oid1, revid2)
         data = self._storage.loadSerial(oid1, revid3)
-        pobj = cPickle.loads(data)
+        pobj = loads(data)
         eq(pobj.getoid(), oid1)
         eq(pobj.value, 3)
         data, revid = self._storage.load(oid1, '')
         eq(revid, revid3)
-        pobj = cPickle.loads(data)
+        pobj = loads(data)
         eq(pobj.getoid(), oid1)
         eq(pobj.value, 3)
         data, revid = self._storage.load(oid2, '')
         eq(revid, revid4)
         eq(loads(data).value, 11)
         data = self._storage.loadSerial(oid2, revid4)
-        pobj = cPickle.loads(data)
+        pobj = loads(data)
         eq(pobj.getoid(), oid2)
         eq(pobj.value, 11)
 
