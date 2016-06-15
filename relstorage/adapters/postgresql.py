@@ -210,9 +210,9 @@ class Psycopg2ConnectionManager(AbstractConnectionManager):
                 cursor.arraysize = 64
                 conn.replica = replica
                 return conn, cursor
-            except psycopg2.OperationalError, e:
+            except psycopg2.OperationalError as e:
                 if replica is not None:
-                    next_replica = replica_selector.next()
+                    next_replica = next(replica_selector)
                     if next_replica is not None:
                         log.warning("Unable to connect to replica %s: %s, "
                             "now trying %s", replica, e, next_replica)

@@ -90,14 +90,14 @@ class IteratorDeepCompare:
         # Make sure ther are no more records left in txn1 and txn2, meaning
         # they were the same length
         try:
-            iter1.next()
+            next(iter1)
         except (IndexError, StopIteration):
             pass
         else:
             self.fail("storage1 has more records")
 
         try:
-            iter2.next()
+            next(iter2)
         except (IndexError, StopIteration):
             pass
         else:

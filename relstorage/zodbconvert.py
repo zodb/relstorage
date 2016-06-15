@@ -45,7 +45,7 @@ def storage_has_data(storage):
     try:
         if hasattr(i, 'next'):
             # New iterator API
-            i.next()
+            next(i)
         else:
             # Old index lookup API
             i[0]

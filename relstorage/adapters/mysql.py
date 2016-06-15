@@ -278,9 +278,9 @@ class MySQLdbConnectionManager(AbstractConnectionManager):
                     conn.autocommit(False)
                 conn.replica = replica
                 return conn, cursor
-            except MySQLdb.OperationalError, e:
+            except MySQLdb.OperationalError as e:
                 if replica is not None:
-                    next_replica = replica_selector.next()
+                    next_replica = next(replica_selector)
                     if next_replica is not None:
                         log.warning("Unable to connect to replica %s: %s, "
                             "now trying %s", replica, e, next_replica)

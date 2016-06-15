@@ -90,7 +90,7 @@ class StorageCacheTests(unittest.TestCase):
         adapter.mover.data[2] = ('abc', 56)
         try:
             c.load(None, 2)
-        except AssertionError, e:
+        except AssertionError as e:
             self.assertTrue('Detected an inconsistency' in e.args[0])
         else:
             self.fail("Failed to report cache inconsistency")
@@ -107,7 +107,7 @@ class StorageCacheTests(unittest.TestCase):
         from ZODB.POSException import ReadConflictError
         try:
             c.load(None, 2)
-        except ReadConflictError, e:
+        except ReadConflictError as e:
             self.assertTrue('future' in e.message)
         else:
             self.fail("Failed to generate a conflict error")

@@ -220,7 +220,7 @@ class CXOracleScriptRunner(OracleScriptRunner):
                         return row
                 finally:
                     del cursor.outputtypehandler
-            except cx_Oracle.DatabaseError, e:
+            except cx_Oracle.DatabaseError as e:
                 # ORA-01406: fetched column value was truncated
                 error, = e
                 if ((isinstance(error, str) and not error.endswith(' 1406'))
@@ -305,9 +305,9 @@ class CXOracleConnectionManager(AbstractConnectionManager):
                     cursor.execute("SET TRANSACTION %s" % transaction_mode)
                 return conn, cursor
 
-            except cx_Oracle.OperationalError, e:
+            except cx_Oracle.OperationalError as e:
                 if replica_selector is not None:
-                    next_dsn = replica_selector.next()
+                    next_dsn = next(replica_selector)
                     if next_dsn is not None:
                         log.warning("Unable to connect to DSN %s: %s, "
                             "now trying %s", dsn, e, next_dsn)

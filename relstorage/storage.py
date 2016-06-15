@@ -284,7 +284,7 @@ class RelStorage(
                     self._load_conn, self._load_cursor)
                 self._load_transaction_open = 'active'
             return f(self._load_conn, self._load_cursor, *args, **kw)
-        except self._adapter.connmanager.disconnected_exceptions, e:
+        except self._adapter.connmanager.disconnected_exceptions as e:
             log.warning("Reconnecting load_conn: %s", e)
             self._drop_load_connection()
             try:
@@ -315,7 +315,7 @@ class RelStorage(
         try:
             self._adapter.connmanager.restart_store(
                 self._store_conn, self._store_cursor)
-        except self._adapter.connmanager.disconnected_exceptions, e:
+        except self._adapter.connmanager.disconnected_exceptions as e:
             log.warning("Reconnecting store_conn: %s", e)
             self._drop_store_connection()
             try:
@@ -332,7 +332,7 @@ class RelStorage(
             self._open_store_connection()
         try:
             return f(self._store_conn, self._store_cursor, *args, **kw)
-        except self._adapter.connmanager.disconnected_exceptions, e:
+        except self._adapter.connmanager.disconnected_exceptions as e:
             if self._transaction is not None:
                 # If transaction commit is in progress, it's too late
                 # to reconnect.
@@ -1296,7 +1296,7 @@ class RelStorage(
         try:
             changes, new_polled_tid = self._restart_load_and_call(
                 self._adapter.poller.poll_invalidations, prev, ignore_tid)
-        except POSException.ReadConflictError, e:
+        except POSException.ReadConflictError as e:
             # The database connection is stale, but postpone this
             # error until the application tries to read or write something.
             self._stale_error = e
@@ -1549,7 +1549,7 @@ class TransactionIterator(object):
 
     def __getitem__(self, n):
         self._index = n
-        return self.next()
+        return next(self)
 
     def next(self):
         if self._closed:
@@ -1607,7 +1607,7 @@ class RecordIterator(object):
 
     def __getitem__(self, n):
         self._index = n
-        return self.next()
+        return next(self)
 
     def next(self):
         if self._index >= len(self._records):

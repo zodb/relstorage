@@ -16,6 +16,7 @@ from ZODB.POSException import ReadConflictError
 from relstorage.adapters.interfaces import IPoller
 from zope.interface import implements
 import logging
+import sys
 
 log = logging.getLogger(__name__)
 

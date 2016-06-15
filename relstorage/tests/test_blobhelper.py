@@ -414,7 +414,7 @@ class BlobHelperTest(unittest.TestCase):
 def test_suite():
     try:
         import ZODB.blob
-    except ImportError, e:
+    except ImportError as e:
         # Disable these tests for ZODB < 3.8.
         return unittest.TestSuite()
 

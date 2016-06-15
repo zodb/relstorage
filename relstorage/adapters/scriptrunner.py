@@ -16,6 +16,7 @@ from relstorage.adapters.interfaces import IScriptRunner
 from zope.interface import implements
 import logging
 import re
+import sys
 
 log = logging.getLogger(__name__)
 
@@ -156,4 +157,3 @@ class TrackingMap:
     def __getitem__(self, key):
         self.used.add(key)
         return self.source[key]
-

@@ -149,7 +149,7 @@ db_names = {
 def test_suite():
     try:
         import cx_Oracle
-    except ImportError, e:
+    except ImportError as e:
         import warnings
         warnings.warn("cx_Oracle is not importable, so Oracle tests disabled")
         return unittest.TestSuite()
@@ -215,7 +215,7 @@ def test_suite():
 
                 # cx_Oracle blob support can only address up to sys.maxint on
                 # 32-bit systems, 4GB otherwise.
-                blob_size = min(sys.maxint, 1<<32)
+                blob_size = min(sys.maxsize, 1<<32)
 
                 suite.addTest(storage_reusable_suite(
                     prefix, create_storage,

@@ -1139,7 +1139,7 @@ class ObjectMover(object):
         bytecount = 0
         # Current versions of cx_Oracle only support offsets up
         # to sys.maxint or 4GB, whichever comes first.
-        maxsize = min(sys.maxint, 1<<32)
+        maxsize = min(sys.maxsize, 1<<32)
         try:
             cursor.execute(stmt, (oid, tid))
             while True:
@@ -1351,7 +1351,7 @@ class ObjectMover(object):
         # Current versions of cx_Oracle only support offsets up
         # to sys.maxint or 4GB, whichever comes first. We divide up our
         # upload into chunks within this limit.
-        maxsize = min(sys.maxint, 1<<32)
+        maxsize = min(sys.maxsize, 1<<32)
         try:
             chunk_num = 0
             while True:
