@@ -105,7 +105,7 @@ def main(argv=sys.argv):
     log.info("Storages opened successfully.")
 
     if options.incremental:
-        if not hasattr(destination, '_adapter') and not hasattr(destination, 'lastTransaction'):
+        if not hasattr(destination, 'lastTransaction'):
             msg = ("Error: no API is known for determining the last committed "
                    "transaction of the destination storage. Aborting "
                    "conversion.")
@@ -113,25 +113,18 @@ def main(argv=sys.argv):
         if not storage_has_data(destination):
             log.warning("Destination empty, start conversion from the beginning.")
         else:
-            wrap_source = False
-            if hasattr(destination, '_adapter'):
-                # RelStorage. Note that we implement lastTransaction(), but
-                # only in-memory, local to the particular object. (We should probably
-                # change that?) So order matters.
-                destination.load(z64) # prime the connection
-                wrap_source = True # compensate for our bug
-                last_tid = destination._adapter.txncontrol.get_tid(
-                    destination._load_cursor)
-            else:
-                # IStorage, like FileStorage
-                last_tid_s = destination.lastTransaction()
-                last_tid = u64(last_tid_s)
+            # This requires that the storage produce a valid (not z64) value before
+            # anything is loaded with it.
+            last_tid = destination.lastTransaction()
+            if isinstance(last_tid, bytes):
+                # This *should* be a byte string.
+                last_tid = u64(last_tid)
 
             next_tid = p64(last_tid+1)
-            if wrap_source:
-                source = _DefaultStartStorageIteration(source, next_tid)
-            else:
-                source = source.iterator(start=next_tid)
+            # Compensate for the RelStorage bug(?) and get a reusable iterator
+            # that starts where we want it to. There's no harm in wrapping it for
+            # other sources like FileStorage too.
+            source = _DefaultStartStorageIteration(source, next_tid)
             log.info("Resuming ZODB copy from %s", readable_tid_repr(next_tid))
 
 
