@@ -13,10 +13,10 @@
 ##############################################################################
 """TransactionControl implementations"""
 
-from base64 import encodestring
 from relstorage.adapters.interfaces import ITransactionControl
 from zope.interface import implementer
 import logging
+from relstorage._compat import bytes_to_pg_binary
 
 log = logging.getLogger(__name__)
 
@@ -79,19 +79,19 @@ class PostgreSQLTransactionControl(TransactionControl):
         return cursor.fetchone()[0]
 
     def add_transaction(self, cursor, tid, username, description, extension,
-            packed=False):
+                        packed=False):
         """Add a transaction."""
         if self.keep_history:
             stmt = """
             INSERT INTO transaction
                 (tid, packed, username, description, extension)
             VALUES (%s, %s,
-                decode(%s, 'base64'), decode(%s, 'base64'),
-                decode(%s, 'base64'))
+                %s, %s,
+                %s)
             """
             cursor.execute(stmt, (tid, packed,
-                encodestring(username), encodestring(description),
-                encodestring(extension)))
+                                  bytes_to_pg_binary(username), bytes_to_pg_binary(description),
+                                  bytes_to_pg_binary(extension)))
 
 
 @implementer(ITransactionControl)

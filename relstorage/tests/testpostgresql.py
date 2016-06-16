@@ -183,7 +183,7 @@ def test_suite():
         pass
     else:
         from .util import RUNNING_ON_CI
-        if RUNNING_ON_CI:
+        if RUNNING_ON_CI or os.environ.get("RS_PG_SMALL_BLOB"):
             # Avoid creating 2GB blobs to be friendly to neighbors
             # and to run fast (2GB blobs take about 4 minutes on Travis
             # CI as-of June 2016)
@@ -200,15 +200,15 @@ def test_suite():
         for shared_blob_dir in shared_blob_dir_choices:
             for keep_history in (False, True):
                 def create_storage(name, blob_dir,
-                        shared_blob_dir=shared_blob_dir,
-                        keep_history=keep_history, **kw):
+                                   shared_blob_dir=shared_blob_dir,
+                                   keep_history=keep_history, **kw):
                     from relstorage.storage import RelStorage
                     from relstorage.adapters.postgresql import PostgreSQLAdapter
                     db = db_names[name]
                     if not keep_history:
                         db += '_hf'
                     dsn = ('dbname=%s user=relstoragetest '
-                            'password=relstoragetest' % db)
+                           'password=relstoragetest' % db)
                     options = Options(
                         keep_history=keep_history,
                         shared_blob_dir=shared_blob_dir,
@@ -246,6 +246,6 @@ def test_suite():
 
     return suite
 
-if __name__=='__main__':
+if __name__ == '__main__':
     logging.basicConfig()
     unittest.main(defaultTest="test_suite")

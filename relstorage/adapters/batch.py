@@ -54,7 +54,7 @@ class RowBatcher(object):
             self.flush()
 
     def insert_into(self, header, row_schema, row, rowkey, size,
-            command='INSERT'):
+                    command='INSERT'):
         key = (command, header, row_schema)
         rows = self.inserts.get(key)
         if rows is None:
@@ -63,7 +63,7 @@ class RowBatcher(object):
         self.rows_added += 1
         self.size_added += size
         if (self.rows_added >= self.row_limit
-            or self.size_added >= self.size_limit):
+                or self.size_added >= self.size_limit):
             self.flush()
 
     def flush(self):

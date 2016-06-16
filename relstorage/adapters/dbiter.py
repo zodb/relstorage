@@ -11,18 +11,16 @@
 # FOR A PARTICULAR PURPOSE.
 #
 ##############################################################################
-
-from base64 import decodestring
+from __future__ import print_function
 from relstorage.adapters.interfaces import IDatabaseIterator
 from zope.interface import implementer
-
+from relstorage._compat import db_binary_to_bytes
 
 class DatabaseIterator(object):
     """Abstract base class for database iteration.
     """
 
     def __init__(self, database_type, runner):
-        self.use_base64 = (database_type == 'postgresql')
         self.runner = runner
 
     def iter_objects(self, cursor, tid):
@@ -30,15 +28,7 @@ class DatabaseIterator(object):
 
         Yields (oid, prev_tid, state) for each object state.
         """
-        if self.use_base64:
-            stmt = """
-            SELECT zoid, encode(state, 'base64')
-            FROM object_state
-            WHERE tid = %(tid)s
-            ORDER BY zoid
-            """
-        else:
-            stmt = """
+        stmt = """
             SELECT zoid, state
             FROM object_state
             WHERE tid = %(tid)s
@@ -49,8 +39,7 @@ class DatabaseIterator(object):
             if hasattr(state, 'read'):
                 # Oracle
                 state = state.read()
-            if state is not None and self.use_base64:
-                state = decodestring(state)
+            state = db_binary_to_bytes(state)
             yield oid, state
 
 
@@ -63,7 +52,6 @@ class HistoryPreservingDatabaseIterator(DatabaseIterator):
         Each row begins with (tid, username, description, extension)
         and may have other columns.
         """
-        use_base64 = self.use_base64
         for row in cursor:
             tid, username, description, ext = row[:4]
             # Although the transaction interface for username and description are
@@ -71,21 +59,18 @@ class HistoryPreservingDatabaseIterator(DatabaseIterator):
             if username is None:
                 username = b''
             else:
-                assert isinstance(username, bytes)
-                if use_base64:
-                    username = decodestring(username)
+                username = db_binary_to_bytes(username)
+
             if description is None:
                 description = b''
             else:
-                assert isinstance(description, bytes)
-                if use_base64:
-                    description = decodestring(description)
+                description = db_binary_to_bytes(description)
             if ext is None:
                 ext = b''
             else:
-                assert isinstance(ext, bytes)
-                if use_base64:
-                    ext = decodestring(ext)
+                ext = db_binary_to_bytes(ext)
+
+
             yield (tid, username, description, ext) + tuple(row[4:])
 
 
@@ -95,17 +80,7 @@ class HistoryPreservingDatabaseIterator(DatabaseIterator):
         Skips packed transactions.
         Yields (tid, username, description, extension) for each transaction.
         """
-        if self.use_base64:
-            stmt = """
-            SELECT tid, encode(username, 'base64'),
-                encode(description, 'base64'), encode(extension, 'base64')
-            FROM transaction
-            WHERE packed = %(FALSE)s
-                AND tid != 0
-            ORDER BY tid DESC
-            """
-        else:
-            stmt = """
+        stmt = """
             SELECT tid, username, description, extension
             FROM transaction
             WHERE packed = %(FALSE)s
@@ -123,16 +98,7 @@ class HistoryPreservingDatabaseIterator(DatabaseIterator):
         Yields (tid, username, description, extension, packed)
         for each transaction.
         """
-        if self.use_base64:
-            stmt = """
-            SELECT tid, encode(username, 'base64'),
-                encode(description, 'base64'), encode(extension, 'base64'),
-                CASE WHEN packed = %(TRUE)s THEN 1 ELSE 0 END
-            FROM transaction
-            WHERE tid >= 0
-            """
-        else:
-            stmt = """
+        stmt = """
             SELECT tid, username, description, extension,
                 CASE WHEN packed = %(TRUE)s THEN 1 ELSE 0 END
             FROM transaction
@@ -162,14 +128,7 @@ class HistoryPreservingDatabaseIterator(DatabaseIterator):
         if not cursor.fetchall():
             raise KeyError(oid)
 
-        if self.use_base64:
-            stmt = """
-            SELECT tid, encode(username, 'base64'),
-                encode(description, 'base64'), encode(extension, 'base64'),
-                state_size
-            """
-        else:
-            stmt = """
+        stmt = """
             SELECT tid, username, description, extension, state_size
             """
         stmt += """

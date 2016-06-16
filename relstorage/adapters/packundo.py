@@ -15,7 +15,6 @@
 """
 
 from ZODB.POSException import UndoError
-from base64 import decodestring
 from perfmetrics import metricmethod
 from relstorage.adapters.interfaces import IPackUndo
 from relstorage.iter import fetchmany
@@ -23,6 +22,8 @@ from relstorage.treemark import TreeMarker
 from zope.interface import implementer
 import logging
 import time
+
+from relstorage._compat import db_binary_to_bytes
 
 log = logging.getLogger(__name__)
 
@@ -403,16 +404,7 @@ class HistoryPreservingPackUndo(PackUndo):
         """
         log.debug("pre_pack: transaction %d: computing references ", tid)
         from_count = 0
-        use_base64 = (self.database_type == 'postgresql')
-
-        if use_base64:
-            stmt = """
-            SELECT zoid, encode(state, 'base64')
-            FROM object_state
-            WHERE tid = %(tid)s
-            """
-        else:
-            stmt = """
+        stmt = """
             SELECT zoid, state
             FROM object_state
             WHERE tid = %(tid)s
@@ -421,13 +413,12 @@ class HistoryPreservingPackUndo(PackUndo):
 
         add_rows = []  # [(from_oid, tid, to_oid)]
         for from_oid, state in fetchmany(cursor):
+            state = db_binary_to_bytes(state)
             if hasattr(state, 'read'):
                 # Oracle
                 state = state.read()
             if state:
                 assert isinstance(state, bytes), type(state) # PY3: used to be str(state)
-                if use_base64:
-                    state = decodestring(state)
                 from_count += 1
                 try:
                     to_oids = get_references(state)
@@ -1013,16 +1004,7 @@ class HistoryFreePackUndo(PackUndo):
         """
         # XXX PY3: This could be tricky
         oid_list = ','.join(str(oid) for oid in oids)
-        use_base64 = (self.database_type == 'postgresql')
-
-        if use_base64:
-            stmt = """
-            SELECT zoid, tid, encode(state, 'base64')
-            FROM object_state
-            WHERE zoid IN (%s)
-            """ % oid_list
-        else:
-            stmt = """
+        stmt = """
             SELECT zoid, tid, state
             FROM object_state
             WHERE zoid IN (%s)
@@ -1032,6 +1014,7 @@ class HistoryFreePackUndo(PackUndo):
         add_objects = []
         add_refs = []
         for from_oid, tid, state in fetchmany(cursor):
+            state = db_binary_to_bytes(state)
             if hasattr(state, 'read'):
                 # Oracle
                 state = state.read()
@@ -1039,8 +1022,6 @@ class HistoryFreePackUndo(PackUndo):
             if state:
                 assert isinstance(state, bytes), type(state)
                 # XXX PY3 state = str(state)
-                if use_base64:
-                    state = decodestring(state)
                 try:
                     to_oids = get_references(state)
                 except:

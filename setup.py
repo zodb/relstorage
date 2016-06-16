@@ -98,10 +98,11 @@ setup(
             'PyMySQL>=0.6.6',
         ],
         'postgresql: platform_python_implementation == "CPython"': [
-            'psycopg2>=2.0',
+            # 2.4.1+ is required for proper bytea handling
+            'psycopg2>=2.6.1',
         ],
         'postgresql: platform_python_implementation == "PyPy"': [
-            'psycopg2cffi>=2.7.0',
+            'psycopg2cffi>=2.7.4',
         ],
         'oracle': [
             'cx_Oracle>=4.3.1'

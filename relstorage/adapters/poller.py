@@ -16,7 +16,6 @@ from ZODB.POSException import ReadConflictError
 from relstorage.adapters.interfaces import IPoller
 from zope.interface import implementer
 import logging
-import sys
 
 from relstorage._compat import intern
 

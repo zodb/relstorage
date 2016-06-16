@@ -14,8 +14,6 @@
 """IObjectMover implementation.
 """
 
-from base64 import decodestring
-from base64 import encodestring
 from perfmetrics import Metric
 from relstorage.adapters.batch import MySQLRowBatcher
 from relstorage.adapters.batch import OracleRowBatcher
@@ -29,6 +27,8 @@ from hashlib import md5
 
 
 from relstorage._compat import xrange
+from relstorage._compat import db_binary_to_bytes
+from relstorage._compat import bytes_to_pg_binary
 
 def compute_md5sum(data):
     if data is not None:
@@ -89,26 +89,24 @@ class ObjectMover(object):
         """
         if self.keep_history:
             stmt = """
-            SELECT encode(state, 'base64'), tid
+            SELECT state, tid
             FROM current_object
                 JOIN object_state USING(zoid, tid)
             WHERE zoid = %s
             """
         else:
             stmt = """
-            SELECT encode(state, 'base64'), tid
+            SELECT state, tid
             FROM object_state
             WHERE zoid = %s
             """
         cursor.execute(stmt, (oid,))
         if cursor.rowcount:
             assert cursor.rowcount == 1
-            state64, tid = cursor.fetchone()
-            if state64 is not None:
-                state = decodestring(state64)
-            else:
-                # This object's creation has been undone
-                state = None
+            state, tid = cursor.fetchone()
+            state = db_binary_to_bytes(state)
+            # If it's None, the object's creation has been
+            # undone.
             return state, tid
         else:
             return None, None
@@ -171,7 +169,7 @@ class ObjectMover(object):
         Returns None if no such state exists.
         """
         stmt = """
-        SELECT encode(state, 'base64')
+        SELECT state
         FROM object_state
         WHERE zoid = %s
             AND tid = %s
@@ -179,9 +177,8 @@ class ObjectMover(object):
         cursor.execute(stmt, (oid, tid))
         if cursor.rowcount:
             assert cursor.rowcount == 1
-            (state64,) = cursor.fetchone()
-            if state64 is not None:
-                return decodestring(state64)
+            (state,) = cursor.fetchone()
+            return db_binary_to_bytes(state)
         return None
 
     @metricmethod_sampled
@@ -257,7 +254,7 @@ class ObjectMover(object):
         Returns (None, None) if no earlier state exists.
         """
         stmt = """
-        SELECT encode(state, 'base64'), tid
+        SELECT state, tid
         FROM object_state
         WHERE zoid = %s
             AND tid < %s
@@ -267,12 +264,9 @@ class ObjectMover(object):
         cursor.execute(stmt, (oid, tid))
         if cursor.rowcount:
             assert cursor.rowcount == 1
-            state64, tid = cursor.fetchone()
-            if state64 is not None:
-                state = decodestring(state64)
-            else:
-                # The object's creation has been undone
-                state = None
+            state, tid = cursor.fetchone()
+            state = db_binary_to_bytes(state)
+            # None in state means The object's creation has been undone
             return state, tid
         else:
             return None, None
@@ -474,8 +468,6 @@ class ObjectMover(object):
         return OracleRowBatcher(cursor, self.inputsizes, row_limit)
 
 
-
-
     @metricmethod_sampled
     def postgresql_store_temp(self, cursor, batcher, oid, prev_tid, data):
         """Store an object in the temporary table."""
@@ -486,8 +478,8 @@ class ObjectMover(object):
         batcher.delete_from('temp_store', zoid=oid)
         batcher.insert_into(
             "temp_store (zoid, prev_tid, md5, state)",
-            "%s, %s, %s, decode(%s, 'base64')",
-            (oid, prev_tid, md5sum, encodestring(data)),
+            "%s, %s, %s, %s",
+            (oid, prev_tid, md5sum, bytes_to_pg_binary(data)),
             rowkey=oid,
             size=len(data),
         )
@@ -559,7 +551,7 @@ class ObjectMover(object):
             md5sum = None
 
         if data is not None:
-            encoded = encodestring(data)
+            encoded = bytes_to_pg_binary(data)
             size = len(data)
         else:
             encoded = None
@@ -570,7 +562,7 @@ class ObjectMover(object):
             row_schema = """
                 %s, %s,
                 COALESCE((SELECT tid FROM current_object WHERE zoid = %s), 0),
-                %s, %s, decode(%s, 'base64')
+                %s, %s, %s
             """
             batcher.insert_into(
                 "object_state (zoid, tid, prev_tid, md5, state_size, state)",
@@ -584,7 +576,7 @@ class ObjectMover(object):
             if data:
                 batcher.insert_into(
                     "object_state (zoid, tid, state_size, state)",
-                    "%s, %s, %s, decode(%s, 'base64')",
+                    "%s, %s, %s, %s",
                     (oid, tid, size, encoded),
                     rowkey=oid,
                     size=size,
@@ -727,7 +719,7 @@ class ObjectMover(object):
         if self.keep_history:
             stmt = """
             SELECT temp_store.zoid, current_object.tid, temp_store.prev_tid,
-                encode(temp_store.state, 'base64')
+                   temp_store.state
             FROM temp_store
                 JOIN current_object ON (temp_store.zoid = current_object.zoid)
             WHERE temp_store.prev_tid != current_object.tid
@@ -736,7 +728,7 @@ class ObjectMover(object):
         else:
             stmt = """
             SELECT temp_store.zoid, object_state.tid, temp_store.prev_tid,
-                encode(temp_store.state, 'base64')
+                temp_store.state
             FROM temp_store
                 JOIN object_state ON (temp_store.zoid = object_state.zoid)
             WHERE temp_store.prev_tid != object_state.tid
@@ -745,7 +737,7 @@ class ObjectMover(object):
         cursor.execute(stmt)
         if cursor.rowcount:
             oid, prev_tid, attempted_prev_tid, data = cursor.fetchone()
-            return oid, prev_tid, attempted_prev_tid, decodestring(data)
+            return oid, prev_tid, attempted_prev_tid, db_binary_to_bytes(data)
         return None
 
     @metricmethod_sampled
@@ -823,10 +815,10 @@ class ObjectMover(object):
         UPDATE temp_store SET
             prev_tid = %s,
             md5 = %s,
-            state = decode(%s, 'base64')
+            state = %s
         WHERE zoid = %s
         """
-        cursor.execute(stmt, (prev_tid, md5sum, encodestring(data), oid))
+        cursor.execute(stmt, (prev_tid, md5sum, bytes_to_pg_binary(data), oid))
 
     @metricmethod_sampled
     def mysql_replace_temp(self, cursor, oid, prev_tid, data):
@@ -1067,7 +1059,7 @@ class ObjectMover(object):
                 if f is None:
                     f = open(filename, 'ab') # Append, chunk 0 was an export
                 read_chunk_size = self.blob_chunk_size
-                reader = iter(lambda: blob.read(read_chunk_size), '')
+                reader = iter(lambda: blob.read(read_chunk_size), b'')
                 for read_chunk in reader:
                     f.write(read_chunk)
                     bytecount += len(read_chunk)
@@ -1156,7 +1148,7 @@ class ObjectMover(object):
                     1.0 * self.blob_chunk_size / blob.getchunksize()), 1) *
                     blob.getchunksize())
                 offset = 1 # Oracle still uses 1-based indexing.
-                reader = iter(lambda: blob.read(offset, read_chunk_size), '')
+                reader = iter(lambda: blob.read(offset, read_chunk_size), b'')
                 for read_chunk in reader:
                     f.write(read_chunk)
                     bytecount += len(read_chunk)
@@ -1241,7 +1233,7 @@ class ObjectMover(object):
                 cursor.execute(insert_stmt, params)
 
                 write_chunk_size = self.blob_chunk_size
-                for _i in xrange(maxsize / write_chunk_size):
+                for _i in xrange(maxsize // write_chunk_size):
                     write_chunk = f.read(write_chunk_size)
                     if not blob.write(write_chunk):
                         # EOF.

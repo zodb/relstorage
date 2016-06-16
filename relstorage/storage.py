@@ -15,8 +15,8 @@
 
 Stores pickles in the database.
 """
+from __future__ import absolute_import, print_function
 
-from __future__ import absolute_import
 from ZODB import ConflictResolution
 from ZODB import POSException
 from ZODB.BaseStorage import DataRecord
@@ -516,8 +516,6 @@ class RelStorage(
                 # an object whose creation has been undone.
                 self._log_keyerror(oid_int, "creation has been undone")
                 raise POSKeyError(oid)
-            assert isinstance(state, bytes) # XXX Py3 Debugging
-            state = state or ''
             return state, p64(tid_int)
         else:
             self._log_keyerror(oid_int, "no tid found")
@@ -649,6 +647,7 @@ class RelStorage(
         # Like store(), but used for importing transactions.  See the
         # comments in FileStorage.restore().  The prev_txn optimization
         # is not used.
+
         if self._stale_error is not None:
             raise self._stale_error
         if self._is_read_only:
@@ -1479,10 +1478,9 @@ class RelStorage(
                         suffix='.tmp',
                         dir=self.blobhelper.temporaryDirectory())
                     os.close(fd)
-                    target = open(name, 'wb')
-                    ZODB.utils.cp(blobfile, target)
+                    with open(name, 'wb') as target:
+                        ZODB.utils.cp(blobfile, target)
                     blobfile.close()
-                    target.close()
                     self.restoreBlob(record.oid, record.tid, record.data,
                                      name, record.data_txn, trans)
                 else:

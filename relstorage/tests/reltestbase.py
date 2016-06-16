@@ -774,6 +774,7 @@ class GenericRelStorageTests(
         from ZODB.FileStorage import FileStorage
         db = DB(self._storage)
         try:
+            transaction.begin()
             c = db.open()
             r = c.root()
             r['alpha'] = PersistentMapping()
@@ -785,6 +786,7 @@ class GenericRelStorageTests(
 
             d = tempfile.mkdtemp()
             try:
+                transaction.begin()
                 fs = FileStorage(os.path.join(d, 'Data.fs'))
                 fs.copyTransactionsFrom(c._storage)
 
