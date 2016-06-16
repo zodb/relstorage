@@ -124,7 +124,7 @@ class FSZODBConvertTests(AbstractZODBConvertBase):
 
     def _write_cfg(self, cfg):
         fd, self.cfgfile = tempfile.mkstemp()
-        os.write(fd, cfg)
+        os.write(fd, cfg.encode('ascii'))
         os.close(fd)
 
     def tearDown(self):
