@@ -55,7 +55,7 @@ class ZConfigTests:
         dsn = (
             "dbname='%s' user='relstoragetest' password='relstoragetest'"
             % dbname)
-        conf = """
+        conf = u"""
         %%import relstorage
         <zodb main>
             <relstorage>
@@ -75,16 +75,16 @@ class ZConfigTests:
             dsn,
             )
 
-        schema_xml = """
+        schema_xml = u"""
         <schema>
         <import package="ZODB"/>
         <section type="ZODB.database" name="main" attribute="database"/>
         </schema>
         """
         import ZConfig
-        from relstorage._compat import StringIO
+        from io import StringIO
         schema = ZConfig.loadSchemaFile(StringIO(schema_xml))
-        config, handler = ZConfig.loadConfigFile(schema, StringIO(conf))
+        config, _ = ZConfig.loadConfigFile(schema, StringIO(conf))
 
         db = config.database.open()
         try:

@@ -31,6 +31,8 @@ import transaction
 import ZODB.POSException
 from relstorage import _compat as six
 
+if not six.PY3:
+    zip = itertools.izip
 
 class IteratorDeepCompare:
 
@@ -45,10 +47,10 @@ class IteratorDeepCompare:
         missing = object()
         iter1 = storage1.iterator()
         iter2 = storage2.iterator()
-        for txn1, txn2 in itertools.izip(iter1, iter2):
-            eq(txn1.tid,         txn2.tid)
-            eq(txn1.status,      txn2.status)
-            eq(txn1.user,        txn2.user)
+        for txn1, txn2 in zip(iter1, iter2):
+            eq(txn1.tid, txn2.tid)
+            eq(txn1.status, txn2.status)
+            eq(txn1.user, txn2.user)
             eq(txn1.description, txn2.description)
 
             # b/w compat on the 'extension' attribute
@@ -72,7 +74,7 @@ class IteratorDeepCompare:
             recs1.sort()
             recs2 = six.list_items(recs2)
             recs2.sort()
-            for (oid1, rec1), (oid2, rec2) in itertools.izip(recs1, recs2):
+            for (oid1, rec1), (oid2, rec2) in zip(recs1, recs2):
                 eq(rec1.oid, rec2.oid)
                 eq(rec1.tid, rec2.tid)
                 eq(rec1.data, rec2.data)
@@ -201,7 +203,7 @@ class BasicRecoveryStorage(IteratorDeepCompare):
 
     def checkRestoreAfterDoubleCommit(self):
         oid = self._storage.new_oid()
-        revid = '\0'*8
+        revid = b'\0'*8
         data1 = zodb_pickle(MinPO(11))
         data2 = zodb_pickle(MinPO(12))
         # Begin the transaction

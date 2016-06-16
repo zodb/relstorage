@@ -55,7 +55,7 @@ class ZConfigTests:
             dbname = base_dbname
         else:
             dbname = base_dbname + '_hf'
-        conf = """
+        conf = u"""
         %%import relstorage
         <zodb main>
             <relstorage>
@@ -77,16 +77,16 @@ class ZConfigTests:
             dbname,
             )
 
-        schema_xml = """
+        schema_xml = u"""
         <schema>
         <import package="ZODB"/>
         <section type="ZODB.database" name="main" attribute="database"/>
         </schema>
         """
         import ZConfig
-        from relstorage._compat import StringIO
+        from io import StringIO
         schema = ZConfig.loadSchemaFile(StringIO(schema_xml))
-        config, handler = ZConfig.loadConfigFile(schema, StringIO(conf))
+        config, _ = ZConfig.loadConfigFile(schema, StringIO(conf))
 
         db = config.database.open()
         try:
@@ -182,7 +182,7 @@ def test_suite():
             HFMySQLTests,
             HFMySQLToFile,
             HFMySQLFromFile,
-            ]:
+    ]:
         suite.addTest(unittest.makeSuite(klass, "check"))
     suite.addTest(unittest.makeSuite(HPMySQLDestZODBConvertTests))
     suite.addTest(unittest.makeSuite(HPMySQLSrcZODBConvertTests))
@@ -250,6 +250,6 @@ def test_suite():
 
     return suite
 
-if __name__=='__main__':
+if __name__ == '__main__':
     logging.basicConfig()
     unittest.main(defaultTest="test_suite")

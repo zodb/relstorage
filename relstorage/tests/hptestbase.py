@@ -142,6 +142,11 @@ class HistoryPreservingRelStorageTests(
         # Verify the database stores and retrieves non-ASCII text
         # in transaction metadata.
         ugly_string = ''.join(chr(c) for c in range(256))
+        if not isinstance(ugly_string, bytes):
+            # Py3
+            check_string = ugly_string.encode("latin-1")
+        else:
+            check_string = ugly_string
 
         db = DB(self._storage)
         try:
@@ -155,8 +160,8 @@ class HistoryPreservingRelStorageTests(
             transaction.commit()
 
             info = self._storage.undoInfo()
-            self.assertEqual(info[0]['description'], ugly_string)
-            self.assertEqual(info[1]['user_name'], '/ ' + ugly_string)
+            self.assertEqual(info[0]['description'], check_string)
+            self.assertEqual(info[1]['user_name'], b'/ ' + check_string)
         finally:
             db.close()
 

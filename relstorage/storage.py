@@ -54,13 +54,13 @@ except ImportError:
 
 _relstorage_interfaces = []
 for name in (
-    'IStorage',
-    'IMVCCStorage',
-    'IStorageRestoreable',
-    'IStorageIteration',
-    'IStorageUndoable',
-    'IBlobStorage',
-    'IBlobStorageRestoreable',
+        'IStorage',
+        'IMVCCStorage',
+        'IStorageRestoreable',
+        'IStorageIteration',
+        'IStorageUndoable',
+        'IBlobStorage',
+        'IBlobStorageRestoreable',
     ):
     if hasattr(ZODB.interfaces, name):
         _relstorage_interfaces.append(getattr(ZODB.interfaces, name))
@@ -74,8 +74,19 @@ log = logging.getLogger("relstorage")
 # early rather than wait for an explicit abort.
 abort_early = os.environ.get('RELSTORAGE_ABORT_EARLY')
 
-z64 = '\0' * 8
+z64 = b'\0' * 8
 
+def _to_latin1(data):
+    if data is None:
+        return data
+    if isinstance(data, bytes):
+        return data
+    return data.encode("latin-1")
+
+def _from_latin1(data):
+    if isinstance(data, str) or data is None:
+        return data
+    return data.decode('latin-1')
 
 @implementer(*_relstorage_interfaces)
 class RelStorage(
@@ -505,7 +516,8 @@ class RelStorage(
                 # an object whose creation has been undone.
                 self._log_keyerror(oid_int, "creation has been undone")
                 raise POSKeyError(oid)
-            state = str(state or '')
+            assert isinstance(state, bytes) # XXX Py3 Debugging
+            state = state or ''
             return state, p64(tid_int)
         else:
             self._log_keyerror(oid_int, "no tid found")
@@ -545,7 +557,7 @@ class RelStorage(
             self._lock_release()
 
         if state is not None:
-            state = str(state)
+            assert isinstance(state, bytes) # XXX PY3 used to do str(state)
             if not state:
                 raise POSKeyError(oid)
             return state
@@ -588,7 +600,7 @@ class RelStorage(
                     end = p64(end_int)
                 else:
                     end = None
-                state = str(state)
+                assert isinstance(state, bytes), type(state) # XXX Py3 port: state = str(state)
                 return state, p64(start_tid), end
             else:
                 return None
@@ -617,7 +629,8 @@ class RelStorage(
         assert cursor is not None
         oid_int = u64(oid)
         if serial:
-            prev_tid_int = u64(serial)
+            # XXX PY3: ZODB.tests.IteratorStorage passes a str (non-bytes) value for oid
+            prev_tid_int = u64(serial if isinstance(serial, bytes) else serial.encode('ascii'))
         else:
             prev_tid_int = 0
 
@@ -704,13 +717,13 @@ class RelStorage(
             self._clear_temp()
             self._transaction = transaction
 
-            user = str(transaction.user)
-            desc = str(transaction.description)
+            user = _to_latin1(transaction.user)
+            desc = _to_latin1(transaction.description)
             ext = transaction._extension
             if ext:
                 ext = dumps(ext, 1)
             else:
-                ext = ""
+                ext = b""
             self._ude = user, desc, ext
             self._tstatus = status
 
@@ -807,6 +820,7 @@ class RelStorage(
                 break
 
             oid_int, prev_tid_int, serial_int, data = conflict
+            assert isinstance(data, bytes) # XXX PY3 porting
             oid = p64(oid_int)
             prev_tid = p64(prev_tid_int)
             serial = p64(serial_int)
@@ -1041,10 +1055,15 @@ class RelStorage(
             res = []
             for tid_int, user, desc, ext in rows:
                 tid = p64(tid_int)
+                # Note that user and desc are schizophrenic. The transaction
+                # interface specifies that they are a Python str, *probably*
+                # meaning bytes. But code in the wild and the ZODB test suite
+                # sets them as native strings, meaning unicode on Py3. OTOH, the
+                # test suite checks that this method *returns* them as bytes!
                 d = {'id': base64.encodestring(tid)[:-1],
                      'time': TimeStamp(tid).timeTime(),
-                     'user_name': user or '',
-                     'description': desc or ''}
+                     'user_name':  user or b'',
+                     'description': desc or b''}
                 if ext:
                     d.update(loads(ext))
                 if filter is None or filter(d):
@@ -1086,7 +1105,7 @@ class RelStorage(
                           "tid": tid,
                           "version": '',
                           "size": length,
-                          })
+                })
                 if filter is None or filter(d):
                     res.append(d)
                     if size is not None and len(res) >= size:
@@ -1111,7 +1130,7 @@ class RelStorage(
         if transaction is not self._transaction:
             raise POSException.StorageTransactionError(self, transaction)
 
-        undo_tid = base64.decodestring(transaction_id + '\n')
+        undo_tid = base64.decodestring(transaction_id + b'\n')
         assert len(undo_tid) == 8
         undo_tid_int = u64(undo_tid)
 
@@ -1165,7 +1184,8 @@ class RelStorage(
             """Return the set of OIDs the given state refers to."""
             refs = set()
             if state:
-                for oid in referencesf(str(state)):
+                assert isinstance(state, bytes), type(state) # XXX PY3: str(state)
+                for oid in referencesf(state):
                     refs.add(u64(oid))
             return refs
 
@@ -1563,6 +1583,7 @@ class TransactionIterator(object):
         self._index += 1
         return res
 
+    __next__ = next
 
 class RelStorageTransactionRecord(TransactionRecord):
 
@@ -1571,8 +1592,8 @@ class RelStorageTransactionRecord(TransactionRecord):
         self._tid_int = tid_int
         tid = p64(tid_int)
         status = packed and 'p' or ' '
-        user = user or ''
-        description = desc or ''
+        user = user or b''
+        description = desc or b''
         if ext:
             extension = loads(ext)
         else:
@@ -1625,13 +1646,9 @@ class RecordIterator(object):
 
 class Record(DataRecord):
     """An object state in a transaction"""
-    version = ''
-    data_txn = None
 
     def __init__(self, tid, oid_int, data):
-        self.tid = tid
-        self.oid = p64(oid_int)
+        # XXX PY3: Used to to str(data) on Py2
         if data is not None:
-            self.data = str(data)
-        else:
-            self.data = None
+            assert isinstance(data, bytes)
+        DataRecord.__init__(self, p64(oid_int), tid, data, None)

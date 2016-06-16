@@ -261,16 +261,17 @@ class GenericRelStorageTests(
 
     def check16KObject(self):
         # Store 16 * 1024 bytes in an object, then retrieve it
-        data = 'a 16 byte string' * 1024
+        data = b'a 16 byte string' * 1024
         oid = self._storage.new_oid()
         self._dostoreNP(oid, data=data)
-        got, serialno = self._storage.load(oid, '')
-        self.assertEqual(len(got), len(data))
+        got, _ = self._storage.load(oid, '')
+        self.assertIsInstance(got, bytes)
         self.assertEqual(got, data)
+        self.assertEqual(len(got), len(data))
 
     def check16MObject(self):
         # Store 16 * 1024 * 1024 bytes in an object, then retrieve it
-        data = 'a 16 byte string' * (1024 * 1024)
+        data = b'a 16 byte string' * (1024 * 1024)
         oid = self._storage.new_oid()
         self._dostoreNP(oid, data=data)
         got, serialno = self._storage.load(oid, '')
@@ -282,13 +283,13 @@ class GenericRelStorageTests(
         # to exercise possible buffer overfilling that the batching
         # code might cause.
         import transaction
-        data = '0123456789012345678' * 100
+        data = b'0123456789012345678' * 100
         t = transaction.Transaction()
         self._storage.tpc_begin(t)
         oids = []
         for i in range(99):
             oid = self._storage.new_oid()
-            self._storage.store(oid, '\0'*8, data, '', t)
+            self._storage.store(oid, b'\0'*8, data, '', t)
             oids.append(oid)
         self._storage.tpc_vote(t)
         self._storage.tpc_finish(t)
@@ -300,8 +301,8 @@ class GenericRelStorageTests(
     def checkPreventOIDOverlap(self):
         # Store an object with a particular OID, then verify that
         # OID is not reused.
-        data = 'mydata'
-        oid1 = '\0' * 7 + '\x0f'
+        data = b'mydata'
+        oid1 = b'\0' * 7 + b'\x0f'
         self._dostoreNP(oid1, data=data)
         oid2 = self._storage.new_oid()
         self.assert_(oid1 < oid2, 'old OID %r should be less than new OID %r'
@@ -345,7 +346,7 @@ class GenericRelStorageTests(
             got, serial = c1._storage.load(oid, '')
 
             # try to load an object that doesn't exist
-            self.assertRaises(KeyError, c1._storage.load, 'bad.oid.', '')
+            self.assertRaises(KeyError, c1._storage.load, b'bad.oid.', '')
         finally:
             db.close()
 
@@ -525,7 +526,7 @@ class GenericRelStorageTests(
             c2._storage._drop_load_connection()
 
             # Make the database connection to c2 reopen without polling.
-            c2._storage.load('\0' * 8, '')
+            c2._storage.load(b'\0' * 8, '')
             self.assertTrue(c2._storage._load_transaction_open)
 
             # Open a connection, which should be the same connection
@@ -706,7 +707,7 @@ class GenericRelStorageTests(
             unpick_errs += (fUnpickErr,)
 
 
-        self._dostoreNP(self._storage.new_oid(), data='brokenpickle')
+        self._dostoreNP(self._storage.new_oid(), data=b'brokenpickle')
         self.assertRaises(unpick_errs, self._storage.pack,
             time.time() + 10000, referencesf)
 

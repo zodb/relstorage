@@ -56,12 +56,12 @@ def new_time():
     return new_time
 
 
-with open(__file__) as _f:
+with open(__file__, 'rb') as _f:
     # Just use the this module as the source of our data
     # Capture it at import time because test cases may
     # chdir(), and we may not have an absolute path in __file__,
     # depending on how they are run.
-    _random_file_data = _f.read().replace('\n', '').split()
+    _random_file_data = _f.read().replace(b'\n', b'').split()
 del _f
 
 
@@ -80,7 +80,7 @@ def random_file(size, fd):
         a = collections.deque(words)
         b = collections.deque(seed)
         while True:
-            yield ' '.join(list(a)[0:1024])
+            yield b' '.join(list(a)[0:1024])
             a.rotate(int(b[0]))
             b.rotate(1)
     datagen = fdata()
@@ -97,7 +97,7 @@ def random_file(size, fd):
 def md5sum(fd):
     md5sum = md5()
     blocksize = md5sum.block_size << 8
-    for data in iter(lambda: fd.read(blocksize), ''):
+    for data in iter(lambda: fd.read(blocksize), b''):
         md5sum.update(data)
     return md5sum.hexdigest()
 
@@ -140,14 +140,14 @@ class BlobUndoTests(BlobTestBase):
         transaction.begin()
         blob = Blob()
         with blob.open('w') as f:
-            f.write('this is state 1')
+            f.write(b'this is state 1')
         root['blob'] = blob
         transaction.commit()
 
         transaction.begin()
         blob = root['blob']
         with blob.open('w') as f:
-            f.write('this is state 2')
+            f.write(b'this is state 2')
         transaction.commit()
 
 
@@ -156,7 +156,7 @@ class BlobUndoTests(BlobTestBase):
 
         with blob.open('r') as f:
             data = f.read()
-        self.assertEqual(data, 'this is state 1')
+        self.assertEqual(data, b'this is state 1')
 
         database.close()
 
@@ -165,7 +165,7 @@ class BlobUndoTests(BlobTestBase):
         connection = database.open()
         root = connection.root()
         transaction.begin()
-        with open('consume1', 'w') as f: f.write('this is state 1')
+        with open('consume1', 'wb') as f: f.write(b'this is state 1')
         blob = Blob()
         blob.consumeFile('consume1')
         root['blob'] = blob
@@ -173,7 +173,7 @@ class BlobUndoTests(BlobTestBase):
 
         transaction.begin()
         blob = root['blob']
-        with open('consume2', 'w') as f: f.write('this is state 2')
+        with open('consume2', 'wb') as f: f.write(b'this is state 2')
         blob.consumeFile('consume2')
         transaction.commit()
 
@@ -182,7 +182,7 @@ class BlobUndoTests(BlobTestBase):
 
         with blob.open('r') as f:
             data = f.read()
-        self.assertEqual(data, 'this is state 1')
+        self.assertEqual(data, b'this is state 1')
 
         database.close()
 
@@ -194,25 +194,25 @@ class BlobUndoTests(BlobTestBase):
 
         transaction.begin()
         with blob.open('w') as f:
-            f.write('this is state 1')
+            f.write(b'this is state 1')
         root['blob'] = blob
         transaction.commit()
 
         transaction.begin()
         blob = root['blob']
         with blob.open('w') as f:
-            f.write('this is state 2')
+            f.write(b'this is state 2')
         transaction.commit()
 
         database.undo(database.undoLog(0, 1)[0]['id'])
         transaction.commit()
 
-        self.assertEqual(blob.open('r').read(), 'this is state 1')
+        self.assertEqual(blob.open('r').read(), b'this is state 1')
 
         database.undo(database.undoLog(0, 1)[0]['id'])
         transaction.commit()
 
-        self.assertEqual(blob.open('r').read(), 'this is state 2')
+        self.assertEqual(blob.open('r').read(), b'this is state 2')
 
         database.close()
 
@@ -224,7 +224,7 @@ class BlobUndoTests(BlobTestBase):
 
         transaction.begin()
         with blob.open('w') as f:
-            f.write('this is state 1')
+            f.write(b'this is state 1')
         root['blob'] = blob
         transaction.commit()
 
@@ -236,7 +236,7 @@ class BlobUndoTests(BlobTestBase):
         database.undo(database.undoLog(0, 1)[0]['id'])
         transaction.commit()
 
-        self.assertEqual(blob.open('r').read(), 'this is state 1')
+        self.assertEqual(blob.open('r').read(), b'this is state 1')
 
         database.close()
 
@@ -265,19 +265,19 @@ class RecoveryBlobStorage(BlobTestBase,
         transaction.commit()
         conn.root()[2] = ZODB.blob.Blob()
         with conn.root()[2].open('w') as f:
-            f.write('some data')
+            f.write(b'some data')
         transaction.commit()
         conn.root()[3] = ZODB.blob.Blob()
         with conn.root()[3].open('w') as f:
             f.write(
-                (''.join(struct.pack(">I", random.randint(0, (1<<32)-1))
-                         for i in range(random.randint(10000,20000)))
+                (b''.join(struct.pack(">I", random.randint(0, (1<<32)-1))
+                          for i in range(random.randint(10000,20000)))
                 )[:-random.randint(1,4)]
             )
         transaction.commit()
         conn.root()[2] = ZODB.blob.Blob()
         with conn.root()[2].open('w') as f:
-            f.write('some other data')
+            f.write(b'some other data')
         transaction.commit()
         self._dst.copyTransactionsFrom(self._storage)
         self.compare(self._storage, self._dst)

@@ -425,7 +425,7 @@ class HistoryPreservingPackUndo(PackUndo):
                 # Oracle
                 state = state.read()
             if state:
-                state = str(state)
+                assert isinstance(state, bytes), type(state) # PY3: used to be str(state)
                 if use_base64:
                     state = decodestring(state)
                 from_count += 1
@@ -1011,6 +1011,7 @@ class HistoryFreePackUndo(PackUndo):
 
         Returns the number of references added.
         """
+        # XXX PY3: This could be tricky
         oid_list = ','.join(str(oid) for oid in oids)
         use_base64 = (self.database_type == 'postgresql')
 
@@ -1036,7 +1037,8 @@ class HistoryFreePackUndo(PackUndo):
                 state = state.read()
             add_objects.append((from_oid, tid))
             if state:
-                state = str(state)
+                assert isinstance(state, bytes), type(state)
+                # XXX PY3 state = str(state)
                 if use_base64:
                     state = decodestring(state)
                 try:

@@ -66,22 +66,24 @@ class HistoryPreservingDatabaseIterator(DatabaseIterator):
         use_base64 = self.use_base64
         for row in cursor:
             tid, username, description, ext = row[:4]
+            # Although the transaction interface for username and description are
+            # defined as strings, this layer works with bytes. PY3.
             if username is None:
-                username = ''
+                username = b''
             else:
-                username = str(username)
+                assert isinstance(username, bytes)
                 if use_base64:
                     username = decodestring(username)
             if description is None:
-                description = ''
+                description = b''
             else:
-                description = str(description)
+                assert isinstance(description, bytes)
                 if use_base64:
                     description = decodestring(description)
             if ext is None:
-                ext = ''
+                ext = b''
             else:
-                ext = str(ext)
+                assert isinstance(ext, bytes)
                 if use_base64:
                     ext = decodestring(ext)
             yield (tid, username, description, ext) + tuple(row[4:])
