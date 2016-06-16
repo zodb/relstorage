@@ -40,6 +40,8 @@ except ImportError:
             False
     else:
         # Using ZODB 3.8
+        # NOTE: This won't work on Py3, but this old ZODB doesn't
+        # support that anyway.
         import cPickle
         import cStringIO
 
