@@ -613,13 +613,13 @@ class LocalClientBucket(dict):
             sizedelta += len(key)
         if self.size + sizedelta > self.limit:
             raise SizeOverflow()
-        dict.__setitem__(key, value)
+        dict.__setitem__(self, key, value)
         self.size += sizedelta
         return True
 
     def __delitem__(self, key):
         oldvalue = self[key]
-        dict.__delitem__(key)
+        dict.__delitem__(self, key)
         sizedelta = len(key)
         if isinstance(oldvalue, bytes):
             sizedelta += len(oldvalue)
