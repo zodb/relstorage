@@ -198,8 +198,8 @@ def test_suite():
         for shared_blob_dir in shared_blob_dir_choices:
             for keep_history in (False, True):
                 def create_storage(name, blob_dir,
-                        shared_blob_dir=shared_blob_dir,
-                        keep_history=keep_history, **kw):
+                                   shared_blob_dir=shared_blob_dir,
+                                   keep_history=keep_history, **kw):
                     from relstorage.storage import RelStorage
                     from relstorage.adapters.mysql import MySQLAdapter
                     db = db_names[name]

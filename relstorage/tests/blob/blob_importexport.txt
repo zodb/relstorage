@@ -34,10 +34,10 @@ Put a couple blob objects in our database1 and on the filesystem:
 
     >>> import time, os
     >>> nothing = transaction.begin()
-    >>> data1 = 'x'*100000
+    >>> data1 = b'x'*100000
     >>> blob1 = ZODB.blob.Blob()
     >>> with blob1.open('w') as f: _ = f.write(data1)
-    >>> data2 = 'y'*100000
+    >>> data2 = b'y'*100000
     >>> blob2 = ZODB.blob.Blob()
     >>> with blob2.open('w') as f: _ = f.write(data2)
     >>> d = PersistentMapping({'blob1':blob1, 'blob2':blob2})
@@ -66,9 +66,13 @@ Make sure our data exists:
     >>> items2 = root2['blobdata']
     >>> bool(items1.keys() == items2.keys())
     True
-    >>> items1['blob1'].open().read() == items2['blob1'].open().read()
+    >>> with items1['blob1'].open() as f: b1d = f.read()
+    >>> with items2['blob1'].open() as f: b2d = f.read()
+    >>> b1d == b2d
     True
-    >>> items1['blob2'].open().read() == items2['blob2'].open().read()
+    >>> with items1['blob2'].open() as f: b1d = f.read()
+    >>> with items2['blob2'].open() as f: b2d = f.read()
+    >>> b1d == b2d
     True
     >>> transaction.get().abort()
 
