@@ -16,6 +16,7 @@
 Stores pickles in the database.
 """
 
+from __future__ import absolute_import
 from ZODB import ConflictResolution
 from ZODB import POSException
 from ZODB.BaseStorage import DataRecord
@@ -41,6 +42,7 @@ import tempfile
 import threading
 import time
 import weakref
+from relstorage import _compat as six
 
 try:
     from ZODB.interfaces import StorageStopIteration
@@ -888,9 +890,9 @@ class RelStorage(
         tid_int = u64(self._tid)
 
         if self._txn_check_serials:
-            oid_ints = [u64(oid) for oid in self._txn_check_serials.iterkeys()]
+            oid_ints = [u64(oid) for oid in six.iterkeys(self._txn_check_serials)]
             current = self._adapter.mover.current_object_tids(cursor, oid_ints)
-            for oid, expect in self._txn_check_serials.iteritems():
+            for oid, expect in six.iteritems(self._txn_check_serials):
                 oid_int = u64(oid)
                 actual = p64(current.get(oid_int, 0))
                 if actual != expect:

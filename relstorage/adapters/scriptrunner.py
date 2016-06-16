@@ -12,11 +12,13 @@
 #
 ##############################################################################
 
+from __future__ import absolute_import
 from relstorage.adapters.interfaces import IScriptRunner
 from zope.interface import implementer
 import logging
 import re
 import sys
+from relstorage import _compat as six
 
 log = logging.getLogger(__name__)
 
@@ -118,7 +120,7 @@ class OracleScriptRunner(ScriptRunner):
             stmt = generic_stmt % tracker
             used = tracker.used
             params = {}
-            for k, v in generic_params.iteritems():
+            for k, v in six.iteritems(generic_params):
                 if k in used:
                     params[k] = v
         else:

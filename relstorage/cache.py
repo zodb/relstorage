@@ -12,6 +12,7 @@
 #
 ##############################################################################
 
+from __future__ import absolute_import
 from relstorage.autotemp import AutoTemporaryFile
 from ZODB.utils import p64
 from ZODB.utils import u64
@@ -20,6 +21,7 @@ from ZODB.TimeStamp import TimeStamp
 import logging
 import random
 import threading
+from relstorage import _compat as six
 
 log = logging.getLogger(__name__)
 
@@ -512,7 +514,7 @@ class StorageCache(object):
                     change_dict[oid_int] = tid_int
 
                 # Put the changes in new_delta_after*.
-                for oid_int, tid_int in change_dict.iteritems():
+                for oid_int, tid_int in six.iteritems(change_dict):
                     if tid_int > cp0:
                         new_delta_after0[oid_int] = tid_int
                     elif tid_int > cp1:
@@ -706,7 +708,7 @@ class LocalClient(object):
         compress = self._compress
         self._lock_acquire()
         try:
-            for key, value in d.iteritems():
+            for key, value in six.iteritems(d):
                 if isinstance(value, basestring):
                     if len(value) >= self._value_limit:
                         # This value is too big, so don't cache it.

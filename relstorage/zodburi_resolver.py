@@ -4,7 +4,7 @@ from ZODB.DemoStorage import DemoStorage
 
 from relstorage.options import Options
 from relstorage.storage import RelStorage
-
+from relstorage import _compat as six
 
 #################################################
 # Utility to interpret inputs, talen from zodburi
@@ -99,7 +99,7 @@ class PostgreSQLAdapterHelper(Resolver):
         ]
 
         kw, unused = self.interpret_kwargs(kw)
-        dsn_args.extend(kw.items())
+        dsn_args.extend(six.list_items(kw))
 
         dsn = ' '.join("%s='%s'"%arg for arg in dsn_args)
 
@@ -139,7 +139,7 @@ class OracleAdapterHelper(Resolver):
 
     def __call__(self, parsed_uri, kw):
         kw, unused = self.interpret_kwargs(kw)
-        
+
         def factory(options):
             from relstorage.adapters.oracle import OracleAdapter
             return OracleAdapter(options=options, **kw)

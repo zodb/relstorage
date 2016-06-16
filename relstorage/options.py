@@ -17,6 +17,8 @@
 # ZODB does not seem to provide version information anywhere but in
 # setup.py, so the code below is a hack.  TODO: Bring this up on zodb-dev.
 
+from __future__ import absolute_import
+from relstorage import _compat as six
 default_strict_tpc = False
 
 from ZEO.zrpc.connection import Connection as __Connection
@@ -71,7 +73,7 @@ class Options(object):
         # simulating disconnected caches in tests.
         self.share_local_cache = True
 
-        for key, value in kwoptions.iteritems():
+        for key, value in six.iteritems(kwoptions):
             if key in self.__dict__:
                 setattr(self, key, value)
             else:

@@ -29,6 +29,7 @@ import itertools
 import time
 import transaction
 import ZODB.POSException
+from relstorage import _compat as six
 
 
 class IteratorDeepCompare:
@@ -67,9 +68,9 @@ class IteratorDeepCompare:
             recs1 = dict([(r.oid, r) for r in txn1])
             recs2 = dict([(r.oid, r) for r in txn2])
             eq(len(recs1), len(recs2))
-            recs1 = recs1.items()
+            recs1 = six.list_items(recs1)
             recs1.sort()
-            recs2 = recs2.items()
+            recs2 = six.list_items(recs2)
             recs2.sort()
             for (oid1, rec1), (oid2, rec2) in itertools.izip(recs1, recs2):
                 eq(rec1.oid, rec2.oid)

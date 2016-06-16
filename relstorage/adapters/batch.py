@@ -15,6 +15,7 @@
 """
 
 import re
+from relstorage import _compat as six
 
 
 class RowBatcher(object):
@@ -39,7 +40,7 @@ class RowBatcher(object):
     def delete_from(self, table, **kw):
         if not kw:
             raise AssertionError("Need at least one column value")
-        columns = kw.keys()
+        columns = six.list_keys(kw)
         columns.sort()
         columns = tuple(columns)
         key = (table, columns)
@@ -155,7 +156,7 @@ class OracleRowBatcher(RowBatcher):
 
             if len(rows) == 1:
                 # use the single insert syntax
-                row = rows.values()[0]
+                row = six.list_values(rows)[0]
                 stmt = "INSERT INTO %s VALUES (%s)" % (header, row_schema)
                 for name in self.inputsizes:
                     if name in row:
@@ -206,7 +207,7 @@ class OracleRowBatcher(RowBatcher):
     def _do_array_ops(self):
         items = sorted(self.array_ops.items())
         for (operation, row_schema), rows in items:
-            r = rows.values()
+            r = six.list_values(rows)
             params = []
             datatypes = [self.inputsizes[name] for name in row_schema.split()]
             for i, column in enumerate(zip(*r)):

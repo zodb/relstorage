@@ -61,7 +61,7 @@ except ImportError:
     except ImportError:
         raise t, v, tb
     else:
-        del t, v, b
+        del t, v, tb
 from zope.interface import implementer
 
 from relstorage.adapters.connmanager import AbstractConnectionManager
@@ -80,7 +80,7 @@ from relstorage.adapters.scriptrunner import ScriptRunner
 from relstorage.adapters.stats import MySQLStats
 from relstorage.adapters.txncontrol import MySQLTransactionControl
 from relstorage.options import Options
-
+from relstorage import _compat as six
 log = logging.getLogger(__name__)
 
 # disconnected_exceptions contains the exception types that might be
@@ -221,7 +221,7 @@ class MySQLAdapter(object):
         p = self._params.copy()
         if 'passwd' in p:
             del p['passwd']
-        p = p.items()
+        p = six.list_items(p)
         p.sort()
         parts.extend('%s=%r' % item for item in p)
         return ", ".join(parts)

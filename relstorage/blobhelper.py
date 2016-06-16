@@ -16,6 +16,7 @@
 Most of this code is lifted from ZODB/ZEO.
 """
 
+from __future__ import absolute_import
 from ZODB import POSException
 from ZODB.utils import p64
 from ZODB.utils import u64
@@ -23,6 +24,7 @@ import os
 import threading
 import time
 import zc.lockfile
+from relstorage import _compat as six
 
 
 try:
@@ -345,7 +347,7 @@ class BlobHelper(object):
 
     def abort(self):
         if self._txn_blobs:
-            for oid, filename in self._txn_blobs.iteritems():
+            for oid, filename in six.iteritems(self._txn_blobs):
                 if os.path.exists(filename):
                     ZODB.blob.remove_committed(filename)
                     if self.shared_blob_dir:

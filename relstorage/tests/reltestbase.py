@@ -32,6 +32,7 @@ from relstorage.tests import fakecache
 import random
 import time
 import transaction
+from relstorage import _compat as six
 
 class StorageCreatingMixin(object):
 
@@ -329,17 +330,17 @@ class GenericRelStorageTests(
                 'zzz:state:')
             r1['alpha'] = PersistentMapping()
             transaction.commit()
-            self.assertEqual(len(fakecache.data.keys()), 5)
+            self.assertEqual(len(six.list_keys(fakecache.data)), 5)
 
             oid = r1['alpha']._p_oid
             got, serial = c1._storage.load(oid, '')
             # another state should now be cached
-            self.assertEqual(len(fakecache.data.keys()), 5)
+            self.assertEqual(len(six.list_keys(fakecache.data)), 5)
 
             # make a change
             r1['beta'] = 0
             transaction.commit()
-            self.assertEqual(len(fakecache.data.keys()), 6)
+            self.assertEqual(len(six.list_keys(fakecache.data)), 6)
 
             got, serial = c1._storage.load(oid, '')
 
