@@ -19,6 +19,7 @@ import logging
 import re
 import sys
 from relstorage import _compat as six
+from relstorage._compat import intern
 
 log = logging.getLogger(__name__)
 

@@ -12,7 +12,7 @@
 #
 ##############################################################################
 
-from cStringIO import StringIO
+from ZODB._compat import BytesIO as StringIO
 import tempfile
 
 class AutoTemporaryFile(object):

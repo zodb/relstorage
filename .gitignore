@@ -1,4 +1,5 @@
 .installed.cfg
+.dir-locals.el
 .pydevproject
 *.egg-info
 *.pyc

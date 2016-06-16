@@ -27,3 +27,24 @@ else:
     list_values = dict.values
     iteritems = dict.iteritems
     iterkeys = dict.iterkeys
+
+# Types
+
+if PY3:
+    string_types = (str,)
+else:
+    string_types = (basestring,)
+
+
+# Functions
+if PY3:
+    xrange = range
+    intern = sys.intern
+else:
+    xrange = xrange
+    intern = intern
+
+from ZODB._compat import BytesIO
+StringIO = BytesIO
+
+from ZODB._compat import dumps

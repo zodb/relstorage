@@ -37,10 +37,8 @@ import ZODB.tests.StorageTestBase
 import ZODB.tests.util
 import zope.testing.renormalizing
 
-try:
-    from hashlib import md5
-except ImportError:
-    from md5 import new as md5
+
+from hashlib import md5
 
 
 def new_time():

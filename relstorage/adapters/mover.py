@@ -25,12 +25,10 @@ from relstorage.iter import fetchmany
 from zope.interface import implementer
 import os
 import sys
+from hashlib import md5
 
-try:
-    from hashlib import md5
-except ImportError:
-    from md5 import new as md5
 
+from relstorage._compat import xrange
 
 def compute_md5sum(data):
     if data is not None:

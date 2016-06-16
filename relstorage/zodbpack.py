@@ -15,7 +15,7 @@
 """ZODB storage packing utility.
 """
 
-from StringIO import StringIO
+from relstorage._compat import StringIO
 import logging
 import optparse
 import sys

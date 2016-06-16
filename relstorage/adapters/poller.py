@@ -18,6 +18,8 @@ from zope.interface import implementer
 import logging
 import sys
 
+from relstorage._compat import intern
+
 log = logging.getLogger(__name__)
 
 

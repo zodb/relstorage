@@ -89,7 +89,7 @@ class ZConfigTests:
             </schema>
             """
             import ZConfig
-            from StringIO import StringIO
+            from relstorage._compat import StringIO
             schema = ZConfig.loadSchemaFile(StringIO(schema_xml))
             config, handler = ZConfig.loadConfigFile(schema, StringIO(conf))
 
@@ -232,4 +232,3 @@ def test_suite():
 if __name__=='__main__':
     logging.basicConfig()
     unittest.main(defaultTest="test_suite")
-

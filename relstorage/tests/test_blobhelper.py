@@ -4,8 +4,11 @@ from relstorage.tests.util import support_blob_cache
 import os
 import unittest
 
-test_oid = '\0' * 7 + '\x01'
-test_tid = '\0' * 7 + '\x02'
+from relstorage._compat import PY3
+from relstorage._compat import dumps
+
+test_oid = b'\0' * 7 + b'\x01'
+test_tid = b'\0' * 7 + b'\x02'
 
 
 class IsBlobRecordTest(unittest.TestCase):
@@ -16,21 +19,18 @@ class IsBlobRecordTest(unittest.TestCase):
 
     def test_true(self):
         from ZODB.blob import Blob
-        import cPickle
-        p = cPickle.dumps(Blob)
+        p = dumps(Blob)
         self.assertTrue(self._call(p))
 
     def test_empty_pickle(self):
         self.assertFalse(self._call(''))
 
     def test_obviously_false(self):
-        import cPickle
-        p = cPickle.dumps('x')
+        p = dumps('x')
         self.assertFalse(self._call(p))
 
     def test_still_false(self):
-        import cPickle
-        p = cPickle.dumps('ZODB.blob')
+        p = dumps('ZODB.blob')
         self.assertFalse(self._call(p))
 
 
@@ -179,7 +179,8 @@ class BlobHelperTest(unittest.TestCase):
 
         obj = self._make_default(shared=False)
         f = obj.openCommittedBlobFile(None, test_oid, test_tid)
-        self.assertEqual(f.__class__, file)
+        if not PY3:
+            self.assertEqual(f.__class__, file)
         self.assertEqual(f.read(), 'blob here')
 
     def test_openCommittedBlobFile_as_blobfile(self):
@@ -210,7 +211,8 @@ class BlobHelperTest(unittest.TestCase):
         loadBlob, obj.loadBlob = obj.loadBlob, loadBlob_wrapper
         f = obj.openCommittedBlobFile(None, test_oid, test_tid)
         self.assertEqual(loadBlob_calls, [1])
-        self.assertEqual(f.__class__, file)
+        if not PY3:
+            self.assertEqual(f.__class__, file)
         self.assertEqual(f.read(), 'blob here')
 
     def test_openCommittedBlobFile_retry_as_blobfile(self):

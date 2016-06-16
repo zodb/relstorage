@@ -73,7 +73,7 @@ class StorageCache(object):
             module_name = options.cache_module_name
             module = __import__(module_name, {}, {}, ['Client'])
             servers = options.cache_servers
-            if isinstance(servers, basestring):
+            if isinstance(servers, six.string_types):
                 servers = servers.split()
             self.clients_local_first.append(module.Client(servers))
 
@@ -593,13 +593,13 @@ class LocalClientBucket(dict):
         Throws SizeOverflow if the new item would cause this map to
         surpass its memory limit.
         """
-        if isinstance(value, basestring):
+        if isinstance(value, six.string_types):
             sizedelta = len(value)
         else:
             sizedelta = 0
         if key in self:
             oldvalue = self[key]
-            if isinstance(oldvalue, basestring):
+            if isinstance(oldvalue, six.string_types):
                 sizedelta -= len(oldvalue)
         else:
             sizedelta += len(key)
@@ -613,7 +613,7 @@ class LocalClientBucket(dict):
         oldvalue = self[key]
         self._super.__delitem__(key)
         sizedelta = len(key)
-        if isinstance(oldvalue, basestring):
+        if isinstance(oldvalue, six.string_types):
             sizedelta += len(oldvalue)
         self.size -= sizedelta
 
@@ -667,7 +667,7 @@ class LocalClient(object):
                     self._set_one(key, cvalue)
 
                 if decompress is not None:
-                    if isinstance(cvalue, basestring):
+                    if isinstance(cvalue, six.string_types):
                         value = decompress(cvalue)
                     else:
                         value = cvalue
@@ -709,7 +709,7 @@ class LocalClient(object):
         self._lock_acquire()
         try:
             for key, value in six.iteritems(d):
-                if isinstance(value, basestring):
+                if isinstance(value, six.string_types):
                     if len(value) >= self._value_limit:
                         # This value is too big, so don't cache it.
                         continue
@@ -754,7 +754,7 @@ class LocalClient(object):
                 del self._bucket1[key]
 
             if decompress is not None:
-                if isinstance(cvalue, basestring):
+                if isinstance(cvalue, six.string_types):
                     value = decompress(cvalue)
                 else:
                     value = cvalue
