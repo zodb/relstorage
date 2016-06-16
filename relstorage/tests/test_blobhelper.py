@@ -52,7 +52,7 @@ class BlobHelperTest(unittest.TestCase):
         return self._class()(*args, **kw)
 
     def _make_default(self, shared=True, cache_size=None,
-            download_action='write', keep_history=True):
+                      download_action='write', keep_history=True):
         test = self
 
         class DummyOptions:
@@ -178,10 +178,10 @@ class BlobHelperTest(unittest.TestCase):
             return
 
         obj = self._make_default(shared=False)
-        f = obj.openCommittedBlobFile(None, test_oid, test_tid)
-        if not PY3:
-            self.assertEqual(f.__class__, file)
-        self.assertEqual(f.read(), 'blob here')
+        with obj.openCommittedBlobFile(None, test_oid, test_tid) as f:
+            if not PY3:
+                self.assertEqual(f.__class__, file)
+            self.assertEqual(f.read(), b'blob here')
 
     def test_openCommittedBlobFile_as_blobfile(self):
         if not support_blob_cache:
@@ -191,9 +191,10 @@ class BlobHelperTest(unittest.TestCase):
         from ZODB.blob import Blob
         from ZODB.blob import BlobFile
         b = Blob()
-        f = obj.openCommittedBlobFile(None, test_oid, test_tid, blob=b)
-        self.assertEqual(f.__class__, BlobFile)
-        self.assertEqual(f.read(), 'blob here')
+        with obj.openCommittedBlobFile(None, test_oid, test_tid, blob=b) as f:
+            self.assertEqual(f.__class__, BlobFile)
+            self.assertEqual(f.read(), b'blob here')
+
 
     def test_openCommittedBlobFile_retry_as_file(self):
         if not support_blob_cache:
@@ -209,11 +210,11 @@ class BlobHelperTest(unittest.TestCase):
 
         obj = self._make_default(shared=False)
         loadBlob, obj.loadBlob = obj.loadBlob, loadBlob_wrapper
-        f = obj.openCommittedBlobFile(None, test_oid, test_tid)
-        self.assertEqual(loadBlob_calls, [1])
-        if not PY3:
-            self.assertEqual(f.__class__, file)
-        self.assertEqual(f.read(), 'blob here')
+        with obj.openCommittedBlobFile(None, test_oid, test_tid) as f:
+            self.assertEqual(loadBlob_calls, [1])
+            if not PY3:
+                self.assertEqual(f.__class__, file)
+            self.assertEqual(f.read(), b'blob here')
 
     def test_openCommittedBlobFile_retry_as_blobfile(self):
         if not support_blob_cache:
@@ -232,10 +233,10 @@ class BlobHelperTest(unittest.TestCase):
         from ZODB.blob import Blob
         from ZODB.blob import BlobFile
         b = Blob()
-        f = obj.openCommittedBlobFile(None, test_oid, test_tid, b)
-        self.assertEqual(loadBlob_calls, [1])
-        self.assertEqual(f.__class__, BlobFile)
-        self.assertEqual(f.read(), 'blob here')
+        with obj.openCommittedBlobFile(None, test_oid, test_tid, b) as f:
+            self.assertEqual(loadBlob_calls, [1])
+            self.assertEqual(f.__class__, BlobFile)
+            self.assertEqual(f.read(), b'blob here')
 
     def test_openCommittedBlobFile_retry_fail_on_shared(self):
         if not support_blob_cache:
@@ -257,7 +258,7 @@ class BlobHelperTest(unittest.TestCase):
         loadBlob, obj.loadBlob = obj.loadBlob, loadBlob_wrapper
         from ZODB.POSException import POSKeyError
         self.assertRaises(POSKeyError, obj.openCommittedBlobFile,
-            None, test_oid, test_tid)
+                          None, test_oid, test_tid)
         self.assertEqual(loadBlob_calls, [1])
 
     def test_storeBlob_shared(self):
@@ -273,11 +274,11 @@ class BlobHelperTest(unittest.TestCase):
         obj = self._make_default()
         self.assertFalse(obj.txn_has_blobs)
         obj.storeBlob(None, store_func, test_oid, test_tid, 'blob pickle',
-            fn, '', dummy_txn)
+                      fn, '', dummy_txn)
         self.assertFalse(os.path.exists(fn))
         self.assertTrue(obj.txn_has_blobs)
         self.assertEqual(called,
-            [(test_oid, test_tid, 'blob pickle', '', dummy_txn)])
+                         [(test_oid, test_tid, 'blob pickle', '', dummy_txn)])
 
     def test_storeBlob_unshared(self):
         if not support_blob_cache:
@@ -319,9 +320,9 @@ class BlobHelperTest(unittest.TestCase):
         obj = self._make_default()
         self.assertFalse(obj.txn_has_blobs)
         obj.storeBlob(None, store_func, test_oid, test_tid, 'blob pickle',
-            fn1, '', dummy_txn)
+                      fn1, '', dummy_txn)
         obj.storeBlob(None, store_func, test_oid, test_tid, 'blob pickle',
-            fn2, '', dummy_txn)
+                      fn2, '', dummy_txn)
         self.assertFalse(os.path.exists(fn1))
         self.assertFalse(os.path.exists(fn2))
         self.assertTrue(obj.txn_has_blobs)
@@ -413,13 +414,18 @@ class BlobHelperTest(unittest.TestCase):
         self.assertFalse(os.path.exists(fn2))
 
 
-def test_suite():
-    try:
-        import ZODB.blob
-    except ImportError as e:
-        # Disable these tests for ZODB < 3.8.
-        return unittest.TestSuite()
+def write_file(fn, data):
+    assert isinstance(data, str)
+    with open(fn, 'w') as f:
+        f.write(data)
 
+
+def read_file(fn):
+    with open(fn, 'r') as f:
+        return f.read()
+
+
+def test_suite():
     suite = unittest.TestSuite()
     for klass in [
             IsBlobRecordTest,
@@ -429,18 +435,5 @@ def test_suite():
 
     return suite
 
-
-def write_file(fn, data):
-    f = open(fn, 'wb')
-    try:
-        f.write(data)
-    finally:
-        f.close()
-
-
-def read_file(fn):
-    f = open(fn, 'rb')
-    try:
-        return f.read()
-    finally:
-        f.close()
+if __name__ == '__main__':
+    unittest.main(defaultTest='test_suite')

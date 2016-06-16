@@ -293,11 +293,8 @@ class BlobHelper(object):
                 continue
 
             new_fn = self.fshelper.getBlobFilename(oid, tid)
-            orig = open(orig_fn, 'r')
-            new = open(new_fn, 'wb')
-            ZODB.utils.cp(orig, new)
-            orig.close()
-            new.close()
+            with open(orig_fn, 'rb') as orig, open(new_fn, 'wb') as new:
+                ZODB.utils.cp(orig, new)
 
             self._add_blob_to_transaction(oid, new_fn)
 
