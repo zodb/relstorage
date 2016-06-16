@@ -52,16 +52,13 @@ import logging
 try:
     import MySQLdb
 except ImportError:
-    import sys
-    t, v, tb = sys.exc_info()
     try:
         import pymysql
         pymysql.install_as_MySQLdb()
         import MySQLdb
     except ImportError:
-        raise t, v, tb
-    else:
-        del t, v, tb
+        raise ImportError("Unable to import MySQLdb or pymysql")
+
 from zope.interface import implementer
 
 from relstorage.adapters.connmanager import AbstractConnectionManager

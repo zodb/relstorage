@@ -11,6 +11,8 @@
 # FOR A PARTICULAR PURPOSE.
 #
 ##############################################################################
+"""PostgreSQL adapter for RelStorage."""
+
 from perfmetrics import metricmethod
 from relstorage.adapters.connmanager import AbstractConnectionManager
 from relstorage.adapters.dbiter import HistoryFreeDatabaseIterator
@@ -33,19 +35,16 @@ import logging
 try:
     import psycopg2
 except ImportError:
-    import sys
-    t, v, tb = sys.exc_info()
     try:
         import psycopg2cffi.compat
         psycopg2cffi.compat.register()
         import psycopg2
     except ImportError:
-        raise t, v, tb
-    else:
-        del t, v, tb
+        raise ImportError("Unable to import psycopg2 or psycopg2cffi")
+
 import psycopg2.extensions
 import re
-"""PostgreSQL adapter for RelStorage."""
+
 
 
 
