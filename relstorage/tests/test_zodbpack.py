@@ -30,7 +30,7 @@ class ZODBPackScriptTests(unittest.TestCase):
         """ % self.db_fn
 
         fd, self.cfg_fn = tempfile.mkstemp()
-        os.write(fd, cfg)
+        os.write(fd, cfg.encode('ascii'))
         os.close(fd)
 
     def tearDown(self):
@@ -53,7 +53,7 @@ class ZODBPackScriptTests(unittest.TestCase):
         conn = db.open()
         conn.root()['x'] = 1
         transaction.commit()
-        oid = '\0' * 8
+        oid = b'\0' * 8
         state, serial = storage.load(oid, '')
         time.sleep(0.1)
         conn.root()['x'] = 2
@@ -83,7 +83,7 @@ class ZODBPackScriptTests(unittest.TestCase):
         conn = db.open()
         conn.root()['x'] = 1
         transaction.commit()
-        oid = '\0' * 8
+        oid = b'\0' * 8
         state, serial = storage.load(oid, '')
         time.sleep(0.1)
         conn.root()['x'] = 2
@@ -105,3 +105,6 @@ def test_suite():
     suite = unittest.TestSuite()
     suite.addTest(unittest.makeSuite(ZODBPackScriptTests))
     return suite
+
+if __name__ == '__main__':
+    unittest.main(defaultTest='test_suite')
