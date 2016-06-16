@@ -24,6 +24,7 @@ import logging
 import time
 
 from relstorage._compat import db_binary_to_bytes
+from relstorage._compat import mysql_connection
 
 log = logging.getLogger(__name__)
 
@@ -139,7 +140,7 @@ class PackUndo(object):
             sleep = time.sleep
         delay = self.options.pack_commit_busy_delay
         while not self.locker.hold_commit_lock(cursor, nowait=True):
-            cursor.connection.rollback()
+            mysql_connection(cursor).rollback()
             log.debug('pack: commit lock busy, sleeping %.4g second(s)', delay)
             sleep(delay)
 

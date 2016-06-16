@@ -22,6 +22,7 @@
 from perfmetrics import metricmethod
 from relstorage.adapters.interfaces import IOIDAllocator
 from zope.interface import implementer
+from relstorage._compat import mysql_connection
 
 @implementer(IOIDAllocator)
 class PostgreSQLOIDAllocator(object):
@@ -58,7 +59,8 @@ class MySQLOIDAllocator(object):
         """Return a sequence of new, unused OIDs."""
         stmt = "INSERT INTO new_oid VALUES ()"
         cursor.execute(stmt)
-        n = cursor.connection.insert_id()
+        conn = mysql_connection(cursor)
+        n = conn.insert_id()
         if n % 100 == 0:
             # Clean out previously generated OIDs.
             stmt = "DELETE FROM new_oid WHERE zoid < %s"

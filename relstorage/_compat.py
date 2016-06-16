@@ -75,6 +75,18 @@ def db_binary_to_bytes(data):
     return data
 
 
+# mysqlclient, a binary driver that works for Py2, Py3 and
+# PyPy (claimed), uses a connection that is a weakref. MySQLdb
+# and PyMySQL use a hard reference
+from weakref import ref as _wref
+def mysql_connection(cursor):
+    conn = cursor.connection
+    if isinstance(conn, _wref):
+        conn = conn()
+    return conn
+
+
+
 from ZODB._compat import BytesIO
 StringIO = BytesIO
 
