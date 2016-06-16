@@ -1,5 +1,11 @@
+from __future__ import print_function, absolute_import
+
 import cgi
-import urlparse
+try:
+    from urllib import parse as urlparse
+except ImportError:
+    # Py2
+    import urlparse
 from ZODB.DemoStorage import DemoStorage
 
 from relstorage.options import Options

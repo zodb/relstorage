@@ -35,7 +35,6 @@ from relstorage.options import Options
 from zope.interface import implementer
 import ZODB.interfaces
 import base64
-import cPickle
 import logging
 import os
 import tempfile
@@ -43,6 +42,7 @@ import threading
 import time
 import weakref
 from relstorage import _compat as six
+from relstorage._compat import dumps, loads
 
 try:
     from ZODB.interfaces import StorageStopIteration
@@ -708,7 +708,7 @@ class RelStorage(
             desc = str(transaction.description)
             ext = transaction._extension
             if ext:
-                ext = cPickle.dumps(ext, 1)
+                ext = dumps(ext, 1)
             else:
                 ext = ""
             self._ude = user, desc, ext
@@ -1046,7 +1046,7 @@ class RelStorage(
                      'user_name': user or '',
                      'description': desc or ''}
                 if ext:
-                    d.update(cPickle.loads(ext))
+                    d.update(loads(ext))
                 if filter is None or filter(d):
                     if i >= first:
                         res.append(d)
@@ -1077,7 +1077,7 @@ class RelStorage(
             for tid_int, username, description, extension, length in rows:
                 tid = p64(tid_int)
                 if extension:
-                    d = cPickle.loads(extension)
+                    d = loads(extension)
                 else:
                     d = {}
                 d.update({"time": TimeStamp(tid).timeTime(),
@@ -1569,14 +1569,15 @@ class RelStorageTransactionRecord(TransactionRecord):
     def __init__(self, trans_iter, tid_int, user, desc, ext, packed):
         self._trans_iter = trans_iter
         self._tid_int = tid_int
-        self.tid = p64(tid_int)
-        self.status = packed and 'p' or ' '
-        self.user = user or ''
-        self.description = desc or ''
+        tid = p64(tid_int)
+        status = packed and 'p' or ' '
+        user = user or ''
+        description = desc or ''
         if ext:
-            self.extension = cPickle.loads(ext)
+            extension = loads(ext)
         else:
-            self.extension = {}
+            extension = {}
+        TransactionRecord.__init__(self, tid, status, user, description, extension)
 
     # maintain compatibility with the old (ZODB 3.8 and below) name of
     # the extension attribute.
@@ -1618,6 +1619,8 @@ class RecordIterator(object):
         res = Record(self.tid, *params)
         self._index += 1
         return res
+
+    __next__ = next
 
 
 class Record(DataRecord):

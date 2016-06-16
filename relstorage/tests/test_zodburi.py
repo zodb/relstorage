@@ -117,7 +117,7 @@ class TestEntryPoints(unittest.TestCase):
             except DistributionNotFound as e:
                 import warnings
                 warnings.warn('%s not found, skipping the zodburi test for %s'%
-                              (e[0], name))
+                              (e.args[0], name))
 
 def test_suite():
     suite = unittest.TestSuite()

@@ -47,4 +47,4 @@ else:
 from ZODB._compat import BytesIO
 StringIO = BytesIO
 
-from ZODB._compat import dumps
+from ZODB._compat import dumps, loads
