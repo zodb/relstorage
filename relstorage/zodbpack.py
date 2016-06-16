@@ -15,7 +15,7 @@
 """ZODB storage packing utility.
 """
 
-from relstorage._compat import StringIO
+from io import StringIO
 import logging
 import optparse
 import sys
@@ -23,7 +23,7 @@ import time
 import ZConfig
 import ZODB.serialize
 
-schema_xml = b"""
+schema_xml = u"""
 <schema>
   <import package="ZODB"/>
   <import package="relstorage"/>
