@@ -53,7 +53,7 @@ if PY3:
     # buffer on Py3/Py2, respectively, for bytea columns
     _db_binary_types = (memoryview,)
     def bytes_to_pg_binary(data):
-        # bytes under Py2 is perfectly acceptable
+        # bytes under Py3 is perfectly acceptable
         return data
 else:
     _db_binary_types = (memoryview, buffer)
@@ -62,7 +62,10 @@ else:
     try:
         from psycopg2 import Binary as _psyBinary
     except ImportError:
-        bytes_to_pg_binary = memoryview
+        # On PyPy and/or with psycopg2cffi up through at least
+        # 2.6, we must use buffer, not memoryview. otherwise the string
+        # representation of the wrong thing gets passed to the DB.
+        bytes_to_pg_binary = buffer
     else:
         bytes_to_pg_binary = _psyBinary
 
