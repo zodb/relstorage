@@ -32,8 +32,10 @@ else:
 
 if PY3:
     string_types = (str,)
+    unicode = str
 else:
     string_types = (basestring,)
+    unicode = unicode
 
 
 # Functions

@@ -22,6 +22,7 @@ import logging
 import random
 import threading
 from relstorage import _compat as six
+from relstorage._compat import unicode
 
 log = logging.getLogger(__name__)
 
@@ -163,7 +164,7 @@ class StorageCache(object):
             #   wrong tid in delta_after*.
             cp0, cp1 = self.checkpoints
             import os
-            import thread
+            import threading
             raise AssertionError("Detected an inconsistency "
                 "between the RelStorage cache and the database "
                 "while loading an object using the delta_after0 dict.  "
@@ -185,7 +186,7 @@ class StorageCache(object):
                     'lda0': len(self.delta_after0),
                     'lda1': len(self.delta_after1),
                     'pid': os.getpid(),
-                    'thread_ident': thread.get_ident(),
+                    'thread_ident': threading.current_thread(),
                 })
 
     def load(self, cursor, oid_int):
@@ -234,7 +235,7 @@ class StorageCache(object):
                 cursor, oid_int)
             self._check_tid_after_load(oid_int, actual_tid_int, tid_int)
 
-            cache_data = '%s%s' % (p64(tid_int), state or '')
+            cache_data = p64(tid_int) + (state or b'')
             for client in self.clients_local_first:
                 client.set(cachekey, cache_data)
             return state, tid_int
@@ -284,7 +285,7 @@ class StorageCache(object):
         state, tid_int = self.adapter.mover.load_current(cursor, oid_int)
         if tid_int:
             self._check_tid_after_load(oid_int, tid_int)
-            cache_data = '%s%s' % (p64(tid_int), state or '')
+            cache_data = p64(tid_int) + (state or b'')
             for client in self.clients_local_first:
                 client.set(cp0_key, cache_data)
         return state, tid_int
@@ -301,7 +302,7 @@ class StorageCache(object):
         Typically, we can't actually cache the object yet, because its
         transaction ID is not yet chosen.
         """
-        assert isinstance(state, str)
+        assert isinstance(state, bytes)
         queue = self.queue
         queue.seek(0, 2)  # seek to end
         startpos = queue.tell()
@@ -320,7 +321,7 @@ class StorageCache(object):
         # file is large and needs to be read sequentially from disk.
         items = [
             (startpos, endpos, oid_int)
-            for (oid_int, (startpos, endpos)) in self.queue_contents.items()
+            for (oid_int, (startpos, endpos)) in six.iteritems(self.queue_contents)
             ]
         items.sort()
 
@@ -337,7 +338,7 @@ class StorageCache(object):
                     client.set_multi(to_send)
                 to_send.clear()
                 send_size = 0
-            to_send[cachekey] = '%s%s' % (tid, state)
+            to_send[cachekey] = tid + state
             send_size += item_size
 
         if to_send:
@@ -454,6 +455,8 @@ class StorageCache(object):
                 # self.delta_after0 in case the cache is offline.
                 cache_data = '%d %d' % self.checkpoints
                 log.debug("Reinstating checkpoints: %s", cache_data)
+
+            cache_data = cache_data.encode("ascii")
             for client in self.clients_global_first:
                 client.set(self.checkpoints_key, cache_data)
 
@@ -554,6 +557,9 @@ class StorageCache(object):
         else:
             # shift the existing checkpoints
             change_to = '%d %d' % (tid_int, cp0)
+        expect = expect.encode('ascii')
+        change_to = change_to.encode('ascii')
+
         for client in self.clients_global_first:
             old_value = client.get(self.checkpoints_key)
             if old_value:
@@ -563,14 +569,14 @@ class StorageCache(object):
             # Although this is a race with other instances, the race
             # should not matter.
             log.debug("Shifting checkpoints to: %s. len(delta_after0) == %d.",
-                change_to, len(self.delta_after0))
+                      change_to, len(self.delta_after0))
             for client in self.clients_global_first:
                 client.set(self.checkpoints_key, change_to)
             # The poll code will later see the new checkpoints
             # and update self.checkpoints and self.delta_after(0|1).
         else:
             log.debug("Checkpoints already shifted to %s. "
-                "len(delta_after0) == %d.", old_value, len(self.delta_after0))
+                      "len(delta_after0) == %d.", old_value, len(self.delta_after0))
 
 
 class SizeOverflow(Exception):
@@ -583,9 +589,9 @@ class LocalClientBucket(dict):
     """
 
     def __init__(self, limit):
+        dict.__init__(self)
         self.size = 0
         self.limit = limit
-        self._super = super(LocalClientBucket, self)
 
     def __setitem__(self, key, value):
         """Set an item.
@@ -593,27 +599,29 @@ class LocalClientBucket(dict):
         Throws SizeOverflow if the new item would cause this map to
         surpass its memory limit.
         """
-        if isinstance(value, six.string_types):
+        assert not isinstance(value, unicode)
+        if isinstance(value, bytes):
+            # XXX PY3: Why do we accept non-bytes?
             sizedelta = len(value)
         else:
             sizedelta = 0
         if key in self:
             oldvalue = self[key]
-            if isinstance(oldvalue, six.string_types):
+            if isinstance(oldvalue, bytes):
                 sizedelta -= len(oldvalue)
         else:
             sizedelta += len(key)
         if self.size + sizedelta > self.limit:
             raise SizeOverflow()
-        self._super.__setitem__(key, value)
+        dict.__setitem__(key, value)
         self.size += sizedelta
         return True
 
     def __delitem__(self, key):
         oldvalue = self[key]
-        self._super.__delitem__(key)
+        dict.__delitem__(key)
         sizedelta = len(key)
-        if isinstance(oldvalue, six.string_types):
+        if isinstance(oldvalue, bytes):
             sizedelta += len(oldvalue)
         self.size -= sizedelta
 
@@ -667,7 +675,8 @@ class LocalClient(object):
                     self._set_one(key, cvalue)
 
                 if decompress is not None:
-                    if isinstance(cvalue, six.string_types):
+                    # XXX: PY3: When would we have non-bytes? Why would we?
+                    if isinstance(cvalue, bytes):
                         value = decompress(cvalue)
                     else:
                         value = cvalue
@@ -709,7 +718,11 @@ class LocalClient(object):
         self._lock_acquire()
         try:
             for key, value in six.iteritems(d):
-                if isinstance(value, six.string_types):
+                # XXX PY3 Shouldn't we assert isinstance(bytes)?
+                # Why do we allow non-bytes values? Do we use them outside
+                # of tests?
+                # On Py2, this used to check basestring
+                if isinstance(value, bytes):
                     if len(value) >= self._value_limit:
                         # This value is too big, so don't cache it.
                         continue
@@ -717,7 +730,6 @@ class LocalClient(object):
                         cvalue = compress(value)
                     else:
                         cvalue = value
-
                 else:
                     cvalue = value
 
@@ -754,7 +766,7 @@ class LocalClient(object):
                 del self._bucket1[key]
 
             if decompress is not None:
-                if isinstance(cvalue, six.string_types):
+                if isinstance(cvalue, bytes):
                     value = decompress(cvalue)
                 else:
                     value = cvalue

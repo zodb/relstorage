@@ -234,7 +234,7 @@ class BlobHelper(object):
         return self.fshelper.temp_dir
 
     def storeBlob(self, cursor, store_func,
-            oid, serial, data, blobfilename, version, txn):
+                  oid, serial, data, blobfilename, version, txn):
         """Storage API: store a blob object."""
         assert not version
 
