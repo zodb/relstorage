@@ -98,7 +98,7 @@ class ZConfigTests:
             self.assertEqual(storage.getName(), "xyz")
             adapter = storage._adapter
             from relstorage.adapters.mysql import MySQLAdapter
-            self.assert_(isinstance(adapter, MySQLAdapter))
+            self.assertIsInstance(adapter, MySQLAdapter)
             self.assertEqual(adapter._params, {
                 'passwd': 'relstoragetest',
                 'db': dbname,

@@ -96,7 +96,7 @@ class ZConfigTests:
             self.assertEqual(storage.getName(), "xyz")
             adapter = storage._adapter
             from relstorage.adapters.postgresql import PostgreSQLAdapter
-            self.assert_(isinstance(adapter, PostgreSQLAdapter))
+            self.assertIsInstance(adapter, PostgreSQLAdapter)
             self.assertEqual(adapter._dsn, dsn)
             self.assertEqual(adapter.keep_history, self.keep_history)
             self.assertEqual(

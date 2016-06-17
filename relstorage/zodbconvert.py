@@ -21,12 +21,12 @@ from __future__ import print_function
 import logging
 import optparse
 from persistent.TimeStamp import TimeStamp
-from ZODB._compat import BytesIO as StringIO
+from io import StringIO
 import sys
 import ZConfig
-from ZODB.utils import p64, u64, z64, readable_tid_repr
+from ZODB.utils import p64, u64, readable_tid_repr
 
-schema_xml = b"""
+schema_xml = u"""
 <schema>
   <import package="ZODB"/>
   <import package="relstorage"/>

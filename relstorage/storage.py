@@ -34,7 +34,6 @@ from relstorage.cache import StorageCache
 from relstorage.options import Options
 from zope.interface import implementer
 import ZODB.interfaces
-import base64
 import logging
 import os
 import tempfile
@@ -44,6 +43,8 @@ import weakref
 
 from relstorage._compat import iterkeys, iteritems
 from relstorage._compat import dumps, loads
+from relstorage._compat import base64_encodebytes
+from relstorage._compat import base64_decodebytes
 
 try:
     from ZODB.interfaces import StorageStopIteration
@@ -1060,7 +1061,7 @@ class RelStorage(
                 # meaning bytes. But code in the wild and the ZODB test suite
                 # sets them as native strings, meaning unicode on Py3. OTOH, the
                 # test suite checks that this method *returns* them as bytes!
-                d = {'id': base64.encodestring(tid)[:-1],
+                d = {'id': base64_encodebytes(tid)[:-1],
                      'time': TimeStamp(tid).timeTime(),
                      'user_name':  user or b'',
                      'description': desc or b''}
@@ -1130,7 +1131,7 @@ class RelStorage(
         if transaction is not self._transaction:
             raise POSException.StorageTransactionError(self, transaction)
 
-        undo_tid = base64.decodestring(transaction_id + b'\n')
+        undo_tid = base64_decodebytes(transaction_id + b'\n')
         assert len(undo_tid) == 8
         undo_tid_int = u64(undo_tid)
 

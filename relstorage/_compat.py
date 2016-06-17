@@ -5,7 +5,8 @@ Compatibility shims.
 """
 
 from __future__ import print_function, absolute_import, division
-__docformat__ = "restructuredtext en"
+
+# pylint:disable=unused-import
 
 import sys
 PY3 = sys.version_info[0] == 3
@@ -42,9 +43,13 @@ else:
 if PY3:
     xrange = range
     intern = sys.intern
+    from base64 import encodebytes as base64_encodebytes
+    from base64 import decodebytes as base64_decodebytes
 else:
     xrange = xrange
     intern = intern
+    from base64 import encodestring as base64_encodebytes
+    from base64 import decodestring as base64_decodebytes
 
 # Database types
 
@@ -90,4 +95,8 @@ def mysql_connection(cursor):
 from ZODB._compat import BytesIO
 StringIO = BytesIO
 
+# XXX: This is a private module in ZODB, but it has a lot
+# of knowledge about how to choose the right implementation
+# based on Python version and implementation. We at least
+# centralize the import from here.
 from ZODB._compat import dumps, loads
