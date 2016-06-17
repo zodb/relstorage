@@ -29,7 +29,7 @@ from perfmetrics import Metric
 from perfmetrics import metricmethod
 from persistent.TimeStamp import TimeStamp
 from relstorage.blobhelper import BlobHelper
-from relstorage.blobhelper import is_blob_record
+from ZODB.blob import is_blob_record
 from relstorage.cache import StorageCache
 from relstorage.options import Options
 from zope.interface import implementer
@@ -41,7 +41,8 @@ import tempfile
 import threading
 import time
 import weakref
-from relstorage import _compat as six
+
+from relstorage._compat import iterkeys, iteritems
 from relstorage._compat import dumps, loads
 
 try:
@@ -903,9 +904,9 @@ class RelStorage(
         tid_int = u64(self._tid)
 
         if self._txn_check_serials:
-            oid_ints = [u64(oid) for oid in six.iterkeys(self._txn_check_serials)]
+            oid_ints = [u64(oid) for oid in iterkeys(self._txn_check_serials)]
             current = self._adapter.mover.current_object_tids(cursor, oid_ints)
-            for oid, expect in six.iteritems(self._txn_check_serials):
+            for oid, expect in iteritems(self._txn_check_serials):
                 oid_int = u64(oid)
                 actual = p64(current.get(oid_int, 0))
                 if actual != expect:

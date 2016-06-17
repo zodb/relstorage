@@ -77,7 +77,7 @@ from relstorage.adapters.scriptrunner import ScriptRunner
 from relstorage.adapters.stats import MySQLStats
 from relstorage.adapters.txncontrol import MySQLTransactionControl
 from relstorage.options import Options
-from relstorage import _compat as six
+from relstorage._compat import iteritems
 log = logging.getLogger(__name__)
 
 # disconnected_exceptions contains the exception types that might be
@@ -122,12 +122,12 @@ try:
     if hasattr(pymysql.converters, 'escape_string'):
         orig_escape_string = pymysql.converters.escape_string
         def escape_string(value, mapping=None):
-            if isinstance(value, bytearray) and not(value):
+            if isinstance(value, bytearray) and not value:
                 return value
             return orig_escape_string(value, mapping)
         pymysql.converters.escape_string = escape_string
 except ImportError:
-	pass
+    pass
 
 @implementer(IRelStorageAdapter)
 class MySQLAdapter(object):
@@ -218,8 +218,7 @@ class MySQLAdapter(object):
         p = self._params.copy()
         if 'passwd' in p:
             del p['passwd']
-        p = six.list_items(p)
-        p.sort()
+        p = sorted(iteritems(p))
         parts.extend('%s=%r' % item for item in p)
         return ", ".join(parts)
 

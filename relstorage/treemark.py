@@ -11,7 +11,7 @@ import BTrees
 import collections
 import gc
 import logging
-from relstorage import _compat as six
+from relstorage._compat import iteritems
 
 
 IIunion32 = BTrees.family32.II.union
@@ -118,7 +118,7 @@ class TreeMarker(object):
         reachable = self._reachable
         lo = self.lo
 
-        for oid_hi, oids_lo in six.iteritems(this_pass):
+        for oid_hi, oids_lo in iteritems(this_pass):
             from_reachable_set = reachable[oid_hi]
 
             for oid_lo in oids_lo:
@@ -134,7 +134,7 @@ class TreeMarker(object):
                     continue
 
                 # Add the children of this OID to next_pass.
-                for to_oid_hi, s in six.iteritems(refs[oid_hi]):
+                for to_oid_hi, s in iteritems(refs[oid_hi]):
                     min_key = oid_lo << 32
                     max_key = min_key | 0xffffffff
                     keys = s.keys(min=min_key, max=max_key)
@@ -158,7 +158,7 @@ class TreeMarker(object):
     @property
     def reachable(self):
         """Iterate over all the reachable OIDs."""
-        for oid_hi, oids_lo in six.iteritems(self._reachable):
+        for oid_hi, oids_lo in iteritems(self._reachable):
             for oid_lo in oids_lo:
                 # Decode the OID.
                 yield oid_hi | oid_lo

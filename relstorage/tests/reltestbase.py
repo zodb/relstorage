@@ -328,22 +328,22 @@ class GenericRelStorageTests(
             # A commit count *might* be cached depending on the ZODB version.
             self.assertTrue('zzz:checkpoints' in fakecache.data)
             self.assertEqual(sorted(fakecache.data.keys())[-1][:10],
-                'zzz:state:')
+                             'zzz:state:')
             r1['alpha'] = PersistentMapping()
             transaction.commit()
-            self.assertEqual(len(six.list_keys(fakecache.data)), 5)
+            self.assertEqual(len(fakecache.data), 5)
 
             oid = r1['alpha']._p_oid
-            got, serial = c1._storage.load(oid, '')
+            c1._storage.load(oid, '')
             # another state should now be cached
-            self.assertEqual(len(six.list_keys(fakecache.data)), 5)
+            self.assertEqual(len(fakecache.data), 5)
 
             # make a change
             r1['beta'] = 0
             transaction.commit()
-            self.assertEqual(len(six.list_keys(fakecache.data)), 6)
+            self.assertEqual(len(fakecache.data), 6)
 
-            got, serial = c1._storage.load(oid, '')
+            c1._storage.load(oid, '')
 
             # try to load an object that doesn't exist
             self.assertRaises(KeyError, c1._storage.load, b'bad.oid.', '')

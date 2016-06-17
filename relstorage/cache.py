@@ -21,7 +21,8 @@ from ZODB.TimeStamp import TimeStamp
 import logging
 import random
 import threading
-from relstorage import _compat as six
+from relstorage._compat import string_types
+from relstorage._compat import iteritems
 from relstorage._compat import unicode
 
 log = logging.getLogger(__name__)
@@ -74,7 +75,7 @@ class StorageCache(object):
             module_name = options.cache_module_name
             module = __import__(module_name, {}, {}, ['Client'])
             servers = options.cache_servers
-            if isinstance(servers, six.string_types):
+            if isinstance(servers, string_types):
                 servers = servers.split()
             self.clients_local_first.append(module.Client(servers))
 
@@ -108,7 +109,7 @@ class StorageCache(object):
         if self.options.share_local_cache:
             local_client = self.clients_local_first[0]
             return StorageCache(self.adapter, self.options, self.prefix,
-                local_client)
+                                local_client)
         else:
             return StorageCache(self.adapter, self.options, self.prefix)
 
@@ -321,7 +322,7 @@ class StorageCache(object):
         # file is large and needs to be read sequentially from disk.
         items = [
             (startpos, endpos, oid_int)
-            for (oid_int, (startpos, endpos)) in six.iteritems(self.queue_contents)
+            for (oid_int, (startpos, endpos)) in iteritems(self.queue_contents)
             ]
         items.sort()
 
@@ -517,7 +518,7 @@ class StorageCache(object):
                     change_dict[oid_int] = tid_int
 
                 # Put the changes in new_delta_after*.
-                for oid_int, tid_int in six.iteritems(change_dict):
+                for oid_int, tid_int in iteritems(change_dict):
                     if tid_int > cp0:
                         new_delta_after0[oid_int] = tid_int
                     elif tid_int > cp1:
@@ -717,7 +718,7 @@ class LocalClient(object):
         compress = self._compress
         self._lock_acquire()
         try:
-            for key, value in six.iteritems(d):
+            for key, value in iteritems(d):
                 # XXX PY3 Shouldn't we assert isinstance(bytes)?
                 # Why do we allow non-bytes values? Do we use them outside
                 # of tests?

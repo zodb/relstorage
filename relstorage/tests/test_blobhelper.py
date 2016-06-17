@@ -12,9 +12,10 @@ test_tid = b'\0' * 7 + b'\x02'
 
 
 class IsBlobRecordTest(unittest.TestCase):
-
+    # XXX: This test can go away, was only for older
+    # ZODB < 3.8
     def _call(self, *args, **kw):
-        from relstorage.blobhelper import is_blob_record
+        from ZODB.blob import is_blob_record
         return is_blob_record(*args, **kw)
 
     def test_true(self):

@@ -10,7 +10,7 @@ from ZODB.DemoStorage import DemoStorage
 
 from relstorage.options import Options
 from relstorage.storage import RelStorage
-from relstorage import _compat as six
+
 
 #################################################
 # Utility to interpret inputs, talen from zodburi
@@ -105,7 +105,7 @@ class PostgreSQLAdapterHelper(Resolver):
         ]
 
         kw, unused = self.interpret_kwargs(kw)
-        dsn_args.extend(six.list_items(kw))
+        dsn_args.extend(kw.items())
 
         dsn = ' '.join("%s='%s'"%arg for arg in dsn_args)
 

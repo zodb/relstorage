@@ -16,7 +16,7 @@
 # This is copied from ZODB.tests.RecoveryStorage and expanded to fit
 # history-free storages.
 
-from relstorage.blobhelper import is_blob_record
+from ZODB.blob import is_blob_record
 from transaction import Transaction
 from ZODB import DB
 from ZODB.serialize import referencesf
@@ -24,14 +24,16 @@ from ZODB.tests.StorageTestBase import handle_serials
 from ZODB.tests.StorageTestBase import MinPO
 from ZODB.tests.StorageTestBase import snooze
 from ZODB.tests.StorageTestBase import zodb_pickle
-from ZODB.tests.StorageTestBase import zodb_unpickle
+
 import itertools
 import time
 import transaction
 import ZODB.POSException
-from relstorage import _compat as six
 
-if not six.PY3:
+from relstorage._compat import PY3
+from relstorage._compat import iteritems
+
+if not PY3:
     zip = itertools.izip
 
 class IteratorDeepCompare:
@@ -70,11 +72,10 @@ class IteratorDeepCompare:
             recs1 = dict([(r.oid, r) for r in txn1])
             recs2 = dict([(r.oid, r) for r in txn2])
             eq(len(recs1), len(recs2))
-            recs1 = six.list_items(recs1)
-            recs1.sort()
-            recs2 = six.list_items(recs2)
+            recs1 = sorted(iteritems(recs1))
+            recs2 = sorted(iteritems(recs2))
             recs2.sort()
-            for (oid1, rec1), (oid2, rec2) in zip(recs1, recs2):
+            for (_oid1, rec1), (_oid2, rec2) in zip(recs1, recs2):
                 eq(rec1.oid, rec2.oid)
                 eq(rec1.tid, rec2.tid)
                 eq(rec1.data, rec2.data)
@@ -298,8 +299,8 @@ class UndoableRecoveryStorage(BasicRecoveryStorage):
         transaction.commit()
 
         r = db.open().root()
-        self.assertEquals(r["obj1"].x, 'x1')
-        self.assertEquals(r["obj2"].x, 'x2')
+        self.assertEqual(r["obj1"].x, 'x1')
+        self.assertEqual(r["obj2"].x, 'x2')
 
         # Dirty tricks.
         if is_filestorage:
@@ -327,8 +328,8 @@ class UndoableRecoveryStorage(BasicRecoveryStorage):
             # transaction.  Without the patch, the second assert failed
             # (it claimed it couldn't find a data record for obj2) on my
             # box, but other failure modes were possible.
-            self.assert_(self._storage._data_find(pos, obj1_oid, '') > 0)
-            self.assert_(self._storage._data_find(pos, obj2_oid, '') > 0)
+            self.assertTrue(self._storage._data_find(pos, obj1_oid, '') > 0)
+            self.assertTrue(self._storage._data_find(pos, obj2_oid, '') > 0)
 
             # The offset of the next ("redo") transaction.
             pos = self._storage.getSize()
@@ -349,8 +350,8 @@ class UndoableRecoveryStorage(BasicRecoveryStorage):
         if is_filestorage:
             # Again _data_find should find both objects in this txn, and
             # again the second assert failed on my box.
-            self.assert_(self._storage._data_find(pos, obj1_oid, '') > 0)
-            self.assert_(self._storage._data_find(pos, obj2_oid, '') > 0)
+            self.assertTrue(self._storage._data_find(pos, obj1_oid, '') > 0)
+            self.assertTrue(self._storage._data_find(pos, obj2_oid, '') > 0)
 
         # Indirectly provoke .restore().  .restore in turn indirectly
         # provokes _data_find too, but not usefully for the purposes of

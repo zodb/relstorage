@@ -17,8 +17,7 @@ from relstorage.adapters.interfaces import IScriptRunner
 from zope.interface import implementer
 import logging
 import re
-import sys
-from relstorage import _compat as six
+from relstorage._compat import iteritems
 from relstorage._compat import intern
 
 log = logging.getLogger(__name__)
@@ -56,7 +55,7 @@ class ScriptRunner(object):
             cursor.execute(stmt, generic_params)
         except:
             log.warning("script statement failed: %r; parameters: %r",
-                stmt, generic_params)
+                        stmt, generic_params)
             raise
 
     def run_script(self, cursor, script, params=()):
@@ -121,7 +120,7 @@ class OracleScriptRunner(ScriptRunner):
             stmt = generic_stmt % tracker
             used = tracker.used
             params = {}
-            for k, v in six.iteritems(generic_params):
+            for k, v in iteritems(generic_params):
                 if k in used:
                     params[k] = v
         else:
@@ -132,7 +131,7 @@ class OracleScriptRunner(ScriptRunner):
             cursor.execute(stmt, params)
         except:
             log.warning("script statement failed: %r; parameters: %r",
-                stmt, params)
+                        stmt, params)
             raise
 
     def run_many(self, cursor, stmt, items):
@@ -142,7 +141,7 @@ class OracleScriptRunner(ScriptRunner):
         """
         # replace '%s' with ':n'
         matches = []
-        def replace(match):
+        def replace(_match):
             matches.append(None)
             return ':%d' % len(matches)
         stmt = intern(re.sub('%s', replace, stmt))

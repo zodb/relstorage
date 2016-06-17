@@ -18,7 +18,7 @@
 # setup.py, so the code below is a hack.  TODO: Bring this up on zodb-dev.
 
 from __future__ import absolute_import
-from relstorage import _compat as six
+from relstorage._compat import iteritems
 default_strict_tpc = False
 
 from ZEO.zrpc.connection import Connection as __Connection
@@ -73,7 +73,7 @@ class Options(object):
         # simulating disconnected caches in tests.
         self.share_local_cache = True
 
-        for key, value in six.iteritems(kwoptions):
+        for key, value in iteritems(kwoptions):
             if key in self.__dict__:
                 setattr(self, key, value)
             else:
