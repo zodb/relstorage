@@ -1,21 +1,26 @@
 [run]
 source = relstorage
-omit = relstorage/tests/*
+omit =
+     relstorage/tests/*
+     relstorage/adapters/tests/*
+     # Omit the main oracle adapter file since we don't test it at all
+     relstorage/adapters/oracle.py
 
 [report]
-# Coverage is run on Linux under cPython 2, so
-# exclude branches that are windows specific or pypy/python3
+# Coverage is run on Linux under cPython 2 and 3,
+# against MySQL and PostgreSQL, so
+# exclude branches that are windows, pypy or oracle
 # specific
 exclude_lines =
     pragma: no cover
     def __repr__
     raise AssertionError
     raise NotImplementedError
-    except ImportError:
     if __name__ == .__main__.:
     if PYPY:
-    if PY3:
     if sys.platform == 'win32':
     if mswindows:
     if is_windows:
-    if sys.version_info.*>=.*3
+    def oracle_
+    class CXOracle
+    class Oracle
