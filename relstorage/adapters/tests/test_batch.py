@@ -166,7 +166,7 @@ class PostgreSQLRowBatcherTests(unittest.TestCase):
         return PostgreSQLRowBatcher
 
     def test_insert_postgresql_8_1(self):
-        class MockVersionDetector:
+        class MockVersionDetector(object):
             def get_version(self, cursor):
                 return (8, 1)
         cursor = MockCursor()
@@ -243,7 +243,7 @@ class OracleRowBatcherTests(unittest.TestCase):
             ])
 
     def test_insert_one_raw_row(self):
-        class MockRawType:
+        class MockRawType(object):
             pass
         cursor = MockCursor()
         batcher = self.getClass()(cursor, {'rawdata': MockRawType})
@@ -262,7 +262,7 @@ class OracleRowBatcherTests(unittest.TestCase):
         self.assertEqual(cursor.inputsizes, {'rawdata': MockRawType})
 
     def test_insert_two_raw_rows(self):
-        class MockRawType:
+        class MockRawType(object):
             pass
         cursor = MockCursor()
         batcher = self.getClass()(cursor, {'rawdata': MockRawType})
@@ -294,7 +294,7 @@ class OracleRowBatcherTests(unittest.TestCase):
             })
 
 
-class MockCursor:
+class MockCursor(object):
     def __init__(self):
         self.executed = []
         self.inputsizes = {}

@@ -14,13 +14,13 @@
 
 from perfmetrics import metricmethod
 from relstorage.adapters.interfaces import IReplicaSelector
-from zope.interface import implements
+from zope.interface import implementer
 import os
 import time
 
 
+@implementer(IReplicaSelector)
 class ReplicaSelector(object):
-    implements(IReplicaSelector)
 
     def __init__(self, fn, replica_timeout):
         self.replica_conf = fn

@@ -9,6 +9,8 @@ from random import random
 from relstorage.treemark import TreeMarker
 import logging
 
+from relstorage._compat import xrange
+
 log = logging.getLogger('bigmark')
 
 

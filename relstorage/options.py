@@ -17,12 +17,14 @@
 # ZODB does not seem to provide version information anywhere but in
 # setup.py, so the code below is a hack.  TODO: Bring this up on zodb-dev.
 
+from __future__ import absolute_import
+from relstorage._compat import iteritems
 default_strict_tpc = False
 
 from ZEO.zrpc.connection import Connection as __Connection
-if __Connection.current_protocol >= 'Z310':
+if __Connection.current_protocol >= b'Z310':
     default_strict_tpc = True
-
+del __Connection
 
 class Options(object):
     """Options for configuring and tuning RelStorage.
@@ -71,7 +73,7 @@ class Options(object):
         # simulating disconnected caches in tests.
         self.share_local_cache = True
 
-        for key, value in kwoptions.iteritems():
+        for key, value in iteritems(kwoptions):
             if key in self.__dict__:
                 setattr(self, key, value)
             else:

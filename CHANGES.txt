@@ -11,6 +11,9 @@
   psycopg2cffi respectively. PyPy can be substantially faster than
   CPython in some scenarios; see `PR 23`_.
 
+- Add initial support for Python 3.4+ for MySQL using mysqlclient, PostgreSQL,
+  and Oracle.
+
 - Updated the buildout configuration to just run relstorage tests and
   to select which databases to use at build time.
 
@@ -47,6 +50,12 @@
   `PR 21`_ by Mauro Amico.
 
 .. _`PR 21`: https://github.com/zodb/relstorage/pull/21
+
+- Oracle: Packing should no longer produce LOB errors. This partially
+  reverts the speedups in 1.6.0b2. Reported in `issue 30`_ by Peter
+  Jacobs.
+
+.. _`issue 30`: https://github.com/zodb/relstorage/issues/30
 
 1.6.0b3 (2014-12-08)
 --------------------

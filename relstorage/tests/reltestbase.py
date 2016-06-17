@@ -33,6 +33,7 @@ import random
 import time
 import transaction
 
+
 class StorageCreatingMixin(object):
 
     def make_adapter(self, options):
@@ -95,14 +96,14 @@ class RelStorageTestBase(StorageCreatingMixin,
 
 
 class GenericRelStorageTests(
-    RelStorageTestBase,
-    BasicStorage.BasicStorage,
-    PackableStorage.PackableStorage,
-    Synchronization.SynchronizedStorage,
-    ConflictResolution.ConflictResolvingStorage,
-    PersistentStorage.PersistentStorage,
-    MTStorage.MTStorage,
-    ReadOnlyStorage.ReadOnlyStorage,
+        RelStorageTestBase,
+        BasicStorage.BasicStorage,
+        PackableStorage.PackableStorage,
+        Synchronization.SynchronizedStorage,
+        ConflictResolution.ConflictResolvingStorage,
+        PersistentStorage.PersistentStorage,
+        MTStorage.MTStorage,
+        ReadOnlyStorage.ReadOnlyStorage,
     ):
 
     def checkDropAndPrepare(self):
@@ -141,7 +142,7 @@ class GenericRelStorageTests(
             r1['myobj'] = 'yes'
             c2 = db.open()
             r2 = c2.root()
-            self.assert_('myobj' not in r2)
+            self.assertNotIn('myobj', r2)
 
             storage = c1._storage
             t = transaction.Transaction()
@@ -151,10 +152,10 @@ class GenericRelStorageTests(
             storage.tpc_vote(t)
             storage.tpc_finish(t)
 
-            self.assert_('myobj' not in r2)
+            self.assertNotIn('myobj', r2)
             c2.sync()
-            self.assert_('myobj' in r2)
-            self.assert_(r2['myobj'] == 'yes')
+            self.assertIn('myobj', r2)
+            self.assertEqual(r2['myobj'], 'yes')
         finally:
             db.close()
 
@@ -184,18 +185,18 @@ class GenericRelStorageTests(
 
             # The second connection will now load root['alpha'], but due to
             # MVCC, it should continue to see the old state.
-            self.assert_(r2['alpha']._p_changed is None)  # A ghost
-            self.assert_(not r2['alpha'])
-            self.assert_(r2['alpha']._p_changed == 0)
+            self.assertIsNone(r2['alpha']._p_changed)  # A ghost
+            self.assertFalse(r2['alpha'])
+            self.assertEqual(r2['alpha']._p_changed, 0)
 
             # make root['alpha'] visible to the second connection
             c2.sync()
 
             # Now it should be in sync
-            self.assert_(r2['alpha']._p_changed is None)  # A ghost
-            self.assert_(r2['alpha'])
-            self.assert_(r2['alpha']._p_changed == 0)
-            self.assert_(r2['alpha']['beta'] == 'yes')
+            self.assertIsNone(r2['alpha']._p_changed)  # A ghost
+            self.assertTrue(r2['alpha'])
+            self.assertEqual(r2['alpha']._p_changed, 0)
+            self.assertEqual(r2['alpha']['beta'], 'yes')
 
             # Repeat the test with root['gamma']
             r1['gamma']['delta'] = 'yes'
@@ -210,18 +211,18 @@ class GenericRelStorageTests(
 
             # The second connection will now load root[3], but due to MVCC,
             # it should continue to see the old state.
-            self.assert_(r2['gamma']._p_changed is None)  # A ghost
-            self.assert_(not r2['gamma'])
-            self.assert_(r2['gamma']._p_changed == 0)
+            self.assertIsNone(r2['gamma']._p_changed)  # A ghost
+            self.assertFalse(r2['gamma'])
+            self.assertEqual(r2['gamma']._p_changed, 0)
 
             # make root[3] visible to the second connection
             c2.sync()
 
             # Now it should be in sync
-            self.assert_(r2['gamma']._p_changed is None)  # A ghost
-            self.assert_(r2['gamma'])
-            self.assert_(r2['gamma']._p_changed == 0)
-            self.assert_(r2['gamma']['delta'] == 'yes')
+            self.assertIsNone(r2['gamma']._p_changed)  # A ghost
+            self.assertTrue(r2['gamma'])
+            self.assertEqual(r2['gamma']._p_changed, 0)
+            self.assertEqual(r2['gamma']['delta'], 'yes')
         finally:
             db.close()
 
@@ -260,16 +261,17 @@ class GenericRelStorageTests(
 
     def check16KObject(self):
         # Store 16 * 1024 bytes in an object, then retrieve it
-        data = 'a 16 byte string' * 1024
+        data = b'a 16 byte string' * 1024
         oid = self._storage.new_oid()
         self._dostoreNP(oid, data=data)
-        got, serialno = self._storage.load(oid, '')
-        self.assertEqual(len(got), len(data))
+        got, _ = self._storage.load(oid, '')
+        self.assertIsInstance(got, bytes)
         self.assertEqual(got, data)
+        self.assertEqual(len(got), len(data))
 
     def check16MObject(self):
         # Store 16 * 1024 * 1024 bytes in an object, then retrieve it
-        data = 'a 16 byte string' * (1024 * 1024)
+        data = b'a 16 byte string' * (1024 * 1024)
         oid = self._storage.new_oid()
         self._dostoreNP(oid, data=data)
         got, serialno = self._storage.load(oid, '')
@@ -281,13 +283,13 @@ class GenericRelStorageTests(
         # to exercise possible buffer overfilling that the batching
         # code might cause.
         import transaction
-        data = '0123456789012345678' * 100
+        data = b'0123456789012345678' * 100
         t = transaction.Transaction()
         self._storage.tpc_begin(t)
         oids = []
         for i in range(99):
             oid = self._storage.new_oid()
-            self._storage.store(oid, '\0'*8, data, '', t)
+            self._storage.store(oid, b'\0'*8, data, '', t)
             oids.append(oid)
         self._storage.tpc_vote(t)
         self._storage.tpc_finish(t)
@@ -299,11 +301,11 @@ class GenericRelStorageTests(
     def checkPreventOIDOverlap(self):
         # Store an object with a particular OID, then verify that
         # OID is not reused.
-        data = 'mydata'
-        oid1 = '\0' * 7 + '\x0f'
+        data = b'mydata'
+        oid1 = b'\0' * 7 + b'\x0f'
         self._dostoreNP(oid1, data=data)
         oid2 = self._storage.new_oid()
-        self.assert_(oid1 < oid2, 'old OID %r should be less than new OID %r'
+        self.assertTrue(oid1 < oid2, 'old OID %r should be less than new OID %r'
             % (oid1, oid2))
 
     def checkUseCache(self):
@@ -326,25 +328,25 @@ class GenericRelStorageTests(
             # A commit count *might* be cached depending on the ZODB version.
             self.assertTrue('zzz:checkpoints' in fakecache.data)
             self.assertEqual(sorted(fakecache.data.keys())[-1][:10],
-                'zzz:state:')
+                             'zzz:state:')
             r1['alpha'] = PersistentMapping()
             transaction.commit()
-            self.assertEqual(len(fakecache.data.keys()), 5)
+            self.assertEqual(len(fakecache.data), 5)
 
             oid = r1['alpha']._p_oid
-            got, serial = c1._storage.load(oid, '')
+            c1._storage.load(oid, '')
             # another state should now be cached
-            self.assertEqual(len(fakecache.data.keys()), 5)
+            self.assertEqual(len(fakecache.data), 5)
 
             # make a change
             r1['beta'] = 0
             transaction.commit()
-            self.assertEqual(len(fakecache.data.keys()), 6)
+            self.assertEqual(len(fakecache.data), 6)
 
-            got, serial = c1._storage.load(oid, '')
+            c1._storage.load(oid, '')
 
             # try to load an object that doesn't exist
-            self.assertRaises(KeyError, c1._storage.load, 'bad.oid.', '')
+            self.assertRaises(KeyError, c1._storage.load, b'bad.oid.', '')
         finally:
             db.close()
 
@@ -389,7 +391,7 @@ class GenericRelStorageTests(
             # immediately when a connection is opened;
             # fake that here for older releases.
             c2 = db.open()
-            self.assert_(c2 is c1)
+            self.assertIs(c2, c1)
             c2.sync()
             r = c2.root()
             self.assertEqual(r['alpha'], 1)
@@ -424,7 +426,7 @@ class GenericRelStorageTests(
             c1._storage._store_conn.close()
 
             c2 = db.open()
-            self.assert_(c2 is c1)
+            self.assertIs(c2, c1)
 
             r = c2.root()
             self.assertEqual(r['alpha'], 1)
@@ -524,7 +526,7 @@ class GenericRelStorageTests(
             c2._storage._drop_load_connection()
 
             # Make the database connection to c2 reopen without polling.
-            c2._storage.load('\0' * 8, '')
+            c2._storage.load(b'\0' * 8, '')
             self.assertTrue(c2._storage._load_transaction_open)
 
             # Open a connection, which should be the same connection
@@ -555,7 +557,7 @@ class GenericRelStorageTests(
                 conn.root()['dc'] = DoubleCommitter()
                 transaction.commit()
                 conn2 = db.open()
-                self.assertEquals(conn2.root()['dc'].new_attribute, 1)
+                self.assertEqual(conn2.root()['dc'].new_attribute, 1)
                 conn2.close()
             finally:
                 transaction.abort()
@@ -705,7 +707,7 @@ class GenericRelStorageTests(
             unpick_errs += (fUnpickErr,)
 
 
-        self._dostoreNP(self._storage.new_oid(), data='brokenpickle')
+        self._dostoreNP(self._storage.new_oid(), data=b'brokenpickle')
         self.assertRaises(unpick_errs, self._storage.pack,
             time.time() + 10000, referencesf)
 
@@ -772,6 +774,7 @@ class GenericRelStorageTests(
         from ZODB.FileStorage import FileStorage
         db = DB(self._storage)
         try:
+            transaction.begin()
             c = db.open()
             r = c.root()
             r['alpha'] = PersistentMapping()
@@ -783,6 +786,7 @@ class GenericRelStorageTests(
 
             d = tempfile.mkdtemp()
             try:
+                transaction.begin()
                 fs = FileStorage(os.path.join(d, 'Data.fs'))
                 fs.copyTransactionsFrom(c._storage)
 

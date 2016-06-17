@@ -16,68 +16,18 @@
 Most of this code is lifted from ZODB/ZEO.
 """
 
+from __future__ import absolute_import
 from ZODB import POSException
-from ZODB import utils
 from ZODB.utils import p64
 from ZODB.utils import u64
-import BTrees.OOBTree
-import logging
 import os
-import re
-import thread
 import threading
 import time
 import zc.lockfile
+from relstorage._compat import iteritems
 
-
-try:
-    import ZODB.blob
-    from ZODB.blob import is_blob_record
-    # Using ZODB 3.9 or above
-except ImportError:
-    try:
-        from ZODB.blob import Blob
-    except ImportError:
-        # Using ZODB < 3.8
-        def is_blob_record(record):
-            False
-    else:
-        # Using ZODB 3.8
-        import cPickle
-        import cStringIO
-
-        def find_global_Blob(module, class_):
-            if module == 'ZODB.blob' and class_ == 'Blob':
-                return Blob
-
-        def is_blob_record(record):
-            """Check whether a database record is a blob record.
-
-            This is primarily intended to be used when copying data from one
-            storage to another.
-
-            """
-            if record and ('ZODB.blob' in record):
-                unpickler = cPickle.Unpickler(cStringIO.StringIO(record))
-                unpickler.find_global = find_global_Blob
-
-                try:
-                    return unpickler.load() is Blob
-                except (MemoryError, KeyboardInterrupt, SystemExit):
-                    raise
-                except Exception:
-                    pass
-
-            return False
-
-
-try:
-    from ZEO.ClientStorage import BlobCacheLayout, _check_blob_cache_size
-except ImportError:
-    # ZODB 3.8 or older
-    BlobCacheLayout = None
-    _check_blob_cache_size = None
-
+import ZODB.blob
+from ZEO.ClientStorage import BlobCacheLayout, _check_blob_cache_size
 
 class BlobHelper(object):
     """Blob support for RelStorage.
@@ -237,7 +187,7 @@ class BlobHelper(object):
         return self.fshelper.temp_dir
 
     def storeBlob(self, cursor, store_func,
-            oid, serial, data, blobfilename, version, txn):
+                  oid, serial, data, blobfilename, version, txn):
         """Storage API: store a blob object."""
         assert not version
 
@@ -296,11 +246,8 @@ class BlobHelper(object):
                 continue
 
             new_fn = self.fshelper.getBlobFilename(oid, tid)
-            orig = open(orig_fn, 'r')
-            new = open(new_fn, 'wb')
-            ZODB.utils.cp(orig, new)
-            orig.close()
-            new.close()
+            with open(orig_fn, 'rb') as orig, open(new_fn, 'wb') as new:
+                ZODB.utils.cp(orig, new)
 
             self._add_blob_to_transaction(oid, new_fn)
 
@@ -350,7 +297,7 @@ class BlobHelper(object):
 
     def abort(self):
         if self._txn_blobs:
-            for oid, filename in self._txn_blobs.iteritems():
+            for _oid, filename in iteritems(self._txn_blobs):
                 if os.path.exists(filename):
                     ZODB.blob.remove_committed(filename)
                     if self.shared_blob_dir:

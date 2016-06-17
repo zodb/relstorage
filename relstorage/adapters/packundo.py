@@ -15,17 +15,24 @@
 """
 
 from ZODB.POSException import UndoError
-from base64 import decodestring
 from perfmetrics import metricmethod
 from relstorage.adapters.interfaces import IPackUndo
 from relstorage.iter import fetchmany
 from relstorage.treemark import TreeMarker
-from zope.interface import implements
+from zope.interface import implementer
 import logging
 import time
 
+from relstorage._compat import db_binary_to_bytes
+from relstorage._compat import mysql_connection
+
 log = logging.getLogger(__name__)
 
+def _oracle_fetchmany(self, cursor): # pylint:disable=unused-argument
+    # We can't safely fetch many rows at once without
+    # getting 'ProgrammingError: LOB variable no longer valid after subsequent fetch'
+    # See https://github.com/zodb/relstorage/issues/30
+    return cursor
 
 class PackUndo(object):
     """Abstract base class for pack/undo"""
@@ -38,6 +45,9 @@ class PackUndo(object):
         self.runner = runner
         self.locker = locker
         self.options = options
+
+    def _fetchmany(self, cursor):
+        return fetchmany(cursor)
 
     def choose_pack_transaction(self, pack_point):
         """Return the transaction before or at the specified pack time.
@@ -138,13 +148,13 @@ class PackUndo(object):
             sleep = time.sleep
         delay = self.options.pack_commit_busy_delay
         while not self.locker.hold_commit_lock(cursor, nowait=True):
-            cursor.connection.rollback()
+            mysql_connection(cursor).rollback()
             log.debug('pack: commit lock busy, sleeping %.4g second(s)', delay)
             sleep(delay)
 
 
+@implementer(IPackUndo)
 class HistoryPreservingPackUndo(PackUndo):
-    implements(IPackUndo)
 
     keep_history = True
 
@@ -403,16 +413,7 @@ class HistoryPreservingPackUndo(PackUndo):
         """
         log.debug("pre_pack: transaction %d: computing references ", tid)
         from_count = 0
-        use_base64 = (self.database_type == 'postgresql')
-
-        if use_base64:
-            stmt = """
-            SELECT zoid, encode(state, 'base64')
-            FROM object_state
-            WHERE tid = %(tid)s
-            """
-        else:
-            stmt = """
+        stmt = """
             SELECT zoid, state
             FROM object_state
             WHERE tid = %(tid)s
@@ -421,13 +422,12 @@ class HistoryPreservingPackUndo(PackUndo):
 
         add_rows = []  # [(from_oid, tid, to_oid)]
         for from_oid, state in fetchmany(cursor):
+            state = db_binary_to_bytes(state)
             if hasattr(state, 'read'):
                 # Oracle
                 state = state.read()
             if state:
-                state = str(state)
-                if use_base64:
-                    state = decodestring(state)
+                assert isinstance(state, bytes), type(state) # PY3: used to be str(state)
                 from_count += 1
                 try:
                     to_oids = get_references(state)
@@ -908,9 +908,13 @@ class OracleHistoryPreservingPackUndo(HistoryPreservingPackUndo):
           AND rownum <= 1000
         """
 
+    # XXX: This may not be necessary, the HP tests don't fail
+    # without it.
+    _fetchmany = _oracle_fetchmany
 
+
+@implementer(IPackUndo)
 class HistoryFreePackUndo(PackUndo):
-    implements(IPackUndo)
 
     keep_history = False
 
@@ -1011,17 +1015,9 @@ class HistoryFreePackUndo(PackUndo):
 
         Returns the number of references added.
         """
+        # XXX PY3: This could be tricky
         oid_list = ','.join(str(oid) for oid in oids)
-        use_base64 = (self.database_type == 'postgresql')
-
-        if use_base64:
-            stmt = """
-            SELECT zoid, tid, encode(state, 'base64')
-            FROM object_state
-            WHERE zoid IN (%s)
-            """ % oid_list
-        else:
-            stmt = """
+        stmt = """
             SELECT zoid, tid, state
             FROM object_state
             WHERE zoid IN (%s)
@@ -1030,21 +1026,22 @@ class HistoryFreePackUndo(PackUndo):
 
         add_objects = []
         add_refs = []
-        for from_oid, tid, state in fetchmany(cursor):
+
+        for from_oid, tid, state in self._fetchmany(cursor):
+            state = db_binary_to_bytes(state)
             if hasattr(state, 'read'):
                 # Oracle
                 state = state.read()
             add_objects.append((from_oid, tid))
             if state:
-                state = str(state)
-                if use_base64:
-                    state = decodestring(state)
+                assert isinstance(state, bytes), type(state)
+                # XXX PY3 state = str(state)
                 try:
                     to_oids = get_references(state)
                 except:
                     log.error("pre_pack: can't unpickle "
-                        "object %d in transaction %d; state length = %d" % (
-                        from_oid, tid, len(state)))
+                              "object %d in transaction %d; state length = %d",
+                              from_oid, tid, len(state))
                     raise
                 for to_oid in to_oids:
                     add_refs.append((from_oid, tid, to_oid))
@@ -1084,7 +1081,7 @@ class HistoryFreePackUndo(PackUndo):
         """
         if not self.options.pack_gc:
             log.warning("pre_pack: garbage collection is disabled on a "
-                "history-free storage, so doing nothing")
+                        "history-free storage, so doing nothing")
             return
 
         conn, cursor = self.connmanager.open_for_pre_pack()
@@ -1267,3 +1264,5 @@ class OracleHistoryFreePackUndo(HistoryFreePackUndo):
         """
 
     _script_create_temp_pack_visit = None
+
+    _fetchmany = _oracle_fetchmany

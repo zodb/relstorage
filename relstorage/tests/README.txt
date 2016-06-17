@@ -71,7 +71,17 @@ following::
     GRANT CONNECT, RESOURCE, CREATE TABLE, CREATE SEQUENCE TO relstoragetest2_hf;
     GRANT EXECUTE ON DBMS_LOCK TO relstoragetest2_hf;
 
+You may need to grant tablespace privileges if you get "no privileges
+on tablespace" errors::
+
+    grant unlimited tablespace to relstoragetest;
+    grant unlimited tablespace to relstoragetest2;
+    grant unlimited tablespace to relstoragetest_hf;
+    grant unlimited tablespace to relstoragetest2_hf;
+
 When running the tests, you can use the environment variable
 ORACLE_TEST_DSN to override the data source name, which defaults to
-"XE" (for Oracle 10g XE).
-
+"XE" (for Oracle 10g XE). For example, using Oracle's Developer Days
+Virtual Box VM with an IP of 192.168.1.131, you might set
+ORACLE_TEST_DSN to ``192.168.1.131/orcl``. (And you would connect as
+sysdba with ``sqlplus 'sys/oracle@192.168.1.131/orcl' as sysdba``.)

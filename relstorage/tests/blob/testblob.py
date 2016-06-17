@@ -1,3 +1,4 @@
+from __future__ import print_function
 ##############################################################################
 #
 # Copyright (c) 2004 Zope Foundation and Contributors.
@@ -34,12 +35,10 @@ import ZODB.interfaces
 from relstorage.tests.RecoveryStorage import IteratorDeepCompare
 import ZODB.tests.StorageTestBase
 import ZODB.tests.util
-import zope.testing.renormalizing
+from zope.testing import renormalizing
 
-try:
-    from hashlib import md5
-except ImportError:
-    from md5 import new as md5
+
+from hashlib import md5
 
 
 def new_time():
@@ -57,12 +56,12 @@ def new_time():
     return new_time
 
 
-with open(__file__) as _f:
+with open(__file__, 'rb') as _f:
     # Just use the this module as the source of our data
     # Capture it at import time because test cases may
     # chdir(), and we may not have an absolute path in __file__,
     # depending on how they are run.
-    _random_file_data = _f.read().replace('\n', '').split()
+    _random_file_data = _f.read().replace(b'\n', b'').split()
 del _f
 
 
@@ -81,14 +80,14 @@ def random_file(size, fd):
         a = collections.deque(words)
         b = collections.deque(seed)
         while True:
-            yield ' '.join(list(a)[0:1024])
+            yield b' '.join(list(a)[0:1024])
             a.rotate(int(b[0]))
             b.rotate(1)
     datagen = fdata()
     bytes = 0
     md5sum = md5()
     while bytes < size:
-        data = datagen.next()
+        data = next(datagen)
         md5sum.update(data)
         fd.write(data)
         bytes += len(data)
@@ -98,7 +97,7 @@ def random_file(size, fd):
 def md5sum(fd):
     md5sum = md5()
     blocksize = md5sum.block_size << 8
-    for data in iter(lambda: fd.read(blocksize), ''):
+    for data in iter(lambda: fd.read(blocksize), b''):
         md5sum.update(data)
     return md5sum.hexdigest()
 
@@ -141,14 +140,14 @@ class BlobUndoTests(BlobTestBase):
         transaction.begin()
         blob = Blob()
         with blob.open('w') as f:
-            f.write('this is state 1')
+            f.write(b'this is state 1')
         root['blob'] = blob
         transaction.commit()
 
         transaction.begin()
         blob = root['blob']
         with blob.open('w') as f:
-            f.write('this is state 2')
+            f.write(b'this is state 2')
         transaction.commit()
 
 
@@ -157,7 +156,7 @@ class BlobUndoTests(BlobTestBase):
 
         with blob.open('r') as f:
             data = f.read()
-        self.assertEqual(data, 'this is state 1')
+        self.assertEqual(data, b'this is state 1')
 
         database.close()
 
@@ -166,7 +165,7 @@ class BlobUndoTests(BlobTestBase):
         connection = database.open()
         root = connection.root()
         transaction.begin()
-        with open('consume1', 'w') as f: f.write('this is state 1')
+        with open('consume1', 'wb') as f: f.write(b'this is state 1')
         blob = Blob()
         blob.consumeFile('consume1')
         root['blob'] = blob
@@ -174,7 +173,7 @@ class BlobUndoTests(BlobTestBase):
 
         transaction.begin()
         blob = root['blob']
-        with open('consume2', 'w') as f: f.write('this is state 2')
+        with open('consume2', 'wb') as f: f.write(b'this is state 2')
         blob.consumeFile('consume2')
         transaction.commit()
 
@@ -183,7 +182,7 @@ class BlobUndoTests(BlobTestBase):
 
         with blob.open('r') as f:
             data = f.read()
-        self.assertEqual(data, 'this is state 1')
+        self.assertEqual(data, b'this is state 1')
 
         database.close()
 
@@ -195,25 +194,27 @@ class BlobUndoTests(BlobTestBase):
 
         transaction.begin()
         with blob.open('w') as f:
-            f.write('this is state 1')
+            f.write(b'this is state 1')
         root['blob'] = blob
         transaction.commit()
 
         transaction.begin()
         blob = root['blob']
         with blob.open('w') as f:
-            f.write('this is state 2')
+            f.write(b'this is state 2')
         transaction.commit()
 
         database.undo(database.undoLog(0, 1)[0]['id'])
         transaction.commit()
 
-        self.assertEqual(blob.open('r').read(), 'this is state 1')
+        with blob.open('r') as f:
+            self.assertEqual(f.read(), b'this is state 1')
 
         database.undo(database.undoLog(0, 1)[0]['id'])
         transaction.commit()
 
-        self.assertEqual(blob.open('r').read(), 'this is state 2')
+        with blob.open('r') as f:
+            self.assertEqual(f.read(), b'this is state 2')
 
         database.close()
 
@@ -225,7 +226,7 @@ class BlobUndoTests(BlobTestBase):
 
         transaction.begin()
         with blob.open('w') as f:
-            f.write('this is state 1')
+            f.write(b'this is state 1')
         root['blob'] = blob
         transaction.commit()
 
@@ -237,7 +238,8 @@ class BlobUndoTests(BlobTestBase):
         database.undo(database.undoLog(0, 1)[0]['id'])
         transaction.commit()
 
-        self.assertEqual(blob.open('r').read(), 'this is state 1')
+        with blob.open('r') as f:
+            self.assertEqual(f.read(), b'this is state 1')
 
         database.close()
 
@@ -256,7 +258,7 @@ class RecoveryBlobStorage(BlobTestBase,
     # Requires a setUp() that creates a self._dst destination storage
     def testSimpleBlobRecovery(self):
         if hasattr(ZODB.interfaces, 'IBlobStorageRestoreable'):
-            self.assert_(
+            self.assertTrue(
                 ZODB.interfaces.IBlobStorageRestoreable.providedBy(
                     self._storage)
                 )
@@ -266,19 +268,19 @@ class RecoveryBlobStorage(BlobTestBase,
         transaction.commit()
         conn.root()[2] = ZODB.blob.Blob()
         with conn.root()[2].open('w') as f:
-            f.write('some data')
+            f.write(b'some data')
         transaction.commit()
         conn.root()[3] = ZODB.blob.Blob()
         with conn.root()[3].open('w') as f:
             f.write(
-                (''.join(struct.pack(">I", random.randint(0, (1<<32)-1))
-                         for i in range(random.randint(10000,20000)))
-                )[:-random.randint(1,4)]
+                (b''.join(struct.pack(">I", random.randint(0, (1<<32)-1))
+                          for i in range(random.randint(10000, 20000)))
+                )[:-random.randint(1, 4)]
             )
         transaction.commit()
         conn.root()[2] = ZODB.blob.Blob()
         with conn.root()[2].open('w') as f:
-            f.write('some other data')
+            f.write(b'some other data')
         transaction.commit()
         self._dst.copyTransactionsFrom(self._storage)
         self.compare(self._storage, self._dst)
@@ -295,9 +297,9 @@ class LargeBlobTest(BlobTestBase):
     testsize = 0 # Set on the auto-generated parent class
 
     def _log(self, msg):
-        print '%s [%s]: %s' % (
+        print('%s [%s]: %s' % (
             datetime.datetime.now().isoformat(' '),
-            self.__class__.__name__, msg)
+            self.__class__.__name__, msg))
 
     def testLargeBlob(self):
         # Large blobs are chunked into multiple pieces, we want to know
@@ -346,7 +348,7 @@ def packing_with_uncommitted_data_non_undoing():
     >>> from ZODB.blob import Blob
     >>> root['blob'] = Blob()
     >>> connection.add(root['blob'])
-    >>> root['blob'].open('w').write('test')
+    >>> with root['blob'].open('w') as f: _ = f.write(b'test')
 
     >>> blob_storage.pack(new_time(), referencesf)
 
@@ -373,7 +375,7 @@ def packing_with_uncommitted_data_undoing():
     >>> from ZODB.blob import Blob
     >>> root['blob'] = Blob()
     >>> connection.add(root['blob'])
-    >>> root['blob'].open('w').write('test')
+    >>> with root['blob'].open('w') as f: _ = f.write(b'test')
 
     >>> blob_storage.pack(new_time(), referencesf)
 
@@ -400,10 +402,10 @@ def secure_blob_directory():
 
     They are only accessible by the owner:
 
-    >>> oct(os.stat('blobs').st_mode)
-    '040700'
-    >>> oct(os.stat(tmp_dir).st_mode)
-    '040700'
+    >>> os.stat('blobs').st_mode
+    16832
+    >>> os.stat(tmp_dir).st_mode
+    16832
 
     These settings are recognized as secure:
 
@@ -415,7 +417,7 @@ def secure_blob_directory():
     After making the permissions of tmp_dir more liberal, the directory is
     recognized as insecure:
 
-    >>> os.chmod(tmp_dir, 040711)
+    >>> os.chmod(tmp_dir, 0o40711)
     >>> blob_storage.fshelper.isSecure(tmp_dir)
     False
 
@@ -445,7 +447,7 @@ def loadblob_tmpstore():
     >>> from ZODB.blob import Blob
     >>> root['blob'] = Blob()
     >>> connection.add(root['blob'])
-    >>> with root['blob'].open('w') as f: _ = f.write('test')
+    >>> with root['blob'].open('w') as f: _ = f.write(b'test')
     >>> import transaction
     >>> transaction.commit()
     >>> blob_oid = root['blob']._p_oid
@@ -456,11 +458,7 @@ def loadblob_tmpstore():
     >>> database.close()
 
     >>> from ZODB.Connection import TmpStore
-    >>> try:
-    ...     tmpstore = TmpStore(blob_storage)
-    ... except TypeError:
-    ...     # ZODB 3.8
-    ...     tmpstore = TmpStore('', blob_storage)
+    >>> tmpstore = TmpStore(blob_storage)
 
     We can access the blob correctly:
 
@@ -482,10 +480,10 @@ def do_not_depend_on_cwd():
     >>> db = DB(bs)
     >>> conn = db.open()
     >>> conn.root()['blob'] = ZODB.blob.Blob()
-    >>> with conn.root()['blob'].open('w') as f: _ = f.write('data')
+    >>> with conn.root()['blob'].open('w') as f: _ = f.write(b'data')
     >>> transaction.commit()
     >>> os.chdir(here)
-    >>> conn.root()['blob'].open().read()
+    >>> with conn.root()['blob'].open() as f: f.read()
     'data'
 
     >>> bs.close()
@@ -532,7 +530,7 @@ def savepoint_cleanup():
     >>> db = DB(bs)
     >>> conn = db.open()
     >>> conn.root().b = ZODB.blob.Blob()
-    >>> with conn.root().b.open('w') as f: _ = f.write('initial')
+    >>> with conn.root().b.open('w') as f: _ = f.write(b'initial')
     >>> _ = transaction.savepoint()
     >>> len(os.listdir(tdir))
     1
@@ -541,9 +539,9 @@ def savepoint_cleanup():
     >>> os.path.exists(savepoint_dir) and len(os.listdir(savepoint_dir)) > 0
     False
     >>> conn.root().b = ZODB.blob.Blob()
-    >>> with conn.root().b.open('w') as f: _ = f.write('initial')
+    >>> with conn.root().b.open('w') as f: _ = f.write(b'initial')
     >>> transaction.commit()
-    >>> with conn.root().b.open('w') as f: _ = f.write('1')
+    >>> with conn.root().b.open('w') as f: _ = f.write(b'1')
     >>> _ = transaction.savepoint()
     >>> transaction.abort()
     >>> os.path.exists(savepoint_dir) and len(os.listdir(savepoint_dir)) > 0
@@ -560,7 +558,7 @@ def tearDown(test):
     ZODB.tests.util.tearDown(test)
 
 
-class MinimalTestLayer:
+class MinimalTestLayer(object):
 
     __bases__ = ()
     __module__ = ''
@@ -604,6 +602,22 @@ def rmtree(path):
             os.rmdir(dname)
     os.rmdir(path)
 
+checker = renormalizing.RENormalizing([
+    # Python 3 bytes add a "b".
+    (re.compile(r'b(".*?")'), r"\1"),
+    (re.compile(r"b('.*?')"), r"\1"),
+    # Windows shows result from 'u64' as long?
+    (re.compile(r"(\d+)L"), r"\1"),
+    # Python 3 adds module name to exceptions.
+    (re.compile("ZODB.POSException.ConflictError"), r"ConflictError"),
+    (re.compile("ZODB.POSException.POSKeyError"), r"POSKeyError"),
+    (re.compile("ZODB.POSException.ReadConflictError"), r"ReadConflictError"),
+    (re.compile("ZODB.POSException.Unsupported"), r"Unsupported"),
+    (re.compile("ZODB.interfaces.BlobError"), r"BlobError"),
+    # XXX document me
+    (re.compile(r'\%(sep)s\%(sep)s' % dict(sep=os.path.sep)), '/'),
+    (re.compile(r'\%(sep)s' % dict(sep=os.path.sep)), '/'),
+])
 
 def storage_reusable_suite(prefix, factory,
                            test_blob_storage_recovery=False,
@@ -612,8 +626,7 @@ def storage_reusable_suite(prefix, factory,
                            keep_history=True,
                            pack_test_name='blob_packing.txt',
                            test_blob_cache=False,
-                           large_blob_size=None
-                           ):
+                           large_blob_size=None):
     """Return a test suite for a generic IBlobStorage.
 
     Pass a factory taking a name and a blob directory name.
@@ -633,23 +646,23 @@ def storage_reusable_suite(prefix, factory,
         "blob_transaction.txt",
         setUp=setup, tearDown=tearDown,
         optionflags=doctest.ELLIPSIS,
+        checker=checker,
         ))
     if test_packing:
         suite.addTest(doctest.DocFileSuite(
             pack_test_name,
             setUp=setup, tearDown=tearDown,
+            checker=checker,
             ))
     if test_blob_cache:
         suite.addTest(doctest.DocFileSuite(
             "blob_cache.test",
             setUp=setup, tearDown=tearDown,
+            checker=checker,
         ))
     suite.addTest(doctest.DocTestSuite(
         setUp=setup, tearDown=tearDown,
-        checker = zope.testing.renormalizing.RENormalizing([
-            (re.compile(r'\%(sep)s\%(sep)s' % dict(sep=os.path.sep)), '/'),
-            (re.compile(r'\%(sep)s' % dict(sep=os.path.sep)), '/'),
-            ]),
+        checker=checker,
         ))
 
     def create_storage(self, name='data', blob_dir=None, **kw):

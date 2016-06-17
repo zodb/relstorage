@@ -15,6 +15,7 @@
 """
 
 import re
+from relstorage._compat import list_values, iterkeys
 
 
 class RowBatcher(object):
@@ -39,9 +40,7 @@ class RowBatcher(object):
     def delete_from(self, table, **kw):
         if not kw:
             raise AssertionError("Need at least one column value")
-        columns = kw.keys()
-        columns.sort()
-        columns = tuple(columns)
+        columns = tuple(sorted(iterkeys(kw)))
         key = (table, columns)
         rows = self.deletes.get(key)
         if rows is None:
@@ -53,7 +52,7 @@ class RowBatcher(object):
             self.flush()
 
     def insert_into(self, header, row_schema, row, rowkey, size,
-            command='INSERT'):
+                    command='INSERT'):
         key = (command, header, row_schema)
         rows = self.inserts.get(key)
         if rows is None:
@@ -62,7 +61,7 @@ class RowBatcher(object):
         self.rows_added += 1
         self.size_added += size
         if (self.rows_added >= self.row_limit
-            or self.size_added >= self.size_limit):
+                or self.size_added >= self.size_limit):
             self.flush()
 
     def flush(self):
@@ -155,7 +154,7 @@ class OracleRowBatcher(RowBatcher):
 
             if len(rows) == 1:
                 # use the single insert syntax
-                row = rows.values()[0]
+                row = list_values(rows)[0]
                 stmt = "INSERT INTO %s VALUES (%s)" % (header, row_schema)
                 for name in self.inputsizes:
                     if name in row:
@@ -187,7 +186,7 @@ class OracleRowBatcher(RowBatcher):
         self.rows_added += 1
         self.size_added += size
         if (self.rows_added >= self.row_limit
-            or self.size_added >= self.size_limit):
+                or self.size_added >= self.size_limit):
             self.flush()
 
     def flush(self):
@@ -206,7 +205,7 @@ class OracleRowBatcher(RowBatcher):
     def _do_array_ops(self):
         items = sorted(self.array_ops.items())
         for (operation, row_schema), rows in items:
-            r = rows.values()
+            r = list_values(rows)
             params = []
             datatypes = [self.inputsizes[name] for name in row_schema.split()]
             for i, column in enumerate(zip(*r)):

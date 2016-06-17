@@ -15,6 +15,7 @@
 
 Stores pickles in the database.
 """
+from __future__ import absolute_import, print_function
 
 from ZODB import ConflictResolution
 from ZODB import POSException
@@ -28,19 +29,22 @@ from perfmetrics import Metric
 from perfmetrics import metricmethod
 from persistent.TimeStamp import TimeStamp
 from relstorage.blobhelper import BlobHelper
-from relstorage.blobhelper import is_blob_record
+from ZODB.blob import is_blob_record
 from relstorage.cache import StorageCache
 from relstorage.options import Options
-from zope.interface import implements
+from zope.interface import implementer
 import ZODB.interfaces
-import base64
-import cPickle
 import logging
 import os
 import tempfile
 import threading
 import time
 import weakref
+
+from relstorage._compat import iterkeys, iteritems
+from relstorage._compat import dumps, loads
+from relstorage._compat import base64_encodebytes
+from relstorage._compat import base64_decodebytes
 
 try:
     from ZODB.interfaces import StorageStopIteration
@@ -52,13 +56,13 @@ except ImportError:
 
 _relstorage_interfaces = []
 for name in (
-    'IStorage',
-    'IMVCCStorage',
-    'IStorageRestoreable',
-    'IStorageIteration',
-    'IStorageUndoable',
-    'IBlobStorage',
-    'IBlobStorageRestoreable',
+        'IStorage',
+        'IMVCCStorage',
+        'IStorageRestoreable',
+        'IStorageIteration',
+        'IStorageUndoable',
+        'IBlobStorage',
+        'IBlobStorageRestoreable',
     ):
     if hasattr(ZODB.interfaces, name):
         _relstorage_interfaces.append(getattr(ZODB.interfaces, name))
@@ -72,15 +76,26 @@ log = logging.getLogger("relstorage")
 # early rather than wait for an explicit abort.
 abort_early = os.environ.get('RELSTORAGE_ABORT_EARLY')
 
-z64 = '\0' * 8
+z64 = b'\0' * 8
 
+def _to_latin1(data):
+    if data is None:
+        return data
+    if isinstance(data, bytes):
+        return data
+    return data.encode("latin-1")
 
+def _from_latin1(data):
+    if isinstance(data, str) or data is None:
+        return data
+    return data.decode('latin-1')
+
+@implementer(*_relstorage_interfaces)
 class RelStorage(
         UndoLogCompatible,
         ConflictResolution.ConflictResolvingStorage
         ):
     """Storage to a relational database, based on invalidation polling"""
-    implements(*_relstorage_interfaces)
 
     _transaction = None  # Transaction that is being committed
     _tstatus = ' '  # Transaction status, used for copying data
@@ -284,7 +299,7 @@ class RelStorage(
                     self._load_conn, self._load_cursor)
                 self._load_transaction_open = 'active'
             return f(self._load_conn, self._load_cursor, *args, **kw)
-        except self._adapter.connmanager.disconnected_exceptions, e:
+        except self._adapter.connmanager.disconnected_exceptions as e:
             log.warning("Reconnecting load_conn: %s", e)
             self._drop_load_connection()
             try:
@@ -315,7 +330,7 @@ class RelStorage(
         try:
             self._adapter.connmanager.restart_store(
                 self._store_conn, self._store_cursor)
-        except self._adapter.connmanager.disconnected_exceptions, e:
+        except self._adapter.connmanager.disconnected_exceptions as e:
             log.warning("Reconnecting store_conn: %s", e)
             self._drop_store_connection()
             try:
@@ -332,7 +347,7 @@ class RelStorage(
             self._open_store_connection()
         try:
             return f(self._store_conn, self._store_cursor, *args, **kw)
-        except self._adapter.connmanager.disconnected_exceptions, e:
+        except self._adapter.connmanager.disconnected_exceptions as e:
             if self._transaction is not None:
                 # If transaction commit is in progress, it's too late
                 # to reconnect.
@@ -503,7 +518,6 @@ class RelStorage(
                 # an object whose creation has been undone.
                 self._log_keyerror(oid_int, "creation has been undone")
                 raise POSKeyError(oid)
-            state = str(state or '')
             return state, p64(tid_int)
         else:
             self._log_keyerror(oid_int, "no tid found")
@@ -543,7 +557,7 @@ class RelStorage(
             self._lock_release()
 
         if state is not None:
-            state = str(state)
+            assert isinstance(state, bytes) # XXX PY3 used to do str(state)
             if not state:
                 raise POSKeyError(oid)
             return state
@@ -586,7 +600,7 @@ class RelStorage(
                     end = p64(end_int)
                 else:
                     end = None
-                state = str(state)
+                assert isinstance(state, bytes), type(state) # XXX Py3 port: state = str(state)
                 return state, p64(start_tid), end
             else:
                 return None
@@ -615,7 +629,8 @@ class RelStorage(
         assert cursor is not None
         oid_int = u64(oid)
         if serial:
-            prev_tid_int = u64(serial)
+            # XXX PY3: ZODB.tests.IteratorStorage passes a str (non-bytes) value for oid
+            prev_tid_int = u64(serial if isinstance(serial, bytes) else serial.encode('ascii'))
         else:
             prev_tid_int = 0
 
@@ -634,6 +649,7 @@ class RelStorage(
         # Like store(), but used for importing transactions.  See the
         # comments in FileStorage.restore().  The prev_txn optimization
         # is not used.
+
         if self._stale_error is not None:
             raise self._stale_error
         if self._is_read_only:
@@ -702,13 +718,13 @@ class RelStorage(
             self._clear_temp()
             self._transaction = transaction
 
-            user = str(transaction.user)
-            desc = str(transaction.description)
+            user = _to_latin1(transaction.user)
+            desc = _to_latin1(transaction.description)
             ext = transaction._extension
             if ext:
-                ext = cPickle.dumps(ext, 1)
+                ext = dumps(ext, 1)
             else:
-                ext = ""
+                ext = b""
             self._ude = user, desc, ext
             self._tstatus = status
 
@@ -805,6 +821,7 @@ class RelStorage(
                 break
 
             oid_int, prev_tid_int, serial_int, data = conflict
+            assert isinstance(data, bytes) # XXX PY3 porting
             oid = p64(oid_int)
             prev_tid = p64(prev_tid_int)
             serial = p64(serial_int)
@@ -888,9 +905,9 @@ class RelStorage(
         tid_int = u64(self._tid)
 
         if self._txn_check_serials:
-            oid_ints = [u64(oid) for oid in self._txn_check_serials.iterkeys()]
+            oid_ints = [u64(oid) for oid in iterkeys(self._txn_check_serials)]
             current = self._adapter.mover.current_object_tids(cursor, oid_ints)
-            for oid, expect in self._txn_check_serials.iteritems():
+            for oid, expect in iteritems(self._txn_check_serials):
                 oid_int = u64(oid)
                 actual = p64(current.get(oid_int, 0))
                 if actual != expect:
@@ -1039,12 +1056,17 @@ class RelStorage(
             res = []
             for tid_int, user, desc, ext in rows:
                 tid = p64(tid_int)
-                d = {'id': base64.encodestring(tid)[:-1],
+                # Note that user and desc are schizophrenic. The transaction
+                # interface specifies that they are a Python str, *probably*
+                # meaning bytes. But code in the wild and the ZODB test suite
+                # sets them as native strings, meaning unicode on Py3. OTOH, the
+                # test suite checks that this method *returns* them as bytes!
+                d = {'id': base64_encodebytes(tid)[:-1],
                      'time': TimeStamp(tid).timeTime(),
-                     'user_name': user or '',
-                     'description': desc or ''}
+                     'user_name':  user or b'',
+                     'description': desc or b''}
                 if ext:
-                    d.update(cPickle.loads(ext))
+                    d.update(loads(ext))
                 if filter is None or filter(d):
                     if i >= first:
                         res.append(d)
@@ -1075,7 +1097,7 @@ class RelStorage(
             for tid_int, username, description, extension, length in rows:
                 tid = p64(tid_int)
                 if extension:
-                    d = cPickle.loads(extension)
+                    d = loads(extension)
                 else:
                     d = {}
                 d.update({"time": TimeStamp(tid).timeTime(),
@@ -1084,7 +1106,7 @@ class RelStorage(
                           "tid": tid,
                           "version": '',
                           "size": length,
-                          })
+                })
                 if filter is None or filter(d):
                     res.append(d)
                     if size is not None and len(res) >= size:
@@ -1109,7 +1131,7 @@ class RelStorage(
         if transaction is not self._transaction:
             raise POSException.StorageTransactionError(self, transaction)
 
-        undo_tid = base64.decodestring(transaction_id + '\n')
+        undo_tid = base64_decodebytes(transaction_id + b'\n')
         assert len(undo_tid) == 8
         undo_tid_int = u64(undo_tid)
 
@@ -1163,7 +1185,8 @@ class RelStorage(
             """Return the set of OIDs the given state refers to."""
             refs = set()
             if state:
-                for oid in referencesf(str(state)):
+                assert isinstance(state, bytes), type(state) # XXX PY3: str(state)
+                for oid in referencesf(state):
                     refs.add(u64(oid))
             return refs
 
@@ -1296,7 +1319,7 @@ class RelStorage(
         try:
             changes, new_polled_tid = self._restart_load_and_call(
                 self._adapter.poller.poll_invalidations, prev, ignore_tid)
-        except POSException.ReadConflictError, e:
+        except POSException.ReadConflictError as e:
             # The database connection is stale, but postpone this
             # error until the application tries to read or write something.
             self._stale_error = e
@@ -1457,10 +1480,9 @@ class RelStorage(
                         suffix='.tmp',
                         dir=self.blobhelper.temporaryDirectory())
                     os.close(fd)
-                    target = open(name, 'wb')
-                    ZODB.utils.cp(blobfile, target)
+                    with open(name, 'wb') as target:
+                        ZODB.utils.cp(blobfile, target)
                     blobfile.close()
-                    target.close()
                     self.restoreBlob(record.oid, record.tid, record.data,
                                      name, record.data_txn, trans)
                 else:
@@ -1549,7 +1571,7 @@ class TransactionIterator(object):
 
     def __getitem__(self, n):
         self._index = n
-        return self.next()
+        return next(self)
 
     def next(self):
         if self._closed:
@@ -1561,20 +1583,22 @@ class TransactionIterator(object):
         self._index += 1
         return res
 
+    __next__ = next
 
 class RelStorageTransactionRecord(TransactionRecord):
 
     def __init__(self, trans_iter, tid_int, user, desc, ext, packed):
         self._trans_iter = trans_iter
         self._tid_int = tid_int
-        self.tid = p64(tid_int)
-        self.status = packed and 'p' or ' '
-        self.user = user or ''
-        self.description = desc or ''
+        tid = p64(tid_int)
+        status = packed and 'p' or ' '
+        user = user or b''
+        description = desc or b''
         if ext:
-            self.extension = cPickle.loads(ext)
+            extension = loads(ext)
         else:
-            self.extension = {}
+            extension = {}
+        TransactionRecord.__init__(self, tid, status, user, description, extension)
 
     # maintain compatibility with the old (ZODB 3.8 and below) name of
     # the extension attribute.
@@ -1607,7 +1631,7 @@ class RecordIterator(object):
 
     def __getitem__(self, n):
         self._index = n
-        return self.next()
+        return next(self)
 
     def next(self):
         if self._index >= len(self._records):
@@ -1617,16 +1641,14 @@ class RecordIterator(object):
         self._index += 1
         return res
 
+    __next__ = next
+
 
 class Record(DataRecord):
     """An object state in a transaction"""
-    version = ''
-    data_txn = None
 
     def __init__(self, tid, oid_int, data):
-        self.tid = tid
-        self.oid = p64(oid_int)
+        # XXX PY3: Used to to str(data) on Py2
         if data is not None:
-            self.data = str(data)
-        else:
-            self.data = None
+            assert isinstance(data, bytes)
+        DataRecord.__init__(self, p64(oid_int), tid, data, None)

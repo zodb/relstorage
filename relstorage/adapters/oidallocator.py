@@ -21,10 +21,11 @@
 
 from perfmetrics import metricmethod
 from relstorage.adapters.interfaces import IOIDAllocator
-from zope.interface import implements
+from zope.interface import implementer
+from relstorage._compat import mysql_connection
 
+@implementer(IOIDAllocator)
 class PostgreSQLOIDAllocator(object):
-    implements(IOIDAllocator)
 
     def set_min_oid(self, cursor, oid):
         """Ensure the next OID is at least the given OID."""
@@ -45,8 +46,8 @@ class PostgreSQLOIDAllocator(object):
         return range(n * 16 - 15, n * 16 + 1)
 
 
+@implementer(IOIDAllocator)
 class MySQLOIDAllocator(object):
-    implements(IOIDAllocator)
 
     def set_min_oid(self, cursor, oid):
         """Ensure the next OID is at least the given OID."""
@@ -58,7 +59,8 @@ class MySQLOIDAllocator(object):
         """Return a sequence of new, unused OIDs."""
         stmt = "INSERT INTO new_oid VALUES ()"
         cursor.execute(stmt)
-        n = cursor.connection.insert_id()
+        conn = mysql_connection(cursor)
+        n = conn.insert_id()
         if n % 100 == 0:
             # Clean out previously generated OIDs.
             stmt = "DELETE FROM new_oid WHERE zoid < %s"
@@ -66,8 +68,8 @@ class MySQLOIDAllocator(object):
         return range(n * 16 - 15, n * 16 + 1)
 
 
+@implementer(IOIDAllocator)
 class OracleOIDAllocator(object):
-    implements(IOIDAllocator)
 
     def __init__(self, connmanager):
         self.connmanager = connmanager

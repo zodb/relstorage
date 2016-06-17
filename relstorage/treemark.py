@@ -6,10 +6,12 @@ rather than Python integers because native integers take up a lot less
 room in RAM.
 """
 
+from __future__ import absolute_import
 import BTrees
 import collections
 import gc
 import logging
+from relstorage._compat import iteritems
 
 
 IIunion32 = BTrees.family32.II.union
@@ -116,7 +118,7 @@ class TreeMarker(object):
         reachable = self._reachable
         lo = self.lo
 
-        for oid_hi, oids_lo in this_pass.iteritems():
+        for oid_hi, oids_lo in iteritems(this_pass):
             from_reachable_set = reachable[oid_hi]
 
             for oid_lo in oids_lo:
@@ -132,7 +134,7 @@ class TreeMarker(object):
                     continue
 
                 # Add the children of this OID to next_pass.
-                for to_oid_hi, s in refs[oid_hi].iteritems():
+                for to_oid_hi, s in iteritems(refs[oid_hi]):
                     min_key = oid_lo << 32
                     max_key = min_key | 0xffffffff
                     keys = s.keys(min=min_key, max=max_key)
@@ -156,7 +158,7 @@ class TreeMarker(object):
     @property
     def reachable(self):
         """Iterate over all the reachable OIDs."""
-        for oid_hi, oids_lo in self._reachable.iteritems():
+        for oid_hi, oids_lo in iteritems(self._reachable):
             for oid_lo in oids_lo:
                 # Decode the OID.
                 yield oid_hi | oid_lo

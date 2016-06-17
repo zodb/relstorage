@@ -35,7 +35,7 @@ class StorageCacheTests(unittest.TestCase):
         c = self._makeOne()
         self.assertEqual(len(c.clients_local_first), 2)
         self.assertEqual(len(c.clients_global_first), 2)
-        self.assert_(isinstance(c.clients_global_first[0], Client))
+        self.assertIsInstance(c.clients_global_first[0], Client)
         self.assertEqual(c.clients_global_first[0].servers, ['host:9999'])
         self.assertEqual(c.prefix, 'myprefix')
 
@@ -45,7 +45,7 @@ class StorageCacheTests(unittest.TestCase):
         c = self._makeOne()
         data['x'] = '1'
         c.clear()
-        self.assert_(not data)
+        self.assertFalse(data)
         self.assertEqual(c.checkpoints, None)
         self.assertEqual(c.delta_after0, {})
         self.assertEqual(c.delta_after1, {})
@@ -63,9 +63,9 @@ class StorageCacheTests(unittest.TestCase):
         c.current_tid = 60
         c.checkpoints = (50, 40)
         c.delta_after0[2] = 55
-        data['myprefix:state:55:2'] = p64(55) + 'abc'
+        data['myprefix:state:55:2'] = p64(55) + b'abc'
         res = c.load(None, 2)
-        self.assertEqual(res, ('abc', 55))
+        self.assertEqual(res, (b'abc', 55))
 
     def test_load_using_delta_after0_miss(self):
         from relstorage.tests.fakecache import data
@@ -75,9 +75,9 @@ class StorageCacheTests(unittest.TestCase):
         c.current_tid = 60
         c.checkpoints = (50, 40)
         c.delta_after0[2] = 55
-        adapter.mover.data[2] = ('abc', 55)
+        adapter.mover.data[2] = (b'abc', 55)
         res = c.load(None, 2)
-        self.assertEqual(res, ('abc', 55))
+        self.assertEqual(res, (b'abc', 55))
 
     def test_load_using_delta_after0_inconsistent(self):
         from relstorage.tests.fakecache import data
@@ -87,10 +87,10 @@ class StorageCacheTests(unittest.TestCase):
         c.current_tid = 60
         c.checkpoints = (50, 40)
         c.delta_after0[2] = 55
-        adapter.mover.data[2] = ('abc', 56)
+        adapter.mover.data[2] = (b'abc', 56)
         try:
             c.load(None, 2)
-        except AssertionError, e:
+        except AssertionError as e:
             self.assertTrue('Detected an inconsistency' in e.args[0])
         else:
             self.fail("Failed to report cache inconsistency")
@@ -107,7 +107,7 @@ class StorageCacheTests(unittest.TestCase):
         from ZODB.POSException import ReadConflictError
         try:
             c.load(None, 2)
-        except ReadConflictError, e:
+        except ReadConflictError as e:
             self.assertTrue('future' in e.message)
         else:
             self.fail("Failed to generate a conflict error")
@@ -119,9 +119,9 @@ class StorageCacheTests(unittest.TestCase):
         c = self.getClass()(adapter, MockOptionsWithFakeCache(), 'myprefix')
         c.current_tid = 60
         c.checkpoints = (50, 40)
-        data['myprefix:state:50:2'] = p64(45) + 'xyz'
+        data['myprefix:state:50:2'] = p64(45) + b'xyz'
         res = c.load(None, 2)
-        self.assertEqual(res, ('xyz', 45))
+        self.assertEqual(res, (b'xyz', 45))
 
     def test_load_using_checkpoint0_miss(self):
         from relstorage.tests.fakecache import data
@@ -130,10 +130,10 @@ class StorageCacheTests(unittest.TestCase):
         c = self.getClass()(adapter, MockOptionsWithFakeCache(), 'myprefix')
         c.current_tid = 60
         c.checkpoints = (50, 40)
-        adapter.mover.data[2] = ('xyz', 45)
+        adapter.mover.data[2] = (b'xyz', 45)
         res = c.load(None, 2)
-        self.assertEqual(res, ('xyz', 45))
-        self.assertEqual(data.get('myprefix:state:50:2'), p64(45) + 'xyz')
+        self.assertEqual(res, (b'xyz', 45))
+        self.assertEqual(data.get('myprefix:state:50:2'), p64(45) + b'xyz')
 
     def test_load_using_delta_after1_hit(self):
         from relstorage.tests.fakecache import data
@@ -143,10 +143,10 @@ class StorageCacheTests(unittest.TestCase):
         c.current_tid = 60
         c.checkpoints = (50, 40)
         c.delta_after1[2] = 45
-        data['myprefix:state:45:2'] = p64(45) + 'abc'
+        data['myprefix:state:45:2'] = p64(45) + b'abc'
         res = c.load(None, 2)
-        self.assertEqual(res, ('abc', 45))
-        self.assertEqual(data.get('myprefix:state:50:2'), p64(45) + 'abc')
+        self.assertEqual(res, (b'abc', 45))
+        self.assertEqual(data.get('myprefix:state:50:2'), p64(45) + b'abc')
 
     def test_load_using_delta_after1_miss(self):
         from relstorage.tests.fakecache import data
@@ -156,10 +156,10 @@ class StorageCacheTests(unittest.TestCase):
         c.current_tid = 60
         c.checkpoints = (50, 40)
         c.delta_after1[2] = 45
-        adapter.mover.data[2] = ('abc', 45)
+        adapter.mover.data[2] = (b'abc', 45)
         res = c.load(None, 2)
-        self.assertEqual(res, ('abc', 45))
-        self.assertEqual(data.get('myprefix:state:50:2'), p64(45) + 'abc')
+        self.assertEqual(res, (b'abc', 45))
+        self.assertEqual(data.get('myprefix:state:50:2'), p64(45) + b'abc')
 
     def test_load_using_checkpoint1_hit(self):
         from relstorage.tests.fakecache import data
@@ -168,10 +168,10 @@ class StorageCacheTests(unittest.TestCase):
         c = self.getClass()(adapter, MockOptionsWithFakeCache(), 'myprefix')
         c.current_tid = 60
         c.checkpoints = (50, 40)
-        data['myprefix:state:40:2'] = p64(35) + '123'
+        data['myprefix:state:40:2'] = p64(35) + b'123'
         res = c.load(None, 2)
-        self.assertEqual(res, ('123', 35))
-        self.assertEqual(data.get('myprefix:state:50:2'), p64(35) + '123')
+        self.assertEqual(res, (b'123', 35))
+        self.assertEqual(data.get('myprefix:state:50:2'), p64(35) + b'123')
 
     def test_load_using_checkpoint1_miss(self):
         from relstorage.tests.fakecache import data
@@ -180,33 +180,33 @@ class StorageCacheTests(unittest.TestCase):
         c = self.getClass()(adapter, MockOptionsWithFakeCache(), 'myprefix')
         c.current_tid = 60
         c.checkpoints = (50, 40)
-        adapter.mover.data[2] = ('123', 35)
+        adapter.mover.data[2] = (b'123', 35)
         res = c.load(None, 2)
-        self.assertEqual(res, ('123', 35))
-        self.assertEqual(data.get('myprefix:state:50:2'), p64(35) + '123')
+        self.assertEqual(res, (b'123', 35))
+        self.assertEqual(data.get('myprefix:state:50:2'), p64(35) + b'123')
 
     def test_store_temp(self):
         c = self._makeOne()
         c.tpc_begin()
-        c.store_temp(2, 'abc')
-        c.store_temp(1, 'def')
-        c.store_temp(2, 'ghi')
+        c.store_temp(2, b'abc')
+        c.store_temp(1, b'def')
+        c.store_temp(2, b'ghi')
         self.assertEqual(c.queue_contents, {1: (3, 6), 2: (6, 9)})
         c.queue.seek(0)
-        self.assertEqual(c.queue.read(), 'abcdefghi')
+        self.assertEqual(c.queue.read(), b'abcdefghi')
 
     def test_send_queue_small(self):
         from relstorage.tests.fakecache import data
         from ZODB.utils import p64
         c = self._makeOne()
         c.tpc_begin()
-        c.store_temp(2, 'abc')
-        c.store_temp(3, 'def')
+        c.store_temp(2, b'abc')
+        c.store_temp(3, b'def')
         tid = p64(55)
         c.send_queue(tid)
         self.assertEqual(data, {
-            'myprefix:state:55:2': tid + 'abc',
-            'myprefix:state:55:3': tid + 'def',
+            'myprefix:state:55:2': tid + b'abc',
+            'myprefix:state:55:3': tid + b'def',
             })
 
     def test_send_queue_large(self):
@@ -215,13 +215,13 @@ class StorageCacheTests(unittest.TestCase):
         c = self._makeOne()
         c.send_limit = 100
         c.tpc_begin()
-        c.store_temp(2, 'abc')
-        c.store_temp(3, 'def' * 100)
+        c.store_temp(2, b'abc')
+        c.store_temp(3, b'def' * 100)
         tid = p64(55)
         c.send_queue(tid)
         self.assertEqual(data, {
-            'myprefix:state:55:2': tid + 'abc',
-            'myprefix:state:55:3': tid + ('def' * 100),
+            'myprefix:state:55:2': tid + b'abc',
+            'myprefix:state:55:3': tid + (b'def' * 100),
             })
 
     def test_send_queue_none(self):
@@ -240,10 +240,10 @@ class StorageCacheTests(unittest.TestCase):
         c.tpc_begin()
         c.after_tpc_finish(p64(55))
         count = data['myprefix:commits']
-        self.assert_(count > 0)
+        self.assertTrue(count > 0)
         c.after_tpc_finish(p64(55))
         newcount = data['myprefix:commits']
-        self.assert_(newcount == count + 1)
+        self.assertEqual(newcount, count + 1)
 
     def test_clear_temp(self):
         c = self._makeOne()
@@ -269,7 +269,7 @@ class StorageCacheTests(unittest.TestCase):
         c = self._makeOne()
         c.after_poll(None, 40, 50, [])
         self.assertEqual(c.checkpoints, (50, 50))
-        self.assertEqual(data['myprefix:checkpoints'], '50 50')
+        self.assertEqual(data['myprefix:checkpoints'], b'50 50')
 
     def test_after_poll_ignore_garbage_checkpoints(self):
         from relstorage.tests.fakecache import data
@@ -277,15 +277,15 @@ class StorageCacheTests(unittest.TestCase):
         c = self._makeOne()
         c.after_poll(None, 40, 50, [])
         self.assertEqual(c.checkpoints, (50, 50))
-        self.assertEqual(data['myprefix:checkpoints'], '50 50')
+        self.assertEqual(data['myprefix:checkpoints'], b'50 50')
 
     def test_after_poll_ignore_invalid_checkpoints(self):
         from relstorage.tests.fakecache import data
-        data['myprefix:checkpoints'] = '60 70'  # bad: c0 < c1
+        data['myprefix:checkpoints'] = b'60 70'  # bad: c0 < c1
         c = self._makeOne()
         c.after_poll(None, 40, 50, [])
         self.assertEqual(c.checkpoints, (50, 50))
-        self.assertEqual(data['myprefix:checkpoints'], '50 50')
+        self.assertEqual(data['myprefix:checkpoints'], b'50 50')
 
     def test_after_poll_reinstate_checkpoints(self):
         from relstorage.tests.fakecache import data
@@ -293,11 +293,11 @@ class StorageCacheTests(unittest.TestCase):
         c.checkpoints = (40, 30)
         c.after_poll(None, 40, 50, [])
         self.assertEqual(c.checkpoints, (50, 50))
-        self.assertEqual(data['myprefix:checkpoints'], '40 30')
+        self.assertEqual(data['myprefix:checkpoints'], b'40 30')
 
     def test_after_poll_future_checkpoints_when_cp_exist(self):
         from relstorage.tests.fakecache import data
-        data['myprefix:checkpoints'] = '90 80'
+        data['myprefix:checkpoints'] = b'90 80'
         c = self._makeOne()
         c.checkpoints = (40, 30)
         c.current_tid = 40
@@ -305,38 +305,38 @@ class StorageCacheTests(unittest.TestCase):
         # This instance can't yet see txn 90, so it sticks with
         # the existing checkpoints.
         self.assertEqual(c.checkpoints, (40, 30))
-        self.assertEqual(data['myprefix:checkpoints'], '90 80')
+        self.assertEqual(data['myprefix:checkpoints'], b'90 80')
         self.assertEqual(c.delta_after0, {2: 45})
         self.assertEqual(c.delta_after1, {})
 
     def test_after_poll_future_checkpoints_when_cp_nonexistent(self):
         from relstorage.tests.fakecache import data
-        data['myprefix:checkpoints'] = '90 80'
+        data['myprefix:checkpoints'] = b'90 80'
         c = self._makeOne()
         c.after_poll(None, 40, 50, [(2, 45)])
         # This instance can't yet see txn 90, and there aren't any
         # existing checkpoints, so fall back to the current tid.
         self.assertEqual(c.checkpoints, (50, 50))
-        self.assertEqual(data['myprefix:checkpoints'], '90 80')
+        self.assertEqual(data['myprefix:checkpoints'], b'90 80')
         self.assertEqual(c.delta_after0, {})
         self.assertEqual(c.delta_after1, {})
 
     def test_after_poll_retain_checkpoints(self):
         from relstorage.tests.fakecache import data
-        data['myprefix:checkpoints'] = '40 30'
+        data['myprefix:checkpoints'] = b'40 30'
         c = self._makeOne()
         c.checkpoints = (40, 30)
         c.current_tid = 40
         c.delta_after1 = {1: 35}
         c.after_poll(None, 40, 50, [(2, 45), (2, 41)])
         self.assertEqual(c.checkpoints, (40, 30))
-        self.assertEqual(data['myprefix:checkpoints'], '40 30')
+        self.assertEqual(data['myprefix:checkpoints'], b'40 30')
         self.assertEqual(c.delta_after0, {2: 45})
         self.assertEqual(c.delta_after1, {1: 35})
 
     def test_after_poll_new_checkpoints(self):
         from relstorage.tests.fakecache import data
-        data['myprefix:checkpoints'] = '50 40'
+        data['myprefix:checkpoints'] = b'50 40'
         adapter = MockAdapter()
         c = self.getClass()(adapter, MockOptionsWithFakeCache(), 'myprefix')
         # Note that OID 3 changed twice.  list_changes is not required
@@ -347,13 +347,13 @@ class StorageCacheTests(unittest.TestCase):
         c.current_tid = 40
         c.after_poll(None, 40, 50, [(3, 42), (2, 45), (3, 41)])
         self.assertEqual(c.checkpoints, (50, 40))
-        self.assertEqual(data['myprefix:checkpoints'], '50 40')
+        self.assertEqual(data['myprefix:checkpoints'], b'50 40')
         self.assertEqual(c.delta_after0, {})
         self.assertEqual(c.delta_after1, {2: 45, 3: 42})
 
     def test_after_poll_gap(self):
         from relstorage.tests.fakecache import data
-        data['myprefix:checkpoints'] = '40 30'
+        data['myprefix:checkpoints'] = b'40 30'
         adapter = MockAdapter()
         c = self.getClass()(adapter, MockOptionsWithFakeCache(), 'myprefix')
         adapter.poller.changes = [(3, 42), (1, 35), (2, 45)]
@@ -363,20 +363,20 @@ class StorageCacheTests(unittest.TestCase):
         # transaction list, forcing a rebuild of delta_after(0|1).
         c.after_poll(None, 43, 50, [(2, 45)])
         self.assertEqual(c.checkpoints, (40, 30))
-        self.assertEqual(data['myprefix:checkpoints'], '40 30')
+        self.assertEqual(data['myprefix:checkpoints'], b'40 30')
         self.assertEqual(c.delta_after0, {2: 45, 3: 42})
         self.assertEqual(c.delta_after1, {1: 35})
 
     def test_after_poll_shift_checkpoints(self):
         from relstorage.tests.fakecache import data
-        data['myprefix:checkpoints'] = '40 30'
+        data['myprefix:checkpoints'] = b'40 30'
         c = self._makeOne()
         c.delta_size_limit = 2
         c.checkpoints = (40, 30)
         c.current_tid = 40
         c.after_poll(None, 40, 314, [(1, 45), (2, 46)])
         self.assertEqual(c.checkpoints, (40, 30))
-        self.assertEqual(data['myprefix:checkpoints'], '314 40')
+        self.assertEqual(data['myprefix:checkpoints'], b'314 40')
         self.assertEqual(c.delta_after0, {1: 45, 2: 46})
         self.assertEqual(c.delta_after1, {})
 
@@ -387,16 +387,16 @@ class LocalClientBucketTests(unittest.TestCase):
         from relstorage.cache import LocalClientBucket
         return LocalClientBucket
 
-    def test_set_string_value(self):
+    def test_set_bytes_value(self):
         b = self.getClass()(100)
         self.assertEqual(b.size, 0)
-        b['abc'] = 'defghi'
+        b['abc'] = b'defghi'
         self.assertEqual(b.size, 9)
-        b['abc'] = '123'
+        b['abc'] = b'123'
         self.assertEqual(b.size, 6)
-        b['abc'] = ''
+        b['abc'] = b''
         self.assertEqual(b.size, 3)
-        b['abc'] = 'defghi'
+        b['abc'] = b'defghi'
         self.assertEqual(b.size, 9)
         del b['abc']
         self.assertEqual(b.size, 0)
@@ -417,12 +417,12 @@ class LocalClientBucketTests(unittest.TestCase):
         from relstorage.cache import SizeOverflow
         b = self.getClass()(5)
         self.assertEqual(b.size, 0)
-        b['abc'] = 'xy'
+        b['abc'] = b'xy'
         self.assertEqual(b.size, 5)
-        b['abc'] = 'z'
+        b['abc'] = b'z'
         self.assertEqual(b.size, 4)
-        self.assertRaises(SizeOverflow, b.__setitem__, 'abc', 'xyz')
-        self.assertEqual(b['abc'], 'z')
+        self.assertRaises(SizeOverflow, b.__setitem__, 'abc', b'xyz')
+        self.assertEqual(b['abc'], b'z')
 
 
 class LocalClientTests(unittest.TestCase):
@@ -443,24 +443,24 @@ class LocalClientTests(unittest.TestCase):
 
     def test_set_and_get_string_compressed(self):
         c = self._makeOne(cache_local_compression='zlib')
-        c.set('abc', 'def')
-        self.assertEqual(c.get('abc'), 'def')
+        c.set('abc', b'def')
+        self.assertEqual(c.get('abc'), b'def')
         self.assertEqual(c.get('xyz'), None)
 
     def test_set_and_get_string_uncompressed(self):
         c = self._makeOne(cache_local_compression='none')
-        c.set('abc', 'def')
-        self.assertEqual(c.get('abc'), 'def')
+        c.set('abc', b'def')
+        self.assertEqual(c.get('abc'), b'def')
         self.assertEqual(c.get('xyz'), None)
 
     def test_set_and_get_tuple_compressed(self):
         c = self._makeOne(cache_local_compression='zlib')
-        c.set('abc', ('one', 'two'))
-        self.assertEqual(c.get('abc'), ('one', 'two'))
+        c.set('abc', (b'one', b'two'))
+        self.assertEqual(c.get('abc'), (b'one', b'two'))
 
     def test_set_and_get_object_too_large(self):
         c = self._makeOne(cache_local_compression='none')
-        c.set('abc', 'abcdefgh' * 10000)
+        c.set('abc', b'abcdefgh' * 10000)
         self.assertEqual(c.get('abc'), None)
 
     def test_set_with_zero_space(self):
@@ -470,15 +470,15 @@ class LocalClientTests(unittest.TestCase):
         self.assertEqual(c._bucket_limit, 0)
         self.assertEqual(c._value_limit, 16384)
         c.set('abc', 1)
-        c.set('def', '')
+        c.set('def', b'')
         self.assertEqual(c.get('abc'), None)
         self.assertEqual(c.get('def'), None)
 
     def test_set_multi_and_get_multi(self):
         c = self._makeOne()
-        c.set_multi({'k0': 'abc', 'k1': 'def'})
-        self.assertEqual(c.get_multi(['k0', 'k1']), {'k0': 'abc', 'k1': 'def'})
-        self.assertEqual(c.get_multi(['k0', 'k2']), {'k0': 'abc'})
+        c.set_multi({'k0': b'abc', 'k1': b'def'})
+        self.assertEqual(c.get_multi(['k0', 'k1']), {'k0': b'abc', 'k1': b'def'})
+        self.assertEqual(c.get_multi(['k0', 'k2']), {'k0': b'abc'})
         self.assertEqual(c.get_multi(['k2', 'k3']), {})
 
     def test_bucket_sizes_without_compression(self):
@@ -488,31 +488,31 @@ class LocalClientTests(unittest.TestCase):
         c.flush_all()
         for i in range(5):
             # add 10 bytes
-            c.set('k%d' % i, '01234567')
+            c.set('k%d' % i, b'01234567')
         self.assertEqual(c._bucket0.size, 50)
         self.assertEqual(c._bucket1.size, 0)
-        c.set('k5', '01234567')
+        c.set('k5', b'01234567')
         self.assertEqual(c._bucket0.size, 10)
         self.assertEqual(c._bucket1.size, 50)
         v = c.get('k2')
-        self.assertEqual(v, '01234567')
+        self.assertEqual(v, b'01234567')
         self.assertEqual(c._bucket0.size, 20)
         self.assertEqual(c._bucket1.size, 40)
         for i in range(5):
             # add 10 bytes
-            c.set('x%d' % i, '01234567')
+            c.set('x%d' % i, b'01234567')
         self.assertEqual(c._bucket0.size, 20)
         self.assertEqual(c._bucket1.size, 50)
-        self.assertEqual(c.get('x0'), '01234567')
-        self.assertEqual(c.get('x1'), '01234567')
-        self.assertEqual(c.get('x2'), '01234567')
-        self.assertEqual(c.get('x3'), '01234567')
-        self.assertEqual(c.get('x4'), '01234567')
+        self.assertEqual(c.get('x0'), b'01234567')
+        self.assertEqual(c.get('x1'), b'01234567')
+        self.assertEqual(c.get('x2'), b'01234567')
+        self.assertEqual(c.get('x3'), b'01234567')
+        self.assertEqual(c.get('x4'), b'01234567')
         self.assertEqual(c._bucket0.size, 50)
         self.assertEqual(c._bucket1.size, 20)
         self.assertEqual(c.get('k0'), None)
         self.assertEqual(c.get('k1'), None)
-        self.assertEqual(c.get('k2'), '01234567')
+        self.assertEqual(c.get('k2'), b'01234567')
         self.assertEqual(c.get('k3'), None)
         self.assertEqual(c.get('k4'), None)
         self.assertEqual(c.get('k5'), None)
@@ -520,7 +520,7 @@ class LocalClientTests(unittest.TestCase):
         self.assertEqual(c._bucket0.size, 10)
         self.assertEqual(c._bucket1.size, 50)
 
-        c.set('z0', '01234567')
+        c.set('z0', b'01234567')
         self.assertEqual(c._bucket0.size, 20)
         self.assertEqual(c._bucket1.size, 50)
 
@@ -529,39 +529,40 @@ class LocalClientTests(unittest.TestCase):
         c._bucket_limit = 21 * 2 + 1
         c.flush_all()
 
-        c.set('k0', '01234567' * 10)
+        c.set('k0', b'01234567' * 10)
         self.assertEqual(c._bucket0.size, 21)
         self.assertEqual(c._bucket1.size, 0)
 
-        c.set('k1', '76543210' * 10)
+        c.set('k1', b'76543210' * 10)
         self.assertEqual(c._bucket0.size, 21 * 2)
         self.assertEqual(c._bucket1.size, 0)
 
-        c.set('k2', 'abcdefgh' * 10)
+        c.set('k2', b'abcdefgh' * 10)
         self.assertEqual(c._bucket0.size, 21)
         self.assertEqual(c._bucket1.size, 21 * 2)
 
         v = c.get('k0')
-        self.assertEqual(v, '01234567' * 10)
+        self.assertEqual(v, b'01234567' * 10)
         self.assertEqual(c._bucket0.size, 21 * 2)
         self.assertEqual(c._bucket1.size, 21)
 
         v = c.get('k1')
-        self.assertEqual(v, '76543210' * 10)
+        self.assertEqual(v, b'76543210' * 10)
         self.assertEqual(c._bucket0.size, 21)
         self.assertEqual(c._bucket1.size, 21 * 2)
 
         v = c.get('k2')
-        self.assertEqual(v, 'abcdefgh' * 10)
+        self.assertEqual(v, b'abcdefgh' * 10)
         self.assertEqual(c._bucket0.size, 21 * 2)
         self.assertEqual(c._bucket1.size, 21)
 
     def test_add(self):
         c = self._makeOne()
-        c.set('k0', 'abc')
-        c.add('k0', 'def')
-        c.add('k1', 'ghi')
-        self.assertEqual(c.get_multi(['k0', 'k1']), {'k0': 'abc', 'k1': 'ghi'})
+        c.set('k0', b'abc')
+        self.assertEqual(c.get('k0'), b'abc')
+        c.add('k0', b'def')
+        c.add('k1', b'ghi')
+        self.assertEqual(c.get_multi(['k0', 'k1']), {'k0': b'abc', 'k1': b'ghi'})
 
     def test_incr_normal(self):
         c = self._makeOne()
@@ -571,13 +572,13 @@ class LocalClientTests(unittest.TestCase):
 
     def test_incr_string_with_compression(self):
         c = self._makeOne(cache_local_compression='zlib')
-        c.set('k0', '41')
+        c.set('k0', b'41')
         self.assertEqual(c.incr('k0'), 42)
         self.assertEqual(c.incr('k1'), None)
 
     def test_incr_string_without_compression(self):
         c = self._makeOne(cache_local_compression='none')
-        c.set('k0', '41')
+        c.set('k0', b'41')
         self.assertEqual(c.incr('k0'), 42)
         self.assertEqual(c.incr('k1'), None)
 
@@ -600,7 +601,7 @@ class LocalClientTests(unittest.TestCase):
         self.assertEqual(c.incr('abc'), None)
 
 
-class MockOptions:
+class MockOptions(object):
     cache_module_name = ''
     cache_servers = ''
     cache_local_mb = 1
@@ -608,7 +609,7 @@ class MockOptions:
     cache_local_compression = 'zlib'
     cache_delta_size_limit = 10000
 
-class MockOptionsWithFakeCache:
+class MockOptionsWithFakeCache(object):
     cache_module_name = 'relstorage.tests.fakecache'
     cache_servers = 'host:9999'
     cache_local_mb = 1
@@ -616,18 +617,18 @@ class MockOptionsWithFakeCache:
     cache_local_compression = 'zlib'
     cache_delta_size_limit = 10000
 
-class MockAdapter:
+class MockAdapter(object):
     def __init__(self):
         self.mover = MockObjectMover()
         self.poller = MockPoller()
 
-class MockObjectMover:
+class MockObjectMover(object):
     def __init__(self):
         self.data = {}  # {oid_int: (state, tid_int)}
     def load_current(self, cursor, oid_int):
         return self.data.get(oid_int, (None, None))
 
-class MockPoller:
+class MockPoller(object):
     def __init__(self):
         self.changes = []  # [(oid, tid)]
     def list_changes(self, cursor, after_tid, last_tid):
@@ -640,3 +641,6 @@ def test_suite():
     suite.addTest(unittest.makeSuite(LocalClientBucketTests))
     suite.addTest(unittest.makeSuite(LocalClientTests))
     return suite
+
+if __name__ == '__main__':
+    unittest.main(defaultTest='test_suite')

@@ -21,12 +21,12 @@ from __future__ import print_function
 import logging
 import optparse
 from persistent.TimeStamp import TimeStamp
-from StringIO import StringIO
+from io import StringIO
 import sys
 import ZConfig
-from ZODB.utils import p64, u64, z64, readable_tid_repr
+from ZODB.utils import p64, u64, readable_tid_repr
 
-schema_xml = """
+schema_xml = u"""
 <schema>
   <import package="ZODB"/>
   <import package="relstorage"/>
@@ -43,16 +43,19 @@ log = logging.getLogger("zodbconvert")
 def storage_has_data(storage):
     i = storage.iterator()
     try:
-        if hasattr(i, 'next'):
-            # New iterator API
-            i.next()
-        else:
-            # Old index lookup API
-            i[0]
-    except (IndexError, StopIteration):
-        return False
-    return True
-
+        try:
+            if hasattr(i, 'next'):
+                # New iterator API
+                next(i)
+            else:
+                # Old index lookup API
+                i[0]
+        except (IndexError, StopIteration):
+            return False
+        return True
+    finally:
+        if hasattr(i, 'close'):
+            i.close()
 
 class _DefaultStartStorageIteration(object):
     # At IStorageIteration instance that keeps a default start value.
@@ -71,9 +74,11 @@ class _DefaultStartStorageIteration(object):
     def __getattr__(self, name):
         return getattr(self._source, name)
 
-def main(argv=sys.argv):
+def main(argv=None):
+    if argv is None:
+        argv = sys.argv
     parser = optparse.OptionParser(description=__doc__,
-        usage="%prog [options] config_file")
+                                   usage="%prog [options] config_file")
     parser.add_option(
         "--dry-run", dest="dry_run", action="store_true",
         help="Attempt to open the storages, then explain what would be done")
@@ -98,9 +103,15 @@ def main(argv=sys.argv):
         format="%(asctime)s [%(name)s] %(levelname)s %(message)s")
 
     schema = ZConfig.loadSchemaFile(StringIO(schema_xml))
-    config, handler = ZConfig.loadConfig(schema, args[0])
+    config, _ = ZConfig.loadConfig(schema, args[0])
     source = config.source.open()
     destination = config.destination.open()
+
+    def cleanup_and_exit(exit_msg=None):
+        source.close()
+        destination.close()
+        if exit_msg:
+            sys.exit(msg)
 
     log.info("Storages opened successfully.")
 
@@ -109,7 +120,7 @@ def main(argv=sys.argv):
             msg = ("Error: no API is known for determining the last committed "
                    "transaction of the destination storage. Aborting "
                    "conversion.")
-            sys.exit(msg)
+            cleanup_and_exit(msg)
         if not storage_has_data(destination):
             log.warning("Destination empty, start conversion from the beginning.")
         else:
@@ -134,12 +145,11 @@ def main(argv=sys.argv):
             log.warning("The destination storage has data.")
         count = 0
         for txn in source.iterator():
-            log.info('%s user=%s description=%s' % (
-                TimeStamp(txn.tid), txn.user, txn.description))
+            log.info('%s user=%s description=%s',
+                     TimeStamp(txn.tid), txn.user, txn.description)
             count += 1
         log.info("Would copy %d transactions.", count)
-        source.close()
-        destination.close()
+        cleanup_and_exit()
     else:
         if options.clear:
             log.info("Clearing old data...")
@@ -148,16 +158,15 @@ def main(argv=sys.argv):
             else:
                 msg = ("Error: no API is known for clearing this type "
                        "of storage. Use another method.")
-                sys.exit(msg)
+                cleanup_and_exit(msg)
             log.info("Done clearing old data.")
 
         if storage_has_data(destination) and not options.incremental:
             msg = "Error: the destination storage has data.  Try --clear."
-            sys.exit(msg)
+            cleanup_and_exit(msg)
 
         destination.copyTransactionsFrom(source)
-        source.close()
-        destination.close()
+        cleanup_and_exit()
 
 
 if __name__ == '__main__':

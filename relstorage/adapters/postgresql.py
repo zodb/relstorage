@@ -11,6 +11,8 @@
 # FOR A PARTICULAR PURPOSE.
 #
 ##############################################################################
+"""PostgreSQL adapter for RelStorage."""
+
 from perfmetrics import metricmethod
 from relstorage.adapters.connmanager import AbstractConnectionManager
 from relstorage.adapters.dbiter import HistoryFreeDatabaseIterator
@@ -28,24 +30,21 @@ from relstorage.adapters.scriptrunner import ScriptRunner
 from relstorage.adapters.stats import PostgreSQLStats
 from relstorage.adapters.txncontrol import PostgreSQLTransactionControl
 from relstorage.options import Options
-from zope.interface import implements
+from zope.interface import implementer
 import logging
 try:
     import psycopg2
 except ImportError:
-    import sys
-    t, v, tb = sys.exc_info()
     try:
         import psycopg2cffi.compat
         psycopg2cffi.compat.register()
         import psycopg2
     except ImportError:
-        raise t, v, tb
-    else:
-        del t, v, tb
+        raise ImportError("Unable to import psycopg2 or psycopg2cffi")
+
 import psycopg2.extensions
 import re
-"""PostgreSQL adapter for RelStorage."""
+
 
 
 
@@ -63,9 +62,9 @@ disconnected_exceptions = (
 # when the adapter attempts to close a database connection.
 close_exceptions = disconnected_exceptions
 
+@implementer(IRelStorageAdapter)
 class PostgreSQLAdapter(object):
     """PostgreSQL adapter for RelStorage."""
-    implements(IRelStorageAdapter)
 
     def __init__(self, dsn='', options=None):
         # options is a relstorage.options.Options or None
@@ -210,9 +209,9 @@ class Psycopg2ConnectionManager(AbstractConnectionManager):
                 cursor.arraysize = 64
                 conn.replica = replica
                 return conn, cursor
-            except psycopg2.OperationalError, e:
+            except psycopg2.OperationalError as e:
                 if replica is not None:
-                    next_replica = replica_selector.next()
+                    next_replica = next(replica_selector)
                     if next_replica is not None:
                         log.warning("Unable to connect to replica %s: %s, "
                             "now trying %s", replica, e, next_replica)

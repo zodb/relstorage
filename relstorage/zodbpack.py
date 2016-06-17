@@ -15,7 +15,7 @@
 """ZODB storage packing utility.
 """
 
-from StringIO import StringIO
+from io import StringIO
 import logging
 import optparse
 import sys
@@ -23,7 +23,7 @@ import time
 import ZConfig
 import ZODB.serialize
 
-schema_xml = """
+schema_xml = u"""
 <schema>
   <import package="ZODB"/>
   <import package="relstorage"/>
@@ -34,9 +34,11 @@ schema_xml = """
 log = logging.getLogger("zodbpack")
 
 
-def main(argv=sys.argv):
+def main(argv=None):
+    if argv is None:
+        argv = sys.argv
     parser = optparse.OptionParser(description=__doc__,
-        usage="%prog [options] config_file")
+                                   usage="%prog [options] config_file")
     parser.add_option(
         "-d", "--days", dest="days", default="0",
         help="Days of history to keep (default 0)",
@@ -64,7 +66,7 @@ def main(argv=sys.argv):
         format="%(asctime)s [%(name)s] %(levelname)s %(message)s")
 
     schema = ZConfig.loadSchemaFile(StringIO(schema_xml))
-    config, handler = ZConfig.loadConfig(schema, args[0])
+    config, _ = ZConfig.loadConfig(schema, args[0])
 
     t = time.time() - float(options.days) * 86400.0
     for s in config.storages:
@@ -74,8 +76,8 @@ def main(argv=sys.argv):
         log.info("Packing %s.", name)
         if options.prepack or options.reuse_prepack:
             storage.pack(t, ZODB.serialize.referencesf,
-                prepack_only=options.prepack,
-                skip_prepack=options.reuse_prepack)
+                         prepack_only=options.prepack,
+                         skip_prepack=options.reuse_prepack)
         else:
             # Be non-relstorage Storages friendly
             storage.pack(t, ZODB.serialize.referencesf)

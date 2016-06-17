@@ -26,47 +26,47 @@ class AutoTemporaryFileTests(unittest.TestCase):
 
     def test_write_and_read_limited(self):
         t = self.getClass()()
-        t.write('abc')
+        t.write(b'abc')
         self.assertEqual(t.tell(), 3)
         t.seek(0)
         self.assertEqual(t.tell(), 0)
-        self.assertEqual(t.read(2), 'ab')
+        self.assertEqual(t.read(2), b'ab')
         self.assertEqual(t.tell(), 2)
 
     def test_write_and_read_unlimited(self):
         t = self.getClass()()
-        t.write('abc')
+        t.write(b'abc')
         t.seek(0)
-        self.assertEqual(t.read(), 'abc')
+        self.assertEqual(t.read(), b'abc')
 
     def test_convert_to_temporary_file(self):
         t = self.getClass()(threshold=4)
         try:
             self.assertEqual(t._threshold, 4)
-            t.write('abc')
+            t.write(b'abc')
             self.assertEqual(t._threshold, 4)
-            t.write('d')
+            t.write(b'd')
             self.assertEqual(t._threshold, 0)
-            t.write('e')
+            t.write(b'e')
             t.seek(0)
-            self.assertEqual(t.read(), 'abcde')
+            self.assertEqual(t.read(), b'abcde')
         finally:
             t.close()
 
     def test_overwrite_during_conversion(self):
         t = self.getClass()(threshold=4)
         try:
-            t.write('abc')
+            t.write(b'abc')
             self.assertEqual(t._threshold, 4)
             t.seek(1)
-            t.write('0')
+            t.write(b'0')
             self.assertEqual(t._threshold, 4)
-            t.write('1')
+            t.write(b'1')
             self.assertEqual(t._threshold, 4)
-            t.write('23')
+            t.write(b'23')
             self.assertEqual(t._threshold, 0)
             t.seek(0)
-            self.assertEqual(t.read(), 'a0123')
+            self.assertEqual(t.read(), b'a0123')
         finally:
             t.close()
 
@@ -74,3 +74,6 @@ def test_suite():
     suite = unittest.TestSuite()
     suite.addTest(unittest.makeSuite(AutoTemporaryFileTests))
     return suite
+
+if __name__ == '__main__':
+    unittest.main(defaultTest='test_suite')

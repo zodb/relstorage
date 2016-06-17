@@ -1,5 +1,11 @@
+from __future__ import print_function, absolute_import
+
 import cgi
-import urlparse
+try:
+    from urllib import parse as urlparse
+except ImportError:
+    # Py2
+    import urlparse
 from ZODB.DemoStorage import DemoStorage
 
 from relstorage.options import Options
@@ -139,7 +145,7 @@ class OracleAdapterHelper(Resolver):
 
     def __call__(self, parsed_uri, kw):
         kw, unused = self.interpret_kwargs(kw)
-        
+
         def factory(options):
             from relstorage.adapters.oracle import OracleAdapter
             return OracleAdapter(options=options, **kw)

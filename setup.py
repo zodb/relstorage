@@ -25,6 +25,7 @@ Intended Audience :: Developers
 License :: OSI Approved :: Zope Public License
 Programming Language :: Python
 Programming Language :: Python :: 2.7
+Programming Language :: Python :: 3.4
 Programming Language :: Python :: Implementation :: CPython
 Programming Language :: Python :: Implementation :: PyPy
 Topic :: Database
@@ -37,7 +38,6 @@ import os
 from setuptools import setup
 
 doclines = __doc__.split("\n")
-
 
 def read_file(*path):
     base_dir = os.path.dirname(__file__)
@@ -83,26 +83,37 @@ setup(
         'zope.interface',
         'zc.lockfile',
     ],
-    tests_require = tests_require,
+    tests_require=tests_require,
     extras_require={
-        'mysql:platform_python_implementation=="CPython"': [
+        # Use MySQL-python (C impl) on CPython 2.7, it has the most
+        # testing and exposure. The best option for PyPy is PyMySQL
+        # because MySQL-python doesn't support it (and binary drivers
+        # like that tend to be slow). Use mysqlclient on Python 3
+        # because it's a binary driver and *probably* faster for
+        # CPython; it requires some minor code changes to support, so
+        # be sure to test this configuration.
+        'mysql:platform_python_implementation=="CPython" and python_version == "2.7"': [
             'MySQL-python>=1.2.2',
+        ],
+        'mysql:platform_python_implementation=="CPython" and python_version >= "3.3"': [
+            'mysqlclient>=1.3.7',
         ],
         'mysql:platform_python_implementation=="PyPy"' : [
             'PyMySQL>=0.6.6',
         ],
         'postgresql: platform_python_implementation == "CPython"': [
-            'psycopg2>=2.0',
+            # 2.4.1+ is required for proper bytea handling
+            'psycopg2>=2.6.1',
         ],
         'postgresql: platform_python_implementation == "PyPy"': [
-            'psycopg2cffi>=2.7.0',
+            'psycopg2cffi>=2.7.4',
         ],
         'oracle': [
             'cx_Oracle>=4.3.1'
         ],
         'test': tests_require,
     },
-    entry_points = {
+    entry_points={
         'console_scripts': [
             'zodbconvert = relstorage.zodbconvert:main',
             'zodbpack = relstorage.zodbpack:main',

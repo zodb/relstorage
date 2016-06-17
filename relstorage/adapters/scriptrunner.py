@@ -12,16 +12,19 @@
 #
 ##############################################################################
 
+from __future__ import absolute_import
 from relstorage.adapters.interfaces import IScriptRunner
-from zope.interface import implements
+from zope.interface import implementer
 import logging
 import re
+from relstorage._compat import iteritems
+from relstorage._compat import intern
 
 log = logging.getLogger(__name__)
 
 
+@implementer(IScriptRunner)
 class ScriptRunner(object):
-    implements(IScriptRunner)
 
     # script_vars contains replacements for parts of scripts.
     # These are correct for PostgreSQL and MySQL but not for Oracle.
@@ -52,7 +55,7 @@ class ScriptRunner(object):
             cursor.execute(stmt, generic_params)
         except:
             log.warning("script statement failed: %r; parameters: %r",
-                stmt, generic_params)
+                        stmt, generic_params)
             raise
 
     def run_script(self, cursor, script, params=()):
@@ -117,7 +120,7 @@ class OracleScriptRunner(ScriptRunner):
             stmt = generic_stmt % tracker
             used = tracker.used
             params = {}
-            for k, v in generic_params.iteritems():
+            for k, v in iteritems(generic_params):
                 if k in used:
                     params[k] = v
         else:
@@ -128,7 +131,7 @@ class OracleScriptRunner(ScriptRunner):
             cursor.execute(stmt, params)
         except:
             log.warning("script statement failed: %r; parameters: %r",
-                stmt, params)
+                        stmt, params)
             raise
 
     def run_many(self, cursor, stmt, items):
@@ -138,7 +141,7 @@ class OracleScriptRunner(ScriptRunner):
         """
         # replace '%s' with ':n'
         matches = []
-        def replace(match):
+        def replace(_match):
             matches.append(None)
             return ':%d' % len(matches)
         stmt = intern(re.sub('%s', replace, stmt))
@@ -146,7 +149,7 @@ class OracleScriptRunner(ScriptRunner):
         cursor.executemany(stmt, items)
 
 
-class TrackingMap:
+class TrackingMap(object):
     """Provides values for keys while tracking which keys are accessed."""
 
     def __init__(self, source):
@@ -156,4 +159,3 @@ class TrackingMap:
     def __getitem__(self, key):
         self.used.add(key)
         return self.source[key]
-

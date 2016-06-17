@@ -30,7 +30,7 @@ from relstorage.adapters.scriptrunner import OracleScriptRunner
 from relstorage.adapters.stats import OracleStats
 from relstorage.adapters.txncontrol import OracleTransactionControl
 from relstorage.options import Options
-from zope.interface import implements
+from zope.interface import implementer
 import cx_Oracle
 import logging
 
@@ -49,9 +49,9 @@ disconnected_exceptions = (
 # when the adapter attempts to close a database connection.
 close_exceptions = disconnected_exceptions
 
+@implementer(IRelStorageAdapter)
 class OracleAdapter(object):
     """Oracle adapter for RelStorage."""
-    implements(IRelStorageAdapter)
 
     def __init__(self, user, password, dsn, commit_lock_id=0,
             twophase=False, options=None):
@@ -220,9 +220,10 @@ class CXOracleScriptRunner(OracleScriptRunner):
                         return row
                 finally:
                     del cursor.outputtypehandler
-            except cx_Oracle.DatabaseError, e:
+            except cx_Oracle.DatabaseError as e:
                 # ORA-01406: fetched column value was truncated
-                error, = e
+                error = e.args[0]
+
                 if ((isinstance(error, str) and not error.endswith(' 1406'))
                         or error.code != 1406):
                     raise
@@ -305,9 +306,9 @@ class CXOracleConnectionManager(AbstractConnectionManager):
                     cursor.execute("SET TRANSACTION %s" % transaction_mode)
                 return conn, cursor
 
-            except cx_Oracle.OperationalError, e:
+            except cx_Oracle.OperationalError as e:
                 if replica_selector is not None:
-                    next_dsn = replica_selector.next()
+                    next_dsn = next(replica_selector)
                     if next_dsn is not None:
                         log.warning("Unable to connect to DSN %s: %s, "
                             "now trying %s", dsn, e, next_dsn)
@@ -380,4 +381,3 @@ class CXOracleConnectionManager(AbstractConnectionManager):
             self._set_xid(conn, cursor)
         if self.on_store_opened is not None:
             self.on_store_opened(cursor, restart=True)
-

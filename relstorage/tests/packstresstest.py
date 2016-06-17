@@ -1,3 +1,4 @@
+from __future__ import print_function
 
 import logging
 
@@ -47,11 +48,11 @@ s = RelStorage(a)
 d = DB(s)
 c = d.open()
 
-print 'size:'
-print d.getSize()
+print('size:')
+print(d.getSize())
 
 if 1:
-    print 'initializing...'
+    print('initializing...')
     container = PersistentMapping()
     c.root()['container'] = container
     container_size = 10000
@@ -59,22 +60,22 @@ if 1:
         container[i] = PersistentMapping()
     transaction.commit()
 
-    print 'generating transactions...'
+    print('generating transactions...')
     for trans in range(100):
-        print trans
+        print(trans)
         sources = (random.randint(0, container_size - 1) for j in range(100))
         for source in sources:
             obj = container[source]
             obj[trans] = container[random.randint(0, container_size - 1)]
         transaction.commit()
 
-    print 'size:'
-    print d.getSize()
+    print('size:')
+    print(d.getSize())
 
-print 'packing...'
+print('packing...')
 d.pack()
 
-print 'size:'
-print d.getSize()
+print('size:')
+print(d.getSize())
 
 d.close()

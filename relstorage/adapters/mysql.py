@@ -52,17 +52,14 @@ import logging
 try:
     import MySQLdb
 except ImportError:
-    import sys
-    t, v, tb = sys.exc_info()
     try:
         import pymysql
         pymysql.install_as_MySQLdb()
         import MySQLdb
     except ImportError:
-        raise t, v, tb
-    else:
-        del t, v, b
-from zope.interface import implements
+        raise ImportError("Unable to import MySQLdb or pymysql")
+
+from zope.interface import implementer
 
 from relstorage.adapters.connmanager import AbstractConnectionManager
 from relstorage.adapters.dbiter import HistoryFreeDatabaseIterator
@@ -80,7 +77,7 @@ from relstorage.adapters.scriptrunner import ScriptRunner
 from relstorage.adapters.stats import MySQLStats
 from relstorage.adapters.txncontrol import MySQLTransactionControl
 from relstorage.options import Options
-
+from relstorage._compat import iteritems
 log = logging.getLogger(__name__)
 
 # disconnected_exceptions contains the exception types that might be
@@ -125,16 +122,16 @@ try:
     if hasattr(pymysql.converters, 'escape_string'):
         orig_escape_string = pymysql.converters.escape_string
         def escape_string(value, mapping=None):
-            if isinstance(value, bytearray) and not(value):
+            if isinstance(value, bytearray) and not value:
                 return value
             return orig_escape_string(value, mapping)
         pymysql.converters.escape_string = escape_string
 except ImportError:
-	pass
+    pass
 
+@implementer(IRelStorageAdapter)
 class MySQLAdapter(object):
     """MySQL adapter for RelStorage."""
-    implements(IRelStorageAdapter)
 
     def __init__(self, options=None, **params):
         if options is None:
@@ -221,8 +218,7 @@ class MySQLAdapter(object):
         p = self._params.copy()
         if 'passwd' in p:
             del p['passwd']
-        p = p.items()
-        p.sort()
+        p = sorted(iteritems(p))
         parts.extend('%s=%r' % item for item in p)
         return ", ".join(parts)
 
@@ -278,9 +274,9 @@ class MySQLdbConnectionManager(AbstractConnectionManager):
                     conn.autocommit(False)
                 conn.replica = replica
                 return conn, cursor
-            except MySQLdb.OperationalError, e:
+            except MySQLdb.OperationalError as e:
                 if replica is not None:
-                    next_replica = replica_selector.next()
+                    next_replica = next(replica_selector)
                     if next_replica is not None:
                         log.warning("Unable to connect to replica %s: %s, "
                             "now trying %s", replica, e, next_replica)

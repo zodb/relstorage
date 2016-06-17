@@ -16,7 +16,7 @@
 # This is copied from ZODB.tests.RecoveryStorage and expanded to fit
 # history-free storages.
 
-from relstorage.blobhelper import is_blob_record
+from ZODB.blob import is_blob_record
 from transaction import Transaction
 from ZODB import DB
 from ZODB.serialize import referencesf
@@ -24,14 +24,19 @@ from ZODB.tests.StorageTestBase import handle_serials
 from ZODB.tests.StorageTestBase import MinPO
 from ZODB.tests.StorageTestBase import snooze
 from ZODB.tests.StorageTestBase import zodb_pickle
-from ZODB.tests.StorageTestBase import zodb_unpickle
+
 import itertools
 import time
 import transaction
 import ZODB.POSException
 
+from relstorage._compat import PY3
+from relstorage._compat import iteritems
 
-class IteratorDeepCompare:
+if not PY3:
+    zip = itertools.izip
+
+class IteratorDeepCompare(object):
 
     def compare(self, storage1, storage2):
         # override this for storages that truncate on restore (because
@@ -44,10 +49,10 @@ class IteratorDeepCompare:
         missing = object()
         iter1 = storage1.iterator()
         iter2 = storage2.iterator()
-        for txn1, txn2 in itertools.izip(iter1, iter2):
-            eq(txn1.tid,         txn2.tid)
-            eq(txn1.status,      txn2.status)
-            eq(txn1.user,        txn2.user)
+        for txn1, txn2 in zip(iter1, iter2):
+            eq(txn1.tid, txn2.tid)
+            eq(txn1.status, txn2.status)
+            eq(txn1.user, txn2.user)
             eq(txn1.description, txn2.description)
 
             # b/w compat on the 'extension' attribute
@@ -67,11 +72,10 @@ class IteratorDeepCompare:
             recs1 = dict([(r.oid, r) for r in txn1])
             recs2 = dict([(r.oid, r) for r in txn2])
             eq(len(recs1), len(recs2))
-            recs1 = recs1.items()
-            recs1.sort()
-            recs2 = recs2.items()
+            recs1 = sorted(iteritems(recs1))
+            recs2 = sorted(iteritems(recs2))
             recs2.sort()
-            for (oid1, rec1), (oid2, rec2) in itertools.izip(recs1, recs2):
+            for (_oid1, rec1), (_oid2, rec2) in zip(recs1, recs2):
                 eq(rec1.oid, rec2.oid)
                 eq(rec1.tid, rec2.tid)
                 eq(rec1.data, rec2.data)
@@ -84,20 +88,21 @@ class IteratorDeepCompare:
                             storage2.loadBlob, rec1.oid, rec1.tid)
                     else:
                         fn2 = storage2.loadBlob(rec1.oid, rec1.tid)
-                        self.assert_(fn1 != fn2)
-                        eq(open(fn1, 'rb').read(), open(fn2, 'rb').read())
+                        self.assertNotEqual(fn1, fn2)
+                        with open(fn1, 'rb') as f1, open(fn2, 'rb') as f2:
+                            eq(f1.read(), f2.read())
 
         # Make sure ther are no more records left in txn1 and txn2, meaning
         # they were the same length
         try:
-            iter1.next()
+            next(iter1)
         except (IndexError, StopIteration):
             pass
         else:
             self.fail("storage1 has more records")
 
         try:
-            iter2.next()
+            next(iter2)
         except (IndexError, StopIteration):
             pass
         else:
@@ -200,7 +205,7 @@ class BasicRecoveryStorage(IteratorDeepCompare):
 
     def checkRestoreAfterDoubleCommit(self):
         oid = self._storage.new_oid()
-        revid = '\0'*8
+        revid = b'\0'*8
         data1 = zodb_pickle(MinPO(11))
         data2 = zodb_pickle(MinPO(12))
         # Begin the transaction
@@ -294,8 +299,8 @@ class UndoableRecoveryStorage(BasicRecoveryStorage):
         transaction.commit()
 
         r = db.open().root()
-        self.assertEquals(r["obj1"].x, 'x1')
-        self.assertEquals(r["obj2"].x, 'x2')
+        self.assertEqual(r["obj1"].x, 'x1')
+        self.assertEqual(r["obj2"].x, 'x2')
 
         # Dirty tricks.
         if is_filestorage:
@@ -323,8 +328,8 @@ class UndoableRecoveryStorage(BasicRecoveryStorage):
             # transaction.  Without the patch, the second assert failed
             # (it claimed it couldn't find a data record for obj2) on my
             # box, but other failure modes were possible.
-            self.assert_(self._storage._data_find(pos, obj1_oid, '') > 0)
-            self.assert_(self._storage._data_find(pos, obj2_oid, '') > 0)
+            self.assertTrue(self._storage._data_find(pos, obj1_oid, '') > 0)
+            self.assertTrue(self._storage._data_find(pos, obj2_oid, '') > 0)
 
             # The offset of the next ("redo") transaction.
             pos = self._storage.getSize()
@@ -339,14 +344,14 @@ class UndoableRecoveryStorage(BasicRecoveryStorage):
         self._storage.tpc_finish(t)
 
         r = db.open().root()
-        self.assertEquals(r["obj1"].x, 'x1')
-        self.assertEquals(r["obj2"].x, 'x2')
+        self.assertEqual(r["obj1"].x, 'x1')
+        self.assertEqual(r["obj2"].x, 'x2')
 
         if is_filestorage:
             # Again _data_find should find both objects in this txn, and
             # again the second assert failed on my box.
-            self.assert_(self._storage._data_find(pos, obj1_oid, '') > 0)
-            self.assert_(self._storage._data_find(pos, obj2_oid, '') > 0)
+            self.assertTrue(self._storage._data_find(pos, obj1_oid, '') > 0)
+            self.assertTrue(self._storage._data_find(pos, obj2_oid, '') > 0)
 
         # Indirectly provoke .restore().  .restore in turn indirectly
         # provokes _data_find too, but not usefully for the purposes of

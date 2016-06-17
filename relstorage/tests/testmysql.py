@@ -31,7 +31,7 @@ import unittest
 base_dbname = os.environ.get('RELSTORAGETEST_DBNAME', 'relstoragetest')
 
 
-class UseMySQLAdapter:
+class UseMySQLAdapter(object):
 
     def make_adapter(self, options):
         from relstorage.adapters.mysql import MySQLAdapter
@@ -47,7 +47,7 @@ class UseMySQLAdapter:
         )
 
 
-class ZConfigTests:
+class ZConfigTests(object):
 
     def checkConfigureViaZConfig(self):
         replica_conf = os.path.join(os.path.dirname(__file__), 'replicas.conf')
@@ -55,7 +55,7 @@ class ZConfigTests:
             dbname = base_dbname
         else:
             dbname = base_dbname + '_hf'
-        conf = """
+        conf = u"""
         %%import relstorage
         <zodb main>
             <relstorage>
@@ -77,16 +77,16 @@ class ZConfigTests:
             dbname,
             )
 
-        schema_xml = """
+        schema_xml = u"""
         <schema>
         <import package="ZODB"/>
         <section type="ZODB.database" name="main" attribute="database"/>
         </schema>
         """
         import ZConfig
-        from StringIO import StringIO
+        from io import StringIO
         schema = ZConfig.loadSchemaFile(StringIO(schema_xml))
-        config, handler = ZConfig.loadConfigFile(schema, StringIO(conf))
+        config, _ = ZConfig.loadConfigFile(schema, StringIO(conf))
 
         db = config.database.open()
         try:
@@ -98,7 +98,7 @@ class ZConfigTests:
             self.assertEqual(storage.getName(), "xyz")
             adapter = storage._adapter
             from relstorage.adapters.mysql import MySQLAdapter
-            self.assert_(isinstance(adapter, MySQLAdapter))
+            self.assertIsInstance(adapter, MySQLAdapter)
             self.assertEqual(adapter._params, {
                 'passwd': 'relstoragetest',
                 'db': dbname,
@@ -182,7 +182,7 @@ def test_suite():
             HFMySQLTests,
             HFMySQLToFile,
             HFMySQLFromFile,
-            ]:
+    ]:
         suite.addTest(unittest.makeSuite(klass, "check"))
     suite.addTest(unittest.makeSuite(HPMySQLDestZODBConvertTests))
     suite.addTest(unittest.makeSuite(HPMySQLSrcZODBConvertTests))
@@ -198,8 +198,8 @@ def test_suite():
         for shared_blob_dir in shared_blob_dir_choices:
             for keep_history in (False, True):
                 def create_storage(name, blob_dir,
-                        shared_blob_dir=shared_blob_dir,
-                        keep_history=keep_history, **kw):
+                                   shared_blob_dir=shared_blob_dir,
+                                   keep_history=keep_history, **kw):
                     from relstorage.storage import RelStorage
                     from relstorage.adapters.mysql import MySQLAdapter
                     db = db_names[name]
@@ -250,6 +250,6 @@ def test_suite():
 
     return suite
 
-if __name__=='__main__':
+if __name__ == '__main__':
     logging.basicConfig()
     unittest.main(defaultTest="test_suite")
