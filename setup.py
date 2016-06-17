@@ -39,7 +39,6 @@ from setuptools import setup
 
 doclines = __doc__.split("\n")
 
-
 def read_file(*path):
     base_dir = os.path.dirname(__file__)
     file_path = (base_dir, ) + tuple(path)

@@ -52,14 +52,14 @@ class ZConfigTests:
         import tempfile
         dsn = os.environ.get('ORACLE_TEST_DSN', 'XE')
         fd, replica_conf = tempfile.mkstemp()
-        os.write(fd, dsn)
+        os.write(fd, dsn.encode("ascii"))
         os.close(fd)
         try:
             if self.keep_history:
                 dbname = base_dbname
             else:
                 dbname = base_dbname + '_hf'
-            conf = """
+            conf = u"""
             %%import relstorage
             <zodb main>
               <relstorage>
@@ -82,16 +82,16 @@ class ZConfigTests:
                 dsn,
                 )
 
-            schema_xml = """
+            schema_xml = u"""
             <schema>
             <import package="ZODB"/>
             <section type="ZODB.database" name="main" attribute="database"/>
             </schema>
             """
             import ZConfig
-            from relstorage._compat import StringIO
+            from io import StringIO
             schema = ZConfig.loadSchemaFile(StringIO(schema_xml))
-            config, handler = ZConfig.loadConfigFile(schema, StringIO(conf))
+            config, _handler = ZConfig.loadConfigFile(schema, StringIO(conf))
 
             db = config.database.open()
             try:
@@ -103,7 +103,7 @@ class ZConfigTests:
                 self.assertEqual(storage.getName(), "xyz")
                 adapter = storage._adapter
                 from relstorage.adapters.oracle import OracleAdapter
-                self.assert_(isinstance(adapter, OracleAdapter))
+                self.assertIsInstance(adapter, OracleAdapter)
                 self.assertEqual(adapter._user, dbname)
                 self.assertEqual(adapter._password, 'relstoragetest')
                 self.assertEqual(adapter._dsn, dsn)
@@ -120,7 +120,7 @@ class ZConfigTests:
 
 
 class HPOracleTests(UseOracleAdapter, HistoryPreservingRelStorageTests,
-        ZConfigTests):
+                    ZConfigTests):
     pass
 
 class HPOracleToFile(UseOracleAdapter, HistoryPreservingToFileStorage):
@@ -130,7 +130,7 @@ class HPOracleFromFile(UseOracleAdapter, HistoryPreservingFromFileStorage):
     pass
 
 class HFOracleTests(UseOracleAdapter, HistoryFreeRelStorageTests,
-        ZConfigTests):
+                    ZConfigTests):
     pass
 
 class HFOracleToFile(UseOracleAdapter, HistoryFreeToFileStorage):
@@ -149,7 +149,7 @@ db_names = {
 def test_suite():
     try:
         import cx_Oracle
-    except ImportError as e:
+    except ImportError:
         import warnings
         warnings.warn("cx_Oracle is not importable, so Oracle tests disabled")
         return unittest.TestSuite()
@@ -162,7 +162,7 @@ def test_suite():
             HFOracleTests,
             HFOracleToFile,
             HFOracleFromFile,
-            ]:
+    ]:
         suite.addTest(unittest.makeSuite(klass, "check"))
 
     try:
@@ -171,14 +171,27 @@ def test_suite():
         # ZODB < 3.8
         pass
     else:
+        from .util import RUNNING_ON_CI
+        if RUNNING_ON_CI or os.environ.get("RS_ORCL_SMALL_BLOB"):
+            # cx_Oracle blob support can only address up to sys.maxint on
+            # 32-bit systems, 4GB otherwise. This takes a great deal of time, however,
+            # so allow tuning it down.
+            from relstorage.adapters.mover import ObjectMover
+            assert hasattr(ObjectMover, 'oracle_blob_chunk_maxsize')
+            ObjectMover.oracle_blob_chunk_maxsize = 1024 * 1024 * 100
+            large_blob_size = ObjectMover.oracle_blob_chunk_maxsize * 2
+        else:
+            large_blob_size = min(sys.maxsize, 1<<32)
+
+
         from relstorage.tests.blob.testblob import storage_reusable_suite
         dsn = os.environ.get('ORACLE_TEST_DSN', 'XE')
         from relstorage.tests.util import shared_blob_dir_choices
         for shared_blob_dir in shared_blob_dir_choices:
             for keep_history in (False, True):
                 def create_storage(name, blob_dir,
-                        shared_blob_dir=shared_blob_dir,
-                        keep_history=keep_history, **kw):
+                                   shared_blob_dir=shared_blob_dir,
+                                   keep_history=keep_history, **kw):
                     from relstorage.storage import RelStorage
                     from relstorage.adapters.oracle import OracleAdapter
                     db = db_names[name]
@@ -213,9 +226,7 @@ def test_suite():
                 else:
                     pack_test_name = 'blob_packing_history_free.txt'
 
-                # cx_Oracle blob support can only address up to sys.maxint on
-                # 32-bit systems, 4GB otherwise.
-                blob_size = min(sys.maxsize, 1<<32)
+                blob_size = large_blob_size
 
                 suite.addTest(storage_reusable_suite(
                     prefix, create_storage,
@@ -229,6 +240,6 @@ def test_suite():
 
     return suite
 
-if __name__=='__main__':
+if __name__ == '__main__':
     logging.basicConfig()
     unittest.main(defaultTest="test_suite")

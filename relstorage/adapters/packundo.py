@@ -28,6 +28,11 @@ from relstorage._compat import mysql_connection
 
 log = logging.getLogger(__name__)
 
+def _oracle_fetchmany(self, cursor): # pylint:disable=unused-argument
+    # We can't safely fetch many rows at once without
+    # getting 'ProgrammingError: LOB variable no longer valid after subsequent fetch'
+    # See https://github.com/zodb/relstorage/issues/30
+    return cursor
 
 class PackUndo(object):
     """Abstract base class for pack/undo"""
@@ -40,6 +45,9 @@ class PackUndo(object):
         self.runner = runner
         self.locker = locker
         self.options = options
+
+    def _fetchmany(self, cursor):
+        return fetchmany(cursor)
 
     def choose_pack_transaction(self, pack_point):
         """Return the transaction before or at the specified pack time.
@@ -900,6 +908,10 @@ class OracleHistoryPreservingPackUndo(HistoryPreservingPackUndo):
           AND rownum <= 1000
         """
 
+    # XXX: This may not be necessary, the HP tests don't fail
+    # without it.
+    _fetchmany = _oracle_fetchmany
+
 
 @implementer(IPackUndo)
 class HistoryFreePackUndo(PackUndo):
@@ -1014,7 +1026,8 @@ class HistoryFreePackUndo(PackUndo):
 
         add_objects = []
         add_refs = []
-        for from_oid, tid, state in fetchmany(cursor):
+
+        for from_oid, tid, state in self._fetchmany(cursor):
             state = db_binary_to_bytes(state)
             if hasattr(state, 'read'):
                 # Oracle
@@ -1027,8 +1040,8 @@ class HistoryFreePackUndo(PackUndo):
                     to_oids = get_references(state)
                 except:
                     log.error("pre_pack: can't unpickle "
-                        "object %d in transaction %d; state length = %d" % (
-                        from_oid, tid, len(state)))
+                              "object %d in transaction %d; state length = %d",
+                              from_oid, tid, len(state))
                     raise
                 for to_oid in to_oids:
                     add_refs.append((from_oid, tid, to_oid))
@@ -1068,7 +1081,7 @@ class HistoryFreePackUndo(PackUndo):
         """
         if not self.options.pack_gc:
             log.warning("pre_pack: garbage collection is disabled on a "
-                "history-free storage, so doing nothing")
+                        "history-free storage, so doing nothing")
             return
 
         conn, cursor = self.connmanager.open_for_pre_pack()
@@ -1251,3 +1264,5 @@ class OracleHistoryFreePackUndo(HistoryFreePackUndo):
         """
 
     _script_create_temp_pack_visit = None
+
+    _fetchmany = _oracle_fetchmany

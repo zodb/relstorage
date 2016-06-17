@@ -1296,6 +1296,11 @@ class ObjectMover(object):
         finally:
             f.close()
 
+    # Current versions of cx_Oracle only support offsets up
+    # to sys.maxint or 4GB, whichever comes first. We divide up our
+    # upload into chunks within this limit.
+    oracle_blob_chunk_maxsize = min(sys.maxsize, 1<<32)
+
     @metricmethod_sampled
     def oracle_upload_blob(self, cursor, oid, tid, filename):
         """Upload a blob from a file.
@@ -1338,10 +1343,7 @@ class ObjectMover(object):
             """
 
         f = open(filename, 'rb')
-        # Current versions of cx_Oracle only support offsets up
-        # to sys.maxint or 4GB, whichever comes first. We divide up our
-        # upload into chunks within this limit.
-        maxsize = min(sys.maxsize, 1<<32)
+        maxsize = self.oracle_blob_chunk_maxsize
         try:
             chunk_num = 0
             while True:
@@ -1353,11 +1355,13 @@ class ObjectMover(object):
                 cursor.execute(select_stmt, params)
                 blob, = cursor.fetchone()
                 blob.open()
-                write_chunk_size = int(max(round(
-                    1.0 * self.blob_chunk_size / blob.getchunksize()), 1) *
-                    blob.getchunksize())
+                write_chunk_size = int(
+                    max(
+                        round(1.0 * self.blob_chunk_size / blob.getchunksize()),
+                        1)
+                    * blob.getchunksize())
                 offset = 1 # Oracle still uses 1-based indexing.
-                for _i in xrange(maxsize / write_chunk_size):
+                for _i in xrange(maxsize // write_chunk_size):
                     write_chunk = f.read(write_chunk_size)
                     if not blob.write(write_chunk, offset):
                         # EOF.

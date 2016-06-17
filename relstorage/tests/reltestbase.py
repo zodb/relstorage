@@ -557,7 +557,7 @@ class GenericRelStorageTests(
                 conn.root()['dc'] = DoubleCommitter()
                 transaction.commit()
                 conn2 = db.open()
-                self.assertEquals(conn2.root()['dc'].new_attribute, 1)
+                self.assertEqual(conn2.root()['dc'].new_attribute, 1)
                 conn2.close()
             finally:
                 transaction.abort()

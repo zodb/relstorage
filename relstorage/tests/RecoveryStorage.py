@@ -87,7 +87,7 @@ class IteratorDeepCompare:
                             storage2.loadBlob, rec1.oid, rec1.tid)
                     else:
                         fn2 = storage2.loadBlob(rec1.oid, rec1.tid)
-                        self.assert_(fn1 != fn2)
+                        self.assertNotEqual(fn1, fn2)
                         with open(fn1, 'rb') as f1, open(fn2, 'rb') as f2:
                             eq(f1.read(), f2.read())
 

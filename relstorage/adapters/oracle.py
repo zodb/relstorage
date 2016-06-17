@@ -222,7 +222,8 @@ class CXOracleScriptRunner(OracleScriptRunner):
                     del cursor.outputtypehandler
             except cx_Oracle.DatabaseError as e:
                 # ORA-01406: fetched column value was truncated
-                error, = e
+                error = e.args[0]
+
                 if ((isinstance(error, str) and not error.endswith(' 1406'))
                         or error.code != 1406):
                     raise
@@ -380,4 +381,3 @@ class CXOracleConnectionManager(AbstractConnectionManager):
             self._set_xid(conn, cursor)
         if self.on_store_opened is not None:
             self.on_store_opened(cursor, restart=True)
-
