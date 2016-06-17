@@ -601,7 +601,7 @@ class LocalClientTests(unittest.TestCase):
         self.assertEqual(c.incr('abc'), None)
 
 
-class MockOptions:
+class MockOptions(object):
     cache_module_name = ''
     cache_servers = ''
     cache_local_mb = 1
@@ -609,7 +609,7 @@ class MockOptions:
     cache_local_compression = 'zlib'
     cache_delta_size_limit = 10000
 
-class MockOptionsWithFakeCache:
+class MockOptionsWithFakeCache(object):
     cache_module_name = 'relstorage.tests.fakecache'
     cache_servers = 'host:9999'
     cache_local_mb = 1
@@ -617,18 +617,18 @@ class MockOptionsWithFakeCache:
     cache_local_compression = 'zlib'
     cache_delta_size_limit = 10000
 
-class MockAdapter:
+class MockAdapter(object):
     def __init__(self):
         self.mover = MockObjectMover()
         self.poller = MockPoller()
 
-class MockObjectMover:
+class MockObjectMover(object):
     def __init__(self):
         self.data = {}  # {oid_int: (state, tid_int)}
     def load_current(self, cursor, oid_int):
         return self.data.get(oid_int, (None, None))
 
-class MockPoller:
+class MockPoller(object):
     def __init__(self):
         self.changes = []  # [(oid, tid)]
     def list_changes(self, cursor, after_tid, last_tid):

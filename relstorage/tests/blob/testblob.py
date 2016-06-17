@@ -558,7 +558,7 @@ def tearDown(test):
     ZODB.tests.util.tearDown(test)
 
 
-class MinimalTestLayer:
+class MinimalTestLayer(object):
 
     __bases__ = ()
     __module__ = ''

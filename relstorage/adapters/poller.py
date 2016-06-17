@@ -23,7 +23,7 @@ log = logging.getLogger(__name__)
 
 
 @implementer(IPoller)
-class Poller:
+class Poller(object):
     """Database change notification poller"""
 
     def __init__(self, poll_query, keep_history, runner, revert_when_stale):

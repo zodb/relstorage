@@ -36,7 +36,7 @@ from relstorage._compat import iteritems
 if not PY3:
     zip = itertools.izip
 
-class IteratorDeepCompare:
+class IteratorDeepCompare(object):
 
     def compare(self, storage1, storage2):
         # override this for storages that truncate on restore (because

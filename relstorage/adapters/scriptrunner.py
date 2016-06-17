@@ -149,7 +149,7 @@ class OracleScriptRunner(ScriptRunner):
         cursor.executemany(stmt, items)
 
 
-class TrackingMap:
+class TrackingMap(object):
     """Provides values for keys while tracking which keys are accessed."""
 
     def __init__(self, source):

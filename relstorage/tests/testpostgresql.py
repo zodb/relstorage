@@ -30,7 +30,7 @@ import unittest
 base_dbname = os.environ.get('RELSTORAGETEST_DBNAME', 'relstoragetest')
 
 
-class UsePostgreSQLAdapter:
+class UsePostgreSQLAdapter(object):
 
     def make_adapter(self, options):
         from relstorage.adapters.postgresql import PostgreSQLAdapter
@@ -44,7 +44,7 @@ class UsePostgreSQLAdapter:
         )
 
 
-class ZConfigTests:
+class ZConfigTests(object):
 
     def checkConfigureViaZConfig(self):
         replica_conf = os.path.join(os.path.dirname(__file__), 'replicas.conf')

@@ -56,12 +56,12 @@ class BlobHelperTest(unittest.TestCase):
                       download_action='write', keep_history=True):
         test = self
 
-        class DummyOptions:
+        class DummyOptions(object):
             blob_dir = self.blob_dir
             shared_blob_dir = shared
             blob_cache_size = cache_size
 
-        class DummyMover:
+        class DummyMover(object):
             def download_blob(self, cursor, oid_int, tid_int, filename):
                 if download_action == 'write':
                     write_file(filename, 'blob here')
@@ -72,7 +72,7 @@ class BlobHelperTest(unittest.TestCase):
             def upload_blob(self, cursor, oid_int, tid_int, filename):
                 test.uploaded = (oid_int, tid_int, filename)
 
-        class DummyAdapter:
+        class DummyAdapter(object):
             mover = DummyMover()
 
             def __init__(self):
@@ -99,7 +99,7 @@ class BlobHelperTest(unittest.TestCase):
             self.assertRaises(ValueError, self._make_default, shared=False)
 
     def test_new_instance(self):
-        class DummyAdapter2:
+        class DummyAdapter2(object):
             pass
 
         obj = self._make_default()

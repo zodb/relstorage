@@ -80,20 +80,20 @@ class AbstractConnectionManagerTests(unittest.TestCase):
             cm.restart_load, conn, MockCursor())
 
 
-class MockOptions:
+class MockOptions(object):
     def __init__(self, fn=None, ro_fn=None):
         self.replica_conf = fn
         self.ro_replica_conf = ro_fn
         self.replica_timeout = 600.0
 
-class MockConnection:
+class MockConnection(object):
     def rollback(self):
         self.rolled_back = True
 
     def close(self):
         self.closed = True
 
-class MockCursor:
+class MockCursor(object):
     def close(self):
         self.closed = True
 

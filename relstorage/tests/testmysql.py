@@ -31,7 +31,7 @@ import unittest
 base_dbname = os.environ.get('RELSTORAGETEST_DBNAME', 'relstoragetest')
 
 
-class UseMySQLAdapter:
+class UseMySQLAdapter(object):
 
     def make_adapter(self, options):
         from relstorage.adapters.mysql import MySQLAdapter
@@ -47,7 +47,7 @@ class UseMySQLAdapter:
         )
 
 
-class ZConfigTests:
+class ZConfigTests(object):
 
     def checkConfigureViaZConfig(self):
         replica_conf = os.path.join(os.path.dirname(__file__), 'replicas.conf')

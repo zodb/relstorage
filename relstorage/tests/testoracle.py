@@ -29,7 +29,7 @@ import unittest
 base_dbname = os.environ.get('RELSTORAGETEST_DBNAME', 'relstoragetest')
 
 
-class UseOracleAdapter:
+class UseOracleAdapter(object):
 
     def make_adapter(self, options):
         from relstorage.adapters.oracle import OracleAdapter
@@ -46,7 +46,7 @@ class UseOracleAdapter:
         )
 
 
-class ZConfigTests:
+class ZConfigTests(object):
 
     def checkConfigureViaZConfig(self):
         import tempfile
