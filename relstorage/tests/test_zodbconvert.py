@@ -18,12 +18,22 @@ import os
 import tempfile
 import transaction
 import unittest
-
+import functools
 
 from relstorage.zodbconvert import main
 
+def skipIfZapNotSupportedByDest(func):
+    @functools.wraps(func)
+    def test(self):
+        if not self.zap_supported_by_dest:
+            raise unittest.SkipTest("zap_all not supported")
+    return test
+
 class AbstractZODBConvertBase(unittest.TestCase):
     cfgfile = None
+
+    # Set to True in a subclass if the destination can be zapped
+    zap_supported_by_dest = False
 
     def _create_src_storage(self):
         raise NotImplementedError()
@@ -55,42 +65,71 @@ class AbstractZODBConvertBase(unittest.TestCase):
     def _dest_conn(self):
         return self.__conn('dest')
 
-    def _write_value_for_x_in_src(self, x):
-        with self._src_conn() as conn:
-            conn.root()['x'] = x
+    def __write_value_for_key_in_db(self, val, key, db_conn_func):
+        with db_conn_func() as conn:
+            conn.root()[key] = val
             transaction.commit()
 
-    def _check_value_of_x_in_dest(self, x):
+    def _write_value_for_key_in_src(self, x, key='x'):
+        self.__write_value_for_key_in_db(x, key, self._src_conn)
+
+    def _write_value_for_key_in_dest(self, x, key='x'):
+        self.__write_value_for_key_in_db(x, key, self._dest_conn)
+
+    def _check_value_of_key_in_dest(self, x, key='x'):
         with self._dest_conn() as conn2:
-            db_x = conn2.root().get('x')
+            db_x = conn2.root().get(key)
             self.assertEqual(db_x, x)
 
     def test_convert(self):
-        self._write_value_for_x_in_src(10)
+        self._write_value_for_key_in_src(10)
         main(['', self.cfgfile])
-        self._check_value_of_x_in_dest(10)
+        self._check_value_of_key_in_dest(10)
 
 
     def test_dry_run(self):
-        self._write_value_for_x_in_src(10)
+        self._write_value_for_key_in_src(10)
         main(['', '--dry-run', self.cfgfile])
-        self._check_value_of_x_in_dest(None)
+        self._check_value_of_key_in_dest(None)
 
     def test_incremental(self):
         x = 10
-        self._write_value_for_x_in_src(x)
+        self._write_value_for_key_in_src(x)
         main(['', self.cfgfile])
-        self._check_value_of_x_in_dest(x)
+        self._check_value_of_key_in_dest(x)
 
         x = "hi"
-        self._write_value_for_x_in_src(x)
+        self._write_value_for_key_in_src(x)
         main(['', '--incremental', self.cfgfile])
-        self._check_value_of_x_in_dest(x)
+        self._check_value_of_key_in_dest(x)
 
     def test_incremental_empty_src_dest(self):
         # Should work and not raise a POSKeyError
         main(['', '--incremental', self.cfgfile])
-        self._check_value_of_x_in_dest(None)
+        self._check_value_of_key_in_dest(None)
+
+    @skipIfZapNotSupportedByDest
+    def test_clear_empty_dest(self):
+        x = 10
+        self._write_value_for_key_in_src(x)
+        main(['', '--clear', self.cfgfile])
+        self._check_value_of_key_in_dest(x)
+
+    @skipIfZapNotSupportedByDest
+    def test_clear_full_dest(self):
+        self._write_value_for_key_in_dest(999)
+        self._write_value_for_key_in_dest(666, key='y')
+        self._write_value_for_key_in_dest(8675309, key='z')
+
+        self._write_value_for_key_in_src(1, key='x')
+        self._write_value_for_key_in_src(2, key='y')
+        # omit z
+
+        main(['', '--clear', self.cfgfile])
+
+        self._check_value_of_key_in_dest(1, key='x')
+        self._check_value_of_key_in_dest(2, key='y')
+        self._check_value_of_key_in_dest(None, key='z')
 
     def test_no_overwrite(self):
         db = self._create_src_db() # create the root object

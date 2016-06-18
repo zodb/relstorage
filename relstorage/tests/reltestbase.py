@@ -894,6 +894,8 @@ class AbstractRSZodbConvertTests(StorageCreatingMixin,
 
 class AbstractRSDestZodbConvertTests(AbstractRSZodbConvertTests):
 
+    zap_supported_by_dest = True
+
     @property
     def filestorage_file(self):
         return self.srcfile

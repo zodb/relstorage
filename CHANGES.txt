@@ -57,6 +57,12 @@
 
 .. _`issue 30`: https://github.com/zodb/relstorage/issues/30
 
+- PostgreSQL: ``zodbconvert --clear`` should be much faster when the
+  destination is a PostgreSQL schema containing lots of data. Partial
+  fix for `issue 16`_ reported by Chris McDonough.
+
+.. _`issue 16`: https://github.com/zodb/relstorage/issues/16
+
 1.6.0b3 (2014-12-08)
 --------------------
 

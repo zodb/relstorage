@@ -880,16 +880,19 @@ class AbstractSchemaInstaller(object):
             script = filter_script(
                 self.schema_script, self.database_type)
             expr = (r'(CREATE|ALTER)\s+(GLOBAL TEMPORARY\s+)?(TABLE|INDEX)'
-                '\s+(temp_)?blob_chunk')
+                    r'\s+(temp_)?blob_chunk')
             script = filter_statements(script, re.compile(expr, re.I))
             self.runner.run_script(cursor, script)
 
+    _zap_all_tbl_stmt = 'DELETE FROM %s'
+
     def zap_all(self, reset_oid=True):
         """Clear all data out of the database."""
-        def callback(conn, cursor):
+        stmt = self._zap_all_tbl_stmt
+
+        def callback(_conn, cursor):
             existent = set(self.list_tables(cursor))
-            todo = list(self.all_tables)
-            todo.reverse()
+            todo = reversed(self.all_tables)
             log.debug("Checking tables: %r", todo)
             for table in todo:
                 log.debug("Considering table %s", table)
@@ -897,7 +900,7 @@ class AbstractSchemaInstaller(object):
                     continue
                 if table in existent:
                     log.debug("Deleting from table %s...", table)
-                    cursor.execute("DELETE FROM %s" % table)
+                    cursor.execute(stmt % table)
             log.debug("Done deleting from tables.")
             script = filter_script(self.init_script, self.database_type)
 
@@ -935,6 +938,12 @@ class PostgreSQLSchemaInstaller(AbstractSchemaInstaller):
 
     database_type = 'postgresql'
 
+    # Use the fast, semi-transactional way to truncate tables. It's
+    # not MVCC safe, but "TRUNCATE is transaction-safe with respect to
+    # the data in the tables: the truncation will be safely rolled
+    # back if the surrounding transaction does not commit."
+    _zap_all_tbl_stmt = 'TRUNCATE TABLE %s CASCADE'
+
     def __init__(self, connmanager, runner, locker, keep_history):
         super(PostgreSQLSchemaInstaller, self).__init__(
             connmanager, runner, keep_history)
@@ -947,7 +956,7 @@ class PostgreSQLSchemaInstaller(AbstractSchemaInstaller):
 
     def prepare(self):
         """Create the database schema if it does not already exist."""
-        def callback(conn, cursor):
+        def callback(_conn, cursor):
             tables = self.list_tables(cursor)
             if not 'object_state' in tables:
                 self.create(cursor)
