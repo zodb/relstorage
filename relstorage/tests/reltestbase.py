@@ -48,7 +48,11 @@ class StorageCreatingMixin(object):
         storage = RelStorage(adapter, options=options)
         storage._batcher_row_limit = 1
         if zap:
-            storage.zap_all()
+            # XXX: Some ZODB tests, possibly check4ExtStorageThread and
+            # check7StorageThreads don't close storages when done with them?
+            # This leads to connections remaining open with locks on PyPy, so on PostgreSQL
+            # we can't TRUNCATE tables and have to go the slow route.
+            storage.zap_all(slow=True)
         return storage
 
 
