@@ -216,7 +216,7 @@ def test_suite():
                         **kw)
                     adapter = PostgreSQLAdapter(dsn=dsn, options=options)
                     storage = RelStorage(adapter, name=name, options=options)
-                    storage.zap_all()
+                    storage.zap_all(slow=True)
                     return storage
 
                 prefix = 'PostgreSQL%s%s' % (

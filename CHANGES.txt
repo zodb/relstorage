@@ -17,8 +17,6 @@
 - Updated the buildout configuration to just run relstorage tests and
   to select which databases to use at build time.
 
-.. _`PR 23`: https://github.com/zodb/relstorage/pull/23/
-
 - zodbconvert: The ``--incremental`` option is supported with a
   FileStorage (or any storage that implements
   ``IStorage.lastTransaction()``) as a destination, not just
@@ -29,19 +27,11 @@
   Sylvain Viollon, Mauro Amico, and Peter Jacobs. Originally reported
   by Jan-Wijbrand Kolman.
 
-.. _`PR 22`: https://github.com/zodb/relstorage/pull/22
-
-
 - Raise a specific exception when acquiring the commit or pack locks
   fails. See `PR 18`_.
 
-.. _`PR 18`: https://github.com/zodb/relstorage/pull/18/
-
-
 - PostgreSQL 9.3: Support ``commit-lock-timeout``. Contributed in `PR
   20`_ by Sean Upton.
-
-.. _`PR 20`: https://github.com/zodb/relstorage/pull/20
 
 - ``RelStorage.lastTransaction()`` is more consistent with FileStorage
   and ClientStorage, returning a useful value in more cases.
@@ -49,13 +39,25 @@
 - Oracle: Add support for getting the database size. Contributed in
   `PR 21`_ by Mauro Amico.
 
-.. _`PR 21`: https://github.com/zodb/relstorage/pull/21
-
 - Oracle: Packing should no longer produce LOB errors. This partially
   reverts the speedups in 1.6.0b2. Reported in `issue 30`_ by Peter
   Jacobs.
 
+- PostgreSQL: ``zodbconvert --clear`` should be much faster when the
+  destination is a PostgreSQL schema containing lots of data. *NOTE*:
+  There can be no other open RelStorage connections to the destination,
+  or any PostgreSQL connection in general that might be holding locks
+  on the RelStorage tables, or ``zodbconvert`` will block indefinitely
+  waiting for the locks to be release. Partial fix for `issue 16`_
+  reported by Chris McDonough.
+
+.. _`PR 18`: https://github.com/zodb/relstorage/pull/18/
+.. _`PR 20`: https://github.com/zodb/relstorage/pull/20
+.. _`PR 21`: https://github.com/zodb/relstorage/pull/21
 .. _`issue 30`: https://github.com/zodb/relstorage/issues/30
+.. _`issue 16`: https://github.com/zodb/relstorage/issues/16
+.. _`PR 22`: https://github.com/zodb/relstorage/pull/22
+.. _`PR 23`: https://github.com/zodb/relstorage/pull/23/
 
 1.6.0b3 (2014-12-08)
 --------------------

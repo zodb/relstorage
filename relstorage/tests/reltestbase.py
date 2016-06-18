@@ -48,7 +48,11 @@ class StorageCreatingMixin(object):
         storage = RelStorage(adapter, options=options)
         storage._batcher_row_limit = 1
         if zap:
-            storage.zap_all()
+            # XXX: Some ZODB tests, possibly check4ExtStorageThread and
+            # check7StorageThreads don't close storages when done with them?
+            # This leads to connections remaining open with locks on PyPy, so on PostgreSQL
+            # we can't TRUNCATE tables and have to go the slow route.
+            storage.zap_all(slow=True)
         return storage
 
 
@@ -698,7 +702,7 @@ class GenericRelStorageTests(
         # on whether the accelerated implementation is in use. Also ,the pure-python
         # version on PyPy can raise IndexError
         from zodbpickle.pickle import UnpicklingError as pUnpickErr
-        unpick_errs = (pUnpickErr,IndexError)
+        unpick_errs = (pUnpickErr, IndexError)
         try:
             from zodbpickle.fastpickle import UnpicklingError as fUnpickErr
         except ImportError:
@@ -709,7 +713,7 @@ class GenericRelStorageTests(
 
         self._dostoreNP(self._storage.new_oid(), data=b'brokenpickle')
         self.assertRaises(unpick_errs, self._storage.pack,
-            time.time() + 10000, referencesf)
+                          time.time() + 10000, referencesf)
 
     def checkBackwardTimeTravelWithoutRevertWhenStale(self):
         # If revert_when_stale is false (the default), when the database
@@ -743,7 +747,7 @@ class GenericRelStorageTests(
                 transaction.commit()
                 self.assertTrue('beta' in r)
 
-                c._storage.zap_all(reset_oid=False)
+                c._storage.zap_all(reset_oid=False, slow=True)
                 c._storage.copyTransactionsFrom(fs)
 
                 fs.close()
@@ -794,7 +798,7 @@ class GenericRelStorageTests(
                 transaction.commit()
                 self.assertTrue('beta' in r)
 
-                c._storage.zap_all(reset_oid=False)
+                c._storage.zap_all(reset_oid=False, slow=True)
                 c._storage.copyTransactionsFrom(fs)
 
                 fs.close()
@@ -893,6 +897,8 @@ class AbstractRSZodbConvertTests(StorageCreatingMixin,
 
 
 class AbstractRSDestZodbConvertTests(AbstractRSZodbConvertTests):
+
+    zap_supported_by_dest = True
 
     @property
     def filestorage_file(self):
