@@ -886,9 +886,16 @@ class AbstractSchemaInstaller(object):
 
     _zap_all_tbl_stmt = 'DELETE FROM %s'
 
-    def zap_all(self, reset_oid=True):
-        """Clear all data out of the database."""
-        stmt = self._zap_all_tbl_stmt
+    def zap_all(self, reset_oid=True, slow=False):
+        """
+        Clear all data out of the database.
+
+        :keyword bool slow: If True (*not* the default) then database
+            specific optimizations will be skipped and rows will simply be
+            DELETEd. This is helpful when other connections might be open and
+            holding some kind of locks.
+        """
+        stmt = self._zap_all_tbl_stmt if not slow else AbstractSchemaInstaller._zap_all_tbl_stmt
 
         def callback(_conn, cursor):
             existent = set(self.list_tables(cursor))
