@@ -27,6 +27,7 @@ def skipIfZapNotSupportedByDest(func):
     def test(self):
         if not self.zap_supported_by_dest:
             raise unittest.SkipTest("zap_all not supported")
+        func(self)
     return test
 
 class AbstractZODBConvertBase(unittest.TestCase):
