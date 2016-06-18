@@ -12,41 +12,15 @@
 #
 ##############################################################################
 
-from relstorage._compat import BytesIO as StringIO
-import tempfile
+from tempfile import SpooledTemporaryFile
 
-class AutoTemporaryFile(object):
-    """Initially a StringIO, but becomes a TemporaryFile if it grows large.
+class AutoTemporaryFile(SpooledTemporaryFile):
+    # Exists for BWC and to preserve the default threshold
 
-    Not thread safe.
-    """
+    def __init__(self, threshold=10*1024*1024, **kw):
+        # STF uses >, the old ATF used >= for the max_size check
+        SpooledTemporaryFile.__init__(self, max_size=threshold - 1, **kw)
 
-    def __init__(self, threshold=10*1024*1024):
-        self._threshold = threshold
-        self._f = StringIO()
-
-    def read(self, n=None):
-        if n is not None:
-            return self._f.read(n)
-        else:
-            return self._f.read()
-
-    def seek(self, pos, mode=0):
-        self._f.seek(pos, mode)
-
-    def tell(self):
-        return self._f.tell()
-
-    def close(self):
-        self._f.close()
-
-    def write(self, data):
-        threshold = self._threshold
-        if threshold and self._f.tell() + len(data) >= threshold:
-            # convert to TemporaryFile
-            self._threshold = 0
-            f = tempfile.TemporaryFile()
-            f.write(self._f.getvalue())
-            f.seek(self._f.tell())
-            self._f = f
-        self._f.write(data)
+    @property
+    def _threshold(self):
+        return self._max_size + 1 if not self._rolled else 0
