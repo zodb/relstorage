@@ -78,3 +78,6 @@ class Options(object):
                 setattr(self, key, value)
             else:
                 raise TypeError("Unknown parameter: %s" % key)
+
+    def __repr__(self):
+        return 'relstorage.options.Options(**' + repr(self.__dict__) + ')'

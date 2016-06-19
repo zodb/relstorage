@@ -1,11 +1,14 @@
 from __future__ import print_function, absolute_import
 
-import cgi
+
 try:
     from urllib import parse as urlparse
+    from urllib.parse import parse_qsl
+    from functools import reduce
 except ImportError:
     # Py2
     import urlparse
+    from cgi import parse_qsl
 from ZODB.DemoStorage import DemoStorage
 
 from relstorage.options import Options
@@ -25,16 +28,15 @@ class SuffixMultiplier(object):
     # match, default is the multiplier.  Matches are case insensitive.  Return
     # values are in the fundamental unit.
     def __init__(self, d, default=1):
-        self._d = d
+        self._d = dict(d)
         self._default = default
         # all keys must be the same size
         self._keysz = None
-        for k in d.keys():
-            if self._keysz is None:
-                self._keysz = len(k)
-            else:
-                if self._keysz != len(k):
-                    raise ValueError('suffix length missmatch')
+        def check(a, b):
+            if len(a) != len(b):
+                raise ValueError("suffix length mismatch")
+            return a
+        self._keysz = len(reduce(check, d))
 
     def __call__(self, v):
         v = v.lower()
@@ -176,7 +178,7 @@ class RelStorageURIResolver(Resolver):
         uri = uri.replace('mysql://', 'http://', 1)
         uri = uri.replace('oracle://', 'http://', 1)
         parsed_uri = urlparse.urlsplit(uri)
-        kw = dict(cgi.parse_qsl(parsed_uri.query))
+        kw = dict(parse_qsl(parsed_uri.query))
 
         adapter_factory, kw = self.adapter_helper(parsed_uri, kw)
         kw, unused = self.interpret_kwargs(kw)
