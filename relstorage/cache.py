@@ -632,8 +632,6 @@ class LocalClient(object):
 
     def __init__(self, options):
         self._lock = threading.Lock()
-        self._lock_acquire = self._lock.acquire
-        self._lock_release = self._lock.release
         self._bucket_limit = int(1000000 * options.cache_local_mb / 2)
         self._value_limit = options.cache_local_object_max
         self._bucket0 = LocalClientBucket(self._bucket_limit)
@@ -650,12 +648,9 @@ class LocalClient(object):
             self._decompress = module.decompress
 
     def flush_all(self):
-        self._lock_acquire()
-        try:
+        with self._lock:
             self._bucket0 = LocalClientBucket(self._bucket_limit)
             self._bucket1 = LocalClientBucket(self._bucket_limit)
-        finally:
-            self._lock_release()
 
     def get(self, key):
         return self.get_multi([key]).get(key)
@@ -663,8 +658,7 @@ class LocalClient(object):
     def get_multi(self, keys):
         res = {}
         decompress = self._decompress
-        self._lock_acquire()
-        try:
+        with self._lock:
             for key in keys:
                 cvalue = self._bucket0.get(key)
                 if cvalue is None:
@@ -685,8 +679,6 @@ class LocalClient(object):
                     value = cvalue
 
                 res[key] = value
-        finally:
-            self._lock_release()
         return res
 
     def _set_one(self, key, cvalue):
@@ -716,8 +708,7 @@ class LocalClient(object):
             # don't bother
             return
         compress = self._compress
-        self._lock_acquire()
-        try:
+        with self._lock:
             for key, value in iteritems(d):
                 # XXX PY3 Shouldn't we assert isinstance(bytes)?
                 # Why do we allow non-bytes values? Do we use them outside
@@ -745,8 +736,6 @@ class LocalClient(object):
                     del self._bucket1[key]
 
                 self._set_one(key, cvalue)
-        finally:
-            self._lock_release()
 
     def add(self, key, value):
         self.set_multi({key: value}, allow_replace=False)
@@ -756,8 +745,7 @@ class LocalClient(object):
             # don't bother
             return None
         decompress = self._decompress
-        self._lock_acquire()
-        try:
+        with self._lock:
             cvalue = self._bucket0.get(key)
             if cvalue is None:
                 cvalue = self._bucket1.get(key)
@@ -777,5 +765,3 @@ class LocalClient(object):
             res = int(value) + 1
             self._set_one(key, res)
             return res
-        finally:
-            self._lock_release()
