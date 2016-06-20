@@ -194,15 +194,17 @@ class RelStorage(
         if create:
             self._adapter.schema.prepare()
 
-        self.__lock = threading.RLock()
-        self.__commit_lock = threading.Lock()
+        self._lock = threading.RLock()
+        self._commit_lock = threading.Lock()
         # XXX: We don't use these attributes but some existing wrappers
         # might rely on them? They used to be a documented part of the FileStorage
-        # interface
-        self._lock_acquire = self.__lock.acquire
-        self._lock_release = self.__lock.release
-        self._commit_lock_acquire = self.__commit_lock.acquire
-        self._commit_lock_release = self.__commit_lock.release
+        # interface prior to ZODB5. In ZODB5, _lock and _commit_lock are documented
+        # attributes. (We used to have them as __lock, etc, so risk of breakage
+        # in a rename is small.)
+        self._lock_acquire = self._lock.acquire
+        self._lock_release = self._lock.release
+        self._commit_lock_acquire = self._commit_lock.acquire
+        self._commit_lock_release = self._commit_lock.release
 
         # _instances is a list of weak references to storage instances bound
         # to the same database.
@@ -377,14 +379,14 @@ class RelStorage(
     def release(self):
         """Release database sessions used by this storage instance.
         """
-        with self.__lock:
+        with self._lock:
             self._drop_load_connection()
             self._drop_store_connection()
 
     def close(self):
         """Close the storage and all instances."""
 
-        with self.__lock:
+        with self._lock:
             self._closed = True
             self._drop_load_connection()
             self._drop_store_connection()
@@ -502,7 +504,7 @@ class RelStorage(
         oid_int = u64(oid)
         cache = self._cache
 
-        with self.__lock:
+        with self._lock:
             self._before_load()
             cursor = self._load_cursor
             state, tid_int = cache.load(cursor, oid_int)
@@ -538,7 +540,7 @@ class RelStorage(
         oid_int = u64(oid)
         tid_int = u64(serial)
 
-        with self.__lock:
+        with self._lock:
             self._before_load()
             state = self._adapter.mover.load_revision(
                 self._load_cursor, oid_int, tid_int)
@@ -564,7 +566,7 @@ class RelStorage(
 
         oid_int = u64(oid)
 
-        with self.__lock:
+        with self._lock:
             if self._store_cursor is not None:
                 # Allow loading data from later transactions
                 # for conflict resolution.
@@ -623,7 +625,7 @@ class RelStorage(
         else:
             prev_tid_int = 0
 
-        with self.__lock:
+        with self._lock:
             self._max_stored_oid = max(self._max_stored_oid, oid_int)
             # save the data in a temporary table
             adapter.mover.store_temp(
@@ -654,7 +656,7 @@ class RelStorage(
         oid_int = u64(oid)
         tid_int = u64(serial)
 
-        with self.__lock:
+        with self._lock:
             self._max_stored_oid = max(self._max_stored_oid, oid_int)
             # save the data.  Note that data can be None.
             adapter.mover.restore(
@@ -688,16 +690,16 @@ class RelStorage(
             raise self._stale_error
         if self._is_read_only:
             raise POSException.ReadOnlyError()
-        self.__lock.acquire()
+        self._lock.acquire()
         try:
             if self._transaction is transaction:
                 if self._options.strict_tpc:
                     raise POSException.StorageTransactionError(
                         "Duplicate tpc_begin calls for same transaction")
                 return
-            self.__lock.release()
-            self.__commit_lock.acquire()
-            self.__lock.acquire()
+            self._lock.release()
+            self._commit_lock.acquire()
+            self._lock.acquire()
             self._clear_temp()
             self._transaction = transaction
 
@@ -733,7 +735,7 @@ class RelStorage(
             self._tid = tid
 
         finally:
-            self.__lock.release()
+            self._lock.release()
 
     def tpc_transaction(self):
         return self._transaction
@@ -770,7 +772,7 @@ class RelStorage(
 
     def _clear_temp(self):
         # Clear all attributes used for transaction commit.
-        # It is assumed that self.__lock.acquire was called before this
+        # It is assumed that self._lock.acquire was called before this
         # method was called.
         self._transaction = None
         self._ude = None
@@ -842,7 +844,7 @@ class RelStorage(
 
     @metricmethod
     def tpc_vote(self, transaction):
-        with self.__lock:
+        with self._lock:
             if transaction is not self._transaction:
                 if self._options.strict_tpc:
                     raise POSException.StorageTransactionError(
@@ -862,7 +864,7 @@ class RelStorage(
         # This method initiates a two-phase commit process,
         # saving the name of the prepared transaction in self._prepared_txn.
 
-        # It is assumed that self.__lock.acquire was called before this
+        # It is assumed that self._lock.acquire was called before this
         # method was called.
 
         if self._prepared_txn is not None:
@@ -906,7 +908,7 @@ class RelStorage(
 
     @metricmethod
     def tpc_finish(self, transaction, f=None):
-        with self.__lock:
+        with self._lock:
             if transaction is not self._transaction:
                 if self._options.strict_tpc:
                     raise POSException.StorageTransactionError(
@@ -921,11 +923,11 @@ class RelStorage(
                 finally:
                     self._clear_temp()
             finally:
-                self.__commit_lock.release()
+                self._commit_lock.release()
 
     def _finish(self, tid, user, desc, ext):
         """Commit the transaction."""
-        # It is assumed that self.__lock.acquire was called before this
+        # It is assumed that self._lock.acquire was called before this
         # method was called.
         assert self._tid is not None
         self._rollback_load_connection()
@@ -942,7 +944,7 @@ class RelStorage(
 
     @metricmethod
     def tpc_abort(self, transaction):
-        with self.__lock:
+        with self._lock:
             if transaction is not self._transaction:
                 return
             try:
@@ -951,7 +953,7 @@ class RelStorage(
                 finally:
                     self._clear_temp()
             finally:
-                self.__commit_lock.release()
+                self._commit_lock.release()
 
     def _abort(self):
         # the lock is held here
@@ -964,7 +966,7 @@ class RelStorage(
             self.blobhelper.abort()
 
     def lastTransaction(self):
-        with self.__lock:
+        with self._lock:
             if self._ltid == z64 and self._prev_polled_tid is None:
                 # We haven't committed *or* polled for transactions,
                 # so our MVCC state is "floating".
@@ -979,7 +981,7 @@ class RelStorage(
             raise self._stale_error
         if self._is_read_only:
             raise POSException.ReadOnlyError()
-        with self.__lock:
+        with self._lock:
             if self._preallocated_oids:
                 oid_int = self._preallocated_oids.pop()
             else:
@@ -1049,7 +1051,7 @@ class RelStorage(
     def history(self, oid, version=None, size=1, filter=None):
         if self._stale_error is not None:
             raise self._stale_error
-        with self.__lock:
+        with self._lock:
             self._before_load()
             cursor = self._load_cursor
             oid_int = u64(oid)
@@ -1099,7 +1101,7 @@ class RelStorage(
         assert len(undo_tid) == 8
         undo_tid_int = u64(undo_tid)
 
-        with self.__lock:
+        with self._lock:
             adapter = self._adapter
             cursor = self._store_cursor
             assert cursor is not None
@@ -1226,7 +1228,7 @@ class RelStorage(
         sync with the database only if enough time has elapsed since
         the last poll.
         """
-        with self.__lock:
+        with self._lock:
             if not self._load_transaction_open:
                 return
             elif not force and self._options.poll_interval:
@@ -1299,7 +1301,7 @@ class RelStorage(
         because prev_polled_tid is not in the database (presumably it
         has been packed).
         """
-        with self.__lock:
+        with self._lock:
             if self._closed:
                 return {}
 
@@ -1334,7 +1336,7 @@ class RelStorage(
         if self.blobhelper is None:
             raise POSException.Unsupported("No blob directory is configured.")
 
-        with self.__lock:
+        with self._lock:
             self._before_load()
             cursor = self._load_cursor
             return self.blobhelper.loadBlob(cursor, oid, serial)
@@ -1351,7 +1353,7 @@ class RelStorage(
         make sure that data are available at least long enough for the
         file to be opened.
         """
-        with self.__lock:
+        with self._lock:
             self._before_load()
             cursor = self._load_cursor
             return self.blobhelper.openCommittedBlobFile(
@@ -1376,7 +1378,7 @@ class RelStorage(
         The new serial is returned.
         """
         assert not version
-        with self.__lock:
+        with self._lock:
             self._batcher.flush()
             cursor = self._store_cursor
             self.blobhelper.storeBlob(cursor, self.store,
@@ -1389,7 +1391,7 @@ class RelStorage(
         See the restore and storeBlob methods.
         """
         self.restore(oid, serial, data, '', prev_txn, txn)
-        with self.__lock:
+        with self._lock:
             self._batcher.flush()
             cursor = self._store_cursor
             self.blobhelper.restoreBlob(cursor, oid, serial, blobfilename)
