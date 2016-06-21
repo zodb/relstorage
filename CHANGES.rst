@@ -51,6 +51,9 @@
   waiting for the locks to be release. Partial fix for `issue 16`_
   reported by Chris McDonough.
 
+- MySQL: Use the "binary" character set to avoid producing "Invalid
+  utf8 character string" warnings. See `issue 57`_.
+
 .. _`PR 18`: https://github.com/zodb/relstorage/pull/18/
 .. _`PR 20`: https://github.com/zodb/relstorage/pull/20
 .. _`PR 21`: https://github.com/zodb/relstorage/pull/21
@@ -58,6 +61,7 @@
 .. _`issue 16`: https://github.com/zodb/relstorage/issues/16
 .. _`PR 22`: https://github.com/zodb/relstorage/pull/22
 .. _`PR 23`: https://github.com/zodb/relstorage/pull/23/
+.. _`issue 57`: https://github.com/zodb/relstorage/issues/57
 
 1.6.0b3 (2014-12-08)
 --------------------
