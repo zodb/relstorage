@@ -12,22 +12,13 @@
 #
 ##############################################################################
 
-
-# Detect the version of ZODB and set default options accordingly.
-# ZODB does not seem to provide version information anywhere but in
-# setup.py, so the code below is a hack.  TODO: Bring this up on zodb-dev.
-
 from __future__ import absolute_import
 from relstorage._compat import iteritems
-default_strict_tpc = False
 
-try:
-    from ZEO.zrpc.connection import Connection as __Connection # XXX Goes away in ZEO5
-    if __Connection.current_protocol >= b'Z310':
-        default_strict_tpc = True
-    del __Connection
-except ImportError:
-    default_strict_tpc = True
+# Previously conditionally true, only true on ZODB >= 3.10, but we
+# don't support older versions anymore.
+default_strict_tpc = True
+
 
 class Options(object):
     """Options for configuring and tuning RelStorage.

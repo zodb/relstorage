@@ -257,11 +257,10 @@ class RecoveryBlobStorage(BlobTestBase,
 
     # Requires a setUp() that creates a self._dst destination storage
     def testSimpleBlobRecovery(self):
-        if hasattr(ZODB.interfaces, 'IBlobStorageRestoreable'):
-            self.assertTrue(
-                ZODB.interfaces.IBlobStorageRestoreable.providedBy(
-                    self._storage)
-                )
+        self.assertTrue(
+            ZODB.interfaces.IBlobStorageRestoreable.providedBy(
+                self._storage)
+            )
         db = DB(self._storage)
         conn = db.open()
         conn.root()[1] = ZODB.blob.Blob()

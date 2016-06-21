@@ -11,30 +11,6 @@ test_oid = b'\0' * 7 + b'\x01'
 test_tid = b'\0' * 7 + b'\x02'
 
 
-class IsBlobRecordTest(unittest.TestCase):
-    # XXX: This test can go away, was only for older
-    # ZODB < 3.8
-    def _call(self, *args, **kw):
-        from ZODB.blob import is_blob_record
-        return is_blob_record(*args, **kw)
-
-    def test_true(self):
-        from ZODB.blob import Blob
-        p = dumps(Blob)
-        self.assertTrue(self._call(p))
-
-    def test_empty_pickle(self):
-        self.assertFalse(self._call(''))
-
-    def test_obviously_false(self):
-        p = dumps('x')
-        self.assertFalse(self._call(p))
-
-    def test_still_false(self):
-        p = dumps('ZODB.blob')
-        self.assertFalse(self._call(p))
-
-
 class BlobHelperTest(unittest.TestCase):
 
     def setUp(self):
@@ -429,7 +405,6 @@ def read_file(fn):
 def test_suite():
     suite = unittest.TestSuite()
     for klass in [
-            IsBlobRecordTest,
             BlobHelperTest,
         ]:
         suite.addTest(unittest.makeSuite(klass, "test"))
