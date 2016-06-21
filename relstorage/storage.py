@@ -771,13 +771,17 @@ class RelStorage(
         # Detect conflicting changes.
         # Try to resolve the conflicts.
         resolved = set()  # a set of OIDs
-        while True:
-            conflict = adapter.mover.detect_conflict(cursor)
-            if conflict is None:
-                break
+        # In the past, we didn't load all conflicts from the DB at once,
+        # just one at a time. This was because we also fetched the state data
+        # from the DB, and it could be large. But now we use the state we have in
+        # our local temp cache, so memory concerns are gone.
+        conflicts = adapter.mover.detect_conflict(cursor)
+        if conflicts:
+            log.debug("Attempting to resolve %d conflicts", len(conflicts))
 
-            oid_int, prev_tid_int, serial_int, data = conflict
-            assert isinstance(data, bytes) # XXX PY3 porting
+        for conflict in conflicts:
+            oid_int, prev_tid_int, serial_int = conflict
+            data = self._cache.read_temp(oid_int)
             oid = p64(oid_int)
             prev_tid = p64(prev_tid_int)
             serial = p64(serial_int)

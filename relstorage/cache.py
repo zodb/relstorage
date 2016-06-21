@@ -311,6 +311,21 @@ class StorageCache(object):
         endpos = queue.tell()
         self.queue_contents[oid_int] = (startpos, endpos)
 
+    def _read_temp_state(self, startpos, endpos):
+        self.queue.seek(startpos)
+        length = endpos - startpos
+        state = self.queue.read(length)
+        if len(state) != length:
+            raise AssertionError("Queued cache data is truncated")
+        return state, length
+
+    def read_temp(self, oid_int):
+        """
+        Return the bytes for a previously stored temporary item.
+        """
+        startpos, endpos = self.queue_contents[oid_int]
+        return self._read_temp_state(startpos, endpos)[0]
+
     def send_queue(self, tid):
         """Now that this tid is known, send all queued objects to the cache"""
         tid_int = u64(tid)
@@ -327,11 +342,7 @@ class StorageCache(object):
         items.sort()
 
         for startpos, endpos, oid_int in items:
-            self.queue.seek(startpos)
-            length = endpos - startpos
-            state = self.queue.read(length)
-            if len(state) != length:
-                raise AssertionError("Queued cache data is truncated")
+            state, length = self._read_temp_state(startpos, endpos)
             cachekey = '%s:state:%d:%d' % (prefix, tid_int, oid_int)
             item_size = length + len(cachekey)
             if send_size and send_size + item_size >= self.send_limit:
