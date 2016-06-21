@@ -88,7 +88,7 @@ class ZConfigTests(object):
 
         db = config.database.open()
         try:
-            storage = db.storage()
+            storage = db.storage
             self.assertEqual(storage.isReadOnly(), False)
             self.assertEqual(storage.getName(), "xyz")
             adapter = storage._adapter
