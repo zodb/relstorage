@@ -88,10 +88,7 @@ class ZConfigTests(object):
 
         db = config.database.open()
         try:
-            storage = getattr(db, 'storage', None)
-            if storage is None:
-                # ZODB < 3.9
-                storage = db._storage
+            storage = db.storage()
             self.assertEqual(storage.isReadOnly(), False)
             self.assertEqual(storage.getName(), "xyz")
             adapter = storage._adapter
@@ -171,78 +168,74 @@ def test_suite():
             HFPostgreSQLTests,
             HFPostgreSQLToFile,
             HFPostgreSQLFromFile,
-            ]:
+    ]:
         suite.addTest(unittest.makeSuite(klass, "check"))
+
     suite.addTest(unittest.makeSuite(HPPostgreSQLDestZODBConvertTests))
     suite.addTest(unittest.makeSuite(HPPostgreSQLSrcZODBConvertTests))
 
-    try:
-        import ZODB.blob
-    except ImportError:
-        # ZODB < 3.8
-        pass
+    import ZODB.blob
+    from .util import RUNNING_ON_CI
+    if RUNNING_ON_CI or os.environ.get("RS_PG_SMALL_BLOB"):
+        # Avoid creating 2GB blobs to be friendly to neighbors
+        # and to run fast (2GB blobs take about 4 minutes on Travis
+        # CI as-of June 2016)
+        # XXX: This is dirty.
+        from relstorage.adapters.mover import ObjectMover
+        assert hasattr(ObjectMover, 'postgresql_blob_chunk_maxsize')
+        ObjectMover.postgresql_blob_chunk_maxsize = 1024 * 1024 * 100
+        large_blob_size = ObjectMover.postgresql_blob_chunk_maxsize * 2
     else:
-        from .util import RUNNING_ON_CI
-        if RUNNING_ON_CI or os.environ.get("RS_PG_SMALL_BLOB"):
-            # Avoid creating 2GB blobs to be friendly to neighbors
-            # and to run fast (2GB blobs take about 4 minutes on Travis
-            # CI as-of June 2016)
-            # XXX: This is dirty.
-            from relstorage.adapters.mover import ObjectMover
-            assert hasattr(ObjectMover, 'postgresql_blob_chunk_maxsize')
-            ObjectMover.postgresql_blob_chunk_maxsize = 1024 * 1024 * 100
-            large_blob_size = ObjectMover.postgresql_blob_chunk_maxsize * 2
-        else:
-            large_blob_size = 1<<31
+        large_blob_size = 1<<31
 
-        from relstorage.tests.blob.testblob import storage_reusable_suite
-        from relstorage.tests.util import shared_blob_dir_choices
-        for shared_blob_dir in shared_blob_dir_choices:
-            for keep_history in (False, True):
-                def create_storage(name, blob_dir,
-                                   shared_blob_dir=shared_blob_dir,
-                                   keep_history=keep_history, **kw):
-                    from relstorage.storage import RelStorage
-                    from relstorage.adapters.postgresql import PostgreSQLAdapter
-                    db = db_names[name]
-                    if not keep_history:
-                        db += '_hf'
-                    dsn = ('dbname=%s user=relstoragetest '
-                           'password=relstoragetest' % db)
-                    options = Options(
-                        keep_history=keep_history,
-                        shared_blob_dir=shared_blob_dir,
-                        blob_dir=os.path.abspath(blob_dir),
-                        **kw)
-                    adapter = PostgreSQLAdapter(dsn=dsn, options=options)
-                    storage = RelStorage(adapter, name=name, options=options)
-                    storage.zap_all(slow=True)
-                    return storage
+    from relstorage.tests.blob.testblob import storage_reusable_suite
+    from relstorage.tests.util import shared_blob_dir_choices
+    for shared_blob_dir in shared_blob_dir_choices:
+        for keep_history in (False, True):
+            def create_storage(name, blob_dir,
+                               shared_blob_dir=shared_blob_dir,
+                               keep_history=keep_history, **kw):
+                from relstorage.storage import RelStorage
+                from relstorage.adapters.postgresql import PostgreSQLAdapter
+                db = db_names[name]
+                if not keep_history:
+                    db += '_hf'
+                dsn = ('dbname=%s user=relstoragetest '
+                       'password=relstoragetest' % db)
+                options = Options(
+                    keep_history=keep_history,
+                    shared_blob_dir=shared_blob_dir,
+                    blob_dir=os.path.abspath(blob_dir),
+                    **kw)
+                adapter = PostgreSQLAdapter(dsn=dsn, options=options)
+                storage = RelStorage(adapter, name=name, options=options)
+                storage.zap_all(slow=True)
+                return storage
 
-                prefix = 'PostgreSQL%s%s' % (
-                    (shared_blob_dir and 'Shared' or 'Unshared'),
-                    (keep_history and 'WithHistory' or 'NoHistory'),
-                )
+            prefix = 'PostgreSQL%s%s' % (
+                (shared_blob_dir and 'Shared' or 'Unshared'),
+                (keep_history and 'WithHistory' or 'NoHistory'),
+            )
 
-                # If the blob directory is a cache, don't test packing,
-                # since packing can not remove blobs from all caches.
-                test_packing = shared_blob_dir
+            # If the blob directory is a cache, don't test packing,
+            # since packing can not remove blobs from all caches.
+            test_packing = shared_blob_dir
 
-                if keep_history:
-                    pack_test_name = 'blob_packing.txt'
-                else:
-                    pack_test_name = 'blob_packing_history_free.txt'
+            if keep_history:
+                pack_test_name = 'blob_packing.txt'
+            else:
+                pack_test_name = 'blob_packing_history_free.txt'
 
-                suite.addTest(storage_reusable_suite(
-                    prefix, create_storage,
-                    test_blob_storage_recovery=True,
-                    test_packing=test_packing,
-                    test_undo=keep_history,
-                    pack_test_name=pack_test_name,
-                    test_blob_cache=(not shared_blob_dir),
-                    # PostgreSQL blob chunks are max 2GB in size
-                    large_blob_size=(not shared_blob_dir) and (large_blob_size) + 100,
-                ))
+            suite.addTest(storage_reusable_suite(
+                prefix, create_storage,
+                test_blob_storage_recovery=True,
+                test_packing=test_packing,
+                test_undo=keep_history,
+                pack_test_name=pack_test_name,
+                test_blob_cache=(not shared_blob_dir),
+                # PostgreSQL blob chunks are max 2GB in size
+                large_blob_size=(not shared_blob_dir) and (large_blob_size) + 100,
+            ))
 
     return suite
 

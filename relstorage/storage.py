@@ -23,16 +23,22 @@ from ZODB.BaseStorage import DataRecord
 from ZODB.BaseStorage import TransactionRecord
 from ZODB.POSException import POSKeyError
 from ZODB.UndoLogCompatible import UndoLogCompatible
+from ZODB.blob import is_blob_record
+from ZODB.interfaces import StorageStopIteration
 from ZODB.utils import p64
 from ZODB.utils import u64
+
 from perfmetrics import Metric
 from perfmetrics import metricmethod
+
 from persistent.TimeStamp import TimeStamp
 from relstorage.blobhelper import BlobHelper
-from ZODB.blob import is_blob_record
+
 from relstorage.cache import StorageCache
 from relstorage.options import Options
+
 from zope.interface import implementer
+
 import ZODB.interfaces
 import logging
 import os
@@ -45,27 +51,6 @@ from relstorage._compat import iterkeys, iteritems
 from relstorage._compat import dumps, loads
 from relstorage._compat import base64_encodebytes
 from relstorage._compat import base64_decodebytes
-
-try:
-    from ZODB.interfaces import StorageStopIteration
-except ImportError:
-    class StorageStopIteration(IndexError, StopIteration):
-        """A combination of StopIteration and IndexError to provide a
-        backwards-compatible exception.
-        """
-
-_relstorage_interfaces = []
-for name in (
-        'IStorage',
-        'IMVCCStorage',
-        'IStorageRestoreable',
-        'IStorageIteration',
-        'IStorageUndoable',
-        'IBlobStorage',
-        'IBlobStorageRestoreable',
-    ):
-    if hasattr(ZODB.interfaces, name):
-        _relstorage_interfaces.append(getattr(ZODB.interfaces, name))
 
 log = logging.getLogger("relstorage")
 
@@ -90,7 +75,13 @@ def _from_latin1(data):
         return data
     return data.decode('latin-1')
 
-@implementer(*_relstorage_interfaces)
+@implementer(ZODB.interfaces.IStorage,
+             ZODB.interfaces.IMVCCStorage,
+             ZODB.interfaces.IStorageRestoreable,
+             ZODB.interfaces.IStorageIteration,
+             ZODB.interfaces.IStorageUndoable,
+             ZODB.interfaces.IBlobStorage,
+             ZODB.interfaces.IBlobStorageRestoreable)
 class RelStorage(
         UndoLogCompatible,
         ConflictResolution.ConflictResolvingStorage
@@ -251,7 +242,7 @@ class RelStorage(
     try:
         from ZODB.mvccadapter import HistoricalStorageAdapter
     except ImportError:
-        pass
+        pass # ZODB4
     else:
         def before_instance(self, before):
             # Implement this method of MVCCAdapterInstance
@@ -421,29 +412,11 @@ class RelStorage(
     def isReadOnly(self):
         return self._is_read_only
 
-    def abortVersion(self, src, transaction):
-        # this method is only here for b/w compat with ZODB 3.7
-        if transaction is not self._transaction:
-            raise POSException.StorageTransactionError(self, transaction)
-        return self._tid, []
-
-    def commitVersion(self, src, dest, transaction):
-        # this method is only here for b/w compat with ZODB 3.7
-        if transaction is not self._transaction:
-            raise POSException.StorageTransactionError(self, transaction)
-        return self._tid, []
-
     def getExtensionMethods(self):
-        # this method is only here for b/w compat with ZODB 3.7
+        # this method is only here for b/w compat with ZODB 3.7.
+        # It still exists in FileStorage in ZODB 4.0 "for testing a ZEO extension
+        # mechanism"
         return {}
-
-    def versionEmpty(self, version):
-        # this method is only here for b/w compat with ZODB 3.7
-        return 1
-
-    def versions(self, max=None):
-        # this method is only here for b/w compat with ZODB 3.7
-        return ()
 
     def _log_keyerror(self, oid_int, reason):
         """Log just before raising POSKeyError in load().
@@ -526,8 +499,6 @@ class RelStorage(
 
         _state, serial = self.load(oid, '')
         return serial
-
-    getSerial = getTid  # ZODB 3.7
 
     def loadEx(self, oid, version=''):
         # Since we don't support versions, just tack the empty version
@@ -1382,7 +1353,7 @@ class RelStorage(
             self._batcher.flush()
             cursor = self._store_cursor
             self.blobhelper.storeBlob(cursor, self.store,
-                oid, serial, data, blobfilename, version, txn)
+                                      oid, serial, data, blobfilename, version, txn)
         return None
 
     def restoreBlob(self, oid, serial, data, blobfilename, prev_txn, txn):
@@ -1544,14 +1515,6 @@ class RelStorageTransactionRecord(TransactionRecord):
         else:
             extension = {}
         TransactionRecord.__init__(self, tid, status, user, description, extension)
-
-    # maintain compatibility with the old (ZODB 3.8 and below) name of
-    # the extension attribute.
-    def _ext_set(self, value):
-        self.extension = value
-    def _ext_get(self):
-        return self.extension
-    _extension = property(fset=_ext_set, fget=_ext_get)
 
     def __iter__(self):
         return RecordIterator(self)

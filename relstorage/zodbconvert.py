@@ -14,7 +14,7 @@
 ##############################################################################
 """ZODB storage conversion utility.
 
-See README.txt for details.
+See README.rst for details.
 """
 from __future__ import print_function
 
@@ -44,12 +44,7 @@ def storage_has_data(storage):
     i = storage.iterator()
     try:
         try:
-            if hasattr(i, 'next'):
-                # New iterator API
-                next(i)
-            else:
-                # Old index lookup API
-                i[0]
+            next(i)
         except (IndexError, StopIteration):
             return False
         return True
@@ -116,11 +111,10 @@ def main(argv=None):
     log.info("Storages opened successfully.")
 
     if options.incremental:
-        if not hasattr(destination, 'lastTransaction'):
-            msg = ("Error: no API is known for determining the last committed "
-                   "transaction of the destination storage. Aborting "
-                   "conversion.")
-            cleanup_and_exit(msg)
+        assert hasattr(destination, 'lastTransaction'), ("Error: no API is known for determining the last committed "
+                                                         "transaction of the destination storage. Aborting "
+                                                         "conversion.")
+
         if not storage_has_data(destination):
             log.warning("Destination empty, start conversion from the beginning.")
         else:

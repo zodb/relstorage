@@ -95,10 +95,7 @@ class ZConfigTests(object):
 
             db = config.database.open()
             try:
-                storage = getattr(db, 'storage', None)
-                if storage is None:
-                    # ZODB < 3.9
-                    storage = db._storage
+                storage = db.storage
                 self.assertEqual(storage.isReadOnly(), False)
                 self.assertEqual(storage.getName(), "xyz")
                 adapter = storage._adapter
@@ -165,78 +162,73 @@ def test_suite():
     ]:
         suite.addTest(unittest.makeSuite(klass, "check"))
 
-    try:
-        import ZODB.blob
-    except ImportError:
-        # ZODB < 3.8
-        pass
+    import ZODB.blob
+    from .util import RUNNING_ON_CI
+    if RUNNING_ON_CI or os.environ.get("RS_ORCL_SMALL_BLOB"):
+        # cx_Oracle blob support can only address up to sys.maxint on
+        # 32-bit systems, 4GB otherwise. This takes a great deal of time, however,
+        # so allow tuning it down.
+        from relstorage.adapters.mover import ObjectMover
+        assert hasattr(ObjectMover, 'oracle_blob_chunk_maxsize')
+        ObjectMover.oracle_blob_chunk_maxsize = 1024 * 1024 * 100
+        large_blob_size = ObjectMover.oracle_blob_chunk_maxsize * 2
     else:
-        from .util import RUNNING_ON_CI
-        if RUNNING_ON_CI or os.environ.get("RS_ORCL_SMALL_BLOB"):
-            # cx_Oracle blob support can only address up to sys.maxint on
-            # 32-bit systems, 4GB otherwise. This takes a great deal of time, however,
-            # so allow tuning it down.
-            from relstorage.adapters.mover import ObjectMover
-            assert hasattr(ObjectMover, 'oracle_blob_chunk_maxsize')
-            ObjectMover.oracle_blob_chunk_maxsize = 1024 * 1024 * 100
-            large_blob_size = ObjectMover.oracle_blob_chunk_maxsize * 2
-        else:
-            large_blob_size = min(sys.maxsize, 1<<32)
+        large_blob_size = min(sys.maxsize, 1<<32)
 
 
-        from relstorage.tests.blob.testblob import storage_reusable_suite
-        dsn = os.environ.get('ORACLE_TEST_DSN', 'XE')
-        from relstorage.tests.util import shared_blob_dir_choices
-        for shared_blob_dir in shared_blob_dir_choices:
-            for keep_history in (False, True):
-                def create_storage(name, blob_dir,
-                                   shared_blob_dir=shared_blob_dir,
-                                   keep_history=keep_history, **kw):
-                    from relstorage.storage import RelStorage
-                    from relstorage.adapters.oracle import OracleAdapter
-                    db = db_names[name]
-                    if not keep_history:
-                        db += '_hf'
-                    options = Options(
-                        keep_history=keep_history,
-                        shared_blob_dir=shared_blob_dir,
-                        blob_dir=os.path.abspath(blob_dir),
-                        **kw)
-                    adapter = OracleAdapter(
-                        user=db,
-                        password='relstoragetest',
-                        dsn=dsn,
-                        options=options,
-                    )
-                    storage = RelStorage(adapter, name=name, options=options)
-                    storage.zap_all()
-                    return storage
-
-                prefix = 'Oracle%s%s' % (
-                    (shared_blob_dir and 'Shared' or 'Unshared'),
-                    (keep_history and 'WithHistory' or 'NoHistory'),
+    from relstorage.tests.blob.testblob import storage_reusable_suite
+    dsn = os.environ.get('ORACLE_TEST_DSN', 'XE')
+    from relstorage.tests.util import shared_blob_dir_choices
+    for shared_blob_dir in shared_blob_dir_choices:
+        for keep_history in (False, True):
+            def create_storage(name, blob_dir,
+                               shared_blob_dir=shared_blob_dir,
+                               keep_history=keep_history, **kw):
+                from relstorage.storage import RelStorage
+                from relstorage.adapters.oracle import OracleAdapter
+                db = db_names[name]
+                if not keep_history:
+                    db += '_hf'
+                options = Options(
+                    keep_history=keep_history,
+                    shared_blob_dir=shared_blob_dir,
+                    blob_dir=os.path.abspath(blob_dir),
+                    **kw)
+                adapter = OracleAdapter(
+                    user=db,
+                    password='relstoragetest',
+                    dsn=dsn,
+                    options=options,
                 )
+                storage = RelStorage(adapter, name=name, options=options)
+                storage.zap_all()
+                return storage
 
-                # If the blob directory is a cache, don't test packing,
-                # since packing can not remove blobs from all caches.
-                test_packing = shared_blob_dir
+            prefix = 'Oracle%s%s' % (
+                (shared_blob_dir and 'Shared' or 'Unshared'),
+                (keep_history and 'WithHistory' or 'NoHistory'),
+            )
 
-                if keep_history:
-                    pack_test_name = 'blob_packing.txt'
-                else:
-                    pack_test_name = 'blob_packing_history_free.txt'
+            # If the blob directory is a cache, don't test packing,
+            # since packing can not remove blobs from all caches.
+            test_packing = shared_blob_dir
 
-                blob_size = large_blob_size
+            if keep_history:
+                pack_test_name = 'blob_packing.txt'
+            else:
+                pack_test_name = 'blob_packing_history_free.txt'
 
-                suite.addTest(storage_reusable_suite(
-                    prefix, create_storage,
-                    test_blob_storage_recovery=True,
-                    test_packing=test_packing,
-                    test_undo=keep_history,
-                    pack_test_name=pack_test_name,
-                    test_blob_cache=(not shared_blob_dir),
-                    large_blob_size=(not shared_blob_dir) and blob_size + 100,
-                ))
+            blob_size = large_blob_size
+
+            suite.addTest(storage_reusable_suite(
+                prefix, create_storage,
+                test_blob_storage_recovery=True,
+                test_packing=test_packing,
+                test_undo=keep_history,
+                pack_test_name=pack_test_name,
+                test_blob_cache=(not shared_blob_dir),
+                large_blob_size=(not shared_blob_dir) and blob_size + 100,
+            ))
 
     return suite
 

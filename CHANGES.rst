@@ -1,11 +1,11 @@
 1.7.0a1 (Unreleased)
 --------------------
 
-- Update the ZODB dependency from ZODB3 3.7.0 to ZODB 4.3.0.
+- Update the ZODB dependency from ZODB3 3.7.0 to ZODB 4.3.1. Support
+  for ZODB older than 3.10 has been removed; ZODB 3.10 may work, but
+  only ZODB 4.3 is tested.
 
-- Fixed ``loadBefore`` of a deleted/undone object to correctly raise a
-  POSKeyError instead of returning an empty state. (Revealed by
-  updated tests for FileStorage in ZODB 4.3.1.)
+- Remove support for Python 2.6 and below. Python 2.7 is now required.
 
 - Add support for PyPy on MySQL and PostgreSQL using PyMySQL and
   psycopg2cffi respectively. PyPy can be substantially faster than
@@ -13,6 +13,10 @@
 
 - Add initial support for Python 3.4+ for MySQL using mysqlclient, PostgreSQL,
   and Oracle.
+
+- Fixed ``loadBefore`` of a deleted/undone object to correctly raise a
+  POSKeyError instead of returning an empty state. (Revealed by
+  updated tests for FileStorage in ZODB 4.3.1.)
 
 - Updated the buildout configuration to just run relstorage tests and
   to select which databases to use at build time.

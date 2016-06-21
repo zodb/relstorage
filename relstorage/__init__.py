@@ -13,22 +13,6 @@
 ##############################################################################
 """relstorage package"""
 
-def check_compatible():
-    try:
-        from ZODB.interfaces import IMVCCStorage
-    except ImportError:
-        # see if the polling patch has been applied
-        from ZODB.Connection import Connection
-        if not hasattr(Connection, '_poll_invalidations'):
-            raise ImportError('RelStorage requires the invalidation polling '
-                'patch for ZODB.')
-    else:
-        # We're running a version of ZODB that knows what to do with
-        # MVCC storages, so no patch is necessary.
-        pass
-
-check_compatible()
-
 
 def patch_zodb_sync():
     """Patch Connection.sync() and afterCompletion() to pass the 'force' flag.

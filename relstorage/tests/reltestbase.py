@@ -118,21 +118,13 @@ class GenericRelStorageTests(
         import sys
         if sys.modules.get("MySQLdb") == sys.modules.get('pymysql', self) \
            and 'MySQL' in str(type(self._storage._adapter.schema)):
-            try:
-                from unittest import SkipTest
-                raise SkipTest("PyMySQL hangs dropping a table.")
-            except ImportError:
-                # Py2.6; nothing to do but return
-                return
+            from unittest import SkipTest
+            raise SkipTest("PyMySQL hangs dropping a table.")
 
         if sys.modules.get("psycopg2") == sys.modules.get("psycopg2cffi", self) \
            and "PostgreSQL" in str(type(self._storage._adapter.schema)):
-            try:
-                from unittest import SkipTest
-                raise SkipTest("psycopg2cffi hangs dropping a table.")
-            except ImportError:
-                # Py2.6; nothing to do but return
-                return
+            from unittest import SkipTest
+            raise SkipTest("psycopg2cffi hangs dropping a table.")
 
         self._storage._adapter.schema.drop_all()
         self._storage._adapter.schema.prepare()
@@ -688,7 +680,7 @@ class GenericRelStorageTests(
             self._storage.pack(packtime, referencesf)
 
             self.assertEqual(len(expect_oids), 2,
-                "The on_filling_object_refs hook should have been called once")
+                             "The on_filling_object_refs hook should have been called once")
             # Both children should still exist.
             self._storage.load(expect_oids[0], '')
             self._storage.load(expect_oids[1], '')

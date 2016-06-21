@@ -52,13 +52,6 @@ class BlobHelper(object):
             if self.shared_blob_dir:
                 # Share files over NFS or similar
                 fshelper = ZODB.blob.FilesystemHelper(self.blob_dir)
-            elif BlobCacheLayout is None:
-                # BlobCacheLayout is required for 'shared_blob_dir=False',
-                # but BlobCacheLayout is incompatible with ZODB 3.8 because
-                # ZODB 3.8 constructs blob filenames in an inflexible way.
-                raise ValueError(
-                    "The shared_blob_dir option must be true when "
-                    "RelStorage is used with ZODB 3.8.")
             else:
                 # The blob directory is a cache of the blobs
                 if 'zeocache' not in ZODB.blob.LAYOUTS:
@@ -75,7 +68,7 @@ class BlobHelper(object):
 
     def new_instance(self, adapter):
         return BlobHelper(options=self.options, adapter=adapter,
-            fshelper=self.fshelper, cache_checker=self.cache_checker)
+                          fshelper=self.fshelper, cache_checker=self.cache_checker)
 
     def clear_temp(self):
         self._txn_blobs = None
@@ -158,7 +151,7 @@ class BlobHelper(object):
                 return open(blob_filename, 'rb')
             else:
                 return ZODB.blob.BlobFile(blob_filename, 'r', blob)
-        except (IOError):
+        except IOError:
             # The file got removed while we were opening.
             # Fall through and try again with the protection of the lock.
             pass
@@ -354,17 +347,20 @@ class BlobCacheChecker(object):
         self._check_blob_size_thread = check_blob_size_thread
 
 
-# Note: the following code is copied directly from ZEO.ClientStorage.
-# It is copied for two reasons:
-#
-# 1. The symbols are not public (the function names start
-#    with an underscore), indicating their signature could change
-#    at any time.
-#
-# 2. No such code exists in ZODB 3.8, when blob support was first added
-#    to ZODB, but RelStorage needs to continue to support ZODB 3.8
-#    and 3.7 for a few years.
+def _has_files(dirname):
+    """Return True if a directory has any visible files."""
+    names = os.listdir(dirname)
+    if not names:
+        return False
+    for name in names:
+        if not name.startswith('.'):
+            return True
+    return False
 
+
+# Note: the following code is copied directly from ZEO.ClientStorage.
+# Because the symbols are not public (the function names start with an
+# underscore), indicating their signature could change at any time.
 
 def _accessed(filename):
     try:
@@ -386,13 +382,3 @@ def _lock_blob(path):
                 raise
         else:
             break
-
-def _has_files(dirname):
-    """Return True if a directory has any visible files."""
-    names = os.listdir(dirname)
-    if not names:
-        return False
-    for name in names:
-        if not name.startswith('.'):
-            return True
-    return False
