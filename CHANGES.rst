@@ -62,6 +62,9 @@
   re-reading it from the database (they are guaranteed to be the
   same). See `issue 38`_.
 
+- Conflict resolution reads all conflicts from the database in one
+  query, instead of querying for each individual conflict. See `issue 39`_.
+
 .. _`PR 18`: https://github.com/zodb/relstorage/pull/18/
 .. _`PR 20`: https://github.com/zodb/relstorage/pull/20
 .. _`PR 21`: https://github.com/zodb/relstorage/pull/21
@@ -71,6 +74,7 @@
 .. _`PR 23`: https://github.com/zodb/relstorage/pull/23/
 .. _`issue 57`: https://github.com/zodb/relstorage/issues/57
 .. _`issue 38`: https://github.com/zodb/relstorage/issues/38
+.. _`issue 39`: https://github.com/zodb/relstorage/issues/39
 
 1.6.0b3 (2014-12-08)
 --------------------

@@ -711,10 +711,9 @@ class ObjectMover(object):
 
     @metricmethod_sampled
     def postgresql_detect_conflict(self, cursor):
-        """Find one conflict in the data about to be committed.
+        """Find all conflicts in the data about to be committed.
 
-        If there is a conflict, returns (oid, prev_tid, attempted_prev_tid,
-        attempted_data).  If there is no conflict, returns None.
+        If there is a conflict, returns a sequence of (oid, prev_tid, attempted_prev_tid).
         """
         if self.keep_history:
             stmt = """
@@ -722,7 +721,6 @@ class ObjectMover(object):
             FROM temp_store
                 JOIN current_object ON (temp_store.zoid = current_object.zoid)
             WHERE temp_store.prev_tid != current_object.tid
-            LIMIT 1
             """
         else:
             stmt = """
@@ -730,20 +728,17 @@ class ObjectMover(object):
             FROM temp_store
                 JOIN object_state ON (temp_store.zoid = object_state.zoid)
             WHERE temp_store.prev_tid != object_state.tid
-            LIMIT 1
             """
         cursor.execute(stmt)
         if cursor.rowcount:
-            oid, prev_tid, attempted_prev_tid, data = cursor.fetchone()
-            return oid, prev_tid, attempted_prev_tid, db_binary_to_bytes(data)
-        return None
+            return cursor.fetchall()
+        return ()
 
     @metricmethod_sampled
     def mysql_detect_conflict(self, cursor):
-        """Find one conflict in the data about to be committed.
+        """Find all conflicts in the data about to be committed.
 
-        If there is a conflict, returns (oid, prev_tid, attempted_prev_tid,
-        attempted_data).  If there is no conflict, returns None.
+        If there is a conflict, returns a list of (oid, prev_tid, attempted_prev_tid).
         """
         # Lock in share mode to ensure the data being read is up to date.
         if self.keep_history:
@@ -752,7 +747,6 @@ class ObjectMover(object):
             FROM temp_store
                 JOIN current_object ON (temp_store.zoid = current_object.zoid)
             WHERE temp_store.prev_tid != current_object.tid
-            LIMIT 1
             LOCK IN SHARE MODE
             """
         else:
@@ -761,20 +755,18 @@ class ObjectMover(object):
             FROM temp_store
                 JOIN object_state ON (temp_store.zoid = object_state.zoid)
             WHERE temp_store.prev_tid != object_state.tid
-            LIMIT 1
             LOCK IN SHARE MODE
             """
         cursor.execute(stmt)
         if cursor.rowcount:
-            return cursor.fetchone()
-        return None
+            return cursor.fetchall()
+        return ()
 
     @metricmethod_sampled
     def oracle_detect_conflict(self, cursor):
-        """Find one conflict in the data about to be committed.
+        """Find all conflicts in the data about to be committed.
 
-        If there is a conflict, returns (oid, prev_tid, attempted_prev_tid,
-        attempted_data).  If there is no conflict, returns None.
+        If there is a conflict, returns a list of (oid, prev_tid, attempted_prev_tid).
         """
         if self.keep_history:
             stmt = """
@@ -790,9 +782,10 @@ class ObjectMover(object):
                 JOIN object_state ON (temp_store.zoid = object_state.zoid)
             WHERE temp_store.prev_tid != object_state.tid
             """
-        return self.runner.run_lob_stmt(cursor, stmt)
-
-
+        cursor.execute(stmt)
+        if cursor.rowcount:
+            return cursor.fetchall()
+        return ()
 
 
     @metricmethod_sampled
