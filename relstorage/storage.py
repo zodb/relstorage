@@ -776,8 +776,8 @@ class RelStorage(
             if conflict is None:
                 break
 
-            oid_int, prev_tid_int, serial_int, data = conflict
-            assert isinstance(data, bytes) # XXX PY3 porting
+            oid_int, prev_tid_int, serial_int = conflict
+            data = self.cache.read_temp(oid_int)
             oid = p64(oid_int)
             prev_tid = p64(prev_tid_int)
             serial = p64(serial_int)

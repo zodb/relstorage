@@ -718,8 +718,7 @@ class ObjectMover(object):
         """
         if self.keep_history:
             stmt = """
-            SELECT temp_store.zoid, current_object.tid, temp_store.prev_tid,
-                   temp_store.state
+            SELECT temp_store.zoid, current_object.tid, temp_store.prev_tid
             FROM temp_store
                 JOIN current_object ON (temp_store.zoid = current_object.zoid)
             WHERE temp_store.prev_tid != current_object.tid
@@ -727,8 +726,7 @@ class ObjectMover(object):
             """
         else:
             stmt = """
-            SELECT temp_store.zoid, object_state.tid, temp_store.prev_tid,
-                temp_store.state
+            SELECT temp_store.zoid, object_state.tid, temp_store.prev_tid
             FROM temp_store
                 JOIN object_state ON (temp_store.zoid = object_state.zoid)
             WHERE temp_store.prev_tid != object_state.tid
@@ -750,8 +748,7 @@ class ObjectMover(object):
         # Lock in share mode to ensure the data being read is up to date.
         if self.keep_history:
             stmt = """
-            SELECT temp_store.zoid, current_object.tid, temp_store.prev_tid,
-                temp_store.state
+            SELECT temp_store.zoid, current_object.tid, temp_store.prev_tid
             FROM temp_store
                 JOIN current_object ON (temp_store.zoid = current_object.zoid)
             WHERE temp_store.prev_tid != current_object.tid
@@ -760,8 +757,7 @@ class ObjectMover(object):
             """
         else:
             stmt = """
-            SELECT temp_store.zoid, object_state.tid, temp_store.prev_tid,
-                temp_store.state
+            SELECT temp_store.zoid, object_state.tid, temp_store.prev_tid
             FROM temp_store
                 JOIN object_state ON (temp_store.zoid = object_state.zoid)
             WHERE temp_store.prev_tid != object_state.tid
@@ -782,16 +778,14 @@ class ObjectMover(object):
         """
         if self.keep_history:
             stmt = """
-            SELECT temp_store.zoid, current_object.tid, temp_store.prev_tid,
-                temp_store.state
+            SELECT temp_store.zoid, current_object.tid, temp_store.prev_tid
             FROM temp_store
                 JOIN current_object ON (temp_store.zoid = current_object.zoid)
             WHERE temp_store.prev_tid != current_object.tid
             """
         else:
             stmt = """
-            SELECT temp_store.zoid, object_state.tid, temp_store.prev_tid,
-                temp_store.state
+            SELECT temp_store.zoid, object_state.tid, temp_store.prev_tid
             FROM temp_store
                 JOIN object_state ON (temp_store.zoid = object_state.zoid)
             WHERE temp_store.prev_tid != object_state.tid
