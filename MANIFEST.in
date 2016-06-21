@@ -1,2 +1,2 @@
-include MANIFEST.in *.txt *.py *.patch
+include MANIFEST.in *.txt *.rst *.py *.patch
 recursive-include relstorage *.py *.xml *.txt
