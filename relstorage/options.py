@@ -21,10 +21,13 @@ from __future__ import absolute_import
 from relstorage._compat import iteritems
 default_strict_tpc = False
 
-from ZEO.zrpc.connection import Connection as __Connection
-if __Connection.current_protocol >= b'Z310':
+try:
+    from ZEO.zrpc.connection import Connection as __Connection # XXX Goes away in ZEO5
+    if __Connection.current_protocol >= b'Z310':
+        default_strict_tpc = True
+    del __Connection
+except ImportError:
     default_strict_tpc = True
-del __Connection
 
 class Options(object):
     """Options for configuring and tuning RelStorage.
