@@ -252,4 +252,5 @@ def test_suite():
 
 if __name__ == '__main__':
     logging.basicConfig()
+    logging.getLogger("zc.lockfile").setLevel(logging.CRITICAL)
     unittest.main(defaultTest="test_suite")
