@@ -12,9 +12,8 @@
 # FOR A PARTICULAR PURPOSE.
 #
 ##############################################################################
-"""ZODB storage conversion utility.
-
-See README.rst for details.
+"""
+ZODB storage conversion utility.
 """
 from __future__ import print_function
 
@@ -76,17 +75,18 @@ def main(argv=None):
                                    usage="%prog [options] config_file")
     parser.add_option(
         "--dry-run", dest="dry_run", action="store_true",
-        help="Attempt to open the storages, then explain what would be done")
+        help="Attempt to open both storages, then explain what would be done.")
     parser.add_option(
         "--clear", dest="clear", action="store_true",
-        help="Clear the contents of the destination storage before copying")
+        help="Clear the contents of the destination storage before copying. Only works if the destination is a RelStorage."
+             " WARNING: use this only if you are certain the destination has no useful data.")
     parser.add_option(
         "--incremental", dest="incremental", action="store_true",
         help="Assume the destination contains a partial copy of the source "
              "and resume copying from the last transaction. WARNING: no "
              "effort is made to verify that the destination holds the same "
-             "transaction data before this point! Use at your own risk. "
-             "Currently only supports RelStorage destinations.")
+             "transaction data before this point! Use at your own risk. ")
+
     parser.set_defaults(dry_run=False, clear=False)
     options, args = parser.parse_args(argv[1:])
 

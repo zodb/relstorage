@@ -4,3 +4,4 @@ MySQL-python
 psycopg2
 sphinxcontrib-programoutput
 repoze.sphinx.autointerface
+sphinx_rtd_theme

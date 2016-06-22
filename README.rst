@@ -22,6 +22,7 @@ replaced the PGStorage project.
 * Supports undo, packing, and filesystem-based ZODB blobs.
 * Both history-preserving and history-free storage are available.
 * Capable of failover to replicated SQL databases.
+* ``zodbconvert`` utility to copy databases.
 * Free, open source (ZPL 2.1)
 
 
@@ -34,7 +35,7 @@ replaced the PGStorage project.
 The complete `changelog`_ is also there.
 
 .. _`Documentation`: http://relstorage.readthedocs.io/en/latest/
-.. _`installation instructions`: http://relstorage.readthedocs.io/en/latest/installation.html
+.. _`installation instructions`: http://relstorage.readthedocs.io/en/latest/install.html
 .. _`readthedocs`: http://relstorage.readthedocs.io/en/latest/
 .. _`changelog`: http://relstorage.readthedocs.io/en/latest/changelog.html
 
