@@ -18,7 +18,7 @@ ZODB storage conversion utility.
 from __future__ import print_function
 
 import logging
-import optparse
+import argparse
 from persistent.TimeStamp import TimeStamp
 from io import StringIO
 import sys
@@ -71,34 +71,32 @@ class _DefaultStartStorageIteration(object):
 def main(argv=None):
     if argv is None:
         argv = sys.argv
-    parser = optparse.OptionParser(description=__doc__,
-                                   usage="%prog [options] config_file")
-    parser.add_option(
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
         "--dry-run", dest="dry_run", action="store_true",
+        default=False,
         help="Attempt to open both storages, then explain what would be done.")
-    parser.add_option(
+    parser.add_argument(
         "--clear", dest="clear", action="store_true",
+        default=False,
         help="Clear the contents of the destination storage before copying. Only works if the destination is a RelStorage."
              " WARNING: use this only if you are certain the destination has no useful data.")
-    parser.add_option(
+    parser.add_argument(
         "--incremental", dest="incremental", action="store_true",
         help="Assume the destination contains a partial copy of the source "
              "and resume copying from the last transaction. WARNING: no "
              "effort is made to verify that the destination holds the same "
              "transaction data before this point! Use at your own risk. ")
+    parser.add_argument("config_file")
 
-    parser.set_defaults(dry_run=False, clear=False)
-    options, args = parser.parse_args(argv[1:])
-
-    if len(args) != 1:
-        parser.error("The name of one configuration file is required.")
+    options = parser.parse_args(argv[1:])
 
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s [%(name)s] %(levelname)s %(message)s")
 
     schema = ZConfig.loadSchemaFile(StringIO(schema_xml))
-    config, _ = ZConfig.loadConfig(schema, args[0])
+    config, _ = ZConfig.loadConfig(schema, options.config_file)
     source = config.source.open()
     destination = config.destination.open()
 
