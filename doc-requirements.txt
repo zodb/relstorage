@@ -1,3 +1,5 @@
+pip>=8.1.2
+setuptools>=23.0.0
 MySQL-python
 psycopg2
 sphinxcontrib-programoutput
