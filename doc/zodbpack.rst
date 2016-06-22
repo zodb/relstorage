@@ -1,6 +1,7 @@
 ==========
  zodbpack
 ==========
+.. highlight:: guess
 
 RelStorage also comes with a script named ``zodbpack`` that packs any
 ZODB storage that allows concurrent connections (including RelStorage

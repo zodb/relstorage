@@ -1,10 +1,8 @@
-
 """
 Database iteration helper.
 
 Based on:
-http://code.activestate.com/recipes/
-    137270-use-generators-for-fetching-large-db-record-sets/
+http://code.activestate.com/recipes/137270-use-generators-for-fetching-large-db-record-sets/
 """
 
 

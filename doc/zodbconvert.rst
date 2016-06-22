@@ -34,6 +34,7 @@ making any changes to the destination, unless the ``--incremental``
 option is used (in which case the destination *must* be a previously
 copied version of the source).
 
+.. highlight:: guess
 
 Here is a sample ``zodbconvert`` configuration file::
 

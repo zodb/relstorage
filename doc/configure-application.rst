@@ -11,6 +11,8 @@ RelStorage, it's time to configure the application to use RelStorage.
           document, as well as a :doc:`list of database-specific
           options <db-specific-options>`.
 
+.. highlight:: guess
+
 Configuring Plone
 =================
 

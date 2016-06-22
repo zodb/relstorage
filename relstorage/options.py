@@ -23,7 +23,7 @@ default_strict_tpc = True
 class Options(object):
     """Options for configuring and tuning RelStorage.
 
-    These parameters can be provided as keyword options in the RelStorage
+    These parameters can be provided as keyword options in the :class:`.RelStorage`
     constructor.  For example:
 
         storage = RelStorage(adapter, pack_gc=True, pack_prepack_only=True)

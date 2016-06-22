@@ -7,7 +7,7 @@ PostgreSQL Adapter Options
 
 The PostgreSQL adapter accepts:
 
-``dsn``
+dsn
     Specifies the data source name for connecting to PostgreSQL.
     A PostgreSQL DSN is a list of parameters separated with
     whitespace.  A typical DSN looks like::
@@ -24,36 +24,36 @@ MySQL Adapter Options
 The MySQL adapter accepts most parameters supported by the MySQL-python
 library, including:
 
-``host``
+host
     string, host to connect
-``user``
+user
     string, user to connect as
-``passwd``
+passwd
     string, password to use
-``db``
+db
     string, database to use
-``port``
+port
     integer, TCP/IP port to connect to
-``unix_socket``
+unix_socket
     string, location of unix_socket (UNIX-ish only)
-``conv``
+conv
     mapping, maps MySQL FIELD_TYPE.* to Python functions which convert a
     string to the appropriate Python type
-``connect_timeout``
+connect_timeout
     number of seconds to wait before the connection attempt fails.
-``compress``
+compress
     if set, gzip compression is enabled
-``named_pipe``
+named_pipe
     if set, connect to server via named pipe (Windows only)
-``init_command``
+init_command
     command which is run once the connection is created
-``read_default_file``
+read_default_file
     see the MySQL documentation for mysql_options()
-``read_default_group``
+read_default_group
     see the MySQL documentation for mysql_options()
-``client_flag``
+client_flag
     client flags from MySQLdb.constants.CLIENT
-``load_infile``
+load_infile
     int, non-zero enables LOAD LOCAL INFILE, zero disables
 
 Oracle Adapter Options
@@ -61,10 +61,10 @@ Oracle Adapter Options
 
 The Oracle adapter accepts:
 
-``user``
+user
         The Oracle account name
-``password``
+password
         The Oracle account password
-``dsn``
+dsn
         The Oracle data source name.  The Oracle client library will
-        normally expect to find the DSN in /etc/oratab.
+        normally expect to find the DSN in ``/etc/oratab``.
