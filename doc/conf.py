@@ -58,6 +58,7 @@ extensions = [
     'sphinx.ext.doctest',
     'sphinx.ext.intersphinx',
     'sphinx.ext.todo',
+    'sphinx.ext.extlinks',
     'sphinx.ext.viewcode',
     'sphinxcontrib.programoutput',
     'repoze.sphinx.autointerface',
