@@ -12,12 +12,13 @@
 # FOR A PARTICULAR PURPOSE.
 #
 ##############################################################################
-"""ZODB storage packing utility.
+"""
+ZODB storage packing utility.
 """
 
 from io import StringIO
 import logging
-import optparse
+import argparse
 import sys
 import time
 import ZConfig
@@ -37,38 +38,37 @@ log = logging.getLogger("zodbpack")
 def main(argv=None):
     if argv is None:
         argv = sys.argv
-    parser = optparse.OptionParser(description=__doc__,
-                                   usage="%prog [options] config_file")
-    parser.add_option(
-        "-d", "--days", dest="days", default="0",
+    parser = argparse.ArgumentParser(description=__doc__)
+
+    parser.add_argument(
+        "-d", "--days", dest="days", default=0,
         help="Days of history to keep (default 0)",
+        type=float,
     )
-    parser.add_option(
+    parser.add_argument(
         "--prepack", dest="prepack", default=False,
         action="store_true",
         help="Perform only the pre-pack preparation stage of a pack. "
         "(Only works with some storage types)",
     )
-    parser.add_option(
+    parser.add_argument(
         "--use-prepack-state", dest="reuse_prepack", default=False,
         action="store_true",
         help="Skip the preparation stage and go straight to packing. "
         "Requires that a pre-pack has been run, or that packing was aborted "
         "before it was completed.",
     )
-    options, args = parser.parse_args(argv[1:])
-
-    if len(args) != 1:
-        parser.error("The name of one configuration file is required.")
+    parser.add_argument("config_file")
+    options = parser.parse_args(argv[1:])
 
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s [%(name)s] %(levelname)s %(message)s")
 
     schema = ZConfig.loadSchemaFile(StringIO(schema_xml))
-    config, _ = ZConfig.loadConfig(schema, args[0])
+    config, _ = ZConfig.loadConfig(schema, options.config_file)
 
-    t = time.time() - float(options.days) * 86400.0
+    t = time.time() - options.days * 86400.0
     for s in config.storages:
         name = '%s (%s)' % ((s.name or 'storage'), s.__class__.__name__)
         log.info("Opening %s...", name)

@@ -84,7 +84,11 @@ Other Enhancements
   same). See :issue:`38`.
 
 - Conflict resolution reads all conflicts from the database in one
-  query, instead of querying for each individual conflict. See :issue:`39`.
+  query, instead of querying for each individual conflict. See
+  :issue:`39`.
+
+- ``zodbconvert`` and ``zodbpack`` use :mod:`argparse` instead of
+  :mod:`optparse` for command line handling.
 
 
 1.6.0b3 (2014-12-08)
