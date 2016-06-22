@@ -91,6 +91,12 @@ Other Enhancements
   :mod:`optparse` for command line handling.
 
 
+1.6.0 (2016-06-09)
+==================
+
+- Tests: Use the standard library doctest module for compatibility
+  with newer zope.testing releases.
+
 1.6.0b3 (2014-12-08)
 ====================
 
@@ -506,3 +512,5 @@ Other Enhancements
 
 - Fixed minor test failures under Windows. Windows is now a supportable
   platform.
+
+Information about older releases can be found :doc:`here <HISTORY>`.

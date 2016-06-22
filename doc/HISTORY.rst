@@ -1,6 +1,9 @@
+====================
+ Historical Changes
+====================
 
 1.1.3 (2009-02-04)
-------------------
+==================
 
 - In rare circumstances, ZODB can legitimately commit an object twice in a
   single transaction.  Fixed RelStorage to accept that.
@@ -12,7 +15,7 @@
 
 
 1.1.2 (2009-01-27)
-------------------
+==================
 
 - When both cache-servers and poll-interval are set, we now poll the
   cache for changes on every request.  This makes it possible to use
@@ -36,7 +39,7 @@
 
 
 1.1.1 (2008-12-27)
-------------------
+==================
 
 - Worked around MySQL performance bugs in packing.  Used temporary
   tables and another column in the pack_object table.  The
@@ -47,7 +50,7 @@
 
 
 1.1 (2008-12-19)
-----------------
+================
 
 - Normalized poll-invalidation patches as Solaris' patch command would not
   accept the current format. The patches now apply with:
@@ -79,7 +82,7 @@
 
 
 1.1c1
------
+=====
 
 - Added optional memcache integration.  This is useful when the connection
   to the relational database has high latency.
@@ -90,7 +93,7 @@
 
 
 1.1b2
------
+=====
 
 - Made the MySQL locks database-specific rather than server-wide.  This is
   important for multi-database configurations.
@@ -104,7 +107,7 @@
 
 
 1.1b1
------
+=====
 
 - Fixed the use of setup.py without setuptools.  Thanks to Chris Withers.
 
@@ -125,8 +128,8 @@
   Jim Fulton.
 
 
-1.0.1
------
+1.0.1 (2008-03-11)
+==================
 
 - The speedtest script failed if run on a test database that has no tables.
   Now the script creates the tables if needed.  Thanks to Flavio Coelho
@@ -142,14 +145,14 @@
   amount of code to maintain.
 
 
-1.0
----
+1.0 (2008-02-29)
+================
 
 - Added a utility for converting between storages called zodbconvert.
 
 
 1.0c1
------
+=====
 
 - The previous fix for non-ASCII characters was incorrect.  Now transaction
   metadata is stored as raw bytes.  A schema migration is required; see
@@ -159,7 +162,7 @@
 
 
 1.0 beta
---------
+========
 
 - Renamed to reflect expanding database support.
 
@@ -211,10 +214,10 @@
 
 
 PGStorage history
-=================
+-----------------
 
 0.4
----
+===
 
 - Began using the PostgreSQL LISTEN and NOTIFY statements as a shortcut
   for invalidation polling.
@@ -255,13 +258,13 @@ PGStorage history
 
 
 0.3
----
+===
 
 - Made compatible with Zope 3, although an undo bug apparently remains.
 
 
 0.2
----
+===
 
 - Fixed concurrent commits, which were generating deadlocks.  Fixed by
   adding a special table, "commit_lock", which is used for
@@ -276,4 +279,3 @@ PGStorage history
   and writing a lot of small transactions, while FileStorage / ZEO
   wins at writing big transactions.  Interestingly, they tie when
   writing a RAM disk.
-

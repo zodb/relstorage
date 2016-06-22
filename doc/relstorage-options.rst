@@ -286,6 +286,8 @@ cache-servers
 
         The default is to disable memcached integration.
 
+        .. versionadded:: 1.1rc1
+
 cache-module-name
         Specifies which Python memcache module to use. The default is
         "relstorage.pylibmc_wrapper", which requires pylibmc. An

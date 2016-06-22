@@ -17,6 +17,7 @@ Contents:
    faq
    migration
    changelog
+   HISTORY
 
 
 
