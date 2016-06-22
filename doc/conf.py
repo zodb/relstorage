@@ -34,6 +34,14 @@ from __future__ import print_function
 import os
 import sys
 
+
+try:
+    import cx_Oracle
+except ImportError:
+    print("Mocking cx_oracle for docs")
+    sys.path.append(".mocks")
+    os.environ['PYTHONPATH'] = '.mocks' + os.pathsep + os.environ.get('PYTHONPATH', '')
+
 os.system('%s generate_rst.py generate' % sys.executable)
 
 if not os.path.exists('changelog.rst') and os.path.exists('../CHANGES.rst'):

@@ -1,6 +1,5 @@
 MySQL-python
 psycopg2
-cx-oracle
 pylibmc
 sphinxcontrib-programoutput
 repoze.sphinx.autointerface
