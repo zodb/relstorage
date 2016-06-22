@@ -2,7 +2,7 @@
  Installation
 ==============
 
-RelStorage is supported on Python 2.7, Python 3.4 and 3.5, and PyPy2.
+RelStorage 1.7 is supported on Python 2.7, Python 3.4 and 3.5, and PyPy2.
 
 You can install RelStorage using pip::
 
@@ -10,7 +10,9 @@ You can install RelStorage using pip::
 
 RelStorage requires a modern version of ZODB; it is tested with ZODB
 4.3 but *might* work with ZODB as old as 3.10. If you need to use an
-older version of ZODB, install RelStorage 1.6.0.
+older version of ZODB, install RelStorage 1.6.0. Likewise, if you need
+Python 2.6 support, install RelStorage 1.6.0 (note that 1.6.0 *does
+not* run on Python 3 or PyPy).
 
 Database Adapter
 ================

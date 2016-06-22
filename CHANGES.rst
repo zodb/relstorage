@@ -6,25 +6,38 @@
 1.7.0a1 (Unreleased)
 ====================
 
+Breaking Changes
+----------------
+
 - Update the ZODB dependency from ZODB3 3.7.0 to ZODB 4.3.1. Support
   for ZODB older than 3.10 has been removed; ZODB 3.10 may work, but
   only ZODB 4.3 is tested.
 
 - Remove support for Python 2.6 and below. Python 2.7 is now required.
 
+Platform Support
+----------------
+
 - Add support for PyPy on MySQL and PostgreSQL using PyMySQL and
   psycopg2cffi respectively. PyPy can be substantially faster than
   CPython in some scenarios; see :pr:`23`.
 
-- Add initial support for Python 3.4+ for MySQL using mysqlclient, PostgreSQL,
+- Add initial support for Python 3.4+ for MySQL (using mysqlclient), PostgreSQL,
   and Oracle.
+
+Bug Fixes
+---------
 
 - Fixed ``loadBefore`` of a deleted/undone object to correctly raise a
   POSKeyError instead of returning an empty state. (Revealed by
   updated tests for FileStorage in ZODB 4.3.1.)
 
-- Updated the buildout configuration to just run relstorage tests and
-  to select which databases to use at build time.
+- Oracle: Packing should no longer produce LOB errors. This partially
+  reverts the speedups in 1.6.0b2. Reported in :issue:`30` by Peter
+  Jacobs.
+
+Included Utilities
+------------------
 
 - zodbconvert: The ``--incremental`` option is supported with a
   FileStorage (or any storage that implements
@@ -36,22 +49,6 @@
   Sylvain Viollon, Mauro Amico, and Peter Jacobs. Originally reported
   by Jan-Wijbrand Kolman.
 
-- Raise a specific exception when acquiring the commit or pack locks
-  fails. See :pr:`18`.
-
-- PostgreSQL 9.3: Support ``commit-lock-timeout``. Contributed in :pr:`20`
-  by Sean Upton.
-
-- ``RelStorage.lastTransaction()`` is more consistent with FileStorage
-  and ClientStorage, returning a useful value in more cases.
-
-- Oracle: Add support for getting the database size. Contributed in
-  :pr:`21` by Mauro Amico.
-
-- Oracle: Packing should no longer produce LOB errors. This partially
-  reverts the speedups in 1.6.0b2. Reported in :issue:`30` by Peter
-  Jacobs.
-
 - PostgreSQL: ``zodbconvert --clear`` should be much faster when the
   destination is a PostgreSQL schema containing lots of data. *NOTE*:
   There can be no other open RelStorage connections to the destination,
@@ -59,6 +56,25 @@
   on the RelStorage tables, or ``zodbconvert`` will block indefinitely
   waiting for the locks to be release. Partial fix for :issue:`16`
   reported by Chris McDonough.
+
+
+Other Enhancements
+------------------
+
+- Raise a specific exception when acquiring the commit or pack locks
+  fails. See :pr:`18`.
+
+- ``RelStorage.lastTransaction()`` is more consistent with FileStorage
+  and ClientStorage, returning a useful value in more cases.
+
+- Updated the buildout configuration to just run relstorage tests and
+  to select which databases to use at build time.
+
+- PostgreSQL 9.3: Support ``commit-lock-timeout``. Contributed in :pr:`20`
+  by Sean Upton.
+
+- Oracle: Add support for getting the database size. Contributed in
+  :pr:`21` by Mauro Amico.
 
 - MySQL: Use the "binary" character set to avoid producing "Invalid
   utf8 character string" warnings. See :issue:`57`.
