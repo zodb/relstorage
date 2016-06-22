@@ -37,8 +37,9 @@ import sys
 
 try:
     import cx_Oracle
+    import pylibmc
 except ImportError:
-    print("Mocking cx_oracle for docs")
+    print("Mocking cx_oracle/pylibmc for docs")
     sys.path.append(".mocks")
     os.environ['PYTHONPATH'] = '.mocks' + os.pathsep + os.environ.get('PYTHONPATH', '')
 

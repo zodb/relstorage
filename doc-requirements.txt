@@ -1,5 +1,4 @@
 MySQL-python
 psycopg2
-pylibmc
 sphinxcontrib-programoutput
 repoze.sphinx.autointerface
