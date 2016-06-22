@@ -1,0 +1,1 @@
+class MemcachedError(Exception): pass

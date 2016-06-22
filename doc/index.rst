@@ -1,13 +1,17 @@
+=====================
+ What is RelStorage?
+=====================
 
 RelStorage is a storage implementation for ZODB that stores pickles in
-a relational database. PostgreSQL 8.1 and above, MySQL 5.0.32+ /
-5.1.34+, and Oracle 10g and 11g are currently supported. RelStorage
-replaced the PGStorage project.
+a relational database. PostgreSQL 8.1 and above (via psycopg2 or
+psycopg2cffi), MySQL 5.0.32+ / 5.1.34+ (via MySQLdb 1.2.2 or PyMySQL),
+and Oracle 10g and 11g (via cx_Oracle) are currently supported.
+RelStorage replaced the PGStorage project.
 
 
-==========
- Features
-==========
+
+Features
+========
 
 * It is a drop-in replacement for FileStorage and ZEO.
 * There is a simple way to convert FileStorage to RelStorage and back again.
@@ -22,28 +26,30 @@ replaced the PGStorage project.
 * Supports undo, packing, and filesystem-based ZODB blobs.
 * Both history-preserving and history-free storage are available.
 * Capable of failover to replicated SQL databases.
-* ``zodbconvert`` utility to copy databases.
+* :doc:`zodbconvert <zodbconvert>` utility to copy/transform
+  databases.
+* :doc:`zodbpack <zodbpack>` utility to pack databases.
+* :doc:`zodburi <zodburi>` support.
 * Free, open source (ZPL 2.1)
 
 
-===============
- Documentation
-===============
-
-`Documentation`_ including `installation instructions`_ is hosted on `readthedocs`_.
-
-The complete `changelog`_ is also there.
-
-.. _`Documentation`: http://relstorage.readthedocs.io/en/latest/
-.. _`installation instructions`: http://relstorage.readthedocs.io/en/latest/install.html
-.. _`readthedocs`: http://relstorage.readthedocs.io/en/latest/
-.. _`changelog`: http://relstorage.readthedocs.io/en/latest/changelog.html
+See :doc:`the rest of the documentation <contents>` for more information.
 
 
-=============
- Development
-=============
+Development
+===========
 
 RelStorage is hosted at GitHub:
 
     https://github.com/zodb/relstorage
+
+
+
+Project URLs
+============
+
+* http://pypi.python.org/pypi/RelStorage       (PyPI entry and downloads)
+* http://shane.willowrise.com/                 (blog)
+
+.. toctree::
+   contents

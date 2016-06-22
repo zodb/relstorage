@@ -69,11 +69,7 @@ setup(
     platforms=["any"],
     description=doclines[0],
     classifiers=filter(None, classifiers.split("\n")),
-    long_description=(
-        read_file("README.rst") + "\n\n" +
-        "Change History\n" +
-        "==============\n\n" +
-        read_file("CHANGES.rst")),
+    long_description=read_file("README.rst"),
     zip_safe=False,  # otherwise ZConfig can't see component.xml
     install_requires=[
         'perfmetrics',
