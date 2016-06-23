@@ -18,19 +18,40 @@ Database Adapter
 ================
 
 You also need the Python database adapter that corresponds with your
-database. On CPython2, install psycopg2, MySQL-python 1.2.2+, or
-cx_Oracle 4.3+; umysql is also known to work. For CPython3, install psycopg2, mysqlclient or
-cx_Oracle. On PyPy, install psycopg2cffi or PyMySQL (PyPy will
-generally work with psycopg2 and MySQLdb, but it will be *much*
-slower; cx_Oracle is untested on PyPy).
+database.
 
-The easiest way to get the recommended and tested database adapter for
-your platform and database is to install the corresponding RelStorage
-extra; RelStorage has extras for all three databases::
+.. tip::
+   The easiest way to get the recommended and tested database adapter for
+   your platform and database is to install the corresponding RelStorage
+   extra; RelStorage has extras for all three databases that install
+   the recommended driver on all platforms::
 
-  pip install "RelStorage[mysql]"
-  pip install "RelStorage[postgresql]"
-  pip install "RelStorage[oracle]"
+    pip install "RelStorage[mysql]"
+    pip install "RelStorage[postgresql]"
+    pip install "RelStorage[oracle]"
+
+
+On CPython2, install psycopg2 2.6.1+, MySQL-python 1.2.5+, or
+cx_Oracle 5.2+; umysql is also known to work. For CPython3, install
+psycopg2, mysqlclient 1.3.7+ or cx_Oracle. On PyPy, install
+psycopg2cffi 2.7.4+ or PyMySQL 0.6.6+ (PyPy will generally work with
+psycopg2 and MySQLdb, but it will be *much* slower; cx_Oracle is
+untested on PyPy).
+
+Here's a table of known working adapters; adapters **in bold** are the recommended
+adapter:
+
+========   ================      ================      ======
+Platform   MySQL                 PostgreSQL            Oracle
+========   ================      ================      ======
+CPython2   **MySQL-python**      **psycopg2**;         **cx_Oracle**
+           ;mysqlclient;         psycopg2cffi
+           PyMySQL;
+           umysql
+CPython3   **mysqlclient**;      **psycopg2**          **cx_Oracle**
+           PyMySQL
+PyPy       **PyMySQL**           **psycopg2cffi**      <untested>
+========   ================      ================      ======
 
 
 

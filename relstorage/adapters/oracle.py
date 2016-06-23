@@ -54,7 +54,7 @@ class OracleAdapter(object):
     """Oracle adapter for RelStorage."""
 
     def __init__(self, user, password, dsn, commit_lock_id=0,
-            twophase=False, options=None):
+                 twophase=False, options=None):
         """Create an Oracle adapter.
 
         The user, password, and dsn parameters are provided to cx_Oracle
@@ -117,9 +117,9 @@ class OracleAdapter(object):
             )
 
         if self.keep_history:
-            poll_query="SELECT MAX(tid) FROM transaction"
+            poll_query = "SELECT MAX(tid) FROM transaction"
         else:
-            poll_query="SELECT MAX(tid) FROM object_state"
+            poll_query = "SELECT MAX(tid) FROM object_state"
         self.poller = Poller(
             poll_query=poll_query,
             keep_history=self.keep_history,
@@ -182,10 +182,12 @@ class OracleAdapter(object):
 class CXOracleScriptRunner(OracleScriptRunner):
 
     def __init__(self):
+        # XXX We don't support older cx_Oracle versions anymore, so drop
+        # the conditional. 5.0 dates back to 2008
         self.use_inline_lobs = (cx_Oracle.version >= '5.0')
 
     def _outputtypehandler(self,
-            cursor, name, defaultType, size, precision, scale):
+                           cursor, name, defaultType, size, precision, scale):
         """cx_Oracle outputtypehandler that causes Oracle to send BLOBs inline.
 
         Note that if a BLOB in the result is too large, Oracle generates an
@@ -286,7 +288,7 @@ class CXOracleConnectionManager(AbstractConnectionManager):
 
     @metricmethod
     def open(self, transaction_mode="ISOLATION LEVEL READ COMMITTED",
-            twophase=False, replica_selector=None):
+             twophase=False, replica_selector=None):
         """Open a database connection and return (conn, cursor)."""
         if replica_selector is None:
             replica_selector = self.replica_selector
@@ -311,7 +313,7 @@ class CXOracleConnectionManager(AbstractConnectionManager):
                     next_dsn = next(replica_selector)
                     if next_dsn is not None:
                         log.warning("Unable to connect to DSN %s: %s, "
-                            "now trying %s", dsn, e, next_dsn)
+                                    "now trying %s", dsn, e, next_dsn)
                         dsn = next_dsn
                         continue
                 log.warning("Unable to connect: %s", e)
@@ -323,12 +325,12 @@ class CXOracleConnectionManager(AbstractConnectionManager):
         Returns (conn, cursor).
         """
         return self.open(self.isolation_read_only,
-            replica_selector=self.ro_replica_selector)
+                         replica_selector=self.ro_replica_selector)
 
     def restart_load(self, conn, cursor):
         """Reinitialize a connection for loading objects."""
         self.check_replica(conn, cursor,
-            replica_selector=self.ro_replica_selector)
+                           replica_selector=self.ro_replica_selector)
         conn.rollback()
         cursor.execute("SET TRANSACTION %s" % self.isolation_read_only)
 

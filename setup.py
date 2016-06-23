@@ -89,7 +89,7 @@ setup(
         # CPython; it requires some minor code changes to support, so
         # be sure to test this configuration.
         'mysql:platform_python_implementation=="CPython" and python_version == "2.7"': [
-            'MySQL-python>=1.2.2',
+            'MySQL-python>=1.2.5',
         ],
         'mysql:platform_python_implementation=="CPython" and python_version >= "3.3"': [
             'mysqlclient>=1.3.7',
@@ -105,7 +105,7 @@ setup(
             'psycopg2cffi>=2.7.4',
         ],
         'oracle': [
-            'cx_Oracle>=4.3.1'
+            'cx_Oracle>=5.0.0'
         ],
         'test': tests_require,
     },
