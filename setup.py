@@ -46,7 +46,12 @@ def read_file(*path):
         result = f.read()
     return result
 
-tests_require = ['mock', 'zope.testing', 'ZODB [test]']
+tests_require = [
+    'mock',
+    'zope.testing',
+    'ZODB [test]',
+    'zc.zlibstorage'
+]
 
 setup(
     name="RelStorage",

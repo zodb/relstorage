@@ -26,6 +26,7 @@ from ZODB.tests import StorageTestBase
 from ZODB.tests import Synchronization
 from ZODB.tests.StorageTestBase import zodb_pickle
 from ZODB.tests.StorageTestBase import zodb_unpickle
+from zc.zlibstorage import ZlibStorage
 from persistent import Persistent
 from persistent.mapping import PersistentMapping
 from relstorage.tests import fakecache
@@ -40,6 +41,9 @@ class StorageCreatingMixin(object):
         # abstract method
         raise NotImplementedError()
 
+    def _wrap_storage(self, storage):
+        return storage
+
     def make_storage(self, zap=True, **kw):
         from relstorage.options import Options
         from relstorage.storage import RelStorage
@@ -53,7 +57,7 @@ class StorageCreatingMixin(object):
             # This leads to connections remaining open with locks on PyPy, so on PostgreSQL
             # we can't TRUNCATE tables and have to go the slow route.
             storage.zap_all(slow=True)
-        return storage
+        return self._wrap_storage(storage)
 
 
 class RelStorageTestBase(StorageCreatingMixin,
@@ -831,7 +835,7 @@ class GenericRelStorageTests(
 
             def updater():
                 thread_db = DB(self._storage)
-                for i in range(updates_per_thread):
+                for _ in range(updates_per_thread):
                     thread_c = thread_db.open()
                     try:
                         thread_c.root()['length'].change(1)
@@ -842,7 +846,7 @@ class GenericRelStorageTests(
 
             import threading
             threads = []
-            for i in range(thread_count):
+            for _ in range(thread_count):
                 t = threading.Thread(target=updater)
                 threads.append(t)
             for t in threads:
@@ -853,7 +857,7 @@ class GenericRelStorageTests(
             c = db.open()
             try:
                 self.assertEqual(c.root()['length'](),
-                    updates_per_thread * thread_count)
+                                 updates_per_thread * thread_count)
             finally:
                 transaction.abort()
                 c.close()
@@ -876,16 +880,36 @@ class AbstractRSZodbConvertTests(StorageCreatingMixin,
         super(AbstractRSZodbConvertTests, self).setUp()
         cfg = """
         %%import relstorage
-        <filestorage %s>
+        %%import zc.zlibstorage
+        <zlibstorage %s>
+        <filestorage>
             path %s
         </filestorage>
-        <relstorage %s>
+        </zlibstorage>
+        <zlibstorage %s>
+        <relstorage>
             %s
         </relstorage>
+        </zlibstorage>
         """ % (self.filestorage_name, self.filestorage_file,
                self.relstorage_name, self._relstorage_contents())
         self._write_cfg(cfg)
         self.make_storage(zap=True)
+
+    def _wrap_storage(self, storage):
+        return ZlibStorage(storage)
+
+    def test_new_instance_still_zlib(self):
+        storage = self.make_storage()
+        new_storage = storage.new_instance()
+        self.assertIsInstance(new_storage,
+                              ZlibStorage)
+
+        self.assertIn('_crs_untransform_record_data', storage.base.__dict__)
+        self.assertIn('_crs_transform_record_data', storage.base.__dict__)
+
+        self.assertIn('_crs_untransform_record_data', new_storage.base.__dict__)
+        self.assertIn('_crs_transform_record_data', new_storage.base.__dict__)
 
 
 class AbstractRSDestZodbConvertTests(AbstractRSZodbConvertTests):

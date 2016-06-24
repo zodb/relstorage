@@ -36,6 +36,10 @@ Bug Fixes
   reverts the speedups in 1.6.0b2. Reported in :issue:`30` by Peter
   Jacobs.
 
+- :meth:`.RelStorage.registerDB` and :meth:`.RelStorage.new_instance`
+  now work with storage wrappers like zc.zlibstorage. See :issue:`70`
+  and :issue:`71`.
+
 Included Utilities
 ------------------
 

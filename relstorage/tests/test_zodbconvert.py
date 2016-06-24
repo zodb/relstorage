@@ -20,6 +20,10 @@ import transaction
 import unittest
 import functools
 
+from ZODB.FileStorage import FileStorage
+from ZODB.DB import DB
+from zc.zlibstorage import ZlibStorage
+
 from relstorage.zodbconvert import main
 
 def skipIfZapNotSupportedByDest(func):
@@ -43,11 +47,9 @@ class AbstractZODBConvertBase(unittest.TestCase):
         raise NotImplementedError()
 
     def _create_src_db(self):
-        from ZODB.DB import DB
         return DB(self._create_src_storage())
 
     def _create_dest_db(self):
-        from ZODB.DB import DB
         return DB(self._create_dest_storage())
 
     @contextmanager
@@ -152,15 +154,25 @@ class FSZODBConvertTests(AbstractZODBConvertBase):
         os.close(fd)
         os.remove(self.destfile)
 
-        cfg = """
+        cfg = self._cfg_header() + self._cfg_source() + self._cfg_dest()
+        self._write_cfg(cfg)
+
+    def _cfg_header(self):
+        return ""
+
+    def _cfg_source(self):
+        return """
         <filestorage source>
             path %s
         </filestorage>
+        """ % self.srcfile
+
+    def _cfg_dest(self):
+        return """
         <filestorage destination>
             path %s
         </filestorage>
-        """ % (self.srcfile, self.destfile)
-        self._write_cfg(cfg)
+        """ % self.destfile
 
     def _write_cfg(self, cfg):
         fd, self.cfgfile = tempfile.mkstemp()
@@ -177,27 +189,41 @@ class FSZODBConvertTests(AbstractZODBConvertBase):
         super(FSZODBConvertTests, self).tearDown()
 
     def _create_src_storage(self):
-        from ZODB.FileStorage import FileStorage
         return FileStorage(self.srcfile)
 
     def _create_dest_storage(self):
-        from ZODB.FileStorage import FileStorage
         return FileStorage(self.destfile)
 
     def test_storage_has_data(self):
-        from ZODB.DB import DB
         from relstorage.zodbconvert import storage_has_data
-        from ZODB.FileStorage import FileStorage
         src = FileStorage(self.srcfile, create=True)
         self.assertFalse(storage_has_data(src))
         db = DB(src)  # add the root object
         db.close()
         self.assertTrue(storage_has_data(src))
 
+class ZlibWrappedZODBConvertTests(FSZODBConvertTests):
+
+    def _cfg_header(self):
+        return "%import zc.zlibstorage\n"
+
+    def _cfg_source(self):
+        return "\n<zlibstorage source>" + super(ZlibWrappedZODBConvertTests, self)._cfg_source() + "</zlibstorage>"
+
+    def _cfg_dest(self):
+        return "\n<zlibstorage destination>" + super(ZlibWrappedZODBConvertTests, self)._cfg_dest() + "</zlibstorage>"
+
+    def _create_src_storage(self):
+        return ZlibStorage(super(ZlibWrappedZODBConvertTests, self)._create_src_storage())
+
+    def _create_dest_storage(self):
+        return ZlibStorage(super(ZlibWrappedZODBConvertTests, self)._create_dest_storage())
+
 
 def test_suite():
     suite = unittest.TestSuite()
     suite.addTest(unittest.makeSuite(FSZODBConvertTests))
+    suite.addTest(unittest.makeSuite(ZlibWrappedZODBConvertTests))
     return suite
 
 if __name__ == '__main__':
