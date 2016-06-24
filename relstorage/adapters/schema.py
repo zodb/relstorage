@@ -926,6 +926,7 @@ class AbstractSchemaInstaller(object):
 
         self.connmanager.open_and_call(callback)
 
+
     def drop_all(self):
         """Drop all tables and sequences."""
         def callback(conn, cursor):

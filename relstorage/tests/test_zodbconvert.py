@@ -19,6 +19,11 @@ import tempfile
 import transaction
 import unittest
 import functools
+import gc
+
+from ZODB.FileStorage import FileStorage
+from ZODB.DB import DB
+from zc.zlibstorage import ZlibStorage
 
 from relstorage.zodbconvert import main
 
@@ -36,6 +41,28 @@ class AbstractZODBConvertBase(unittest.TestCase):
     # Set to True in a subclass if the destination can be zapped
     zap_supported_by_dest = False
 
+    def setUp(self):
+        self._to_close = []
+
+    def tearDown(self):
+        for i in self._to_close:
+            i.close()
+        self._to_close = []
+        # XXX: On PyPy with psycopg2cffi, running these two tests will result
+        # in a hang: HPPostgreSQLDestZODBConvertTests.test_clear_empty_dest HPPostgreSQLDestZODBConvertTests.test_clear_full_dest
+        # test_clear_full_dest will hang in the zodbconvert call to zap_all(), in the C code of the
+        # PG driver. Presumably some connection with some lock got left open and was preventing
+        # the TRUNCATE statements from taking out a lock. The same tests do not hang with psycopg2cffi on
+        # C Python. Manually running the gc (twice!) here fixes the issue. Note that this only started when
+        # we wrapped the destination storage in ZlibStorage (which copies methods into its own dict) so there's
+        # something weird going on with the GC. Seen in PyPy 2.5.0 and 5.3.
+        gc.collect()
+        gc.collect()
+
+    def _closing(self, thing):
+        self._to_close.append(thing)
+        return thing
+
     def _create_src_storage(self):
         raise NotImplementedError()
 
@@ -43,12 +70,10 @@ class AbstractZODBConvertBase(unittest.TestCase):
         raise NotImplementedError()
 
     def _create_src_db(self):
-        from ZODB.DB import DB
-        return DB(self._create_src_storage())
+        return self._closing(DB(self._closing(self._create_src_storage())))
 
     def _create_dest_db(self):
-        from ZODB.DB import DB
-        return DB(self._create_dest_storage())
+        return self._closing(DB(self._closing(self._create_dest_storage())))
 
     @contextmanager
     def __conn(self, name):
@@ -152,15 +177,25 @@ class FSZODBConvertTests(AbstractZODBConvertBase):
         os.close(fd)
         os.remove(self.destfile)
 
-        cfg = """
+        cfg = self._cfg_header() + self._cfg_source() + self._cfg_dest()
+        self._write_cfg(cfg)
+
+    def _cfg_header(self):
+        return ""
+
+    def _cfg_source(self):
+        return """
         <filestorage source>
             path %s
         </filestorage>
+        """ % self.srcfile
+
+    def _cfg_dest(self):
+        return """
         <filestorage destination>
             path %s
         </filestorage>
-        """ % (self.srcfile, self.destfile)
-        self._write_cfg(cfg)
+        """ % self.destfile
 
     def _write_cfg(self, cfg):
         fd, self.cfgfile = tempfile.mkstemp()
@@ -177,27 +212,41 @@ class FSZODBConvertTests(AbstractZODBConvertBase):
         super(FSZODBConvertTests, self).tearDown()
 
     def _create_src_storage(self):
-        from ZODB.FileStorage import FileStorage
         return FileStorage(self.srcfile)
 
     def _create_dest_storage(self):
-        from ZODB.FileStorage import FileStorage
         return FileStorage(self.destfile)
 
     def test_storage_has_data(self):
-        from ZODB.DB import DB
         from relstorage.zodbconvert import storage_has_data
-        from ZODB.FileStorage import FileStorage
         src = FileStorage(self.srcfile, create=True)
         self.assertFalse(storage_has_data(src))
         db = DB(src)  # add the root object
         db.close()
         self.assertTrue(storage_has_data(src))
 
+class ZlibWrappedZODBConvertTests(FSZODBConvertTests):
+
+    def _cfg_header(self):
+        return "%import zc.zlibstorage\n"
+
+    def _cfg_source(self):
+        return "\n<zlibstorage source>" + super(ZlibWrappedZODBConvertTests, self)._cfg_source() + "</zlibstorage>"
+
+    def _cfg_dest(self):
+        return "\n<zlibstorage destination>" + super(ZlibWrappedZODBConvertTests, self)._cfg_dest() + "</zlibstorage>"
+
+    def _create_src_storage(self):
+        return ZlibStorage(super(ZlibWrappedZODBConvertTests, self)._create_src_storage())
+
+    def _create_dest_storage(self):
+        return ZlibStorage(super(ZlibWrappedZODBConvertTests, self)._create_dest_storage())
+
 
 def test_suite():
     suite = unittest.TestSuite()
     suite.addTest(unittest.makeSuite(FSZODBConvertTests))
+    suite.addTest(unittest.makeSuite(ZlibWrappedZODBConvertTests))
     return suite
 
 if __name__ == '__main__':

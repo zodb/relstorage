@@ -237,6 +237,14 @@ class RelStorage(
                            create=False, options=self._options, cache=cache,
                            blobhelper=blobhelper)
         self._instances.append(weakref.ref(other, self._instances.remove))
+
+        if '_crs_transform_record_data' in self.__dict__:
+            # registerDB has been called on us but isn't called on
+            # our children. Make sure any wrapper that needs to transform
+            # records can do so.
+            # See https://github.com/zodb/relstorage/issues/71
+            other._crs_transform_record_data = self._crs_transform_record_data
+            other._crs_untransform_record_data = self._crs_untransform_record_data
         return other
 
     try:
@@ -364,7 +372,7 @@ class RelStorage(
         Used by the test suite and the ZODBConvert script.
         """
         self._adapter.schema.zap_all(**kwargs)
-        self._rollback_load_connection()
+        self.release()
         self._cache.clear()
 
     def release(self):
@@ -387,6 +395,7 @@ class RelStorage(
                 instance = wref()
                 if instance is not None:
                     instance.close()
+            self._instances = []
 
     def __len__(self):
         return self._adapter.stats.get_object_count()
@@ -406,8 +415,21 @@ class RelStorage(
         """Return database size in bytes"""
         return self._adapter.stats.get_db_size()
 
-    def registerDB(self, db, limit=None):
-        pass  # we don't care
+    def registerDB(self, wrapper):
+        if (ZODB.interfaces.IStorageWrapper.providedBy(wrapper)
+                and not ZODB.interfaces.IDatabase.providedBy(wrapper)
+                and not hasattr(type(wrapper), 'new_instance')):
+            # Fixes for https://github.com/zopefoundation/zc.zlibstorage/issues/2
+            # We special-case zlibstorage for speed
+            if hasattr(wrapper, 'base') and hasattr(wrapper, 'copied_methods'):
+                type(wrapper).new_instance = _zlibstorage_new_instance
+                # NOTE that zlibstorage has a custom copyTransactionsFrom that overrides
+                # our own implementation.
+            else:
+                wrapper.new_instance = lambda s: type(wrapper)(self.new_instance())
+
+        # Prior to ZODB 4.3.1, ConflictResolvingStorage would raise an AttributeError
+        super(RelStorage, self).registerDB(wrapper)
 
     def isReadOnly(self):
         return self._is_read_only
@@ -1564,3 +1586,16 @@ class Record(DataRecord):
         if data is not None:
             assert isinstance(data, bytes)
         DataRecord.__init__(self, p64(oid_int), tid, data, None)
+
+def _zlibstorage_new_instance(self):
+    new_self = type(self).__new__(type(self))
+    # Preserve _transform, etc
+    new_self.__dict__ = self.__dict__.copy()
+    new_self.base = self.base.new_instance()
+    # Because these are bound methods, we must re-copy
+    # them or ivars might be wrong, like _transaction
+    for name in self.copied_methods:
+        v = getattr(new_self.base, name, None)
+        if v is not None:
+            setattr(new_self, name, v)
+    return new_self
