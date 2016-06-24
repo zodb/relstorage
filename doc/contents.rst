@@ -16,6 +16,7 @@ Contents:
    zodburi
    faq
    migration
+   developing
    changelog
    HISTORY
 
