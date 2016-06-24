@@ -372,7 +372,7 @@ class RelStorage(
         Used by the test suite and the ZODBConvert script.
         """
         self._adapter.schema.zap_all(**kwargs)
-        self._rollback_load_connection()
+        self.release()
         self._cache.clear()
 
     def release(self):
@@ -395,6 +395,7 @@ class RelStorage(
                 instance = wref()
                 if instance is not None:
                     instance.close()
+            self._instances = []
 
     def __len__(self):
         return self._adapter.stats.get_object_count()
@@ -422,6 +423,8 @@ class RelStorage(
             # We special-case zlibstorage for speed
             if hasattr(wrapper, 'base') and hasattr(wrapper, 'copied_methods'):
                 type(wrapper).new_instance = _zlibstorage_new_instance
+                # NOTE that zlibstorage has a custom copyTransactionsFrom that overrides
+                # our own implementation.
             else:
                 wrapper.new_instance = lambda s: type(wrapper)(self.new_instance())
 

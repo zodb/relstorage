@@ -894,10 +894,11 @@ class AbstractRSZodbConvertTests(StorageCreatingMixin,
         """ % (self.filestorage_name, self.filestorage_file,
                self.relstorage_name, self._relstorage_contents())
         self._write_cfg(cfg)
-        self.make_storage(zap=True)
+
+        self.make_storage(zap=True).close()
 
     def _wrap_storage(self, storage):
-        return ZlibStorage(storage)
+        return self._closing(ZlibStorage(storage))
 
     def _create_dest_storage(self):
         return self._wrap_storage(super(AbstractRSZodbConvertTests, self)._create_dest_storage())
@@ -906,8 +907,8 @@ class AbstractRSZodbConvertTests(StorageCreatingMixin,
         return self._wrap_storage(super(AbstractRSZodbConvertTests, self)._create_src_storage())
 
     def test_new_instance_still_zlib(self):
-        storage = self.make_storage()
-        new_storage = storage.new_instance()
+        storage = self._closing(self.make_storage())
+        new_storage = self._closing(storage.new_instance())
         self.assertIsInstance(new_storage,
                               ZlibStorage)
 
@@ -916,7 +917,6 @@ class AbstractRSZodbConvertTests(StorageCreatingMixin,
 
         self.assertIn('_crs_untransform_record_data', new_storage.base.__dict__)
         self.assertIn('_crs_transform_record_data', new_storage.base.__dict__)
-
 
 class AbstractRSDestZodbConvertTests(AbstractRSZodbConvertTests):
 
@@ -927,7 +927,7 @@ class AbstractRSDestZodbConvertTests(AbstractRSZodbConvertTests):
         return self.srcfile
 
     def _create_dest_storage(self):
-        return self.make_storage(zap=False)
+        return self._closing(self.make_storage(zap=False))
 
 class AbstractRSSrcZodbConvertTests(AbstractRSZodbConvertTests):
 
@@ -939,7 +939,7 @@ class AbstractRSSrcZodbConvertTests(AbstractRSZodbConvertTests):
         return self.destfile
 
     def _create_src_storage(self):
-        return self.make_storage(zap=False)
+        return self._closing(self.make_storage(zap=False))
 
 class DoubleCommitter(Persistent):
     """A crazy persistent class that changes self in __getstate__"""
