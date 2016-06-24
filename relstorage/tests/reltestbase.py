@@ -899,6 +899,12 @@ class AbstractRSZodbConvertTests(StorageCreatingMixin,
     def _wrap_storage(self, storage):
         return ZlibStorage(storage)
 
+    def _create_dest_storage(self):
+        return self._wrap_storage(super(AbstractRSZodbConvertTests, self)._create_dest_storage())
+
+    def _create_src_storage(self):
+        return self._wrap_storage(super(AbstractRSZodbConvertTests, self)._create_src_storage())
+
     def test_new_instance_still_zlib(self):
         storage = self.make_storage()
         new_storage = storage.new_instance()
@@ -931,7 +937,6 @@ class AbstractRSSrcZodbConvertTests(AbstractRSZodbConvertTests):
     @property
     def filestorage_file(self):
         return self.destfile
-
 
     def _create_src_storage(self):
         return self.make_storage(zap=False)
