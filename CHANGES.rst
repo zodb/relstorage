@@ -94,6 +94,9 @@ Other Enhancements
 - ``zodbconvert`` and ``zodbpack`` use :mod:`argparse` instead of
   :mod:`optparse` for command line handling.
 
+- Support :class:`ZODB.interfaces.IExternalGC` for history-free
+  databases, allowing multi-database garbage collection with
+  ``zc.zodbdgc``. See :issue:`47`.
 
 1.6.0 (2016-06-09)
 ==================

@@ -288,6 +288,10 @@ class HistoryPreservingRelStorageTests(
 
         db.close()
 
+    def checkImplementsExternalGC(self):
+        import ZODB.interfaces
+        self.assertFalse(ZODB.interfaces.IExternalGC.providedBy(self._storage))
+        self.assertRaises(AttributeError, self._storage.deleteObject)
 
 class HistoryPreservingToFileStorage(
         RelStorageTestBase,
