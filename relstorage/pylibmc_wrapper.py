@@ -20,9 +20,21 @@ to zope.conf and set the 'cache-servers' parameter as well.
 import pylibmc
 from _pylibmc import MemcachedError  # pylibmc >= 0.9
 import logging
+from functools import wraps
 
 log = logging.getLogger(__name__)
 
+def _catching(func):
+    name = func.__name__
+
+    @wraps(func)
+    def wrapper(*args):
+        try:
+            return func(*args)
+        except MemcachedError as e:
+            log.debug("%s failed: %s", name, e)
+            return None
+    return wrapper
 
 class Client(object):
     behaviors = {
@@ -35,57 +47,36 @@ class Client(object):
         self._client.set_behaviors(self.behaviors)
         if pylibmc.support_compression:
             self.min_compress_len = 1000
-        else:
+        else: # pragma: no cover
             self.min_compress_len = 0
 
+    @_catching
     def get(self, key):
-        try:
-            return self._client.get(key)
-        except MemcachedError as e:
-            log.debug('get failed: %s', e)
-            return None
+        return self._client.get(key)
 
+    @_catching
     def get_multi(self, keys):
-        try:
-            return self._client.get_multi(keys)
-        except MemcachedError as e:
-            log.debug('get_multi failed: %s', e)
-            return None
+        return self._client.get_multi(keys)
 
+    @_catching
     def set(self, key, value):
-        try:
-            return self._client.set(
-                key, value, min_compress_len=self.min_compress_len)
-        except MemcachedError as e:
-            log.debug('set failed: %s', e)
-            return None
+        return self._client.set(
+            key, value, min_compress_len=self.min_compress_len)
 
+    @_catching
     def set_multi(self, d):
-        try:
-            return self._client.set_multi(
-                d, min_compress_len=self.min_compress_len)
-        except MemcachedError as e:
-            log.debug('set_multi failed: %s', e)
-            return None
+        return self._client.set_multi(
+            d, min_compress_len=self.min_compress_len)
 
+    @_catching
     def add(self, key, value):
-        try:
-            return self._client.add(
-                key, value, min_compress_len=self.min_compress_len)
-        except MemcachedError as e:
-            log.debug('add failed: %s', e)
-            return None
+        return self._client.add(
+            key, value, min_compress_len=self.min_compress_len)
 
+    @_catching
     def incr(self, key):
-        try:
-            return self._client.incr(key)
-        except MemcachedError as e:
-            log.debug('incr of %r failed: %s', key, e)
-            return None
+        return self._client.incr(key)
 
+    @_catching
     def flush_all(self):
-        try:
-            self._client.flush_all()
-        except MemcachedError as e:
-            log.debug('flush_all failed: %s', e)
-            return None
+        return self._client.flush_all()
