@@ -34,6 +34,9 @@ import random
 import time
 import transaction
 
+from . import util
+from relstorage.options import Options
+from relstorage.storage import RelStorage
 
 class StorageCreatingMixin(object):
 
@@ -45,8 +48,13 @@ class StorageCreatingMixin(object):
         return storage
 
     def make_storage(self, zap=True, **kw):
-        from relstorage.options import Options
-        from relstorage.storage import RelStorage
+        if ('cache_servers' not in kw and 'cache_module_name' not in kw
+            and kw.get('share_local_cache', True)):
+            if util.CACHE_SERVERS and util.CACHE_MODULE_NAME:
+                kw['cache_servers'] = util.CACHE_SERVERS
+                kw['cache_module_name'] = util.CACHE_MODULE_NAME
+                kw['cache_prefix'] = type(self).__name__ + self._testMethodName
+
         options = Options(keep_history=self.keep_history, **kw)
         adapter = self.make_adapter(options)
         storage = RelStorage(adapter, options=options)
