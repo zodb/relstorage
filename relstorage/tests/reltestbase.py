@@ -34,6 +34,9 @@ import random
 import time
 import transaction
 
+from . import util
+from relstorage.options import Options
+from relstorage.storage import RelStorage
 
 class StorageCreatingMixin(object):
 
@@ -44,9 +47,18 @@ class StorageCreatingMixin(object):
     def _wrap_storage(self, storage):
         return storage
 
+    # A shared variable (not thread safe) that increments every
+    # time we create a memcache using storage. This is to better preserve
+    # test isolation.
+    cache_count = 0
+
     def make_storage(self, zap=True, **kw):
-        from relstorage.options import Options
-        from relstorage.storage import RelStorage
+        if 'cache_servers' not in kw and 'cache_module_name' not in kw:
+            if util.CACHE_SERVERS and util.CACHE_MODULE_NAME:
+                kw['cache_servers'] = util.CACHE_SERVERS
+                kw['cache_module_name'] = util.CACHE_MODULE_NAME
+                kw['cache_prefix'] = str(StorageCreatingMixin.cache_count)
+                StorageCreatingMixin.cache_count += 1
         options = Options(keep_history=self.keep_history, **kw)
         adapter = self.make_adapter(options)
         storage = RelStorage(adapter, options=options)

@@ -3,6 +3,7 @@ sudo: false
 services:
   - mysql
   - postgresql
+  - memcached
 addons:
 # Use postgresql 9.3 to get commit-lock testing
   postgresql: "9.3"
