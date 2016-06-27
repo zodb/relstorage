@@ -50,15 +50,16 @@ class StorageCreatingMixin(object):
     # A shared variable (not thread safe) that increments every
     # time we create a memcache using storage. This is to better preserve
     # test isolation.
-    cache_count = 0
+    #cache_count = 0
 
     def make_storage(self, zap=True, **kw):
-        if 'cache_servers' not in kw and 'cache_module_name' not in kw:
+        if ('cache_servers' not in kw and 'cache_module_name' not in kw
+            and kw.get('share_local_cache', True)):
             if util.CACHE_SERVERS and util.CACHE_MODULE_NAME:
                 kw['cache_servers'] = util.CACHE_SERVERS
                 kw['cache_module_name'] = util.CACHE_MODULE_NAME
-                kw['cache_prefix'] = str(StorageCreatingMixin.cache_count)
-                StorageCreatingMixin.cache_count += 1
+                kw['cache_prefix'] = type(self).__name__ + self._testMethodName
+                #StorageCreatingMixin.cache_count += 1
         options = Options(keep_history=self.keep_history, **kw)
         adapter = self.make_adapter(options)
         storage = RelStorage(adapter, options=options)
