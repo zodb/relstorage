@@ -47,11 +47,6 @@ class StorageCreatingMixin(object):
     def _wrap_storage(self, storage):
         return storage
 
-    # A shared variable (not thread safe) that increments every
-    # time we create a memcache using storage. This is to better preserve
-    # test isolation.
-    #cache_count = 0
-
     def make_storage(self, zap=True, **kw):
         if ('cache_servers' not in kw and 'cache_module_name' not in kw
             and kw.get('share_local_cache', True)):
@@ -59,7 +54,7 @@ class StorageCreatingMixin(object):
                 kw['cache_servers'] = util.CACHE_SERVERS
                 kw['cache_module_name'] = util.CACHE_MODULE_NAME
                 kw['cache_prefix'] = type(self).__name__ + self._testMethodName
-                #StorageCreatingMixin.cache_count += 1
+
         options = Options(keep_history=self.keep_history, **kw)
         adapter = self.make_adapter(options)
         storage = RelStorage(adapter, options=options)

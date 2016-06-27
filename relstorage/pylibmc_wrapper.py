@@ -42,14 +42,14 @@ class Client(object):
         try:
             return self._client.get(key)
         except MemcachedError as e:
-            log.warning('get failed: %s', e)
+            log.debug('get failed: %s', e)
             return None
 
     def get_multi(self, keys):
         try:
             return self._client.get_multi(keys)
         except MemcachedError as e:
-            log.warning('get_multi failed: %s', e)
+            log.debug('get_multi failed: %s', e)
             return None
 
     def set(self, key, value):
@@ -57,7 +57,7 @@ class Client(object):
             return self._client.set(
                 key, value, min_compress_len=self.min_compress_len)
         except MemcachedError as e:
-            log.warning('set failed: %s', e)
+            log.debug('set failed: %s', e)
             return None
 
     def set_multi(self, d):
@@ -65,7 +65,7 @@ class Client(object):
             return self._client.set_multi(
                 d, min_compress_len=self.min_compress_len)
         except MemcachedError as e:
-            log.warning('set_multi failed: %s', e)
+            log.debug('set_multi failed: %s', e)
             return None
 
     def add(self, key, value):
@@ -73,19 +73,19 @@ class Client(object):
             return self._client.add(
                 key, value, min_compress_len=self.min_compress_len)
         except MemcachedError as e:
-            log.warning('add failed: %s', e)
+            log.debug('add failed: %s', e)
             return None
 
     def incr(self, key):
         try:
             return self._client.incr(key)
         except MemcachedError as e:
-            log.warning('incr failed: %s', e)
+            log.debug('incr of %r failed: %s', key, e)
             return None
 
     def flush_all(self):
         try:
             self._client.flush_all()
         except MemcachedError as e:
-            log.warning('flush_all failed: %s', e)
+            log.debug('flush_all failed: %s', e)
             return None
