@@ -48,7 +48,7 @@ Included Utilities
   ``IStorage.lastTransaction()``) as a destination, not just
   RelStorages.
 
-- zodbconvert: The ``--incremental`` option is supported with a
+- zodbconvert: The ``--incremental`` option works correctly with a
   RelStorage as a destination. See :pr:`22`. With contributions by
   Sylvain Viollon, Mauro Amico, and Peter Jacobs. Originally reported
   by Jan-Wijbrand Kolman.
@@ -61,24 +61,11 @@ Included Utilities
   waiting for the locks to be release. Partial fix for :issue:`16`
   reported by Chris McDonough.
 
+- ``zodbconvert`` and ``zodbpack`` use :mod:`argparse` instead of
+  :mod:`optparse` for command line handling.
 
-Other Enhancements
-------------------
-
-- Raise a specific exception when acquiring the commit or pack locks
-  fails. See :pr:`18`.
-
-- ``RelStorage.lastTransaction()`` is more consistent with FileStorage
-  and ClientStorage, returning a useful value in more cases.
-
-- Updated the buildout configuration to just run relstorage tests and
-  to select which databases to use at build time.
-
-- PostgreSQL 9.3: Support ``commit-lock-timeout``. Contributed in :pr:`20`
-  by Sean Upton.
-
-- Oracle: Add support for getting the database size. Contributed in
-  :pr:`21` by Mauro Amico.
+Performance
+-----------
 
 - MySQL: Use the "binary" character set to avoid producing "Invalid
   utf8 character string" warnings. See :issue:`57`.
@@ -91,12 +78,46 @@ Other Enhancements
   query, instead of querying for each individual conflict. See
   :issue:`39`.
 
-- ``zodbconvert`` and ``zodbpack`` use :mod:`argparse` instead of
-  :mod:`optparse` for command line handling.
+- PostgreSQL no longer encodes and decodes object state in Base64
+  during database communication thanks to database driver
+  improvements. This should reduce network overhead and CPU usage for
+  both the RelStorage client and the database server. psycopg2 2.4.1
+  or above is required; 2.6.1 or above is recommended. (Or
+  psycopg2cffi 2.7.4.)
+
+- PostgreSQL 9.3: Support ``commit-lock-timeout``. Contributed in :pr:`20`
+  by Sean Upton.
+
+
+Other Enhancements
+------------------
+
+- Raise a specific exception when acquiring the commit or pack locks
+  fails. See :pr:`18`.
+
+- ``RelStorage.lastTransaction()`` is more consistent with FileStorage
+  and ClientStorage, returning a useful value in more cases.
+
+- Oracle: Add support for getting the database size. Contributed in
+  :pr:`21` by Mauro Amico.
 
 - Support :class:`ZODB.interfaces.IExternalGC` for history-free
   databases, allowing multi-database garbage collection with
   ``zc.zodbdgc``. See :issue:`47`.
+
+Project Details
+---------------
+
+- Travis CI is now used to run RelStorage tests against MySQL and
+  PostgreSQL on every push and pull request. CPython 2 and 3 and PyPy
+  are all tested with the recommended database drivers.
+
+- Documentation has been reorganized and moved to `readthedocs
+  <http://relstorage.readthedocs.io>`_.
+
+- Updated the buildout configuration to just run relstorage tests and
+  to select which databases to use at build time.
+
 
 1.6.0 (2016-06-09)
 ==================
