@@ -290,8 +290,8 @@ cache-servers
 
 cache-module-name
         Specifies which Python memcache module to use. The default is
-        "relstorage.pylibmc_wrapper", which requires pylibmc. An
-        alternative module is "memcache", a pure Python module. If you
+        "relstorage.pylibmc_wrapper", which requires `pylibmc <https://pypi.python.org/pypi/pylibmc>`_. An
+        alternative module is "`memcache <https://pypi.python.org/pypi/python-memcached>`_", a pure Python module. If you
         use the memcache module, use at least version 1.47.
 
         This option has no effect unless cache-servers is set.

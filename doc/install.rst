@@ -53,6 +53,15 @@ CPython3   **mysqlclient**;      **psycopg2**          **cx_Oracle**
 PyPy       **PyMySQL**           **psycopg2cffi**      <untested>
 ========   ================      ================      ======
 
+Memcache Integration
+====================
+
+If you want to use Memcache servers as an external shared cache for
+RelStorage clients, you'll need to install either `pylibmc
+<https://pypi.python.org/pypi/pylibmc>`_ (C based, requires Memcache
+development libraries and CPython) or `python-memcached
+<https://pypi.python.org/pypi/python-memcached>`_ (pure-Python, works
+on CPython and PyPy).
 
 
 Once RelStorage is installed, it's time to :doc:`configure the database <configure-database>`
