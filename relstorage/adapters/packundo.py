@@ -15,6 +15,7 @@
 """
 
 from ZODB.POSException import UndoError
+from ZODB.utils import u64
 from perfmetrics import metricmethod
 from relstorage.adapters.interfaces import IPackUndo
 from relstorage.iter import fetchmany
@@ -1189,7 +1190,7 @@ class HistoryFreePackUndo(PackUndo):
                         counter = total - len(to_remove)
                         if counter >= lastreport + reportstep:
                             log.info("pack: removed %d (%.1f%%) state(s)",
-                                counter, counter/float(total)*100)
+                                     counter, counter/float(total)*100)
                             lastreport = counter / reportstep * reportstep
                         self.locker.release_commit_lock(cursor)
                         self._pause_pack_until_lock(cursor, sleep)
@@ -1242,6 +1243,21 @@ class HistoryFreePackUndo(PackUndo):
         """
         self.runner.run_script(cursor, stmt)
 
+    def deleteObject(self, cursor, oid, oldserial):
+        # The only things to worry about are object_state and blob_chuck.
+        # blob chunks are deleted automatically by a foreign key.
+
+        # We shouldn't *have* to verify the oldserial in the delete statement,
+        # because our only consumer is zc.zodbdgc which only calls us for
+        # unreachable objects, so they shouldn't be modified and get a new
+        # TID. But this is safer.
+        state = """
+        DELETE FROM object_state
+        WHERE zoid = %(oid)s
+        and tid = %(tid)s
+        """
+        self.runner.run_script_stmt(cursor, state, {'oid': u64(oid), 'tid': u64(oldserial)})
+        return cursor.rowcount
 
 class MySQLHistoryFreePackUndo(HistoryFreePackUndo):
 

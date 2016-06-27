@@ -22,6 +22,8 @@ from ZODB import POSException
 from ZODB.BaseStorage import DataRecord
 from ZODB.BaseStorage import TransactionRecord
 from ZODB.POSException import POSKeyError
+from ZODB.POSException import ReadOnlyError
+from ZODB.POSException import StorageTransactionError
 from ZODB.UndoLogCompatible import UndoLogCompatible
 from ZODB.blob import is_blob_record
 from ZODB.interfaces import StorageStopIteration
@@ -38,6 +40,7 @@ from relstorage.cache import StorageCache
 from relstorage.options import Options
 
 from zope.interface import implementer
+from zope import interface
 
 import ZODB.interfaces
 import logging
@@ -82,10 +85,8 @@ def _from_latin1(data):
              ZODB.interfaces.IStorageUndoable,
              ZODB.interfaces.IBlobStorage,
              ZODB.interfaces.IBlobStorageRestoreable)
-class RelStorage(
-        UndoLogCompatible,
-        ConflictResolution.ConflictResolvingStorage
-        ):
+class RelStorage(UndoLogCompatible,
+                 ConflictResolution.ConflictResolvingStorage):
     """Storage to a relational database, based on invalidation polling"""
 
     _transaction = None  # Transaction that is being committed
@@ -221,6 +222,13 @@ class RelStorage(
             self.blobhelper = blobhelper
         elif options.blob_dir:
             self.blobhelper = BlobHelper(options=options, adapter=adapter)
+
+        if hasattr(self._adapter.packundo, 'deleteObject'):
+            interface.alsoProvides(self, ZODB.interfaces.IExternalGC)
+        else:
+            def deleteObject(*args):
+                raise AttributeError("deleteObject")
+            self.deleteObject = deleteObject
 
     def new_instance(self):
         """Creates and returns another storage instance.
@@ -677,17 +685,50 @@ class RelStorage(
                     oid=oid, serials=(previous_serial, serial))
         self._txn_check_serials[oid] = serial
 
+    def deleteObject(self, oid, oldserial, transaction): # pylint:disable=method-hidden
+        # NOTE: packundo.deleteObject is only defined for
+        # history-free schemas. For other schemas, the __init__ function
+        # overrides this method.
+        # This method is only expected to be called from zc.zodbdgc
+        # currently.
+        if self._is_read_only: # pragma: no cover
+            raise ReadOnlyError()
+        # This is called in a phase of two-phase-commit (tpc).
+        # This means we have a transaction, and that we are holding
+        # the commit lock as well as the regular lock.
+        # RelStorage native pack uses a separate pack lock, but
+        # unfortunately there's no way to not hold the commit lock;
+        # however, the transactions are very short.
+        if transaction is not self._transaction: # pragma: no cover
+            raise StorageTransactionError(self, transaction)
+
+        # We don't worry about anything in self._cache because
+        # by definition we are deleting objects that were
+        # not reachable and so shouldn't be in the cache (or if they
+        # were, we'll never ask for them anyway)
+
+        # We delegate the actual operation to the adapter's packundo,
+        # just like native pack
+        cursor = self._store_cursor
+        assert cursor is not None
+        # When this is done, we get a tpc_vote,
+        # and a tpc_finish.
+        # The interface doesn't specify a return value, so for testing
+        # we return the count of rows deleted (should be 1 if successful)
+        return self._adapter.packundo.deleteObject(cursor, oid, oldserial)
+
+
     @metricmethod
     def tpc_begin(self, transaction, tid=None, status=' '):
         if self._stale_error is not None:
             raise self._stale_error
         if self._is_read_only:
-            raise POSException.ReadOnlyError()
+            raise ReadOnlyError()
         self._lock.acquire()
         try:
             if self._transaction is transaction:
                 if self._options.strict_tpc:
-                    raise POSException.StorageTransactionError(
+                    raise StorageTransactionError(
                         "Duplicate tpc_begin calls for same transaction")
                 return
             self._lock.release()

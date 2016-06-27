@@ -17,6 +17,7 @@ from relstorage.tests.RecoveryStorage import BasicRecoveryStorage
 from relstorage.tests.RecoveryStorage import UndoableRecoveryStorage
 from relstorage.tests.reltestbase import GenericRelStorageTests
 from relstorage.tests.reltestbase import RelStorageTestBase
+from ZODB.DB import DB
 from ZODB.FileStorage import FileStorage
 from ZODB.serialize import referencesf
 from ZODB.tests.ConflictResolution import PCounter
@@ -247,6 +248,35 @@ class HistoryFreeRelStorageTests(
         data, serialno = self._storage.load(oid, '')
         inst = zodb_unpickle(data)
         self.assertEqual(inst._value, 5)
+
+
+    def checkImplementsExternalGC(self):
+        from zope.interface.verify import verifyObject
+        import ZODB.interfaces
+        verifyObject(ZODB.interfaces.IExternalGC, self._storage)
+
+        # Now do it.
+        from ZODB.utils import z64
+        import transaction
+        db = ZODB.DB(self._storage) # create the root
+        conn = db.open()
+        storage = conn._storage
+        _state, tid = storage.load(z64)
+
+        # copied from zc.zodbdgc
+        t = transaction.begin()
+        storage.tpc_begin(t)
+        try:
+            count = storage.deleteObject(z64, tid, t)
+            self.assertEqual(count, 1)
+            # Doing it again will do nothing because it's already
+            # gone.
+            count = storage.deleteObject(z64, tid, t)
+            self.assertEqual(count, 0)
+        finally:
+            transaction.abort()
+            conn.close()
+            db.close()
 
 
 class HistoryFreeToFileStorage(
