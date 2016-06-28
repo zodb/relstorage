@@ -80,3 +80,7 @@ class Client(object):
     @_catching
     def flush_all(self):
         return self._client.flush_all()
+
+    @_catching
+    def disconnect_all(self):
+        return self._client.disconnect_all()

@@ -113,6 +113,20 @@ class StorageCache(object):
         else:
             return StorageCache(self.adapter, self.options, self.prefix)
 
+    def release(self):
+        """
+        Release resources held by this instance.
+
+        This is usually memcache connections if they're in use.
+        """
+        for client in self.clients_local_first:
+            client.disconnect_all()
+
+        if not self.options.share_local_cache:
+            # If we have our own local cache not shared with anyone,
+            # go ahead and clear it to release any memory it's holding.
+            self.clients_local_first[0].flush_all()
+
     def clear(self):
         """Remove all data from the cache.  Called by speed tests."""
         for client in self.clients_local_first:
@@ -124,7 +138,7 @@ class StorageCache(object):
         self.commit_count = object()
 
     def _check_tid_after_load(self, oid_int, actual_tid_int,
-            expect_tid_int=None):
+                              expect_tid_int=None):
         """Verify the tid of an object loaded from the database is sane."""
 
         if actual_tid_int > self.current_tid:
@@ -133,16 +147,17 @@ class StorageCache(object):
             # would be a consistency violation.  However, the cause is hard
             # to track down, so issue a ReadConflictError and hope that
             # the application retries successfully.
-            raise ReadConflictError("Got data for OID 0x%(oid_int)x from "
-                "future transaction %(actual_tid_int)d (%(got_ts)s).  "
-                "Current transaction is %(current_tid)d (%(current_ts)s)."
-                % {
-                    'oid_int': oid_int,
-                    'actual_tid_int': actual_tid_int,
-                    'current_tid': self.current_tid,
-                    'got_ts': str(TimeStamp(p64(actual_tid_int))),
-                    'current_ts': str(TimeStamp(p64(self.current_tid))),
-                })
+            msg = ("Got data for OID 0x%(oid_int)x from "
+                   "future transaction %(actual_tid_int)d (%(got_ts)s).  "
+                   "Current transaction is %(current_tid)d (%(current_ts)s)."
+                   % {
+                       'oid_int': oid_int,
+                       'actual_tid_int': actual_tid_int,
+                       'current_tid': self.current_tid,
+                       'got_ts': str(TimeStamp(p64(actual_tid_int))),
+                       'current_ts': str(TimeStamp(p64(self.current_tid))),
+                   })
+            raise ReadConflictError(msg)
 
         if expect_tid_int is not None and actual_tid_int != expect_tid_int:
             # Uh-oh, the cache is inconsistent with the database.
@@ -165,30 +180,31 @@ class StorageCache(object):
             #   wrong tid in delta_after*.
             cp0, cp1 = self.checkpoints
             import os
-            import threading
-            raise AssertionError("Detected an inconsistency "
-                "between the RelStorage cache and the database "
-                "while loading an object using the delta_after0 dict.  "
-                "Please verify the database is configured for "
-                "ACID compliance and that all clients are using "
-                "the same commit lock.  "
-                "(oid_int=%(oid_int)r, expect_tid_int=%(expect_tid_int)r, "
-                "actual_tid_int=%(actual_tid_int)r, "
-                "current_tid=%(current_tid)r, cp0=%(cp0)r, cp1=%(cp1)r, "
-                "len(delta_after0)=%(lda0)r, len(delta_after1)=%(lda1)r, "
-                "pid=%(pid)r, thread_ident=%(thread_ident)r)"
-                % {
-                    'oid_int': oid_int,
-                    'expect_tid_int': expect_tid_int,
-                    'actual_tid_int': actual_tid_int,
-                    'current_tid': self.current_tid,
-                    'cp0': cp0,
-                    'cp1': cp1,
-                    'lda0': len(self.delta_after0),
-                    'lda1': len(self.delta_after1),
-                    'pid': os.getpid(),
-                    'thread_ident': threading.current_thread(),
-                })
+
+            msg = ("Detected an inconsistency "
+                   "between the RelStorage cache and the database "
+                   "while loading an object using the delta_after0 dict.  "
+                   "Please verify the database is configured for "
+                   "ACID compliance and that all clients are using "
+                   "the same commit lock.  "
+                   "(oid_int=%(oid_int)r, expect_tid_int=%(expect_tid_int)r, "
+                   "actual_tid_int=%(actual_tid_int)r, "
+                   "current_tid=%(current_tid)r, cp0=%(cp0)r, cp1=%(cp1)r, "
+                   "len(delta_after0)=%(lda0)r, len(delta_after1)=%(lda1)r, "
+                   "pid=%(pid)r, thread_ident=%(thread_ident)r)"
+                   % {
+                       'oid_int': oid_int,
+                       'expect_tid_int': expect_tid_int,
+                       'actual_tid_int': actual_tid_int,
+                       'current_tid': self.current_tid,
+                       'cp0': cp0,
+                       'cp1': cp1,
+                       'lda0': len(self.delta_after0),
+                       'lda1': len(self.delta_after1),
+                       'pid': os.getpid(),
+                       'thread_ident': threading.current_thread(),
+                   })
+            raise AssertionError(msg)
 
     def load(self, cursor, oid_int):
         """Load the given object from cache if possible.
@@ -495,7 +511,7 @@ class StorageCache(object):
                 and prev_tid_int
                 and prev_tid_int <= self.current_tid
                 and new_tid_int >= self.current_tid
-                ):
+        ):
             # All the conditions for keeping the checkpoints were met,
             # so just update self.delta_after0 and self.current_tid.
             m = self.delta_after0
@@ -560,7 +576,7 @@ class StorageCache(object):
         checkpoint0 shifts to checkpoint1 and the tid just committed
         becomes checkpoint0.
         """
-        cp0, cp1 = self.checkpoints
+        cp0, _cp1 = self.checkpoints
         assert tid_int > cp0
         expect = '%d %d' % self.checkpoints
         if oversize:
@@ -776,3 +792,7 @@ class LocalClient(object):
             res = int(value) + 1
             self._set_one(key, res)
             return res
+
+    def disconnect_all(self):
+        # Compatibility with memcache.
+        pass

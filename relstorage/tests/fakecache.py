@@ -48,3 +48,6 @@ class Client(object):
     def flush_all(self):
         data.clear()
 
+    def disconnect_all(self):
+        # no-op
+        pass
