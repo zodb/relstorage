@@ -1,3 +1,17 @@
-include MANIFEST.in *.txt *.rst *.py setup.cfg
-recursive-include relstorage *.py *.xml *.txt
-recursive-include doc *.py *.rst
+include MANIFEST.in *.txt *.py setup.cfg
+include .coveragerc
+include buildout*.cfg
+include tox.ini
+include .pylintrc
+include BUILDOUT.rst
+include CHANGES.rst
+recursive-include .travis *
+
+recursive-include notes *.ods *.py *.sql *.txt
+
+recursive-include relstorage *.py *.xml *.txt *.test *.conf
+
+recursive-include doc *.py *.rst Makefile
+recursive-exclude doc changelog.rst relstorage.*.rst
+
+recursive-include repltest *.cfg *.conf *.in *.patch *.sql
