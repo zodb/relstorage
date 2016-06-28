@@ -1,3 +1,3 @@
-include MANIFEST.in *.txt *.rst *.py *.patch
+include MANIFEST.in *.txt *.rst *.py setup.cfg
 recursive-include relstorage *.py *.xml *.txt
 recursive-include doc *.py *.rst
