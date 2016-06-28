@@ -384,11 +384,16 @@ class RelStorage(UndoLogCompatible,
         self._cache.clear()
 
     def release(self):
-        """Release database sessions used by this storage instance.
+        """
+        Release external resources used by this storage instance.
+
+        This includes the database sessions (connections) and any memcache
+        connections.
         """
         with self._lock:
             self._drop_load_connection()
             self._drop_store_connection()
+        self._cache.release()
 
     def close(self):
         """Close the storage and all instances."""

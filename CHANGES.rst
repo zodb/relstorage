@@ -6,7 +6,9 @@
 2.0.0b2 (unreleased)
 ====================
 
-- Nothing changed yet.
+- Memcache connections are explicitly released instead of waiting for
+  GC to do it for us. This is especially important with PyPy and/or
+  ``python-memcached``. See :issue:`80`.
 
 
 2.0.0b1 (2016-06-28)
