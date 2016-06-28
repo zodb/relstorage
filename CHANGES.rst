@@ -92,7 +92,9 @@ Performance
 Other Enhancements
 ------------------
 
-- Raise a specific exception when acquiring the commit or pack locks
+- Raise a specific exception when acquiring the commit lock
+  (:exc:`~relstorage.adapters.interfaces.UnableToAcquireCommitLockError`) or pack
+  lock (:exc:`~relstorage.adapters.interfaces.UnableToAcquirePackUndoLockError`)
   fails. See :pr:`18`.
 
 - ``RelStorage.lastTransaction()`` is more consistent with FileStorage
