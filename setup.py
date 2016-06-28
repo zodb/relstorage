@@ -58,9 +58,11 @@ setup(
     name="RelStorage",
     version=VERSION,
     author="Zope Foundation and Contributors",
+    author_email="shane@willowrise.com",
     maintainer="Shane Hathaway",
-    maintainer_email="shane@hathawaymix.org",
-    url="http://pypi.python.org/pypi/RelStorage",
+    maintainer_email="shane@willowrise.com",
+    url="http://relstorage.readthedocs.io/",
+    keywords="ZODB SQL RDBMS MySQL PostgreSQL Oracle",
     packages=[
         'relstorage',
         'relstorage.adapters',
