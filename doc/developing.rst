@@ -94,6 +94,12 @@ MySQL specific tests can be run by the testmysql module::
 
   python -m relstorage.tests.testmysql
 
+.. note:: For some MySQL tests to pass (check16MObject), it may be
+          necessary to increase the server's ``max_allowed_packet``
+          setting. See the `MySQL Documentation
+          <http://dev.mysql.com/doc/refman/5.5/en/packet-too-large.html>`_
+          for more information.
+
 Oracle
 ~~~~~~
 
