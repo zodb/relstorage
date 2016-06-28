@@ -75,7 +75,7 @@ commit-lock-timeout
         PostgreSQL adapter supports this when the PostgreSQL server is
         at least version 9.3; otherwise it is ignored.
 
-        .. versionchanged:: 1.7
+        .. versionchanged:: 2.0.0b1
            Add support for lock timeouts on PostgreSQL 9.3 and above.
            Previously no PostgreSQL version supported timeouts.
 

@@ -3,7 +3,7 @@
 =========
 
 
-1.7.0a1 (Unreleased)
+2.0.0b1 (Unreleased)
 ====================
 
 Breaking Changes
