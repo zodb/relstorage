@@ -17,7 +17,8 @@ from relstorage.autotemp import AutoTemporaryFile
 from ZODB.utils import p64
 from ZODB.utils import u64
 from ZODB.POSException import ReadConflictError
-from ZODB.TimeStamp import TimeStamp
+from persistent.TimeStamp import TimeStamp
+
 import logging
 import random
 import threading
