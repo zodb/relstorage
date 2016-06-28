@@ -3,7 +3,7 @@
 =========
 
 
-2.0.0b1 (Unreleased)
+2.0.0b1 (2016-06-28)
 ====================
 
 Breaking Changes
@@ -311,7 +311,7 @@ Project Details
 1.4.2 (2011-02-04)
 ==================
 
-- Fixed compatibility with ZODB 3.10.  As reported by Jürgen Herrmann,
+- Fixed compatibility with ZODB 3.10.  As reported by JĂźrgen Herrmann,
   there was a problem with conflict errors.  The RelStorage patch of the
   sync() method now works with ZODB 3.10.
 
