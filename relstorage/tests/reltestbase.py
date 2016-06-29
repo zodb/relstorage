@@ -445,64 +445,10 @@ class GenericRelStorageTests(
         finally:
             db.close()
 
-
-    def checkPollInterval(self, shared_cache=True):
-        # Verify the poll_interval parameter causes RelStorage to
-        # delay invalidation polling.
-        self._storage = self.make_storage(
-            poll_interval=3600, share_local_cache=shared_cache)
-
-        db = DB(self._storage)
-        try:
-            tm1 = transaction.TransactionManager()
-            c1 = db.open(transaction_manager=tm1)
-            r1 = c1.root()
-            r1['alpha'] = 1
-            tm1.commit()
-
-            tm2 = transaction.TransactionManager()
-            c2 = db.open(transaction_manager=tm2)
-            r2 = c2.root()
-            self.assertEqual(r2['alpha'], 1)
-            self.assertFalse(c2._storage.need_poll())
-            self.assertTrue(c2._storage._poll_at > 0)
-
-            r1['alpha'] = 2
-            # commit c1 without committing c2.
-            tm1.commit()
-
-            if shared_cache:
-                # The cache reveals that a poll is needed even though
-                # the poll timeout has not expired.
-                self.assertTrue(c2._storage.need_poll())
-                tm2.commit()
-                r2 = c2.root()
-                self.assertEqual(r2['alpha'], 2)
-                self.assertFalse(c2._storage.need_poll())
-            else:
-                # The poll timeout has not expired, so no poll should occur
-                # yet, even after a commit.
-                self.assertFalse(c2._storage.need_poll())
-                tm2.commit()
-                r2 = c2.root()
-                self.assertEqual(r2['alpha'], 1)
-
-            # expire the poll timer and verify c2 sees the change
-            c2._storage._poll_at -= 3601
-            tm2.commit()
-            r2 = c2.root()
-            self.assertEqual(r2['alpha'], 2)
-
-            c2.close()
-            c1.close()
-
-        finally:
-            db.close()
-
-    def checkPollIntervalWithUnsharedCache(self):
-        self.checkPollInterval(shared_cache=False)
-
     def checkCachePolling(self):
+        # NOTE: This test still sets poll_interval, a deprecated
+        # option that does nothing. We keep it around to verify that
+        # this scenario still works either way.
         self._storage = self.make_storage(
             poll_interval=3600, share_local_cache=False)
 
