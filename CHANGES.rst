@@ -10,6 +10,13 @@
   GC to do it for us. This is especially important with PyPy and/or
   ``python-memcached``. See :issue:`80`.
 
+- The ``poll-interval`` option is now ignored and polling is performed
+  when the ZODB Connection requests it (at transaction boundaries).
+  Experience with delayed polling has shown it typically to do more
+  harm than good, including introducing additional possibilities for
+  error and leading to database performance issues. It is expected
+  that most sites won't notice any performance difference. A larger
+  discussion can be found in :issue:`87`.
 
 2.0.0b1 (2016-06-28)
 ====================
