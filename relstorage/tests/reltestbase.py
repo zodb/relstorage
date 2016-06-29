@@ -244,9 +244,9 @@ class GenericRelStorageTests(
 
         revid1 = self._dostoreNP(oid, data=zodb_pickle(obj))
 
-        storage1 = self._storage.bind_connection(None)
+        storage1 = self._storage.new_instance()
         storage1.load(oid, '')
-        storage2 = self._storage.bind_connection(None)
+        storage2 = self._storage.new_instance()
         storage2.load(oid, '')
 
         obj.inc()
@@ -257,11 +257,11 @@ class GenericRelStorageTests(
         root_storage = self._storage
         try:
             self._storage = storage1
-            revid2 = self._dostoreNP(oid, revid=revid1, data=zodb_pickle(obj))
+            _revid2 = self._dostoreNP(oid, revid=revid1, data=zodb_pickle(obj))
             self._storage = storage2
-            revid3 = self._dostoreNP(oid, revid=revid1, data=zodb_pickle(obj))
+            _revid3 = self._dostoreNP(oid, revid=revid1, data=zodb_pickle(obj))
 
-            data, serialno = self._storage.load(oid, '')
+            data, _serialno = self._storage.load(oid, '')
             inst = zodb_unpickle(data)
             self.assertEqual(inst._value, 5)
         finally:
@@ -314,7 +314,7 @@ class GenericRelStorageTests(
         self._dostoreNP(oid1, data=data)
         oid2 = self._storage.new_oid()
         self.assertTrue(oid1 < oid2, 'old OID %r should be less than new OID %r'
-            % (oid1, oid2))
+                        % (oid1, oid2))
 
     def checkUseCache(self):
         # Store an object, cache it, then retrieve it from the cache

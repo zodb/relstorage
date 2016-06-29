@@ -100,9 +100,6 @@ class RelStorage(UndoLogCompatible,
     # _load_transaction_open is:
     # - an empty string when the load transaction is not open.
     # - 'active' when the load connection has begun a read-only transaction.
-    # - 'idle' when the load transaction has been left open but nothing
-    #   is using it. At those times, the load transaction can be closed
-    #   by another thread (with the protection of the lock).
     _load_transaction_open = ''
 
     # store_conn and store_cursor are open during commit,
@@ -495,11 +492,9 @@ class RelStorage(UndoLogCompatible,
         logfunc('; '.join(msg))
 
     def _before_load(self):
-        state = self._load_transaction_open
-        if not state:
+        if not self._load_transaction_open:
             self._restart_load_and_poll()
-        elif state == 'idle':
-            self._load_transaction_open = 'active'
+        assert self._load_transaction_open == 'active'
 
     @Metric(method=True, rate=0.1)
     def load(self, oid, version=''):
@@ -1454,29 +1449,6 @@ class RelStorage(UndoLogCompatible,
         log.info(
             "All %d transactions copied successfully in %4.1f minutes.",
             txnum, elapsed / 60.0)
-
-    # The propagate_invalidations flag implements the old
-    # invalidation polling API and is not otherwise used. Set to a
-    # false value, it tells the Connection not to propagate object
-    # invalidations across connections, since that ZODB feature is
-    # detrimental when the storage provides its own MVCC.
-    propagate_invalidations = False
-
-    def bind_connection(self, zodb_conn):
-        """Make a new storage instance.
-
-        This implements the old invalidation polling API and is not
-        otherwise used.
-        """
-        return self.new_instance()
-
-    def connection_closing(self):
-        """Release resources
-
-        This implements the old invalidation polling API and is not
-        otherwise used.
-        """
-        self.sync(False)
 
 
 class TransactionIterator(object):
