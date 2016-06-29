@@ -139,9 +139,6 @@ class RelStorage(UndoLogCompatible,
     # _prev_polled_tid contains the tid at the previous poll
     _prev_polled_tid = None
 
-    # _poll_at is the time to force a poll
-    _poll_at = 0
-
     # If the blob directory is set, blobhelper is a BlobHelper.
     # Otherwise, blobhelper is None.
     blobhelper = None
@@ -1259,52 +1256,23 @@ class RelStorage(UndoLogCompatible,
         # it can only be iterated over once. zodbconvert works around this.
         return TransactionIterator(self._adapter, start, stop)
 
-    def sync(self, force=True):
+    def sync(self, force=True): # pylint:disable=unused-argument
         """Updates to a current view of the database.
 
         This is implemented by rolling back the relational database
         transaction.
-
-        If force is False and a poll interval has been set, this call
-        is ignored. The poll_invalidations method will later choose to
-        sync with the database only if enough time has elapsed since
-        the last poll.
         """
         with self._lock:
             if not self._load_transaction_open:
                 return
-            elif not force and self._options.poll_interval:
-                # keep the load transaction open and idle so
-                # that it's possible to ignore the next poll.
-                self._load_transaction_open = 'idle'
-            else:
-                try:
-                    self._rollback_load_connection()
-                except self._adapter.connmanager.disconnected_exceptions:
-                    # disconnected. Well, the rollback happens automatically in that case.
-                    if self._transaction:
-                        raise
-                    self._drop_load_connection()
 
-    def need_poll(self):
-        """Return true if polling is needed"""
-        now = time.time()
-
-        if self._cache.need_poll():
-            # There is new data ready to poll
-            self._poll_at = now
-            return True
-
-        if not self._load_transaction_open:
-            # Since the load connection is closed or does not have
-            # a transaction in progress, polling is required.
-            return True
-
-        if now >= self._poll_at:
-            # The poll timeout has expired
-            return True
-
-        return False
+            try:
+                self._rollback_load_connection()
+            except self._adapter.connmanager.disconnected_exceptions:
+                # disconnected. Well, the rollback happens automatically in that case.
+                self._drop_load_connection()
+                if self._transaction:
+                    raise
 
     def _restart_load_and_poll(self):
         """Call _restart_load, poll for changes, and update self._cache.
@@ -1325,7 +1293,6 @@ class RelStorage(UndoLogCompatible,
             # The database connection is stale, but postpone this
             # error until the application tries to read or write something.
             self._stale_error = e
-            self._poll_at = 0  # Don't defer polling.
             return (), prev
 
         self._stale_error = None
@@ -1346,14 +1313,6 @@ class RelStorage(UndoLogCompatible,
         with self._lock:
             if self._closed:
                 return {}
-
-            if self._options.poll_interval:
-                if not self.need_poll():
-                    if self._load_transaction_open == 'idle':
-                        self._load_transaction_open = 'active'
-                    return {}
-                # reset the timeout
-                self._poll_at = time.time() + self._options.poll_interval
 
             changes, new_polled_tid = self._restart_load_and_poll()
 

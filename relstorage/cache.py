@@ -310,6 +310,8 @@ class StorageCache(object):
 
     def tpc_begin(self):
         """Prepare temp space for objects to cache."""
+        # start with a fresh in-memory buffer instead of reusing one that might
+        # already be spooled to disk.
         self.queue = AutoTemporaryFile()
         self.queue_contents = {}
 
@@ -428,16 +430,6 @@ class StorageCache(object):
             self.queue.close()
             self.queue = None
 
-    def need_poll(self):
-        """Return True if the commit count has changed"""
-        for client in self.clients_global_first:
-            new_commit_count = client.get(self.commit_count_key)
-            if new_commit_count is not None:
-                break
-        if new_commit_count != self.commit_count:
-            self.commit_count = new_commit_count
-            return True
-        return False
 
     def after_poll(self, cursor, prev_tid_int, new_tid_int, changes):
         """Update checkpoint data after a database poll.

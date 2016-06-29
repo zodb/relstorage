@@ -252,18 +252,6 @@ class StorageCacheTests(unittest.TestCase):
         self.assertEqual(c.queue_contents, None)
         self.assertEqual(c.queue, None)
 
-    def test_need_poll(self):
-        from ZODB.utils import p64
-        c = self._makeOne()
-        self.assertTrue(c.need_poll())
-        self.assertFalse(c.need_poll())
-        self.assertFalse(c.need_poll())
-        c.tpc_begin()
-        c.after_tpc_finish(p64(55))
-        self.assertTrue(c.need_poll())
-        self.assertFalse(c.need_poll())
-        self.assertFalse(c.need_poll())
-
     def test_after_poll_init_checkpoints(self):
         from relstorage.tests.fakecache import data
         c = self._makeOne()

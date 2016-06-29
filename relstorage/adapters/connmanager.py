@@ -98,7 +98,7 @@ class AbstractConnectionManager(object):
     def restart_load(self, conn, cursor):
         """Reinitialize a connection for loading objects."""
         self.check_replica(conn, cursor,
-            replica_selector=self.ro_replica_selector)
+                           replica_selector=self.ro_replica_selector)
         conn.rollback()
 
     def check_replica(self, conn, cursor, replica_selector=None):

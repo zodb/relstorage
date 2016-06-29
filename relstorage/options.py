@@ -44,7 +44,6 @@ class Options(object):
     ro_replica_conf = None
     replica_timeout = 600.0
     revert_when_stale = False
-    poll_interval = 0
     pack_gc = True
     pack_prepack_only = False
     pack_skip_prepack = False
@@ -98,8 +97,9 @@ class Options(object):
 
     @classmethod
     def valid_option_names(cls):
-        return [x for x in vars(cls)
-                if not callable(getattr(cls, x)) and not x.startswith('_')]
+        # Still include poll_interval so we can warn
+        return ['poll_interval'] + [x for x in vars(cls)
+                                    if not callable(getattr(cls, x)) and not x.startswith('_')]
 
     def __repr__(self):
         return 'relstorage.options.Options(**' + repr(self.__dict__) + ')'
