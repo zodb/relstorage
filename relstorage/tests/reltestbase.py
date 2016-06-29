@@ -339,17 +339,17 @@ class GenericRelStorageTests(
                              'zzz:state:')
             r1['alpha'] = PersistentMapping()
             transaction.commit()
-            self.assertEqual(len(fakecache.data), 5)
+            self.assertEqual(len(fakecache.data), 4)
 
             oid = r1['alpha']._p_oid
             c1._storage.load(oid, '')
             # another state should now be cached
-            self.assertEqual(len(fakecache.data), 5)
+            self.assertEqual(len(fakecache.data), 4)
 
             # make a change
             r1['beta'] = 0
             transaction.commit()
-            self.assertEqual(len(fakecache.data), 6)
+            self.assertEqual(len(fakecache.data), 5)
 
             c1._storage.load(oid, '')
 

@@ -59,11 +59,6 @@ class StorageCache(object):
     #   self.checkpoints[0] < tid <= self.current_tid
     current_tid = 0
 
-    # commit_count contains the last polled value of the
-    # :commits cache key.  The most global client currently
-    # responding stores the value.
-    commit_count = object()
-
     def __init__(self, adapter, options, prefix, local_client=None):
         self.adapter = adapter
         self.options = options
@@ -83,10 +78,6 @@ class StorageCache(object):
         # self.clients_local_first is in order from local to global caches,
         # while self.clients_global_first is in order from global to local.
         self.clients_global_first = list(reversed(self.clients_local_first))
-
-        # commit_count_key contains a number that is incremented
-        # for every commit.  See tpc_finish().
-        self.commit_count_key = '%s:commits' % self.prefix
 
         # checkpoints_key holds the current checkpoints.
         self.checkpoints_key = '%s:checkpoints' % self.prefix
@@ -135,7 +126,6 @@ class StorageCache(object):
         self.delta_after0 = {}
         self.delta_after1 = {}
         self.current_tid = 0
-        self.commit_count = object()
 
     def _check_tid_after_load(self, oid_int, actual_tid_int,
                               expect_tid_int=None):
@@ -379,38 +369,14 @@ class StorageCache(object):
         self.queue.seek(0)
 
     def after_tpc_finish(self, tid):
-        """Update the commit count in the cache.
+        """
+        Flush queued changes.
 
         This is called after the database commit lock is released,
         but before releasing the storage lock that will allow other
         threads to use this instance.
         """
         tid_int = u64(tid)
-
-        # Why do we cache a commit count instead of the transaction ID?
-        # Here's why. This method gets called after the commit lock is
-        # released; other threads or processes could have committed
-        # more transactions in the time that has passed since releasing
-        # the lock, so a cached transaction ID would cause a race. It
-        # also wouldn't work to cache the transaction ID before
-        # releasing the commit lock, since that could cause some
-        # threads or processes watching the cache for changes to think
-        # they are up to date when they are not. The commit count
-        # solves these problems by ensuring that every commit is
-        # followed by a change to the cache that does not conflict with
-        # concurrent committers.
-        cachekey = self.commit_count_key
-        for client in self.clients_global_first:
-            if client.incr(cachekey) is None:
-                # Initialize commit_count.
-                # Use a random number for the base.
-                client.add(cachekey, random.randint(1, 1<<31))
-                # A concurrent committer could have won the race to set the
-                # initial commit_count.  Increment commit_count so that it
-                # doesn't matter who won.
-                if client.incr(cachekey) is not None:
-                    break
-                # else the client is dead.  Fall back to the next client.
 
         if self.checkpoints:
             for oid_int in self.queue_contents:
