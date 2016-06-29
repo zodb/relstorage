@@ -86,6 +86,11 @@ class RelStorageTestBase(StorageCreatingMixin,
         'check2StorageThreads',
         'check7StorageThreads',
         'check4ExtStorageThread',
+        # XXX These two MTStorage tests don't actually need locks. But
+        # on TravisCI, both Python 2.7 and 3.4 segfaulted (sometimes!) in one of
+        # these tests when run under Coverage, so we include them anyway.
+        'check2ZODBThreads',
+        'check7ZODBThreads',
         # PackableStorage
         'checkPackWhileWriting',
         'checkPackNowWhileWriting',
