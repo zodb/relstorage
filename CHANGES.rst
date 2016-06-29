@@ -21,7 +21,7 @@
 - Instances of :class:`.RelStorage` no longer use threading locks and
   hence are not thread safe. A ZODB Connection is documented as not
   being thread-safe and must be used only by a single thread at a
-  time. Because RelStorage natively implements MVCC ,each Connection
+  time. Because RelStorage natively implements MVCC, each Connection
   has a unique storage object. It follows that the storage object is
   used only by a single thread. Using locks just adds unneeded
   overhead to the common case. If this is a breaking change for you,
