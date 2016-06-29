@@ -78,6 +78,21 @@ def _from_latin1(data):
         return data
     return data.decode('latin-1')
 
+class _DummyLock(object):
+    # Enough like a lock for our purposes so we can switch
+    # it in and out for tests.
+    def __enter__(self):
+        return
+
+    def __exit__(self, t, v, tb):
+        return
+
+    def acquire(self):
+        return
+
+    def release(self):
+        return
+
 @implementer(ZODB.interfaces.IStorage,
              ZODB.interfaces.IMVCCStorage,
              ZODB.interfaces.IStorageRestoreable,
@@ -157,7 +172,9 @@ class RelStorage(UndoLogCompatible,
     _stale_error = None
 
     def __init__(self, adapter, name=None, create=None,
-                 options=None, cache=None, blobhelper=None, **kwoptions):
+                 options=None, cache=None, blobhelper=None,
+                 _use_locks=False,
+                 **kwoptions):
         self._adapter = adapter
 
         if options is None:
@@ -180,8 +197,17 @@ class RelStorage(UndoLogCompatible,
         if create:
             self._adapter.schema.prepare()
 
-        self._lock = threading.RLock()
-        self._commit_lock = threading.Lock()
+        # A ZODB Connection is documented as not being thread-safe and
+        # must be used only by a single thread at a time. In IMVCC,
+        # each Connection has a unique storage object. So the storage
+        # object is used only by a single thread. So there's really
+        # not much point in RelStorage keeping thread locks around its
+        # methods.
+        # There are a small handful of ZODB tests that assume the storage is thread
+        # safe (but they know nothing about IMVCC) so we allow our tests to force us to
+        # use locks.
+        self._lock = _DummyLock() if not _use_locks else threading.RLock()
+        self._commit_lock = _DummyLock() if not _use_locks else threading.Lock()
         # XXX: We don't use these attributes but some existing wrappers
         # might rely on them? They used to be a documented part of the FileStorage
         # interface prior to ZODB5. In ZODB5, _lock and _commit_lock are documented
