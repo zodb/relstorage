@@ -1188,13 +1188,12 @@ class RelStorage(UndoLogCompatible,
             raise ValueError('Pick either prepack_only or skip_prepack.')
 
         def get_references(state):
-            """Return the set of OIDs the given state refers to."""
-            refs = set()
-            if state:
-                assert isinstance(state, bytes), type(state) # XXX PY3: str(state)
-                for oid in referencesf(state):
-                    refs.add(u64(oid))
-            return refs
+            """Return an iterable of the set of OIDs the given state refers to."""
+            if not state:
+                return ()
+
+            assert isinstance(state, bytes), type(state) # XXX PY3: str(state)
+            return {u64(oid) for oid in referencesf(state)}
 
         # Use a private connection (lock_conn and lock_cursor) to
         # hold the pack lock.  Have the adapter open temporary
@@ -1363,9 +1362,8 @@ class RelStorage(UndoLogCompatible,
             if changes is None:
                 oids = None
             else:
-                oids = {}
-                for oid_int, _tid_int in changes:
-                    oids[p64(oid_int)] = 1
+                # The value is ignored, only key matters
+                oids = {p64(oid_int): 1 for oid_int, _tid_int in changes}
             return oids
 
     @metricmethod

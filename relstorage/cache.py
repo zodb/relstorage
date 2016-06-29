@@ -82,8 +82,7 @@ class StorageCache(object):
 
         # self.clients_local_first is in order from local to global caches,
         # while self.clients_global_first is in order from global to local.
-        self.clients_global_first = list(self.clients_local_first)
-        self.clients_global_first.reverse()
+        self.clients_global_first = list(reversed(self.clients_local_first))
 
         # commit_count_key contains a number that is incremented
         # for every commit.  See tpc_finish().
