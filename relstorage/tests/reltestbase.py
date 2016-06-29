@@ -244,9 +244,9 @@ class GenericRelStorageTests(
 
         revid1 = self._dostoreNP(oid, data=zodb_pickle(obj))
 
-        storage1 = self._storage.bind_connection(None)
+        storage1 = self._storage.new_instance()
         storage1.load(oid, '')
-        storage2 = self._storage.bind_connection(None)
+        storage2 = self._storage.new_instance()
         storage2.load(oid, '')
 
         obj.inc()
@@ -257,11 +257,11 @@ class GenericRelStorageTests(
         root_storage = self._storage
         try:
             self._storage = storage1
-            revid2 = self._dostoreNP(oid, revid=revid1, data=zodb_pickle(obj))
+            _revid2 = self._dostoreNP(oid, revid=revid1, data=zodb_pickle(obj))
             self._storage = storage2
-            revid3 = self._dostoreNP(oid, revid=revid1, data=zodb_pickle(obj))
+            _revid3 = self._dostoreNP(oid, revid=revid1, data=zodb_pickle(obj))
 
-            data, serialno = self._storage.load(oid, '')
+            data, _serialno = self._storage.load(oid, '')
             inst = zodb_unpickle(data)
             self.assertEqual(inst._value, 5)
         finally:
@@ -314,7 +314,7 @@ class GenericRelStorageTests(
         self._dostoreNP(oid1, data=data)
         oid2 = self._storage.new_oid()
         self.assertTrue(oid1 < oid2, 'old OID %r should be less than new OID %r'
-            % (oid1, oid2))
+                        % (oid1, oid2))
 
     def checkUseCache(self):
         # Store an object, cache it, then retrieve it from the cache
@@ -339,17 +339,17 @@ class GenericRelStorageTests(
                              'zzz:state:')
             r1['alpha'] = PersistentMapping()
             transaction.commit()
-            self.assertEqual(len(fakecache.data), 5)
+            self.assertEqual(len(fakecache.data), 4)
 
             oid = r1['alpha']._p_oid
             c1._storage.load(oid, '')
             # another state should now be cached
-            self.assertEqual(len(fakecache.data), 5)
+            self.assertEqual(len(fakecache.data), 4)
 
             # make a change
             r1['beta'] = 0
             transaction.commit()
-            self.assertEqual(len(fakecache.data), 6)
+            self.assertEqual(len(fakecache.data), 5)
 
             c1._storage.load(oid, '')
 
@@ -445,64 +445,10 @@ class GenericRelStorageTests(
         finally:
             db.close()
 
-
-    def checkPollInterval(self, shared_cache=True):
-        # Verify the poll_interval parameter causes RelStorage to
-        # delay invalidation polling.
-        self._storage = self.make_storage(
-            poll_interval=3600, share_local_cache=shared_cache)
-
-        db = DB(self._storage)
-        try:
-            tm1 = transaction.TransactionManager()
-            c1 = db.open(transaction_manager=tm1)
-            r1 = c1.root()
-            r1['alpha'] = 1
-            tm1.commit()
-
-            tm2 = transaction.TransactionManager()
-            c2 = db.open(transaction_manager=tm2)
-            r2 = c2.root()
-            self.assertEqual(r2['alpha'], 1)
-            self.assertFalse(c2._storage.need_poll())
-            self.assertTrue(c2._storage._poll_at > 0)
-
-            r1['alpha'] = 2
-            # commit c1 without committing c2.
-            tm1.commit()
-
-            if shared_cache:
-                # The cache reveals that a poll is needed even though
-                # the poll timeout has not expired.
-                self.assertTrue(c2._storage.need_poll())
-                tm2.commit()
-                r2 = c2.root()
-                self.assertEqual(r2['alpha'], 2)
-                self.assertFalse(c2._storage.need_poll())
-            else:
-                # The poll timeout has not expired, so no poll should occur
-                # yet, even after a commit.
-                self.assertFalse(c2._storage.need_poll())
-                tm2.commit()
-                r2 = c2.root()
-                self.assertEqual(r2['alpha'], 1)
-
-            # expire the poll timer and verify c2 sees the change
-            c2._storage._poll_at -= 3601
-            tm2.commit()
-            r2 = c2.root()
-            self.assertEqual(r2['alpha'], 2)
-
-            c2.close()
-            c1.close()
-
-        finally:
-            db.close()
-
-    def checkPollIntervalWithUnsharedCache(self):
-        self.checkPollInterval(shared_cache=False)
-
     def checkCachePolling(self):
+        # NOTE: This test still sets poll_interval, a deprecated
+        # option that does nothing. We keep it around to verify that
+        # this scenario still works either way.
         self._storage = self.make_storage(
             poll_interval=3600, share_local_cache=False)
 

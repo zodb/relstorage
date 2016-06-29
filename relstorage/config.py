@@ -18,18 +18,14 @@ from ZODB.config import BaseConfig
 
 from relstorage.options import Options
 from relstorage.storage import RelStorage
-from relstorage.adapters.replica import ReplicaSelector
+
 
 
 class RelStorageFactory(BaseConfig):
     """Open a storage configured via ZConfig"""
     def open(self):
         config = self.config
-        options = Options()
-        for key in options.__dict__.keys():
-            value = getattr(config, key, None)
-            if value is not None:
-                setattr(options, key, value)
+        options = Options.copy_valid_options(config)
         adapter = config.adapter.create(options)
         return RelStorage(adapter, name=config.name, options=options)
 
@@ -64,4 +60,3 @@ class MySQLAdapterFactory(BaseConfig):
             if value is not None:
                 params[key] = value
         return MySQLAdapter(options=options, **params)
-

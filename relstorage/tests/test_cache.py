@@ -239,11 +239,9 @@ class StorageCacheTests(unittest.TestCase):
         c = self._makeOne()
         c.tpc_begin()
         c.after_tpc_finish(p64(55))
-        count = data['myprefix:commits']
-        self.assertTrue(count > 0)
         c.after_tpc_finish(p64(55))
-        newcount = data['myprefix:commits']
-        self.assertEqual(newcount, count + 1)
+        # XXX: This test doesn't actually assert anything. It used to check
+        # the commit-count key, but we don't use that anymore.
 
     def test_clear_temp(self):
         c = self._makeOne()
@@ -251,18 +249,6 @@ class StorageCacheTests(unittest.TestCase):
         c.clear_temp()
         self.assertEqual(c.queue_contents, None)
         self.assertEqual(c.queue, None)
-
-    def test_need_poll(self):
-        from ZODB.utils import p64
-        c = self._makeOne()
-        self.assertTrue(c.need_poll())
-        self.assertFalse(c.need_poll())
-        self.assertFalse(c.need_poll())
-        c.tpc_begin()
-        c.after_tpc_finish(p64(55))
-        self.assertTrue(c.need_poll())
-        self.assertFalse(c.need_poll())
-        self.assertFalse(c.need_poll())
 
     def test_after_poll_init_checkpoints(self):
         from relstorage.tests.fakecache import data

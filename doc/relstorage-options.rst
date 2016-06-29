@@ -42,30 +42,6 @@ keep-history
            between a history-preserving and a history-free database, use
            the :doc:`zodbconvert` utility to copy to a new database.
 
-poll-interval
-        Defer polling the database for the specified maximum time interval,
-        in seconds.  Set to 0 (the default) to always poll.  Fractional
-        seconds are allowed.  Use this to lighten the database load on
-        servers with high read volume and low write volume.
-
-        The poll-interval option works best in conjunction with
-        the ``cache-servers`` option.  If both are enabled, RelStorage will
-        poll a single cache key for changes on every request.
-        The database will not be polled unless the cache indicates
-        there have been changes, or the timeout specified by poll-interval
-        has expired.  This configuration keeps clients fully up to date,
-        while removing much of the polling burden from the database.
-        A good cluster configuration is to use memcache servers
-        and a high poll-interval (say, 60 seconds).
-
-        .. caution::
-
-           This option can be used without the ``cache-servers`` option,
-           but a large poll-interval without cache-servers increases the
-           probability of basing transactions on stale data, which does not
-           affect database consistency, but does increase the probability
-           of conflict errors, leading to low performance.
-
 commit-lock-timeout
         During commit, RelStorage acquires a database-wide lock. This
         option specifies how long to wait for the lock before
