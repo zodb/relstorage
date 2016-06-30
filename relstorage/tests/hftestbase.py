@@ -211,7 +211,10 @@ class HistoryFreeRelStorageTests(
         eq(pobj.getoid(), oid2)
         eq(pobj.value, 11)
 
-    def checkResolve(self):
+    def checkRSResolve(self):
+        # ZODB.tests.ConflictResolution.ConflictResolvingStorage has a checkResolve
+        # with a different signature (as of 4.4.0) that we were unintentionally(?)
+        # shadowing, hence the weird name.
         obj = PCounter()
         obj.inc()
 
