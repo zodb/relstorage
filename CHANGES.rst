@@ -28,6 +28,9 @@
   the common case. If this is a breaking change for you, please open
   an issue. See :pr:`91`.
 
+- MySQL uses (what should be) a slightly more efficient poll query.
+  See :issue:`89`.
+
 2.0.0b1 (2016-06-28)
 ====================
 
