@@ -18,12 +18,18 @@ Stores pickles in the database.
 from __future__ import absolute_import, print_function
 
 from ZODB import ConflictResolution
-from ZODB import POSException
+
 from ZODB.BaseStorage import DataRecord
 from ZODB.BaseStorage import TransactionRecord
+
+from ZODB.POSException import ConflictError
 from ZODB.POSException import POSKeyError
+from ZODB.POSException import ReadConflictError
 from ZODB.POSException import ReadOnlyError
+from ZODB.POSException import StorageError
 from ZODB.POSException import StorageTransactionError
+from ZODB.POSException import Unsupported
+
 from ZODB.UndoLogCompatible import UndoLogCompatible
 from ZODB.blob import is_blob_record
 from ZODB.interfaces import StorageStopIteration
@@ -627,11 +633,11 @@ class RelStorage(UndoLogCompatible,
         if self._stale_error is not None:
             raise self._stale_error
         if self._is_read_only:
-            raise POSException.ReadOnlyError()
+            raise ReadOnlyError()
         if transaction is not self._transaction:
-            raise POSException.StorageTransactionError(self, transaction)
+            raise StorageTransactionError(self, transaction)
         if version:
-            raise POSException.Unsupported("Versions aren't supported")
+            raise Unsupported("Versions aren't supported")
 
         # If self._prepared_txn is not None, that means something is
         # attempting to store objects after the vote phase has finished.
@@ -665,11 +671,11 @@ class RelStorage(UndoLogCompatible,
         if self._stale_error is not None:
             raise self._stale_error
         if self._is_read_only:
-            raise POSException.ReadOnlyError()
+            raise ReadOnlyError()
         if transaction is not self._transaction:
-            raise POSException.StorageTransactionError(self, transaction)
+            raise StorageTransactionError(self, transaction)
         if version:
-            raise POSException.Unsupported("Versions aren't supported")
+            raise Unsupported("Versions aren't supported")
 
         assert self._tid is not None
         assert self._prepared_txn is None
@@ -690,11 +696,11 @@ class RelStorage(UndoLogCompatible,
         if self._stale_error is not None:
             raise self._stale_error
         if transaction is not self._transaction:
-            raise POSException.StorageTransactionError(self, transaction)
+            raise StorageTransactionError(self, transaction)
 
         _, committed_tid = self.load(oid, '')
         if committed_tid != serial:
-            raise POSException.ReadConflictError(
+            raise ReadConflictError(
                 oid=oid, serials=(committed_tid, serial))
 
         if self._txn_check_serials is None:
@@ -704,7 +710,7 @@ class RelStorage(UndoLogCompatible,
             # this oid, the transaction conflicts with itself.
             previous_serial = self._txn_check_serials.get(oid, serial)
             if previous_serial != serial:
-                raise POSException.ReadConflictError(
+                raise ReadConflictError(
                     oid=oid, serials=(previous_serial, serial))
         self._txn_check_serials[oid] = serial
 
@@ -750,10 +756,9 @@ class RelStorage(UndoLogCompatible,
         self._lock.acquire()
         try:
             if self._transaction is transaction:
-                if self._options.strict_tpc:
-                    raise StorageTransactionError(
-                        "Duplicate tpc_begin calls for same transaction")
-                return
+                raise StorageTransactionError(
+                    "Duplicate tpc_begin calls for same transaction")
+
             self._lock.release()
             self._commit_lock.acquire()
             self._lock.acquire()
@@ -806,7 +811,7 @@ class RelStorage(UndoLogCompatible,
         if self._tid is not None:
             return
         if self._transaction is None:
-            raise POSException.StorageError("No transaction in progress")
+            raise StorageError("No transaction in progress")
 
         adapter = self._adapter
         cursor = self._store_cursor
@@ -875,7 +880,7 @@ class RelStorage(UndoLogCompatible,
             rdata = self.tryToResolveConflict(oid, prev_tid, serial, data)
             if rdata is None:
                 # unresolvable; kill the whole transaction
-                raise POSException.ConflictError(
+                raise ConflictError(
                     oid=oid, serials=(prev_tid, serial), data=data)
             else:
                 # resolved
@@ -907,10 +912,9 @@ class RelStorage(UndoLogCompatible,
     def tpc_vote(self, transaction):
         with self._lock:
             if transaction is not self._transaction:
-                if self._options.strict_tpc:
-                    raise POSException.StorageTransactionError(
-                        "tpc_vote called with wrong transaction")
-                return
+                raise StorageTransactionError(
+                    "tpc_vote called with wrong transaction")
+
             try:
                 return self._vote()
             except:
@@ -954,7 +958,7 @@ class RelStorage(UndoLogCompatible,
                 oid_int = u64(oid)
                 actual = p64(current.get(oid_int, 0))
                 if actual != expect:
-                    raise POSException.ReadConflictError(
+                    raise ReadConflictError(
                         oid=oid, serials=(actual, expect))
 
         serials = self._finish_store()
@@ -971,10 +975,8 @@ class RelStorage(UndoLogCompatible,
     def tpc_finish(self, transaction, f=None):
         with self._lock:
             if transaction is not self._transaction:
-                if self._options.strict_tpc:
-                    raise POSException.StorageTransactionError(
-                        "tpc_finish called with wrong transaction")
-                return
+                raise StorageTransactionError(
+                    "tpc_finish called with wrong transaction")
             try:
                 try:
                     if f is not None:
@@ -986,8 +988,12 @@ class RelStorage(UndoLogCompatible,
             finally:
                 self._commit_lock.release()
 
-    def _finish(self, tid, user, desc, ext):
+    def _finish(self, tid, user, desc, ext): # pylint:disable=unused-argument
         """Commit the transaction."""
+        # We take the same params as BaseStorage._finish, even though
+        # we don't inherit from it or use them...in case people might
+        # be calling us directly?
+
         # It is assumed that self._lock.acquire was called before this
         # method was called.
         assert self._tid is not None
@@ -1041,7 +1047,7 @@ class RelStorage(UndoLogCompatible,
         if self._stale_error is not None:
             raise self._stale_error
         if self._is_read_only:
-            raise POSException.ReadOnlyError()
+            raise ReadOnlyError()
         with self._lock:
             if self._preallocated_oids:
                 oid_int = self._preallocated_oids.pop()
@@ -1154,9 +1160,9 @@ class RelStorage(UndoLogCompatible,
         if self._stale_error is not None:
             raise self._stale_error
         if self._is_read_only:
-            raise POSException.ReadOnlyError()
+            raise ReadOnlyError()
         if transaction is not self._transaction:
-            raise POSException.StorageTransactionError(self, transaction)
+            raise StorageTransactionError(self, transaction)
 
         undo_tid = base64_decodebytes(transaction_id + b'\n')
         assert len(undo_tid) == 8
@@ -1197,7 +1203,7 @@ class RelStorage(UndoLogCompatible,
     def pack(self, t, referencesf, prepack_only=False, skip_prepack=False,
              sleep=None):
         if self._is_read_only:
-            raise POSException.ReadOnlyError()
+            raise ReadOnlyError()
 
         prepack_only = prepack_only or self._options.pack_prepack_only
         skip_prepack = skip_prepack or self._options.pack_skip_prepack
@@ -1310,7 +1316,7 @@ class RelStorage(UndoLogCompatible,
         try:
             changes, new_polled_tid = self._restart_load_and_call(
                 self._adapter.poller.poll_invalidations, prev, ignore_tid)
-        except POSException.ReadConflictError as e:
+        except ReadConflictError as e:
             # The database connection is stale, but postpone this
             # error until the application tries to read or write something.
             self._stale_error = e
@@ -1355,7 +1361,7 @@ class RelStorage(UndoLogCompatible,
         Raises POSKeyError if the blobfile cannot be found.
         """
         if self.blobhelper is None:
-            raise POSException.Unsupported("No blob directory is configured.")
+            raise Unsupported("No blob directory is configured.")
 
         with self._lock:
             self._before_load()

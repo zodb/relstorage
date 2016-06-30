@@ -159,7 +159,7 @@ class OracleAdapterHelper(Resolver):
 class RelStorageURIResolver(Resolver):
     _int_args = ('poll_interval', 'cache_local_mb', 'commit_lock_timeout',
                  'commit_lock_id', 'read_only', 'shared_blob_dir',
-                 'keep_history', 'pack_gc', 'pack_dry_run', 'strict_tpc',
+                 'keep_history', 'pack_gc', 'pack_dry_run',
                  'create', 'demostorage',)
     _string_args = ('name', 'blob_dir', 'replica_conf',
                     'cache_module_name', 'cache_prefix',
