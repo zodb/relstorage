@@ -35,6 +35,9 @@
   from the unmaintained MySQL-python to the maintained mysqlclient
   (the same one used by Python 3).
 
+- MySQL uses (what should be) a slightly more efficient poll query.
+  See :issue:`89`.
+
 2.0.0b1 (2016-06-28)
 ====================
 
