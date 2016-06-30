@@ -81,7 +81,7 @@ setup(
     zip_safe=False,  # otherwise ZConfig can't see component.xml
     install_requires=[
         'perfmetrics',
-        'ZODB >= 4.3.1',
+        'ZODB >= 4.4.0',
         # ZEO is needed for blob layout
         'ZEO >= 4.2.0b1, <5.0',
         'zope.interface',
@@ -89,15 +89,18 @@ setup(
     ],
     tests_require=tests_require,
     extras_require={
-        # Use MySQL-python (C impl) on CPython 2.7, it has the most
-        # testing and exposure. The best option for PyPy is PyMySQL
-        # because MySQL-python doesn't support it (and binary drivers
-        # like that tend to be slow). Use mysqlclient on Python 3
-        # because it's a binary driver and *probably* faster for
-        # CPython; it requires some minor code changes to support, so
-        # be sure to test this configuration.
+        # We previously used MySQL-python (C impl) on CPython 2.7,
+        # because it had the longest history. However, it is no longer
+        # maintained, so we switch to its maintained fork mysqlclient;
+        # this is consistent with Python 3. The best option for PyPy
+        # is PyMySQL because MySQL-python doesn't support it (and
+        # binary drivers like that tend to be slow). Although both
+        # PyMySQL and mysqlclient support Python 3, use mysqlclient on
+        # Python 3 because it's a binary driver and *probably* faster
+        # for CPython; it requires some minor code changes to support,
+        # so be sure to test this configuration.
         'mysql:platform_python_implementation=="CPython" and python_version == "2.7"': [
-            'MySQL-python>=1.2.5',
+            'mysqlclient>=1.3.7',
         ],
         'mysql:platform_python_implementation=="CPython" and python_version >= "3.3"': [
             'mysqlclient>=1.3.7',

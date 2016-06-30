@@ -1,6 +1,6 @@
 pip>=8.1.2
 setuptools>=23.0.0
-MySQL-python
+mysqlclient
 psycopg2
 sphinxcontrib-programoutput
 repoze.sphinx.autointerface

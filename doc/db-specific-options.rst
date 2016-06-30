@@ -21,8 +21,8 @@ dsn
 MySQL Adapter Options
 =====================
 
-The MySQL adapter accepts most parameters supported by the MySQL-python
-library, including:
+The MySQL adapter accepts most parameters supported by the mysqlclient
+library (the maintained version of MySQL-python), including:
 
 host
     string, host to connect

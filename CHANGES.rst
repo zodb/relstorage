@@ -28,6 +28,13 @@
   the common case. If this is a breaking change for you, please open
   an issue. See :pr:`91`.
 
+- Update the ZODB dependency to 4.4.0 to avoid deprecation warnings
+  due to the introduction of a new storage protocol.
+
+- Change the recommended and tested MySQL client for Python 2.7 away
+  from the unmaintained MySQL-python to the maintained mysqlclient
+  (the same one used by Python 3).
+
 2.0.0b1 (2016-06-28)
 ====================
 
