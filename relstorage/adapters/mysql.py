@@ -115,10 +115,12 @@ except ImportError:
 
 try:
     import pymysql.converters
-    # PyPy up through at least 5.3.0 has a bug that raises spurious
+    # PyPy up through 5.3.0 has a bug that raises spurious
     # MemoryErrors when run under PyMySQL >= 0.7.
     # (https://bitbucket.org/pypy/pypy/issues/2324/bytearray-replace-a-bc-raises-memoryerror)
+    # (This is fixed in 5.3.1)
     # Patch around it.
+    # XXX: This could be finer grained, only done if we're on PyPy <= 5.3.0.
     if hasattr(pymysql.converters, 'escape_string'):
         orig_escape_string = pymysql.converters.escape_string
         def escape_string(value, mapping=None):
@@ -167,9 +169,9 @@ class MySQLAdapter(object):
             )
 
         if self.keep_history:
-            poll_query="SELECT tid FROM transaction ORDER BY tid DESC LIMIT 1"
+            poll_query = "SELECT MAX(tid) FROM transaction"
         else:
-            poll_query="SELECT tid FROM object_state ORDER BY tid DESC LIMIT 1"
+            poll_query = "SELECT MAX(tid) FROM object_state"
         self.poller = Poller(
             poll_query=poll_query,
             keep_history=self.keep_history,
