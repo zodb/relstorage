@@ -8,7 +8,7 @@ try:
 except ImportError:
     # Py2
     import urlparse
-    from cgi import parse_qsl
+    from urlparse import parse_qsl
 from ZODB.DemoStorage import DemoStorage
 
 from relstorage.options import Options
