@@ -6,7 +6,8 @@ services:
   - memcached
 addons:
 # Use postgresql 9.3 to get commit-lock testing
-  postgresql: "9.3"
+# Use postgresql 9.4 to get support for BLOB SQL functions for pg8000
+  postgresql: "9.4"
 python:
   - 2.7
   - 3.4

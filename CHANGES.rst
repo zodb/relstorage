@@ -41,7 +41,8 @@
 - PyMySQL now works and is tested on Python 3.
 
 - A pure-Python PostgreSQL driver, pg8000, now works and is tested on
-  all platforms. This is a gevent-compatible driver.
+  all platforms. This is a gevent-compatible driver. Note that it
+  requires a PostgreSQL 9.4 server or above.
 
 - Support for cx_Oracle versions older than 5.0 has been dropped. 5.0
   was released in 2008.
