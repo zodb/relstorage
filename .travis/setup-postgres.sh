@@ -1,2 +1,2 @@
 pip install -U -e ".[postgresql]"
-`dirname`/postgres.sh
+`dirname $0`/postgres.sh
