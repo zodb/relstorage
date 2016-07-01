@@ -137,6 +137,18 @@ else:
                 print("Failed to close", self, self.__type, " from:", self.__at, file=sys.stderr)
                 print("Deleted at", ''.join(traceback.format_stack()))
 
+    class _DoesNotRollbackIfNotInTransaction(pg8000.Connection):
+        # pg8000, unlike psycopg2/cffi, will actually send a ROLLBACK
+        # statement even if it's not in a transaction. This generates
+        # warnings from the server "NOT IN TRANSACTION", which are annoying
+        # (because we rolback() after every commit)
+        # So this subclass doesn't do that.
+
+        def rollback(self):
+            if not self.in_transaction:
+                return
+            return super(_DoesNotRollbackIfNotInTransaction,self).rollback()
+
     @implementer(IDBDriver)
     class PG8000Driver(object):
         __name__ = 'pg8000'
@@ -162,6 +174,8 @@ else:
                     key = 'database'
                 kwds[key] = value
             conn = self._connect(**kwds)
+            assert conn.__class__ is _DoesNotRollbackIfNotInTransaction.__base__
+            conn.__class__ = _DoesNotRollbackIfNotInTransaction
             return _ConnWrapper(conn) if self._wrap else conn
 
         ISOLATION_LEVEL_READ_COMMITTED = 'ISOLATION LEVEL READ COMMITTED'
