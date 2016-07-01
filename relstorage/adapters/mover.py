@@ -28,7 +28,6 @@ from hashlib import md5
 
 from relstorage._compat import xrange
 from relstorage._compat import db_binary_to_bytes
-from relstorage._compat import bytes_to_pg_binary
 
 def compute_md5sum(data):
     if data is not None:
@@ -64,7 +63,7 @@ class ObjectMover(object):
     )
 
     def __init__(self, database_type, options, runner=None,
-            Binary=None, inputsizes=None, version_detector=None):
+                 Binary=None, inputsizes=None, version_detector=None):
         # The inputsizes parameter is for Oracle only.
         self.database_type = database_type
         self.keep_history = options.keep_history
@@ -479,7 +478,7 @@ class ObjectMover(object):
         batcher.insert_into(
             "temp_store (zoid, prev_tid, md5, state)",
             "%s, %s, %s, %s",
-            (oid, prev_tid, md5sum, bytes_to_pg_binary(data)),
+            (oid, prev_tid, md5sum, self.Binary(data)),
             rowkey=oid,
             size=len(data),
         )
@@ -551,7 +550,7 @@ class ObjectMover(object):
             md5sum = None
 
         if data is not None:
-            encoded = bytes_to_pg_binary(data)
+            encoded = self.Binary(data)
             size = len(data)
         else:
             encoded = None
@@ -805,7 +804,7 @@ class ObjectMover(object):
             state = %s
         WHERE zoid = %s
         """
-        cursor.execute(stmt, (prev_tid, md5sum, bytes_to_pg_binary(data), oid))
+        cursor.execute(stmt, (prev_tid, md5sum, self.Binary(data), oid))
 
     @metricmethod_sampled
     def mysql_replace_temp(self, cursor, oid, prev_tid, data):

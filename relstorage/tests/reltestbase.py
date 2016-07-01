@@ -154,20 +154,15 @@ class GenericRelStorageTests(
     ):
 
     def checkDropAndPrepare(self):
-        # XXX: Hangs with PyMySql; hangs dropping the object_state table,
-        # the 8th table to drop.
-        # XXX: Also hangs with psycopg2cffi
-
-        import sys
-        if sys.modules.get("MySQLdb") == sys.modules.get('pymysql', self) \
-           and 'MySQL' in str(type(self._storage._adapter.schema)):
-            from unittest import SkipTest
-            raise SkipTest("PyMySQL hangs dropping a table.")
-
-        if sys.modules.get("psycopg2") == sys.modules.get("psycopg2cffi", self) \
-           and "PostgreSQL" in str(type(self._storage._adapter.schema)):
-            from unittest import SkipTest
-            raise SkipTest("psycopg2cffi hangs dropping a table.")
+        # Under PyPy, this test either takes a very long time (PyMySQL)
+        # or hangs (psycopg2cffi) longer than I want to wait (10+ minutes).
+        # This suggests there's a lock on a particular table (the eighth table we drop)
+        # which in turn suggests that there are connections still open and leaked!
+        # Running a manual GC seems to fix it. It's hard to reproduce manually because
+        # it seems to depend on a particular set of tests being run.
+        import gc
+        gc.collect()
+        gc.collect()
 
         self._storage._adapter.schema.drop_all()
         self._storage._adapter.schema.prepare()

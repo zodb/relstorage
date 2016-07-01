@@ -80,11 +80,13 @@ class PostgreSQLAdapter(object):
             options=options,
             runner=self.runner,
             version_detector=self.version_detector,
+            Binary=driver.Binary,
             )
         self.connmanager.set_on_store_opened(self.mover.on_store_opened)
         self.oidallocator = PostgreSQLOIDAllocator()
         self.txncontrol = PostgreSQLTransactionControl(
             keep_history=self.keep_history,
+            driver=driver,
             )
 
         self.poller = Poller(

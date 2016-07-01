@@ -19,6 +19,7 @@ PostgreSQL IDBDriver implementations.
 from __future__ import print_function, absolute_import
 
 import sys
+import os
 
 from zope.interface import moduleProvides
 from zope.interface import implementer
@@ -89,3 +90,7 @@ else:
         preferred_driver_name = driver.__name__
     del driver
     del psycopg2cffi
+
+if os.environ.get("RS_PG_DRIVER"):
+    preferred_driver_name = os.environ["RS_PG_DRIVER"]
+    print("Forcing postgres driver to ", preferred_driver_name)

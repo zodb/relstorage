@@ -18,6 +18,7 @@ MySQL IDBDriver implementations.
 
 from __future__ import print_function, absolute_import
 
+import os
 import sys
 
 from zope.interface import moduleProvides
@@ -118,3 +119,7 @@ else:
     if hasattr(sys, 'pypy_version_info') or not preferred_driver_name:
         preferred_driver_name = driver.__name__
     del driver
+
+if os.environ.get("RS_MY_DRIVER"):
+    preferred_driver_name = os.environ["RS_MY_DRIVER"]
+    print("Forcing MySQL driver to ", preferred_driver_name)
