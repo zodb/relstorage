@@ -15,11 +15,14 @@ env:
   matrix:
     - ENV=mysql
     - ENV=postgres
+    - ENV=pypostgres
+    - ENV=pymysql
 matrix:
   fast_finish: true
 script:
 # coverage slows PyPy down from 2minutes to 12+.
-  - if [[ $TRAVIS_PYTHON_VERSION == 'pypy' ]]; then python -m relstorage.tests.alltests -v; fi
+# But don't run the pymysql/pypy tests twice.
+  - if [[ $TRAVIS_PYTHON_VERSION == 'pypy' -a $ENV != 'pymysql' ]]; then python -m relstorage.tests.alltests -v; fi
   - if [[ $TRAVIS_PYTHON_VERSION != 'pypy' ]]; then coverage run -m relstorage.tests.alltests -v; fi
 after_success:
   - coveralls

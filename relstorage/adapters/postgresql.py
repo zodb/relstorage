@@ -147,8 +147,8 @@ class Psycopg2ConnectionManager(AbstractConnectionManager):
         self.disconnected_exceptions = driver.disconnected_exceptions
         self.close_exceptions = driver.close_exceptions
         self.use_replica_exceptions = driver.use_replica_exceptions
-        self.isolation_read_committed = driver.extensions.ISOLATION_LEVEL_READ_COMMITTED
-        self.isolation_serializable = driver.extensions.ISOLATION_LEVEL_SERIALIZABLE
+        self.isolation_read_committed = driver.ISOLATION_LEVEL_READ_COMMITTED
+        self.isolation_serializable = driver.ISOLATION_LEVEL_SERIALIZABLE
         self.keep_history = options.keep_history
         self._db_connect = driver.connect
         super(Psycopg2ConnectionManager, self).__init__(options)
@@ -183,10 +183,21 @@ class Psycopg2ConnectionManager(AbstractConnectionManager):
         while True:
             try:
                 conn = self._db_connect(dsn)
-                conn.set_isolation_level(isolation)
+                isolation_set = False
+                if hasattr(conn, 'set_isolation_level'):
+                    # psycopg2 family
+                    conn.set_isolation_level(isolation)
+                    isolation_set = True
                 cursor = conn.cursor()
+                if not isolation_set:
+                    cursor.execute('SET TRANSACTION %s' % isolation)
+                    cursor.execute("SET SESSION CHARACTERISTICS AS TRANSACTION %s" % isolation)
+                    conn.commit()
+
                 cursor.arraysize = 64
                 conn.replica = replica
+                assert not conn.autocommit
+                #print("Opened", conn, cursor)
                 return conn, cursor
             except self.use_replica_exceptions as e:
                 if replica is not None:

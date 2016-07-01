@@ -64,10 +64,20 @@ class PostgreSQLLocker(Locker):
                     LOCK TABLE commit_lock IN EXCLUSIVE MODE%s;
                     LOCK TABLE object_state IN SHARE MODE
                     """ % (timeout_stmt, nowait and ' NOWAIT' or '',)
-                cursor.execute(stmt)
+                for s in stmt.splitlines():
+                    if not s.strip():
+                        continue
+                    cursor.execute(s)
             else:
-                cursor.execute("%sLOCK TABLE commit_lock IN EXCLUSIVE MODE%s" %
-                    (timeout_stmt, nowait and ' NOWAIT' or '',))
+                stmt = """
+                %s
+                LOCK TABLE commit_lock IN EXCLUSIVE MODE%s
+                """ % (timeout_stmt, ' NOWAIT' if nowait else '')
+                for s in stmt.splitlines():
+                    if not s.strip():
+                        continue
+                    cursor.execute(s)
+
         except self.lock_exceptions:
             if nowait:
                 return False

@@ -290,7 +290,12 @@ class RelStorage(UndoLogCompatible,
             # Implement this method of MVCCAdapterInstance
             # (possibly destined for IMVCCStorage) as a small optimization
             # in ZODB5 that can eventually simplify ZODB.Connection.Connection
-            return self.HistoricalStorageAdapter(self.new_instance(), before)
+            # XXX: 5.0a2 doesn't forward the release method, so we leak
+            # open connections.
+            i = self.new_instance()
+            x = self.HistoricalStorageAdapter(i, before)
+            x.release = i.release
+            return x
 
 
     @property
@@ -327,6 +332,7 @@ class RelStorage(UndoLogCompatible,
         The first two function parameters are the load connection and cursor.
         """
         if self._load_cursor is None:
+            assert self._load_conn is None
             need_restart = False
             self._open_load_connection()
         else:
@@ -350,6 +356,7 @@ class RelStorage(UndoLogCompatible,
 
     def _open_store_connection(self):
         """Open the store connection to the database.  Return nothing."""
+        assert self._store_conn is None
         conn, cursor = self._adapter.connmanager.open_for_store()
         self._drop_store_connection()
         self._store_conn, self._store_cursor = conn, cursor
@@ -363,6 +370,7 @@ class RelStorage(UndoLogCompatible,
     def _restart_store(self):
         """Restart the store connection, creating a new connection if needed"""
         if self._store_cursor is None:
+            assert self._store_conn is None
             self._open_store_connection()
             return
         try:
@@ -417,6 +425,7 @@ class RelStorage(UndoLogCompatible,
         connections.
         """
         with self._lock:
+            #print("Dropping", self._load_conn, self._store_conn)
             self._drop_load_connection()
             self._drop_store_connection()
         self._cache.release()
@@ -1506,8 +1515,16 @@ class TransactionIterator(object):
         self._index = 0
 
     def close(self):
+        if self._closed:
+            return
         self._adapter.connmanager.close(self._conn, self._cursor)
         self._closed = True
+        self._conn = None
+        self._cursor = None
+
+    def __del__(self):
+        # belt-and-suspenders, effective on CPython
+        self.close()
 
     def iterator(self):
         return self
@@ -1523,10 +1540,11 @@ class TransactionIterator(object):
         return next(self)
 
     def next(self):
+        if self._index >= len(self._transactions):
+            self.close() # Don't leak our connection
+            raise StorageStopIteration()
         if self._closed:
             raise IOError("TransactionIterator already closed")
-        if self._index >= len(self._transactions):
-            raise StorageStopIteration()
         params = self._transactions[self._index]
         res = RelStorageTransactionRecord(self, *params)
         self._index += 1

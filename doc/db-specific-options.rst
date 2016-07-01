@@ -30,7 +30,8 @@ PostgreSQL Adapter Options
 The PostgreSQL adapter accepts:
 
 driver
-    Either "psycopg2" or "psycopg2cffi".
+    Either "psycopg2" or "psycopg2cffi" for the native libpg based
+    drivers. "pg8000" is a pure-python driver suitable for use with gevent.
 
 dsn
     Specifies the data source name for connecting to PostgreSQL.

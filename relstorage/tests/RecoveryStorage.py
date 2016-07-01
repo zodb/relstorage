@@ -362,3 +362,6 @@ class UndoableRecoveryStorage(BasicRecoveryStorage):
         # part of the test.
         self._dst.copyTransactionsFrom(self._storage)
         self.compare(self._storage, self._dst)
+
+        c.close()
+        db.close()

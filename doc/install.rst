@@ -32,8 +32,8 @@ database.
 
 
 On CPython2, install psycopg2 2.6.1+, mysqlclient 1.3.7+, or cx_Oracle
-5.2+; PyMySQL and umysql are also known to work. For CPython3, install
-psycopg2, mysqlclient 1.3.7+ or cx_Oracle. On PyPy, install
+5.2+; PyMySQL 0.7 and umysql are also known to work. For CPython3, install
+psycopg2, mysqlclient 1.3.7+ or cx_Oracle; PyMySQL is also known to work. On PyPy, install
 psycopg2cffi 2.7.4+ or PyMySQL 0.6.6+ (PyPy will generally work with
 psycopg2 and mysqlclient, but it will be *much* slower; cx_Oracle is
 untested on PyPy).
@@ -45,12 +45,13 @@ adapter:
 Platform   MySQL                 PostgreSQL            Oracle
 ========   ================      ================      ======
 CPython2   MySQL-python;         **psycopg2**;         **cx_Oracle**
-           **mysqlclient**;      psycopg2cffi
-           PyMySQL;
+           **mysqlclient**;      psycopg2cffi;
+           PyMySQL;              pg8000
            umysql
 CPython3   **mysqlclient**;      **psycopg2**          **cx_Oracle**
-           PyMySQL
+           PyMySQL               pg8000
 PyPy       **PyMySQL**           **psycopg2cffi**      <untested>
+                                 pg8000
 ========   ================      ================      ======
 
 Memcache Integration

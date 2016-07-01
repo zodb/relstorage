@@ -391,23 +391,26 @@ class ObjectMover(object):
     def postgresql_on_store_opened(self, cursor, restart=False):
         """Create the temporary tables for storing objects"""
         # note that the md5 column is not used if self.keep_history == False.
-        stmt = """
+        stmts = ["""
         CREATE TEMPORARY TABLE temp_store (
             zoid        BIGINT NOT NULL,
             prev_tid    BIGINT NOT NULL,
             md5         CHAR(32),
             state       BYTEA
-        ) ON COMMIT DROP;
+        ) ON COMMIT DROP;""",
+        """
         CREATE UNIQUE INDEX temp_store_zoid ON temp_store (zoid);
-
+        """,
+        """
         CREATE TEMPORARY TABLE temp_blob_chunk (
             zoid        BIGINT NOT NULL,
             chunk_num   BIGINT NOT NULL,
             chunk       OID
-        ) ON COMMIT DROP;
+        ) ON COMMIT DROP;""",
+        """
         CREATE UNIQUE INDEX temp_blob_chunk_key
-            ON temp_blob_chunk (zoid, chunk_num);
-
+            ON temp_blob_chunk (zoid, chunk_num);""",
+        """
         -- This trigger removes blobs that get replaced before being
         -- moved to blob_chunk.  Note that it is never called when
         -- the temp_blob_chunk table is being dropped or truncated.
@@ -415,8 +418,9 @@ class ObjectMover(object):
             BEFORE DELETE ON temp_blob_chunk
             FOR EACH ROW
             EXECUTE PROCEDURE temp_blob_chunk_delete_trigger();
-        """
-        cursor.execute(stmt)
+        """,]
+        for stmt in stmts:
+            cursor.execute(stmt)
 
     @metricmethod_sampled
     def mysql_on_store_opened(self, cursor, restart=False):
@@ -949,13 +953,15 @@ class ObjectMover(object):
             # nothing needs to be updated
             return
 
+        params = {'tid': tid}
         cursor.execute("""
         -- Insert objects created in this transaction into current_object.
         INSERT INTO current_object (zoid, tid)
         SELECT zoid, tid FROM object_state
         WHERE tid = %(tid)s
-            AND prev_tid = 0;
+            AND prev_tid = 0;""", params)
 
+        cursor.execute("""
         -- Change existing objects.  To avoid deadlocks,
         -- update in OID order.
         UPDATE current_object SET tid = %(tid)s
@@ -965,7 +971,7 @@ class ObjectMover(object):
                 AND prev_tid != 0
             ORDER BY zoid
         )
-        """, {'tid': tid})
+        """, params)
 
     @metricmethod_sampled
     def mysql_update_current(self, cursor, tid):
@@ -1033,6 +1039,17 @@ class ObjectMover(object):
         try:
             cursor.execute(stmt, (oid, tid))
             for chunk_num, loid in cursor.fetchall():
+                if not hasattr(cursor.connection, 'lobject'):
+                    # pg8000, etc
+                    # TODO:We're not chunking these.
+                    assert chunk_num == 0
+                    cursor.execute("SELECT lo_get(%(oid)s)", {'oid': loid})
+                    row = cursor.fetchone()
+                    data = row[0]
+                    with open(filename, 'wb') as f:
+                        f.write(data)
+                    return len(data)
+
                 blob = cursor.connection.lobject(loid, 'rb')
 
                 if chunk_num == 0:
@@ -1190,6 +1207,28 @@ class ObjectMover(object):
             INSERT INTO temp_blob_chunk (zoid, chunk_num, chunk)
             VALUES (%(oid)s, %(chunk_num)s, %(loid)s)
             """
+
+        if not hasattr(cursor.connection, 'lobject'):
+            # Not on pg8000.
+            # TODO: Optimize this and chunk it.
+            # TODO: We can easily emulate the psycopg2 interface.
+            with open(filename, 'rb') as f:
+                data = f.read()
+
+            params = {'oid': oid, 'data': self.Binary(data)}
+            if use_tid:
+                insert_stmt = """
+                INSERT INTO blob_chunk (zoid, tid, chunk_num, chunk)
+                SELECT %(oid)s, %(tid)s, 0, lo_from_bytea(0, %(data)s)
+                """
+                params['tid'] = tid
+            else:
+                insert_stmt = """
+                INSERT INTO temp_blob_chunk (zoid, chunk_num, chunk)
+                SELECT %(oid)s, 0, lo_from_bytea(0, %(data)s)
+                """
+            cursor.execute(insert_stmt, params)
+            return
 
         blob = None
 
