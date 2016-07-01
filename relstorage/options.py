@@ -59,6 +59,7 @@ class Options(object):
     commit_lock_timeout = 30
     commit_lock_id = 0
     create_schema = True
+    driver = 'auto'
 
     # If share_local_cache is off, each storage instance has a private
     # cache rather than a shared cache.  This option exists mainly for

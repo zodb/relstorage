@@ -16,7 +16,6 @@
 from relstorage.adapters.interfaces import ITransactionControl
 from zope.interface import implementer
 import logging
-from relstorage._compat import bytes_to_pg_binary
 
 log = logging.getLogger(__name__)
 
@@ -50,8 +49,9 @@ class TransactionControl(object):
 @implementer(ITransactionControl)
 class PostgreSQLTransactionControl(TransactionControl):
 
-    def __init__(self, keep_history):
+    def __init__(self, keep_history, driver):
         self.keep_history = keep_history
+        self._Binary = driver.Binary
 
     def get_tid(self, cursor):
         """Returns the most recent tid."""
@@ -89,9 +89,10 @@ class PostgreSQLTransactionControl(TransactionControl):
                 %s, %s,
                 %s)
             """
+            Binary = self._Binary
             cursor.execute(stmt, (tid, packed,
-                                  bytes_to_pg_binary(username), bytes_to_pg_binary(description),
-                                  bytes_to_pg_binary(extension)))
+                                  Binary(username), Binary(description),
+                                  Binary(extension)))
 
 
 @implementer(ITransactionControl)

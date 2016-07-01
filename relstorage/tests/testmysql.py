@@ -65,6 +65,7 @@ class ZConfigTests(object):
             replica-conf %s
             blob-chunk-size 10MB
             <mysql>
+                driver auto
                 db %s
                 user relstoragetest
                 passwd relstoragetest
@@ -165,16 +166,13 @@ db_names = {
     }
 
 def test_suite():
+    import relstorage.adapters.mysql as _adapter
     try:
-        import MySQLdb
+        _adapter.select_driver()
     except ImportError:
-        try:
-            import pymysql
-            pymysql.install_as_MySQLdb()
-        except ImportError:
-            import warnings
-            warnings.warn("MySQLdb is not importable, so MySQL tests disabled")
-            return unittest.TestSuite()
+        import warnings
+        warnings.warn("No MySQL driver is available, so MySQL tests disabled")
+        return unittest.TestSuite()
 
     suite = unittest.TestSuite()
     for klass in [

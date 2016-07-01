@@ -65,6 +65,7 @@ class ZConfigTests(object):
             replica-conf %s
             blob-chunk-size 10MB
             <postgresql>
+                driver auto
                 dsn %s
             </postgresql>
             </relstorage>
@@ -148,17 +149,13 @@ db_names = {
     }
 
 def test_suite():
+    import relstorage.adapters.postgresql as _adapter
     try:
-        import psycopg2
+        _adapter.select_driver()
     except ImportError:
-        try:
-            from psycopg2cffi import compat
-            compat.register()
-        except ImportError:
-            import warnings
-            warnings.warn(
-                "psycopg2 is not importable, so PostgreSQL tests disabled")
-            return unittest.TestSuite()
+        import warnings
+        warnings.warn("No PostgreSQL driver is available, so PostgreSQL tests disabled")
+        return unittest.TestSuite()
 
     suite = unittest.TestSuite()
     for klass in [

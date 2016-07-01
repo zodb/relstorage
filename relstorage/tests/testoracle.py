@@ -144,8 +144,9 @@ db_names = {
     }
 
 def test_suite():
+    import relstorage.adapters.oracle as _adapter
     try:
-        import cx_Oracle
+        _adapter.select_driver()
     except ImportError:
         import warnings
         warnings.warn("cx_Oracle is not importable, so Oracle tests disabled")

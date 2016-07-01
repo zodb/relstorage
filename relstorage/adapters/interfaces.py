@@ -17,6 +17,8 @@ from ZODB.POSException import StorageError
 from zope.interface import Attribute
 from zope.interface import Interface
 
+#pylint: disable=inherit-non-class,no-method-argument
+
 class IRelStorageAdapter(Interface):
     """A database adapter for RelStorage"""
 
@@ -43,6 +45,46 @@ class IRelStorageAdapter(Interface):
     def __str__():
         """Return a short description of the adapter"""
 
+class IDBDriver(Interface):
+    """
+    An abstraction over the information needed for RelStorage to work
+    with an arbitrary DB-API driver.
+    """
+
+    __name__ = Attribute("The name of this driver")
+
+    disconnected_exceptions = Attribute("A tuple of exceptions this driver can raise if it is "
+                                        "disconnected from the database.")
+    close_exceptions = Attribute("A tuple of exceptions that we can ignore when we try to "
+                                 "close the connection to the database. Often this is the same "
+                                 "or an extension of `disconnected_exceptions`.")
+
+    lock_exceptions = Attribute("A tuple of exceptions") # XXX: Document
+
+    use_replica_exceptions = Attribute("A tuple of exceptions raised by connecting "
+                                       "that should cause us to try a replica.")
+
+    Binary = Attribute("A callable.")
+
+
+class IDBDriverOptions(Interface):
+    """
+    Implemented by a module to provide alternative drivers.
+    """
+
+    database_type = Attribute("A string naming the type of database.")
+
+    driver_map = Attribute("A map of driver names to IDBDriver instances. "
+                           "If the map is empty, no drivers for the specified "
+                           "database are available.")
+
+    preferred_driver_name = Attribute("The name of the best driver in driver_map "
+                                      "to use. None if no drivers are available.")
+
+    def connect(*args, **kwargs):
+        """
+        Return a new database connection.
+        """
 
 class IConnectionManager(Interface):
     """Open and close database connections"""
