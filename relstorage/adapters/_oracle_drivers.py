@@ -38,7 +38,7 @@ try:
     import cx_Oracle
 except ImportError:
     pass
-else:
+else:  # pragma: no cover
 
     @implementer(IDBDriver)
     class cx_OracleDriver(object):

@@ -61,7 +61,7 @@ try:
     import pymysql
 except ImportError:
     pass
-else:
+else:  # pragma: no cover
     import pymysql.err
 
     @implementer(IDBDriver)
@@ -120,6 +120,6 @@ else:
         preferred_driver_name = driver.__name__
     del driver
 
-if os.environ.get("RS_MY_DRIVER"):
+if os.environ.get("RS_MY_DRIVER"): # pragma: no cover
     preferred_driver_name = os.environ["RS_MY_DRIVER"]
     print("Forcing MySQL driver to ", preferred_driver_name)

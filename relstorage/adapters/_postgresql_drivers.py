@@ -69,7 +69,7 @@ try:
     import psycopg2cffi
 except ImportError:
     pass
-else:
+else: # pragma: no cover
 
     @implementer(IDBDriver)
     class Psycopg2cffiDriver(object):
@@ -91,6 +91,6 @@ else:
     del driver
     del psycopg2cffi
 
-if os.environ.get("RS_PG_DRIVER"):
+if os.environ.get("RS_PG_DRIVER"): # pragma: no cover
     preferred_driver_name = os.environ["RS_PG_DRIVER"]
     print("Forcing postgres driver to ", preferred_driver_name)
