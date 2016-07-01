@@ -18,7 +18,6 @@ from relstorage.adapters.connmanager import AbstractConnectionManager
 from relstorage.adapters.dbiter import HistoryFreeDatabaseIterator
 from relstorage.adapters.dbiter import HistoryPreservingDatabaseIterator
 from relstorage.adapters.interfaces import IRelStorageAdapter
-from relstorage.adapters.interfaces import ReplicaClosedException
 from relstorage.adapters.locker import PostgreSQLLocker
 from relstorage.adapters.mover import ObjectMover
 from relstorage.adapters.oidallocator import PostgreSQLOIDAllocator
@@ -32,35 +31,16 @@ from relstorage.adapters.txncontrol import PostgreSQLTransactionControl
 from relstorage.options import Options
 from zope.interface import implementer
 import logging
-try:
-    import psycopg2
-except ImportError:
-    try:
-        import psycopg2cffi.compat
-        psycopg2cffi.compat.register()
-        import psycopg2
-    except ImportError:
-        raise ImportError("Unable to import psycopg2 or psycopg2cffi")
 
-import psycopg2.extensions
+from . import _postgresql_drivers
+from ._abstract_drivers import _select_driver
+
 import re
-
-
-
 
 log = logging.getLogger(__name__)
 
-# disconnected_exceptions contains the exception types that might be
-# raised when the connection to the database has been broken.
-disconnected_exceptions = (
-    psycopg2.OperationalError,
-    psycopg2.InterfaceError,
-    ReplicaClosedException,
-    )
-
-# close_exceptions contains the exception types to ignore
-# when the adapter attempts to close a database connection.
-close_exceptions = disconnected_exceptions
+def select_driver(options=None):
+    return _select_driver(options or Options(), _postgresql_drivers)
 
 @implementer(IRelStorageAdapter)
 class PostgreSQLAdapter(object):
@@ -74,14 +54,19 @@ class PostgreSQLAdapter(object):
         self.options = options
         self.keep_history = options.keep_history
         self.version_detector = PostgreSQLVersionDetector()
+
+        driver = select_driver(options)
+        log.debug("Using driver %r", driver)
+
         self.connmanager = Psycopg2ConnectionManager(
+            driver,
             dsn=dsn,
             options=options,
             )
         self.runner = ScriptRunner()
         self.locker = PostgreSQLLocker(
             options=options,
-            lock_exceptions=(psycopg2.DatabaseError,),
+            lock_exceptions=driver.lock_exceptions,
             version_detector=self.version_detector,
             )
         self.schema = PostgreSQLSchemaInstaller(
@@ -153,25 +138,17 @@ class PostgreSQLAdapter(object):
         return ", ".join(parts)
 
 
-class Psycopg2Connection(psycopg2.extensions.connection):
-    # The replica attribute holds the name of the replica this
-    # connection is bound to.
-    __slots__ = ('replica',)
-
-
 class Psycopg2ConnectionManager(AbstractConnectionManager):
 
-    isolation_read_committed = (
-        psycopg2.extensions.ISOLATION_LEVEL_READ_COMMITTED)
-    isolation_serializable = (
-        psycopg2.extensions.ISOLATION_LEVEL_SERIALIZABLE)
-
-    disconnected_exceptions = disconnected_exceptions
-    close_exceptions = close_exceptions
-
-    def __init__(self, dsn, options):
+    def __init__(self, driver, dsn, options):
         self._dsn = dsn
+        self.disconnected_exceptions = driver.disconnected_exceptions
+        self.close_exceptions = driver.close_exceptions
+        self.use_replica_exceptions = driver.use_replica_exceptions
+        self.isolation_read_committed = driver.extensions.ISOLATION_LEVEL_READ_COMMITTED
+        self.isolation_serializable = driver.extensions.ISOLATION_LEVEL_SERIALIZABLE
         self.keep_history = options.keep_history
+        self._db_connect = driver.connect
         super(Psycopg2ConnectionManager, self).__init__(options)
 
     def _alter_dsn(self, replica):
@@ -187,10 +164,10 @@ class Psycopg2ConnectionManager(AbstractConnectionManager):
         return dsn
 
     @metricmethod
-    def open(self,
-            isolation=psycopg2.extensions.ISOLATION_LEVEL_READ_COMMITTED,
-            replica_selector=None):
+    def open(self, isolation=None, replica_selector=None):
         """Open a database connection and return (conn, cursor)."""
+        if isolation is None:
+            isolation = self.isolation_read_committed
         if replica_selector is None:
             replica_selector = self.replica_selector
 
@@ -203,18 +180,18 @@ class Psycopg2ConnectionManager(AbstractConnectionManager):
 
         while True:
             try:
-                conn = Psycopg2Connection(dsn)
+                conn = self._db_connect(dsn)
                 conn.set_isolation_level(isolation)
                 cursor = conn.cursor()
                 cursor.arraysize = 64
                 conn.replica = replica
                 return conn, cursor
-            except psycopg2.OperationalError as e:
+            except self.use_replica_exceptions as e:
                 if replica is not None:
                     next_replica = next(replica_selector)
                     if next_replica is not None:
                         log.warning("Unable to connect to replica %s: %s, "
-                            "now trying %s", replica, e, next_replica)
+                                    "now trying %s", replica, e, next_replica)
                         replica = next_replica
                         dsn = self._alter_dsn(replica)
                         continue
@@ -227,7 +204,7 @@ class Psycopg2ConnectionManager(AbstractConnectionManager):
         Returns (conn, cursor).
         """
         conn, cursor = self.open(self.isolation_serializable,
-            replica_selector=self.ro_replica_selector)
+                                 replica_selector=self.ro_replica_selector)
         if self.keep_history:
             stmt = """
             PREPARE get_latest_tid AS

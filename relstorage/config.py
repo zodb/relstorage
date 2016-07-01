@@ -25,6 +25,9 @@ class RelStorageFactory(BaseConfig):
     """Open a storage configured via ZConfig"""
     def open(self):
         config = self.config
+        # Hoist the driver setting to the section we really want it.
+        config.driver = config.adapter.config.driver
+        config.adapter.config.driver = None
         options = Options.copy_valid_options(config)
         adapter = config.adapter.create(options)
         return RelStorage(adapter, name=config.name, options=options)

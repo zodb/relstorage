@@ -31,23 +31,16 @@ from relstorage.adapters.stats import OracleStats
 from relstorage.adapters.txncontrol import OracleTransactionControl
 from relstorage.options import Options
 from zope.interface import implementer
-import cx_Oracle
+
+from ._abstract_drivers import _select_driver
+from . import _oracle_drivers
+
 import logging
 
 log = logging.getLogger(__name__)
 
-# disconnected_exceptions contains the exception types that might be
-# raised when the connection to the database has been broken.
-disconnected_exceptions = (
-    cx_Oracle.OperationalError,
-    cx_Oracle.InterfaceError,
-    cx_Oracle.DatabaseError,
-    ReplicaClosedException,
-    )
-
-# close_exceptions contains the exception types to ignore
-# when the adapter attempts to close a database connection.
-close_exceptions = disconnected_exceptions
+def select_driver(options=None):
+    return _select_driver(options or Options(), _oracle_drivers)
 
 @implementer(IRelStorageAdapter)
 class OracleAdapter(object):
@@ -73,18 +66,22 @@ class OracleAdapter(object):
         self.options = options
         self.keep_history = options.keep_history
 
+        driver = select_driver(options)
+        log.debug("Using driver %s", driver)
+
         self.connmanager = CXOracleConnectionManager(
+            driver,
             user=user,
             password=password,
             dsn=dsn,
             twophase=twophase,
             options=options,
             )
-        self.runner = CXOracleScriptRunner()
+        self.runner = CXOracleScriptRunner(driver)
         self.locker = OracleLocker(
             options=self.options,
-            lock_exceptions=(cx_Oracle.DatabaseError,),
-            inputsize_NUMBER=cx_Oracle.NUMBER,
+            lock_exceptions=driver.lock_exceptions,
+            inputsize_NUMBER=driver.NUMBER,
             )
         self.schema = OracleSchemaInstaller(
             connmanager=self.connmanager,
@@ -95,15 +92,15 @@ class OracleAdapter(object):
             database_type='oracle',
             options=options,
             runner=self.runner,
-            Binary=cx_Oracle.Binary,
+            Binary=driver.Binary,
             inputsizes={
-                'blobdata': cx_Oracle.BLOB,
-                'rawdata': cx_Oracle.BINARY,
-                'oid': cx_Oracle.NUMBER,
-                'tid': cx_Oracle.NUMBER,
-                'prev_tid': cx_Oracle.NUMBER,
-                'chunk_num': cx_Oracle.NUMBER,
-                'md5sum': cx_Oracle.STRING,
+                'blobdata': driver.BLOB,
+                'rawdata': driver.BINARY,
+                'oid': driver.NUMBER,
+                'tid': driver.NUMBER,
+                'prev_tid': driver.NUMBER,
+                'chunk_num': driver.NUMBER,
+                'md5sum': driver.STRING,
                 },
             )
         self.connmanager.set_on_store_opened(self.mover.on_store_opened)
@@ -112,7 +109,7 @@ class OracleAdapter(object):
             )
         self.txncontrol = OracleTransactionControl(
             keep_history=self.keep_history,
-            Binary=cx_Oracle.Binary,
+            Binary=driver.Binary,
             twophase=twophase,
             )
 
@@ -181,10 +178,8 @@ class OracleAdapter(object):
 
 class CXOracleScriptRunner(OracleScriptRunner):
 
-    def __init__(self):
-        # XXX We don't support older cx_Oracle versions anymore, so drop
-        # the conditional. 5.0 dates back to 2008
-        self.use_inline_lobs = (cx_Oracle.version >= '5.0')
+    def __init__(self, driver):
+        self.driver = driver
 
     def _outputtypehandler(self,
                            cursor, name, defaultType, size, precision, scale):
@@ -194,17 +189,17 @@ class CXOracleScriptRunner(OracleScriptRunner):
         error indicating truncation.  The run_lob_stmt() method works
         around this.
         """
-        if defaultType == cx_Oracle.BLOB:
+        if defaultType == self.driver.BLOB:
             # Default size for BLOB is 4, we want the whole blob inline.
             # Typical chunk size is 8132, we choose a multiple - 32528
-            return cursor.var(cx_Oracle.LONG_BINARY, 32528, cursor.arraysize)
+            return cursor.var(self.driver.LONG_BINARY, 32528, cursor.arraysize)
 
     def _read_lob(self, value):
         """Handle an Oracle LOB by returning its byte stream.
 
         Returns other objects unchanged.
         """
-        if isinstance(value, cx_Oracle.LOB):
+        if isinstance(value, self.driver.LOB):
             return value.read()
         return value
 
@@ -213,33 +208,29 @@ class CXOracleScriptRunner(OracleScriptRunner):
 
         Returns the value of the default parameter if the result was empty.
         """
-        if self.use_inline_lobs:
+        try:
+            cursor.outputtypehandler = self._outputtypehandler
             try:
-                cursor.outputtypehandler = self._outputtypehandler
-                try:
-                    cursor.execute(stmt, args)
-                    for row in cursor:
-                        return row
-                finally:
-                    del cursor.outputtypehandler
-            except cx_Oracle.DatabaseError as e:
-                # ORA-01406: fetched column value was truncated
-                error = e.args[0]
-
-                if ((isinstance(error, str) and not error.endswith(' 1406'))
-                        or error.code != 1406):
-                    raise
-                # Execute the query, but alter it slightly without
-                # changing its meaning, so that the query cache
-                # will see it as a statement that has to be compiled
-                # with different output type parameters.
-                cursor.execute(stmt + ' ', args)
+                cursor.execute(stmt, args)
                 for row in cursor:
-                    return tuple(map(self._read_lob, row))
-        else:
-            cursor.execute(stmt, args)
+                    return row
+            finally:
+                del cursor.outputtypehandler
+        except self.driver.DatabaseError as e:
+            # ORA-01406: fetched column value was truncated
+            error = e.args[0]
+
+            if ((isinstance(error, str) and not error.endswith(' 1406'))
+                    or error.code != 1406):
+                raise
+            # Execute the query, but alter it slightly without
+            # changing its meaning, so that the query cache
+            # will see it as a statement that has to be compiled
+            # with different output type parameters.
+            cursor.execute(stmt + ' ', args)
             for row in cursor:
                 return tuple(map(self._read_lob, row))
+
         return default
 
 
@@ -276,14 +267,15 @@ class CXOracleConnectionManager(AbstractConnectionManager):
 
     isolation_read_only = "ISOLATION LEVEL SERIALIZABLE"
 
-    disconnected_exceptions = disconnected_exceptions
-    close_exceptions = close_exceptions
-
-    def __init__(self, user, password, dsn, twophase, options):
+    def __init__(self, driver, user, password, dsn, twophase, options):
+        self.disconnected_exceptions = driver.disconnected_exceptions
+        self.close_exceptions = driver.close_exceptions
+        self.use_replica_exceptions = driver.use_replica_exceptions
         self._user = user
         self._password = password
         self._dsn = dsn
         self._twophase = twophase
+        self._db_connect = driver.connect
         super(CXOracleConnectionManager, self).__init__(options)
 
     @metricmethod
@@ -301,14 +293,14 @@ class CXOracleConnectionManager(AbstractConnectionManager):
         while True:
             try:
                 kw = {'twophase': twophase, 'threaded': True}
-                conn = cx_Oracle.connect(self._user, self._password, dsn, **kw)
+                conn = self._db_connect(self._user, self._password, dsn, **kw)
                 cursor = conn.cursor()
                 cursor.arraysize = 64
                 if transaction_mode:
                     cursor.execute("SET TRANSACTION %s" % transaction_mode)
                 return conn, cursor
 
-            except cx_Oracle.OperationalError as e:
+            except self.use_replica_exceptions as e:
                 if replica_selector is not None:
                     next_dsn = next(replica_selector)
                     if next_dsn is not None:

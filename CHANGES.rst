@@ -38,6 +38,17 @@
 - MySQL uses (what should be) a slightly more efficient poll query.
   See :issue:`89`.
 
+- PyMySQL now works on Python 3.
+
+- Support for cx_Oracle versions older than 5.0 has been dropped. 5.0
+  was released in 2008.
+
+- Support explicitly specifying the database driver to use. This can
+  be important when there is a large performance difference between
+  drivers, and more than one might be installed. (Also, RelStorage no
+  longer has the side-effect of registering ``PyMySQL`` as ``MySQLdb`` and
+  ``psycopg2cffi`` as ``psycopg2``.) See :issue:`86`.`
+
 2.0.0b1 (2016-06-28)
 ====================
 

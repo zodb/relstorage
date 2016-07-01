@@ -96,6 +96,9 @@
 
   <sectiontype name="postgresql" implements="relstorage.adapter"
     datatype=".PostgreSQLAdapterFactory">
+	<key name="driver" datatype="string" required="no" default="auto">
+      <description>See the RelStorage documentation.</description>
+	</key>
     <key name="dsn" datatype="string" required="no" default="">
       <description>
         The PostgreSQL data source name.  For example:
@@ -111,6 +114,9 @@
 
   <sectiontype name="oracle" implements="relstorage.adapter"
     datatype=".OracleAdapterFactory">
+	<key name="driver" datatype="string" required="no" default="auto">
+      <description>See the RelStorage documentation.</description>
+	</key>
     <key name="user" datatype="string" required="yes">
       <description>
         The Oracle account name
@@ -131,6 +137,9 @@
 
   <sectiontype name="mysql" implements="relstorage.adapter"
     datatype=".MySQLAdapterFactory">
+	<key name="driver" datatype="string" required="no" default="auto">
+      <description>See the RelStorage documentation.</description>
+	</key>
     <key name="host" datatype="string" required="no">
       <description>
         host to connect

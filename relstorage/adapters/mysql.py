@@ -49,15 +49,6 @@ load_infile
 """
 
 import logging
-try:
-    import MySQLdb
-except ImportError:
-    try:
-        import pymysql
-        pymysql.install_as_MySQLdb()
-        import MySQLdb
-    except ImportError:
-        raise ImportError("Unable to import MySQLdb or pymysql")
 
 from zope.interface import implementer
 
@@ -65,7 +56,7 @@ from relstorage.adapters.connmanager import AbstractConnectionManager
 from relstorage.adapters.dbiter import HistoryFreeDatabaseIterator
 from relstorage.adapters.dbiter import HistoryPreservingDatabaseIterator
 from relstorage.adapters.interfaces import IRelStorageAdapter
-from relstorage.adapters.interfaces import ReplicaClosedException
+
 from relstorage.adapters.locker import MySQLLocker
 from relstorage.adapters.mover import ObjectMover
 from relstorage.adapters.oidallocator import MySQLOIDAllocator
@@ -78,58 +69,14 @@ from relstorage.adapters.stats import MySQLStats
 from relstorage.adapters.txncontrol import MySQLTransactionControl
 from relstorage.options import Options
 from relstorage._compat import iteritems
+
+from . import _mysql_drivers
+from ._abstract_drivers import _select_driver
+
 log = logging.getLogger(__name__)
 
-# disconnected_exceptions contains the exception types that might be
-# raised when the connection to the database has been broken.
-disconnected_exceptions = (
-    MySQLdb.OperationalError,
-    MySQLdb.InterfaceError,
-    ReplicaClosedException,
-    )
-
-# close_exceptions contains the exception types to ignore
-# when the adapter attempts to close a database connection.
-close_exceptions = disconnected_exceptions + (MySQLdb.ProgrammingError,)
-
-try:
-    # Under PyMySql 0.6.6, closing an already closed
-    # connection raises a plain pymysql.err.Error.
-    # It can also raise a DatabaseError, and sometimes
-    # an IOError doesn't get mapped to a type
-    import pymysql.err
-    close_exceptions += (
-        pymysql.err.Error,
-        IOError,
-        pymysql.err.DatabaseError
-        )
-    disconnected_exceptions += (
-        IOError, # This one can escape mapping;
-        # This one has only been seen as its subclass,
-        # InternalError, as (0, 'Socket receive buffer full'),
-        # which should probably be taken as disconnect
-        pymysql.err.DatabaseError,
-        )
-except ImportError:
-    pass
-
-try:
-    import pymysql.converters
-    # PyPy up through 5.3.0 has a bug that raises spurious
-    # MemoryErrors when run under PyMySQL >= 0.7.
-    # (https://bitbucket.org/pypy/pypy/issues/2324/bytearray-replace-a-bc-raises-memoryerror)
-    # (This is fixed in 5.3.1)
-    # Patch around it.
-    # XXX: This could be finer grained, only done if we're on PyPy <= 5.3.0.
-    if hasattr(pymysql.converters, 'escape_string'):
-        orig_escape_string = pymysql.converters.escape_string
-        def escape_string(value, mapping=None):
-            if isinstance(value, bytearray) and not value:
-                return value
-            return orig_escape_string(value, mapping)
-        pymysql.converters.escape_string = escape_string
-except ImportError:
-    pass
+def select_driver(options=None):
+    return _select_driver(options or Options(), _mysql_drivers)
 
 @implementer(IRelStorageAdapter)
 class MySQLAdapter(object):
@@ -142,14 +89,18 @@ class MySQLAdapter(object):
         self.keep_history = options.keep_history
         self._params = params
 
+        driver = select_driver(options)
+        log.debug("Using driver %r", driver)
+
         self.connmanager = MySQLdbConnectionManager(
+            driver,
             params=params,
             options=options,
             )
         self.runner = ScriptRunner()
         self.locker = MySQLLocker(
             options=options,
-            lock_exceptions=(MySQLdb.DatabaseError,),
+            lock_exceptions=driver.lock_exceptions,
             )
         self.schema = MySQLSchemaInstaller(
             connmanager=self.connmanager,
@@ -159,13 +110,13 @@ class MySQLAdapter(object):
         self.mover = ObjectMover(
             database_type='mysql',
             options=options,
-            Binary=MySQLdb.Binary,
+            Binary=driver.Binary,
             )
         self.connmanager.set_on_store_opened(self.mover.on_store_opened)
         self.oidallocator = MySQLOIDAllocator()
         self.txncontrol = MySQLTransactionControl(
             keep_history=self.keep_history,
-            Binary=MySQLdb.Binary,
+            Binary=driver.Binary,
             )
 
         if self.keep_history:
@@ -230,11 +181,12 @@ class MySQLdbConnectionManager(AbstractConnectionManager):
     isolation_read_committed = "ISOLATION LEVEL READ COMMITTED"
     isolation_repeatable_read = "ISOLATION LEVEL REPEATABLE READ"
 
-    disconnected_exceptions = disconnected_exceptions
-    close_exceptions = close_exceptions
-
-    def __init__(self, params, options):
+    def __init__(self, driver, params, options):
         self._params = params.copy()
+        self.disconnected_exceptions = driver.disconnected_exceptions
+        self.close_exceptions = driver.close_exceptions
+        self.use_replica_exceptions = driver.use_replica_exceptions
+        self._db_connect = driver.connect
         super(MySQLdbConnectionManager, self).__init__(options)
 
     def _alter_params(self, replica):
@@ -266,7 +218,7 @@ class MySQLdbConnectionManager(AbstractConnectionManager):
 
         while True:
             try:
-                conn = MySQLdb.connect(**params)
+                conn = self._db_connect(**params)
                 cursor = conn.cursor()
                 cursor.arraysize = 64
                 if transaction_mode:
@@ -280,7 +232,7 @@ class MySQLdbConnectionManager(AbstractConnectionManager):
                 cursor.execute("SET NAMES binary")
                 conn.replica = replica
                 return conn, cursor
-            except MySQLdb.OperationalError as e:
+            except self.use_replica_exceptions as e:
                 if replica is not None:
                     next_replica = next(replica_selector)
                     if next_replica is not None:

@@ -960,7 +960,7 @@ class PostgreSQLSchemaInstaller(AbstractSchemaInstaller):
     def get_database_name(self, cursor):
         cursor.execute("SELECT current_database()")
         for (name,) in cursor:
-            return name
+            return name if isinstance(name, str) else name.decode('ascii')
 
     def prepare(self):
         """Create the database schema if it does not already exist."""
@@ -993,7 +993,8 @@ class PostgreSQLSchemaInstaller(AbstractSchemaInstaller):
 
     def list_tables(self, cursor):
         cursor.execute("SELECT tablename FROM pg_tables")
-        return [name for (name,) in cursor.fetchall()]
+        return [name if isinstance(name, str) else name.decode('ascii')
+                for (name,) in cursor.fetchall()]
 
     def list_sequences(self, cursor):
         cursor.execute("SELECT relname FROM pg_class WHERE relkind = 'S'")
@@ -1077,11 +1078,12 @@ class MySQLSchemaInstaller(AbstractSchemaInstaller):
     def get_database_name(self, cursor):
         cursor.execute("SELECT DATABASE()")
         for (name,) in cursor:
-            return name
+            return name if isinstance(name, str) else name.decode('ascii')
 
     def list_tables(self, cursor):
         cursor.execute("SHOW TABLES")
-        return [name for (name,) in cursor.fetchall()]
+        return [name if isinstance(name, str) else name.decode('ascii')
+                for (name,) in cursor.fetchall()]
 
     def list_sequences(self, cursor):
         return []
@@ -1094,6 +1096,8 @@ class MySQLSchemaInstaller(AbstractSchemaInstaller):
             for col_index, col in enumerate(cursor.description):
                 if col[0].lower() == 'engine':
                     engine = row[col_index]
+                    if not isinstance(engine, str):
+                        engine = engine.decode('ascii')
                     if engine.lower() != 'innodb':
                         raise StorageError(
                             "The object_state table must use the InnoDB "

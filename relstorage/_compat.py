@@ -64,6 +64,7 @@ else:
     _db_binary_types = (memoryview, buffer)
     # bytes is str under py2, so must be memoryview
     # There is a psycopg2.Binary type that should do basically the same thing
+    # XXX: Use the driver layer for this. Binary is a standard field!
     try:
         from psycopg2 import Binary as _psyBinary
     except ImportError:
