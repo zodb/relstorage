@@ -387,18 +387,6 @@ class LocalClientBucketTests(unittest.TestCase):
         del b['abc']
         self.assertEqual(b.size, 0)
 
-    def test_set_integer_value(self):
-        b = self.getClass()(100)
-        self.assertEqual(b.size, 0)
-        b['abc'] = 5
-        self.assertEqual(b.size, 3)
-        b['abc'] = -7
-        self.assertEqual(b.size, 3)
-        b['abc'] = 0
-        self.assertEqual(b.size, 3)
-        del b['abc']
-        self.assertEqual(b.size, 0)
-
     def test_set_limit(self):
         from relstorage.cache import SizeOverflow
         b = self.getClass()(5)
@@ -438,11 +426,6 @@ class LocalClientTests(unittest.TestCase):
         c.set('abc', b'def')
         self.assertEqual(c.get('abc'), b'def')
         self.assertEqual(c.get('xyz'), None)
-
-    def test_set_and_get_tuple_compressed(self):
-        c = self._makeOne(cache_local_compression='zlib')
-        c.set('abc', (b'one', b'two'))
-        self.assertEqual(c.get('abc'), (b'one', b'two'))
 
     def test_set_and_get_object_too_large(self):
         c = self._makeOne(cache_local_compression='none')

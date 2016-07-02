@@ -17,6 +17,7 @@ from __future__ import absolute_import, print_function
 import logging
 import sys
 import unittest
+import importlib
 
 _include_db = True
 
@@ -44,8 +45,7 @@ def make_suite():
         test_modules += db_test_modules
 
     for mod_name in test_modules:
-        mod = __import__(mod_name, globals(),
-                         fromlist=['chicken'] if '.' in mod_name else [])
+        mod = importlib.import_module(mod_name)
         suite.addTest(mod.test_suite())
 
     return suite

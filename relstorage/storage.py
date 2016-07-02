@@ -252,7 +252,7 @@ class RelStorage(UndoLogCompatible,
         if hasattr(self._adapter.packundo, 'deleteObject'):
             interface.alsoProvides(self, ZODB.interfaces.IExternalGC)
         else:
-            def deleteObject(*args):
+            def deleteObject(*_args):
                 raise AttributeError("deleteObject")
             self.deleteObject = deleteObject
 
@@ -267,7 +267,7 @@ class RelStorage(UndoLogCompatible,
             blobhelper = self.blobhelper.new_instance(adapter=adapter)
         else:
             blobhelper = None
-        other = RelStorage(adapter=adapter, name=self.__name__,
+        other = type(self)(adapter=adapter, name=self.__name__,
                            create=False, options=self._options, cache=cache,
                            blobhelper=blobhelper)
         self._instances.append(weakref.ref(other, self._instances.remove))
@@ -414,7 +414,8 @@ class RelStorage(UndoLogCompatible,
         Used by the test suite and the ZODBConvert script.
         """
         self._adapter.schema.zap_all(**kwargs)
-        self.release()
+        self._drop_load_connection()
+        self._drop_store_connection()
         self._cache.clear()
 
     def release(self):
@@ -425,7 +426,6 @@ class RelStorage(UndoLogCompatible,
         connections.
         """
         with self._lock:
-            #print("Dropping", self._load_conn, self._store_conn)
             self._drop_load_connection()
             self._drop_store_connection()
         self._cache.release()
