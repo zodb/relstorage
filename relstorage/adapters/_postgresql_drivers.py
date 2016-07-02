@@ -145,19 +145,105 @@ else:
                 print("Failed to close", self, self.__type, " from:", self.__at, file=sys.stderr)
                 print("Deleted at", ''.join(traceback.format_stack()))
 
-    class _DoesNotRollbackIfNotInTransaction(pg8000.Connection):
-        # pg8000, unlike psycopg2/cffi, will actually send a ROLLBACK
-        # statement even if it's not in a transaction. This generates
-        # warnings from the server "NOT IN TRANSACTION", which are annoying
-        # (because we rolback() after every commit)
-        # So this subclass doesn't do that.
-        # This will be fixed in 1.10.7, see https://github.com/mfenniak/pg8000/pull/114
+    Binary = pg8000.Binary
+
+    # Just enough lobject functionality for everything to work.
+    # This is not threadsafe or useful outside of relstorage, it implements exactly
+    # our requirements.
+    class _UploadBlob(object):
+        closed = False
+        def __init__(self, conn, new_file):
+            with open(new_file, 'rb') as f:
+                data = f.read()
+
+            cursor = conn.cursor()
+            try:
+                cursor.execute("SELECT lo_from_bytea(0, %(data)s)",
+                               {'data': Binary(data)})
+                row = cursor.fetchone()
+                self.oid = row[0]
+            finally:
+                cursor.close()
+
+        def close(self):
+            self.closed = True
+
+    class _WriteBlob(object):
+        closed = False
+
+        def __init__(self, conn):
+            self._cursor = conn.cursor()
+            self._offset = 0
+            try:
+                self._cursor.execute("SELECT lo_creat(-1)")
+                row = self._cursor.fetchone()
+                self.oid = row[0]
+            except:
+                self._cursor.close()
+                raise
+
+        def close(self):
+            self._cursor.close()
+            self.closed = True
+
+        def write(self, data):
+            self._cursor.execute("SELECT lo_put(%(oid)s, %(off)s, %(data)s)",
+                                 {'oid': self.oid, 'off': self._offset, 'data': data})
+            self._offset += len(data)
+            return len(data)
+
+    class _ReadBlob(object):
+        closed = False
+
+        def __init__(self, conn, oid):
+            cursor = conn.cursor()
+            try:
+                # We could theoretically chunk this.
+                cursor.execute("SELECT lo_get(%(oid)s)",
+                               {'oid': oid})
+                row = cursor.fetchone()
+                self._data = row[0]
+            finally:
+                cursor.close()
+
+        def export(self, filename):
+            with open(filename, 'wb') as f:
+                f.write(self._data)
+            self.close()
+
+        def read(self, _size):
+            data = self._data
+            self._data = b''
+            return data
+
+        def close(self):
+            self._data = ''
+            self.closed = True
+
+    class _Connection(pg8000.Connection):
         def rollback(self):
+            # pg8000, unlike psycopg2/cffi, will actually send a ROLLBACK
+            # statement even if it's not in a transaction. This generates
+            # warnings from the server "NOT IN TRANSACTION", which are annoying
+            # (because we rolback() after every commit)
+            # So this subclass doesn't do that.
+            # This will be fixed in 1.10.7, see https://github.com/mfenniak/pg8000/pull/114
+
             # This is net perfectly correct because we don't hold the lock. But we
             # don't expect to be used by multiple threads.
             if not self.in_transaction:
                 return
-            return super(_DoesNotRollbackIfNotInTransaction,self).rollback()
+            return super(_Connection, self).rollback()
+
+        def lobject(self, oid=0, mode='', new_oid=0, new_file=None):
+            if oid == 0 and new_oid == 0 and mode == 'wb':
+                if new_file:
+                    # Upload the whole file right now.
+                    return _UploadBlob(self, new_file)
+                return _WriteBlob(self)
+            if oid != 0 and mode == 'rb':
+                return _ReadBlob(self, oid)
+            raise AssertionError("Unsupported params", dict(locals()))
 
     @implementer(IDBDriver)
     class PG8000Driver(object):
@@ -186,8 +272,8 @@ else:
                     key = 'database'
                 kwds[key] = value
             conn = self._connect(**kwds)
-            assert conn.__class__ is _DoesNotRollbackIfNotInTransaction.__base__
-            conn.__class__ = _DoesNotRollbackIfNotInTransaction
+            assert conn.__class__ is _Connection.__base__
+            conn.__class__ = _Connection
             return _ConnWrapper(conn) if self._wrap else conn
 
         # Extensions

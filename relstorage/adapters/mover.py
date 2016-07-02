@@ -1035,20 +1035,11 @@ class ObjectMover(object):
 
         f = None
         bytecount = 0
+        read_chunk_size = self.blob_chunk_size
 
         try:
             cursor.execute(stmt, (oid, tid))
             for chunk_num, loid in cursor.fetchall():
-                if not hasattr(cursor.connection, 'lobject'):
-                    # pg8000, etc
-                    # TODO:We're not chunking these.
-                    assert chunk_num == 0
-                    cursor.execute("SELECT lo_get(%(oid)s)", {'oid': loid})
-                    row = cursor.fetchone()
-                    data = row[0]
-                    with open(filename, 'wb') as f:
-                        f.write(data)
-                    return len(data)
 
                 blob = cursor.connection.lobject(loid, 'rb')
 
@@ -1061,11 +1052,12 @@ class ObjectMover(object):
 
                 if f is None:
                     f = open(filename, 'ab') # Append, chunk 0 was an export
-                read_chunk_size = self.blob_chunk_size
+
                 reader = iter(lambda: blob.read(read_chunk_size), b'')
                 for read_chunk in reader:
                     f.write(read_chunk)
                     bytecount += len(read_chunk)
+                blob.close()
         except:
             if f is not None:
                 f.close()
@@ -1172,7 +1164,8 @@ class ObjectMover(object):
             f.close()
         return bytecount
 
-    # PostgreSQL only supports up to 2GB of data per BLOB.
+    # PostgreSQL < 9.3 only supports up to 2GB of data per BLOB.
+    # Even above that, we can only use larger blobs on 64-bit builds.
     postgresql_blob_chunk_maxsize = 1<<31
 
     @metricmethod_sampled
@@ -1208,32 +1201,11 @@ class ObjectMover(object):
             VALUES (%(oid)s, %(chunk_num)s, %(loid)s)
             """
 
-        if not hasattr(cursor.connection, 'lobject'):
-            # Not on pg8000.
-            # TODO: Optimize this and chunk it.
-            # TODO: We can easily emulate the psycopg2 interface.
-            with open(filename, 'rb') as f:
-                data = f.read()
-
-            params = {'oid': oid, 'data': self.Binary(data)}
-            if use_tid:
-                insert_stmt = """
-                INSERT INTO blob_chunk (zoid, tid, chunk_num, chunk)
-                SELECT %(oid)s, %(tid)s, 0, lo_from_bytea(0, %(data)s)
-                """
-                params['tid'] = tid
-            else:
-                insert_stmt = """
-                INSERT INTO temp_blob_chunk (zoid, chunk_num, chunk)
-                SELECT %(oid)s, 0, lo_from_bytea(0, %(data)s)
-                """
-            cursor.execute(insert_stmt, params)
-            return
-
         blob = None
 
         maxsize = self.postgresql_blob_chunk_maxsize
         filesize = os.path.getsize(filename)
+        write_chunk_size = self.blob_chunk_size
 
         if filesize <= maxsize:
             # File is small enough to fit in one chunk, just use
@@ -1257,7 +1229,7 @@ class ObjectMover(object):
                     params['tid'] = tid
                 cursor.execute(insert_stmt, params)
 
-                write_chunk_size = self.blob_chunk_size
+
                 for _i in xrange(maxsize // write_chunk_size):
                     write_chunk = f.read(write_chunk_size)
                     if not blob.write(write_chunk):
