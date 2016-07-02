@@ -150,23 +150,6 @@ else:
     # Just enough lobject functionality for everything to work.
     # This is not threadsafe or useful outside of relstorage, it implements exactly
     # our requirements.
-    class _UploadBlob(object):
-        closed = False
-        def __init__(self, conn, new_file):
-            with open(new_file, 'rb') as f:
-                data = f.read()
-
-            cursor = conn.cursor()
-            try:
-                cursor.execute("SELECT lo_from_bytea(0, %(data)s)",
-                               {'data': Binary(data)})
-                row = cursor.fetchone()
-                self.oid = row[0]
-            finally:
-                cursor.close()
-
-        def close(self):
-            self.closed = True
 
     class _WriteBlob(object):
         closed = False
@@ -188,36 +171,57 @@ else:
 
         def write(self, data):
             self._cursor.execute("SELECT lo_put(%(oid)s, %(off)s, %(data)s)",
-                                 {'oid': self.oid, 'off': self._offset, 'data': data})
+                                 {'oid': self.oid, 'off': self._offset, 'data': Binary(data)})
             self._offset += len(data)
             return len(data)
 
+    class _UploadBlob(object):
+        closed = False
+        fetch_size = 1024 * 1024 * 9
+
+        def __init__(self, conn, new_file):
+            blob = _WriteBlob(conn)
+            self.oid = blob.oid
+            try:
+                with open(new_file, 'rb') as f:
+                    while 1:
+                        data = f.read(self.fetch_size)
+                        if not data:
+                            break
+                        blob.write(data)
+            finally:
+                blob.close()
+
+        def close(self):
+            self.closed = True
+
     class _ReadBlob(object):
         closed = False
-
+        fetch_size = 1024 * 1024 * 9
         def __init__(self, conn, oid):
-            cursor = conn.cursor()
-            try:
-                # We could theoretically chunk this.
-                cursor.execute("SELECT lo_get(%(oid)s)",
-                               {'oid': oid})
-                row = cursor.fetchone()
-                self._data = row[0]
-            finally:
-                cursor.close()
+            self._cursor = conn.cursor()
+            self.oid = oid
+            self.offset = 0
 
         def export(self, filename):
             with open(filename, 'wb') as f:
-                f.write(self._data)
+                while 1:
+                    data = self.read(self.fetch_size)
+                    if not data:
+                        break
+                    f.write(data)
             self.close()
 
-        def read(self, _size):
-            data = self._data
-            self._data = b''
+        def read(self, size):
+            self._cursor.execute("SELECT lo_get(%(oid)s, %(off)s, %(cnt)s)",
+                                 {'oid': self.oid, 'off': self.offset, 'cnt': size})
+            row = self._cursor.fetchone()
+            data = row[0]
+            self.offset += len(data)
             return data
 
         def close(self):
-            self._data = ''
+            self._cursor.close()
             self.closed = True
 
     class _Connection(pg8000.Connection):

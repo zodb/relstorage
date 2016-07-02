@@ -1229,7 +1229,6 @@ class ObjectMover(object):
                     params['tid'] = tid
                 cursor.execute(insert_stmt, params)
 
-
                 for _i in xrange(maxsize // write_chunk_size):
                     write_chunk = f.read(write_chunk_size)
                     if not blob.write(write_chunk):
