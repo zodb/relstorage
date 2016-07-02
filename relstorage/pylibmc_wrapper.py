@@ -31,7 +31,7 @@ def _catching(func):
     def wrapper(*args):
         try:
             return func(*args)
-        except MemcachedError as e:
+        except MemcachedError as e: # pragma: no cover
             log.debug("%s failed: %s", name, e)
             return None
     return wrapper
@@ -42,13 +42,13 @@ class Client(object):
         "ketama": True,
     }
 
+    min_compress_len = 0
+
     def __init__(self, servers):
         self._client = pylibmc.Client(servers, binary=True)
         self._client.set_behaviors(self.behaviors)
         if pylibmc.support_compression:
             self.min_compress_len = 1000
-        else: # pragma: no cover
-            self.min_compress_len = 0
 
     @_catching
     def get(self, key):
@@ -72,10 +72,6 @@ class Client(object):
     def add(self, key, value):
         return self._client.add(
             key, value, min_compress_len=self.min_compress_len)
-
-    @_catching
-    def incr(self, key):
-        return self._client.incr(key)
 
     @_catching
     def flush_all(self):

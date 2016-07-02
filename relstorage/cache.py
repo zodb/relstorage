@@ -11,23 +11,27 @@
 # FOR A PARTICULAR PURPOSE.
 #
 ##############################################################################
+from __future__ import absolute_import, print_function
 
-from __future__ import absolute_import
 from relstorage.autotemp import AutoTemporaryFile
 from ZODB.utils import p64
 from ZODB.utils import u64
 from ZODB.POSException import ReadConflictError
 from persistent.TimeStamp import TimeStamp
 
+import importlib
 import logging
-import random
 import threading
+
 from relstorage._compat import string_types
 from relstorage._compat import iteritems
 from relstorage._compat import unicode
 
 log = logging.getLogger(__name__)
 
+class _UsedAfterRelease(object):
+    pass
+_UsedAfterRelease = _UsedAfterRelease()
 
 class StorageCache(object):
     """RelStorage integration with memcached or similar.
@@ -69,7 +73,7 @@ class StorageCache(object):
 
         if options.cache_servers:
             module_name = options.cache_module_name
-            module = __import__(module_name, {}, {}, ['Client'])
+            module = importlib.import_module(module_name)
             servers = options.cache_servers
             if isinstance(servers, string_types):
                 servers = servers.split()
@@ -81,6 +85,7 @@ class StorageCache(object):
 
         # checkpoints_key holds the current checkpoints.
         self.checkpoints_key = '%s:checkpoints' % self.prefix
+        assert isinstance(self.checkpoints_key, str) # no unicode on Py2
 
         # delta_after0 contains {oid: tid} after checkpoint 0
         # and before or at self.current_tid.
@@ -97,12 +102,12 @@ class StorageCache(object):
 
     def new_instance(self):
         """Return a copy of this instance sharing the same local client"""
+        local_client = None
         if self.options.share_local_cache:
             local_client = self.clients_local_first[0]
-            return StorageCache(self.adapter, self.options, self.prefix,
-                                local_client)
-        else:
-            return StorageCache(self.adapter, self.options, self.prefix)
+
+        return type(self)(self.adapter, self.options, self.prefix,
+                          local_client)
 
     def release(self):
         """
@@ -113,10 +118,12 @@ class StorageCache(object):
         for client in self.clients_local_first:
             client.disconnect_all()
 
-        if not self.options.share_local_cache:
-            # If we have our own local cache not shared with anyone,
-            # go ahead and clear it to release any memory it's holding.
-            self.clients_local_first[0].flush_all()
+        # Release our clients. If we had a non-shared local cache,
+        # this will also allow it to release any memory its holding.
+        # Set them to non-iterables to make it obvious if we are used
+        # after release.
+        self.clients_local_first = _UsedAfterRelease
+        self.clients_global_first = _UsedAfterRelease
 
     def clear(self):
         """Remove all data from the cache.  Called by speed tests."""
@@ -569,10 +576,12 @@ class SizeOverflow(Exception):
     """Too much memory would be consumed by a new key"""
 
 class LocalClientBucket(dict):
-    """A map that keeps a record of its approx. size.
-
-    keys must be strings and most values are strings.
     """
+    A map that keeps a record of its approx. size.
+
+    keys must be `str`` and values must be bytestrings.
+    """
+    __slots__ = ('size', 'limit')
 
     def __init__(self, limit):
         dict.__init__(self)
@@ -580,23 +589,25 @@ class LocalClientBucket(dict):
         self.limit = limit
 
     def __setitem__(self, key, value):
-        """Set an item.
+        """
+        Set an item.
 
         Throws SizeOverflow if the new item would cause this map to
         surpass its memory limit.
         """
-        assert not isinstance(value, unicode)
-        if isinstance(value, bytes):
-            # XXX PY3: Why do we accept non-bytes?
-            sizedelta = len(value)
-        else:
-            sizedelta = 0
+        # These types are gated by LocalClient, we don't need to double
+        # check.
+        #assert isinstance(key, str)
+        #assert isinstance(value, bytes)
+
+        sizedelta = len(value)
+
         if key in self:
             oldvalue = self[key]
-            if isinstance(oldvalue, bytes):
-                sizedelta -= len(oldvalue)
+            sizedelta -= len(oldvalue)
         else:
             sizedelta += len(key)
+
         if self.size + sizedelta > self.limit:
             raise SizeOverflow()
         dict.__setitem__(self, key, value)
@@ -607,13 +618,15 @@ class LocalClientBucket(dict):
         oldvalue = self[key]
         dict.__delitem__(self, key)
         sizedelta = len(key)
-        if isinstance(oldvalue, bytes):
-            sizedelta += len(oldvalue)
+        sizedelta += len(oldvalue)
         self.size -= sizedelta
 
 
 class LocalClient(object):
     """A memcache-like object that stores in Python dictionaries."""
+
+    _compress = None
+    _decompress = None
 
     def __init__(self, options):
         self._lock = threading.Lock()
@@ -623,12 +636,8 @@ class LocalClient(object):
         self._bucket1 = LocalClientBucket(self._bucket_limit)
 
         compression_module = options.cache_local_compression
-        if compression_module in ('', None, 'none'):
-            self._compress = None
-            self._decompress = None
-        else:
-            module = __import__(
-                compression_module, {}, {}, ['compress', 'decompress'])
+        if compression_module and compression_module != 'none':
+            module = importlib.import_module(compression_module)
             self._compress = module.compress
             self._decompress = module.decompress
 
@@ -654,15 +663,7 @@ class LocalClient(object):
                     del self._bucket1[key]
                     self._set_one(key, cvalue)
 
-                if decompress is not None:
-                    # XXX: PY3: When would we have non-bytes? Why would we?
-                    if isinstance(cvalue, bytes):
-                        value = decompress(cvalue)
-                    else:
-                        value = cvalue
-                else:
-                    value = cvalue
-
+                value = decompress(cvalue) if decompress else cvalue
                 res[key] = value
         return res
 
@@ -695,20 +696,15 @@ class LocalClient(object):
         compress = self._compress
         with self._lock:
             for key, value in iteritems(d):
-                # XXX PY3 Shouldn't we assert isinstance(bytes)?
-                # Why do we allow non-bytes values? Do we use them outside
-                # of tests?
-                # On Py2, this used to check basestring
-                if isinstance(value, bytes):
-                    if len(value) >= self._value_limit:
-                        # This value is too big, so don't cache it.
-                        continue
-                    if compress is not None:
-                        cvalue = compress(value)
-                    else:
-                        cvalue = value
-                else:
-                    cvalue = value
+                # This used to allow non-byte values, but that's confusing
+                # on Py3 and wasn't used outside of tests, so we enforce it.
+                assert isinstance(key, str), (type(key), key)
+                assert isinstance(value, bytes)
+                if len(value) >= self._value_limit:
+                    # This value is too big, so don't cache it.
+                    continue
+
+                cvalue = compress(value) if compress else value
 
                 if key in self._bucket0:
                     if not allow_replace:
@@ -724,32 +720,6 @@ class LocalClient(object):
 
     def add(self, key, value):
         self.set_multi({key: value}, allow_replace=False)
-
-    def incr(self, key):
-        if not self._bucket_limit:
-            # don't bother
-            return None
-        decompress = self._decompress
-        with self._lock:
-            cvalue = self._bucket0.get(key)
-            if cvalue is None:
-                cvalue = self._bucket1.get(key)
-                if cvalue is None:
-                    return None
-                # this key is active, so move it to bucket0
-                del self._bucket1[key]
-
-            if decompress is not None:
-                if isinstance(cvalue, bytes):
-                    value = decompress(cvalue)
-                else:
-                    value = cvalue
-            else:
-                value = cvalue
-
-            res = int(value) + 1
-            self._set_one(key, res)
-            return res
 
     def disconnect_all(self):
         # Compatibility with memcache.
