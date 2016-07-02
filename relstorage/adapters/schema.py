@@ -960,7 +960,15 @@ class PostgreSQLSchemaInstaller(AbstractSchemaInstaller):
     def get_database_name(self, cursor):
         cursor.execute("SELECT current_database()")
         for (name,) in cursor:
-            return name if isinstance(name, str) else name.decode('ascii')
+            if isinstance(name, str):
+                return name
+            if hasattr(name, 'encode'):
+                # OK, name must be a unicode object, and we must be on Py2.
+                # pg8000 does this.
+                assert isinstance(name, unicode) # pylint:disable=undefined-variable
+                return name.encode('ascii')
+            assert isinstance(name, bytes)
+            return name.decode('ascii')
 
     def prepare(self):
         """Create the database schema if it does not already exist."""

@@ -85,6 +85,7 @@ class StorageCache(object):
 
         # checkpoints_key holds the current checkpoints.
         self.checkpoints_key = '%s:checkpoints' % self.prefix
+        assert isinstance(self.checkpoints_key, str) # no unicode on Py2
 
         # delta_after0 contains {oid: tid} after checkpoint 0
         # and before or at self.current_tid.
@@ -624,6 +625,9 @@ class LocalClientBucket(dict):
 class LocalClient(object):
     """A memcache-like object that stores in Python dictionaries."""
 
+    _compress = None
+    _decompress = None
+
     def __init__(self, options):
         self._lock = threading.Lock()
         self._bucket_limit = int(1000000 * options.cache_local_mb / 2)
@@ -632,10 +636,7 @@ class LocalClient(object):
         self._bucket1 = LocalClientBucket(self._bucket_limit)
 
         compression_module = options.cache_local_compression
-        if compression_module in ('', None, 'none'):
-            self._compress = lambda x: x
-            self._decompress = lambda x: x
-        else:
+        if compression_module and compression_module != 'none':
             module = importlib.import_module(compression_module)
             self._compress = module.compress
             self._decompress = module.decompress
@@ -662,7 +663,7 @@ class LocalClient(object):
                     del self._bucket1[key]
                     self._set_one(key, cvalue)
 
-                value = decompress(cvalue)
+                value = decompress(cvalue) if decompress else cvalue
                 res[key] = value
         return res
 
@@ -697,12 +698,13 @@ class LocalClient(object):
             for key, value in iteritems(d):
                 # This used to allow non-byte values, but that's confusing
                 # on Py3 and wasn't used outside of tests, so we enforce it.
-                assert isinstance(key, str)
+                assert isinstance(key, str), (type(key), key)
                 assert isinstance(value, bytes)
                 if len(value) >= self._value_limit:
                     # This value is too big, so don't cache it.
                     continue
-                cvalue = compress(value)
+
+                cvalue = compress(value) if compress else value
 
                 if key in self._bucket0:
                     if not allow_replace:
