@@ -150,7 +150,7 @@ class Psycopg2ConnectionManager(AbstractConnectionManager):
         self.isolation_read_committed = driver.ISOLATION_LEVEL_READ_COMMITTED
         self.isolation_serializable = driver.ISOLATION_LEVEL_SERIALIZABLE
         self.keep_history = options.keep_history
-        self._db_connect = driver.connect
+        self._db_connect_with_isolation = driver.connect_with_isolation
         super(Psycopg2ConnectionManager, self).__init__(options)
 
     def _alter_dsn(self, replica):
@@ -182,22 +182,9 @@ class Psycopg2ConnectionManager(AbstractConnectionManager):
 
         while True:
             try:
-                conn = self._db_connect(dsn)
-                isolation_set = False
-                if hasattr(conn, 'set_isolation_level'):
-                    # psycopg2 family
-                    conn.set_isolation_level(isolation)
-                    isolation_set = True
-                cursor = conn.cursor()
-                if not isolation_set:
-                    cursor.execute('SET TRANSACTION %s' % isolation)
-                    cursor.execute("SET SESSION CHARACTERISTICS AS TRANSACTION %s" % isolation)
-                    conn.commit()
-
+                conn, cursor = self._db_connect_with_isolation(isolation, dsn)
                 cursor.arraysize = 64
                 conn.replica = replica
-                assert not conn.autocommit
-                #print("Opened", conn, cursor)
                 return conn, cursor
             except self.use_replica_exceptions as e:
                 if replica is not None:

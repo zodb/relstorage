@@ -60,6 +60,10 @@ else:
         ISOLATION_LEVEL_READ_COMMITTED = psycopg2.extensions.ISOLATION_LEVEL_READ_COMMITTED
         ISOLATION_LEVEL_SERIALIZABLE = psycopg2.extensions.ISOLATION_LEVEL_SERIALIZABLE
 
+        def connect_with_isolation(self, isolation, *args, **kwargs):
+            conn = self.connect(*args, **kwargs)
+            conn.set_isolation_level(isolation)
+            return conn, conn.cursor()
 
     driver = Psycopg2Driver()
     driver_map[driver.__name__] = driver
@@ -86,6 +90,10 @@ else: # pragma: no cover
         ISOLATION_LEVEL_READ_COMMITTED = psycopg2cffi.extensions.ISOLATION_LEVEL_READ_COMMITTED
         ISOLATION_LEVEL_SERIALIZABLE = psycopg2cffi.extensions.ISOLATION_LEVEL_SERIALIZABLE
 
+        def connect_with_isolation(self, isolation, *args, **kwargs):
+            conn = self.connect(*args, **kwargs)
+            conn.set_isolation_level(isolation)
+            return conn, conn.cursor()
 
     driver = Psycopg2cffiDriver()
     driver_map[driver.__name__] = driver
@@ -143,8 +151,10 @@ else:
         # warnings from the server "NOT IN TRANSACTION", which are annoying
         # (because we rolback() after every commit)
         # So this subclass doesn't do that.
-
+        # This will be fixed in 1.10.7, see https://github.com/mfenniak/pg8000/pull/114
         def rollback(self):
+            # This is net perfectly correct because we don't hold the lock. But we
+            # don't expect to be used by multiple threads.
             if not self.in_transaction:
                 return
             return super(_DoesNotRollbackIfNotInTransaction,self).rollback()
@@ -160,11 +170,13 @@ else:
         Binary = staticmethod(pg8000.Binary)
         _connect = staticmethod(pg8000.connect)
 
+
         _wrap = False
 
         def connect(self, dsn):
             # Parse the DSN into parts to pass as keywords.
-            # TODO: We can do this is psycopg2 as well.
+            # We don't do this psycopg2 because a real DSN supports more options than
+            # we do and we don't want to limit it.
             kwds = {}
             parts = dsn.split(' ')
             for part in parts:
@@ -178,8 +190,19 @@ else:
             conn.__class__ = _DoesNotRollbackIfNotInTransaction
             return _ConnWrapper(conn) if self._wrap else conn
 
+        # Extensions
+
         ISOLATION_LEVEL_READ_COMMITTED = 'ISOLATION LEVEL READ COMMITTED'
         ISOLATION_LEVEL_SERIALIZABLE = 'ISOLATION LEVEL SERIALIZABLE'
+
+        def connect_with_isolation(self, isolation, dsn):
+            conn = self.connect(dsn)
+            cursor = conn.cursor()
+            cursor.execute('SET TRANSACTION %s' % isolation)
+            cursor.execute("SET SESSION CHARACTERISTICS AS TRANSACTION %s" % isolation)
+            conn.commit()
+            return conn, cursor
+
 
     # XXX: global side-effect!
     pg8000.paramstyle = 'pyformat'
