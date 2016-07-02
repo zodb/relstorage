@@ -13,8 +13,12 @@
 ##############################################################################
 """Combines all the tests"""
 from __future__ import absolute_import, print_function
-import unittest
+
 import logging
+import sys
+import unittest
+
+_include_db = True
 
 def make_suite():
     suite = unittest.TestSuite()
@@ -29,10 +33,15 @@ def make_suite():
         'relstorage.tests.test_zodbconvert',
         'relstorage.tests.test_zodbpack',
         'relstorage.tests.test_zodburi',
+    ]
+    db_test_modules = [
         'relstorage.tests.testpostgresql',
         'relstorage.tests.testmysql',
         'relstorage.tests.testoracle',
     ]
+
+    if _include_db:
+        test_modules += db_test_modules
 
     for mod_name in test_modules:
         mod = __import__(mod_name, globals(),
@@ -42,6 +51,9 @@ def make_suite():
     return suite
 
 if __name__ == '__main__':
+    if '--no-db' in sys.argv:
+        _include_db = False
+        sys.argv.remove('--no-db')
     logging.basicConfig()
     # We get constant errors about failing to lock a blob file,
     # which really bloats the CI logs, so turn those off.

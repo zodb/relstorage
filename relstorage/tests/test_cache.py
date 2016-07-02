@@ -550,43 +550,6 @@ class LocalClientTests(unittest.TestCase):
         c.add('k1', b'ghi')
         self.assertEqual(c.get_multi(['k0', 'k1']), {'k0': b'abc', 'k1': b'ghi'})
 
-    def test_incr_normal(self):
-        c = self._makeOne()
-        c.set('k0', 41)
-        self.assertEqual(c.incr('k0'), 42)
-        self.assertEqual(c.incr('k1'), None)
-
-    def test_incr_string_with_compression(self):
-        c = self._makeOne(cache_local_compression='zlib')
-        c.set('k0', b'41')
-        self.assertEqual(c.incr('k0'), 42)
-        self.assertEqual(c.incr('k1'), None)
-
-    def test_incr_string_without_compression(self):
-        c = self._makeOne(cache_local_compression='none')
-        c.set('k0', b'41')
-        self.assertEqual(c.incr('k0'), 42)
-        self.assertEqual(c.incr('k1'), None)
-
-    def test_incr_hit_size_limit(self):
-        c = self._makeOne()
-        c._bucket_limit = 4
-        c.flush_all()
-        c.set('k0', 14)
-        c.set('key1', 27)
-        self.assertEqual(c._bucket0.size, 4)
-        self.assertEqual(c._bucket1.size, 2)
-        self.assertEqual(c.incr('k0'), 15)  # this moves k0 to bucket0
-        self.assertEqual(c._bucket0.size, 2)
-        self.assertEqual(c._bucket1.size, 4)
-
-    def test_incr_with_zero_space(self):
-        options = MockOptions()
-        options.cache_local_mb = 0
-        c = self.getClass()(options)
-        self.assertEqual(c.incr('abc'), None)
-
-
 class MockOptions(object):
     cache_module_name = ''
     cache_servers = ''

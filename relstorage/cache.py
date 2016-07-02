@@ -725,32 +725,6 @@ class LocalClient(object):
     def add(self, key, value):
         self.set_multi({key: value}, allow_replace=False)
 
-    def incr(self, key):
-        if not self._bucket_limit:
-            # don't bother
-            return None
-        decompress = self._decompress
-        with self._lock:
-            cvalue = self._bucket0.get(key)
-            if cvalue is None:
-                cvalue = self._bucket1.get(key)
-                if cvalue is None:
-                    return None
-                # this key is active, so move it to bucket0
-                del self._bucket1[key]
-
-            if decompress is not None:
-                if isinstance(cvalue, bytes):
-                    value = decompress(cvalue)
-                else:
-                    value = cvalue
-            else:
-                value = cvalue
-
-            res = int(value) + 1
-            self._set_one(key, res)
-            return res
-
     def disconnect_all(self):
         # Compatibility with memcache.
         pass
