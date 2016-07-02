@@ -399,7 +399,7 @@ history_preserving_reset_oid = """
         CREATE SEQUENCE zoid_seq;
 """
 
-postgresql_procedures = """
+postgresql_procedures = ["""
 CREATE OR REPLACE FUNCTION blob_chunk_delete_trigger() RETURNS TRIGGER
 AS $blob_chunk_delete_trigger$
     -- Version: %(postgresql_proc_version)s
@@ -415,7 +415,7 @@ AS $blob_chunk_delete_trigger$
         RETURN OLD;
     END;
 $blob_chunk_delete_trigger$ LANGUAGE plpgsql;
-
+""" % globals() ,"""
 CREATE OR REPLACE FUNCTION temp_blob_chunk_delete_trigger() RETURNS TRIGGER
 AS $temp_blob_chunk_delete_trigger$
     -- Version: %(postgresql_proc_version)s
@@ -431,7 +431,7 @@ AS $temp_blob_chunk_delete_trigger$
         RETURN OLD;
     END;
 $temp_blob_chunk_delete_trigger$ LANGUAGE plpgsql;
-""" % globals()
+""" % globals(),]
 
 oracle_history_preserving_package = """
 CREATE OR REPLACE PACKAGE relstorage_op AS
@@ -1046,7 +1046,8 @@ class PostgreSQLSchemaInstaller(AbstractSchemaInstaller):
     def install_procedures(self, cursor):
         """Install the stored procedures"""
         self.install_languages(cursor)
-        cursor.execute(postgresql_procedures)
+        for stmt in postgresql_procedures:
+            cursor.execute(stmt)
 
     def list_triggers(self, cursor):
         cursor.execute("SELECT tgname FROM pg_trigger")

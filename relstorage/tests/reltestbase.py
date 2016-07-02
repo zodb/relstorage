@@ -291,6 +291,8 @@ class GenericRelStorageTests(
             inst = zodb_unpickle(data)
             self.assertEqual(inst._value, 5)
         finally:
+            storage1.close()
+            storage2.close()
             self._storage = root_storage
 
     def check16KObject(self):

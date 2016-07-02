@@ -6,7 +6,8 @@ services:
   - memcached
 addons:
 # Use postgresql 9.3 to get commit-lock testing
-  postgresql: "9.3"
+# Use postgresql 9.4 to get support for BLOB SQL functions for pg8000
+  postgresql: "9.4"
 python:
   - 2.7
   - 3.4
@@ -15,11 +16,14 @@ env:
   matrix:
     - ENV=mysql
     - ENV=postgres
+    - ENV=pypostgres
+    - ENV=pymysql
 matrix:
   fast_finish: true
 script:
 # coverage slows PyPy down from 2minutes to 12+.
-  - if [[ $TRAVIS_PYTHON_VERSION == 'pypy' ]]; then python -m relstorage.tests.alltests -v; fi
+# But don't run the pymysql/pypy tests twice.
+  - if [[ $TRAVIS_PYTHON_VERSION == 'pypy' && $ENV != 'pymysql' ]]; then python -m relstorage.tests.alltests -v; fi
   - if [[ $TRAVIS_PYTHON_VERSION != 'pypy' ]]; then coverage run -m relstorage.tests.alltests -v; fi
 after_success:
   - coveralls

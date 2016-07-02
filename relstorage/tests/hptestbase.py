@@ -286,6 +286,8 @@ class HistoryPreservingRelStorageTests(
         transaction1.abort()
         eq(historical_conn.root()['first']['count'], 0)
 
+        historical_conn.close()
+        conn.close()
         db.close()
 
     def checkImplementsExternalGC(self):

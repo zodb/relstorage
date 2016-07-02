@@ -147,10 +147,10 @@ class Psycopg2ConnectionManager(AbstractConnectionManager):
         self.disconnected_exceptions = driver.disconnected_exceptions
         self.close_exceptions = driver.close_exceptions
         self.use_replica_exceptions = driver.use_replica_exceptions
-        self.isolation_read_committed = driver.extensions.ISOLATION_LEVEL_READ_COMMITTED
-        self.isolation_serializable = driver.extensions.ISOLATION_LEVEL_SERIALIZABLE
+        self.isolation_read_committed = driver.ISOLATION_LEVEL_READ_COMMITTED
+        self.isolation_serializable = driver.ISOLATION_LEVEL_SERIALIZABLE
         self.keep_history = options.keep_history
-        self._db_connect = driver.connect
+        self._db_connect_with_isolation = driver.connect_with_isolation
         super(Psycopg2ConnectionManager, self).__init__(options)
 
     def _alter_dsn(self, replica):
@@ -182,9 +182,7 @@ class Psycopg2ConnectionManager(AbstractConnectionManager):
 
         while True:
             try:
-                conn = self._db_connect(dsn)
-                conn.set_isolation_level(isolation)
-                cursor = conn.cursor()
+                conn, cursor = self._db_connect_with_isolation(isolation, dsn)
                 cursor.arraysize = 64
                 conn.replica = replica
                 return conn, cursor

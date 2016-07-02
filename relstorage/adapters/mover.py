@@ -391,23 +391,26 @@ class ObjectMover(object):
     def postgresql_on_store_opened(self, cursor, restart=False):
         """Create the temporary tables for storing objects"""
         # note that the md5 column is not used if self.keep_history == False.
-        stmt = """
+        stmts = ["""
         CREATE TEMPORARY TABLE temp_store (
             zoid        BIGINT NOT NULL,
             prev_tid    BIGINT NOT NULL,
             md5         CHAR(32),
             state       BYTEA
-        ) ON COMMIT DROP;
+        ) ON COMMIT DROP;""",
+        """
         CREATE UNIQUE INDEX temp_store_zoid ON temp_store (zoid);
-
+        """,
+        """
         CREATE TEMPORARY TABLE temp_blob_chunk (
             zoid        BIGINT NOT NULL,
             chunk_num   BIGINT NOT NULL,
             chunk       OID
-        ) ON COMMIT DROP;
+        ) ON COMMIT DROP;""",
+        """
         CREATE UNIQUE INDEX temp_blob_chunk_key
-            ON temp_blob_chunk (zoid, chunk_num);
-
+            ON temp_blob_chunk (zoid, chunk_num);""",
+        """
         -- This trigger removes blobs that get replaced before being
         -- moved to blob_chunk.  Note that it is never called when
         -- the temp_blob_chunk table is being dropped or truncated.
@@ -415,8 +418,9 @@ class ObjectMover(object):
             BEFORE DELETE ON temp_blob_chunk
             FOR EACH ROW
             EXECUTE PROCEDURE temp_blob_chunk_delete_trigger();
-        """
-        cursor.execute(stmt)
+        """,]
+        for stmt in stmts:
+            cursor.execute(stmt)
 
     @metricmethod_sampled
     def mysql_on_store_opened(self, cursor, restart=False):
@@ -949,13 +953,15 @@ class ObjectMover(object):
             # nothing needs to be updated
             return
 
+        params = {'tid': tid}
         cursor.execute("""
         -- Insert objects created in this transaction into current_object.
         INSERT INTO current_object (zoid, tid)
         SELECT zoid, tid FROM object_state
         WHERE tid = %(tid)s
-            AND prev_tid = 0;
+            AND prev_tid = 0;""", params)
 
+        cursor.execute("""
         -- Change existing objects.  To avoid deadlocks,
         -- update in OID order.
         UPDATE current_object SET tid = %(tid)s
@@ -965,7 +971,7 @@ class ObjectMover(object):
                 AND prev_tid != 0
             ORDER BY zoid
         )
-        """, {'tid': tid})
+        """, params)
 
     @metricmethod_sampled
     def mysql_update_current(self, cursor, tid):
@@ -1029,10 +1035,12 @@ class ObjectMover(object):
 
         f = None
         bytecount = 0
+        read_chunk_size = self.blob_chunk_size
 
         try:
             cursor.execute(stmt, (oid, tid))
             for chunk_num, loid in cursor.fetchall():
+
                 blob = cursor.connection.lobject(loid, 'rb')
 
                 if chunk_num == 0:
@@ -1044,11 +1052,12 @@ class ObjectMover(object):
 
                 if f is None:
                     f = open(filename, 'ab') # Append, chunk 0 was an export
-                read_chunk_size = self.blob_chunk_size
+
                 reader = iter(lambda: blob.read(read_chunk_size), b'')
                 for read_chunk in reader:
                     f.write(read_chunk)
                     bytecount += len(read_chunk)
+                blob.close()
         except:
             if f is not None:
                 f.close()
@@ -1155,7 +1164,8 @@ class ObjectMover(object):
             f.close()
         return bytecount
 
-    # PostgreSQL only supports up to 2GB of data per BLOB.
+    # PostgreSQL < 9.3 only supports up to 2GB of data per BLOB.
+    # Even above that, we can only use larger blobs on 64-bit builds.
     postgresql_blob_chunk_maxsize = 1<<31
 
     @metricmethod_sampled
@@ -1195,6 +1205,7 @@ class ObjectMover(object):
 
         maxsize = self.postgresql_blob_chunk_maxsize
         filesize = os.path.getsize(filename)
+        write_chunk_size = self.blob_chunk_size
 
         if filesize <= maxsize:
             # File is small enough to fit in one chunk, just use
@@ -1218,7 +1229,6 @@ class ObjectMover(object):
                     params['tid'] = tid
                 cursor.execute(insert_stmt, params)
 
-                write_chunk_size = self.blob_chunk_size
                 for _i in xrange(maxsize // write_chunk_size):
                     write_chunk = f.read(write_chunk_size)
                     if not blob.write(write_chunk):
