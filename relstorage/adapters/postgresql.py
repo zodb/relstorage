@@ -126,7 +126,9 @@ class PostgreSQLAdapter(object):
             )
 
     def new_instance(self):
-        return PostgreSQLAdapter(dsn=self._dsn, options=self.options)
+        inst = type(self)(dsn=self._dsn, options=self.options)
+        inst.version_detector.version = self.version_detector.version
+        return inst
 
     def __str__(self):
         parts = [self.__class__.__name__]

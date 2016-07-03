@@ -47,6 +47,11 @@
 - Support for cx_Oracle versions older than 5.0 has been dropped. 5.0
   was released in 2008.
 
+- Support for PostgreSQL 8.1 and earlier has been dropped. 8.2 is
+  likely to still work, but 9.0 or above is recommended. 8.2 was
+  released in 2006 and is no longer supported by upstream. The oldest
+  version still supported by upstream is 9.1, released in 2011.
+
 - Support explicitly specifying the database driver to use. This can
   be important when there is a large performance difference between
   drivers, and more than one might be installed. (Also, RelStorage no

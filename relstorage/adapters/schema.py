@@ -993,12 +993,6 @@ class PostgreSQLSchemaInstaller(AbstractSchemaInstaller):
 
         self.connmanager.open_and_call(callback)
 
-    def create(self, cursor):
-        """Create the database tables."""
-        super(PostgreSQLSchemaInstaller, self).create(cursor)
-        # Create the pack_lock table only on PostgreSQL 8.1 (not 8.2+)
-        self.locker.create_pack_lock(cursor)
-
     def list_tables(self, cursor):
         cursor.execute("SELECT tablename FROM pg_tables")
         return [name if isinstance(name, str) else name.decode('ascii')
