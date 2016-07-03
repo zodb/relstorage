@@ -33,6 +33,9 @@ class Locker(object):
 @implementer(ILocker)
 class PostgreSQLLocker(Locker):
 
+    _checked_lock_timeout = False
+    _has_lock_timeout = None
+
     def __init__(self, options, lock_exceptions, version_detector):
         super(PostgreSQLLocker, self).__init__(
             options=options, lock_exceptions=lock_exceptions)
@@ -43,7 +46,12 @@ class PostgreSQLLocker(Locker):
         # in PostgreSQL 9.3+, lock_timeout in ms; if nowait, then ignored
         timeout = (not nowait and self.commit_lock_timeout or 0) * 1000  # ms
         timeout_stmt = ''
-        if self._pg_has_lock_timeout(cursor):
+        if not self._checked_lock_timeout:
+            # This won't change, we're only used for a single database.
+            self._has_lock_timeout = self._pg_has_lock_timeout(cursor)
+            self._checked_lock_timeout = True
+
+        if self._has_lock_timeout:
             timeout_stmt = 'SET lock_timeout = %d; ' % timeout
         try:
             if ensure_current:
@@ -92,36 +100,19 @@ class PostgreSQLLocker(Locker):
         """Returns True if PostgreSQL 9.3+, supporting lock_timeout"""
         return self.version_detector.get_version(cursor) >= (9, 3)
 
-    def _pg_has_advisory_locks(self, cursor):
-        """Return true if this version of PostgreSQL supports advisory locks"""
-        return self.version_detector.get_version(cursor) >= (8, 2)
-
-    def create_pack_lock(self, cursor):
-        if not self._pg_has_advisory_locks(cursor):
-            cursor.execute("CREATE TABLE pack_lock ()")
-
     def hold_pack_lock(self, cursor):
         """Try to acquire the pack lock.
 
         Raise an exception if packing or undo is already in progress.
         """
-        if self._pg_has_advisory_locks(cursor):
-            cursor.execute("SELECT pg_try_advisory_lock(1)")
-            locked = cursor.fetchone()[0]
-            if not locked:
-                raise UnableToAcquirePackUndoLockError('A pack or undo operation is in progress')
-        else:
-            # b/w compat
-            try:
-                cursor.execute("LOCK pack_lock IN EXCLUSIVE MODE NOWAIT")
-            except self.lock_exceptions:  # psycopg2.DatabaseError:
-                raise UnableToAcquirePackUndoLockError('A pack or undo operation is in progress')
+        cursor.execute("SELECT pg_try_advisory_lock(1)")
+        locked = cursor.fetchone()[0]
+        if not locked:
+            raise UnableToAcquirePackUndoLockError('A pack or undo operation is in progress')
 
     def release_pack_lock(self, cursor):
         """Release the pack lock."""
-        if self._pg_has_advisory_locks(cursor):
-            cursor.execute("SELECT pg_advisory_unlock(1)")
-        # else no action needed since the lock will be released at txn commit
+        cursor.execute("SELECT pg_advisory_unlock(1)")
 
 
 @implementer(ILocker)

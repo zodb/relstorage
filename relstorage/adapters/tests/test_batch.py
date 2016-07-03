@@ -131,11 +131,11 @@ class RowBatcherTests(unittest.TestCase):
             size=5,
             )
         self.assertEqual(cursor.executed, [(
-                'INSERT INTO mytable (id, name) VALUES\n'
-                '(%s, id || %s),\n'
-                '(%s, id || %s)',
-                (1, 'a', 2, 'B'))
-            ])
+            'INSERT INTO mytable (id, name) VALUES\n'
+            '(%s, id || %s),\n'
+            '(%s, id || %s)',
+            (1, 'a', 2, 'B'))
+        ])
         self.assertEqual(batcher.rows_added, 0)
         self.assertEqual(batcher.size_added, 0)
         self.assertEqual(batcher.inserts, {})
@@ -156,40 +156,6 @@ class RowBatcherTests(unittest.TestCase):
             ('DELETE FROM mytable WHERE id IN (1)', None),
             ('INSERT INTO mytable (id, name) VALUES\n(%s, id || %s)',
              (1, 'a')),
-            ])
-
-
-class PostgreSQLRowBatcherTests(unittest.TestCase):
-
-    def getClass(self):
-        from relstorage.adapters.batch import PostgreSQLRowBatcher
-        return PostgreSQLRowBatcher
-
-    def test_insert_postgresql_8_1(self):
-        class MockVersionDetector(object):
-            def get_version(self, cursor):
-                return (8, 1)
-        cursor = MockCursor()
-        batcher = self.getClass()(cursor, MockVersionDetector())
-        batcher.insert_into(
-            "mytable (id, name)",
-            "%s, id || %s",
-            (1, 'a'),
-            rowkey=1,
-            size=3,
-            )
-        batcher.insert_into(
-            "mytable (id, name)",
-            "%s, id || %s",
-            (2, 'b'),
-            rowkey=2,
-            size=3,
-            )
-        self.assertEqual(cursor.executed, [])
-        batcher.flush()
-        self.assertEqual(cursor.executed, [
-            ('INSERT INTO mytable (id, name) VALUES (%s, id || %s)', (1, 'a')),
-            ('INSERT INTO mytable (id, name) VALUES (%s, id || %s)', (2, 'b'))
             ])
 
 
@@ -240,7 +206,7 @@ class OracleRowBatcherTests(unittest.TestCase):
             'INTO mytable (id, name) VALUES (:id_1, :id_1 || :name_1)\n'
             'SELECT * FROM DUAL',
             {'id_0': 1, 'id_1': 2, 'name_1': 'b', 'name_0': 'a'})
-            ])
+        ])
 
     def test_insert_one_raw_row(self):
         class MockRawType(object):
@@ -258,7 +224,7 @@ class OracleRowBatcherTests(unittest.TestCase):
         self.assertEqual(cursor.executed, [
             ('INSERT INTO mytable (id, data) VALUES (:id, :rawdata)',
                 {'id': 1, 'rawdata': 'xyz'})
-            ])
+        ])
         self.assertEqual(cursor.inputsizes, {'rawdata': MockRawType})
 
     def test_insert_two_raw_rows(self):
@@ -287,11 +253,11 @@ class OracleRowBatcherTests(unittest.TestCase):
             'INTO mytable (id, data) VALUES (:id_1, :rawdata_1)\n'
             'SELECT * FROM DUAL',
             {'id_0': 1, 'id_1': 2, 'rawdata_0': 'xyz', 'rawdata_1': 'abc'})
-            ])
+        ])
         self.assertEqual(cursor.inputsizes, {
             'rawdata_0': MockRawType,
             'rawdata_1': MockRawType,
-            })
+        })
 
 
 class MockCursor(object):
@@ -306,7 +272,6 @@ class MockCursor(object):
 def test_suite():
     suite = unittest.TestSuite()
     suite.addTest(unittest.makeSuite(RowBatcherTests))
-    suite.addTest(unittest.makeSuite(PostgreSQLRowBatcherTests))
     suite.addTest(unittest.makeSuite(OracleRowBatcherTests))
     return suite
 

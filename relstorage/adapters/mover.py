@@ -460,7 +460,7 @@ class ObjectMover(object):
 
     @metricmethod_sampled
     def postgresql_make_batcher(self, cursor, row_limit):
-        return PostgreSQLRowBatcher(cursor, self.version_detector, row_limit)
+        return PostgreSQLRowBatcher(cursor, row_limit)
 
     @metricmethod_sampled
     def mysql_make_batcher(self, cursor, row_limit):

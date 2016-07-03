@@ -15,18 +15,18 @@
 """
 
 import re
-from relstorage._compat import list_values, iterkeys
+from relstorage._compat import list_values, iterkeys, iteritems
 
 
 class RowBatcher(object):
-    """Generic row batcher.
+    """
+    Generic row batcher.
 
     Expects '%s' parameters and a tuple for each row.
     """
 
     row_limit = 100
     size_limit = 1<<20
-    support_batch_insert = True
 
     def __init__(self, cursor, row_limit=None):
         self.cursor = cursor
@@ -75,9 +75,8 @@ class RowBatcher(object):
         self.size_added = 0
 
     def _do_deletes(self):
-        for (table, columns), rows in sorted(self.deletes.items()):
-            rows = list(rows)
-            rows.sort()
+        for (table, columns), rows in sorted(iteritems(self.deletes)):
+            rows = list(sorted(rows))
             if len(columns) == 1:
                 value_str = ','.join(v for (v,) in rows)
                 stmt = "DELETE FROM %s WHERE %s IN (%s)" % (
@@ -94,32 +93,22 @@ class RowBatcher(object):
             self.cursor.execute(stmt)
 
     def _do_inserts(self):
-        items = sorted(self.inserts.items())
+        items = sorted(iteritems(self.inserts))
         for (command, header, row_schema), rows in items:
-            if self.support_batch_insert:
-                parts = []
-                params = []
-                s = "(%s)" % row_schema
-                for row in rows.values():
-                    parts.append(s)
-                    params.extend(row)
-                parts = ',\n'.join(parts)
-                stmt = "%s INTO %s VALUES\n%s" % (command, header, parts)
-                self.cursor.execute(stmt, tuple(params))
-            else:
-                for row in rows.values():
-                    stmt = "%s INTO %s VALUES (%s)" % (
-                        command, header, row_schema)
-                    self.cursor.execute(stmt, tuple(row))
+            # Batched inserts
+            parts = []
+            params = []
+            s = "(%s)" % row_schema
+            for row in rows.values():
+                parts.append(s)
+                params.extend(row)
+            parts = ',\n'.join(parts)
+            stmt = "%s INTO %s VALUES\n%s" % (command, header, parts)
+            self.cursor.execute(stmt, tuple(params))
 
 
 class PostgreSQLRowBatcher(RowBatcher):
-
-    def __init__(self, cursor, version_detector, row_limit=None):
-        super(PostgreSQLRowBatcher, self).__init__(cursor, row_limit)
-        self.support_batch_insert = (
-            version_detector.get_version(cursor) >= (8, 2))
-
+    pass
 
 class MySQLRowBatcher(RowBatcher):
     pass
