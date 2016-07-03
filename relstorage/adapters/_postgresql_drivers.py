@@ -109,41 +109,6 @@ try:
 except ImportError:
     pass
 else:
-    import traceback
-
-    class _ConnWrapper(object): # pragma: no cover
-        def __init__(self, conn):
-            self.__conn = conn
-            self.__type = type(conn)
-            self.__at = ''.join(traceback.format_stack())
-
-        def __getattr__(self, name):
-            return getattr(self.__conn, name)
-
-        def __setattr__(self, name, value):
-            if name in ('_ConnWrapper__conn', '_ConnWrapper__at', '_ConnWrapper__type'):
-                object.__setattr__(self, name, value)
-                return
-            return setattr(self.__conn, name, value)
-
-        def cursor(self):
-            return _ConnWrapper(self.__conn.cursor())
-
-        def __iter__(self):
-            return self.__conn.__iter__()
-
-        def close(self):
-            if self.__conn is None:
-                return
-            try:
-                self.__conn.close()
-            finally:
-                self.__conn = None
-
-        def __del__(self):
-            if self.__conn is not None:
-                print("Failed to close", self, self.__type, " from:", self.__at, file=sys.stderr)
-                print("Deleted at", ''.join(traceback.format_stack()))
 
     Binary = pg8000.Binary
 
@@ -248,6 +213,8 @@ else:
             if oid != 0 and mode == 'rb':
                 return _ReadBlob(self, oid)
             raise AssertionError("Unsupported params", dict(locals()))
+
+    from ._abstract_drivers import _ConnWrapper
 
     @implementer(IDBDriver)
     class PG8000Driver(object):

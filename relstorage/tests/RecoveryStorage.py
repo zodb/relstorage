@@ -298,7 +298,8 @@ class UndoableRecoveryStorage(BasicRecoveryStorage):
         r["obj2"].x = 'x2'
         transaction.commit()
 
-        r = db.open().root()
+        c2 = db.open()
+        r = c2.root()
         self.assertEqual(r["obj1"].x, 'x1')
         self.assertEqual(r["obj2"].x, 'x2')
 
@@ -343,7 +344,8 @@ class UndoableRecoveryStorage(BasicRecoveryStorage):
         self._storage.tpc_vote(t)
         self._storage.tpc_finish(t)
 
-        r = db.open().root()
+        c3 = db.open()
+        r = c3.root()
         self.assertEqual(r["obj1"].x, 'x1')
         self.assertEqual(r["obj2"].x, 'x2')
 
@@ -364,4 +366,6 @@ class UndoableRecoveryStorage(BasicRecoveryStorage):
         self.compare(self._storage, self._dst)
 
         c.close()
+        c2.close()
+        c3.close()
         db.close()

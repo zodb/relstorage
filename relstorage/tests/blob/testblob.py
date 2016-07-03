@@ -284,6 +284,9 @@ class RecoveryBlobStorage(BlobTestBase,
         self._dst.copyTransactionsFrom(self._storage)
         self.compare(self._storage, self._dst)
 
+        conn.close()
+        db.close()
+
 
 class LargeBlobTest(BlobTestBase):
     """Test large blob upload and download.
@@ -313,9 +316,10 @@ class LargeBlobTest(BlobTestBase):
         blob_file.close()
         self._log('Committing %s blob file' % size)
         transaction.commit()
+        conn.close()
 
         # Clear the cache
-        for base, dir, files in os.walk('.'):
+        for base, _dir, files in os.walk('.'):
             for f in files:
                 if f.endswith('.blob'):
                     ZODB.blob.remove_committed(os.path.join(base, f))
@@ -326,6 +330,9 @@ class LargeBlobTest(BlobTestBase):
         with conn.root()[1].open('r') as blob:
             self._log('Creating signature for %s blob cache' % size)
             self.assertEqual(md5sum(blob), signature)
+
+        conn.close()
+        db.close()
 
 
 def packing_with_uncommitted_data_non_undoing():
@@ -353,6 +360,9 @@ def packing_with_uncommitted_data_non_undoing():
 
     Clean up:
 
+    >>> transaction.abort()
+    >>> connection.close()
+    >>> blob_storage.close()
     >>> database.close()
 
     """
@@ -365,6 +375,7 @@ def packing_with_uncommitted_data_undoing():
     blob_directory and confused our packing strategy. We now use a separate
     temporary directory that is ignored while packing.
 
+    >>> import transaction
     >>> from ZODB.serialize import referencesf
 
     >>> blob_storage = create_storage()
@@ -380,7 +391,10 @@ def packing_with_uncommitted_data_undoing():
 
     Clean up:
 
+    >>> transaction.abort()
+    >>> connection.close()
     >>> database.close()
+    >>> blob_storage.close()
     """
 
 
@@ -466,6 +480,8 @@ def loadblob_tmpstore():
 
     Clean up:
 
+    >>> connection.close()
+    >>> blob_storage.close()
     >>> tmpstore.close()
     >>> database.close()
     """
