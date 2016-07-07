@@ -466,7 +466,7 @@ class LocalClientTests(unittest.TestCase):
         v = c.get('k2')
         self.assertEqual(v, b'01234567')
         self.assertEqual(c._bucket0.size, 20)
-        self.assertEqual(c._bucket1.size, 40)
+        self.assertEqual(c._bucket1.size, 50) # don't shrink
         for i in range(5):
             # add 10 bytes
             c.set('x%d' % i, b'01234567')
@@ -478,7 +478,7 @@ class LocalClientTests(unittest.TestCase):
         self.assertEqual(c.get('x3'), b'01234567')
         self.assertEqual(c.get('x4'), b'01234567')
         self.assertEqual(c._bucket0.size, 50)
-        self.assertEqual(c._bucket1.size, 20)
+        self.assertEqual(c._bucket1.size, 50) # don't shrink
         self.assertEqual(c.get('k0'), None)
         self.assertEqual(c.get('k1'), None)
         self.assertEqual(c.get('k2'), b'01234567')
@@ -513,7 +513,7 @@ class LocalClientTests(unittest.TestCase):
         v = c.get('k0')
         self.assertEqual(v, b'01234567' * 10)
         self.assertEqual(c._bucket0.size, 21 * 2)
-        self.assertEqual(c._bucket1.size, 21)
+        self.assertEqual(c._bucket1.size, 21 * 2) # don't shrink bucket1
 
         v = c.get('k1')
         self.assertEqual(v, b'76543210' * 10)
@@ -523,7 +523,7 @@ class LocalClientTests(unittest.TestCase):
         v = c.get('k2')
         self.assertEqual(v, b'abcdefgh' * 10)
         self.assertEqual(c._bucket0.size, 21 * 2)
-        self.assertEqual(c._bucket1.size, 21)
+        self.assertEqual(c._bucket1.size, 21 * 2)
 
     def test_add(self):
         c = self._makeOne()

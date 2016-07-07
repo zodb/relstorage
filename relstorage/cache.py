@@ -695,9 +695,6 @@ class LocalClient(object):
             # in bucket1; we never try to add to bucket 1
             # so we can't get an overflow there, and the dict
             # is unlikely to shrink so we don't save any memory.
-            # There are some tests that check this though; they can
-            # go away.
-            del bucket1[k]
             buckets = self._set_one(k, res[k], buckets)
             bucket0, bucket1 = buckets
 
