@@ -56,7 +56,15 @@
   be important when there is a large performance difference between
   drivers, and more than one might be installed. (Also, RelStorage no
   longer has the side-effect of registering ``PyMySQL`` as ``MySQLdb`` and
-  ``psycopg2cffi`` as ``psycopg2``.) See :issue:`86`.`
+  ``psycopg2cffi`` as ``psycopg2``.) See :issue:`86`.
+
+- The in-memory cache allows for higher levels of concurrent
+  operation via finer-grained locks. For example, compression and
+  decompression are no longer done while holding a lock.
+
+- The in-memory cache now uses a better approximation of a LRU
+  algorithm with less overhead, so more data should fit in the same
+  size cache. (For best performance, CFFI should be installed.)
 
 2.0.0b1 (2016-06-28)
 ====================
