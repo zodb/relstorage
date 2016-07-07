@@ -481,15 +481,16 @@ class LocalClientTests(unittest.TestCase):
         self.assertEqual(c.get('x4'), b'01234567')
         self.assertEqual(c._bucket0.size, 50)
         self.assertEqual(c._bucket1.size, 20)
-        self.assertEqual(c.get('k0'), b'01234567')
-        self.assertEqual(c.get('k1'), b'01234567')
+
+        self.assertEqual(c.get('k0'), None)
+        self.assertEqual(c.get('k1'), None)
         self.assertEqual(c.get('k2'), b'01234567')
-        self.assertEqual(c.get('k3'), b'01234567')
-        self.assertEqual(c.get('k4'), b'01234567')
+        self.assertEqual(c.get('k3'), None)
+        self.assertEqual(c.get('k4'), None)
         self.assertEqual(c.get('k5'), b'01234567')
 
         self.assertEqual(c._bucket0.size, 70)
-        self.assertEqual(c._bucket1.size, 40)
+        self.assertEqual(c._bucket1.size, 0)
 
         c.set('z0', b'01234567')
         self.assertEqual(c._bucket0.size, 10)
