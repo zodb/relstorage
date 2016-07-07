@@ -434,6 +434,9 @@ class RelStorage(UndoLogCompatible,
         """Close the storage and all instances."""
 
         with self._lock:
+            if self._closed:
+                return
+
             self._closed = True
             self._drop_load_connection()
             self._drop_store_connection()
@@ -444,6 +447,7 @@ class RelStorage(UndoLogCompatible,
                 if instance is not None:
                     instance.close()
             self._instances = []
+            self._cache.close()
 
     def __len__(self):
         return self._adapter.stats.get_object_count()

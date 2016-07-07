@@ -55,6 +55,8 @@ class Options(object):
     cache_local_mb = 10
     cache_local_object_max = 16384
     cache_local_compression = 'zlib'
+    cache_local_dir = None
+    cache_local_dir_count = 20
     cache_delta_size_limit = 10000
     commit_lock_timeout = 30
     commit_lock_id = 0

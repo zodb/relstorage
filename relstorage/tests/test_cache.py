@@ -536,6 +536,7 @@ class MockOptions(object):
     cache_local_object_max = 16384
     cache_local_compression = 'zlib'
     cache_delta_size_limit = 10000
+    cache_local_dir = None
 
 class MockOptionsWithFakeCache(object):
     cache_module_name = 'relstorage.tests.fakecache'
@@ -544,6 +545,7 @@ class MockOptionsWithFakeCache(object):
     cache_local_object_max = 16384
     cache_local_compression = 'zlib'
     cache_delta_size_limit = 10000
+    cache_local_dir = None
 
 class MockAdapter(object):
     def __init__(self):

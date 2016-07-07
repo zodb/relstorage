@@ -11,7 +11,7 @@
 # FOR A PARTICULAR PURPOSE.
 #
 ##############################################################################
-from __future__ import absolute_import, print_function
+from __future__ import absolute_import, print_function, division
 
 from relstorage.autotemp import AutoTemporaryFile
 from ZODB.utils import p64
@@ -68,7 +68,7 @@ class StorageCache(object):
         self.options = options
         self.prefix = prefix or ''
         if local_client is None:
-            local_client = LocalClient(options)
+            local_client = LocalClient(options, self.prefix)
         self.clients_local_first = [local_client]
 
         if options.cache_servers:
@@ -115,7 +115,8 @@ class StorageCache(object):
 
         This is usually memcache connections if they're in use.
         """
-        for client in self.clients_local_first:
+        clients = self.clients_local_first if self.clients_local_first is not _UsedAfterRelease else ()
+        for client in clients:
             client.disconnect_all()
 
         # Release our clients. If we had a non-shared local cache,
@@ -124,6 +125,21 @@ class StorageCache(object):
         # after release.
         self.clients_local_first = _UsedAfterRelease
         self.clients_global_first = _UsedAfterRelease
+
+    def close(self):
+        """
+        Release resources held by this instance, and
+        save any persistent data necessary.
+        """
+        clients = self.clients_local_first if self.clients_local_first is not _UsedAfterRelease else ()
+        for client in clients:
+            try:
+                save = getattr(client, 'save')
+            except AttributeError:
+                continue
+            else:
+                save()
+        self.release()
 
     def clear(self):
         """Remove all data from the cache.  Called by speed tests."""
@@ -590,13 +606,27 @@ class LocalClientBucket(object):
     This class is not threadsafe, accesses to __setitem__ and get_and_bubble_all
     must be protected by a lock.
     """
-    __slots__ = ('size', 'limit', '_dict', '_ring')
+    __slots__ = ('size', 'limit', '_dict', '_ring', '_hits', '_misses')
 
     def __init__(self, limit):
         self._dict = {}
         self._ring = Ring()
+        self._hits = 0
+        self._misses = 0
         self.size = 0
         self.limit = limit
+
+    def reset_stats(self):
+        self._hits = 0
+        self._misses = 0
+
+    def stats(self):
+        total = self._hits + self._misses
+        return {'hits': self._hits,
+                'misses': self._misses,
+                'ratio': self._hits/total if total else 0,
+                'size': len(self._dict),
+                'bytes': self.size}
 
     def __setitem__(self, key, value):
         """
@@ -652,8 +682,11 @@ class LocalClientBucket(object):
         for key in keys:
             entry = dct.get(key)
             if entry is not None:
+                self._hits += 1
                 rng.move_to_head(entry)
                 res[key] = entry.value
+            else:
+                self._misses += 1
         return res
 
     def get(self, key):
@@ -662,6 +695,42 @@ class LocalClientBucket(object):
         if entry is not None:
             return entry.value
 
+    __getitem__ = get
+
+    def load_from_file(self, cache_file):
+        from ._compat import loads
+        import time
+        now = time.time()
+        s = cache_file.read()
+        tuples = loads(s)
+        loaded = 0
+        for k, v in tuples:
+            if k in self or k.endswith("checkpoints"):
+                continue
+            self[k] = v
+            loaded += 1
+            if self.size >= self.limit:
+                break
+        then = time.time()
+        log.info("Loaded %d items from %s in %s",
+                 loaded, cache_file, then - now)
+        return loaded
+
+    def write_to_file(self, cache_file):
+        from ._compat import dump, HIGHEST_PROTOCOL
+        import time
+        now = time.time()
+        # Iterate these from least to most recently used;
+        # when we load them, we'll effectively reverse this
+        # and wind up with the correct order
+        tuples = [(x._p_oid, x.value) for x in self._ring]
+        dump(tuples, cache_file, HIGHEST_PROTOCOL)
+        then = time.time()
+        total = self._hits + self._misses
+        ratio = self._hits/total if total else 0
+        log.info("Wrote %d items to %s in %s. Total hits %s; misses %s; ratio %s",
+                 len(tuples), cache_file, then - now, self._hits, self._misses, ratio)
+
 
 class LocalClient(object):
     """A memcache-like object that stores in Python dictionaries."""
@@ -669,8 +738,10 @@ class LocalClient(object):
     _compress = None
     _decompress = None
 
-    def __init__(self, options):
+    def __init__(self, options, prefix=None):
         self._lock = threading.Lock()
+        self.options = options
+        self.prefix = prefix or ''
         self._bucket_limit = int(1000000 * options.cache_local_mb)
         self._value_limit = options.cache_local_object_max
         self.__bucket = None
@@ -682,6 +753,11 @@ class LocalClient(object):
             self._compress = module.compress
             self._decompress = module.decompress
 
+    def save(self):
+        options = self.options
+        if options.cache_local_dir and self._bucket0.size:
+            _Loader.save_local_cache(options, self.prefix, self._bucket0)
+
     @property
     def _bucket0(self):
         # For testing only.
@@ -690,6 +766,15 @@ class LocalClient(object):
     def flush_all(self):
         with self._lock:
             self.__bucket = LocalClientBucket(self._bucket_limit)
+            options = self.options
+            if options.cache_local_dir:
+                _Loader.load_local_cache(options, self.prefix, self._bucket0)
+
+    def reset_stats(self):
+        self.__bucket.reset_stats()
+
+    def stats(self):
+        return self.__bucket.stats()
 
     def get(self, key):
         return self.get_multi([key]).get(key)
@@ -751,3 +836,97 @@ class LocalClient(object):
     def disconnect_all(self):
         # Compatibility with memcache.
         pass
+
+class _Loader(object):
+
+    @classmethod
+    def _normalize_path(cls, options):
+        import os.path
+        path = os.path.expanduser(os.path.expandvars(options.cache_local_dir))
+        path = os.path.abspath(path)
+        return path
+
+    @classmethod
+    def _list_cache_files(cls, options, prefix):
+        import os.path
+        import glob
+        path = cls._normalize_path(options)
+        possible_caches = glob.glob(os.path.join(path, 'relstorage-cache-' + prefix + '.*'))
+        return possible_caches
+
+    @classmethod
+    def _stat_cache_files(cls, options, prefix):
+        import os
+        fds = []
+        stats = []
+        for possible_cache_path in cls._list_cache_files(options, prefix):
+            cache_file = open(possible_cache_path, 'rb')
+            fds.append(cache_file)
+            stats.append((os.fstat(cache_file.fileno()), cache_file, possible_cache_path))
+
+        # Newest and biggest first
+        stats.sort(key=lambda s: (s[0].st_mtime, s[0].st_size), reverse=True)
+
+        return fds, stats
+
+
+    @classmethod
+    def load_local_cache(cls, options, prefix, local_client_bucket):
+        # Given an options that points to a local cache dir,
+        # choose a file from that directory and load it.
+        import os
+
+        fds = []
+        try:
+            fds, stats = cls._stat_cache_files(options, prefix)
+            for _, fd, cache_path in stats:
+                try:
+                    cnt = local_client_bucket.load_from_file(fd)
+                    if not cnt:
+                        break
+                except: # pylint:disable=bare-except
+                    log.exception("Invalid cache file %s", cache_path)
+                    fd.close()
+                    fds.remove(fd)
+                    os.remove(cache_path)
+        finally:
+            for _fd in fds:
+                _fd.close()
+
+    @classmethod
+    def save_local_cache(cls, options, prefix, local_client_bucket):
+        # Dump the file.
+        import tempfile
+        import os
+        import os.path
+        tempdir = cls._normalize_path(options)
+        fd, path = tempfile.mkstemp('._rscache_', dir=tempdir)
+        f = os.fdopen(fd, 'wb')
+        try:
+            local_client_bucket.write_to_file(f)
+        except:
+            f.close()
+            os.remove(path)
+            raise
+        else:
+            f.close()
+
+        # Ok, now pick a place to put it, dropping the oldest file,
+        # if necessary.
+
+        files = cls._list_cache_files(options, prefix)
+        if len(files) < options.cache_local_dir_count:
+            # Odds of same pid existing already are too low to worry about
+            new_name = 'relstorage-cache-' + prefix + '.' + str(os.getpid())
+            os.rename(path, os.path.join(tempdir, new_name))
+        else:
+            fds, stats = cls._stat_cache_files(options, prefix)
+            # oldest and smallest first
+            stats.reverse()
+            try:
+                stats[0][1].close()
+                new_path = stats[0][2]
+                os.rename(path, new_path)
+            finally:
+                for _fd in fds:
+                    _fd.close()

@@ -86,3 +86,5 @@ StringIO = BytesIO
 # based on Python version and implementation. We at least
 # centralize the import from here.
 from ZODB._compat import dumps, loads
+from ZODB._compat import dump
+from ZODB._compat import HIGHEST_PROTOCOL
