@@ -25,7 +25,6 @@ import threading
 
 from relstorage._compat import string_types
 from relstorage._compat import iteritems
-from relstorage._compat import unicode
 
 log = logging.getLogger(__name__)
 
@@ -575,20 +574,24 @@ class StorageCache(object):
 class SizeOverflow(Exception):
     """Too much memory would be consumed by a new key"""
 
-class LocalClientBucket(dict):
+class LocalClientBucket(object):
     """
     A map that keeps a record of its approx. size.
 
     keys must be `str`` and values must be bytestrings.
     """
-    __slots__ = ('size', 'limit')
+    __slots__ = ('size', 'limit', '_dict', '_next_bucket')
 
-    def __init__(self, limit):
-        dict.__init__(self)
+    def __init__(self, limit, next_bucket=None):
+        self._dict = {}
+        self._next_bucket = next_bucket
         self.size = 0
         self.limit = limit
 
-    def __setitem__(self, key, value):
+    def set_ignore_size(self, key, value):
+        self.__setitem__(key, value, False)
+
+    def __setitem__(self, key, value, check_size=True):
         """
         Set an item.
 
@@ -602,24 +605,43 @@ class LocalClientBucket(dict):
 
         sizedelta = len(value)
 
-        if key in self:
-            oldvalue = self[key]
+        if key in self._dict:
+            oldvalue = self._dict[key]
             sizedelta -= len(oldvalue)
         else:
             sizedelta += len(key)
 
-        if self.size + sizedelta > self.limit:
+        if check_size and self.size + sizedelta > self.limit:
             raise SizeOverflow()
-        dict.__setitem__(self, key, value)
+        self._dict[key] = value
         self.size += sizedelta
         return True
 
+    def __getitem__(self, key):
+        return self._dict[key]
+
+    def __contains__(self, key):
+        return key in self._dict
+
     def __delitem__(self, key):
-        oldvalue = self[key]
-        dict.__delitem__(self, key)
+        oldvalue = self._dict[key]
+        del self._dict[key]
         sizedelta = len(key)
         sizedelta += len(oldvalue)
         self.size -= sizedelta
+
+    def get_and_bubble(self, key, parent):
+        if key in self._dict:
+            res = self._dict[key]
+            if parent is not None:
+                self.__delitem__(key)
+                parent.__setitem__(key, res, False)
+            return res
+        elif self._next_bucket is not None:
+            return self._next_bucket.get_and_bubble(key, self)
+
+    def has_key(self, key):
+        return self.get_and_bubble(key, None) is not None
 
 
 class LocalClient(object):
@@ -628,13 +650,21 @@ class LocalClient(object):
     _compress = None
     _decompress = None
 
+    MAX_CLIENT_BUCKETS = 5
+
     def __init__(self, options):
         self._lock = threading.Lock()
-        self._bucket_limit = int(1000000 * options.cache_local_mb / 2)
+        # We need at least 2 buckets to make this algorithm work, but will
+        # shift through up to MAX_CLIENT_BUCKETS of them. This is a balance between how much we
+        # throw-away when we GC vs how much iteration we have to do to find
+        # any given key.
+        self._bucket_count = max(options.cache_local_mb // 10, 2)
+        self._bucket_count = min(self._bucket_count, self.MAX_CLIENT_BUCKETS)
+        self._bucket_limit = int(1000000 * options.cache_local_mb // self._bucket_count)
         self._value_limit = options.cache_local_object_max
         # We store the buckets together in a tuple so they can be atomically
         # switched out together.
-        self.__buckets = ({}, {})
+        self.__buckets = ()
         self.flush_all()
 
         compression_module = options.cache_local_compression
@@ -653,50 +683,24 @@ class LocalClient(object):
 
     def flush_all(self):
         with self._lock:
-            self.__buckets = (LocalClientBucket(self._bucket_limit),
-                              LocalClientBucket(self._bucket_limit))
+            self.__buckets = (LocalClientBucket(self._bucket_limit),)
+            for _i in range(self._bucket_count - 1):
+                self.__buckets = (LocalClientBucket(self._bucket_limit, self.__buckets[0]),) + self.__buckets
 
     def get(self, key):
         return self.get_multi([key]).get(key)
 
     def get_multi(self, keys):
         res = {}
-        keys_to_hoist = set()
         decompress = self._decompress
         # Read from a self-consistent set of buckets.
         buckets = self.__buckets
-        bucket0, bucket1 = buckets
+        bucket0 = buckets[0]
 
         for key in keys:
-            cvalue = bucket0.get(key)
-            if cvalue is None:
-                cvalue = bucket1.get(key)
-                if cvalue is None:
-                    continue
-                # This key is active so move it to bucket0
-                keys_to_hoist.add(key)
-            res[key] = cvalue
-
-        if keys_to_hoist:
-            if buckets is not self.__buckets: # Assuming reading a single var is atomic
-                # Snap. We've shifted buckets, so we really want to
-                # hoist all the keys
-                keys_to_hoist = res.keys()
-                buckets = self.__buckets
-                bucket0, bucket1 = self.__buckets
-
-        for k in keys_to_hoist:
-            # Note that we could shift buckets again at any point in this
-            # process. That's ok, we're just doing the best we can.
-            if k in bucket0:
-                # An intervening set; this typically shouldn't happen
-                continue
-            # Note that it doesn't matter if we leave it
-            # in bucket1; we never try to add to bucket 1
-            # so we can't get an overflow there, and the dict
-            # is unlikely to shrink so we don't save any memory.
-            buckets = self._set_one(k, res[k], buckets)
-            bucket0, bucket1 = buckets
+            v = bucket0.get_and_bubble(key, None)
+            if v is not None:
+                res[key] = v
 
         # Finally, while not holding the lock, decompress if needed
         if decompress:
@@ -714,12 +718,12 @@ class LocalClient(object):
             buckets = self.__buckets
         except SizeOverflow:
             # Shift bucket0 to bucket1.
-            new_buckets = (LocalClientBucket(self._bucket_limit),
-                           bucket0)
+            new_buckets = (LocalClientBucket(self._bucket_limit, bucket0),) + buckets[:-1]
             with self._lock:
                 if self.__buckets is buckets:
                     # We won
                     self.__buckets = new_buckets
+                    new_buckets[-1]._next_bucket = None
                     # Watch for the log message below to decide whether the
                     # cache_local_mb parameter is set to a reasonable value.
                     # The log message indicates that old cache data has
@@ -740,6 +744,11 @@ class LocalClient(object):
 
     def set(self, key, value):
         self.set_multi({key: value})
+
+    def _has_key(self, key, buckets):
+        for bucket in buckets:
+            if key in bucket:
+                return True
 
     def set_multi(self, d, allow_replace=True):
         if not self._bucket_limit:
@@ -762,24 +771,15 @@ class LocalClient(object):
             items.append((key, cvalue))
 
         buckets = self.__buckets
-        bucket0, bucket1 = buckets
 
         for key, cvalue in items:
-            if key in bucket0:
-                if not allow_replace:
-                    continue
+            if not allow_replace and buckets[0].has_key(key):
+                continue
                 # Bucket0 could be shifted out at any
                 # point during this operation, and that's ok
                 # because it would mean the key still goes away
-                del bucket0[key]
-
-            if key in bucket1:
-                if not allow_replace:
-                    continue
-                del bucket1[key]
 
             buckets = self._set_one(key, cvalue, buckets)
-            bucket0, bucket1 = buckets
 
     def add(self, key, value):
         self.set_multi({key: value}, allow_replace=False)

@@ -11,7 +11,7 @@
 # FOR A PARTICULAR PURPOSE.
 #
 ##############################################################################
-
+from __future__ import print_function, absolute_import
 import unittest
 
 class StorageCacheTests(unittest.TestCase):
@@ -466,32 +466,34 @@ class LocalClientTests(unittest.TestCase):
         v = c.get('k2')
         self.assertEqual(v, b'01234567')
         self.assertEqual(c._bucket0.size, 20)
-        self.assertEqual(c._bucket1.size, 50) # don't shrink
+        self.assertEqual(c._bucket1.size, 40)
         for i in range(5):
             # add 10 bytes
             c.set('x%d' % i, b'01234567')
         self.assertEqual(c._bucket0.size, 20)
         self.assertEqual(c._bucket1.size, 50)
+        # Bubble these up through the cache tree, which
+        # doesn't shrink the nodes.
         self.assertEqual(c.get('x0'), b'01234567')
         self.assertEqual(c.get('x1'), b'01234567')
         self.assertEqual(c.get('x2'), b'01234567')
         self.assertEqual(c.get('x3'), b'01234567')
         self.assertEqual(c.get('x4'), b'01234567')
         self.assertEqual(c._bucket0.size, 50)
-        self.assertEqual(c._bucket1.size, 50) # don't shrink
-        self.assertEqual(c.get('k0'), None)
-        self.assertEqual(c.get('k1'), None)
+        self.assertEqual(c._bucket1.size, 20)
+        self.assertEqual(c.get('k0'), b'01234567')
+        self.assertEqual(c.get('k1'), b'01234567')
         self.assertEqual(c.get('k2'), b'01234567')
-        self.assertEqual(c.get('k3'), None)
-        self.assertEqual(c.get('k4'), None)
-        self.assertEqual(c.get('k5'), None)
+        self.assertEqual(c.get('k3'), b'01234567')
+        self.assertEqual(c.get('k4'), b'01234567')
+        self.assertEqual(c.get('k5'), b'01234567')
 
-        self.assertEqual(c._bucket0.size, 10)
-        self.assertEqual(c._bucket1.size, 50)
+        self.assertEqual(c._bucket0.size, 70)
+        self.assertEqual(c._bucket1.size, 40)
 
         c.set('z0', b'01234567')
-        self.assertEqual(c._bucket0.size, 20)
-        self.assertEqual(c._bucket1.size, 50)
+        self.assertEqual(c._bucket0.size, 10)
+        self.assertEqual(c._bucket1.size, 70)
 
     def test_bucket_sizes_with_compression(self):
         c = self._makeOne(cache_local_compression='zlib')
@@ -506,24 +508,28 @@ class LocalClientTests(unittest.TestCase):
         self.assertEqual(c._bucket0.size, 21 * 2)
         self.assertEqual(c._bucket1.size, 0)
 
+        # Cause a bucket shift
         c.set('k2', b'abcdefgh' * 10)
         self.assertEqual(c._bucket0.size, 21)
         self.assertEqual(c._bucket1.size, 21 * 2)
 
+        # Bubble this one up
         v = c.get('k0')
         self.assertEqual(v, b'01234567' * 10)
         self.assertEqual(c._bucket0.size, 21 * 2)
-        self.assertEqual(c._bucket1.size, 21 * 2) # don't shrink bucket1
+        self.assertEqual(c._bucket1.size, 21)
 
+        # Bubble up again. Note that we don't shrink the top node on a bubble
+        # but we do shrink the end nodes
         v = c.get('k1')
         self.assertEqual(v, b'76543210' * 10)
-        self.assertEqual(c._bucket0.size, 21)
-        self.assertEqual(c._bucket1.size, 21 * 2)
+        self.assertEqual(c._bucket0.size, 63)
+        self.assertEqual(c._bucket1.size, 0)
 
         v = c.get('k2')
         self.assertEqual(v, b'abcdefgh' * 10)
-        self.assertEqual(c._bucket0.size, 21 * 2)
-        self.assertEqual(c._bucket1.size, 21 * 2)
+        self.assertEqual(c._bucket0.size, 63)
+        self.assertEqual(c._bucket1.size, 0)
 
     def test_add(self):
         c = self._makeOne()
@@ -567,6 +573,45 @@ class MockPoller(object):
         return ((oid, tid) for (oid, tid) in self.changes
                 if tid > after_tid and tid <= last_tid)
 
+def local_benchmark():
+    options = MockOptions()
+    options.cache_local_mb = 100
+    options.cache_local_compression = 'none'
+
+    from relstorage.cache import LocalClient
+    import time
+    client = LocalClient(options)
+    with open('/dev/urandom', 'rb') as f:
+        random_data = f.read(1024*1024)
+
+    key_groups = []
+    key_groups.append([str(i) for i in range(10)])
+    for i in range(1, 10): # 1 - 9
+        keys = [str(i) + str(j) for j in range(10)]
+        key_groups.append(keys)
+
+    def populate():
+        for k in range(120):
+            client.set(str(k), random_data)
+
+    def read():
+        for keys in key_groups:
+            client.get_multi(keys)
+
+    import timeit
+    import statistics
+    number = 10000
+    pop_timer = timeit.Timer(populate)
+    pop_times = pop_timer.repeat(number=number)
+
+    read_timer = timeit.Timer(read)
+    read_times = read_timer.repeat(number=number)
+
+
+    print("pop average", statistics.mean(pop_times), "stddev", statistics.stdev(pop_times))
+    print("read average", statistics.mean(read_times), "stddev", statistics.stdev(read_times))
+
+
 def test_suite():
     suite = unittest.TestSuite()
     suite.addTest(unittest.makeSuite(StorageCacheTests))
@@ -575,4 +620,8 @@ def test_suite():
     return suite
 
 if __name__ == '__main__':
-    unittest.main(defaultTest='test_suite')
+    import sys
+    if '--bench' in sys.argv:
+        local_benchmark()
+    else:
+        unittest.main(defaultTest='test_suite')
