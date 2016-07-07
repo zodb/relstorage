@@ -632,8 +632,10 @@ class LocalClient(object):
         self._lock = threading.Lock()
         self._bucket_limit = int(1000000 * options.cache_local_mb / 2)
         self._value_limit = options.cache_local_object_max
-        self._bucket0 = LocalClientBucket(self._bucket_limit)
-        self._bucket1 = LocalClientBucket(self._bucket_limit)
+        # We store the buckets together in a tuple so they can be atomically
+        # switched out together.
+        self.__buckets = ({}, {})
+        self.flush_all()
 
         compression_module = options.cache_local_compression
         if compression_module and compression_module != 'none':
@@ -641,50 +643,103 @@ class LocalClient(object):
             self._compress = module.compress
             self._decompress = module.decompress
 
+    @property
+    def _bucket0(self):
+        return self.__buckets[0]
+
+    @property
+    def _bucket1(self):
+        return self.__buckets[1]
+
     def flush_all(self):
         with self._lock:
-            self._bucket0 = LocalClientBucket(self._bucket_limit)
-            self._bucket1 = LocalClientBucket(self._bucket_limit)
+            self.__buckets = (LocalClientBucket(self._bucket_limit),
+                              LocalClientBucket(self._bucket_limit))
 
     def get(self, key):
         return self.get_multi([key]).get(key)
 
     def get_multi(self, keys):
         res = {}
+        keys_to_hoist = set()
         decompress = self._decompress
-        with self._lock:
-            for key in keys:
-                cvalue = self._bucket0.get(key)
-                if cvalue is None:
-                    cvalue = self._bucket1.get(key)
-                    if cvalue is None:
-                        continue
-                    # This key is active, so move it to bucket0.
-                    del self._bucket1[key]
-                    self._set_one(key, cvalue)
+        # Read from a self-consistent set of buckets.
+        buckets = self.__buckets
+        bucket0, bucket1 = buckets
 
-                value = decompress(cvalue) if decompress else cvalue
-                res[key] = value
+        for key in keys:
+            cvalue = bucket0.get(key)
+            if cvalue is None:
+                cvalue = bucket1.get(key)
+                if cvalue is None:
+                    continue
+                # This key is active so move it to bucket0
+                keys_to_hoist.add(key)
+            res[key] = cvalue
+
+        if keys_to_hoist:
+            if buckets is not self.__buckets: # Assuming reading a single var is atomic
+                # Snap. We've shifted buckets, so we really want to
+                # hoist all the keys
+                keys_to_hoist = res.keys()
+                buckets = self.__buckets
+                bucket0, bucket1 = self.__buckets
+
+        for k in keys_to_hoist:
+            # Note that we could shift buckets again at any point in this
+            # process. That's ok, we're just doing the best we can.
+            if k in bucket0:
+                # An intervening set; this typically shouldn't happen
+                continue
+            # Note that it doesn't matter if we leave it
+            # in bucket1; we never try to add to bucket 1
+            # so we can't get an overflow there, and the dict
+            # is unlikely to shrink so we don't save any memory.
+            # There are some tests that check this though; they can
+            # go away.
+            del bucket1[k]
+            buckets = self._set_one(k, res[k], buckets)
+            bucket0, bucket1 = buckets
+
+        # Finally, while not holding the lock, decompress if needed
+        if decompress:
+            res = {k: decompress(v) for k, v in iteritems(res)}
+
         return res
 
-    def _set_one(self, key, cvalue):
+    def _set_one(self, key, cvalue, buckets):
+        bucket0 = buckets[0]
         try:
-            self._bucket0[key] = cvalue
+            bucket0[key] = cvalue
+            # In case thread 1 is writing little tiny keys that will never
+            # split, but thread 2 writes one massive key that does split,
+            # always return current buckets.
+            buckets = self.__buckets
         except SizeOverflow:
             # Shift bucket0 to bucket1.
-            self._bucket1 = self._bucket0
-            self._bucket0 = LocalClientBucket(self._bucket_limit)
-            # Watch for the log message below to decide whether the
-            # cache_local_mb parameter is set to a reasonable value.
-            # The log message indicates that old cache data has
-            # been garbage collected.
-            log.debug("LocalClient buckets shifted")
+            new_buckets = (LocalClientBucket(self._bucket_limit),
+                           bucket0)
+            with self._lock:
+                if self.__buckets is buckets:
+                    # We won
+                    self.__buckets = new_buckets
+                    # Watch for the log message below to decide whether the
+                    # cache_local_mb parameter is set to a reasonable value.
+                    # The log message indicates that old cache data has
+                    # been garbage collected.
+                    log.debug("LocalClient buckets shifted")
+
+                buckets = new_buckets = self.__buckets
+
+            bucket0 = buckets[0]
 
             try:
-                self._bucket0[key] = cvalue
+                bucket0[key] = cvalue
             except SizeOverflow:
                 # The value doesn't fit in the cache at all, apparently.
                 pass
+
+        return buckets
 
     def set(self, key, value):
         self.set_multi({key: value})
@@ -693,30 +748,41 @@ class LocalClient(object):
         if not self._bucket_limit:
             # don't bother
             return
+
         compress = self._compress
-        with self._lock:
-            for key, value in iteritems(d):
-                # This used to allow non-byte values, but that's confusing
-                # on Py3 and wasn't used outside of tests, so we enforce it.
-                assert isinstance(key, str), (type(key), key)
-                assert isinstance(value, bytes)
-                if len(value) >= self._value_limit:
-                    # This value is too big, so don't cache it.
+        items = [] # [(key, value)]
+        for key, value in iteritems(d):
+            # This used to allow non-byte values, but that's confusing
+            # on Py3 and wasn't used outside of tests, so we enforce it.
+            assert isinstance(key, str), (type(key), key)
+            assert isinstance(value, bytes)
+
+            cvalue = compress(value) if compress else value
+
+            if len(cvalue) >= self._value_limit:
+                # This value is too big, so don't cache it.
+                continue
+            items.append((key, cvalue))
+
+        buckets = self.__buckets
+        bucket0, bucket1 = buckets
+
+        for key, cvalue in items:
+            if key in bucket0:
+                if not allow_replace:
                     continue
+                # Bucket0 could be shifted out at any
+                # point during this operation, and that's ok
+                # because it would mean the key still goes away
+                del bucket0[key]
 
-                cvalue = compress(value) if compress else value
+            if key in bucket1:
+                if not allow_replace:
+                    continue
+                del bucket1[key]
 
-                if key in self._bucket0:
-                    if not allow_replace:
-                        continue
-                    del self._bucket0[key]
-
-                if key in self._bucket1:
-                    if not allow_replace:
-                        continue
-                    del self._bucket1[key]
-
-                self._set_one(key, cvalue)
+            buckets = self._set_one(key, cvalue, buckets)
+            bucket0, bucket1 = buckets
 
     def add(self, key, value):
         self.set_multi({key: value}, allow_replace=False)
