@@ -363,6 +363,12 @@ cache-local-dir
            In the future an option to ignore files that are older than
            a specified time might be added.
 
+           In the future, an separate option to limit the on-disk
+           cache size might be added (so the cache files would contain
+           only the most recently-used subset of items instead of the
+           full contents; this makes it more practical to use a much
+           larger cache-local-mb).
+
            In the futere, an option to write these to the background at
            certain intervals or after a certain percentage of the
            local cache has changed might be added.
