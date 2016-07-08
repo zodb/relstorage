@@ -6,6 +6,46 @@
 2.0.0b2 (unreleased)
 ====================
 
+Breaking Changes
+----------------
+
+- Support for cx_Oracle versions older than 5.0 has been dropped. 5.0
+  was released in 2008.
+
+- Support for PostgreSQL 8.1 and earlier has been dropped. 8.2 is
+  likely to still work, but 9.0 or above is recommended. 8.2 was
+  released in 2006 and is no longer supported by upstream. The oldest
+  version still supported by upstream is 9.1, released in 2011.
+
+
+Platform Support
+----------------
+
+- Using ZODB >= 4.4.2 (*but not 5.0*) is recommended to avoid
+  deprecation warnings due to the introduction of a new storage
+  protocol. The next major release of RelStorage will require ZODB
+  4.4.2 or above and should work with ZODB 5.0.
+
+- Change the recommended and tested MySQL client for Python 2.7 away
+  from the unmaintained MySQL-python to the maintained mysqlclient
+  (the same one used by Python 3).
+
+- PyMySQL now works and is tested on Python 3.
+
+- A pure-Python PostgreSQL driver, pg8000, now works and is tested on
+  all platforms. This is a gevent-compatible driver. Note that it
+  requires a PostgreSQL 9.4 server or above for BLOB support.
+
+- Support explicitly specifying the database driver to use. This can
+  be important when there is a large performance difference between
+  drivers, and more than one might be installed. (Also, RelStorage no
+  longer has the side-effect of registering ``PyMySQL`` as ``MySQLdb`` and
+  ``psycopg2cffi`` as ``psycopg2``.) See :issue:`86`.
+
+
+Bug Fixes
+---------
+
 - Memcache connections are explicitly released instead of waiting for
   GC to do it for us. This is especially important with PyPy and/or
   ``python-memcached``. See :issue:`80`.
@@ -18,8 +58,17 @@
   that most sites won't notice any performance difference. A larger
   discussion can be found in :issue:`87`.
 
-- Instances of :class:`.RelStorage` no longer use threading locks and
-  hence are not thread safe. A ZODB :class:`Connection
+Performance
+-----------
+
+- Support a persistent on-disk cache. This can greatly speed up
+  application warmup after a restart (such as when deploying new code).
+  Some synthetic benchmarks show an 8-10x improvement. See :issue:`92`
+  for a discussion, and see the options ``cache-local-dir`` and
+  ``cache-local-dir-count``.
+
+- Instances of :class:`.RelStorage` no longer use threading locks by
+  default and hence are not thread safe. A ZODB :class:`Connection
   <ZODB.interfaces.IConnection>` is documented as not being
   thread-safe and must be used only by a single thread at a time.
   Because RelStorage natively implements MVCC, each Connection has a
@@ -28,35 +77,8 @@
   the common case. If this is a breaking change for you, please open
   an issue. See :pr:`91`.
 
-- Update the ZODB dependency to 4.4.0 to avoid deprecation warnings
-  due to the introduction of a new storage protocol.
-
-- Change the recommended and tested MySQL client for Python 2.7 away
-  from the unmaintained MySQL-python to the maintained mysqlclient
-  (the same one used by Python 3).
-
 - MySQL uses (what should be) a slightly more efficient poll query.
   See :issue:`89`.
-
-- PyMySQL now works and is tested on Python 3.
-
-- A pure-Python PostgreSQL driver, pg8000, now works and is tested on
-  all platforms. This is a gevent-compatible driver. Note that it
-  requires a PostgreSQL 9.4 server or above for BLOB support.
-
-- Support for cx_Oracle versions older than 5.0 has been dropped. 5.0
-  was released in 2008.
-
-- Support for PostgreSQL 8.1 and earlier has been dropped. 8.2 is
-  likely to still work, but 9.0 or above is recommended. 8.2 was
-  released in 2006 and is no longer supported by upstream. The oldest
-  version still supported by upstream is 9.1, released in 2011.
-
-- Support explicitly specifying the database driver to use. This can
-  be important when there is a large performance difference between
-  drivers, and more than one might be installed. (Also, RelStorage no
-  longer has the side-effect of registering ``PyMySQL`` as ``MySQLdb`` and
-  ``psycopg2cffi`` as ``psycopg2``.) See :issue:`86`.
 
 - The in-memory cache allows for higher levels of concurrent
   operation via finer-grained locks. For example, compression and
@@ -66,12 +88,6 @@
   algorithm with less overhead, so more data should fit in the same
   size cache. (For best performance, CFFI should be installed; a
   warning is generated if that is not the case.)
-
-- Support a persistent on-disk cache. This can greatly speed up
-  application warmup after a restart (such as deploying new code).
-  Some synthetic benchmarks show an 8-10x improvement. See :issue:`92`
-  for a discussion, and see the options ``cache-local-dir`` and
-  ``cache-local-dir-count``.
 
 - The in-memory cache is now smart enough not to store compressed
   objects that grow during compression, and it uses the same
