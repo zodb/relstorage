@@ -247,8 +247,151 @@ pack-commit-busy-delay
 
         The default delay is 5.0 seconds.
 
-Local and Remote Caching
-========================
+Database Caching
+================
+
+In addition to the ZODB Connection object caches, RelStorage uses
+pickle caches to reduce the number of queries to the database server.
+(This is similar to ZEO.) Caches can be both local to a process and
+remote (and shared between many processes). These options affect all
+caching operations.
+
+cache-prefix
+        The prefix for all keys in the cache; also used as part of
+        persistent cache names. All clients using a database should
+        use the same cache-prefix. Defaults to the database name. (For
+        example, in PostgreSQL, the database name is determined by
+        executing ``SELECT current_database()``.) Set this if you have
+        multiple databases with the same name.
+
+        .. versionchanged:: 1.6.0b1
+           Start defaulting to the database name.
+
+cache-delta-size-limit
+        This is an advanced option. RelStorage uses a system of
+        checkpoints to improve the cache hit rate. This option
+        configures how many objects should be stored before creating a
+        new checkpoint.
+
+        The default is 10000.
+
+Local Caching
+-------------
+
+RelStorage caches pickled objects in memory, similar to a ZEO cache.
+The "local" cache is shared between all threads in a process. An
+adequately sized local cache is important for the highest possible
+performance. Using a suitably-sized local cache, especially with
+persistent data files, can make a substantial performance difference,
+even if the write volume is relatively high.
+
+cache-local-mb
+        This option configures the approximate maximum amount of memory the
+        cache should consume, in megabytes. It defaults to 10.
+
+        Set to 0 to disable the in-memory cache. (*This is not recommended.*)
+
+cache-local-object-max
+        This option configures the maximum size of an object's pickle
+        (in bytes) that can qualify for the "local" cache.  The size is
+        measured after compression. Larger objects can still qualify
+        for memcache.
+
+        The default is 16384 (1 << 14) bytes.
+
+        .. versionchanged:: 2.0b2
+           Measure the size after compression instead of before.
+
+cache-local-compression
+        This option configures compression within the "local" cache.
+        This option names a Python module that provides two functions,
+        ``compress()`` and ``decompress()``.  Supported values include
+        ``zlib``, ``bz2``, and ``none`` (no compression).
+
+        The default is ``zlib``.
+
+        If you use the compressing storage wrapper `zc.zlibstorage
+        <https://pypi.python.org/pypi/zc.zlibstorage>`_, this option
+        automatically does nothing. With other compressing storage
+        wrappers this should be set to ``none``.
+
+        .. versionadded:: 1.6
+
+cache-local-dir
+        The path to a directory where the local cache will be saved
+        when the database is closed. On startup, RelStorage will look
+        in this directory for cache files to load into memory.
+
+        This option can dramatically reduce the amount of time it
+        takes for your application to warm up after a restart,
+        especially if there were relatively few writes in the
+        meantime. Some synthetic benchmarks show an 8-10x improvement
+        after a restart.
+
+        This is similar to the ZEO persistent cache, but adds *no
+        overhead* to normal transactions.
+
+        This directory will be populated with a number of files (up to
+        ``cache-local-dir-count`` files), written each time a
+        RelStorage instance is closed. If multiple RelStorage
+        processes are working against the same database (for example,
+        the workers of gunicorn), then they will each write and read
+        files in this directory. On startup, the files will be
+        combined to get the "warmest" possible cache.
+
+        Each file could potentially be up to the size of
+        ``cache-local-mb``, but they are compressed and are usually
+        much smaller. However, the time taken to load the cache file
+        (which only occurs when RelStorage is first opened) and the
+        time taken to save the cache file (which only occurs when the
+        database is closed) are proportional to the total size of the
+        cache; thus, a cache that is too large (holding many unused
+        entries) will slow down startup/shutdown for no benefit.
+
+        This directory can be shared among storages connected to
+        different databases, so long as they all have a distinct
+        ``cache-prefix``.
+
+        If this directory does not exist, we will attempt to create it
+        on startup. It may be possible to share this directory across
+        machines, but that has not been tested.
+
+        .. tip::
+           If the database (ZODB.DB object) is not properly
+           ``close()``, then the cache files will not be written.
+
+           In the future an option to ignore files that are older than
+           a specified time might be added.
+
+           In the futere, an option to write these to the background at
+           certain intervals or after a certain percentage of the
+           local cache has changed might be added.
+
+        .. versionadded:: 2.0b2
+           This is a new, *experimental* feature. While there should
+           be no problems enabling it, the exact details of its
+           function are subject to change in the future based on
+           feedback and experience.
+
+cache-local-dir-count
+        How many files that ``cache-local-dir`` will be allowed to
+        contain before files start getting reused. Set this equal to
+        the number of workers that will be sharing the directory.
+
+        The default is 20.
+
+        .. versionadded:: 2.0b2
+           See the notes for ``cache-local-dir``.
+
+
+Remote Caching
+--------------
+
+RelStorage can use Memcached servers as a secondary, semi-persistent
+database cache. They are most useful if the ration of writes to reads is
+relatively low (because they add overhead to each write operation).
+They can also be useful if the database server is behind a
+high-latency connection or otherwise responds slowly.
 
 cache-servers
         Specifies a list of memcached servers. Using memcached with
@@ -271,45 +414,3 @@ cache-module-name
         use the memcache module, use at least version 1.47.
 
         This option has no effect unless cache-servers is set.
-
-cache-prefix
-        The prefix for all keys in the cache. All clients using a
-        database should use the same cache-prefix. Defaults to the
-        database name. (For example, in PostgreSQL, the database
-        name is determined by executing ``SELECT current_database()``.)
-        Set this if you have multiple databases with the same name.
-
-        .. versionchanged:: 1.6.0b1
-           Start defaulting to the database name.
-
-cache-local-mb
-        RelStorage caches pickled objects in memory, similar to a ZEO
-        cache. The "local" cache is shared between threads. This option
-        configures the approximate maximum amount of memory the cache
-        should consume, in megabytes.  It defaults to 10.
-
-        Set to 0 to disable the in-memory cache.
-
-cache-local-object-max
-        This option configures the maximum size of an object's pickle
-        (in bytes) that can qualify for the "local" cache.  The size is
-        measured before compression. Larger objects can still qualify
-        for memcache.
-
-        The default is 16384 (1 << 14) bytes.
-
-cache-local-compression
-        This option configures compression within the "local" cache.
-        This option names a Python module that provides two functions,
-        ``compress()`` and ``decompress()``.  Supported values include
-        ``zlib``, ``bz2``, and ``none`` (no compression).
-
-        The default is ``zlib``.
-
-cache-delta-size-limit
-        This is an advanced option. RelStorage uses a system of
-        checkpoints to improve the cache hit rate. This option
-        configures how many objects should be stored before creating a
-        new checkpoint.
-
-        The default is 10000.

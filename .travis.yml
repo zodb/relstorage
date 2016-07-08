@@ -33,8 +33,8 @@ notifications:
 install:
   - pip install -U pip setuptools
   - pip install -U tox coveralls
-  - if [[ $TRAVIS_PYTHON_VERSION == 'pypy' ]]; then pip install python-memcached; fi
-  - if [[ $TRAVIS_PYTHON_VERSION != 'pypy' ]]; then pip install pylibmc; fi
+  - if [[ $TRAVIS_PYTHON_VERSION == 'pypy' ]]; then pip install -U python-memcached; fi
+  - if [[ $TRAVIS_PYTHON_VERSION != 'pypy' ]]; then pip install -U pylibmc cffi; fi
   - pip install -U -e ".[test]"
   - .travis/setup-$ENV.sh
 # cache: pip seems not to work if `install` is replaced (https://github.com/travis-ci/travis-ci/issues/3239)

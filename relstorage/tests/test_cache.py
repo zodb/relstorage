@@ -39,6 +39,10 @@ class StorageCacheTests(unittest.TestCase):
         self.assertEqual(c.clients_global_first[0].servers, ['host:9999'])
         self.assertEqual(c.prefix, 'myprefix')
 
+        # can be closed multiple times
+        c.close()
+        c.close()
+
     def test_clear(self):
         from relstorage.tests.fakecache import data
         data.clear()
@@ -399,6 +403,60 @@ class LocalClientBucketTests(unittest.TestCase):
         self.assertEqual(b.get('abc'), None)
         self.assertEqual(b.get("abcd"), 'xyz')
 
+    def test_load_and_store(self):
+        from io import BytesIO
+        client1 = self.getClass()(100)
+        client1['abc'] = b'xyz'
+
+        bio = BytesIO()
+        client1.write_to_file(bio)
+        bio.seek(0)
+
+        client2 = self.getClass()(100)
+        count, stored = client2.load_from_file(bio)
+        self.assertEqual(count, stored)
+        self.assertEqual(count, 1)
+        self.assertEqual(client1['abc'], client2['abc'])
+        self.assertEqual(1, len(client2))
+        self.assertEqual(client1.size, client2.size)
+
+        bio.seek(0)
+        client1.reset_stats()
+        client1['def'] = b'123'
+        client1_max_size = client1.size
+        client1.write_to_file(bio)
+        bio.seek(0)
+
+        # This time there's too much data, so an arbitrary
+        # entry gets dropped
+        client2 = self.getClass()(3)
+        count, stored = client2.load_from_file(bio)
+        self.assertEqual(count, stored)
+        self.assertEqual(count, 2)
+        self.assertEqual(1, len(client2))
+
+
+        bio.seek(0)
+        # Duplicate keys ignored.
+        # Note that we do this in client1, because if we do it in client2,
+        # the first key (abc) will push out the existing 'def' and get
+        # inserted, and then 'def' will push out 'abc'
+        count, stored = client1.load_from_file(bio)
+        self.assertEqual(count, 2)
+        self.assertEqual(stored, 0)
+        self.assertEqual(2, len(client1))
+
+        # Half duplicate keys
+        del client1['abc']
+        self.assertEqual(1, len(client1))
+        bio.seek(0)
+        count, stored = client1.load_from_file(bio)
+        self.assertEqual(client1['def'], b'123')
+        self.assertEqual(client1['abc'], b'xyz')
+        self.assertEqual(count, 2)
+        self.assertEqual(stored, 1)
+        self.assertEqual(client1.size, client1_max_size)
+
 
 class LocalClientTests(unittest.TestCase):
 
@@ -415,6 +473,14 @@ class LocalClientTests(unittest.TestCase):
         c = self._makeOne()
         self.assertEqual(c._bucket_limit, 1000000)
         self.assertEqual(c._value_limit, 16384)
+        # cover
+        self.assertIn('hits', c.stats())
+        c.reset_stats()
+        c.disconnect_all()
+
+        self.assertRaises(ValueError,
+                          self._makeOne,
+                          cache_local_compression='unsup')
 
     def test_set_and_get_string_compressed(self):
         c = self._makeOne(cache_local_compression='zlib')
@@ -498,28 +564,29 @@ class LocalClientTests(unittest.TestCase):
 
     def test_bucket_sizes_with_compression(self):
         c = self._makeOne(cache_local_compression='zlib')
-        c._bucket_limit = 21 * 2 + 1
+        c._bucket_limit = 23 * 2 + 1
         c.flush_all()
 
-        c.set('k0', b'01234567' * 10)
-        self.assertEqual(c._bucket0.size, 21)
+        c.set('k0', b'01234567' * 15)
+        self.assertEqual(c._bucket0.size, 23)
 
-        c.set('k1', b'76543210' * 10)
-        self.assertEqual(c._bucket0.size, 21 * 2)
+        c.set('k1', b'76543210' * 15)
+        self.assertEqual(len(c._bucket0), 2)
+        self.assertEqual(c._bucket0.size, 23 * 2)
 
-        c.set('k2', b'abcdefgh' * 10)
-        self.assertEqual(c._bucket0.size, 21 * 2)
+        c.set('k2', b'abcdefgh' * 15)
+        self.assertEqual(c._bucket0.size, 23 * 2)
 
         v = c.get('k0')
         self.assertEqual(v, None) # This one got evicted :(
 
         v = c.get('k1')
-        self.assertEqual(v, b'76543210' * 10)
-        self.assertEqual(c._bucket0.size, 42)
+        self.assertEqual(v, b'76543210' * 15)
+        self.assertEqual(c._bucket0.size, 46)
 
         v = c.get('k2')
-        self.assertEqual(v, b'abcdefgh' * 10)
-        self.assertEqual(c._bucket0.size, 42)
+        self.assertEqual(v, b'abcdefgh' * 15)
+        self.assertEqual(c._bucket0.size, 46)
 
     def test_add(self):
         c = self._makeOne()
@@ -529,6 +596,71 @@ class LocalClientTests(unittest.TestCase):
         c.add('k1', b'ghi')
         self.assertEqual(c.get_multi(['k0', 'k1']), {'k0': b'abc', 'k1': b'ghi'})
 
+    def test_load_and_save(self, _make_dir=True):
+        import tempfile
+        import shutil
+        import os
+        temp_dir = tempfile.mkdtemp(".rstest_cache")
+        root_temp_dir = temp_dir
+        if not _make_dir:
+            temp_dir = os.path.join(temp_dir, 'child1', 'child2')
+        try:
+            c = self._makeOne(cache_local_dir=temp_dir)
+            # No files yet.
+            self.assertEqual([], os.listdir(temp_dir) if _make_dir else [])
+            self.assertEqual([], os.listdir(root_temp_dir))
+            # Saving an empty bucket does nothing
+            c.save()
+            self.assertEqual([], os.listdir(temp_dir) if _make_dir else [])
+            self.assertEqual([], os.listdir(root_temp_dir))
+
+            c.set('k0', b'abc')
+            c.save()
+            cache_files = os.listdir(temp_dir)
+            self.assertEqual(1, len(cache_files))
+            self.assertTrue(cache_files[0].startswith('relstorage-cache-'), cache_files)
+
+            # Loading it works
+            c2 = self._makeOne(cache_local_dir=temp_dir)
+            self.assertEqual(c2.get('k0'), b'abc')
+
+            # Change and save and we overwrite the
+            # existing file.
+            c2.set('k1', b'def')
+            c2.save()
+            new_cache_files = os.listdir(temp_dir)
+            self.assertEqual(cache_files, new_cache_files)
+
+            c3 = self._makeOne(cache_local_dir=temp_dir)
+            self.assertEqual(c3.get('k0'), b'abc')
+            self.assertEqual(c3.get('k1'), b'def')
+
+            # If we corrupt the file, it is silently ignored and removed
+            with open(os.path.join(temp_dir, new_cache_files[0]), 'wb') as f:
+                f.write(b'Nope!')
+
+            c3 = self._makeOne(cache_local_dir=temp_dir)
+            self.assertEqual(c3.get('k0'), None)
+            cache_files = os.listdir(temp_dir)
+            self.assertEqual(0, len(cache_files))
+
+            # Now lets break saving
+            def badwrite(*args):
+                raise OSError("Nope")
+            c2._bucket0.write_to_file = badwrite
+
+            c2.save()
+            cache_files = os.listdir(temp_dir)
+            self.assertEqual(0, len(cache_files))
+
+        finally:
+            shutil.rmtree(root_temp_dir)
+
+    def test_load_and_save_new_dir(self):
+         # automatically create directories as needed
+         self.test_load_and_save(False)
+
+
 class MockOptions(object):
     cache_module_name = ''
     cache_servers = ''
@@ -536,6 +668,8 @@ class MockOptions(object):
     cache_local_object_max = 16384
     cache_local_compression = 'zlib'
     cache_delta_size_limit = 10000
+    cache_local_dir = None
+    cache_local_dir_count = 1
 
 class MockOptionsWithFakeCache(object):
     cache_module_name = 'relstorage.tests.fakecache'
@@ -544,6 +678,8 @@ class MockOptionsWithFakeCache(object):
     cache_local_object_max = 16384
     cache_local_compression = 'zlib'
     cache_delta_size_limit = 10000
+    cache_local_dir = None
+    cache_local_dir_count = 1
 
 class MockAdapter(object):
     def __init__(self):
@@ -566,13 +702,13 @@ class MockPoller(object):
 def local_benchmark():
     options = MockOptions()
     options.cache_local_mb = 100
-    options.cache_local_compression = 'none'
+    #options.cache_local_compression = 'none'
 
     from relstorage.cache import LocalClient
     import time
     client = LocalClient(options)
     with open('/dev/urandom', 'rb') as f:
-        random_data = f.read(1024*1024)
+        random_data = f.read(1024)
 
     key_groups = []
     key_groups.append([str(i) for i in range(10)])
@@ -592,7 +728,7 @@ def local_benchmark():
     import timeit
     import statistics
     #import cProfile, pstats
-    number = 10000
+    number = 100
     pop_timer = timeit.Timer(populate)
     #pr = cProfile.Profile()
     #pr.enable()
@@ -613,6 +749,62 @@ def local_benchmark():
     print("pop average", statistics.mean(pop_times), "stddev", statistics.stdev(pop_times))
     print("read average", statistics.mean(read_times), "stddev", statistics.stdev(read_times))
 
+def save_load_benchmark():
+    from relstorage.cache import LocalClientBucket
+    from io import BytesIO
+
+    bucket = LocalClientBucket(10*1024*1024)
+
+    i = 1
+    j = 0
+    while bucket.size < bucket.limit - i:
+        val = (str(j) * i).encode('ascii')
+        if len(val) > bucket.limit or bucket.size + len(val) > bucket.limit:
+            break
+        bucket[str(i)] = val
+        if i < 1096:
+            i += 50
+            j += 1
+        else:
+            j += 1
+            i += 1
+        print("Len", len(bucket), "size",bucket.size, "i", i)
+
+    print("Len", len(bucket), "size", bucket.size)
+    number = 50
+    import timeit
+    import statistics
+    import cProfile
+    import pstats
+
+    def write():
+        io = BytesIO()
+        bucket.write_to_file(io)
+
+    bio = BytesIO()
+    bucket.write_to_file(bio)
+
+    def load():
+        bio.seek(0)
+        b2 = LocalClientBucket(bucket.limit)
+        b2.load_from_file(bio)
+
+    write_timer = timeit.Timer(write)
+    write_times = write_timer.repeat(number=number)
+
+    print("write average", statistics.mean(write_times), "stddev", statistics.stdev(write_times))
+
+    #pr = cProfile.Profile()
+    #pr.enable()
+
+    read_timer = timeit.Timer(load)
+    read_times = read_timer.repeat(number=number)
+    #pr.disable()
+    #ps = pstats.Stats(pr).sort_stats('cumulative')
+    #ps.print_stats()
+
+    print("read average", statistics.mean(read_times), "stddev", statistics.stdev(read_times))
+
 
 def test_suite():
     suite = unittest.TestSuite()
@@ -623,7 +815,9 @@ def test_suite():
 
 if __name__ == '__main__':
     import sys
-    if '--bench' in sys.argv:
+    if '--localbench' in sys.argv:
         local_benchmark()
+    elif '--iobench' in sys.argv:
+        save_load_benchmark()
     else:
         unittest.main(defaultTest='test_suite')

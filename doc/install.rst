@@ -8,6 +8,10 @@ You can install RelStorage using pip::
 
     pip install RelStorage
 
+Installing CFFI (and a functioning compiler) is also recommended::
+
+    pip install cffi
+
 RelStorage requires a modern version of ZODB; it is tested with ZODB
 4.3 but *might* work with ZODB as old as 3.10. If you need to use an
 older version of ZODB, install RelStorage 1.6.0. Likewise, if you need

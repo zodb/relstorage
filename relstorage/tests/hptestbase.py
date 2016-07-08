@@ -165,7 +165,7 @@ class HistoryPreservingRelStorageTests(
         finally:
             db.close()
 
-    def checkPackGC(self, expect_object_deleted=True):
+    def checkPackGC(self, expect_object_deleted=True, close=True):
         db = DB(self._storage)
         try:
             c1 = db.open()
@@ -194,7 +194,8 @@ class HistoryPreservingRelStorageTests(
                 # The object should still exist
                 self._storage.load(oid, '')
         finally:
-            db.close()
+            if close:
+                db.close()
         return oid
 
     def checkPackGCDisabled(self):
@@ -207,12 +208,13 @@ class HistoryPreservingRelStorageTests(
 
     def checkPackGCReusePrePackData(self):
         self._storage = self.make_storage(pack_prepack_only=True)
-        oid = self.checkPackGC(expect_object_deleted=False)
+        oid = self.checkPackGC(expect_object_deleted=False,close=False)
         # We now have pre-pack analysis data
         self._storage._options.pack_prepack_only = False
         self._storage.pack(0, referencesf, skip_prepack=True)
         # The object should now be gone
         self.assertRaises(KeyError, self._storage.load, oid, '')
+        self._storage.close()
 
     def checkPackOldUnreferenced(self):
         db = DB(self._storage)

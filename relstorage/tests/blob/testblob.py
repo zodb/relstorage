@@ -468,8 +468,6 @@ def loadblob_tmpstore():
 
     Now we open a database with a TmpStore in front:
 
-    >>> database.close()
-
     >>> from ZODB.Connection import TmpStore
     >>> tmpstore = TmpStore(blob_storage)
 

@@ -22,12 +22,14 @@ if PY3:
         return list(d.values())
     iteritems = dict.items
     iterkeys = dict.keys
+    itervalues = dict.values
 else:
     list_keys = dict.keys
     list_items = dict.items
     list_values = dict.values
     iteritems = dict.iteritems
     iterkeys = dict.iterkeys
+    itervalues = dict.itervalues
 
 # Types
 
@@ -86,3 +88,6 @@ StringIO = BytesIO
 # based on Python version and implementation. We at least
 # centralize the import from here.
 from ZODB._compat import dumps, loads
+from ZODB._compat import dump
+from ZODB._compat import HIGHEST_PROTOCOL
+from ZODB._compat import Pickler, Unpickler

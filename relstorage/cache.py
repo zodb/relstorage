@@ -11,21 +11,39 @@
 # FOR A PARTICULAR PURPOSE.
 #
 ##############################################################################
-from __future__ import absolute_import, print_function
+from __future__ import absolute_import, print_function, division
 
 from relstorage.autotemp import AutoTemporaryFile
 from ZODB.utils import p64
 from ZODB.utils import u64
 from ZODB.POSException import ReadConflictError
-from persistent.TimeStamp import TimeStamp
+from persistent.timestamp import TimeStamp
 from persistent.ring import Ring
+if Ring.__name__ == '_DequeRing': # pragma: no cover
+    import warnings
+    warnings.warn("Install CFFI for best cache performance")
 
 import importlib
 import logging
 import threading
+import time
+import zlib
+import bz2
 
-from relstorage._compat import string_types
-from relstorage._compat import iteritems
+from ._compat import string_types
+from ._compat import iteritems
+from ._compat import itervalues
+from ._compat import PY3
+if PY3:
+    # On Py3, use the built-in pickle, so that we can get
+    # protocol 4 when available.
+    from pickle import Unpickler
+    from pickle import Pickler
+else:
+    # On Py2, zodbpickle gives us protocol 3, but we don't
+    # use its special binary type
+    from ._compat import Unpickler
+    from ._compat import Pickler
 
 log = logging.getLogger(__name__)
 
@@ -68,7 +86,7 @@ class StorageCache(object):
         self.options = options
         self.prefix = prefix or ''
         if local_client is None:
-            local_client = LocalClient(options)
+            local_client = LocalClient(options, self.prefix)
         self.clients_local_first = [local_client]
 
         if options.cache_servers:
@@ -115,7 +133,8 @@ class StorageCache(object):
 
         This is usually memcache connections if they're in use.
         """
-        for client in self.clients_local_first:
+        clients = self.clients_local_first if self.clients_local_first is not _UsedAfterRelease else ()
+        for client in clients:
             client.disconnect_all()
 
         # Release our clients. If we had a non-shared local cache,
@@ -124,6 +143,21 @@ class StorageCache(object):
         # after release.
         self.clients_local_first = _UsedAfterRelease
         self.clients_global_first = _UsedAfterRelease
+
+    def close(self):
+        """
+        Release resources held by this instance, and
+        save any persistent data necessary.
+        """
+        clients = self.clients_local_first if self.clients_local_first is not _UsedAfterRelease else ()
+        for client in clients:
+            try:
+                save = getattr(client, 'save')
+            except AttributeError:
+                continue
+            else:
+                save()
+        self.release()
 
     def clear(self):
         """Remove all data from the cache.  Called by speed tests."""
@@ -574,11 +608,19 @@ class StorageCache(object):
 
 
 class _RingEntry(object):
+
     __slots__ = ('_p_oid', '_Persistent__ring', 'value')
 
     def __init__(self, key, value):
         self._p_oid = key
         self.value = value
+
+    @property
+    def key(self):
+        return self._p_oid
+
+    def __reduce__(self):
+        return _RingEntry, (self._p_oid, self.value)
 
 
 class LocalClientBucket(object):
@@ -590,13 +632,29 @@ class LocalClientBucket(object):
     This class is not threadsafe, accesses to __setitem__ and get_and_bubble_all
     must be protected by a lock.
     """
-    __slots__ = ('size', 'limit', '_dict', '_ring')
 
     def __init__(self, limit):
         self._dict = {}
         self._ring = Ring()
+        self._hits = 0
+        self._misses = 0
         self.size = 0
         self.limit = limit
+
+    def reset_stats(self):
+        self._hits = 0
+        self._misses = 0
+
+    def stats(self):
+        total = self._hits + self._misses
+        return {'hits': self._hits,
+                'misses': self._misses,
+                'ratio': self._hits/total if total else 0,
+                'size': len(self._dict),
+                'bytes': self.size}
+
+    def __len__(self):
+        return len(self._dict)
 
     def __setitem__(self, key, value):
         """
@@ -652,8 +710,11 @@ class LocalClientBucket(object):
         for key in keys:
             entry = dct.get(key)
             if entry is not None:
+                self._hits += 1
                 rng.move_to_head(entry)
                 res[key] = entry.value
+            else:
+                self._misses += 1
         return res
 
     def get(self, key):
@@ -662,25 +723,127 @@ class LocalClientBucket(object):
         if entry is not None:
             return entry.value
 
+    def __getitem__(self, key):
+        # Testing only
+        return self._dict[key].value
+
+    def load_from_file(self, cache_file):
+        now = time.time()
+        unpick = Unpickler(cache_file)
+        version = unpick.load()
+        if version != 1: # pragma: no cover
+            raise ValueError("Incorrect version of cache_file")
+        count = unpick.load()
+        stored = 0
+        loaded_dict = unpick.load()
+        if not self._dict:
+            # bulk-update in C for speed
+            stored = len(loaded_dict)
+            self._dict.update(loaded_dict)
+            for ring_entry in itervalues(loaded_dict):
+                if self.size < self.limit:
+                    self._ring.add(ring_entry)
+                    self.size += len(ring_entry.key) + len(ring_entry.value)
+                else:
+                    # We're too big! ignore these things from now on.
+                    # This is unlikely.
+                    del self._dict[ring_entry.key]
+        else:
+            new_keys = set(loaded_dict.keys()) - set(self._dict.keys())
+            stored += len(new_keys)
+            # Loading more data into an existing bucket.
+            # Load only the *new* keys, but don't care about LRU,
+            # it's all screwed up anyway at this point
+            for new_key in new_keys:
+                new_ring_entry = loaded_dict[new_key]
+                self._dict[new_key] = new_ring_entry
+                self._ring.add(new_ring_entry)
+
+                self.size += len(new_key) + len(new_ring_entry.value)
+                if self.size >= self.limit: # pragma: no cover
+                    break
+
+
+        then = time.time()
+        log.info("Examined %d and stored %d items from %s in %s",
+                 count, stored, cache_file, then - now)
+        return count, stored
+
+    def write_to_file(self, cache_file):
+        now = time.time()
+        # pickling the items is about 2-3x faster than marshal
+        pickler = Pickler(cache_file, -1) # Highest protocol
+
+        pickler.dump(1) # Version marker
+        assert len(self._dict) == len(self._ring)
+        pickler.dump(len(self._dict)) # How many pairs we write
+        # We lose the order. We'll have to build it up again as we go.
+        pickler.dump(self._dict)
+
+        then = time.time()
+        stats = self.stats()
+        log.info("Wrote %d items to %s in %s. Total hits %s; misses %s; ratio %s",
+                 stats['size'], cache_file, then - now,
+                 stats['hits'], stats['misses'], stats['ratio'])
+
 
 class LocalClient(object):
     """A memcache-like object that stores in Python dictionaries."""
 
-    _compress = None
-    _decompress = None
+    # Use the same markers as zc.zlibstorage (well, one marker)
+    # to automatically avoid double-compression
+    _compression_markers = {
+        'zlib': (b'.z', zlib.compress),
+        'bz2': (b'.b', bz2.compress),
+        'none': (None, None)
+    }
+    _decompression_functions = {
+        b'.z': zlib.decompress,
+        b'.b': bz2.decompress
+    }
 
-    def __init__(self, options):
+    def __init__(self, options, prefix=None):
         self._lock = threading.Lock()
+        self.options = options
+        self.prefix = prefix or ''
         self._bucket_limit = int(1000000 * options.cache_local_mb)
         self._value_limit = options.cache_local_object_max
         self.__bucket = None
         self.flush_all()
 
         compression_module = options.cache_local_compression
-        if compression_module and compression_module != 'none':
-            module = importlib.import_module(compression_module)
-            self._compress = module.compress
-            self._decompress = module.decompress
+        try:
+            compression_markers = self._compression_markers[compression_module]
+        except KeyError:
+            raise ValueError("Unknown compression module")
+        else:
+            self.__compression_marker = compression_markers[0]
+            self.__compress = compression_markers[1]
+            if self.__compress is None:
+                self._compress = None
+
+    def _decompress(self, data):
+        pfx = data[:2]
+        if pfx not in self._decompression_functions:
+            return data
+        return self._decompression_functions[pfx](data[2:])
+
+    def _compress(self, data): # pylint:disable=method-hidden
+        # We override this if we're disabling compression
+        # altogether.
+        # Use the same basic rule as zc.zlibstorage, but bump the object size up from 20;
+        # many smaller object (under 100 bytes) like you get with small btrees,
+        # tend not to compress well, so don't bother.
+        if data and (len(data) > 100) and data[:2] not in self._decompression_functions:
+            compressed = self.__compression_marker + self.__compress(data)
+            if len(compressed) < len(data):
+                return compressed
+        return data
+
+    def save(self):
+        options = self.options
+        if options.cache_local_dir and self._bucket0.size:
+            _Loader.save_local_cache(options, self.prefix, self._bucket0)
 
     @property
     def _bucket0(self):
@@ -690,6 +853,15 @@ class LocalClient(object):
     def flush_all(self):
         with self._lock:
             self.__bucket = LocalClientBucket(self._bucket_limit)
+            options = self.options
+            if options.cache_local_dir:
+                _Loader.load_local_cache(options, self.prefix, self._bucket0)
+
+    def reset_stats(self):
+        self.__bucket.reset_stats()
+
+    def stats(self):
+        return self.__bucket.stats()
 
     def get(self, key):
         return self.get_multi([key]).get(key)
@@ -703,9 +875,8 @@ class LocalClient(object):
             res = get(keys)
 
         # Finally, while not holding the lock, decompress if needed
-        if decompress:
-            res = {k: decompress(v)
-                   for k, v in iteritems(res)}
+        res = {k: decompress(v)
+               for k, v in iteritems(res)}
 
         return res
 
@@ -751,3 +922,130 @@ class LocalClient(object):
     def disconnect_all(self):
         # Compatibility with memcache.
         pass
+
+
+import glob
+import gzip
+import io
+import os
+import os.path
+import tempfile
+
+class _Loader(object):
+
+    @classmethod
+    def _normalize_path(cls, options):
+        path = os.path.expanduser(os.path.expandvars(options.cache_local_dir))
+        path = os.path.abspath(path)
+        return path
+
+    _gz_ext = ".gz"
+
+    @classmethod
+    def _gzip_file(cls, fileobj=None, **kwargs):
+        # These files appear to be extremely compressable. One zodbshootout example
+        # with random data compressed a 3.4MB file to 393K and a 19M file went to 3M.
+        gz_cache_file = gzip.GzipFile(fileobj=fileobj, **kwargs)
+        # A layer of caching on top of the Gzipfile is
+        # *crucial* for Python 2.7. Without buffering, reading
+        # 100,000 objects from a 2MB file takes 4 seconds;
+        # with it, it takes around 1.3. Python 3 doesn't have this problem,
+        # but it's nice to still do. The slowness under Python2 is pretty much
+        # removed by the buffering, so we go ahead and do it there too.
+        if kwargs.get('mode') == 'rb':
+            buf_cache_file = io.BufferedReader(gz_cache_file)
+            return buf_cache_file
+        buf_cache_file = io.BufferedWriter(gz_cache_file)
+        return buf_cache_file
+
+    @classmethod
+    def _list_cache_files(cls, options, prefix):
+        path = cls._normalize_path(options)
+        possible_caches = glob.glob(os.path.join(path, 'relstorage-cache-' + prefix + '.*' + cls._gz_ext))
+        return possible_caches
+
+    @classmethod
+    def _stat_cache_files(cls, options, prefix):
+        fds = []
+        stats = []
+        try:
+            for possible_cache_path in cls._list_cache_files(options, prefix):
+                cache_file = io.open(possible_cache_path, 'rb')
+                fds.append(cache_file)
+                buf_cache_file = cls._gzip_file(fileobj=cache_file, mode='rb')
+                stats.append((os.fstat(cache_file.fileno()), buf_cache_file, possible_cache_path, cache_file))
+        except: # pragma: no cover
+            for _f in fds:
+                _f.close()
+            raise
+
+        # Newest and biggest first
+        stats.sort(key=lambda s: (s[0].st_mtime, s[0].st_size), reverse=True)
+
+        return stats
+
+
+    @classmethod
+    def load_local_cache(cls, options, prefix, local_client_bucket):
+        # Given an options that points to a local cache dir,
+        # choose a file from that directory and load it.
+        stats = cls._stat_cache_files(options, prefix)
+
+        try:
+            for _, fd, cache_path, _ in stats:
+                try:
+                    _, stored = local_client_bucket.load_from_file(fd)
+                    if not stored or local_client_bucket.size >= local_client_bucket.limit:
+                        break # pragma: no cover
+                except: # pylint:disable=bare-except
+                    log.exception("Invalid cache file %s", cache_path)
+                    fd.close()
+                    os.remove(cache_path)
+        finally:
+            for e in stats:
+                e[1].close()
+                e[3].close()
+
+    @classmethod
+    def save_local_cache(cls, options, prefix, local_client_bucket):
+        # Dump the file.
+        tempdir = cls._normalize_path(options)
+        try:
+            # make it if needed. try to avoid a time-of-use/check
+            # race (not that it matters here)
+            os.makedirs(tempdir)
+        except os.error:
+            pass
+
+        fd, path = tempfile.mkstemp('._rscache_', dir=tempdir)
+        with io.open(fd, 'wb') as f:
+            with cls._gzip_file(filename=path, fileobj=f, mode='wb', compresslevel=5) as fz:
+                try:
+                    local_client_bucket.write_to_file(fz)
+                except:
+                    log.exception("Failed to save cache file %s", path)
+                    fz.close()
+                    f.close()
+                    os.remove(path)
+                    return
+
+        # Ok, now pick a place to put it, dropping the oldest file,
+        # if necessary.
+
+        files = cls._list_cache_files(options, prefix)
+        if len(files) < options.cache_local_dir_count:
+            # Odds of same pid existing already are too low to worry about
+            new_name = 'relstorage-cache-' + prefix + '.' + str(os.getpid()) + cls._gz_ext
+            os.rename(path, os.path.join(tempdir, new_name))
+        else:
+            stats = cls._stat_cache_files(options, prefix)
+            # oldest and smallest first
+            stats.reverse()
+            try:
+                stats[0][1].close()
+                new_path = stats[0][2]
+                os.rename(path, new_path)
+            finally:
+                for e in stats:
+                    e[1].close()
+                    e[3].close()
