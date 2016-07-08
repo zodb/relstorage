@@ -19,7 +19,7 @@ from ZODB.utils import u64
 from ZODB.POSException import ReadConflictError
 from persistent.timestamp import TimeStamp
 from persistent.ring import Ring
-if Ring.__name__ == '_DequeRing':
+if Ring.__name__ == '_DequeRing': # pragma: no cover
     import warnings
     warnings.warn("Install CFFI for best cache performance")
 
@@ -27,6 +27,8 @@ import importlib
 import logging
 import threading
 import time
+import zlib
+import bz2
 
 from ._compat import string_types
 from ._compat import iteritems
@@ -779,8 +781,17 @@ class LocalClientBucket(object):
 class LocalClient(object):
     """A memcache-like object that stores in Python dictionaries."""
 
-    _compress = None
-    _decompress = None
+    # Use the same markers as zc.zlibstorage (well, one marker)
+    # to automatically avoid double-compression
+    _compression_markers = {
+        'zlib': (b'.z', zlib.compress),
+        'bz2': (b'.b', bz2.compress),
+        'none': (None, None)
+    }
+    _decompression_functions = {
+        b'.z': zlib.decompress,
+        b'.b': bz2.decompress
+    }
 
     def __init__(self, options, prefix=None):
         self._lock = threading.Lock()
@@ -792,10 +803,33 @@ class LocalClient(object):
         self.flush_all()
 
         compression_module = options.cache_local_compression
-        if compression_module and compression_module != 'none':
-            module = importlib.import_module(compression_module)
-            self._compress = module.compress
-            self._decompress = module.decompress
+        try:
+            compression_markers = self._compression_markers[compression_module]
+        except KeyError:
+            raise ValueError("Unknown compression module")
+        else:
+            self.__compression_marker = compression_markers[0]
+            self.__compress = compression_markers[1]
+            if self.__compress is None:
+                self._compress = None
+
+    def _decompress(self, data):
+        pfx = data[:2]
+        if pfx not in self._decompression_functions:
+            return data
+        return self._decompression_functions[pfx](data[2:])
+
+    def _compress(self, data): # pylint:disable=method-hidden
+        # We override this if we're disabling compression
+        # altogether.
+        # Use the same basic rule as zc.zlibstorage, but bump the object size up from 20;
+        # many smaller object (under 100 bytes) like you get with small btrees,
+        # tend not to compress well, so don't bother.
+        if data and (len(data) > 100) and data[:2] not in self._decompression_functions:
+            compressed = self.__compression_marker + self.__compress(data)
+            if len(compressed) < len(data):
+                return compressed
+        return data
 
     def save(self):
         options = self.options
@@ -832,9 +866,8 @@ class LocalClient(object):
             res = get(keys)
 
         # Finally, while not holding the lock, decompress if needed
-        if decompress:
-            res = {k: decompress(v)
-                   for k, v in iteritems(res)}
+        res = {k: decompress(v)
+               for k, v in iteritems(res)}
 
         return res
 

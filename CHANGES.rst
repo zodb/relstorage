@@ -73,6 +73,12 @@
   for a discussion, and see the options ``cache-local-dir`` and
   ``cache-local-dir-count``.
 
+- The in-memory cache is now smart enough not to store compressed
+  objects that grow during compression, and it uses the same
+  compression markers as zc.zlibstorage to avoid double-compression.
+  It can also gracefully handle changes to the compression format in
+  persistent files.
+
 2.0.0b1 (2016-06-28)
 ====================
 

@@ -310,10 +310,10 @@ cache-local-compression
 
         The default is ``zlib``.
 
-        If you use a compressing storage wrapper, such as
-        `zc.zlibstorage
-        <https://pypi.python.org/pypi/zc.zlibstorage>`_, you should
-        set this option to none.
+        If you use the compressing storage wrapper `zc.zlibstorage
+        <https://pypi.python.org/pypi/zc.zlibstorage>`_, this option
+        automatically does nothing. With other compressing storage
+        wrappers this should be set to ``none``.
 
         .. versionadded:: 1.6
 

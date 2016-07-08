@@ -478,6 +478,10 @@ class LocalClientTests(unittest.TestCase):
         c.reset_stats()
         c.disconnect_all()
 
+        self.assertRaises(ValueError,
+                          self._makeOne,
+                          cache_local_compression='unsup')
+
     def test_set_and_get_string_compressed(self):
         c = self._makeOne(cache_local_compression='zlib')
         c.set('abc', b'def')
@@ -560,28 +564,29 @@ class LocalClientTests(unittest.TestCase):
 
     def test_bucket_sizes_with_compression(self):
         c = self._makeOne(cache_local_compression='zlib')
-        c._bucket_limit = 21 * 2 + 1
+        c._bucket_limit = 23 * 2 + 1
         c.flush_all()
 
-        c.set('k0', b'01234567' * 10)
-        self.assertEqual(c._bucket0.size, 21)
+        c.set('k0', b'01234567' * 15)
+        self.assertEqual(c._bucket0.size, 23)
 
-        c.set('k1', b'76543210' * 10)
-        self.assertEqual(c._bucket0.size, 21 * 2)
+        c.set('k1', b'76543210' * 15)
+        self.assertEqual(len(c._bucket0), 2)
+        self.assertEqual(c._bucket0.size, 23 * 2)
 
-        c.set('k2', b'abcdefgh' * 10)
-        self.assertEqual(c._bucket0.size, 21 * 2)
+        c.set('k2', b'abcdefgh' * 15)
+        self.assertEqual(c._bucket0.size, 23 * 2)
 
         v = c.get('k0')
         self.assertEqual(v, None) # This one got evicted :(
 
         v = c.get('k1')
-        self.assertEqual(v, b'76543210' * 10)
-        self.assertEqual(c._bucket0.size, 42)
+        self.assertEqual(v, b'76543210' * 15)
+        self.assertEqual(c._bucket0.size, 46)
 
         v = c.get('k2')
-        self.assertEqual(v, b'abcdefgh' * 10)
-        self.assertEqual(c._bucket0.size, 42)
+        self.assertEqual(v, b'abcdefgh' * 15)
+        self.assertEqual(c._bucket0.size, 46)
 
     def test_add(self):
         c = self._makeOne()
@@ -697,13 +702,13 @@ class MockPoller(object):
 def local_benchmark():
     options = MockOptions()
     options.cache_local_mb = 100
-    options.cache_local_compression = 'none'
+    #options.cache_local_compression = 'none'
 
     from relstorage.cache import LocalClient
     import time
     client = LocalClient(options)
     with open('/dev/urandom', 'rb') as f:
-        random_data = f.read(1024*1024)
+        random_data = f.read(1024)
 
     key_groups = []
     key_groups.append([str(i) for i in range(10)])
@@ -723,7 +728,7 @@ def local_benchmark():
     import timeit
     import statistics
     #import cProfile, pstats
-    number = 10000
+    number = 100
     pop_timer = timeit.Timer(populate)
     #pr = cProfile.Profile()
     #pr.enable()
