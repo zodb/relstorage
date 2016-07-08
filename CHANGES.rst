@@ -64,7 +64,14 @@
 
 - The in-memory cache now uses a better approximation of a LRU
   algorithm with less overhead, so more data should fit in the same
-  size cache. (For best performance, CFFI should be installed.)
+  size cache. (For best performance, CFFI should be installed; a
+  warning is generated if that is not the case.)
+
+- Support a persistent on-disk cache. This can greatly speed up
+  application warmup after a restart (such as deploying new code).
+  Some synthetic benchmarks show an 8-10x improvement. See :issue:`92`
+  for a discussion, and see the options ``cache-local-dir`` and
+  ``cache-local-dir-count``.
 
 2.0.0b1 (2016-06-28)
 ====================
