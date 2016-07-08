@@ -88,3 +88,4 @@ StringIO = BytesIO
 from ZODB._compat import dumps, loads
 from ZODB._compat import dump
 from ZODB._compat import HIGHEST_PROTOCOL
+from ZODB._compat import Pickler, Unpickler

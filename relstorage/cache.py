@@ -23,9 +23,12 @@ from persistent.ring import Ring
 import importlib
 import logging
 import threading
+import time
 
-from relstorage._compat import string_types
-from relstorage._compat import iteritems
+from ._compat import string_types
+from ._compat import iteritems
+from ._compat import Unpickler
+from ._compat import Pickler
 
 log = logging.getLogger(__name__)
 
@@ -590,11 +593,16 @@ class StorageCache(object):
 
 
 class _RingEntry(object):
+
     __slots__ = ('_p_oid', '_Persistent__ring', 'value')
 
     def __init__(self, key, value):
         self._p_oid = key
         self.value = value
+
+    @property
+    def key(self):
+        return self._p_oid
 
 
 class LocalClientBucket(object):
@@ -606,7 +614,6 @@ class LocalClientBucket(object):
     This class is not threadsafe, accesses to __setitem__ and get_and_bubble_all
     must be protected by a lock.
     """
-    __slots__ = ('size', 'limit', '_dict', '_ring', '_hits', '_misses')
 
     def __init__(self, limit):
         self._dict = {}
@@ -627,6 +634,9 @@ class LocalClientBucket(object):
                 'ratio': self._hits/total if total else 0,
                 'size': len(self._dict),
                 'bytes': self.size}
+
+    def __len__(self):
+        return len(self._dict)
 
     def __setitem__(self, key, value):
         """
@@ -698,38 +708,47 @@ class LocalClientBucket(object):
     __getitem__ = get
 
     def load_from_file(self, cache_file):
-        from ._compat import loads
-        import time
         now = time.time()
-        s = cache_file.read()
-        tuples = loads(s)
-        loaded = 0
-        for k, v in tuples:
-            if k in self or k.endswith("checkpoints"):
+        unpick = Unpickler(cache_file)
+        version = unpick.load()
+        if version != 1: # pragma: no cover
+            raise ValueError("Incorrect version of cache_file")
+        count = unpick.load()
+        stored = 0
+        for _ in range(count):
+            k, v = unpick.load()
+            if k in self:
                 continue
             self[k] = v
-            loaded += 1
-            if self.size >= self.limit:
-                break
+            stored += 1
+            # We load everything, even if we exceed our
+            # size limit (which we might if the limit changed
+            # in the meantime, or if we are loading multiple files
+            # for better hit ratios) so that the LRU list works out
+            # correct...these come in from least to most recently
+            # referenced
         then = time.time()
-        log.info("Loaded %d items from %s in %s",
-                 loaded, cache_file, then - now)
-        return loaded
+        log.info("Examined %d and stored %d items from %s in %s",
+                 count, stored, cache_file, then - now)
+        return count, stored
 
     def write_to_file(self, cache_file):
-        from ._compat import dump, HIGHEST_PROTOCOL
-        import time
         now = time.time()
+        pickler = Pickler(cache_file, -1) # Highest protocol
+        pickler.dump(1) # Version marker
+        assert len(self._dict) == len(self._ring)
+        pickler.dump(len(self._dict)) # How many pairs we write
         # Iterate these from least to most recently used;
         # when we load them, we'll effectively reverse this
         # and wind up with the correct order
-        tuples = [(x._p_oid, x.value) for x in self._ring]
-        dump(tuples, cache_file, HIGHEST_PROTOCOL)
+        for entry in self._ring:
+            pickler.dump((entry.key, entry.value))
+
         then = time.time()
-        total = self._hits + self._misses
-        ratio = self._hits/total if total else 0
+        stats = self.stats()
         log.info("Wrote %d items to %s in %s. Total hits %s; misses %s; ratio %s",
-                 len(tuples), cache_file, then - now, self._hits, self._misses, ratio)
+                 stats['size'], cache_file, then - now,
+                 stats['hits'], stats['misses'], stats['ratio'])
 
 
 class LocalClient(object):
@@ -851,23 +870,31 @@ class _Loader(object):
         import os.path
         import glob
         path = cls._normalize_path(options)
-        possible_caches = glob.glob(os.path.join(path, 'relstorage-cache-' + prefix + '.*'))
+        possible_caches = glob.glob(os.path.join(path, 'relstorage-cache-' + prefix + '.*.gz'))
         return possible_caches
 
     @classmethod
     def _stat_cache_files(cls, options, prefix):
         import os
+        import io
+        import gzip
         fds = []
         stats = []
-        for possible_cache_path in cls._list_cache_files(options, prefix):
-            cache_file = open(possible_cache_path, 'rb')
-            fds.append(cache_file)
-            stats.append((os.fstat(cache_file.fileno()), cache_file, possible_cache_path))
+        try:
+            for possible_cache_path in cls._list_cache_files(options, prefix):
+                cache_file = io.open(possible_cache_path, 'rb')
+                fds.append(cache_file)
+                gz_cache_file = gzip.GzipFile(fileobj=cache_file, mode='rb')
+                stats.append((os.fstat(cache_file.fileno()), gz_cache_file, possible_cache_path, cache_file))
+        except: # pragma: no cover
+            for _f in fds:
+                _f.close()
+            raise
 
         # Newest and biggest first
         stats.sort(key=lambda s: (s[0].st_mtime, s[0].st_size), reverse=True)
 
-        return fds, stats
+        return stats
 
 
     @classmethod
@@ -875,23 +902,22 @@ class _Loader(object):
         # Given an options that points to a local cache dir,
         # choose a file from that directory and load it.
         import os
+        stats = cls._stat_cache_files(options, prefix)
 
-        fds = []
         try:
-            fds, stats = cls._stat_cache_files(options, prefix)
-            for _, fd, cache_path in stats:
+            for _, fd, cache_path, _ in stats:
                 try:
-                    cnt = local_client_bucket.load_from_file(fd)
-                    if not cnt:
-                        break
+                    _, stored = local_client_bucket.load_from_file(fd)
+                    if not stored or local_client_bucket.size >= local_client_bucket.limit:
+                        break # pragma: no cover
                 except: # pylint:disable=bare-except
                     log.exception("Invalid cache file %s", cache_path)
                     fd.close()
-                    fds.remove(fd)
                     os.remove(cache_path)
         finally:
-            for _fd in fds:
-                _fd.close()
+            for e in stats:
+                e[1].close()
+                e[3].close()
 
     @classmethod
     def save_local_cache(cls, options, prefix, local_client_bucket):
@@ -899,17 +925,21 @@ class _Loader(object):
         import tempfile
         import os
         import os.path
+        import gzip
         tempdir = cls._normalize_path(options)
+        # These files appear to be extremely compressable. One zodbshootout example
+        # with random data compressed a 3.4MB file to 393K.
         fd, path = tempfile.mkstemp('._rscache_', dir=tempdir)
-        f = os.fdopen(fd, 'wb')
-        try:
-            local_client_bucket.write_to_file(f)
-        except:
-            f.close()
-            os.remove(path)
-            raise
-        else:
-            f.close()
+        with os.fdopen(fd, 'wb') as f:
+            with gzip.GzipFile(filename=path, fileobj=f, mode='wb', compresslevel=5) as fz:
+                try:
+                    local_client_bucket.write_to_file(fz)
+                except:
+                    log.exception("Failed to save cache file %s", path)
+                    fz.close()
+                    f.close()
+                    os.remove(path)
+                    return
 
         # Ok, now pick a place to put it, dropping the oldest file,
         # if necessary.
@@ -917,10 +947,10 @@ class _Loader(object):
         files = cls._list_cache_files(options, prefix)
         if len(files) < options.cache_local_dir_count:
             # Odds of same pid existing already are too low to worry about
-            new_name = 'relstorage-cache-' + prefix + '.' + str(os.getpid())
+            new_name = 'relstorage-cache-' + prefix + '.' + str(os.getpid()) + '.gz'
             os.rename(path, os.path.join(tempdir, new_name))
         else:
-            fds, stats = cls._stat_cache_files(options, prefix)
+            stats = cls._stat_cache_files(options, prefix)
             # oldest and smallest first
             stats.reverse()
             try:
@@ -928,5 +958,6 @@ class _Loader(object):
                 new_path = stats[0][2]
                 os.rename(path, new_path)
             finally:
-                for _fd in fds:
-                    _fd.close()
+                for e in stats:
+                    e[1].close()
+                    e[3].close()
