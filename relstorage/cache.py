@@ -33,8 +33,17 @@ import bz2
 from ._compat import string_types
 from ._compat import iteritems
 from ._compat import itervalues
-from ._compat import Unpickler
-from ._compat import Pickler
+from ._compat import PY3
+if PY3:
+    # On Py3, use the built-in pickle, so that we can get
+    # protocol 4 when available.
+    from pickle import Unpickler
+    from pickle import Pickler
+else:
+    # On Py2, zodbpickle gives us protocol 3, but we don't
+    # use its special binary type
+    from ._compat import Unpickler
+    from ._compat import Pickler
 
 log = logging.getLogger(__name__)
 
