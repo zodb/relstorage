@@ -418,21 +418,23 @@ class LocalClientBucketTests(unittest.TestCase):
         self.assertEqual(count, 1)
         self.assertEqual(client1['abc'], client2['abc'])
         self.assertEqual(1, len(client2))
+        self.assertEqual(client1.size, client2.size)
 
         bio.seek(0)
         client1.reset_stats()
         client1['def'] = b'123'
+        client1_max_size = client1.size
         client1.write_to_file(bio)
         bio.seek(0)
 
-        # This time there's too much data, so the oldest
+        # This time there's too much data, so an arbitrary
         # entry gets dropped
         client2 = self.getClass()(3)
         count, stored = client2.load_from_file(bio)
         self.assertEqual(count, stored)
         self.assertEqual(count, 2)
         self.assertEqual(1, len(client2))
-        self.assertEqual(client1['def'], client2['def'])
+
 
         bio.seek(0)
         # Duplicate keys ignored.
@@ -442,6 +444,18 @@ class LocalClientBucketTests(unittest.TestCase):
         count, stored = client1.load_from_file(bio)
         self.assertEqual(count, 2)
         self.assertEqual(stored, 0)
+        self.assertEqual(2, len(client1))
+
+        # Half duplicate keys
+        del client1['abc']
+        self.assertEqual(1, len(client1))
+        bio.seek(0)
+        count, stored = client1.load_from_file(bio)
+        self.assertEqual(client1['def'], b'123')
+        self.assertEqual(client1['abc'], b'xyz')
+        self.assertEqual(count, 2)
+        self.assertEqual(stored, 1)
+        self.assertEqual(client1.size, client1_max_size)
 
 
 class LocalClientTests(unittest.TestCase):
@@ -720,6 +734,62 @@ def local_benchmark():
     print("pop average", statistics.mean(pop_times), "stddev", statistics.stdev(pop_times))
     print("read average", statistics.mean(read_times), "stddev", statistics.stdev(read_times))
 
+def save_load_benchmark():
+    from relstorage.cache import LocalClientBucket
+    from io import BytesIO
+
+    bucket = LocalClientBucket(10*1024*1024)
+
+    i = 1
+    j = 0
+    while bucket.size < bucket.limit - i:
+        val = (str(j) * i).encode('ascii')
+        if len(val) > bucket.limit or bucket.size + len(val) > bucket.limit:
+            break
+        bucket[str(i)] = val
+        if i < 1096:
+            i += 50
+            j += 1
+        else:
+            j += 1
+            i += 1
+        print("Len", len(bucket), "size",bucket.size, "i", i)
+
+    print("Len", len(bucket), "size", bucket.size)
+    number = 50
+    import timeit
+    import statistics
+    import cProfile
+    import pstats
+
+    def write():
+        io = BytesIO()
+        bucket.write_to_file(io)
+
+    bio = BytesIO()
+    bucket.write_to_file(bio)
+
+    def load():
+        bio.seek(0)
+        b2 = LocalClientBucket(bucket.limit)
+        b2.load_from_file(bio)
+
+    write_timer = timeit.Timer(write)
+    write_times = write_timer.repeat(number=number)
+
+    print("write average", statistics.mean(write_times), "stddev", statistics.stdev(write_times))
+
+    #pr = cProfile.Profile()
+    #pr.enable()
+
+    read_timer = timeit.Timer(load)
+    read_times = read_timer.repeat(number=number)
+    #pr.disable()
+    #ps = pstats.Stats(pr).sort_stats('cumulative')
+    #ps.print_stats()
+
+    print("read average", statistics.mean(read_times), "stddev", statistics.stdev(read_times))
+
 
 def test_suite():
     suite = unittest.TestSuite()
@@ -730,7 +800,9 @@ def test_suite():
 
 if __name__ == '__main__':
     import sys
-    if '--bench' in sys.argv:
+    if '--localbench' in sys.argv:
         local_benchmark()
+    elif '--iobench' in sys.argv:
+        save_load_benchmark()
     else:
         unittest.main(defaultTest='test_suite')

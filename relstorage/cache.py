@@ -27,6 +27,7 @@ import time
 
 from ._compat import string_types
 from ._compat import iteritems
+from ._compat import itervalues
 from ._compat import Unpickler
 from ._compat import Pickler
 
@@ -604,6 +605,9 @@ class _RingEntry(object):
     def key(self):
         return self._p_oid
 
+    def __reduce__(self):
+        return _RingEntry, (self._p_oid, self.value)
+
 
 class LocalClientBucket(object):
     """
@@ -705,7 +709,9 @@ class LocalClientBucket(object):
         if entry is not None:
             return entry.value
 
-    __getitem__ = get
+    def __getitem__(self, key):
+        # Testing only
+        return self._dict[key].value
 
     def load_from_file(self, cache_file):
         now = time.time()
@@ -715,18 +721,35 @@ class LocalClientBucket(object):
             raise ValueError("Incorrect version of cache_file")
         count = unpick.load()
         stored = 0
-        for _ in range(count):
-            k, v = unpick.load()
-            if k in self:
-                continue
-            self[k] = v
-            stored += 1
-            # We load everything, even if we exceed our
-            # size limit (which we might if the limit changed
-            # in the meantime, or if we are loading multiple files
-            # for better hit ratios) so that the LRU list works out
-            # correct...these come in from least to most recently
-            # referenced
+        loaded_dict = unpick.load()
+        if not self._dict:
+            # bulk-update in C for speed
+            stored = len(loaded_dict)
+            self._dict.update(loaded_dict)
+            for ring_entry in itervalues(loaded_dict):
+                if self.size < self.limit:
+                    self._ring.add(ring_entry)
+                    self.size += len(ring_entry.key) + len(ring_entry.value)
+                else:
+                    # We're too big! ignore these things from now on.
+                    # This is unlikely.
+                    del self._dict[ring_entry.key]
+        else:
+            new_keys = set(loaded_dict.keys()) - set(self._dict.keys())
+            stored += len(new_keys)
+            # Loading more data into an existing bucket.
+            # Load only the *new* keys, but don't care about LRU,
+            # it's all screwed up anyway at this point
+            for new_key in new_keys:
+                new_ring_entry = loaded_dict[new_key]
+                self._dict[new_key] = new_ring_entry
+                self._ring.add(new_ring_entry)
+
+                self.size += len(new_key) + len(new_ring_entry.value)
+                if self.size >= self.limit: # pragma: no cover
+                    break
+
+
         then = time.time()
         log.info("Examined %d and stored %d items from %s in %s",
                  count, stored, cache_file, then - now)
@@ -734,15 +757,14 @@ class LocalClientBucket(object):
 
     def write_to_file(self, cache_file):
         now = time.time()
+        # pickling the items is about 2-3x faster than marshal
         pickler = Pickler(cache_file, -1) # Highest protocol
+
         pickler.dump(1) # Version marker
         assert len(self._dict) == len(self._ring)
         pickler.dump(len(self._dict)) # How many pairs we write
-        # Iterate these from least to most recently used;
-        # when we load them, we'll effectively reverse this
-        # and wind up with the correct order
-        for entry in self._ring:
-            pickler.dump((entry.key, entry.value))
+        # We lose the order. We'll have to build it up again as we go.
+        pickler.dump(self._dict)
 
         then = time.time()
         stats = self.stats()
