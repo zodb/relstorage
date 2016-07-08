@@ -591,18 +591,23 @@ class LocalClientTests(unittest.TestCase):
         c.add('k1', b'ghi')
         self.assertEqual(c.get_multi(['k0', 'k1']), {'k0': b'abc', 'k1': b'ghi'})
 
-    def test_load_and_save(self):
+    def test_load_and_save(self, _make_dir=True):
         import tempfile
         import shutil
         import os
         temp_dir = tempfile.mkdtemp(".rstest_cache")
+        root_temp_dir = temp_dir
+        if not _make_dir:
+            temp_dir = os.path.join(temp_dir, 'child1', 'child2')
         try:
             c = self._makeOne(cache_local_dir=temp_dir)
             # No files yet.
-            self.assertEqual([], os.listdir(temp_dir))
+            self.assertEqual([], os.listdir(temp_dir) if _make_dir else [])
+            self.assertEqual([], os.listdir(root_temp_dir))
             # Saving an empty bucket does nothing
             c.save()
-            self.assertEqual([], os.listdir(temp_dir))
+            self.assertEqual([], os.listdir(temp_dir) if _make_dir else [])
+            self.assertEqual([], os.listdir(root_temp_dir))
 
             c.set('k0', b'abc')
             c.save()
@@ -644,7 +649,12 @@ class LocalClientTests(unittest.TestCase):
             self.assertEqual(0, len(cache_files))
 
         finally:
-            shutil.rmtree(temp_dir)
+            shutil.rmtree(root_temp_dir)
+
+    def test_load_and_save_new_dir(self):
+         # automatically create directories as needed
+         self.test_load_and_save(False)
+
 
 class MockOptions(object):
     cache_module_name = ''

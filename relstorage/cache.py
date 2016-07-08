@@ -17,8 +17,11 @@ from relstorage.autotemp import AutoTemporaryFile
 from ZODB.utils import p64
 from ZODB.utils import u64
 from ZODB.POSException import ReadConflictError
-from persistent.TimeStamp import TimeStamp
+from persistent.timestamp import TimeStamp
 from persistent.ring import Ring
+if Ring.__name__ == '_DequeRing':
+    import warnings
+    warnings.warn("Install CFFI for best cache performance")
 
 import importlib
 import logging
@@ -878,7 +881,7 @@ class LocalClient(object):
         # Compatibility with memcache.
         pass
 
-from relstorage._compat import PY3
+
 import glob
 import gzip
 import io
@@ -965,6 +968,12 @@ class _Loader(object):
     def save_local_cache(cls, options, prefix, local_client_bucket):
         # Dump the file.
         tempdir = cls._normalize_path(options)
+        try:
+            # make it if needed. try to avoid a time-of-use/check
+            # race (not that it matters here)
+            os.makedirs(tempdir)
+        except os.error:
+            pass
 
         fd, path = tempfile.mkstemp('._rscache_', dir=tempdir)
         with io.open(fd, 'wb') as f:
