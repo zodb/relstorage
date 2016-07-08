@@ -878,36 +878,57 @@ class LocalClient(object):
         # Compatibility with memcache.
         pass
 
+from relstorage._compat import PY3
+import glob
+import gzip
+import io
+import os
+import os.path
+import tempfile
+
 class _Loader(object):
 
     @classmethod
     def _normalize_path(cls, options):
-        import os.path
         path = os.path.expanduser(os.path.expandvars(options.cache_local_dir))
         path = os.path.abspath(path)
         return path
 
+    _gz_ext = ".gz"
+
+    @classmethod
+    def _gzip_file(cls, fileobj=None, **kwargs):
+        # These files appear to be extremely compressable. One zodbshootout example
+        # with random data compressed a 3.4MB file to 393K and a 19M file went to 3M.
+        gz_cache_file = gzip.GzipFile(fileobj=fileobj, **kwargs)
+        # A layer of caching on top of the Gzipfile is
+        # *crucial* for Python 2.7. Without buffering, reading
+        # 100,000 objects from a 2MB file takes 4 seconds;
+        # with it, it takes around 1.3. Python 3 doesn't have this problem,
+        # but it's nice to still do. The slowness under Python2 is pretty much
+        # removed by the buffering, so we go ahead and do it there too.
+        if kwargs.get('mode') == 'rb':
+            buf_cache_file = io.BufferedReader(gz_cache_file)
+            return buf_cache_file
+        buf_cache_file = io.BufferedWriter(gz_cache_file)
+        return buf_cache_file
+
     @classmethod
     def _list_cache_files(cls, options, prefix):
-        import os.path
-        import glob
         path = cls._normalize_path(options)
-        possible_caches = glob.glob(os.path.join(path, 'relstorage-cache-' + prefix + '.*.gz'))
+        possible_caches = glob.glob(os.path.join(path, 'relstorage-cache-' + prefix + '.*' + cls._gz_ext))
         return possible_caches
 
     @classmethod
     def _stat_cache_files(cls, options, prefix):
-        import os
-        import io
-        import gzip
         fds = []
         stats = []
         try:
             for possible_cache_path in cls._list_cache_files(options, prefix):
                 cache_file = io.open(possible_cache_path, 'rb')
                 fds.append(cache_file)
-                gz_cache_file = gzip.GzipFile(fileobj=cache_file, mode='rb')
-                stats.append((os.fstat(cache_file.fileno()), gz_cache_file, possible_cache_path, cache_file))
+                buf_cache_file = cls._gzip_file(fileobj=cache_file, mode='rb')
+                stats.append((os.fstat(cache_file.fileno()), buf_cache_file, possible_cache_path, cache_file))
         except: # pragma: no cover
             for _f in fds:
                 _f.close()
@@ -923,7 +944,6 @@ class _Loader(object):
     def load_local_cache(cls, options, prefix, local_client_bucket):
         # Given an options that points to a local cache dir,
         # choose a file from that directory and load it.
-        import os
         stats = cls._stat_cache_files(options, prefix)
 
         try:
@@ -944,16 +964,11 @@ class _Loader(object):
     @classmethod
     def save_local_cache(cls, options, prefix, local_client_bucket):
         # Dump the file.
-        import tempfile
-        import os
-        import os.path
-        import gzip
         tempdir = cls._normalize_path(options)
-        # These files appear to be extremely compressable. One zodbshootout example
-        # with random data compressed a 3.4MB file to 393K.
+
         fd, path = tempfile.mkstemp('._rscache_', dir=tempdir)
-        with os.fdopen(fd, 'wb') as f:
-            with gzip.GzipFile(filename=path, fileobj=f, mode='wb', compresslevel=5) as fz:
+        with io.open(fd, 'wb') as f:
+            with cls._gzip_file(filename=path, fileobj=f, mode='wb', compresslevel=5) as fz:
                 try:
                     local_client_bucket.write_to_file(fz)
                 except:
@@ -969,7 +984,7 @@ class _Loader(object):
         files = cls._list_cache_files(options, prefix)
         if len(files) < options.cache_local_dir_count:
             # Odds of same pid existing already are too low to worry about
-            new_name = 'relstorage-cache-' + prefix + '.' + str(os.getpid()) + '.gz'
+            new_name = 'relstorage-cache-' + prefix + '.' + str(os.getpid()) + cls._gz_ext
             os.rename(path, os.path.join(tempdir, new_name))
         else:
             stats = cls._stat_cache_files(options, prefix)
