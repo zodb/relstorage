@@ -179,7 +179,10 @@ class RelStorage(UndoLogCompatible,
 
     def __init__(self, adapter, name=None, create=None,
                  options=None, cache=None, blobhelper=None,
-                 _use_locks=False,
+                 # The top-level storage should use locks because
+                 # new_oid is shared among all connections. But the new_instance
+                 # objects don't need to.
+                 _use_locks=True,
                  **kwoptions):
         self._adapter = adapter
 
@@ -269,6 +272,7 @@ class RelStorage(UndoLogCompatible,
             blobhelper = None
         other = type(self)(adapter=adapter, name=self.__name__,
                            create=False, options=self._options, cache=cache,
+                           _use_locks=False,
                            blobhelper=blobhelper)
         self._instances.append(weakref.ref(other, self._instances.remove))
 
@@ -1062,6 +1066,10 @@ class RelStorage(UndoLogCompatible,
         if self._is_read_only:
             raise ReadOnlyError()
         with self._lock:
+            # This method is actually called on the storage object of
+            # the DB, not the storage object of a connection for some
+            # reason. This means this method is shared among all
+            # connections using a database.
             if self._preallocated_oids:
                 oid_int = self._preallocated_oids.pop()
             else:

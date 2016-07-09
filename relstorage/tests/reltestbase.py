@@ -41,7 +41,6 @@ from relstorage.storage import RelStorage
 class StorageCreatingMixin(object):
 
     keep_history = None # Override
-    use_locked_storage = None # override
 
     def make_adapter(self, options):
         # abstract method
@@ -60,7 +59,7 @@ class StorageCreatingMixin(object):
 
         options = Options(keep_history=self.keep_history, **kw)
         adapter = self.make_adapter(options)
-        storage = RelStorage(adapter, options=options, _use_locks=self.use_locked_storage)
+        storage = RelStorage(adapter, options=options)
         storage._batcher_row_limit = 1
         if zap:
             # XXX: Some ZODB tests, possibly check4ExtStorageThread and
@@ -76,38 +75,17 @@ class RelStorageTestBase(StorageCreatingMixin,
 
     keep_history = None  # Override
     _storage_created = None
-    _locked_tests = (
-        # These tests know nothing of IMVCCStorage and so don't
-        # create a new_instance for each thread, as of ZODB 4.3.1.
-        # BasicStorage
-        'check_checkCurrentSerialInTransaction',
-        'check_tid_ordering_w_commit',
-        # MTStorage
-        'check2StorageThreads',
-        'check7StorageThreads',
-        'check4ExtStorageThread',
-        # XXX These two MTStorage tests don't actually need locks. But
-        # on TravisCI, both Python 2.7 and 3.4 segfaulted (sometimes!) in one of
-        # these tests when run under Coverage, so we include them anyway.
-        'check2ZODBThreads',
-        'check7ZODBThreads',
-        # PackableStorage
-        'checkPackWhileWriting',
-        'checkPackNowWhileWriting',
-        'checkPackLotsWhileWriting',
-    )
 
     def setUp(self):
-        if self._testMethodName in self._locked_tests:
-            self.use_locked_storage = True
+        pass
         # Note that we're deliberately NOT calling super's setup.
         # It does stuff on disk, etc, that's not necessary for us
         # and just slows us down by ~10%.
         #super(RelStorageTestBase, self).setUp()
 
     def tearDown(self):
-        self.use_locked_storage = False
         transaction.abort()
+        # XXX: This could create one! Do subclasses override self._storage?
         storage = self._storage
         if storage is not None:
             self._storage = None
