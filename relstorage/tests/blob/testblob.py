@@ -632,6 +632,13 @@ checker = renormalizing.RENormalizing([
     (re.compile(r'\%(sep)s' % dict(sep=os.path.sep)), '/'),
 ])
 
+try:
+    file_type = file
+except NameError:
+    # Py3: Python 3 does not have a file type.
+    import io
+    file_type = io.BufferedReader
+
 def storage_reusable_suite(prefix, factory,
                            test_blob_storage_recovery=False,
                            test_packing=False,
@@ -652,6 +659,7 @@ def storage_reusable_suite(prefix, factory,
             return factory(name, blob_dir, **kw)
 
         test.globs['create_storage'] = create_storage
+        test.globs['file_type'] = file_type
 
     suite = unittest.TestSuite()
     suite.addTest(doctest.DocFileSuite(

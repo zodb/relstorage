@@ -1,17 +1,3 @@
-##############################################################################
-#
-# Copyright (c) 2005-2007 Zope Foundation and Contributors.
-# All Rights Reserved.
-#
-# This software is subject to the provisions of the Zope Public License,
-# Version 2.1 (ZPL).  A copy of the ZPL should accompany this distribution.
-# THIS SOFTWARE IS PROVIDED "AS IS" AND ANY AND ALL EXPRESS OR IMPLIED
-# WARRANTIES ARE DISCLAIMED, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
-# WARRANTIES OF TITLE, MERCHANTABILITY, AGAINST INFRINGEMENT, AND FITNESS
-# FOR A PARTICULAR PURPOSE.
-#
-##############################################################################
-
 Transaction support for Blobs
 =============================
 
@@ -314,7 +300,12 @@ We can also read committed data by calling open with a 'c' flag:
 
     >>> f = blob.open('c')
 
-This doesn't prevent us from opening the blob for writing:
+This just returns a regular file object:
+
+    >>> type(f) == file_type
+    True
+
+and doesn't prevent us from opening the blob for writing:
 
     >>> with blob.open('w') as file:
     ...     _ = file.write(b'x')
@@ -390,20 +381,15 @@ stored are discarded.
     >>> blob_storage.tpc_begin(t)
     >>> with open('blobfile', 'wb') as file:
     ...     _ = file.write(b'This data should go away')
-    >>> s1 = blob_storage.storeBlob(blob._p_oid, oldserial, olddata, 'blobfile',
+    >>> blob_storage.storeBlob(blob._p_oid, oldserial, olddata, 'blobfile',
     ...                             '', t)
     >>> new_oid = blob_storage.new_oid()
     >>> with open('blobfile2', 'wb') as file:
     ...     _ = file.write(b'This data should go away too')
-    >>> s2 = blob_storage.storeBlob(new_oid, '\0'*8, olddata, 'blobfile2',
+    >>> blob_storage.storeBlob(new_oid, '\0'*8, olddata, 'blobfile2',
     ...                             '', t)
-
-    >>> serials = blob_storage.tpc_vote(t)
-    >>> if s1 is None:
-    ...     s1 = [s for (oid, s) in serials if oid == blob._p_oid][0]
-    >>> if s2 is None:
-    ...     s2 = [s for (oid, s) in serials if oid == new_oid][0]
-
+    >>> bool(blob_storage.tpc_vote(t))
+    False
     >>> blob_storage.tpc_abort(t)
 
 Now, the serial for the existing blob should be the same:
@@ -411,14 +397,7 @@ Now, the serial for the existing blob should be the same:
     >>> blob_storage.load(blob._p_oid, '') == (olddata, oldserial)
     True
 
-And we shouldn't be able to read the data that we saved:
-
-    >>> blob_storage.loadBlob(blob._p_oid, s1)
-    Traceback (most recent call last):
-    ...
-    POSKeyError: 'No blob file...
-
-Of course the old data should be unaffected:
+The old data should be unaffected:
 
     >>> with open(blob_storage.loadBlob(blob._p_oid, oldserial)) as fp:
     ...     fp.read()
@@ -430,11 +409,6 @@ Similarly, the new object wasn't added to the storage:
     Traceback (most recent call last):
     ...
     POSKeyError: 0x...
-
-    >>> blob_storage.loadBlob(blob._p_oid, s2)
-    Traceback (most recent call last):
-    ...
-    POSKeyError: 'No blob file...
 
 .. clean up
 
