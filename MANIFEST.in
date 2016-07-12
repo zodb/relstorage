@@ -9,7 +9,7 @@ recursive-include .travis *
 
 recursive-include notes *.ods *.py *.sql *.txt
 
-recursive-include relstorage *.py *.xml *.txt *.test *.conf
+recursive-include relstorage *.py *.xml *.txt *.test *.conf *.rst
 
 recursive-include doc *.py *.rst Makefile
 recursive-exclude doc changelog.rst relstorage.*.rst
