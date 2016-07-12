@@ -30,6 +30,7 @@ from ZODB.tests.StorageTestBase import zodb_pickle
 from ZODB.utils import p64
 import time
 import transaction
+import unittest
 
 
 class HistoryPreservingRelStorageTests(
@@ -43,6 +44,10 @@ class HistoryPreservingRelStorageTests(
     ):
 
     keep_history = True
+
+    def checkUndoMultipleConflictResolution(self, *_args, **_kwargs):
+        # 4.2.3 and above add this. it's an exotic feature according to jimfulton.
+        raise unittest.SkipTest("conflict-resolving undo not supported")
 
     def checkTransactionalUndoIterator(self):
         # this test overrides the broken version in TransactionalUndoStorage.
