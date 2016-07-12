@@ -61,7 +61,7 @@ class _ZEOTracer(object):
         self._pack = struct.Struct(">iiH8s8s").pack
         self._lock = threading.Lock()
 
-    def _trace(self, code, oid_int=0, tid_int=0, end_tid_int=0, dlen=0, now=time.time):
+    def _trace(self, code, oid_int=0, tid_int=0, end_tid_int=0, dlen=0, now=None):
         # This method was originally part of ZEO.cache.ClientCache. The below
         # comment is verbatim:
         # The code argument is two hex digits; bits 0 and 7 must be zero.
@@ -76,6 +76,7 @@ class _ZEOTracer(object):
             tid = z64
         if end_tid is None:
             end_tid = z64
+        now = now or time.time
         try:
             self._trace_file.write(
                 self._pack(
@@ -93,7 +94,7 @@ class _ZEOTracer(object):
         # As a locking optimization, we accept this in bulk
         with self._lock:
             for startpos, endpos, oid_int in items:
-                self._trace(0x52, oid_int, tid_int, dlen=endpos-startpos)
+                self._trace(0x52, oid_int, tid_int, dlen=endpos-startpos, now=time.time)
 
     def close(self):
         self._trace_file.close()
