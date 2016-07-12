@@ -210,7 +210,6 @@ class StorageCache(object):
             #   transaction order, leading it to sometimes put the
             #   wrong tid in delta_after*.
             cp0, cp1 = self.checkpoints
-            import os
 
             msg = ("Detected an inconsistency "
                    "between the RelStorage cache and the database "

@@ -33,6 +33,9 @@ notifications:
 install:
   - pip install -U pip setuptools
   - pip install -U tox coveralls
+# Install patched version of 4; waiting on 4.4.3.
+# Same change was merged to 5.0 branch post a5
+  - pip install git+https://github.com/zopefoundation/ZODB.git@4#egg=ZODB
   - if [[ $TRAVIS_PYTHON_VERSION == 'pypy' ]]; then pip install -U python-memcached; fi
   - if [[ $TRAVIS_PYTHON_VERSION != 'pypy' ]]; then pip install -U pylibmc cffi; fi
   - pip install -U -e ".[test]"

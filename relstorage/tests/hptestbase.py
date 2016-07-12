@@ -57,22 +57,15 @@ class HistoryPreservingRelStorageTests(
             t = transaction.Transaction()
             tid = p64(i + 1)
             s.tpc_begin(t, tid)
-            txn_orig = []
             for j in range(OBJECTS):
                 oid = s.new_oid()
                 obj = MinPO(i * OBJECTS + j)
-                revid = s.store(oid, None, zodb_pickle(obj), '', t)
-                txn_orig.append((tid, oid, revid))
-            serials = s.tpc_vote(t)
-            if not serials:
-                orig.extend(txn_orig)
-            else:
-                # The storage provided revision IDs after the vote
-                serials = dict(serials)
-                for tid, oid, revid in txn_orig:
-                    self.assertEqual(revid, None)
-                    orig.append((tid, oid, serials[oid]))
+                s.store(oid, None, zodb_pickle(obj), '', t)
+                orig.append((tid, oid))
+            s.tpc_vote(t)
             s.tpc_finish(t)
+
+        orig = [(tid, oid, s.getTid(oid)) for tid, oid in orig]
 
         i = 0
         for tid, oid, revid in orig:

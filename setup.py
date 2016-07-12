@@ -81,8 +81,7 @@ setup(
     zip_safe=False,  # otherwise ZConfig can't see component.xml
     install_requires=[
         'perfmetrics',
-        # ZODB 5.0 requires the new storage protocol.
-        'ZODB >= 4.3.1, <5.0',
+        'ZODB >= 4.4.2',
         # ZEO is needed for blob layout
         'ZEO >= 4.2.0b1, <5.0',
         'zope.interface',

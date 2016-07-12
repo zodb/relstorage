@@ -101,6 +101,7 @@ class _DummyLock(object):
 
 @implementer(ZODB.interfaces.IStorage,
              ZODB.interfaces.IMVCCStorage,
+             ZODB.interfaces.IMultiCommitStorage,
              ZODB.interfaces.IStorageRestoreable,
              ZODB.interfaces.IStorageIteration,
              ZODB.interfaces.IStorageUndoable,
@@ -176,6 +177,12 @@ class RelStorage(UndoLogCompatible,
     # _stale_error is None most of the time.  It's a ReadConflictError
     # when the database connection is stale (due to async replication).
     _stale_error = None
+
+    # OIDs resolved by undo()
+    _resolved = ()
+
+    # user, description, extension from transaction metadata.
+    _ude = None
 
     def __init__(self, adapter, name=None, create=None,
                  options=None, cache=None, blobhelper=None,
@@ -781,6 +788,7 @@ class RelStorage(UndoLogCompatible,
             self._lock.acquire()
             self._clear_temp()
             self._transaction = transaction
+            self._resolved = set()
 
             user = _to_latin1(transaction.user)
             desc = _to_latin1(transaction.description)
@@ -868,7 +876,7 @@ class RelStorage(UndoLogCompatible,
     def _finish_store(self):
         """Move stored objects from the temporary table to final storage.
 
-        Returns a list of (oid, tid) to be received by
+        Returns a sequence of OIDs that were resolved to be received by
         Connection._handle_serial().
         """
         assert self._tid is not None
@@ -909,21 +917,15 @@ class RelStorage(UndoLogCompatible,
 
         # Move the new states into the permanent table
         tid_int = u64(self._tid)
-        serials = []
+
         if self.blobhelper is not None:
             txn_has_blobs = self.blobhelper.txn_has_blobs
         else:
             txn_has_blobs = False
         oid_ints = adapter.mover.move_from_temp(cursor, tid_int, txn_has_blobs)
-        for oid_int in oid_ints:
-            oid = p64(oid_int)
-            if oid in resolved:
-                serial = ConflictResolution.ResolvedSerial
-            else:
-                serial = self._tid
-            serials.append((oid, serial))
 
-        return serials
+
+        return resolved
 
     @metricmethod
     def tpc_vote(self, transaction):
@@ -933,7 +935,12 @@ class RelStorage(UndoLogCompatible,
                     "tpc_vote called with wrong transaction")
 
             try:
-                return self._vote()
+                resolved_by_vote = self._vote()
+                if self._resolved:
+                    # self._resolved contains OIDs from undo()
+                    self._resolved.update(resolved_by_vote)
+                    return self._resolved
+                return resolved_by_vote
             except:
                 if abort_early:
                     # abort early to avoid lockups while running the
@@ -978,7 +985,7 @@ class RelStorage(UndoLogCompatible,
                     raise ReadConflictError(
                         oid=oid, serials=(actual, expect))
 
-        serials = self._finish_store()
+        resolved_serials = self._finish_store()
         self._adapter.mover.update_current(cursor, tid_int)
         self._prepared_txn = self._adapter.txncontrol.commit_phase1(
             conn, cursor, tid_int)
@@ -986,7 +993,8 @@ class RelStorage(UndoLogCompatible,
         if self.blobhelper is not None:
             self.blobhelper.vote(self._tid)
 
-        return serials
+        # New storage protocol
+        return resolved_serials
 
     @metricmethod
     def tpc_finish(self, transaction, f=None):
@@ -1000,6 +1008,7 @@ class RelStorage(UndoLogCompatible,
                         f(self._tid)
                     u, d, e = self._ude
                     self._finish(self._tid, u, d, e)
+                    return self._tid
                 finally:
                     self._clear_temp()
             finally:
@@ -1216,7 +1225,10 @@ class RelStorage(UndoLogCompatible,
                 if self.blobhelper is not None:
                     self.blobhelper.copy_undone(copied, self._tid)
 
-                return self._tid, oids
+                #return self._tid, oids
+                # new storage protocol
+                self._resolved.update(oids)
+                return None
             finally:
                 adapter.locker.release_pack_lock(cursor)
 
@@ -1423,7 +1435,7 @@ class RelStorage(UndoLogCompatible,
         (or copy and remove it) immediately, or at transaction-commit
         time.  The file must not be open.
 
-        The new serial is returned.
+        Returns nothing.
         """
         assert not version
         with self._lock:
