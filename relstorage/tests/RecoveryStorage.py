@@ -20,7 +20,6 @@ from ZODB.blob import is_blob_record
 from transaction import Transaction
 from ZODB import DB
 from ZODB.serialize import referencesf
-from ZODB.tests.StorageTestBase import handle_serials
 from ZODB.tests.StorageTestBase import MinPO
 from ZODB.tests.StorageTestBase import snooze
 from ZODB.tests.StorageTestBase import zodb_pickle
@@ -215,10 +214,9 @@ class BasicRecoveryStorage(IteratorDeepCompare):
             # Store an object
             self._storage.store(oid, revid, data1, '', t)
             # Store it again
-            r1 = self._storage.store(oid, revid, data2, '', t)
+            self._storage.store(oid, revid, data2, '', t)
             # Finish the transaction
-            r2 = self._storage.tpc_vote(t)
-            revid = handle_serials(oid, r1, r2)
+            self._storage.tpc_vote(t)
             self._storage.tpc_finish(t)
         except:
             self._storage.tpc_abort(t)
