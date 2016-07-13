@@ -72,18 +72,16 @@ class _ZEOTracer(object):
         tid = p64(tid_int) if tid_int else z64
         end_tid = p64(end_tid_int) if end_tid_int else z64
         oid = b'' if not oid_int else p64(oid_int)
-        if tid is None:
-            tid = z64
-        if end_tid is None:
-            end_tid = z64
-        now = now or time.time
+
+        now = now or time.time()
         try:
             self._trace_file.write(
                 self._pack(
-                    int(now()), encoded, len(oid), tid, end_tid) + oid,
+                    int(now), encoded, len(oid), tid, end_tid) + oid,
                 )
-        except:
-            print(repr(tid), repr(end_tid))
+        except: # pragma: no cover
+            log.exception("Problem writing trace info for %r at tid %r and end tid %r",
+                          oid, tid, end_tid)
             raise
 
     def __call__(self, *args, **kwargs):
@@ -93,8 +91,9 @@ class _ZEOTracer(object):
     def trace_store_current(self, tid_int, items):
         # As a locking optimization, we accept this in bulk
         with self._lock:
+            now = time.time()
             for startpos, endpos, oid_int in items:
-                self._trace(0x52, oid_int, tid_int, dlen=endpos-startpos, now=time.time)
+                self._trace(0x52, oid_int, tid_int, dlen=endpos-startpos, now=now)
 
     def close(self):
         self._trace_file.close()
