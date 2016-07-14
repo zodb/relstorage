@@ -58,35 +58,47 @@ class _ZEOTracer(object):
 
     def __init__(self, trace_file):
         self._trace_file = trace_file
-        self._pack = struct.Struct(">iiH8s8s").pack
         self._lock = threading.Lock()
 
-    def _trace(self, code, oid_int=0, tid_int=0, end_tid_int=0, dlen=0, now=None):
-        # This method was originally part of ZEO.cache.ClientCache. The below
-        # comment is verbatim:
-        # The code argument is two hex digits; bits 0 and 7 must be zero.
-        # The first hex digit shows the operation, the second the outcome.
-        # ...
-        # Note: when tracing is disabled, this method is hidden by a dummy.
-        encoded = (dlen << 8) + code
-        tid = p64(tid_int) if tid_int else z64
-        end_tid = p64(end_tid_int) if end_tid_int else z64
-        oid = b'' if not oid_int else p64(oid_int)
+        # closure variables are faster than self/global dict lookups
+        # (going off example in ZEO code; in one test locally this gets us a
+        # ~15% improvement)
+        _now = time.time
+        _pack = struct.Struct(">iiH8s8s").pack
+        _trace_file_write = trace_file.write
+        _p64 = p64
+        _z64 = z64
+        _int = int
+        _len = len
 
-        now = now or time.time()
-        try:
-            self._trace_file.write(
-                self._pack(
-                    int(now), encoded, len(oid), tid, end_tid) + oid,
-                )
-        except: # pragma: no cover
-            log.exception("Problem writing trace info for %r at tid %r and end tid %r",
-                          oid, tid, end_tid)
-            raise
+        def trace(code, oid_int=0, tid_int=0, end_tid_int=0, dlen=0, now=None):
+            # This method was originally part of ZEO.cache.ClientCache. The below
+            # comment is verbatim:
+            # The code argument is two hex digits; bits 0 and 7 must be zero.
+            # The first hex digit shows the operation, the second the outcome.
+            # ...
+            # Note: when tracing is disabled, this method is hidden by a dummy.
+            encoded = (dlen << 8) + code
+            tid = _p64(tid_int) if tid_int else _z64
+            end_tid = _p64(end_tid_int) if end_tid_int else _z64
+            oid = b'' if not oid_int else _p64(oid_int)
 
-    def __call__(self, *args, **kwargs):
+            now = now or _now()
+            try:
+                _trace_file_write(
+                    _pack(
+                        _int(now), encoded, _len(oid), tid, end_tid) + oid,
+                    )
+            except: # pragma: no cover
+                log.exception("Problem writing trace info for %r at tid %r and end tid %r",
+                              oid, tid, end_tid)
+                raise
+
+        self._trace = trace
+
+    def trace(self, code, oid_int=0, tid_int=0, end_tid_int=0, dlen=0):
         with self._lock:
-            self._trace(*args, **kwargs)
+            self._trace(code, oid_int, tid_int, end_tid_int, dlen)
 
     def trace_store_current(self, tid_int, items):
         # As a locking optimization, we accept this in bulk
@@ -97,6 +109,7 @@ class _ZEOTracer(object):
 
     def close(self):
         self._trace_file.close()
+        del self._trace
 
 
 class StorageCache(object):
@@ -173,12 +186,12 @@ class StorageCache(object):
             tracefile = _Loader.trace_file(options, self.prefix)
             if tracefile:
                 _tracer = _ZEOTracer(tracefile)
-                _tracer(0x00)
+                _tracer.trace(0x00)
 
         self._tracer = _tracer
         if hasattr(self._tracer, 'trace_store_current'):
-            self._trace = self._tracer
-            self._trace_store_current = self._trace.trace_store_current
+            self._trace = self._tracer.trace
+            self._trace_store_current = self._tracer.trace_store_current
 
 
     def new_instance(self):
