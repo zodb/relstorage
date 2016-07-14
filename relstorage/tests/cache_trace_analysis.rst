@@ -76,27 +76,27 @@ Check to make sure the cache analysis scripts work.
                        loads    hits  inv(h)  writes hitrate
     Jul 11 12:11-11       0       0       0       0     n/a
     Jul 11 12:11:41 ==================== Restart ====================
-    Jul 11 12:11-14     180       0      16     197    0.0%
-    Jul 11 12:15-29     818       5      82     793    0.6%
-    Jul 11 12:30-44     818      28      82     687    3.4%
-    Jul 11 12:45-59     818      72      82     578    8.8%
-    Jul 11 13:00-14     818      85      82     519   10.4%
-    Jul 11 13:15-29     818     169      82     450   20.7%
-    Jul 11 13:30-44     819     194      81     397   23.7%
-    Jul 11 13:45-59     818     223      82     385   27.3%
-    Jul 11 14:00-14     818     278      82     322   34.0%
-    Jul 11 14:15-29     818     337      82     275   41.2%
-    Jul 11 14:30-44     818     388      82     262   47.4%
-    Jul 11 14:45-59     819     404      81     233   49.3%
-    Jul 11 15:00-14     818     434      82     227   53.1%
+    Jul 11 12:11-14     180       0      16     198    0.0%
+    Jul 11 12:15-29     818       5      82     895    0.6%
+    Jul 11 12:30-44     818      28      82     872    3.4%
+    Jul 11 12:45-59     818      72      82     828    8.8%
+    Jul 11 13:00-14     818      85      82     815   10.4%
+    Jul 11 13:15-29     818     169      82     731   20.7%
+    Jul 11 13:30-44     819     194      81     706   23.7%
+    Jul 11 13:45-59     818     223      82     677   27.3%
+    Jul 11 14:00-14     818     278      82     622   34.0%
+    Jul 11 14:15-29     818     337      82     563   41.2%
+    Jul 11 14:30-44     818     388      82     512   47.4%
+    Jul 11 14:45-59     819     404      81     496   49.3%
+    Jul 11 15:00-14     818     434      82     466   53.1%
     Jul 11 15:15-15       2       2       0       0  100.0%
     <BLANKLINE>
-    Read 16,324 trace records (555,008 bytes) in 0.0 seconds
+    Read 19,380 trace records (658,912 bytes) in 0.0 seconds
     Versions:   0 records used a version
     First time: Sun Jul 11 12:11:41 2010
     Last time:  Sun Jul 11 15:15:01 2010
     Duration:   11,000 seconds
-    Data recs:  7,944 (48.7%), average size 1106 bytes
+    Data recs:  11,000 (56.8%), average size 1106 bytes
     Hit rate:   26.2% (load hits / loads)
     <BLANKLINE>
             Count Code Function (action)
@@ -104,7 +104,7 @@ Check to make sure the cache analysis scripts work.
               998  1c  invalidate (hit, saving non-current)
             7,381  20  load (miss)
             2,619  22  load (hit)
-            5,325  52  store (current, non-version)
+            8,381  52  store (current, non-version)
 
     >>> ZEO.scripts.cache_simul.main('-s 2 -i 5 relstorage-trace-cache.0.trace'.split())
     CircularCacheSimulation, cache size 2,097,152 bytes
@@ -156,27 +156,27 @@ Check to make sure the cache analysis scripts work.
                        loads    hits  inv(h)  writes hitrate
     Jul 11 12:11-11       0       0       0       0     n/a
     Jul 11 12:11:41 ==================== Restart ====================
-    Jul 11 12:11-14     180       0      16     197    0.0%
-    Jul 11 12:15-29     818       5      82     793    0.6%
-    Jul 11 12:30-44     818      28      82     687    3.4%
-    Jul 11 12:45-59     818      72      82     578    8.8%
-    Jul 11 13:00-14     818      85      82     519   10.4%
-    Jul 11 13:15-29     818     169      82     450   20.7%
-    Jul 11 13:30-44     819     194      81     397   23.7%
-    Jul 11 13:45-59     818     223      82     385   27.3%
-    Jul 11 14:00-14     818     278      82     322   34.0%
-    Jul 11 14:15-29     818     337      82     275   41.2%
-    Jul 11 14:30-44     818     388      82     262   47.4%
-    Jul 11 14:45-59     819     404      81     233   49.3%
-    Jul 11 15:00-14     818     434      82     227   53.1%
+    Jul 11 12:11-14     180       0      16     198    0.0%
+    Jul 11 12:15-29     818       5      82     895    0.6%
+    Jul 11 12:30-44     818      28      82     872    3.4%
+    Jul 11 12:45-59     818      72      82     828    8.8%
+    Jul 11 13:00-14     818      85      82     815   10.4%
+    Jul 11 13:15-29     818     169      82     731   20.7%
+    Jul 11 13:30-44     819     194      81     706   23.7%
+    Jul 11 13:45-59     818     223      82     677   27.3%
+    Jul 11 14:00-14     818     278      82     622   34.0%
+    Jul 11 14:15-29     818     337      82     563   41.2%
+    Jul 11 14:30-44     818     388      82     512   47.4%
+    Jul 11 14:45-59     819     404      81     496   49.3%
+    Jul 11 15:00-14     818     434      82     466   53.1%
     Jul 11 15:15-15       2       2       0       0  100.0%
     <BLANKLINE>
-    Read 16,324 trace records (555,008 bytes) in 0.0 seconds
+    Read 19,380 trace records (658,912 bytes) in 0.0 seconds
     Versions:   0 records used a version
     First time: Sun Jul 11 12:11:41 2010
     Last time:  Sun Jul 11 15:15:01 2010
     Duration:   11,000 seconds
-    Data recs:  7,944 (48.7%), average size 1106 bytes
+    Data recs:  11,000 (56.8%), average size 1106 bytes
     Hit rate:   26.2% (load hits / loads)
     <BLANKLINE>
             Count Code Function (action)
@@ -184,7 +184,7 @@ Check to make sure the cache analysis scripts work.
               998  1c  invalidate (hit, saving non-current)
             7,381  20  load (miss)
             2,619  22  load (hit)
-            5,325  52  store (current, non-version)
+            8,381  52  store (current, non-version)
 
     >>> ZEO.scripts.cache_simul.main('-s 4 relstorage-trace-cache.0.trace'.split())
     CircularCacheSimulation, cache size 4,194,304 bytes
@@ -212,27 +212,27 @@ Check to make sure the cache analysis scripts work.
                        loads    hits  inv(h)  writes hitrate
     Jul 11 12:11-11       0       0       0       0     n/a
     Jul 11 12:11:41 ==================== Restart ====================
-    Jul 11 12:11-14     180       0      16     197    0.0%
-    Jul 11 12:15-29     818       5      82     793    0.6%
-    Jul 11 12:30-44     818      28      82     687    3.4%
-    Jul 11 12:45-59     818      72      82     578    8.8%
-    Jul 11 13:00-14     818      85      82     519   10.4%
-    Jul 11 13:15-29     818     169      82     450   20.7%
-    Jul 11 13:30-44     819     194      81     397   23.7%
-    Jul 11 13:45-59     818     223      82     385   27.3%
-    Jul 11 14:00-14     818     278      82     322   34.0%
-    Jul 11 14:15-29     818     337      82     275   41.2%
-    Jul 11 14:30-44     818     388      82     262   47.4%
-    Jul 11 14:45-59     819     404      81     233   49.3%
-    Jul 11 15:00-14     818     434      82     227   53.1%
+    Jul 11 12:11-14     180       0      16     198    0.0%
+    Jul 11 12:15-29     818       5      82     895    0.6%
+    Jul 11 12:30-44     818      28      82     872    3.4%
+    Jul 11 12:45-59     818      72      82     828    8.8%
+    Jul 11 13:00-14     818      85      82     815   10.4%
+    Jul 11 13:15-29     818     169      82     731   20.7%
+    Jul 11 13:30-44     819     194      81     706   23.7%
+    Jul 11 13:45-59     818     223      82     677   27.3%
+    Jul 11 14:00-14     818     278      82     622   34.0%
+    Jul 11 14:15-29     818     337      82     563   41.2%
+    Jul 11 14:30-44     818     388      82     512   47.4%
+    Jul 11 14:45-59     819     404      81     496   49.3%
+    Jul 11 15:00-14     818     434      82     466   53.1%
     Jul 11 15:15-15       2       2       0       0  100.0%
     <BLANKLINE>
-    Read 16,324 trace records (555,008 bytes) in 0.0 seconds
+    Read 19,380 trace records (658,912 bytes) in 0.0 seconds
     Versions:   0 records used a version
     First time: Sun Jul 11 12:11:41 2010
     Last time:  Sun Jul 11 15:15:01 2010
     Duration:   11,000 seconds
-    Data recs:  7,944 (48.7%), average size 1106 bytes
+    Data recs:  11,000 (56.8%), average size 1106 bytes
     Hit rate:   26.2% (load hits / loads)
     <BLANKLINE>
             Count Code Function (action)
@@ -240,7 +240,7 @@ Check to make sure the cache analysis scripts work.
               998  1c  invalidate (hit, saving non-current)
             7,381  20  load (miss)
             2,619  22  load (hit)
-            5,325  52  store (current, non-version)
+            8,381  52  store (current, non-version)
 
     >>> ZEO.scripts.cache_simul.main('-s 1 relstorage-trace-cache.0.trace'.split())
     CircularCacheSimulation, cache size 1,048,576 bytes

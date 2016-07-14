@@ -419,6 +419,8 @@ class StorageCache(object):
         if tid_int:
             self._check_tid_after_load(oid_int, tid_int)
             cache_data = p64(tid_int) + (state or b'')
+            # Record this as a store into the cache, ZEO does.
+            self._trace(0x52, oid_int, tid_int, dlen=len(state) if state else 0)
             for client in self.clients_local_first:
                 client.set(cp0_key, cache_data)
         return state, tid_int
