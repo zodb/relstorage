@@ -129,8 +129,10 @@ class StorageCache(object):
     #   self.checkpoints[0] < tid <= self.current_tid
     current_tid = 0
 
+    _tracer = None
+
     def __init__(self, adapter, options, prefix, local_client=None,
-                 _create_trace=True):
+                 _tracer=None):
         self.adapter = adapter
         self.options = options
         self.prefix = prefix or ''
@@ -167,12 +169,17 @@ class StorageCache(object):
         # entries in the delta_after maps.
         self.delta_size_limit = options.cache_delta_size_limit
 
-        if _create_trace:
+        if _tracer is None:
             tracefile = _Loader.trace_file(options, self.prefix)
             if tracefile:
-                self._trace = _ZEOTracer(tracefile)
-                self._trace_store_current = self._trace.trace_store_current
-                self._trace(0x00)
+                _tracer = _ZEOTracer(tracefile)
+                _tracer(0x00)
+
+        self._tracer = _tracer
+        if hasattr(self._tracer, 'trace_store_current'):
+            self._trace = self._tracer
+            self._trace_store_current = self._trace.trace_store_current
+
 
     def new_instance(self):
         """Return a copy of this instance sharing the same local client"""
@@ -182,10 +189,7 @@ class StorageCache(object):
 
         cache = type(self)(self.adapter, self.options, self.prefix,
                            local_client,
-                           _create_trace=False)
-        if isinstance(self._trace, _ZEOTracer):
-            cache._trace = self._trace
-            cache._trace_store_current = self._trace.trace_store_current
+                           _tracer=self._tracer or False)
         return cache
 
     def release(self):
@@ -219,12 +223,12 @@ class StorageCache(object):
             else:
                 save()
         self.release()
-        try:
-            self._trace.close()
+
+        if self._tracer:
+            self._tracer.close()
             del self._trace
             del self._trace_store_current
-        except AttributeError:
-            pass
+            del self._tracer
 
     def clear(self):
         """Remove all data from the cache.  Called by speed tests."""
@@ -477,7 +481,8 @@ class StorageCache(object):
             for (oid_int, (startpos, endpos)) in iteritems(self.queue_contents)
             ]
         items.sort()
-
+        # Trace these. This is the equivalent of ZEOs
+        # ClientStorage._update_cache.
         self._trace_store_current(tid_int, items)
         for startpos, endpos, oid_int in items:
             state, length = self._read_temp_state(startpos, endpos)
