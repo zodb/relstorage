@@ -14,6 +14,7 @@ Contents:
    zodbconvert
    zodbpack
    zodburi
+   cache-tracing
    faq
    migration
    developing

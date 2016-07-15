@@ -285,6 +285,8 @@ performance. Using a suitably-sized local cache, especially with
 persistent data files, can make a substantial performance difference,
 even if the write volume is relatively high.
 
+For help understanding and tuning the cache behaviour, see :doc:`cache-tracing`.
+
 cache-local-mb
         This option configures the approximate maximum amount of memory the
         cache should consume, in megabytes. It defaults to 10.
