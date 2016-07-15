@@ -30,6 +30,7 @@ def make_suite():
         'relstorage.tests.test_autotemp',
         'relstorage.tests.test_blobhelper',
         'relstorage.tests.test_cache',
+        'relstorage.tests.test_cache_stats',
         'relstorage.tests.test_treemark',
         'relstorage.tests.test_zodbconvert',
         'relstorage.tests.test_zodbpack',

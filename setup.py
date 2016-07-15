@@ -49,6 +49,11 @@ VERSION = read_file('version.txt').strip()
 
 tests_require = [
     'mock',
+    # random2 is a forward port of python 2's random to
+    # python 3. Our test_cache_stats (inherited from ZEO)
+    # needs that. Without it, the tests can work on Py2 but
+    # not Py3.
+    'random2',
     'zope.testing',
     'ZODB [test]',
     'zc.zlibstorage'
