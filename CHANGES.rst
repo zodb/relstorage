@@ -3,7 +3,7 @@
 =========
 
 
-2.0.0b3 (unreleased)
+2.0.0b3 (2016-07-16)
 ====================
 
 - Add support for ZODB 5. RelStorage continues to run on ZODB 4 >=
