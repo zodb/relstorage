@@ -11,7 +11,7 @@
 - Add support for tooling to help understand RelStorage cache
   behaviour. This can help tune cache sizes and the choice to use
   Memcached or not. See :issue:`106` and :pr:`108`.
-
+- Fix a threading issue with certain database drivers.
 
 2.0.0b2 (2016-07-08)
 ====================
