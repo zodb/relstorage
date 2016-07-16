@@ -76,9 +76,33 @@ configuration file.  The default cache size is 10 MB, which is small.
 The cache_stats.py tool shows its command line syntax when invoked without
 arguments.  The tracefile argument can be a gzipped file if it has a .gz
 extension.  It will be read from stdin (assuming uncompressed data) if the
-tracefile argument is '-'.
+tracefile argument is '-'.::
 
-.. program-output:: python -m ZEO.scripts.cache_stats --help
+  $ python -m ZEO.scripts.cache_stats --help
+  usage: cache_stats.py [--verbose | --quiet] [--sizes] [--no-stats]
+                        [--load-histogram] [--check] [--interval INTERVAL]
+                        tracefile
+
+  Trace file statistics analyzer
+
+  positional arguments:
+    tracefile             The trace to read; may be gzipped
+
+  optional arguments:
+    --verbose, -v         Be verbose; print each record
+    --quiet, -q           Reduce output; don't print summaries
+    --sizes, -s           print histogram of object sizes
+    --no-stats, -S        don't print statistics
+    --load-histogram, -h  print histogram of object load frequencies
+    --check, -X           enable heuristic checking for misaligned records: oids
+                          > 2**32 will be rejected; this requires the tracefile
+                          to be seekable
+    --interval INTERVAL, -i INTERVAL
+                          summarizing interval in minutes (default 15;
+                          max 60)
+
+.. This is not ready yet .. program-output:: python -m
+.. ZEO.scripts.cache_stats --help
 
 Simulating Different Cache Sizes
 ================================
@@ -89,9 +113,30 @@ the ZEO client cache implementation based upon the events read from a trace
 file.  A new simulation is started each time the trace file records a client
 restart event; if a trace file contains more than one restart event, a
 separate line is printed for each simulation, and a line with overall
-statistics is added at the end.
+statistics is added at the end.::
 
-.. program-output:: python -m ZEO.scripts.cache_simul --help
+  $ python -m ZEO.scripts.cache_simul --help
+  usage: cache_simul.py [-h] [--size CACHELIMIT] [--interval INTERVAL]
+                        [--rearrange REARRANGE]
+                        tracefile
+
+  Cache simulation. Note: - The simulation isn't perfect. - The simulation will
+  be far off if the trace file was created starting with a non-empty cache
+
+  positional arguments:
+    tracefile             The trace to read; may be gzipped
+
+  optional arguments:
+    -h, --help            show this help message and exit
+    --size CACHELIMIT, -s CACHELIMIT
+                          cache size in MB (default 20MB)
+    --interval INTERVAL, -i INTERVAL
+                          summarizing interval in minutes (default 15; max 60)
+    --rearrange REARRANGE, -r REARRANGE
+                          rearrange factor
+
+.. not ready yet
+.. .. program-output:: python -m ZEO.scripts.cache_simul --help
 
 Example, assuming the trace file is in /tmp/cachetrace.log::
 
