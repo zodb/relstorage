@@ -1085,7 +1085,7 @@ class _Loader(object):
         # process, but records client opens/closes). If it is set to any other value,
         # we include a pid. If it is not set, we do nothing.
         trace = os.environ.get("ZEO_CACHE_TRACE")
-        if not trace:
+        if not trace or not options.cache_local_dir:
             return None
 
         if trace == 'single':
