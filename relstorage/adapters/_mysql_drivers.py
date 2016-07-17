@@ -191,7 +191,7 @@ else:
 
         def query(self, sql, args=()):
             __traceback_info__ = args
-            print("SQL QUERY", sql)
+            print("Query", sql, file=sys.stderr)
             if isinstance(args, dict):
                 # First, encode them as strings
                 # (OK to use iteritems here, this only runs on Python 2.)
@@ -202,7 +202,6 @@ else:
                 args = ()
             try:
                 super(UConnection, self).query(sql, args=args)
-                self.__debug_lock(sql)
             except IOError:
                 self.__debug_lock(sql, True)
                 tb = sys.exc_info()[2]
@@ -252,6 +251,9 @@ else:
     class umysqldbDriver(PyMySQLDriver):
         __name__ = 'umysqldb'
         connect = UConnection
+        # umysql has a tendency to crash when given a bytearray, at least on
+        # OS X.
+        Binary = bytes
 
     driver = umysqldbDriver()
     driver_map[driver.__name__] = driver
