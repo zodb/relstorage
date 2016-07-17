@@ -3,7 +3,7 @@
 =========
 
 
-2.0.0b4 (unreleased)
+2.0.0b4 (2016-07-17)
 ====================
 
 - Add experimental support for umysqldb as a MySQL driver for Python
