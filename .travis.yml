@@ -14,10 +14,10 @@ python:
   - pypy
 env:
   matrix:
-    - ENV=mysql
-    - ENV=postgres
-    - ENV=pypostgres
-    - ENV=pymysql
+#    - ENV=mysql
+#    - ENV=postgres
+#    - ENV=pypostgres
+#    - ENV=pymysql
     - ENV=umysqldb
 matrix:
   exclude:

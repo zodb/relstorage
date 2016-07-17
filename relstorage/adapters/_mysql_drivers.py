@@ -167,23 +167,31 @@ else:
             try:
                 result = self._result
                 if result is None:
-                    logger.warn("No result from GET_LOCK query: %s", result.__dict__, exc_info=ex)
+                    logger.warn("No result from GET_LOCK query: %s",
+                                result.__dict__, exc_info=ex)
                     return
                 if not result.affected_rows:
-                    logger.warn("Zero rowcount from GET_LOCK query: %s", result.__dict__, exc_info=ex)
+                    logger.warn("Zero rowcount from GET_LOCK query: %s",
+                                result.__dict__, exc_info=ex)
                 if not result.rows:
-                    # We see this a fair amount. The C code in umysql got a packet that
-                    # its treating as an "OK" response, for which it just returns a tuple
-                    #   (affected_rows, rowid)
-                    # But no actual rows. In all cases, it has been returning affected_rows of 2?
-                    # We *could* patch the rows variable here to be [0], indicating the lock was not
-                    # taken, but given that OK response I'm not sure that's right just yet
-                    logger.warn("Empty rows from GET_LOCK query: %s", result.__dict__, exc_info=ex)
+                    # We see this a fair amount. The C code in umysql
+                    # got a packet that its treating as an "OK"
+                    # response, for which it just returns a tuple
+                    # (affected_rows, rowid)
+
+                    # But no actual rows. In all cases, it has been
+                    # returning affected_rows of 2? We *could* patch
+                    # the rows variable here to be [0], indicating the
+                    # lock was not taken, but given that OK response
+                    # I'm not sure that's right just yet
+                    logger.warn("Empty rows from GET_LOCK query: %s",
+                                result.__dict__, exc_info=ex)
             except Exception: # pylint: disable=broad-except
                 logger.exception("Failed to debug lock problem")
 
         def query(self, sql, args=()):
             __traceback_info__ = args
+            print("SQL QUERY", sql)
             if isinstance(args, dict):
                 # First, encode them as strings
                 # (OK to use iteritems here, this only runs on Python 2.)
@@ -202,17 +210,21 @@ else:
             except InternalError as e:
                 self.__debug_lock(sql, True)
                 if e.args == (0, 'Socket receive buffer full'):
-                    # This is very similar to https://github.com/esnme/ultramysql/issues/16
-                    # (although that issue is claimed to be fixed).
-                    # It causes issues when using the same connection to execute very
-                    # many requests (in one example, slightly more than 2,630,000 queries).
-                    # Most commonly, it has been seen when attempting a database
-                    # pack or conversion on a large database. In that case, the MySQL-Python
-                    # driver must be used, or the amount of data to query must otherwise
-                    # be reduced.
+                    # This is very similar to
+                    # https://github.com/esnme/ultramysql/issues/16
+                    # (although that issue is claimed to be fixed). It
+                    # causes issues when using the same connection to
+                    # execute very many requests (in one example,
+                    # slightly more than 2,630,000 queries). Most
+                    # commonly, it has been seen when attempting a
+                    # database pack or conversion on a large database.
+                    # In that case, the MySQL-Python driver must be
+                    # used, or the amount of data to query must
+                    # otherwise be reduced.
 
-                    # In theory, we can workaround the issue by replacing our now-bad _umysql_conn
-                    # with a new one and trying again.
+                    # In theory, we can workaround the issue by
+                    # replacing our now-bad _umysql_conn with a new
+                    # one and trying again.
                     assert not self._umysql_conn.is_connected()
                     self._umysql_conn.close()
                     del self._umysql_conn
@@ -231,7 +243,7 @@ else:
                 self.__debug_lock(sql, True)
                 raise
 
-        def connect(self, *_args, **_kwargs):
+        def connect(self, *_args, **_kwargs): # pragma: no cover
             # Redirect the PyMySQL connect method to the umysqldb method, that's
             # already captured the host and port. (XXX: Why do we do this?)
             return self._connect()
