@@ -6,7 +6,8 @@
 2.0.0b4 (unreleased)
 ====================
 
-- Nothing changed yet.
+- Add experimental support for umysqldb as a MySQL driver for Python
+  2.7. This is a gevent-compatible driver implemented in C for speed.
 
 
 2.0.0b3 (2016-07-16)

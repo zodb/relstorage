@@ -54,7 +54,8 @@ The MySQL adapter accepts most parameters supported by the mysqlclient
 library (the maintained version of MySQL-python), including:
 
 driver
-    Either "MySQLdb" or "PyMySQL"
+    Either "MySQLdb" (which can either by ``mysqlclient`` or
+	``MySQL-python``), or "PyMySQL", or "umysqldb".
 host
     string, host to connect
 user

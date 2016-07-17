@@ -18,12 +18,20 @@ env:
     - ENV=postgres
     - ENV=pypostgres
     - ENV=pymysql
+    - ENV=umysqldb
+  exclude:
+    - python: 3.4
+      env: ENV=umysqldb
+    - python: pypy
+      env: ENV=pymysql
+    - python: pypy
+      env: ENV=umysqldb
 matrix:
   fast_finish: true
 script:
 # coverage slows PyPy down from 2minutes to 12+.
 # But don't run the pymysql/pypy tests twice.
-  - if [[ $TRAVIS_PYTHON_VERSION == 'pypy' && $ENV != 'pymysql' ]]; then python -m relstorage.tests.alltests -v; fi
+  - if [[ $TRAVIS_PYTHON_VERSION == 'pypy' ]]; then python -m relstorage.tests.alltests -v; fi
   - if [[ $TRAVIS_PYTHON_VERSION != 'pypy' ]]; then coverage run -m relstorage.tests.alltests -v; fi
 after_success:
   - coveralls
