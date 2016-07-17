@@ -8,6 +8,8 @@
 
 - Add experimental support for umysqldb as a MySQL driver for Python
   2.7. This is a gevent-compatible driver implemented in C for speed.
+  Note that it may not be able to store large objects (it has been
+  observed to fail for a 16M object).
 
 
 2.0.0b3 (2016-07-16)

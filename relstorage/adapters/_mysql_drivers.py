@@ -160,7 +160,7 @@ else:
 
     class UConnection(umysqldb.connections.Connection):
 
-        def __debug_lock(self, sql, ex=False):
+        def __debug_lock(self, sql, ex=False): # pragma: no cover
             if not 'GET_LOCK' in sql:
                 return
 
@@ -201,18 +201,19 @@ else:
                 args = ()
             try:
                 return super(UConnection, self).query(sql, args=args)
-            except IOError:
+            except IOError: # pragma: no cover
                 self.__debug_lock(sql, True)
                 tb = sys.exc_info()[2]
                 six.reraise(InterfaceError, None, tb)
             except ProgrammingError as e:
                 if e.args[0] == 'cursor closed':
+                    # Seen during aborts and rollbacks.
                     self.__reconnect()
                     return super(UConnection, self).query(sql, args=args)
-                else:
-                    print(sql)
+                else: # pragma: no cover
                     raise
-            except InternalError as e:
+            except InternalError as e: # pragma: no cover
+                # Rare.
                 self.__debug_lock(sql, True)
                 if e.args == (0, 'Socket receive buffer full'):
                     # This is very similar to
@@ -240,7 +241,7 @@ else:
                         # something seems to be holding on to the errno
 
                 raise
-            except Exception:
+            except Exception: # pragma: no cover
                 self.__debug_lock(sql, True)
                 raise
 
