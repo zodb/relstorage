@@ -156,7 +156,7 @@ else:
     # (previously, we mapped everything to Error, which may have been
     # hiding some issues)
 
-    from pymysql.err import InternalError, InterfaceError
+    from pymysql.err import InternalError, InterfaceError, ProgrammingError
 
     class UConnection(umysqldb.connections.Connection):
 
@@ -200,11 +200,18 @@ else:
                 # and delete the now useless args
                 args = ()
             try:
-                super(UConnection, self).query(sql, args=args)
+                return super(UConnection, self).query(sql, args=args)
             except IOError:
                 self.__debug_lock(sql, True)
                 tb = sys.exc_info()[2]
                 six.reraise(InterfaceError, None, tb)
+            except ProgrammingError as e:
+                if e.args[0] == 'cursor closed':
+                    self.__reconnect()
+                    return super(UConnection, self).query(sql, args=args)
+                else:
+                    print(sql)
+                    raise
             except InternalError as e:
                 self.__debug_lock(sql, True)
                 if e.args == (0, 'Socket receive buffer full'):
@@ -223,13 +230,9 @@ else:
                     # In theory, we can workaround the issue by
                     # replacing our now-bad _umysql_conn with a new
                     # one and trying again.
-                    assert not self._umysql_conn.is_connected()
-                    self._umysql_conn.close()
-                    del self._umysql_conn
-                    self._umysql_conn = umysql.Connection()
-                    self._connect()  # Potentially this could raise again?
+                    self.__reconnect()
                     try:
-                        return self.query(sql, args)
+                        return super(UConnection, self).query(sql, args=args)
                     except InternalError:
                         raise
                         # However, in practice, this results in raising the same
@@ -240,6 +243,13 @@ else:
             except Exception:
                 self.__debug_lock(sql, True)
                 raise
+
+        def __reconnect(self):
+            assert not self._umysql_conn.is_connected()
+            self._umysql_conn.close()
+            del self._umysql_conn
+            self._umysql_conn = umysql.Connection()
+            self._connect()  # Potentially this could raise again?
 
         def connect(self, *_args, **_kwargs): # pragma: no cover
             # Redirect the PyMySQL connect method to the umysqldb method, that's

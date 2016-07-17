@@ -136,7 +136,14 @@ class HPMySQLTests(UseMySQLAdapter, HistoryPreservingRelStorageTests,
         # `max_allowed_packet`, you probably need to increase it.
         # JAM uses 64M.
         # http://dev.mysql.com/doc/refman/5.7/en/packet-too-large.html
-        super(HPMySQLTests, self).check16MObject()
+
+        # This fails if the driver is umysqldb.
+        try:
+            super(HPMySQLTests, self).check16MObject()
+        except Exception as e:
+            if e.args == (0, 'Query too big'):
+                raise unittest.SkipTest("Fails with umysqldb")
+            raise
 
 class HPMySQLToFile(UseMySQLAdapter, HistoryPreservingToFileStorage):
     pass
@@ -150,7 +157,13 @@ class HFMySQLTests(UseMySQLAdapter, HistoryFreeRelStorageTests,
     @skipOnCI("Travis MySQL goes away error 2006")
     def check16MObject(self):
         # See note in HPMySQLTests.check16MObject.
-        super(HFMySQLTests, self).check16MObject()
+        try:
+            super(HFMySQLTests, self).check16MObject()
+        except Exception as e:
+            if e.args == (0, 'Query too big'):
+                raise unittest.SkipTest("Fails with umysqldb")
+            raise
+
 
 class HFMySQLToFile(UseMySQLAdapter, HistoryFreeToFileStorage):
     pass
