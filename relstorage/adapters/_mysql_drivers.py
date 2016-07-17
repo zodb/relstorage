@@ -259,7 +259,9 @@ else:
     driver_map[driver.__name__] = driver
 
 
-    if not preferred_driver_name:
+    if (not preferred_driver_name
+        or (preferred_driver_name == 'PyMySQL'
+            and not hasattr(sys, 'pypy_version_info'))):
         preferred_driver_name = driver.__name__
     del driver
 
