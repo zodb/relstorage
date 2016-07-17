@@ -19,6 +19,7 @@ env:
     - ENV=pypostgres
     - ENV=pymysql
     - ENV=umysqldb
+matrix:
   exclude:
     - python: 3.4
       env: ENV=umysqldb
@@ -26,7 +27,6 @@ env:
       env: ENV=pymysql
     - python: pypy
       env: ENV=umysqldb
-matrix:
   fast_finish: true
 script:
 # coverage slows PyPy down from 2minutes to 12+.
