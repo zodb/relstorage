@@ -177,13 +177,12 @@ else:
                     # We see this a fair amount. The C code in umysql
                     # got a packet that its treating as an "OK"
                     # response, for which it just returns a tuple
-                    # (affected_rows, rowid)
-
-                    # But no actual rows. In all cases, it has been
-                    # returning affected_rows of 2? We *could* patch
-                    # the rows variable here to be [0], indicating the
-                    # lock was not taken, but given that OK response
-                    # I'm not sure that's right just yet
+                    # (affected_rows, rowid), but no actual rows. In
+                    # all cases, it has been returning affected_rows
+                    # of 2? We *could* patch the rows variable here to
+                    # be [0], indicating the lock was not taken, but
+                    # given that OK response I'm not sure that's right
+                    # just yet
                     logger.warn("Empty rows from GET_LOCK query: %s",
                                 result.__dict__, exc_info=ex)
             except Exception: # pylint: disable=broad-except
@@ -207,7 +206,9 @@ else:
                 six.reraise(InterfaceError, None, tb)
             except ProgrammingError as e:
                 if e.args[0] == 'cursor closed':
-                    # Seen during aborts and rollbacks.
+                    # This has only been seen during aborts and rollbacks; however, if it
+                    # happened at some other time it might lead to inconsistency.
+                    logger.warn("Reconnecting on failed query %s", sql, exc_info=True)
                     self.__reconnect()
                     return super(UConnection, self).query(sql, args=args)
                 else: # pragma: no cover

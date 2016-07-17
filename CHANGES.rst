@@ -9,7 +9,8 @@
 - Add experimental support for umysqldb as a MySQL driver for Python
   2.7. This is a gevent-compatible driver implemented in C for speed.
   Note that it may not be able to store large objects (it has been
-  observed to fail for a 16M object).
+  observed to fail for a 16M object), and has been observed to have
+  some other stability issues.
 
 
 2.0.0b3 (2016-07-16)
@@ -169,7 +170,7 @@ Included Utilities
   There can be no other open RelStorage connections to the destination,
   or any PostgreSQL connection in general that might be holding locks
   on the RelStorage tables, or ``zodbconvert`` will block indefinitely
-  waiting for the locks to be release. Partial fix for :issue:`16`
+  waiting for the locks to be released. Partial fix for :issue:`16`
   reported by Chris McDonough.
 
 - ``zodbconvert`` and ``zodbpack`` use :mod:`argparse` instead of
