@@ -47,7 +47,7 @@ client_flag
 load_infile
     int, non-zero enables LOAD LOCAL INFILE, zero disables
 """
-
+from __future__ import print_function
 import logging
 
 from zope.interface import implementer
