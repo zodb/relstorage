@@ -125,13 +125,10 @@ else:  # pragma: no cover
 try:
     import umysqldb
     import umysql
-    assert umysql # not used here, but must be importable
-    import pymysql
 except ImportError:
     pass
 else:
     # umysqldb piggybacks on much of the implementation of PyMySQL
-    import pymysql.err
     from umysqldb.connections import encoders, notouch
     import umysqldb.connections
 
@@ -189,7 +186,8 @@ else:
             __traceback_info__ = args
             if isinstance(args, dict):
                 # First, encode them as strings
-                args = {k: encoders.get(type(v), notouch)(v) for k, v in args.items()}
+                # (OK to use iteritems here, this only runs on Python 2.)
+                args = {k: encoders.get(type(v), notouch)(v) for k, v in args.iteritems()}
                 # now format the string
                 sql = sql % args
                 # and delete the now useless args
@@ -218,7 +216,6 @@ else:
                     assert not self._umysql_conn.is_connected()
                     self._umysql_conn.close()
                     del self._umysql_conn
-                    import umysql
                     self._umysql_conn = umysql.Connection()
                     self._connect()  # Potentially this could raise again?
                     try:
@@ -234,7 +231,9 @@ else:
                 self.__debug_lock(sql, True)
                 raise
 
-        def connect(self, *args, **kwargs):
+        def connect(self, *_args, **_kwargs):
+            # Redirect the PyMySQL connect method to the umysqldb method, that's
+            # already captured the host and port. (XXX: Why do we do this?)
             return self._connect()
 
     @implementer(IDBDriver)
@@ -253,4 +252,6 @@ else:
 
 if os.environ.get("RS_MY_DRIVER"): # pragma: no cover
     preferred_driver_name = os.environ["RS_MY_DRIVER"]
+    driver_map = {k: v for k, v in driver_map.items()
+                  if k == preferred_driver_name}
     print("Forcing MySQL driver to ", preferred_driver_name)
