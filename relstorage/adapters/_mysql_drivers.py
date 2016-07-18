@@ -129,9 +129,15 @@ except ImportError:
     pass
 else:
     # umysqldb piggybacks on much of the implementation of PyMySQL
-    from umysqldb.connections import encoders, notouch
     import umysqldb.connections
 
+    import re
+    import operator
+
+    param_match = re.compile(r'%\(.*?\)s')
+
+    # {orig_sql: (new_sql, itemgetter)}
+    _dict_cache = {}
 
     # The underlying umysql driver doesn't handle dicts as arguments
     # to queries (as of 2.61). Until it does, we need to do that
@@ -188,16 +194,38 @@ else:
             except Exception: # pylint: disable=broad-except
                 logger.exception("Failed to debug lock problem")
 
+        def __dict_to_tuple(self, sql, args):
+            """
+            Transform a dict-format expression into the equivalent
+            tuple version.
+
+            Caches statements. We know we only use a small number of small
+            hard coded strings.
+            """
+            try:
+                # This is racy, but it's idempotent
+                tuple_sql, itemgetter = _dict_cache[sql]
+            except KeyError:
+                dict_exprs = param_match.findall(sql)
+                if not dict_exprs:
+                    tuple_sql = sql
+                    itemgetter = lambda d: ()
+                else:
+                    itemgetter = operator.itemgetter(*[dict_expr[2:-2] for dict_expr in dict_exprs])
+                    if len(dict_exprs) == 1:
+                        _itemgetter = itemgetter
+                        itemgetter = lambda d: (_itemgetter(d),)
+                    tuple_sql = param_match.sub('%s', sql)
+                    tuple_sql = intern(tuple_sql)
+                _dict_cache[sql] = (tuple_sql, itemgetter)
+
+            return tuple_sql, itemgetter(args)
+
         def query(self, sql, args=()):
             __traceback_info__ = args
             if isinstance(args, dict):
-                # First, encode them as strings
-                # (OK to use iteritems here, this only runs on Python 2.)
-                args = {k: encoders.get(type(v), notouch)(v) for k, v in args.iteritems()}
-                # now format the string
-                sql = sql % args
-                # and delete the now useless args
-                args = ()
+                sql, args = self.__dict_to_tuple(sql, args)
+
             try:
                 return super(UConnection, self).query(sql, args=args)
             except IOError: # pragma: no cover
@@ -233,14 +261,10 @@ else:
                     # replacing our now-bad _umysql_conn with a new
                     # one and trying again.
                     self.__reconnect()
-                    try:
-                        return super(UConnection, self).query(sql, args=args)
-                    except InternalError:
-                        raise
-                        # However, in practice, this results in raising the same
-                        # error with 2.61 of umysql; it's not clear why that is, but
-                        # something seems to be holding on to the errno
-
+                    # However, in practice, this results in raising the same
+                    # error with 2.61 of umysql; it's not clear why that is, but
+                    # something seems to be holding on to the errno
+                    return super(UConnection, self).query(sql, args=args)
                 raise
             except Exception: # pragma: no cover
                 self.__debug_lock(sql, True)

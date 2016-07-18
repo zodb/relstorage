@@ -6,7 +6,7 @@
 2.0.0b5 (unreleased)
 ====================
 
-- Nothing changed yet.
+- The umysqldb support handles query transformations more efficiently.
 
 
 2.0.0b4 (2016-07-17)
