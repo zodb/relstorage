@@ -21,7 +21,7 @@ from relstorage.adapters.interfaces import IRelStorageAdapter
 from relstorage.adapters.interfaces import ReplicaClosedException
 from .locker import OracleLocker
 from relstorage.adapters.mover import ObjectMover
-from relstorage.adapters.oidallocator import OracleOIDAllocator
+from .oidallocator import OracleOIDAllocator
 from relstorage.adapters.packundo import OracleHistoryFreePackUndo
 from relstorage.adapters.packundo import OracleHistoryPreservingPackUndo
 from relstorage.adapters.poller import Poller

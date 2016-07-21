@@ -21,7 +21,7 @@ from relstorage.adapters.dbiter import HistoryPreservingDatabaseIterator
 from relstorage.adapters.interfaces import IRelStorageAdapter
 from .locker import PostgreSQLLocker
 from relstorage.adapters.mover import ObjectMover
-from relstorage.adapters.oidallocator import PostgreSQLOIDAllocator
+from .oidallocator import PostgreSQLOIDAllocator
 from relstorage.adapters.packundo import HistoryFreePackUndo
 from relstorage.adapters.packundo import HistoryPreservingPackUndo
 from relstorage.adapters.poller import Poller

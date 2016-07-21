@@ -17,26 +17,29 @@ IOIDAllocator implementations.
 
 from __future__ import absolute_import
 
-import six
-import abc
-
-
-from perfmetrics import metricmethod
-from relstorage.adapters.interfaces import IOIDAllocator
+from ..oidallocator import AbstractOIDAllocator
+from ..interfaces import IOIDAllocator
 from zope.interface import implementer
 from relstorage._compat import mysql_connection
+from perfmetrics import metricmethod
 
-@six.add_metaclass(abc.ABCMeta)
-class AbstractOIDAllocator(object):
-    # All of these allocators allocate 16 OIDs at a time.  In the sequence
-    # or table, value (n) represents (n * 16 - 15) through (n * 16).  So,
-    # value 1 represents OID block 1-16, 2 represents OID block 17-32,
-    # and so on.
+@implementer(IOIDAllocator)
+class MySQLOIDAllocator(AbstractOIDAllocator):
 
-    @abc.abstractmethod
     def set_min_oid(self, cursor, oid):
-        raise NotImplementedError()
+        """Ensure the next OID is at least the given OID."""
+        n = (oid + 15) // 16
+        cursor.execute("REPLACE INTO new_oid VALUES(%s)", (n,))
 
-    @abc.abstractmethod
+    @metricmethod
     def new_oids(self, cursor):
-        raise NotImplementedError()
+        """Return a sequence of new, unused OIDs."""
+        stmt = "INSERT INTO new_oid VALUES ()"
+        cursor.execute(stmt)
+        conn = mysql_connection(cursor)
+        n = conn.insert_id()
+        if n % 100 == 0:
+            # Clean out previously generated OIDs.
+            stmt = "DELETE FROM new_oid WHERE zoid < %s"
+            cursor.execute(stmt, (n,))
+        return range(n * 16 - 15, n * 16 + 1)
