@@ -27,7 +27,7 @@ from relstorage.adapters.packundo import OracleHistoryPreservingPackUndo
 from relstorage.adapters.poller import Poller
 from .schema import OracleSchemaInstaller
 from .batch import OracleRowBatcher
-from relstorage.adapters.scriptrunner import OracleScriptRunner
+from .scriptrunner import OracleScriptRunner
 from relstorage.adapters.stats import OracleStats
 from relstorage.adapters.txncontrol import OracleTransactionControl
 from relstorage.options import Options
