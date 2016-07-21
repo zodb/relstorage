@@ -65,7 +65,7 @@ from relstorage.adapters.packundo import MySQLHistoryPreservingPackUndo
 from relstorage.adapters.poller import Poller
 from .schema import MySQLSchemaInstaller
 from relstorage.adapters.scriptrunner import ScriptRunner
-from relstorage.adapters.stats import MySQLStats
+from .stats import MySQLStats
 from .txncontrol import MySQLTransactionControl
 from relstorage.options import Options
 from relstorage._compat import iteritems
