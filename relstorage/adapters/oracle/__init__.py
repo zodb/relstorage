@@ -26,6 +26,7 @@ from relstorage.adapters.packundo import OracleHistoryFreePackUndo
 from relstorage.adapters.packundo import OracleHistoryPreservingPackUndo
 from relstorage.adapters.poller import Poller
 from .schema import OracleSchemaInstaller
+from .batch import OracleRowBatcher
 from relstorage.adapters.scriptrunner import OracleScriptRunner
 from relstorage.adapters.stats import OracleStats
 from relstorage.adapters.txncontrol import OracleTransactionControl
@@ -102,6 +103,7 @@ class OracleAdapter(object):
                 'chunk_num': driver.NUMBER,
                 'md5sum': driver.STRING,
                 },
+            batcher_factory=OracleRowBatcher,
             )
         self.connmanager.set_on_store_opened(self.mover.on_store_opened)
         self.oidallocator = OracleOIDAllocator(

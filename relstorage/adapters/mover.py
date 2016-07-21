@@ -15,9 +15,7 @@
 """
 
 from perfmetrics import Metric
-from relstorage.adapters.batch import MySQLRowBatcher
-from relstorage.adapters.batch import OracleRowBatcher
-from relstorage.adapters.batch import PostgreSQLRowBatcher
+from .batch import RowBatcher
 from relstorage.adapters.interfaces import IObjectMover
 from relstorage.iter import fetchmany
 from zope.interface import implementer
@@ -51,7 +49,6 @@ class ObjectMover(object):
         'get_object_tid_after',
         'current_object_tids',
         'on_store_opened',
-        'make_batcher',
         'store_temp',
         'restore',
         'detect_conflict',
@@ -63,7 +60,8 @@ class ObjectMover(object):
     )
 
     def __init__(self, database_type, options, runner=None,
-                 Binary=None, inputsizes=None, version_detector=None):
+                 Binary=None, inputsizes=None, version_detector=None,
+                 batcher_factory=RowBatcher):
         # The inputsizes parameter is for Oracle only.
         self.database_type = database_type
         self.keep_history = options.keep_history
@@ -72,12 +70,11 @@ class ObjectMover(object):
         self.Binary = Binary
         self.inputsizes = inputsizes
         self.version_detector = version_detector
+        self.make_batcher = batcher_factory
 
         for method_name in self._method_names:
             method = getattr(self, '%s_%s' % (database_type, method_name))
             setattr(self, method_name, method)
-
-
 
 
     @metricmethod_sampled
@@ -454,22 +451,6 @@ class ObjectMover(object):
 
     # no store connection initialization needed for Oracle
     oracle_on_store_opened = None
-
-
-
-
-    @metricmethod_sampled
-    def postgresql_make_batcher(self, cursor, row_limit):
-        return PostgreSQLRowBatcher(cursor, row_limit)
-
-    @metricmethod_sampled
-    def mysql_make_batcher(self, cursor, row_limit):
-        return MySQLRowBatcher(cursor, row_limit)
-
-    @metricmethod_sampled
-    def oracle_make_batcher(self, cursor, row_limit):
-        return OracleRowBatcher(cursor, self.inputsizes, row_limit)
-
 
     @metricmethod_sampled
     def postgresql_store_temp(self, cursor, batcher, oid, prev_tid, data):

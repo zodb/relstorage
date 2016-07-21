@@ -162,7 +162,7 @@ class RowBatcherTests(unittest.TestCase):
 class OracleRowBatcherTests(unittest.TestCase):
 
     def getClass(self):
-        from relstorage.adapters.batch import OracleRowBatcher
+        from relstorage.adapters.oracle.batch import OracleRowBatcher
         return OracleRowBatcher
 
     def test_insert_one_row(self):
