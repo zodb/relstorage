@@ -47,7 +47,7 @@ client_flag
 load_infile
     int, non-zero enables LOAD LOCAL INFILE, zero disables
 """
-from __future__ import print_function
+from __future__ import print_function, absolute_import
 import logging
 
 from zope.interface import implementer
@@ -71,7 +71,7 @@ from relstorage.options import Options
 from relstorage._compat import iteritems
 
 from . import _mysql_drivers
-from ._abstract_drivers import _select_driver
+from .._abstract_drivers import _select_driver
 
 log = logging.getLogger(__name__)
 

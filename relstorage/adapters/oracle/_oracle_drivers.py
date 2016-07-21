@@ -18,13 +18,12 @@ Oracle IDBDriver implementations.
 
 from __future__ import print_function, absolute_import
 
-import sys
 
 from zope.interface import moduleProvides
 from zope.interface import implementer
 
-from .interfaces import IDBDriver, IDBDriverOptions
-from ._abstract_drivers import _standard_exceptions
+from ..interfaces import IDBDriver, IDBDriverOptions
+from .._abstract_drivers import _standard_exceptions
 
 
 database_type = 'oracle'

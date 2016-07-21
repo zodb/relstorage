@@ -12,6 +12,7 @@
 #
 ##############################################################################
 """PostgreSQL adapter for RelStorage."""
+from __future__ import absolute_import
 
 from perfmetrics import metricmethod
 from relstorage.adapters.connmanager import AbstractConnectionManager
@@ -33,7 +34,7 @@ from zope.interface import implementer
 import logging
 
 from . import _postgresql_drivers
-from ._abstract_drivers import _select_driver
+from .._abstract_drivers import _select_driver
 
 import re
 

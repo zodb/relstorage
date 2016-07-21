@@ -12,7 +12,7 @@
 #
 ##############################################################################
 """Oracle adapter for RelStorage."""
-
+from __future__ import absolute_import
 from perfmetrics import metricmethod
 from relstorage.adapters.connmanager import AbstractConnectionManager
 from relstorage.adapters.dbiter import HistoryFreeDatabaseIterator
@@ -32,7 +32,7 @@ from relstorage.adapters.txncontrol import OracleTransactionControl
 from relstorage.options import Options
 from zope.interface import implementer
 
-from ._abstract_drivers import _select_driver
+from .._abstract_drivers import _select_driver
 from . import _oracle_drivers
 
 import logging

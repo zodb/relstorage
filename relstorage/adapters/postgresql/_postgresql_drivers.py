@@ -24,8 +24,8 @@ import os
 from zope.interface import moduleProvides
 from zope.interface import implementer
 
-from .interfaces import IDBDriver, IDBDriverOptions
-from ._abstract_drivers import _standard_exceptions
+from ..interfaces import IDBDriver, IDBDriverOptions
+from .._abstract_drivers import _standard_exceptions
 
 
 database_type = 'postgresql'
@@ -214,7 +214,7 @@ else:
                 return _ReadBlob(self, oid)
             raise AssertionError("Unsupported params", dict(locals()))
 
-    from ._abstract_drivers import _ConnWrapper
+    from .._abstract_drivers import _ConnWrapper
 
     @implementer(IDBDriver)
     class PG8000Driver(object):
