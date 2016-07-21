@@ -63,7 +63,7 @@ from relstorage.adapters.oidallocator import MySQLOIDAllocator
 from relstorage.adapters.packundo import MySQLHistoryFreePackUndo
 from relstorage.adapters.packundo import MySQLHistoryPreservingPackUndo
 from relstorage.adapters.poller import Poller
-from relstorage.adapters.schema import MySQLSchemaInstaller
+from .schema import MySQLSchemaInstaller
 from relstorage.adapters.scriptrunner import ScriptRunner
 from relstorage.adapters.stats import MySQLStats
 from relstorage.adapters.txncontrol import MySQLTransactionControl
