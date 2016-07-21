@@ -29,7 +29,7 @@ from .schema import OracleSchemaInstaller
 from .batch import OracleRowBatcher
 from .scriptrunner import OracleScriptRunner
 from relstorage.adapters.stats import OracleStats
-from relstorage.adapters.txncontrol import OracleTransactionControl
+from .txncontrol import OracleTransactionControl
 from relstorage.options import Options
 from zope.interface import implementer
 

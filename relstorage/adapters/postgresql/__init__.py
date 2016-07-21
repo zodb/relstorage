@@ -28,7 +28,7 @@ from relstorage.adapters.poller import Poller
 from .schema import PostgreSQLSchemaInstaller
 from relstorage.adapters.scriptrunner import ScriptRunner
 from relstorage.adapters.stats import PostgreSQLStats
-from relstorage.adapters.txncontrol import PostgreSQLTransactionControl
+from .txncontrol import PostgreSQLTransactionControl
 from relstorage.options import Options
 from zope.interface import implementer
 import logging
