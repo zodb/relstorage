@@ -19,7 +19,7 @@ from relstorage.adapters.dbiter import HistoryFreeDatabaseIterator
 from relstorage.adapters.dbiter import HistoryPreservingDatabaseIterator
 from relstorage.adapters.interfaces import IRelStorageAdapter
 from relstorage.adapters.interfaces import ReplicaClosedException
-from relstorage.adapters.locker import OracleLocker
+from .locker import OracleLocker
 from relstorage.adapters.mover import ObjectMover
 from relstorage.adapters.oidallocator import OracleOIDAllocator
 from relstorage.adapters.packundo import OracleHistoryFreePackUndo

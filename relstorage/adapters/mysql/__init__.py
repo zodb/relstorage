@@ -57,7 +57,7 @@ from relstorage.adapters.dbiter import HistoryFreeDatabaseIterator
 from relstorage.adapters.dbiter import HistoryPreservingDatabaseIterator
 from relstorage.adapters.interfaces import IRelStorageAdapter
 
-from relstorage.adapters.locker import MySQLLocker
+from .locker import MySQLLocker
 from relstorage.adapters.mover import ObjectMover
 from relstorage.adapters.oidallocator import MySQLOIDAllocator
 from relstorage.adapters.packundo import MySQLHistoryFreePackUndo
