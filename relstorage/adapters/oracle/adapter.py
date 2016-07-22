@@ -90,22 +90,23 @@ class OracleAdapter(object):
             runner=self.runner,
             keep_history=self.keep_history,
             )
+        inputsizes = {
+            'blobdata': driver.BLOB,
+            'rawdata': driver.BINARY,
+            'oid': driver.NUMBER,
+            'tid': driver.NUMBER,
+            'prev_tid': driver.NUMBER,
+            'chunk_num': driver.NUMBER,
+            'md5sum': driver.STRING,
+        }
         self.mover = OracleObjectMover(
             database_type='oracle',
             options=options,
             runner=self.runner,
             Binary=driver.Binary,
-            inputsizes={
-                'blobdata': driver.BLOB,
-                'rawdata': driver.BINARY,
-                'oid': driver.NUMBER,
-                'tid': driver.NUMBER,
-                'prev_tid': driver.NUMBER,
-                'chunk_num': driver.NUMBER,
-                'md5sum': driver.STRING,
-                },
-            batcher_factory=OracleRowBatcher,
+            batcher_factory=lambda cursor, row_limit: OracleRowBatcher(cursor, inputsizes, row_limit),
             )
+        self.mover.inputsizes = inputsizes
         self.connmanager.set_on_store_opened(self.mover.on_store_opened)
         self.oidallocator = OracleOIDAllocator(
             connmanager=self.connmanager,

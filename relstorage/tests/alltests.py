@@ -22,6 +22,7 @@ import importlib
 _include_db = True
 _only_mysql = False
 _only_pgsql = False
+_only_oracle = False
 
 def make_suite():
     suite = unittest.TestSuite()
@@ -50,6 +51,8 @@ def make_suite():
         test_modules.extend(x for x in db_test_modules if 'mysql' in x)
     elif _only_pgsql:
         test_modules.extend(x for x in db_test_modules if 'postgresql' in x)
+    elif _only_oracle:
+        test_modules.extend(x for x in db_test_modules if 'oracle' in x)
 
     for mod_name in test_modules:
         mod = importlib.import_module(mod_name)
@@ -69,6 +72,11 @@ if __name__ == '__main__':
         _include_db = False
         _only_pgsql = True
         sys.argv.remove('--only-pgsql')
+    if '--only-oracle' in sys.argv:
+        _include_db = False
+        _only_oracle = True
+        sys.argv.remove('--only-oracle')
+
     logging.basicConfig(level=logging.CRITICAL,
                         format='%(asctime)s %(levelname)-5.5s [%(name)s][%(thread)d:%(process)d][%(threadName)s] %(message)s')
     # We get constant errors about failing to lock a blob file,

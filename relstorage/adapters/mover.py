@@ -19,8 +19,6 @@ from .batch import RowBatcher
 from relstorage.adapters.interfaces import IObjectMover
 from relstorage.iter import fetchmany
 from zope.interface import implementer
-import os
-import sys
 from hashlib import md5
 
 from relstorage._compat import db_binary_to_bytes
@@ -60,15 +58,13 @@ def _query_property(base_name):
 class AbstractObjectMover(object):
 
     def __init__(self, database_type, options, runner=None,
-                 Binary=None, inputsizes=None, version_detector=None,
+                 Binary=None, version_detector=None,
                  batcher_factory=RowBatcher):
-        # The inputsizes parameter is for Oracle only.
         self.database_type = database_type
         self.keep_history = options.keep_history
         self.blob_chunk_size = options.blob_chunk_size
         self.runner = runner
         self.Binary = Binary
-        self.inputsizes = inputsizes
         self.version_detector = version_detector
         self.make_batcher = batcher_factory
 
@@ -311,10 +307,8 @@ class AbstractObjectMover(object):
         """
         stmt = self._detect_conflict_query
         cursor.execute(stmt)
-        if cursor.rowcount:
-            return cursor.fetchall()
-        return ()
-
+        rows = cursor.fetchall()
+        return rows
 
     @metricmethod_sampled
     def replace_temp(self, cursor, oid, prev_tid, data):
@@ -413,8 +407,7 @@ class AbstractObjectMover(object):
             SELECT zoid FROM object_state
             WHERE tid = %s
                 AND prev_tid != 0
-            ORDER BY zoid
-        )
+            ORDER BY zoid)
         """
 
     @metricmethod_sampled

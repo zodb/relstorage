@@ -37,6 +37,8 @@ def _to_oracle_ordered(query_tuple):
 @implementer(IObjectMover)
 class OracleObjectMover(AbstractObjectMover):
 
+    inputsizes = ()
+
     _move_from_temp_hp_insert_query = format_to_named(AbstractObjectMover._move_from_temp_hp_insert_query)
     _move_from_temp_hf_insert_query = format_to_named(AbstractObjectMover._move_from_temp_hf_insert_query)
     _move_from_temp_copy_blob_query = format_to_named(AbstractObjectMover._move_from_temp_copy_blob_query)
@@ -245,6 +247,7 @@ class OracleObjectMover(AbstractObjectMover):
 
     _update_current_insert_query = format_to_named(AbstractObjectMover._update_current_insert_query)
     _update_current_update_query = format_to_named(AbstractObjectMover._update_current_update_query)
+    _update_current_update_query = _update_current_update_query.replace('ORDER BY zoid', '')
 
     @metricmethod_sampled
     def download_blob(self, cursor, oid, tid, filename):
