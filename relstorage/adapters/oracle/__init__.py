@@ -27,7 +27,7 @@ from .packundo import OracleHistoryPreservingPackUndo
 from relstorage.adapters.poller import Poller
 from .schema import OracleSchemaInstaller
 from .batch import OracleRowBatcher
-from .scriptrunner import OracleScriptRunner
+from .scriptrunner import CXOracleScriptRunner
 from .stats import OracleStats
 from .txncontrol import OracleTransactionControl
 from relstorage.options import Options
@@ -178,62 +178,6 @@ class OracleAdapter(object):
         return ", ".join(parts)
 
 
-class CXOracleScriptRunner(OracleScriptRunner):
-
-    def __init__(self, driver):
-        self.driver = driver
-
-    def _outputtypehandler(self,
-                           cursor, name, defaultType, size, precision, scale):
-        """cx_Oracle outputtypehandler that causes Oracle to send BLOBs inline.
-
-        Note that if a BLOB in the result is too large, Oracle generates an
-        error indicating truncation.  The run_lob_stmt() method works
-        around this.
-        """
-        if defaultType == self.driver.BLOB:
-            # Default size for BLOB is 4, we want the whole blob inline.
-            # Typical chunk size is 8132, we choose a multiple - 32528
-            return cursor.var(self.driver.LONG_BINARY, 32528, cursor.arraysize)
-
-    def _read_lob(self, value):
-        """Handle an Oracle LOB by returning its byte stream.
-
-        Returns other objects unchanged.
-        """
-        if isinstance(value, self.driver.LOB):
-            return value.read()
-        return value
-
-    def run_lob_stmt(self, cursor, stmt, args=(), default=None):
-        """Execute a statement and return one row with all LOBs inline.
-
-        Returns the value of the default parameter if the result was empty.
-        """
-        try:
-            cursor.outputtypehandler = self._outputtypehandler
-            try:
-                cursor.execute(stmt, args)
-                for row in cursor:
-                    return row
-            finally:
-                del cursor.outputtypehandler
-        except self.driver.DatabaseError as e:
-            # ORA-01406: fetched column value was truncated
-            error = e.args[0]
-
-            if ((isinstance(error, str) and not error.endswith(' 1406'))
-                    or error.code != 1406):
-                raise
-            # Execute the query, but alter it slightly without
-            # changing its meaning, so that the query cache
-            # will see it as a statement that has to be compiled
-            # with different output type parameters.
-            cursor.execute(stmt + ' ', args)
-            for row in cursor:
-                return tuple(map(self._read_lob, row))
-
-        return default
 
 
 class CXOracleConnectionManager(AbstractConnectionManager):
