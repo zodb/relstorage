@@ -22,6 +22,25 @@ from relstorage._compat import intern
 
 log = logging.getLogger(__name__)
 
+_stmt_cache = {}
+
+def format_to_named(stmt):
+    """
+    Convert '%s' pyformat strings to :n numbered
+    strings. Intended only for static strings.
+    """
+    try:
+        return _stmt_cache[stmt]
+    except KeyError:
+        matches = []
+        def replace(_match):
+            matches.append(None)
+            return ':%d' % len(matches)
+        new_stmt = intern(re.sub('%s', replace, stmt))
+        _stmt_cache[stmt] = new_stmt
+
+        return new_stmt
+
 class OracleScriptRunner(ScriptRunner):
 
     script_vars = {
@@ -69,14 +88,7 @@ class OracleScriptRunner(ScriptRunner):
 
         stmt should use '%s' parameter format.
         """
-        # replace '%s' with ':n'
-        matches = []
-        def replace(_match):
-            matches.append(None)
-            return ':%d' % len(matches)
-        stmt = intern(re.sub('%s', replace, stmt))
-
-        cursor.executemany(stmt, items)
+        cursor.executemany(format_to_named(stmt), items)
 
 
 class TrackingMap(object):

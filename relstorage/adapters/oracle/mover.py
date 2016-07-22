@@ -21,20 +21,19 @@ from zope.interface import implementer
 import os
 import sys
 
-from ..mover import AbstractObjectMover
-
 from relstorage._compat import xrange
 
-
-from ..mover import  compute_md5sum
+from ..mover import compute_md5sum
 from ..mover import metricmethod_sampled
 
-def _to_oracle_ordered(query_tuple, count=1):
-    # Replace %s with :1, :2, etc
-    return query_tuple
+from .scriptrunner import format_to_named
+from ..mover import AbstractObjectMover
 
-def _to_oracle(query, count=1):
-    return query
+def _to_oracle_ordered(query_tuple):
+    # Replace %s with :1, :2, etc
+    assert len(query_tuple) == 2
+    return format_to_named(query_tuple[0]), format_to_named(query_tuple[1])
+
 
 @implementer(IObjectMover)
 class OracleObjectMover(AbstractObjectMover):
@@ -48,7 +47,7 @@ class OracleObjectMover(AbstractObjectMover):
             cursor, stmt, (oid,), default=(None, None))
 
 
-    _load_revision_query = _to_oracle(AbstractObjectMover._load_revision_query)
+    _load_revision_query = format_to_named(AbstractObjectMover._load_revision_query)
 
     @metricmethod_sampled
     def load_revision(self, cursor, oid, tid):
@@ -252,8 +251,8 @@ class OracleObjectMover(AbstractObjectMover):
 
 
 
-    _update_current_insert_query = _to_oracle(AbstractObjectMover._update_current_insert_query)
-    _update_current_update_query = _to_oracle(AbstractObjectMover._update_current_update_query)
+    _update_current_insert_query = format_to_named(AbstractObjectMover._update_current_insert_query)
+    _update_current_update_query = format_to_named(AbstractObjectMover._update_current_update_query)
 
     @metricmethod_sampled
     def download_blob(self, cursor, oid, tid, filename):
