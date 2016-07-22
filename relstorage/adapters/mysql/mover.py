@@ -74,6 +74,14 @@ class MySQLObjectMover(AbstractObjectMover):
         AbstractObjectMover._detect_conflict_queries[1] + '\nLOCK IN SHARE MODE'
     )
 
+    def _move_from_temp_object_state(self, cursor, tid):
+        stmt = """
+        REPLACE INTO object_state (zoid, tid, state_size, state)
+        SELECT zoid, %s, COALESCE(LENGTH(state), 0), state
+        FROM temp_store
+        """
+        cursor.execute(stmt, (tid,))
+
     @metricmethod_sampled
     def update_current(self, cursor, tid):
         """Update the current object pointers.

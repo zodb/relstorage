@@ -28,6 +28,12 @@ adap_mods = {'adapters.' + basename(x).split('.')[0] for x in glob.glob(join(dir
              if not x.startswith("_")}
 modules = modules.union(adap_mods)
 
+for driver in 'mysql', 'oracle', 'postgresql':
+    adap_mods = {'adapters.' + driver + '.' + basename(x).split('.')[0]
+                 for x in glob.glob(join(directory, 'adapters', driver, '*.py'))
+                 if not x.startswith("_")}
+    modules = modules.union(adap_mods)
+
 modules = set(name for name in modules
               if not name.startswith('_'))
 

@@ -336,61 +336,56 @@ class AbstractObjectMover(object):
         """
         cursor.execute(stmt, (prev_tid, md5sum, self.Binary(data), oid))
 
+    _move_from_temp_hp_insert_query = """
+    INSERT INTO object_state
+      (zoid, tid, prev_tid, md5, state_size, state)
+    SELECT zoid, %s, prev_tid, md5,
+      COALESCE(LENGTH(state), 0), state
+    FROM temp_store
+    """
+
+    _move_from_temp_hf_insert_query = """
+    INSERT INTO object_state (zoid, tid, state_size, state)
+    SELECT zoid, %s, COALESCE(LENGTH(state), 0), state
+    FROM temp_store
+    """
+
+    _move_from_temp_copy_blob_query = """
+    INSERT INTO blob_chunk (zoid, tid, chunk_num, chunk)
+    SELECT zoid, %s, chunk_num, chunk
+    FROM temp_blob_chunk
+    """
+
+    def _move_from_temp_object_state(self, cursor, tid):
+        """
+        Called for history-free databases.
+
+        Should replace all entries in object_state with the
+        same zoid from temp_store.
+        """
+
+        stmt = """
+        DELETE FROM object_state
+        WHERE zoid IN (SELECT zoid FROM temp_store)
+        """
+        cursor.execute(stmt)
+
+        stmt = self._move_from_temp_hf_insert_query
+        cursor.execute(stmt, (tid,))
+
+
     @metricmethod_sampled
     def move_from_temp(self, cursor, tid, txn_has_blobs):
         """Moved the temporarily stored objects to permanent storage.
 
         Returns the list of oids stored.
         """
-        # XXX: Factor this
+
         if self.keep_history:
-            if self.database_type == 'oracle':
-                stmt = """
-                INSERT INTO object_state
-                    (zoid, tid, prev_tid, md5, state_size, state)
-                SELECT zoid, :1, prev_tid, md5,
-                    COALESCE(LENGTH(state), 0), state
-                FROM temp_store
-                """
-            else:
-                stmt = """
-                INSERT INTO object_state
-                    (zoid, tid, prev_tid, md5, state_size, state)
-                SELECT zoid, %s, prev_tid, md5,
-                    COALESCE(LENGTH(state), 0), state
-                FROM temp_store
-                """
+            stmt = self._move_from_temp_hp_insert_query
             cursor.execute(stmt, (tid,))
-
         else:
-            if self.database_type == 'mysql':
-                stmt = """
-                REPLACE INTO object_state (zoid, tid, state_size, state)
-                SELECT zoid, %s, COALESCE(LENGTH(state), 0), state
-                FROM temp_store
-                """
-                cursor.execute(stmt, (tid,))
-
-            else:
-                stmt = """
-                DELETE FROM object_state
-                WHERE zoid IN (SELECT zoid FROM temp_store)
-                """
-                cursor.execute(stmt)
-
-                if self.database_type == 'oracle':
-                    stmt = """
-                    INSERT INTO object_state (zoid, tid, state_size, state)
-                    SELECT zoid, :1, COALESCE(LENGTH(state), 0), state
-                    FROM temp_store
-                    """
-                else:
-                    stmt = """
-                    INSERT INTO object_state (zoid, tid, state_size, state)
-                    SELECT zoid, %s, COALESCE(LENGTH(state), 0), state
-                    FROM temp_store
-                    """
-                cursor.execute(stmt, (tid,))
+            self._move_from_temp_object_state(cursor, tid)
 
             if txn_has_blobs:
                 stmt = """
@@ -400,18 +395,7 @@ class AbstractObjectMover(object):
                 cursor.execute(stmt)
 
         if txn_has_blobs:
-            if self.database_type == 'oracle':
-                stmt = """
-                INSERT INTO blob_chunk (zoid, tid, chunk_num, chunk)
-                SELECT zoid, :1, chunk_num, chunk
-                FROM temp_blob_chunk
-                """
-            else:
-                stmt = """
-                INSERT INTO blob_chunk (zoid, tid, chunk_num, chunk)
-                SELECT zoid, %s, chunk_num, chunk
-                FROM temp_blob_chunk
-                """
+            stmt = self._move_from_temp_copy_blob_query
             cursor.execute(stmt, (tid,))
 
         stmt = """
