@@ -58,7 +58,7 @@ from relstorage.adapters.dbiter import HistoryPreservingDatabaseIterator
 from relstorage.adapters.interfaces import IRelStorageAdapter
 
 from .locker import MySQLLocker
-from relstorage.adapters.mover import ObjectMover
+from .mover import MySQLObjectMover
 from .oidallocator import MySQLOIDAllocator
 from .packundo import MySQLHistoryFreePackUndo
 from .packundo import MySQLHistoryPreservingPackUndo
@@ -107,7 +107,7 @@ class MySQLAdapter(object):
             runner=self.runner,
             keep_history=self.keep_history,
             )
-        self.mover = ObjectMover(
+        self.mover = MySQLObjectMover(
             database_type='mysql',
             options=options,
             Binary=driver.Binary,

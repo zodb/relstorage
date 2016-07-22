@@ -20,7 +20,7 @@ from relstorage.adapters.dbiter import HistoryFreeDatabaseIterator
 from relstorage.adapters.dbiter import HistoryPreservingDatabaseIterator
 from relstorage.adapters.interfaces import IRelStorageAdapter
 from .locker import PostgreSQLLocker
-from relstorage.adapters.mover import ObjectMover
+from .mover import PostgreSQLObjectMover
 from .oidallocator import PostgreSQLOIDAllocator
 from relstorage.adapters.packundo import HistoryFreePackUndo
 from relstorage.adapters.packundo import HistoryPreservingPackUndo
@@ -76,7 +76,7 @@ class PostgreSQLAdapter(object):
             locker=self.locker,
             keep_history=self.keep_history,
             )
-        self.mover = ObjectMover(
+        self.mover = PostgreSQLObjectMover(
             database_type='postgresql',
             options=options,
             runner=self.runner,

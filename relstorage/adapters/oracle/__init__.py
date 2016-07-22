@@ -20,7 +20,7 @@ from relstorage.adapters.dbiter import HistoryPreservingDatabaseIterator
 from relstorage.adapters.interfaces import IRelStorageAdapter
 from relstorage.adapters.interfaces import ReplicaClosedException
 from .locker import OracleLocker
-from relstorage.adapters.mover import ObjectMover
+from .mover import OracleObjectMover
 from .oidallocator import OracleOIDAllocator
 from .packundo import OracleHistoryFreePackUndo
 from .packundo import OracleHistoryPreservingPackUndo
@@ -89,7 +89,7 @@ class OracleAdapter(object):
             runner=self.runner,
             keep_history=self.keep_history,
             )
-        self.mover = ObjectMover(
+        self.mover = OracleObjectMover(
             database_type='oracle',
             options=options,
             runner=self.runner,
