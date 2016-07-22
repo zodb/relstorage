@@ -23,7 +23,6 @@ import sys
 
 from relstorage._compat import xrange
 
-from ..mover import compute_md5sum
 from ..mover import metricmethod_sampled
 
 from .scriptrunner import format_to_named
@@ -120,10 +119,7 @@ class OracleObjectMover(AbstractObjectMover):
     @metricmethod_sampled
     def store_temp(self, cursor, batcher, oid, prev_tid, data):
         """Store an object in the temporary table."""
-        if self.keep_history:
-            md5sum = compute_md5sum(data)
-        else:
-            md5sum = None
+        md5sum = self._compute_md5sum(data)
 
         size = len(data)
         if size <= 2000:
@@ -159,15 +155,9 @@ class OracleObjectMover(AbstractObjectMover):
 
         Used for copying transactions into this database.
         """
-        if self.keep_history:
-            md5sum = compute_md5sum(data)
-        else:
-            md5sum = None
+        md5sum = self._compute_md5sum(data)
 
-        if data is not None:
-            size = len(data)
-        else:
-            size = 0
+        size = len(data) if data is not None else 0
 
         if size <= 2000:
             # Send data inline for speed.  Oracle docs say maximum size
@@ -238,10 +228,8 @@ class OracleObjectMover(AbstractObjectMover):
 
         This happens after conflict resolution.
         """
-        if self.keep_history:
-            md5sum = compute_md5sum(data)
-        else:
-            md5sum = None
+        md5sum = self._compute_md5sum(data)
+
         stmt = """
         UPDATE temp_store SET
             prev_tid = :prev_tid,

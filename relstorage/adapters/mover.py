@@ -23,8 +23,6 @@ import os
 import sys
 from hashlib import md5
 
-
-from relstorage._compat import xrange
 from relstorage._compat import db_binary_to_bytes
 
 def compute_md5sum(data):
@@ -73,6 +71,11 @@ class AbstractObjectMover(object):
         self.inputsizes = inputsizes
         self.version_detector = version_detector
         self.make_batcher = batcher_factory
+
+        if self.keep_history:
+            self._compute_md5sum = compute_md5sum
+        else:
+            self._compute_md5sum = lambda arg: None
 
     _load_current_queries = (
         """
@@ -168,7 +171,6 @@ class AbstractObjectMover(object):
             return None, None
 
 
-
     @metricmethod_sampled
     def get_object_tid_after(self, cursor, oid, tid):
         """Returns the tid of the next change after an object revision.
@@ -190,6 +192,8 @@ class AbstractObjectMover(object):
         else:
             return None
 
+    # NOTE: These are not database param escapes, they are Python
+    # escapes, so they shouldn't be translated to :1, etc.
     _current_object_tids_queries = (
         "SELECT zoid, tid FROM current_object WHERE zoid IN (%s)",
         "SELECT zoid, tid FROM object_state WHERE zoid IN (%s)"
@@ -217,10 +221,8 @@ class AbstractObjectMover(object):
         raise NotImplementedError()
 
     def _generic_store_temp(self, batcher, oid, prev_tid, data, command='INSERT',):
-        if self.keep_history:
-            md5sum = compute_md5sum(data)
-        else:
-            md5sum = None
+        md5sum = self._compute_md5sum(data)
+
         if command == 'INSERT':
             batcher.delete_from('temp_store', zoid=oid)
         batcher.insert_into(
@@ -241,10 +243,7 @@ class AbstractObjectMover(object):
 
         Used for copying transactions into this database.
         """
-        if self.keep_history:
-            md5sum = compute_md5sum(data)
-        else:
-            md5sum = None
+        md5sum = self._compute_md5sum(data)
 
         if data is not None:
             encoded = self.Binary(data)
@@ -323,10 +322,8 @@ class AbstractObjectMover(object):
 
         This happens after conflict resolution.
         """
-        if self.keep_history:
-            md5sum = compute_md5sum(data)
-        else:
-            md5sum = None
+        md5sum = self._compute_md5sum(data)
+
         stmt = """
         UPDATE temp_store SET
             prev_tid = %s,
@@ -421,13 +418,15 @@ class AbstractObjectMover(object):
         """
 
     @metricmethod_sampled
-    def update_current(self, cursor, tid):
+    def update_current(self, cursor, tid): # pylint:disable=method-hidden
         """Update the current object pointers.
 
         tid is the integer tid of the transaction being committed.
         """
         if not self.keep_history:
             # nothing needs to be updated
+            # Can elide this check in the future.
+            self.update_current = lambda cursor, tid: None
             return
 
         stmt = self._update_current_insert_query
