@@ -59,6 +59,11 @@ PyPy       **PyMySQL**           **psycopg2cffi**;
                                  *pg8000*
 ========   ================      =================     ======
 
+.. note:: If you use umysql, make sure the server has a
+          ``max_allowed_packet`` setting no larger than 16MB. Also
+          make sure that RelStorage's ``blob-chunk-size`` is less than
+          16MB as well.
+
 Memcache Integration
 ====================
 

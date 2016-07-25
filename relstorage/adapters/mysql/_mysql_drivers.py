@@ -25,6 +25,8 @@ import six
 from zope.interface import moduleProvides
 from zope.interface import implementer
 
+from ZODB.POSException import TransactionTooLargeError
+
 from ..interfaces import IDBDriver, IDBDriverOptions
 
 from .._abstract_drivers import _standard_exceptions
@@ -245,26 +247,20 @@ else:
                 # Rare.
                 self.__debug_lock(sql, True)
                 if e.args == (0, 'Socket receive buffer full'):
-                    # This is very similar to
-                    # https://github.com/esnme/ultramysql/issues/16
-                    # (although that issue is claimed to be fixed). It
-                    # causes issues when using the same connection to
-                    # execute very many requests (in one example,
-                    # slightly more than 2,630,000 queries). Most
-                    # commonly, it has been seen when attempting a
-                    # database pack or conversion on a large database.
-                    # In that case, the MySQL-Python driver must be
-                    # used, or the amount of data to query must
-                    # otherwise be reduced.
-
-                    # In theory, we can workaround the issue by
-                    # replacing our now-bad _umysql_conn with a new
-                    # one and trying again.
-                    self.__reconnect()
-                    # However, in practice, this results in raising the same
-                    # error with 2.61 of umysql; it's not clear why that is, but
-                    # something seems to be holding on to the errno
-                    return super(UConnection, self).query(sql, args=args)
+                    # This is a function of the server having a larger
+                    # ``max_allowed_packet`` than ultramysql can
+                    # handle. umysql up through at least 2.61
+                    # hardcodes a receive (and send) buffer size of
+                    # 16MB
+                    # (https://github.com/esnme/ultramysql/issues/34).
+                    # If the server has a larger value then that and generates
+                    # a packet bigger than that, we get this error (after spending
+                    # time reading 16Mb, of course). This can happen for a single row
+                    # (if the blob chunk size was configured too high), or it can
+                    # happen for aggregate queries (the dbiter.iter_objects query is
+                    # particularly common cause of this.) Retrying won't help.
+                    raise TransactionTooLargeError('umysql got results bigger than 16MB.'
+                                                   " Reduce the server's max_allowed_packet setting.")
                 raise
             except Exception: # pragma: no cover
                 self.__debug_lock(sql, True)

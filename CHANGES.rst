@@ -7,7 +7,11 @@
 ====================
 
 - The umysqldb support handles query transformations more efficiently.
-
+- Supporting new databases should be simpler due to a code
+  restructuring. Note that many internal implementation classes have
+  moved or been renamed.
+- umysqldb now raises a more informative error when the server sends
+  too large a packet.
 
 2.0.0b4 (2016-07-17)
 ====================
@@ -15,8 +19,9 @@
 - Add experimental support for umysqldb as a MySQL driver for Python
   2.7. This is a gevent-compatible driver implemented in C for speed.
   Note that it may not be able to store large objects (it has been
-  observed to fail for a 16M object), and has been observed to have
-  some other stability issues.
+  observed to fail for a 16M object---it hardcodes a
+  ``max_allowed_packet`` of exactly 16MB for read and write buffers),
+  and has been observed to have some other stability issues.
 
 
 2.0.0b3 (2016-07-16)

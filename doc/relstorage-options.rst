@@ -38,9 +38,12 @@ keep-history
 
            This option must not change once the database schema has
            been installed, because the schemas for history-preserving and
-           history-free storage are different. If you want to convert
-           between a history-preserving and a history-free database, use
-           the :doc:`zodbconvert` utility to copy to a new database.
+           history-free storage are different. RelStorage will refuse
+           to initialize if it detects this value has been altered.
+
+           If you want to convert between a history-preserving and a
+           history-free database, use the :doc:`zodbconvert` utility
+           to copy to a new database.
 
 commit-lock-timeout
         During commit, RelStorage acquires a database-wide lock. This
@@ -112,12 +115,28 @@ blob-cache-size-check
 blob-chunk-size
         When ZODB blobs are stored in MySQL, RelStorage breaks them into
         chunks to minimize the impact on RAM.  This option specifies the chunk
-        size for new blobs. On PostgreSQL and Oracle, this value is used as
-        the memory buffer size for blob upload and download operations. The
-        default is 1048576 (1 mebibyte).
+        size for new blobs. If RAM is available and the network
+        connection to the database server is fast, a larger value can
+        be more efficient because it will result in fewer roundtrips
+        to the server.
 
-        This option allows suffixes such as "mb" or "gb".
-        This option is ignored if shared-blob-dir is true.
+        .. caution:: On MySQL, this value cannot exceed the server's
+                     `max_allowed_packet
+                     <https://dev.mysql.com/doc/refman/5.5/en/server-system-variables.html#sysvar_max_allowed_packet>`_
+                     setting. If blob chunks are larger than that, it
+                     won't be possible to upload them. If blob chunks
+                     are uploaded and then that value is later
+                     reduced, it won't be possible to download blobs
+                     that exceed that value.
+
+        On PostgreSQL and Oracle, this value is used as the memory
+        buffer size for blob upload and download operations.
+
+        The default is 1048576 (1 megabyte). This option allows
+        suffixes such as "mb" or "gb".
+
+        This option has no effect if shared-blob-dir is true (because
+        blobs are not stored on the server).
 
 Replication
 ===========
