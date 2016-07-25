@@ -1,6 +1,6 @@
 ##############################################################################
 #
-# Copyright (c) 2009 Zope Foundation and Contributors.
+# Copyright (c) 2008 Zope Foundation and Contributors.
 # All Rights Reserved.
 #
 # This software is subject to the provisions of the Zope Public License,
@@ -11,24 +11,11 @@
 # FOR A PARTICULAR PURPOSE.
 #
 ##############################################################################
-"""Stats implementations
-"""
+"""PostgreSQL adapter for RelStorage."""
+from __future__ import absolute_import
 
-import abc
-import six
+from relstorage.adapters.postgresql.adapter import PostgreSQLAdapter
+from relstorage.adapters.postgresql.adapter import select_driver
 
-@six.add_metaclass(abc.ABCMeta)
-class AbstractStats(object):
-
-    def __init__(self, connmanager):
-        self.connmanager = connmanager
-
-    def get_object_count(self):
-        """Returns the number of objects in the database"""
-        # do later
-        return 0
-
-    @abc.abstractmethod
-    def get_db_size(self):
-        """Returns the approximate size of the database in bytes"""
-        raise NotImplementedError()
+assert PostgreSQLAdapter
+assert select_driver

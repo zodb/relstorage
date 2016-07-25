@@ -11,24 +11,29 @@
 # FOR A PARTICULAR PURPOSE.
 #
 ##############################################################################
-"""Stats implementations
 """
+Stats implementations
+"""
+from __future__ import absolute_import
 
-import abc
-import six
+from ..stats import AbstractStats
 
-@six.add_metaclass(abc.ABCMeta)
-class AbstractStats(object):
-
-    def __init__(self, connmanager):
-        self.connmanager = connmanager
+class MySQLStats(AbstractStats):
 
     def get_object_count(self):
         """Returns the number of objects in the database"""
         # do later
         return 0
 
-    @abc.abstractmethod
     def get_db_size(self):
         """Returns the approximate size of the database in bytes"""
-        raise NotImplementedError()
+        conn, cursor = self.connmanager.open()
+        try:
+            cursor.execute("SHOW TABLE STATUS")
+            description = [i[0] for i in cursor.description]
+            rows = cursor.fetchall()
+        finally:
+            self.connmanager.close(conn, cursor)
+        data_column = description.index('Data_length')
+        index_column = description.index('Index_length')
+        return sum([row[data_column] + row[index_column] for row in rows], 0)

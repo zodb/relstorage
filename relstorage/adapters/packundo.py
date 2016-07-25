@@ -29,12 +29,6 @@ from relstorage._compat import mysql_connection
 
 log = logging.getLogger(__name__)
 
-def _oracle_fetchmany(self, cursor): # pylint:disable=unused-argument
-    # We can't safely fetch many rows at once without
-    # getting 'ProgrammingError: LOB variable no longer valid after subsequent fetch'
-    # See https://github.com/zodb/relstorage/issues/30
-    return cursor
-
 class PackUndo(object):
     """Abstract base class for pack/undo"""
 
@@ -820,100 +814,6 @@ class HistoryPreservingPackUndo(PackUndo):
             self.runner.run_script_stmt(cursor, stmt)
 
 
-class MySQLHistoryPreservingPackUndo(HistoryPreservingPackUndo):
-
-    # Work around a MySQL performance bug by avoiding an expensive subquery.
-    # See: http://mail.zope.org/pipermail/zodb-dev/2008-May/011880.html
-    #      http://bugs.mysql.com/bug.php?id=28257
-    _script_create_temp_pack_visit = """
-        CREATE TEMPORARY TABLE temp_pack_visit (
-            zoid BIGINT UNSIGNED NOT NULL,
-            keep_tid BIGINT UNSIGNED NOT NULL
-        );
-        CREATE UNIQUE INDEX temp_pack_visit_zoid ON temp_pack_visit (zoid);
-        CREATE INDEX temp_pack_keep_tid ON temp_pack_visit (keep_tid);
-        """
-
-    # MySQL optimizes deletion far better when using a join syntax.
-    _script_pack_current_object = """
-        DELETE FROM current_object
-        USING current_object
-            JOIN pack_state USING (zoid, tid)
-        WHERE current_object.tid = %(tid)s
-        """
-
-    _script_pack_object_state = """
-        DELETE FROM object_state
-        USING object_state
-            JOIN pack_state USING (zoid, tid)
-        WHERE object_state.tid = %(tid)s
-        """
-
-    _script_pack_object_ref = """
-        DELETE FROM object_refs_added
-        USING object_refs_added
-            JOIN transaction USING (tid)
-        WHERE transaction.empty = true;
-
-        DELETE FROM object_ref
-        USING object_ref
-            JOIN transaction USING (tid)
-        WHERE transaction.empty = true
-        """
-
-    _script_create_temp_undo = """
-        CREATE TEMPORARY TABLE temp_undo (
-            zoid BIGINT UNSIGNED NOT NULL,
-            prev_tid BIGINT UNSIGNED NOT NULL
-        );
-        CREATE UNIQUE INDEX temp_undo_zoid ON temp_undo (zoid)
-        """
-
-    _script_delete_empty_transactions_batch = """
-        DELETE FROM transaction
-        WHERE packed = %(TRUE)s
-          AND empty = %(TRUE)s
-        LIMIT 1000
-        """
-
-
-class OracleHistoryPreservingPackUndo(HistoryPreservingPackUndo):
-
-    _script_choose_pack_transaction = """
-        SELECT MAX(tid)
-        FROM transaction
-        WHERE tid > 0
-            AND tid <= %(tid)s
-            AND packed = 'N'
-        """
-
-    _script_create_temp_pack_visit = None
-    _script_create_temp_undo = None
-    _script_reset_temp_undo = "DELETE FROM temp_undo"
-
-    _script_find_pack_tid = """
-        SELECT MAX(keep_tid)
-        FROM pack_object
-        """
-
-    _script_transaction_has_data = """
-        SELECT DISTINCT tid
-        FROM object_state
-        WHERE tid = %(tid)s
-        """
-
-    _script_delete_empty_transactions_batch = """
-        DELETE FROM transaction
-        WHERE packed = %(TRUE)s
-          AND empty = %(TRUE)s
-          AND rownum <= 1000
-        """
-
-    # XXX: This may not be necessary, the HP tests don't fail
-    # without it.
-    _fetchmany = _oracle_fetchmany
-
-
 @implementer(IPackUndo)
 class HistoryFreePackUndo(PackUndo):
 
@@ -1258,27 +1158,3 @@ class HistoryFreePackUndo(PackUndo):
         """
         self.runner.run_script_stmt(cursor, state, {'oid': u64(oid), 'tid': u64(oldserial)})
         return cursor.rowcount
-
-class MySQLHistoryFreePackUndo(HistoryFreePackUndo):
-
-    _script_create_temp_pack_visit = """
-        CREATE TEMPORARY TABLE temp_pack_visit (
-            zoid BIGINT UNSIGNED NOT NULL,
-            keep_tid BIGINT UNSIGNED NOT NULL
-        );
-        CREATE UNIQUE INDEX temp_pack_visit_zoid ON temp_pack_visit (zoid);
-        """
-
-
-class OracleHistoryFreePackUndo(HistoryFreePackUndo):
-
-    _script_choose_pack_transaction = """
-        SELECT MAX(tid)
-        FROM object_state
-        WHERE tid > 0
-            AND tid <= %(tid)s
-        """
-
-    _script_create_temp_pack_visit = None
-
-    _fetchmany = _oracle_fetchmany

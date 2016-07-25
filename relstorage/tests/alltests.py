@@ -20,6 +20,9 @@ import unittest
 import importlib
 
 _include_db = True
+_only_mysql = False
+_only_pgsql = False
+_only_oracle = False
 
 def make_suite():
     suite = unittest.TestSuite()
@@ -44,6 +47,12 @@ def make_suite():
 
     if _include_db:
         test_modules += db_test_modules
+    elif _only_mysql:
+        test_modules.extend(x for x in db_test_modules if 'mysql' in x)
+    elif _only_pgsql:
+        test_modules.extend(x for x in db_test_modules if 'postgresql' in x)
+    elif _only_oracle:
+        test_modules.extend(x for x in db_test_modules if 'oracle' in x)
 
     for mod_name in test_modules:
         mod = importlib.import_module(mod_name)
@@ -55,6 +64,19 @@ if __name__ == '__main__':
     if '--no-db' in sys.argv:
         _include_db = False
         sys.argv.remove('--no-db')
+    if '--only-mysql' in sys.argv:
+        _include_db = False
+        _only_mysql = True
+        sys.argv.remove('--only-mysql')
+    if '--only-pgsql' in sys.argv:
+        _include_db = False
+        _only_pgsql = True
+        sys.argv.remove('--only-pgsql')
+    if '--only-oracle' in sys.argv:
+        _include_db = False
+        _only_oracle = True
+        sys.argv.remove('--only-oracle')
+
     logging.basicConfig(level=logging.CRITICAL,
                         format='%(asctime)s %(levelname)-5.5s [%(name)s][%(thread)d:%(process)d][%(threadName)s] %(message)s')
     # We get constant errors about failing to lock a blob file,

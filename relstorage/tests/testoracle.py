@@ -169,9 +169,9 @@ def test_suite():
         # cx_Oracle blob support can only address up to sys.maxint on
         # 32-bit systems, 4GB otherwise. This takes a great deal of time, however,
         # so allow tuning it down.
-        from relstorage.adapters.mover import ObjectMover
+        from relstorage.adapters.oracle.mover import OracleObjectMover as ObjectMover
         assert hasattr(ObjectMover, 'oracle_blob_chunk_maxsize')
-        ObjectMover.oracle_blob_chunk_maxsize = 1024 * 1024 * 100
+        ObjectMover.oracle_blob_chunk_maxsize = 1024 * 1024 * 10
         large_blob_size = ObjectMover.oracle_blob_chunk_maxsize * 2
     else:
         large_blob_size = min(sys.maxsize, 1<<32)
@@ -235,4 +235,5 @@ def test_suite():
 
 if __name__ == '__main__':
     logging.basicConfig()
+    logging.getLogger("zc.lockfile").setLevel(logging.CRITICAL)
     unittest.main(defaultTest="test_suite")

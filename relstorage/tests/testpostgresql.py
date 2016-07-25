@@ -178,7 +178,7 @@ def test_suite():
         # and to run fast (2GB blobs take about 4 minutes on Travis
         # CI as-of June 2016)
         # XXX: This is dirty.
-        from relstorage.adapters.mover import ObjectMover
+        from relstorage.adapters.postgresql.mover import PostgreSQLObjectMover as ObjectMover
         assert hasattr(ObjectMover, 'postgresql_blob_chunk_maxsize')
         ObjectMover.postgresql_blob_chunk_maxsize = 1024 * 1024 * 10
         large_blob_size = ObjectMover.postgresql_blob_chunk_maxsize * 2

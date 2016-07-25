@@ -11,24 +11,24 @@
 # FOR A PARTICULAR PURPOSE.
 #
 ##############################################################################
-"""Stats implementations
+"""
+Stats implementations
 """
 
-import abc
-import six
+from __future__ import absolute_import
 
-@six.add_metaclass(abc.ABCMeta)
-class AbstractStats(object):
+from ..stats import AbstractStats
 
-    def __init__(self, connmanager):
-        self.connmanager = connmanager
+class PostgreSQLStats(AbstractStats):
 
     def get_object_count(self):
         """Returns the number of objects in the database"""
         # do later
         return 0
 
-    @abc.abstractmethod
     def get_db_size(self):
         """Returns the approximate size of the database in bytes"""
-        raise NotImplementedError()
+        def callback(conn, cursor):
+            cursor.execute("SELECT pg_database_size(current_database())")
+            return cursor.fetchone()[0]
+        return self.connmanager.open_and_call(callback)

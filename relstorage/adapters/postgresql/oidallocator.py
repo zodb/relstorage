@@ -17,26 +17,28 @@ IOIDAllocator implementations.
 
 from __future__ import absolute_import
 
-import six
-import abc
-
-
+from ..oidallocator import AbstractOIDAllocator
 from perfmetrics import metricmethod
-from relstorage.adapters.interfaces import IOIDAllocator
+from ..interfaces import IOIDAllocator
 from zope.interface import implementer
-from relstorage._compat import mysql_connection
 
-@six.add_metaclass(abc.ABCMeta)
-class AbstractOIDAllocator(object):
-    # All of these allocators allocate 16 OIDs at a time.  In the sequence
-    # or table, value (n) represents (n * 16 - 15) through (n * 16).  So,
-    # value 1 represents OID block 1-16, 2 represents OID block 17-32,
-    # and so on.
+@implementer(IOIDAllocator)
+class PostgreSQLOIDAllocator(AbstractOIDAllocator):
 
-    @abc.abstractmethod
     def set_min_oid(self, cursor, oid):
-        raise NotImplementedError()
+        """Ensure the next OID is at least the given OID."""
+        n = (oid + 15) // 16
+        cursor.execute("""
+        SELECT CASE WHEN %s > nextval('zoid_seq')
+            THEN setval('zoid_seq', %s)
+            ELSE 0
+            END
+        """, (n, n))
 
-    @abc.abstractmethod
+    @metricmethod
     def new_oids(self, cursor):
-        raise NotImplementedError()
+        """Return a sequence of new, unused OIDs."""
+        stmt = "SELECT NEXTVAL('zoid_seq')"
+        cursor.execute(stmt)
+        n = cursor.fetchone()[0]
+        return range(n * 16 - 15, n * 16 + 1)

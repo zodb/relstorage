@@ -12,29 +12,30 @@
 #
 ##############################################################################
 """PostgreSQL adapter for RelStorage."""
+from __future__ import absolute_import
 
-from perfmetrics import metricmethod
-from relstorage.adapters.connmanager import AbstractConnectionManager
-from relstorage.adapters.dbiter import HistoryFreeDatabaseIterator
-from relstorage.adapters.dbiter import HistoryPreservingDatabaseIterator
-from relstorage.adapters.interfaces import IRelStorageAdapter
-from relstorage.adapters.locker import PostgreSQLLocker
-from relstorage.adapters.mover import ObjectMover
-from relstorage.adapters.oidallocator import PostgreSQLOIDAllocator
-from relstorage.adapters.packundo import HistoryFreePackUndo
-from relstorage.adapters.packundo import HistoryPreservingPackUndo
-from relstorage.adapters.poller import Poller
-from relstorage.adapters.schema import PostgreSQLSchemaInstaller
-from relstorage.adapters.scriptrunner import ScriptRunner
-from relstorage.adapters.stats import PostgreSQLStats
-from relstorage.adapters.txncontrol import PostgreSQLTransactionControl
+from .._abstract_drivers import _select_driver
+from ..dbiter import HistoryFreeDatabaseIterator
+from ..dbiter import HistoryPreservingDatabaseIterator
+from ..interfaces import IRelStorageAdapter
+from ..packundo import HistoryFreePackUndo
+from ..packundo import HistoryPreservingPackUndo
+from ..poller import Poller
+from ..scriptrunner import ScriptRunner
+
+from . import _postgresql_drivers
+from .connmanager import Psycopg2ConnectionManager
+from .locker import PostgreSQLLocker
+from .mover import PostgreSQLObjectMover
+from .oidallocator import PostgreSQLOIDAllocator
+from .schema import PostgreSQLSchemaInstaller
+from .stats import PostgreSQLStats
+from .txncontrol import PostgreSQLTransactionControl
+
+
 from relstorage.options import Options
 from zope.interface import implementer
 import logging
-
-from . import _postgresql_drivers
-from ._abstract_drivers import _select_driver
-
 import re
 
 log = logging.getLogger(__name__)
@@ -75,7 +76,7 @@ class PostgreSQLAdapter(object):
             locker=self.locker,
             keep_history=self.keep_history,
             )
-        self.mover = ObjectMover(
+        self.mover = PostgreSQLObjectMover(
             database_type='postgresql',
             options=options,
             runner=self.runner,
@@ -141,90 +142,6 @@ class PostgreSQLAdapter(object):
         parts.append('dsn=%r' % s)
         return ", ".join(parts)
 
-
-class Psycopg2ConnectionManager(AbstractConnectionManager):
-
-    def __init__(self, driver, dsn, options):
-        self._dsn = dsn
-        self.disconnected_exceptions = driver.disconnected_exceptions
-        self.close_exceptions = driver.close_exceptions
-        self.use_replica_exceptions = driver.use_replica_exceptions
-        self.isolation_read_committed = driver.ISOLATION_LEVEL_READ_COMMITTED
-        self.isolation_serializable = driver.ISOLATION_LEVEL_SERIALIZABLE
-        self.keep_history = options.keep_history
-        self._db_connect_with_isolation = driver.connect_with_isolation
-        super(Psycopg2ConnectionManager, self).__init__(options)
-
-    def _alter_dsn(self, replica):
-        """Alter the DSN to use the specified replica.
-
-        The replica parameter is a string specifying either host or host:port.
-        """
-        if ':' in replica:
-            host, port = replica.split(':')
-            dsn = '%s host=%s port=%s' % (self._dsn, host, port)
-        else:
-            dsn = '%s host=%s' % (self._dsn, replica)
-        return dsn
-
-    @metricmethod
-    def open(self, isolation=None, replica_selector=None):
-        """Open a database connection and return (conn, cursor)."""
-        if isolation is None:
-            isolation = self.isolation_read_committed
-        if replica_selector is None:
-            replica_selector = self.replica_selector
-
-        if replica_selector is not None:
-            replica = replica_selector.current()
-            dsn = self._alter_dsn(replica)
-        else:
-            replica = None
-            dsn = self._dsn
-
-        while True:
-            try:
-                conn, cursor = self._db_connect_with_isolation(isolation, dsn)
-                cursor.arraysize = 64
-                conn.replica = replica
-                return conn, cursor
-            except self.use_replica_exceptions as e:
-                if replica is not None:
-                    next_replica = next(replica_selector)
-                    if next_replica is not None:
-                        log.warning("Unable to connect to replica %s: %s, "
-                                    "now trying %s", replica, e, next_replica)
-                        replica = next_replica
-                        dsn = self._alter_dsn(replica)
-                        continue
-                log.warning("Unable to connect: %s", e)
-                raise
-
-    def open_for_load(self):
-        """Open and initialize a connection for loading objects.
-
-        Returns (conn, cursor).
-        """
-        conn, cursor = self.open(self.isolation_serializable,
-                                 replica_selector=self.ro_replica_selector)
-        if self.keep_history:
-            stmt = """
-            PREPARE get_latest_tid AS
-            SELECT tid
-            FROM transaction
-            ORDER BY tid DESC
-            LIMIT 1
-            """
-        else:
-            stmt = """
-            PREPARE get_latest_tid AS
-            SELECT tid
-            FROM object_state
-            ORDER BY tid DESC
-            LIMIT 1
-            """
-        cursor.execute(stmt)
-        return conn, cursor
 
 
 class PostgreSQLVersionDetector(object):

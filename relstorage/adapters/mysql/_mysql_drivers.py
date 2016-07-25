@@ -25,9 +25,9 @@ import six
 from zope.interface import moduleProvides
 from zope.interface import implementer
 
-from .interfaces import IDBDriver, IDBDriverOptions
+from ..interfaces import IDBDriver, IDBDriverOptions
 
-from ._abstract_drivers import _standard_exceptions
+from .._abstract_drivers import _standard_exceptions
 
 logger = __import__('logging').getLogger(__name__)
 
