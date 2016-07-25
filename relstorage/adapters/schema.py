@@ -271,16 +271,14 @@ class AbstractSchemaInstaller(object):
                     "can not connect to a history-preserving database. "
                     "If you need to convert, use the zodbconvert utility."
                 )
+        if not 'blob_chunk' in tables:
+            raise StorageError(
+                "Schema mismatch; please create the blob_chunk tables."
+                "See migration instructions for RelStorage 1.5."
+            )
 
     def update_schema(self, cursor, tables):
-        if not 'blob_chunk' in tables:
-            # Add the blob_chunk table (RelStorage 1.5+)
-            script = filter_script(
-                self.schema_script, self.database_type)
-            expr = (r'(CREATE|ALTER)\s+(GLOBAL TEMPORARY\s+)?(TABLE|INDEX)'
-                    r'\s+(temp_)?blob_chunk')
-            script = filter_statements(script, re.compile(expr, re.I))
-            self.runner.run_script(cursor, script)
+        pass
 
     _zap_all_tbl_stmt = 'DELETE FROM %s'
 
