@@ -51,7 +51,7 @@ class OracleLocker(AbstractLocker):
                 return False # Lock failed due to a timeout
             if status >= 1 and status <= 5:
                 msg = ('', 'timeout', 'deadlock', 'parameter error',
-                    'lock already owned', 'illegal handle')[int(status)]
+                       'lock already owned', 'illegal handle')[int(status)]
             else:
                 msg = str(status)
             raise UnableToAcquireCommitLockError(

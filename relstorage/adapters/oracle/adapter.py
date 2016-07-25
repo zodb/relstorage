@@ -21,7 +21,7 @@ from ..dbiter import HistoryPreservingDatabaseIterator
 from ..interfaces import IRelStorageAdapter
 from ..poller import Poller
 
-from . import _oracle_drivers
+from . import drivers
 from .batch import OracleRowBatcher
 from .connmanager import CXOracleConnectionManager
 from .locker import OracleLocker
@@ -42,7 +42,7 @@ import logging
 log = logging.getLogger(__name__)
 
 def select_driver(options=None):
-    return _select_driver(options or Options(), _oracle_drivers)
+    return _select_driver(options or Options(), drivers)
 
 @implementer(IRelStorageAdapter)
 class OracleAdapter(object):

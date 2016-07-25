@@ -56,7 +56,7 @@ from ..interfaces import IRelStorageAdapter
 from ..poller import Poller
 from ..scriptrunner import ScriptRunner
 
-from . import _mysql_drivers
+from . import drivers
 from .connmanager import MySQLdbConnectionManager
 from .locker import MySQLLocker
 from .mover import MySQLObjectMover
@@ -75,7 +75,7 @@ import logging
 log = logging.getLogger(__name__)
 
 def select_driver(options=None):
-    return _select_driver(options or Options(), _mysql_drivers)
+    return _select_driver(options or Options(), drivers)
 
 @implementer(IRelStorageAdapter)
 class MySQLAdapter(object):

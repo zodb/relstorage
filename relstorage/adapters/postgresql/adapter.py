@@ -23,7 +23,7 @@ from ..packundo import HistoryPreservingPackUndo
 from ..poller import Poller
 from ..scriptrunner import ScriptRunner
 
-from . import _postgresql_drivers
+from . import drivers
 from .connmanager import Psycopg2ConnectionManager
 from .locker import PostgreSQLLocker
 from .mover import PostgreSQLObjectMover
@@ -41,7 +41,7 @@ import re
 log = logging.getLogger(__name__)
 
 def select_driver(options=None):
-    return _select_driver(options or Options(), _postgresql_drivers)
+    return _select_driver(options or Options(), drivers)
 
 @implementer(IRelStorageAdapter)
 class PostgreSQLAdapter(object):
