@@ -59,6 +59,10 @@ Here are some sample SQL statements for creating the user and database::
     GRANT ALL ON zodb.* TO 'zodbuser'@'localhost';
     FLUSH PRIVILEGES;
 
+See the RelStorage option ``blob-chunk-size`` for information on
+configuring the server's ``max_allowed_packet`` value for optimal
+performance.
+
 Oracle
 ======
 

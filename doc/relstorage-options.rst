@@ -120,14 +120,18 @@ blob-chunk-size
         be more efficient because it will result in fewer roundtrips
         to the server.
 
-        .. caution:: On MySQL, this value cannot exceed the server's
-                     `max_allowed_packet
-                     <https://dev.mysql.com/doc/refman/5.5/en/server-system-variables.html#sysvar_max_allowed_packet>`_
-                     setting. If blob chunks are larger than that, it
-                     won't be possible to upload them. If blob chunks
-                     are uploaded and then that value is later
-                     reduced, it won't be possible to download blobs
-                     that exceed that value.
+        .. caution::
+           On MySQL, this value cannot exceed the server's
+           `max_allowed_packet
+           <https://dev.mysql.com/doc/refman/5.5/en/server-system-variables.html#sysvar_max_allowed_packet>`_
+           setting. If blob chunks are larger than that, it won't be
+           possible to upload them. If blob chunks are uploaded and
+           then that value is later reduced, it won't be possible to
+           download blobs that exceed that value.
+
+           The driver may also influence this. For example, umysqldb
+           needs a 1.3MB ``max_allowed_packet`` to send multiple 1MB
+           chunks.
 
         On PostgreSQL and Oracle, this value is used as the memory
         buffer size for blob upload and download operations.

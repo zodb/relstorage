@@ -244,7 +244,10 @@ def test_suite():
                 pack_test_name = 'blob_packing_history_free.txt'
 
             # MySQL is limited to the blob_chunk_size as there is no
-            # native blob streaming support.
+            # native blob streaming support. (Note: this depends on
+            # the max_allowed_packet size on the server as well as the driver; both
+            # values default to 1MB. But umysqldb needs 1.3MB max_allowed_packet size
+            # to send multiple 1MB chunks. So keep it small.)
             blob_size = Options().blob_chunk_size
 
             suite.addTest(storage_reusable_suite(

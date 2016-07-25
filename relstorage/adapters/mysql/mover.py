@@ -13,7 +13,7 @@
 ##############################################################################
 """IObjectMover implementation.
 """
-
+from __future__ import print_function
 
 from relstorage.adapters.interfaces import IObjectMover
 from zope.interface import implementer
@@ -171,8 +171,7 @@ class MySQLObjectMover(AbstractObjectMover):
             VALUES (%s, %s, %s)
             """
 
-        f = open(filename, 'rb')
-        try:
+        with open(filename, 'rb') as f:
             chunk_num = 0
             while True:
                 chunk = f.read(self.blob_chunk_size)
@@ -186,5 +185,3 @@ class MySQLObjectMover(AbstractObjectMover):
                     params = (oid, chunk_num, chunk)
                 cursor.execute(insert_stmt, params)
                 chunk_num += 1
-        finally:
-            f.close()
