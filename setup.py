@@ -77,6 +77,7 @@ setup(
     tests_require=[
         'mock',
         'zope.testing',
+        'ZODB3[test]',
     ],
     extras_require={
         'mysql': ['MySQL-python>=1.2.2'],
