@@ -70,7 +70,7 @@ setup(
     zip_safe=False,  # otherwise ZConfig can't see component.xml
     install_requires=[
         'perfmetrics',
-        'ZODB3>=3.7.0',
+        'ZODB3>=3.7.0,<3.11.0',
         'zope.interface',
         'zc.lockfile',
     ],
