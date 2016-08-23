@@ -302,3 +302,13 @@ class MockCursor:
         self.inputsizes.update(kw)
     def execute(self, stmt, params=None):
         self.executed.append((stmt, params))
+
+def test_suite():
+    suite = unittest.TestSuite()
+    suite.addTest(unittest.makeSuite(RowBatcherTests))
+    suite.addTest(unittest.makeSuite(PostgreSQLRowBatcherTests))
+    suite.addTest(unittest.makeSuite(OracleRowBatcherTests))
+    return suite
+
+if __name__ == '__main__':
+    unittest.main(defaultTest='test_suite')
