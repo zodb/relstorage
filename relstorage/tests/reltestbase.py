@@ -635,8 +635,27 @@ class GenericRelStorageTests(
         # Verify the pack stops with the right exception if it encounters
         # a broken pickle.
         from cPickle import UnpicklingError
+        unpick_errs = (UnpicklingError,)
+        try:
+            # Under Python 2, with zodbpickle, there may be a difference depending
+            # on whether the accelerated implementation is in use.
+            from zodbpickle.pickle import UnpicklingError as pUnpickErr
+        except ImportError:
+            pass
+        else:
+            unpick_errs += (pUnpickErr,)
+        try:
+            from zodbpickle.fastpickle import UnpicklingError as fUnpickErr
+        except ImportError:
+            pass
+        else:
+            unpick_errs += (fUnpickErr,)
+
+        # PyPy can also raise IndexError
+        unpick_errs += (IndexError,)
+
         self._dostoreNP(self._storage.new_oid(), data='brokenpickle')
-        self.assertRaises(UnpicklingError, self._storage.pack,
+        self.assertRaises(unpick_errs, self._storage.pack,
             time.time() + 10000, referencesf)
 
     def checkBackwardTimeTravelWithoutRevertWhenStale(self):

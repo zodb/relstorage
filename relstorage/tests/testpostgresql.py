@@ -167,7 +167,7 @@ def test_suite():
             # XXX: This is dirty.
             from relstorage.adapters.mover import ObjectMover
             assert hasattr(ObjectMover, 'postgresql_blob_chunk_maxsize')
-            ObjectMover.postgresql_blob_chunk_maxsize = 1024 * 1024 * 100
+            ObjectMover.postgresql_blob_chunk_maxsize = 1024 * 1024 * 10
             large_blob_size = ObjectMover.postgresql_blob_chunk_maxsize * 2
         else:
             large_blob_size = 1<<31
