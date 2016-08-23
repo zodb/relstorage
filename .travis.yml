@@ -41,14 +41,16 @@ notifications:
 install:
   - pip install -U pip setuptools
   - pip install -U tox coveralls
-# Install the latest stable versions of ZODB/ZEO together, without -U
-# and without specifying to use beta versions. The caches on travis
-# sometimes get in a weird state and we wind up with incompatible mixes.
-  - pip install ZODB ZEO
   - if [[ $TRAVIS_PYTHON_VERSION == 'pypy' ]]; then pip install -U python-memcached; fi
   - if [[ $TRAVIS_PYTHON_VERSION != 'pypy' ]]; then pip install -U pylibmc cffi; fi
   - pip install -U -e ".[test]"
   - .travis/setup-$ENV.sh
+# Install the latest stable versions of ZODB/ZEO together,
+# without specifying to use beta versions. The caches on travis
+# sometimes get in a weird state and we wind up with incompatible
+# mixes while they are in beta mode (e.g., we get ZEO 5.0b1 but ZODB
+# 4.4.3 for some reason)
+  - pip install "ZODB<5" "ZEO<5"
 # cache: pip seems not to work if `install` is replaced (https://github.com/travis-ci/travis-ci/issues/3239)
 cache:
   directories:
