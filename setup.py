@@ -77,6 +77,7 @@ setup(
     install_requires=[
         'perfmetrics',
         'ZODB3>=3.7.0',
+        'ZEO<=5.0', # ZEO.zrpc is gone
         'zope.interface',
         'zc.lockfile',
     ],

@@ -20,7 +20,13 @@ notifications:
 install:
   - pip install -U pip setuptools
   - pip install -U tox coveralls
+  - pip install pylibmc
   - pip install -U -e ".[test]"
+# RecoveryStorage can't import handle_serials in 5.0, and there are
+# transaction changes that affect our tests in 4.4. It's hard to write
+# a requirement like this in setup.py because of the ZODB3 meta
+# distribution being renamed back to ZODB.
+  - pip install 'ZODB<4.4'
   - .travis/setup-$ENV.sh
 # cache: pip seems not to work if `install` is replaced (https://github.com/travis-ci/travis-ci/issues/3239)
 cache:
