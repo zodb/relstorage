@@ -38,14 +38,19 @@ from ._compat import itervalues
 from ._compat import PY3
 if PY3:
     # On Py3, use the built-in pickle, so that we can get
-    # protocol 4 when available.
+    # protocol 4 when available. It is *much* faster at writing out
+    # individual large objects such as the cache dict (about 3-4x faster)
     from pickle import Unpickler
     from pickle import Pickler
+    from pickle import HIGHEST_PROTOCOL
 else:
     # On Py2, zodbpickle gives us protocol 3, but we don't
     # use its special binary type
     from ._compat import Unpickler
     from ._compat import Pickler
+    from ._compat import HIGHEST_PROTOCOL
+
+from io import BytesIO
 
 log = logging.getLogger(__name__)
 
@@ -840,6 +845,8 @@ class LocalClientBucket(object):
 
     def load_from_file(self, cache_file):
         now = time.time()
+        # Unlike write_to_file, using the raw stream
+        # is fine for both Py 2 and 3.
         unpick = Unpickler(cache_file)
         version = unpick.load()
         if version != 1: # pragma: no cover
@@ -882,14 +889,30 @@ class LocalClientBucket(object):
 
     def write_to_file(self, cache_file):
         now = time.time()
-        # pickling the items is about 2-3x faster than marshal
-        pickler = Pickler(cache_file, -1) # Highest protocol
+        # pickling the items is about 3x faster than marshal
+
+        # Under Python 2, (or generally, under any pickle protocol
+        # less than 4, when framing was introduced) whether we are
+        # writing to an io.BufferedWriter, a <file> opened by name or
+        # fd, with default buffer or a large (16K) buffer, putting the
+        # Pickler directly on top of that stream is SLOW. Writing a
+        # 512MB dict takes ~40-50seconds. If instead we use a BytesIO
+        # to buffer in memory, that time goes down to about 7s.
+        if HIGHEST_PROTOCOL >= 4:
+            bio = cache_file
+        else:
+            bio = BytesIO()
+
+        pickler = Pickler(bio, -1) # Highest protocol
 
         pickler.dump(1) # Version marker
         assert len(self._dict) == len(self._ring)
         pickler.dump(len(self._dict)) # How many pairs we write
         # We lose the order. We'll have to build it up again as we go.
         pickler.dump(self._dict)
+
+        if bio is not cache_file:
+            cache_file.write(bio.getvalue())
 
         then = time.time()
         stats = self.stats()
@@ -1050,29 +1073,61 @@ class _Loader(object):
         path = os.path.abspath(path)
         return path
 
-    _gz_ext = ".gz"
+    @classmethod
+    def _open(cls, _options, filename, *args):
+        return io.open(filename, *args, buffering=16384)
 
     @classmethod
-    def _gzip_file(cls, fileobj=None, **kwargs):
-        # These files appear to be extremely compressable. One zodbshootout example
-        # with random data compressed a 3.4MB file to 393K and a 19M file went to 3M.
-        gz_cache_file = gzip.GzipFile(fileobj=fileobj, **kwargs)
-        # A layer of caching on top of the Gzipfile is
-        # *crucial* for Python 2.7. Without buffering, reading
-        # 100,000 objects from a 2MB file takes 4 seconds;
-        # with it, it takes around 1.3. Python 3 doesn't have this problem,
-        # but it's nice to still do. The slowness under Python2 is pretty much
-        # removed by the buffering, so we go ahead and do it there too.
+    def _gzip_ext(cls, options):
+        if options.cache_local_dir_compress:
+            return ".rscache.gz"
+        return ".rscache"
+
+    @classmethod
+    def _gzip_file(cls, options, filename, fileobj, **kwargs):
+        if not options.cache_local_dir_compress:
+            return fileobj
+        # These files would *appear* to be extremely compressable. One
+        # zodbshootout example with random data compressed a 3.4MB
+        # file to 393K and a 19M file went to 3M.
+
+        # As far as speed goes: for writing a 512MB file containing
+        # 650,987 values with only 1950 distinct values (so
+        # potentially highly compressible, although none of the
+        # identical items were next to each other in the dict on
+        # purpose) of random data under Python 2.7:
+
+        # no GzipFile is                   8s
+        # GzipFile with compresslevel=0 is 11s
+        # GzipFile with compresslevel=5 is 28s (NOTE: Time was the same for Python 3)
+
+        # But the on disk size at compresslevel=5 was 526,510,662
+        # compared to the in-memory size of 524,287,388 (remembering
+        # there is more overhead on disk). So its hardly worth it.
+
+        # Under Python 2.7, buffering is *critical* for performance.
+        # Python 3 doesn't have this problem as much for reads, but it's nice to still do.
+
+        # For writing, the fileobj itself must be buffered; this is
+        # taken care of by passing objects obtained from io.open; without
+        # that low-level BufferdWriter, what is 10s to write 512MB in 600K objects
+        # becomes 40s.
+
+        gz_cache_file = gzip.GzipFile(filename, fileobj=fileobj, **kwargs)
         if kwargs.get('mode') == 'rb':
-            buf_cache_file = io.BufferedReader(gz_cache_file)
-            return buf_cache_file
-        buf_cache_file = io.BufferedWriter(gz_cache_file)
-        return buf_cache_file
+            # For reading, 2.7 without buffering 100,000 objects from a
+            # 2MB file takes 4 seconds; with it, it takes around 1.3.
+            return io.BufferedReader(gz_cache_file)
+
+        return gz_cache_file
 
     @classmethod
     def _list_cache_files(cls, options, prefix):
         path = cls._normalize_path(options)
-        possible_caches = glob.glob(os.path.join(path, 'relstorage-cache-' + prefix + '.*' + cls._gz_ext))
+        possible_caches = glob.glob(os.path.join(path, 'relstorage-cache-'
+                                                 + prefix
+                                                 + '.*'
+                                                 + cls._gzip_ext(options)))
         return possible_caches
 
     @classmethod
@@ -1116,9 +1171,9 @@ class _Loader(object):
         stats = []
         try:
             for possible_cache_path in cls._list_cache_files(options, prefix):
-                cache_file = io.open(possible_cache_path, 'rb')
+                cache_file = cls._open(options, possible_cache_path, 'rb')
                 fds.append(cache_file)
-                buf_cache_file = cls._gzip_file(fileobj=cache_file, mode='rb')
+                buf_cache_file = cls._gzip_file(options, possible_cache_path, fileobj=cache_file, mode='rb')
                 stats.append((os.fstat(cache_file.fileno()), buf_cache_file, possible_cache_path, cache_file))
         except: # pragma: no cover
             for _f in fds:
@@ -1136,7 +1191,8 @@ class _Loader(object):
         # Given an options that points to a local cache dir,
         # choose a file from that directory and load it.
         stats = cls._stat_cache_files(options, prefix)
-
+        if not stats:
+            log.debug("No cache files found")
         try:
             for _, fd, cache_path, _ in stats:
                 try:
@@ -1164,8 +1220,8 @@ class _Loader(object):
             pass
 
         fd, path = tempfile.mkstemp('._rscache_', dir=tempdir)
-        with io.open(fd, 'wb') as f:
-            with cls._gzip_file(filename=path, fileobj=f, mode='wb', compresslevel=5) as fz:
+        with cls._open(options, fd, 'wb') as f:
+            with cls._gzip_file(options, filename=path, fileobj=f, mode='wb', compresslevel=5) as fz:
                 try:
                     local_client_bucket.write_to_file(fz)
                 except:
@@ -1181,8 +1237,9 @@ class _Loader(object):
         files = cls._list_cache_files(options, prefix)
         if len(files) < options.cache_local_dir_count:
             # Odds of same pid existing already are too low to worry about
-            new_name = 'relstorage-cache-' + prefix + '.' + str(os.getpid()) + cls._gz_ext
-            os.rename(path, os.path.join(tempdir, new_name))
+            new_name = 'relstorage-cache-' + prefix + '.' + str(os.getpid()) + cls._gzip_ext(options)
+            new_path = os.path.join(tempdir, new_name)
+            os.rename(path, new_path)
         else:
             stats = cls._stat_cache_files(options, prefix)
             # oldest and smallest first
@@ -1195,3 +1252,4 @@ class _Loader(object):
                 for e in stats:
                     e[1].close()
                     e[3].close()
+        return new_path

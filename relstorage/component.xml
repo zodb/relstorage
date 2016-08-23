@@ -80,6 +80,9 @@
     <key name="cache-local-dir-count" datatype="integer" required="no">
       <description>See the RelStorage README.txt file.</description>
     </key>
+    <key name="cache-local-dir-compress" datatype="boolean" required="no" default="false">
+      <description>See the RelStorage README.txt file.</description>
+    </key>
     <key name="cache-local-object-max" datatype="byte-size" required="no">
       <description>See the RelStorage README.txt file.</description>
     </key>
