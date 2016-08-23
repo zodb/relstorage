@@ -77,7 +77,7 @@ class RelStorageTestBase(StorageTestBase.StorageTestBase):
             if util.CACHE_SERVERS and util.CACHE_MODULE_NAME:
                 kw['cache_servers'] = util.CACHE_SERVERS
                 kw['cache_module_name'] = util.CACHE_MODULE_NAME
-                kw['cache_prefix'] = type(self).__name__ + self._testMethodNa
+                kw['cache_prefix'] = type(self).__name__ + self._testMethodName
         options = Options(keep_history=self.keep_history, **kw)
         adapter = self.make_adapter(options)
         storage = RelStorage(adapter, options=options)

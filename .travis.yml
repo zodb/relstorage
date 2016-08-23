@@ -11,7 +11,6 @@ env:
 matrix:
   fast_finish: true
 script:
-  - python -c 'import ZODB; print ZODB '
   - coverage run -m relstorage.tests.alltests
 after_success:
   - coveralls
@@ -23,13 +22,15 @@ install:
   - pip install -U tox coveralls
   - pip install pylibmc
   - pip install -U -e ".[test]"
-# RecoveryStorage can't import handle_serials in 5.0, and there are
-# transaction changes that affect our tests in 4.4. It's hard to write
-# a requirement like this in setup.py because of the ZODB3 meta
-# distribution being renamed back to ZODB.
+  - .travis/setup-$ENV.sh
+# setup-ENV likes to update ZODB. But RecoveryStorage can't import
+# handle_serials in 5.0, and there are transaction changes that affect
+# our tests in 4.4. It's hard to write a requirement like this in
+# setup.py because of the ZODB3 meta distribution being renamed back
+# to ZODB.
   - pip uninstall -y ZODB
   - pip install 'ZODB<4.4'
-  - .travis/setup-$ENV.sh
+
 # cache: pip seems not to work if `install` is replaced (https://github.com/travis-ci/travis-ci/issues/3239)
 cache:
   directories:

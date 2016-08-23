@@ -1,3 +1,9 @@
+1.6.1 (unreleased)
+------------------
+
+- Tests: Basic integration testing is done on Travis CI. Thanks to
+  Mauro Amico.
+
 1.6.0 (2016-06-09)
 ------------------
 
