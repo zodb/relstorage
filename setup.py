@@ -88,7 +88,7 @@ setup(
         'perfmetrics',
         'ZODB >= 4.4.2',
         # ZEO is needed for blob layout
-        'ZEO >= 4.2.0b1, <5.0',
+        'ZEO >= 4.2.0b1',
         'zope.interface',
         'zc.lockfile',
     ],
