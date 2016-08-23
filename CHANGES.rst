@@ -6,12 +6,17 @@
 2.0.0b5 (unreleased)
 ====================
 
-- The umysqldb support handles query transformations more efficiently.
 - Supporting new databases should be simpler due to a code
   restructuring. Note that many internal implementation classes have
   moved or been renamed.
+- The umysqldb support handles query transformations more efficiently.
 - umysqldb now raises a more informative error when the server sends
   too large a packet.
+
+  .. note:: If you receive "Socket receive buffer full" errors, you
+            are likely experiencing `this issue <https://github.com/esnme/ultramysql/issues/34>`_ in ultramysql and
+            will need a patched version, such as the one provided in
+            `this pull request <https://github.com/esnme/ultramysql/pull/61>`_.
 
 2.0.0b4 (2016-07-17)
 ====================
