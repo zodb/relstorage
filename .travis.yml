@@ -29,7 +29,7 @@ install:
 # setup.py because of the ZODB3 meta distribution being renamed back
 # to ZODB.
   - pip uninstall -y ZODB
-  - pip install 'ZODB<4.4'
+  - pip install 'ZODB<4.3'
 
 # cache: pip seems not to work if `install` is replaced (https://github.com/travis-ci/travis-ci/issues/3239)
 cache:

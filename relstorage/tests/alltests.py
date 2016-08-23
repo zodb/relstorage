@@ -28,7 +28,8 @@ def make_suite():
     return suite
 
 if __name__ == '__main__':
-    logging.basicConfig()
+    logging.basicConfig(level=logging.ERROR,
+                        format='%(asctime)s %(levelname)-5.5s [%(name)s][%(thread)d:%(process)d][%(threadName)s] %(message)s')
     # We get constant errors about failing to lock a blob file,
     # which really bloats the CI logs, so turn those off.
     logging.getLogger('zc.lockfile').setLevel(logging.CRITICAL)
