@@ -1179,7 +1179,8 @@ class ObjectMover(object):
             f.close()
         return bytecount
 
-
+    # PostgreSQL only supports up to 2GB of data per BLOB.
+    postgresql_blob_chunk_maxsize = 1<<31
 
     @metricmethod_sampled
     def postgresql_upload_blob(self, cursor, oid, tid, filename):
@@ -1215,8 +1216,8 @@ class ObjectMover(object):
             """
 
         blob = None
-        # PostgreSQL only supports up to 2GB of data per BLOB.
-        maxsize = 1<<31
+
+        maxsize = self.postgresql_blob_chunk_maxsize
         filesize = os.path.getsize(filename)
 
         if filesize <= maxsize:

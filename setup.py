@@ -41,6 +41,12 @@ def read_file(*path):
     file_path = (base_dir, ) + tuple(path)
     return file(os.path.join(*file_path)).read()
 
+tests_require = [
+    'mock',
+    'zope.testing',
+    'ZODB3 [test]',
+]
+
 setup(
     name="RelStorage",
     version=VERSION,
@@ -71,14 +77,16 @@ setup(
     install_requires=[
         'perfmetrics',
         'ZODB3>=3.7.0',
+        'ZEO<=5.0', # ZEO.zrpc is gone
         'zope.interface',
         'zc.lockfile',
     ],
-    tests_require=['mock'],
+    tests_require=tests_require,
     extras_require={
         'mysql': ['MySQL-python>=1.2.2'],
         'postgresql': ['psycopg2>=2.0'],
         'oracle': ['cx_Oracle>=4.3.1'],
+        'test': tests_require,
     },
     entry_points = {
         'console_scripts': [

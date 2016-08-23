@@ -56,6 +56,13 @@ def new_time():
     time.sleep(1)
     return new_time
 
+with open(__file__) as _f:
+    # Just use the this module as the source of our data
+    # Capture it at import time because test cases may
+    # chdir(), and we may not have an absolute path in __file__,
+    # depending on how they are run.
+    _random_file_data = _f.read().replace('\n', '').split()
+del _f
 
 def random_file(size, fd):
     """Create a random data of at least the given size, writing to fd.
@@ -68,8 +75,7 @@ def random_file(size, fd):
     """
     def fdata():
         seed = "1092384956781341341234656953214543219"
-        # Just use the this module as the source of our data
-        words = open(__file__, "r").read().replace("\n", '').split()
+        words = _random_file_data
         a = collections.deque(words)
         b = collections.deque(seed)
         while True:

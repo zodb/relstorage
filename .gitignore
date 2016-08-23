@@ -3,6 +3,8 @@
 *.egg-info
 *.pyc
 *.sublime-*
+.coverage
+htmlcov/
 bin/
 develop-eggs/
 dist/

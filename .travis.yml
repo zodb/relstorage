@@ -1,0 +1,43 @@
+language: python
+sudo: false
+services:
+  - mysql
+  - postgresql
+  - memcached
+env:
+  matrix:
+    - ENV=mysql
+    - ENV=postgres
+matrix:
+  fast_finish: true
+script:
+  - coverage run -m relstorage.tests.alltests
+after_success:
+  - coveralls
+notifications:
+  email: false
+
+install:
+  - pip install -U pip setuptools
+  - pip install -U tox coveralls
+  - pip install pylibmc
+  - pip install -U -e ".[test]"
+  - .travis/setup-$ENV.sh
+# setup-ENV likes to update ZODB. But RecoveryStorage can't import
+# handle_serials in 5.0, and there are transaction changes that affect
+# our tests in 4.3+ (checkUndoCreationBranch1). It's hard to write a requirement like this in
+# setup.py because of the ZODB3 meta distribution being renamed back
+# to ZODB.
+  - pip uninstall -y ZODB
+  - pip install 'ZODB<4.3'
+
+# cache: pip seems not to work if `install` is replaced (https://github.com/travis-ci/travis-ci/issues/3239)
+cache:
+  directories:
+    - $HOME/.cache/pip
+    - $HOME/.venv
+    - $HOME/.runtimes
+    - $HOME/.wheelhouse
+
+before_cache:
+    - rm -f $HOME/.cache/pip/log/debug.log

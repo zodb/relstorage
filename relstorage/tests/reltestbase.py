@@ -33,6 +33,9 @@ import random
 import time
 import transaction
 
+from . import util
+from relstorage.options import Options
+from relstorage.storage import RelStorage
 
 class RelStorageTestBase(StorageTestBase.StorageTestBase):
 
@@ -69,8 +72,12 @@ class RelStorageTestBase(StorageTestBase.StorageTestBase):
         raise NotImplementedError()
 
     def make_storage(self, zap=True, **kw):
-        from relstorage.options import Options
-        from relstorage.storage import RelStorage
+        if ('cache_servers' not in kw and 'cache_module_name' not in kw
+            and kw.get('share_local_cache', True)):
+            if util.CACHE_SERVERS and util.CACHE_MODULE_NAME:
+                kw['cache_servers'] = util.CACHE_SERVERS
+                kw['cache_module_name'] = util.CACHE_MODULE_NAME
+                kw['cache_prefix'] = type(self).__name__ + self._testMethodName
         options = Options(keep_history=self.keep_history, **kw)
         adapter = self.make_adapter(options)
         storage = RelStorage(adapter, options=options)
@@ -628,8 +635,27 @@ class GenericRelStorageTests(
         # Verify the pack stops with the right exception if it encounters
         # a broken pickle.
         from cPickle import UnpicklingError
+        unpick_errs = (UnpicklingError,)
+        try:
+            # Under Python 2, with zodbpickle, there may be a difference depending
+            # on whether the accelerated implementation is in use.
+            from zodbpickle.pickle import UnpicklingError as pUnpickErr
+        except ImportError:
+            pass
+        else:
+            unpick_errs += (pUnpickErr,)
+        try:
+            from zodbpickle.fastpickle import UnpicklingError as fUnpickErr
+        except ImportError:
+            pass
+        else:
+            unpick_errs += (fUnpickErr,)
+
+        # PyPy can also raise IndexError
+        unpick_errs += (IndexError,)
+
         self._dostoreNP(self._storage.new_oid(), data='brokenpickle')
-        self.assertRaises(UnpicklingError, self._storage.pack,
+        self.assertRaises(unpick_errs, self._storage.pack,
             time.time() + 10000, referencesf)
 
     def checkBackwardTimeTravelWithoutRevertWhenStale(self):
