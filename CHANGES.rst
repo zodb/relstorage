@@ -26,7 +26,10 @@
 - Writing persistent cache files to disk is substantially (3x) faster for
   any Python version less than 3.4 (including 2.7). However, it now
   requires an amount of memory equal to the local cache size.
-
+- Add an option, ``cache-local-dir-read-count`` to limit the maximum
+  number of persistent local cache files will be used to populate a
+  storages's cache. This can be useful to reduce startup time if cache
+  files are large and workers have mostly similar caches.
 
 2.0.0b4 (2016-07-17)
 ====================

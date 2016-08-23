@@ -480,6 +480,31 @@ class LocalClientBucketTests(unittest.TestCase):
         options.cache_local_dir_compress = True
         self.test_load_and_store(options)
 
+    def test_load_from_multiple_files_hit_limit(self):
+        from relstorage.cache import _Loader
+        import tempfile
+        client = self.getClass()(100)
+        options = MockOptions()
+        options.cache_local_dir_count = 5
+        options.cache_local_dir_read_count = 2
+        options.cache_local_dir = tempfile.mkdtemp()
+
+        for i in range(5):
+            # They all have to have unique keys so something gets loaded
+            # from each one
+            if i > 0:
+                del client[str(i - 1)]
+            client[str(i)] = b'abc'
+            _Loader.save_local_cache(options, 'test', client, _pid=i)
+            self.assertEqual(_Loader.count_cache_files(options, 'test'),
+                             i + 1)
+
+        files_loaded = _Loader.load_local_cache(options, 'test', client)
+        self.assertEqual(files_loaded, 2)
+
+        import shutil
+        shutil.rmtree(options.cache_local_dir)
+
 class LocalClientTests(unittest.TestCase):
 
     def getClass(self):
@@ -682,8 +707,9 @@ class LocalClientTests(unittest.TestCase):
          # automatically create directories as needed
          self.test_load_and_save(False)
 
+from relstorage.options import Options
 
-class MockOptions(object):
+class MockOptions(Options):
     cache_module_name = ''
     cache_servers = ''
     cache_local_mb = 1

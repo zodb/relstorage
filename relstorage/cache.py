@@ -1185,6 +1185,9 @@ class _Loader(object):
 
         return stats
 
+    @classmethod
+    def count_cache_files(cls, options, prefix):
+        return len(cls._list_cache_files(options, prefix))
 
     @classmethod
     def load_local_cache(cls, options, prefix, local_client_bucket):
@@ -1193,10 +1196,16 @@ class _Loader(object):
         stats = cls._stat_cache_files(options, prefix)
         if not stats:
             log.debug("No cache files found")
+        max_load = options.cache_local_dir_read_count or len(stats)
+        loaded_count = 0
         try:
             for _, fd, cache_path, _ in stats:
+                if loaded_count >= max_load:
+                    break
+
                 try:
                     _, stored = local_client_bucket.load_from_file(fd)
+                    loaded_count += 1
                     if not stored or local_client_bucket.size >= local_client_bucket.limit:
                         break # pragma: no cover
                 except: # pylint:disable=bare-except
@@ -1207,9 +1216,10 @@ class _Loader(object):
             for e in stats:
                 e[1].close()
                 e[3].close()
+        return loaded_count
 
     @classmethod
-    def save_local_cache(cls, options, prefix, local_client_bucket):
+    def save_local_cache(cls, options, prefix, local_client_bucket, _pid=None):
         # Dump the file.
         tempdir = cls._normalize_path(options)
         try:
@@ -1236,8 +1246,9 @@ class _Loader(object):
 
         files = cls._list_cache_files(options, prefix)
         if len(files) < options.cache_local_dir_count:
+            pid = _pid or os.getpid() # allowing passing for testing
             # Odds of same pid existing already are too low to worry about
-            new_name = 'relstorage-cache-' + prefix + '.' + str(os.getpid()) + cls._gzip_ext(options)
+            new_name = 'relstorage-cache-' + prefix + '.' + str(pid) + cls._gzip_ext(options)
             new_path = os.path.join(tempdir, new_name)
             os.rename(path, new_path)
         else:
