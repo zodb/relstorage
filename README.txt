@@ -46,6 +46,11 @@ The patches are also included in the source distribution of RelStorage.
 You need the Python database adapter that corresponds with your database.
 Install psycopg2, MySQLdb 1.2.2+, or cx_Oracle 4.3+.
 
+**CAUTION**: RelStorage 1.6 will *not* work with ZODB 5 or ZEO 5. You
+  will need a 4.x or older version of those two dependencies. The
+  setup.py distributed with RelStorage cannot enforce this due to the
+  legacy nature of its ZODB3 dependency.
+
 Configuring Your Database
 -------------------------
 
