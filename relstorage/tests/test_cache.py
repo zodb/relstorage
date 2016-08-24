@@ -443,6 +443,7 @@ class LocalClientBucketTests(unittest.TestCase):
 
         client1.reset_stats()
         client1['def'] = b'123'
+        self.assertEqual(2, len(client1))
         client1_max_size = client1.size
         self._save(bio, client1, options)
 
@@ -450,9 +451,9 @@ class LocalClientBucketTests(unittest.TestCase):
         # entry gets dropped
         client2 = self.getClass()(3)
         count, stored = self._load(bio, client2, options)
-        self.assertEqual(count, stored)
-        self.assertEqual(count, 2)
         self.assertEqual(1, len(client2))
+        self.assertEqual(count, 2)
+        self.assertEqual(stored, 1)
 
 
         # Duplicate keys ignored.
@@ -743,54 +744,121 @@ class MockPoller(object):
                 if tid > after_tid and tid <= last_tid)
 
 def local_benchmark():
+    from relstorage.cache import LocalClient, LocalClientBucket
     options = MockOptions()
-    options.cache_local_mb = 100
+    options.cache_local_mb = 500
     #options.cache_local_compression = 'none'
 
-    from relstorage.cache import LocalClient
-    import time
-    client = LocalClient(options)
+    REPEAT_COUNT = 4
+
+    KEY_GROUP_SIZE = 400
+    DATA_SIZE = 1024
+
+    # With 1000 in a key group, and 1024 bytes of data, we produce
+    # 909100 keys, and 930918400 = 887MB of data, which will overflow
+    # a cache of 500 MB.
+
+    # A group size of 100 produces 9100 keys with 9318400 = 8.8MB of data.
+    # Likewise, group of 200 produces 36380 keys with 35.5MB of data.
+
+    # Most of our time is spent in compression, it seems.
+    # In the 8.8mb case, populating all the data with default compression
+    # takes about 2.5-2.8s. Using no compression, it takes 0.38 to 0.42s.
+    # Reading is the same at about 0.2s.
+
     with open('/dev/urandom', 'rb') as f:
-        random_data = f.read(1024)
+        random_data = f.read(DATA_SIZE)
 
     key_groups = []
-    key_groups.append([str(i) for i in range(10)])
-    for i in range(1, 10): # 1 - 9
-        keys = [str(i) + str(j) for j in range(10)]
+    key_groups.append([int(str(i)) for i in range(KEY_GROUP_SIZE)])
+    for i in range(1, KEY_GROUP_SIZE):
+        keys = [int(str(i) + str(j)) for j in range(KEY_GROUP_SIZE)]
         key_groups.append(keys)
 
-    def populate():
-        data = {str(k): random_data for k in range(120)}
-        for k, v in data.items():
-            client.set(k, v)
+    ALL_DATA = {}
+    for group in key_groups:
+        for key in group:
+            ALL_DATA[key] = random_data
+    print(len(ALL_DATA), sum((len(v) for v in ALL_DATA.values()))/1024/1024)
 
-    def read():
-        for keys in key_groups:
-            client.get_multi(keys)
+    class DLocalBucket(LocalClientBucket):
+        CACHE_TYPE = dict
 
-    import timeit
-    import statistics
-    #import cProfile, pstats
-    number = 100
-    pop_timer = timeit.Timer(populate)
-    #pr = cProfile.Profile()
-    #pr.enable()
-    pop_times = pop_timer.repeat(number=number)
-    #pr.disable()
-    #ps = pstats.Stats(pr).sort_stats('cumulative')
-    #ps.print_stats()
+    class DLocalClient(LocalClient):
+        bucket_type = DLocalBucket
 
-    read_timer = timeit.Timer(read)
-    #pr = cProfile.Profile()
-    #pr.enable()
-    read_times = read_timer.repeat(number=number)
-    #pr.disable()
-    #ps = pstats.Stats(pr).sort_stats('cumulative')
-    #ps.print_stats()
+    from BTrees.OOBTree import OOBTree
+    from BTrees.LOBTree import LOBTree
+    class BLocalBucket(LocalClientBucket):
+        CACHE_TYPE = OOBTree
+
+    class BLocalClient(LocalClient):
+        bucket_type = BLocalBucket
+
+    def do_times(client_type):
+        client = client_type(options)
+        print("Testing", type(client._bucket0._dict))
+
+        def populate():
+            for k, v in ALL_DATA.items():
+                client.set(k, v)
+
+        def populate_empty():
+            c = LocalClient(options)
+            for k, v in ALL_DATA.items():
+                c.set(k, v)
+
+        def read():
+            for keys in key_groups:
+                res = client.get_multi(keys)
+                assert len(res) == len(keys)
+                assert res.popitem()[1] == random_data
 
 
-    print("pop average", statistics.mean(pop_times), "stddev", statistics.stdev(pop_times))
-    print("read average", statistics.mean(read_times), "stddev", statistics.stdev(read_times))
+
+        import timeit
+        import statistics
+        try:
+            import cProfile, pstats
+            raise ImportError
+        except ImportError:
+            class cProfile(object):
+                class Profile(object):
+                    def enable(self): pass
+                    def disable(self): pass
+            class pstats(object):
+                class Stats(object):
+                    def __init__(self, *args): pass
+                    def sort_stats(self, *args): return self
+                    def print_stats(self, *args): pass
+
+
+        number = REPEAT_COUNT
+        pop_timer = timeit.Timer(populate)
+        pr = cProfile.Profile()
+        pr.enable()
+        pop_times = pop_timer.repeat(number=number)
+        pr.disable()
+        ps = pstats.Stats(pr).sort_stats('cumulative')
+        ps.print_stats(.4)
+
+        read_timer = timeit.Timer(read)
+        pr = cProfile.Profile()
+        pr.enable()
+        read_times = read_timer.repeat(number=number)
+        pr.disable()
+        ps = pstats.Stats(pr).sort_stats('cumulative')
+        ps.print_stats(.4)
+
+        empty_pop = timeit.Timer(populate_empty)
+        epop_times = empty_pop.repeat(number=number)
+
+        print("pop  average", statistics.mean(pop_times), "stddev", statistics.stdev(pop_times))
+        print("epop average", statistics.mean(epop_times), "stddev", statistics.stdev(epop_times))
+        print("read average", statistics.mean(read_times), "stddev", statistics.stdev(read_times))
+
+    do_times(DLocalClient)
+    do_times(BLocalClient)
 
 def save_load_benchmark():
     from relstorage.cache import LocalClientBucket, _Loader
@@ -798,7 +866,10 @@ def save_load_benchmark():
     import os
     import itertools
 
+    import sys
+    sys.setrecursionlimit(500000)
     bucket = LocalClientBucket(500*1024*1024)
+    print("Testing", type(bucket._dict))
 
 
     size_dists = [100] * 800 + [300] * 500 + [1024] * 300 + [2048] * 200 + [4096] * 150

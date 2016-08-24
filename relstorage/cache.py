@@ -738,7 +738,6 @@ class _RingEntry(object):
     def __reduce__(self):
         return _RingEntry, (self._p_oid, self.value)
 
-
 class LocalClientBucket(object):
     """
     A map that keeps a record of its approx. size.
@@ -750,6 +749,15 @@ class LocalClientBucket(object):
     """
 
     def __init__(self, limit):
+        # We experimented with using OOBTree and LOBTree
+        # for the type of self._dict. The OOBTree has a similar
+        # but slightly slower performance profile (as would be expected
+        # given the big-O complexity) as a dict, but very large ones can't
+        # be pickled in a single shot! The LOBTree works faster and uses less
+        # memory than the OOBTree or the dict *if* all the keys are integers;
+        # which they currently are not. Plus the LOBTrees are slower on PyPy than its
+        # own dict specializations. We were hoping to be able to write faster pickles with
+        # large BTrees, but since that's not the case, we abandoned the idea.
         self._dict = {}
         self._ring = Ring()
         self._hits = 0
@@ -843,44 +851,94 @@ class LocalClientBucket(object):
         # Testing only
         return self._dict[key].value
 
+    # Benchmark for the general approach:
+
+    # Pickle is about 3x faster than marshal if we write single large
+    # objects, surprisingly. If we stick to writing smaller objects, the
+    # difference narrows to almost negligible.
+
+    # Writing 525MB of data, 655K keys (no compression):
+    # - code as-of commit e58126a (the previous major optimizations for version 1 format)
+    #    version 1 format, solid dict under 3.4: write: 3.8s/read 7.09s
+    #    2.68s to update ring, 2.6s to read pickle
+    #
+    # -in a btree under 3.4: write: 4.8s/read 8.2s
+    #    written as single list of the items
+    #    3.1s to load the pickle, 2.6s to update the ring
+    #
+    # -in a dict under 3.4: write: 3.7s/read 7.6s
+    #    written as the dict and updated into the dict
+    #    2.7s loading the pickle, 2.9s to update the dict
+    # - in a dict under 3.4: write: 3.0s/read 12.8s
+    #    written by iterating the ring and writing one key/value pair
+    #     at a time, so this is the only solution that
+    #     automatically preserves the LRU property (and would be amenable to
+    #     capping read based on time, and written file size); this format also lets us avoid the
+    #     full write buffer for HIGHEST_PROTOCOL < 4
+    #    2.5s spent in pickle.load, 8.9s spent in __setitem__,5.7s in ring.add
+    # - in a dict: write 3.2/read 9.1s
+    #    same as above, but custom code to set the items
+    #   1.9s in pickle.load, 4.3s in ring.add
+    # - same as above, but in a btree: write 2.76s/read 10.6
+    #    1.8s in pickle.load, 3.8s in ring.add,
+    #
+    # For the final version with optimizations, the write time is 2.3s/read is 6.4s
+
+    _FILE_VERSION = 2
+
     def load_from_file(self, cache_file):
         now = time.time()
         # Unlike write_to_file, using the raw stream
         # is fine for both Py 2 and 3.
         unpick = Unpickler(cache_file)
-        version = unpick.load()
-        if version != 1: # pragma: no cover
-            raise ValueError("Incorrect version of cache_file")
-        count = unpick.load()
-        stored = 0
-        loaded_dict = unpick.load()
-        if not self._dict:
-            # bulk-update in C for speed
-            stored = len(loaded_dict)
-            self._dict.update(loaded_dict)
-            for ring_entry in itervalues(loaded_dict):
-                if self.size < self.limit:
-                    self._ring.add(ring_entry)
-                    self.size += len(ring_entry.key) + len(ring_entry.value)
-                else:
-                    # We're too big! ignore these things from now on.
-                    # This is unlikely.
-                    del self._dict[ring_entry.key]
-        else:
-            new_keys = set(loaded_dict.keys()) - set(self._dict.keys())
-            stored += len(new_keys)
-            # Loading more data into an existing bucket.
-            # Load only the *new* keys, but don't care about LRU,
-            # it's all screwed up anyway at this point
-            for new_key in new_keys:
-                new_ring_entry = loaded_dict[new_key]
-                self._dict[new_key] = new_ring_entry
-                self._ring.add(new_ring_entry)
 
-                self.size += len(new_key) + len(new_ring_entry.value)
-                if self.size >= self.limit: # pragma: no cover
+        # Local optimizations
+        load = unpick.load
+
+        version = load()
+        if version != self._FILE_VERSION: # pragma: no cover
+            raise ValueError("Incorrect version of cache_file")
+        count = load()
+        entries_oldest_first = [load() for _ in range(count)]
+        assert len(entries_oldest_first) == count
+
+        def _insert_entries(entries):
+            stored = 0
+
+            # local optimizations
+            RE = _RingEntry
+            ring_add = self._ring.add
+            data = self._dict
+            limit = self.limit
+            size = self.size # update locally, copy back at end
+
+            for k, v in entries:
+                if k in data:
+                    continue
+
+                if size >= limit:
                     break
 
+                ring_entry = data[k] = RE(k, v)
+                size += len(k) + len(v)
+                ring_add(ring_entry)
+                stored += 1
+
+            self.size = size # copy back
+            return stored
+
+        stored = 0
+        if not self._dict:
+            # Empty, so quickly take everything they give us,
+            # oldest first so that the result is actually LRU
+            stored = _insert_entries(entries_oldest_first)
+        else:
+            # Loading more data into an existing bucket.
+            # Load only the *new* keys, trying to get the newest ones
+            # because LRU is going to get messed up anyway.
+
+            entries_newest_first = reversed(entries_oldest_first)
+            stored = _insert_entries(entries_newest_first)
 
         then = time.time()
         log.info("Examined %d and stored %d items from %s in %s",
@@ -891,28 +949,28 @@ class LocalClientBucket(object):
         now = time.time()
         # pickling the items is about 3x faster than marshal
 
+
         # Under Python 2, (or generally, under any pickle protocol
         # less than 4, when framing was introduced) whether we are
         # writing to an io.BufferedWriter, a <file> opened by name or
         # fd, with default buffer or a large (16K) buffer, putting the
-        # Pickler directly on top of that stream is SLOW. Writing a
-        # 512MB dict takes ~40-50seconds. If instead we use a BytesIO
-        # to buffer in memory, that time goes down to about 7s.
-        if HIGHEST_PROTOCOL >= 4:
-            bio = cache_file
-        else:
-            bio = BytesIO()
+        # Pickler directly on top of that stream is SLOW for large
+        # singe objects. Writing a 512MB dict takes ~40-50seconds. If
+        # instead we use a BytesIO to buffer in memory, that time goes
+        # down to about 7s. However, since we switched to writing many
+        # smaller objects, that need goes away.
 
-        pickler = Pickler(bio, -1) # Highest protocol
+        pickler = Pickler(cache_file, -1) # Highest protocol
+        dump = pickler.dump
 
-        pickler.dump(1) # Version marker
+        dump(self._FILE_VERSION) # Version marker
         assert len(self._dict) == len(self._ring)
-        pickler.dump(len(self._dict)) # How many pairs we write
-        # We lose the order. We'll have to build it up again as we go.
-        pickler.dump(self._dict)
+        dump(len(self._dict)) # How many pairs we write
 
-        if bio is not cache_file:
-            cache_file.write(bio.getvalue())
+        # Dump from oldest to newest, so when we read, we
+        # wind up with the correct order
+        for entry in self._ring:
+            dump((entry._p_oid, entry.value))
 
         then = time.time()
         stats = self.stats()

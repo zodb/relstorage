@@ -18,14 +18,15 @@
             will need a patched version, such as the one provided in
             `this pull request
             <https://github.com/esnme/ultramysql/pull/61>`_.
+- The local persistent cache file format has been changed to improve
+  reading and writing speed. Old files will be cleaned up
+  automatically. Users of the default settings could see improvements
+  of up to 3x or more on reading and writing.
 - Compression of local persistent cache files has been disabled by
   default (but there is still an option to turn it back on).
   Operational experience showed that it didn't actually save that much
   disk space, while substantially slowing down the reading and writing
   process (2-4x).
-- Writing persistent cache files to disk is substantially (3x) faster for
-  any Python version less than 3.4 (including 2.7). However, it now
-  requires an amount of memory equal to the local cache size.
 - Add an option, ``cache-local-dir-read-count`` to limit the maximum
   number of persistent local cache files will be used to populate a
   storages's cache. This can be useful to reduce startup time if cache
