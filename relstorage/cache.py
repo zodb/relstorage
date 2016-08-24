@@ -34,7 +34,6 @@ import struct
 
 from ._compat import string_types
 from ._compat import iteritems
-from ._compat import itervalues
 from ._compat import PY3
 if PY3:
     # On Py3, use the built-in pickle, so that we can get
@@ -42,15 +41,11 @@ if PY3:
     # individual large objects such as the cache dict (about 3-4x faster)
     from pickle import Unpickler
     from pickle import Pickler
-    from pickle import HIGHEST_PROTOCOL
 else:
     # On Py2, zodbpickle gives us protocol 3, but we don't
     # use its special binary type
     from ._compat import Unpickler
     from ._compat import Pickler
-    from ._compat import HIGHEST_PROTOCOL
-
-from io import BytesIO
 
 log = logging.getLogger(__name__)
 
