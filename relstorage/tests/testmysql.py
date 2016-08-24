@@ -64,6 +64,7 @@ class ZConfigTests(object):
             keep-history %s
             replica-conf %s
             blob-chunk-size 10MB
+            cache-local-dir-read-count 12
             <mysql>
                 driver auto
                 db %s

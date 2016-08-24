@@ -275,9 +275,9 @@ Database Caching
 
 In addition to the ZODB Connection object caches, RelStorage uses
 pickle caches to reduce the number of queries to the database server.
-(This is similar to ZEO.) Caches can be both local to a process and
-remote (and shared between many processes). These options affect all
-caching operations.
+(This is similar to ZEO.) Caches can be both local to a process
+(within its memory) and remote (and shared between many processes).
+These options affect all caching operations.
 
 cache-prefix
         The prefix for all keys in the cache; also used as part of
@@ -342,6 +342,19 @@ cache-local-compression
 
         .. versionadded:: 1.6
 
+Persistent Local Caching
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+Like ZEO, RelStorage can store its local cache to disk for a quicker
+application warmup period.
+
+.. versionadded:: 2.0b2
+   This is a new, *experimental* feature. While there should
+   be no problems enabling it, the exact details of its
+   function are subject to change in the future based on
+   feedback and experience.
+
+
 cache-local-dir
         The path to a directory where the local cache will be saved
         when the database is closed. On startup, RelStorage will look
@@ -385,25 +398,6 @@ cache-local-dir
            If the database (ZODB.DB object) is not properly
            ``close()``, then the cache files will not be written.
 
-           In the future an option to ignore files that are older than
-           a specified time might be added.
-
-           In the future, an separate option to limit the on-disk
-           cache size might be added (so the cache files would contain
-           only the most recently-used subset of items instead of the
-           full contents; this makes it more practical to use a much
-           larger cache-local-mb).
-
-           In the futere, an option to write these to the background at
-           certain intervals or after a certain percentage of the
-           local cache has changed might be added.
-
-        .. versionadded:: 2.0b2
-           This is a new, *experimental* feature. While there should
-           be no problems enabling it, the exact details of its
-           function are subject to change in the future based on
-           feedback and experience.
-
 cache-local-dir-count
         How many files that ``cache-local-dir`` will be allowed to
         contain before files start getting reused. Set this equal to
@@ -411,9 +405,41 @@ cache-local-dir-count
 
         The default is 20.
 
-        .. versionadded:: 2.0b2
-           See the notes for ``cache-local-dir``.
+cache-local-dir-compress
+        Whether to compress the persistent cache files on disk. The
+        default is false because individual entries are usually already
+        compressed and the tested workloads do not show a space
+        benefit from the compression; in addition, compression can
+        slow the reading and writing process by 2 to 3 times or more
+        (and hence slow down opening the storage).
 
+        .. versionadded:: 2.0b5
+
+cache-local-dir-read-count
+        The maximum number of files to read to populate the cache on
+        startup.
+
+        By default, RelStorage will read all the appropriate files (so
+        up to ``cache-local-dir-count`` files), from newest to oldest,
+        collecting the distinct entries out of them, until the cache
+        is fully populated (``cache-local-mb``) or there are no more
+        files. This ensures that after startup, all workers have the
+        most fully populated cache. This strategy works well if the
+        workers have a good distribution of work (relatively few
+        overlapping items) and the cache size is relatively small;
+        after startup they will all be equally warm without spending
+        too much startup time.
+
+        However, if the workers all do nearly the same work (so most
+        items in the cache files are the same) and the cache sizes are
+        very large, then the benefits of reading each subsequent file
+        diminish (because it has very few if any new entries to add,
+        and reading them all takes a lot of time). In that case, set
+        this value to 1 to only read the first ("best") cache file.
+
+        For situations in between, choose a number in between.
+
+        .. versionadded:: 2.0b5
 
 Remote Caching
 --------------
