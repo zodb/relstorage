@@ -3,7 +3,7 @@
 =========
 
 
-2.0.0b5 (unreleased)
+2.0.0b5 (2016-08-24)
 ====================
 
 - Supporting new databases should be simpler due to a code
