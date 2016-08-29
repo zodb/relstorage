@@ -4,6 +4,7 @@
 *.pyc
 *.sublime-*
 .coverage
+pip-selfcheck.json
 htmlcov/
 bin/
 develop-eggs/
@@ -12,3 +13,5 @@ eggs/
 include/
 lib/
 parts/
+.eggs/
+local/
