@@ -4,6 +4,12 @@
 - Tests: Basic integration testing is done on Travis CI. Thanks to
   Mauro Amico.
 
+- Oracle: Packing should no longer produce LOB errors. This partially
+  reverts the speedups in 1.6.0b2. Reported in `issue 30`_ by Peter
+  Jacobs.
+
+.. _`issue 30`: https://github.com/zodb/relstorage/issues/30
+
 1.6.0 (2016-06-09)
 ------------------
 
