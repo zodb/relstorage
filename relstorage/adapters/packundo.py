@@ -27,6 +27,13 @@ import time
 log = logging.getLogger(__name__)
 
 
+def _oracle_fetchmany(self, cursor): # pylint:disable=unused-argument
+    # We can't safely fetch many rows at once without
+    # getting 'ProgrammingError: LOB variable no longer valid after subsequent fetch'
+    # See https://github.com/zodb/relstorage/issues/30
+    return cursor
+
+
 class PackUndo(object):
     """Abstract base class for pack/undo"""
 
@@ -932,6 +939,9 @@ class HistoryFreePackUndo(PackUndo):
         CREATE INDEX temp_pack_keep_tid ON temp_pack_visit (keep_tid)
         """
 
+    def _fetchmany(self, cursor):
+        return fetchmany(cursor)
+
     def verify_undoable(self, cursor, undo_tid):
         """Raise UndoError if it is not safe to undo the specified txn."""
         raise UndoError("Undo is not supported by this storage")
@@ -1030,7 +1040,7 @@ class HistoryFreePackUndo(PackUndo):
 
         add_objects = []
         add_refs = []
-        for from_oid, tid, state in fetchmany(cursor):
+        for from_oid, tid, state in self._fetchmany(cursor):
             if hasattr(state, 'read'):
                 # Oracle
                 state = state.read()
@@ -1267,3 +1277,5 @@ class OracleHistoryFreePackUndo(HistoryFreePackUndo):
         """
 
     _script_create_temp_pack_visit = None
+
+    _fetchmany = _oracle_fetchmany
