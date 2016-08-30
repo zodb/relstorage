@@ -24,6 +24,8 @@ classifiers = """\
 Intended Audience :: Developers
 License :: OSI Approved :: Zope Public License
 Programming Language :: Python
+Programming Language :: Python :: 2.7
+Programming Language :: Python :: Implementation :: CPython
 Topic :: Database
 Topic :: Software Development :: Libraries :: Python Modules
 Operating System :: Microsoft :: Windows
@@ -51,9 +53,11 @@ setup(
     name="RelStorage",
     version=VERSION,
     author="Zope Foundation and Contributors",
+    author_email="shane@willowrise.com",
     maintainer="Shane Hathaway",
     maintainer_email="shane@hathawaymix.org",
-    url="http://pypi.python.org/pypi/RelStorage",
+    url="http://relstorage.readthedocs.io",
+    keywords="ZODB SQL RDBMS MySQL PostgreSQL Oracle",
     packages=[
         'relstorage',
         'relstorage.adapters',
