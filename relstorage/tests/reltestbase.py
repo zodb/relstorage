@@ -87,6 +87,25 @@ class RelStorageTestBase(StorageCreatingMixin,
 
     _storage = property(get_storage, set_storage)
 
+    def make_adapter(self, options):
+        # abstract method
+        raise NotImplementedError()
+
+    def make_storage(self, zap=True, **kw):
+        if ('cache_servers' not in kw and 'cache_module_name' not in kw
+            and kw.get('share_local_cache', True)):
+            if util.CACHE_SERVERS and util.CACHE_MODULE_NAME:
+                kw['cache_servers'] = util.CACHE_SERVERS
+                kw['cache_module_name'] = util.CACHE_MODULE_NAME
+                kw['cache_prefix'] = type(self).__name__ + self._testMethodName
+        options = Options(keep_history=self.keep_history, **kw)
+        adapter = self.make_adapter(options)
+        storage = RelStorage(adapter, options=options)
+        storage._batcher_row_limit = 1
+        if zap:
+            storage.zap_all()
+        return storage
+
     def open(self, read_only=False):
         # This is used by a few ZODB tests that close and reopen the storage.
         storage = self._storage
