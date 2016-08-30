@@ -269,6 +269,29 @@ Project Details
   to select which databases to use at build time.
 
 
+1.6.1 (2016-08-30)
+==================
+
+- Tests: Basic integration testing is done on Travis CI. Thanks to
+  Mauro Amico.
+
+- ``RelStorage.lastTransaction()`` is more consistent with FileStorage
+  and ClientStorage, returning a useful value in more cases.
+
+- zodbconvert: The ``--incremental`` option is supported with a
+  FileStorage (or any storage that implements
+  ``IStorage.lastTransaction()``) as a destination, not just
+  RelStorages.
+
+- zodbconvert: The ``--incremental`` option is supported with a
+  RelStorage as a destination. See :pr:`22`. With contributions by
+  Sylvain Viollon, Mauro Amico, and Peter Jacobs. Originally reported
+  by Jan-Wijbrand Kolman.
+
+- Oracle: Packing should no longer produce LOB errors. This partially
+  reverts the speedups in 1.6.0b2. Reported in :issue:`30` by Peter
+  Jacobs.
+
 1.6.0 (2016-06-09)
 ==================
 
