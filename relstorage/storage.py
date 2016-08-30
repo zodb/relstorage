@@ -957,7 +957,15 @@ class RelStorage(
     def lastTransaction(self):
         self._lock_acquire()
         try:
-            return self._ltid
+            if (self._ltid == z64
+                and self._prev_polled_tid is None):
+                # We haven't committed *or* polled for transactions,
+                # so our MVCC state is "floating".
+                # Read directly from the database to get the latest value,
+                self._before_load() # connect if needed
+                return p64(self._adapter.txncontrol.get_tid(self._load_cursor))
+
+            return max(self._ltid, p64(self._prev_polled_tid or 0))
         finally:
             self._lock_release()
 
@@ -1201,6 +1209,8 @@ class RelStorage(
         # TODO: Remove all old revisions of blobs in history-free mode.
 
     def iterator(self, start=None, stop=None):
+        # XXX: This is broken for purposes of copyTransactionsFrom() because
+        # it can only be iterated over once. zodbconvert works around this.
         return TransactionIterator(self._adapter, start, stop)
 
     def sync(self, force=True):

@@ -37,7 +37,27 @@ from . import util
 from relstorage.options import Options
 from relstorage.storage import RelStorage
 
-class RelStorageTestBase(StorageTestBase.StorageTestBase):
+
+class StorageCreatingMixin(object):
+
+    def make_adapter(self, options):
+        # abstract method
+        raise NotImplementedError()
+
+    def make_storage(self, zap=True, **kw):
+        from relstorage.options import Options
+        from relstorage.storage import RelStorage
+        options = Options(keep_history=self.keep_history, **kw)
+        adapter = self.make_adapter(options)
+        storage = RelStorage(adapter, options=options)
+        storage._batcher_row_limit = 1
+        if zap:
+            storage.zap_all()
+        return storage
+
+
+class RelStorageTestBase(StorageCreatingMixin,
+                         StorageTestBase.StorageTestBase):
 
     keep_history = None  # Override
     _storage_created = None
@@ -810,6 +830,54 @@ class GenericRelStorageTests(
         finally:
             db.close()
 
+from .test_zodbconvert import FSZODBConvertTests
+
+class AbstractRSZodbConvertTests(StorageCreatingMixin,
+                                 FSZODBConvertTests):
+    keep_history = True
+    filestorage_name = 'source'
+    relstorage_name = 'destination'
+
+    def _relstorage_contents(self):
+        raise NotImplementedError()
+
+    def setUp(self):
+        super(AbstractRSZodbConvertTests, self).setUp()
+        cfg = """
+        %%import relstorage
+        <filestorage %s>
+            path %s
+        </filestorage>
+        <relstorage %s>
+            %s
+        </relstorage>
+        """ % (self.filestorage_name, self.filestorage_file,
+               self.relstorage_name, self._relstorage_contents())
+        self._write_cfg(cfg)
+        self.make_storage(zap=True)
+
+
+class AbstractRSDestZodbConvertTests(AbstractRSZodbConvertTests):
+
+    @property
+    def filestorage_file(self):
+        return self.srcfile
+
+    def _create_dest_storage(self):
+        return self.make_storage(zap=False)
+
+class AbstractRSSrcZodbConvertTests(AbstractRSZodbConvertTests):
+
+    filestorage_name = 'destination'
+    relstorage_name = 'source'
+
+    @property
+    def filestorage_file(self):
+        return self.destfile
+
+
+    def _create_src_storage(self):
+        return self.make_storage(zap=False)
 
 class DoubleCommitter(Persistent):
     """A crazy persistent class that changes self in __getstate__"""

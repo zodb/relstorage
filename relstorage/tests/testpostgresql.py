@@ -12,7 +12,7 @@
 #
 ##############################################################################
 """Tests of relstorage.adapters.postgresql"""
-
+from __future__ import absolute_import
 from relstorage.options import Options
 from relstorage.tests.hftestbase import HistoryFreeFromFileStorage
 from relstorage.tests.hftestbase import HistoryFreeRelStorageTests
@@ -20,6 +20,8 @@ from relstorage.tests.hftestbase import HistoryFreeToFileStorage
 from relstorage.tests.hptestbase import HistoryPreservingFromFileStorage
 from relstorage.tests.hptestbase import HistoryPreservingRelStorageTests
 from relstorage.tests.hptestbase import HistoryPreservingToFileStorage
+from .reltestbase import AbstractRSDestZodbConvertTests
+from .reltestbase import AbstractRSSrcZodbConvertTests
 import logging
 import os
 import unittest
@@ -105,6 +107,21 @@ class ZConfigTests:
             db.close()
 
 
+class _PgSQLCfgMixin(object):
+
+    def _relstorage_contents(self):
+        return """
+                <postgresql>
+                   dsn dbname='relstoragetest' user='relstoragetest' password='relstoragetest'
+                </postgresql>
+        """
+
+class HPPostgreSQLDestZODBConvertTests(UsePostgreSQLAdapter, _PgSQLCfgMixin, AbstractRSDestZodbConvertTests):
+    pass
+
+class HPPostgreSQLSrcZODBConvertTests(UsePostgreSQLAdapter, _PgSQLCfgMixin, AbstractRSSrcZodbConvertTests):
+    pass
+
 class HPPostgreSQLTests(UsePostgreSQLAdapter, HistoryPreservingRelStorageTests,
         ZConfigTests):
     pass
@@ -152,6 +169,8 @@ def test_suite():
             HFPostgreSQLFromFile,
             ]:
         suite.addTest(unittest.makeSuite(klass, "check"))
+    suite.addTest(unittest.makeSuite(HPPostgreSQLDestZODBConvertTests))
+    suite.addTest(unittest.makeSuite(HPPostgreSQLSrcZODBConvertTests))
 
     try:
         import ZODB.blob

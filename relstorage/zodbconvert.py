@@ -16,6 +16,7 @@
 
 See README.txt for details.
 """
+from __future__ import print_function
 
 import logging
 import optparse
@@ -23,7 +24,7 @@ from persistent.TimeStamp import TimeStamp
 from StringIO import StringIO
 import sys
 import ZConfig
-from ZODB.utils import p64, readable_tid_repr
+from ZODB.utils import p64, u64, z64, readable_tid_repr
 
 schema_xml = """
 <schema>
@@ -52,6 +53,23 @@ def storage_has_data(storage):
         return False
     return True
 
+
+class _DefaultStartStorageIteration(object):
+    # At IStorageIteration instance that keeps a default start value.
+    # This is needed because RelStorage.iterator() does return an object with an
+    # iterator() method, but that object returns itself, so it can only be iterated
+    # once! This breaks some implementations of copyTransactionsFrom, notably
+    # our own. See #22
+
+    def __init__(self, source, start):
+        self._source = source
+        self._start = start
+
+    def iterator(self, start=None, end=None):
+        return self._source.iterator(start or self._start, end)
+
+    def __getattr__(self, name):
+        return getattr(self._source, name)
 
 def main(argv=sys.argv):
     parser = optparse.OptionParser(description=__doc__,
@@ -87,7 +105,7 @@ def main(argv=sys.argv):
     log.info("Storages opened successfully.")
 
     if options.incremental:
-        if not hasattr(destination, '_adapter'):
+        if not hasattr(destination, 'lastTransaction'):
             msg = ("Error: no API is known for determining the last committed "
                    "transaction of the destination storage. Aborting "
                    "conversion.")
@@ -95,10 +113,18 @@ def main(argv=sys.argv):
         if not storage_has_data(destination):
             log.warning("Destination empty, start conversion from the beginning.")
         else:
-            last_tid = destination._adapter.txncontrol.get_tid(
-                destination._load_cursor)
+            # This requires that the storage produce a valid (not z64) value before
+            # anything is loaded with it.
+            last_tid = destination.lastTransaction()
+            if isinstance(last_tid, bytes):
+                # This *should* be a byte string.
+                last_tid = u64(last_tid)
+
             next_tid = p64(last_tid+1)
-            source = source.iterator(start=next_tid)
+            # Compensate for the RelStorage bug(?) and get a reusable iterator
+            # that starts where we want it to. There's no harm in wrapping it for
+            # other sources like FileStorage too.
+            source = _DefaultStartStorageIteration(source, next_tid)
             log.info("Resuming ZODB copy from %s", readable_tid_repr(next_tid))
 
 
@@ -124,7 +150,7 @@ def main(argv=sys.argv):
                 sys.exit(msg)
             log.info("Done clearing old data.")
 
-        if storage_has_data(destination):
+        if storage_has_data(destination) and not options.incremental:
             msg = "Error: the destination storage has data.  Try --clear."
             sys.exit(msg)
 
