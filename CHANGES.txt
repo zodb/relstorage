@@ -1,7 +1,8 @@
 1.6.2 (unreleased)
 ------------------
 
-- Nothing changed yet.
+- Remove the version pin for ZEO for those still installing the old
+  monolithic ZODB3 distributions.
 
 
 1.6.1 (2016-08-30)
