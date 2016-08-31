@@ -1,4 +1,4 @@
-1.6.2 (unreleased)
+1.6.2 (2016-08-31)
 ------------------
 
 - Remove the version pin for ZEO for those still installing the old
