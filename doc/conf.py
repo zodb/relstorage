@@ -381,25 +381,4 @@ extlinks = {'issue': ('https://github.com/zodb/relstorage/issues/%s',
 
 autodoc_default_flags = ['members', 'show-inheritance']
 autoclass_content = 'both'
-
-
-# order the methods in the class documentation the same way they are ordered in the source code
-
-from sphinx.ext import autodoc
-from sphinx.ext.autodoc import ClassDocumenter
-
-
-class MyClassDocumenter(ClassDocumenter):
-
-    def get_object_members(self, want_all):
-        members_check_module, members = super(MyClassDocumenter, self).get_object_members(want_all)
-
-        def key((name, obj)):
-            try:
-                return obj.im_func.func_code.co_firstlineno
-            except AttributeError:
-                return 0
-        members.sort(key=key)
-        return members_check_module, members
-
-autodoc.ClassDocumenter = MyClassDocumenter
+autodoc_member_order = 'bysource'

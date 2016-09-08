@@ -114,15 +114,15 @@ setup(
         'oracle': [
             'cx_Oracle>=5.0.0'
         ],
-        ":python_version <= '2.7.8'": [
+        ":python_full_version > '2.7.8'": [
+            'ZODB >= 4.4.2',
+            'ZEO >= 4.2.0',
+        ],
+        ":python_full_version < '2.7.9'": [
             # We must pin old versions prior to 2.7.9 because ZEO
             # 5 only runs on versions with good SSL support.
             'ZODB >= 4.4.2, <5.0',
             'ZEO >= 4.2.0, <5.0'
-        ],
-        ":python_version >= '2.7.9'": [
-            'ZODB >= 4.4.2',
-            'ZEO >= 4.2.0',
         ],
         'test': tests_require,
     },
