@@ -6,7 +6,9 @@
 2.0.0b6 (unreleased)
 ====================
 
-- Nothing changed yet.
+- Use ``setuptools.find_packages`` and ``include_package_data`` to
+  ensure wheels have all the files necessary. This corrects an issue
+  with the 2.0.0b5 release on PyPI. See :issue:`121` by Carlos Sanchez.
 
 
 2.0.0b5 (2016-08-24)

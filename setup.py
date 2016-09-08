@@ -35,6 +35,7 @@ Operating System :: Unix
 
 import os
 from setuptools import setup
+from setuptools import find_packages
 
 doclines = __doc__.split("\n")
 
@@ -68,16 +69,8 @@ setup(
     maintainer_email="shane@willowrise.com",
     url="http://relstorage.readthedocs.io/",
     keywords="ZODB SQL RDBMS MySQL PostgreSQL Oracle",
-    packages=[
-        'relstorage',
-        'relstorage.adapters',
-        'relstorage.adapters.tests',
-        'relstorage.tests',
-        'relstorage.tests.blob',
-    ],
-    package_data={
-        'relstorage': ['component.xml'],
-    },
+    packages=find_packages(),
+    include_package_data=True,
     license="ZPL 2.1",
     platforms=["any"],
     description=doclines[0],
