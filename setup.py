@@ -120,7 +120,7 @@ setup(
             'ZODB >= 4.4.2, <5.0',
             'ZEO >= 4.2.0, <5.0'
         ],
-        ":python_version > '2.7.8'": [
+        ":python_version >= '2.7.9'": [
             'ZODB >= 4.4.2',
             'ZEO >= 4.2.0',
         ],
