@@ -3,7 +3,7 @@
 =========
 
 
-2.0.0b6 (unreleased)
+2.0.0b6 (2016-09-08)
 ====================
 
 - Use ``setuptools.find_packages`` and ``include_package_data`` to
