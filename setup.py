@@ -79,11 +79,9 @@ setup(
     zip_safe=False,  # otherwise ZConfig can't see component.xml
     install_requires=[
         'perfmetrics',
-        'ZODB >= 4.4.2',
-        # ZEO is needed for blob layout
-        'ZEO >= 4.2.0',
         'zope.interface',
         'zc.lockfile',
+        # ZODB and ZEO are handled as environment-markers in extras.
     ],
     tests_require=tests_require,
     extras_require={
@@ -115,6 +113,16 @@ setup(
         ],
         'oracle': [
             'cx_Oracle>=5.0.0'
+        ],
+        ":python_version <= '2.7.8'": [
+            # We must pin old versions prior to 2.7.9 because ZEO
+            # 5 only runs on versions with good SSL support.
+            'ZODB >= 4.4.2, <5.0',
+            'ZEO >= 4.2.0, <5.0'
+        ],
+        ":python_version > '2.7.8'": [
+            'ZODB >= 4.4.2',
+            'ZEO >= 4.2.0',
         ],
         'test': tests_require,
     },
