@@ -750,7 +750,7 @@ class MockPoller(object):
 def local_benchmark():
     from relstorage.cache import LocalClient, LocalClientBucket
     options = MockOptions()
-    options.cache_local_mb = 500
+    options.cache_local_mb = 100
     #options.cache_local_compression = 'none'
 
     REPEAT_COUNT = 4
@@ -770,13 +770,33 @@ def local_benchmark():
     # takes about 2.5-2.8s. Using no compression, it takes 0.38 to 0.42s.
     # Reading is the same at about 0.2s.
 
+    # Before any changes:
+    # cache_local_mb = 500, datasize = 142, comp=none
+    # epop average 3.304353015982391 stddev 0.1057548559581552
+    # mix  average 2.922693134013874 stddev 0.014240008454610707
+    # pop  average 2.2137693379966854 stddev 0.09458639191519878
+    # read average 1.0852473539998755 stddev 0.023173488388016424
+
+    # cache_local_mb = 100, datasize=142, comp=none
+    # epop average 3.8289742503354014 stddev 0.138905518890246
+    # mix  average 6.044395485989905 stddev 0.12402917755863634
+    # pop  average 4.849317686690483 stddev 0.3407186386084065
+    # read average 0.7788464936699407 stddev 0.011301417502572604
+
+    # cache_local_mb = 100, datasize=142, comp=default
+    # epop average 30.283703678986058 stddev 0.349105696895158
+    # mix  average 32.43547729967395 stddev 0.6131160273617585
+    # pop  average 31.683537834013503 stddev 0.9313916809959417
+    # read average 0.7965960823348723 stddev 0.013812922826548332
+
     with open('/dev/urandom', 'rb') as f:
         random_data = f.read(DATA_SIZE)
 
     key_groups = []
-    key_groups.append([int(str(i)) for i in range(KEY_GROUP_SIZE)])
+    key_groups.append([str(i) for i in range(KEY_GROUP_SIZE)])
     for i in range(1, KEY_GROUP_SIZE):
-        keys = [int(str(i) + str(j)) for j in range(KEY_GROUP_SIZE)]
+        keys = [str(i) + str(j) for j in range(KEY_GROUP_SIZE)]
+        assert len(set(keys)) == len(keys)
         key_groups.append(keys)
 
     ALL_DATA = {}
@@ -784,22 +804,9 @@ def local_benchmark():
         for key in group:
             ALL_DATA[key] = random_data
     print(len(ALL_DATA), sum((len(v) for v in ALL_DATA.values()))/1024/1024)
+    assert all(isinstance(k, str) for k in ALL_DATA)
 
-    class DLocalBucket(LocalClientBucket):
-        CACHE_TYPE = dict
-
-    class DLocalClient(LocalClient):
-        bucket_type = DLocalBucket
-
-    from BTrees.OOBTree import OOBTree
-    from BTrees.LOBTree import LOBTree
-    class BLocalBucket(LocalClientBucket):
-        CACHE_TYPE = OOBTree
-
-    class BLocalClient(LocalClient):
-        bucket_type = BLocalBucket
-
-    def do_times(client_type):
+    def do_times(client_type=LocalClient):
         client = client_type(options)
         print("Testing", type(client._bucket0._dict))
 
@@ -815,10 +822,18 @@ def local_benchmark():
         def read():
             for keys in key_groups:
                 res = client.get_multi(keys)
-                assert len(res) == len(keys)
+                #assert len(res) == len(keys)
                 assert res.popitem()[1] == random_data
 
-
+        def mixed():
+            hot_keys = key_groups[0]
+            i = 0
+            for k, v in ALL_DATA.items():
+                i += 1
+                client.set(k, v)
+                if i == len(hot_keys):
+                    client.get_multi(hot_keys)
+                    i = 0
 
         import timeit
         import statistics
@@ -838,31 +853,30 @@ def local_benchmark():
 
 
         number = REPEAT_COUNT
-        pop_timer = timeit.Timer(populate)
-        pr = cProfile.Profile()
-        pr.enable()
-        pop_times = pop_timer.repeat(number=number)
-        pr.disable()
-        ps = pstats.Stats(pr).sort_stats('cumulative')
-        ps.print_stats(.4)
+        def run_func(func):
+            pop_timer = timeit.Timer(func)
+            pr = cProfile.Profile()
+            pr.enable()
+            pop_times = pop_timer.repeat(number=number)
+            pr.disable()
+            ps = pstats.Stats(pr).sort_stats('cumulative')
+            ps.print_stats(.4)
 
-        read_timer = timeit.Timer(read)
-        pr = cProfile.Profile()
-        pr.enable()
-        read_times = read_timer.repeat(number=number)
-        pr.disable()
-        ps = pstats.Stats(pr).sort_stats('cumulative')
-        ps.print_stats(.4)
+            return pop_times
 
-        empty_pop = timeit.Timer(populate_empty)
-        epop_times = empty_pop.repeat(number=number)
+        times = {}
+        for name, func in (('pop ', populate),
+                           ('epop', populate_empty),
+                           ('read', read),
+                           ('mix ', mixed)):
+            times[name] = run_func(func)
 
-        print("pop  average", statistics.mean(pop_times), "stddev", statistics.stdev(pop_times))
-        print("epop average", statistics.mean(epop_times), "stddev", statistics.stdev(epop_times))
-        print("read average", statistics.mean(read_times), "stddev", statistics.stdev(read_times))
+        for name, time in sorted(times.items()):
 
-    do_times(DLocalClient)
-    do_times(BLocalClient)
+            print(name, "average", statistics.mean(time), "stddev", statistics.stdev(time))
+
+
+    do_times()
 
 def save_load_benchmark():
     from relstorage.cache import LocalClientBucket, _Loader
