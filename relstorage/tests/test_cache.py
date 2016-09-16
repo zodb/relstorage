@@ -436,17 +436,29 @@ class LocalClientBucketTests(unittest.TestCase):
         bio = BytesIO()
 
         self._save(bio, client1, options)
+        # Nothing is written this time because it hasn't been read
+        client2 = self.getClass()(100)
+        count, stored = self._load(bio, client2, options)
+        self.assertEqual(count, stored)
+        self.assertEqual(count, 0)
+
+        client1['abc'] # Increment its frequency count so it gets written
+        bio = BytesIO()
+
+        self._save(bio, client1, options)
 
         client2 = self.getClass()(100)
         count, stored = self._load(bio, client2, options)
         self.assertEqual(count, stored)
         self.assertEqual(count, 1)
+
         self.assertEqual(client1['abc'], client2['abc'])
         self.assertEqual(1, len(client2))
         self.assertEqual(client1.size, client2.size)
 
         client1.reset_stats()
         client1['def'] = b'123'
+        client1['def']
         self.assertEqual(2, len(client1))
         client1_max_size = client1.size
         self._save(bio, client1, options)
@@ -480,6 +492,24 @@ class LocalClientBucketTests(unittest.TestCase):
         self.assertEqual(stored, 1)
         self.assertEqual(client1.size, client1_max_size)
 
+        # Age the keys so that when we age them again for writing
+        # we lose some
+        # Force the conditions for it to actually do something.
+        client1.limit = 0
+        client1._age_factor = 0
+        client1._age()
+
+        bio = BytesIO()
+        self._save(bio, client1, options)
+
+
+        client1 = self.getClass()(100)
+        count, stored = self._load(bio, client1, options)
+        self.assertEqual(count, 0)
+        self.assertEqual(stored, 0)
+        self.assertEqual(client1.size, 0)
+
+
     def test_load_and_store_to_gzip(self):
         options = MockOptions()
         options.cache_local_dir_compress = True
@@ -501,6 +531,8 @@ class LocalClientBucketTests(unittest.TestCase):
             if i > 0:
                 del client[str(i - 1)]
             client[str(i)] = b'abc'
+            client[str(i)] # Increment so it gets saved
+
             _Loader.save_local_cache(options, 'test', client, _pid=i)
             self.assertEqual(_Loader.count_cache_files(options, 'test'),
                              i + 1)
@@ -724,6 +756,7 @@ class LocalClientTests(unittest.TestCase):
             self.assertEqual([], os.listdir(root_temp_dir))
 
             c.set('k0', b'abc')
+            c.get('k0') # Increment the count so it gets saved
             c.save()
             cache_files = os.listdir(temp_dir)
             self.assertEqual(1, len(cache_files))
@@ -736,6 +769,7 @@ class LocalClientTests(unittest.TestCase):
             # Change and save and we overwrite the
             # existing file.
             c2.set('k1', b'def')
+            c2.get('k1') # increment
             c2.save()
             new_cache_files = os.listdir(temp_dir)
             self.assertEqual(cache_files, new_cache_files)

@@ -936,8 +936,25 @@ class LocalClientBucket(object):
     must be protected by a lock.
     """
 
+    # What multiplier of the number of items in the cache do we apply
+    # to determine when to age the frequencies?
+    _age_factor = 10
+
     # When did we last age?
     _aged_at = 0
+
+    # Percentage of our byte limit that should be dedicated
+    # to the main "protected" generation
+    _gen_protected_pct = 0.8
+    # Percentage of our byte limit that should be dedicated
+    # to the initial "eden" generation
+    _gen_eden_pct = 0.1
+    # Percentage of our byte limit that should be dedicated
+    # to the "probationary"generation
+    _gen_probation_pct = 0.1
+    # By default these numbers add up to 1.0, but it would be possible to
+    # overcommit by making them sum to more than 1.0. (For very small
+    # limits, the rounding will also make them overcommit).
 
     def __init__(self, limit):
         # We experimented with using OOBTree and LOBTree
@@ -954,9 +971,9 @@ class LocalClientBucket(object):
         self._dict = {}
 
 
-        self._protected = _ProtectedLRU(int(limit * .8))
-        self._probation = _ProbationLRU(int(limit * .1), self._protected)
-        self._eden = _EdenLRU(int(limit * .1), self._probation, self._dict)
+        self._protected = _ProtectedLRU(int(limit * self._gen_protected_pct))
+        self._probation = _ProbationLRU(int(limit * self._gen_probation_pct), self._protected)
+        self._eden = _EdenLRU(int(limit * self._gen_eden_pct), self._probation, self._dict)
         self._hits = 0
         self._misses = 0
         self._sets = 0
@@ -990,8 +1007,6 @@ class LocalClientBucket(object):
         return len(self._dict)
 
     def _age(self):
-        dct = self._dict
-
         # Age only when we're full and would thus need to evict; this
         # makes initial population faster.
         if self.size < self.limit:
@@ -999,15 +1014,22 @@ class LocalClientBucket(object):
 
         # Age the whole thing periodically based on the number of
         # operations we've done that would have altered popularity.
-        # Dynamically calculate how often we need to age. This is
+        # Dynamically calculate how often we need to age. By default, this is
         # based on what Caffeine's PerfectFrequency does: 10 * max
         # cache entries
-        age_period = 10 * len(dct)
+        dct = self._dict
+        age_period = self._age_factor * len(dct)
         operations = self._hits + self._sets
         if operations - self._aged_at > age_period:
+            now = time.time()
+            log.info("Beginning frequency aging for %d cache entries",
+                     len(dct))
             self._aged_at = operations
             for entry in itervalues(dct):
-                entry.age()
+                entry.frequency //= 2
+            done = time.time()
+            log.info("Aged %d cache entries in %s", done - now)
+        return self._aged_at
 
     def __setitem__(self, key, value):
         """
@@ -1107,7 +1129,7 @@ class LocalClientBucket(object):
     #
     # For the final version with optimizations, the write time is 2.3s/read is 6.4s
 
-    _FILE_VERSION = 3
+    _FILE_VERSION = 4
 
     def load_from_file(self, cache_file):
         now = time.time()
@@ -1121,9 +1143,15 @@ class LocalClientBucket(object):
         version = load()
         if version != self._FILE_VERSION: # pragma: no cover
             raise ValueError("Incorrect version of cache_file")
-        count = load()
-        entries_oldest_first = [load() for _ in range(count)]
-        assert len(entries_oldest_first) == count
+
+        entries_oldest_first = list()
+        entries_oldest_first_append = entries_oldest_first.append
+        try:
+            while 1:
+                entries_oldest_first_append(load())
+        except EOFError:
+            pass
+        count = len(entries_oldest_first)
 
         def _insert_entries(entries):
             stored = 0
@@ -1190,21 +1218,35 @@ class LocalClientBucket(object):
 
         # Dump all the entries in increasing order of popularity (
         # so that when we read them back in the least popular items end up LRU).
-        # Anything with a popularity of 0 hasn't been accessed in a long
-        # time, so don't dump it
-        entries = list(sorted((e for e in itervalues(self._dict) if e.frequency),
+        # Anything with a popularity of 0 probably hasn't been accessed in a long
+        # time, so don't dump it.
+
+        # Age them now, writing only the most popular. (But don't age in place just
+        # in case we're still being used.)
+
+        entries = list(sorted((e for e in itervalues(self._dict) if e.frequency // 2),
                               key=lambda e: e.frequency))
-        dump(len(entries)) # how many
+
         if len(entries) < len(self._dict):
             log.info("Ignoring %d items for writing due to inactivity",
                      len(self._dict) - len(entries))
+
+        # Don't bother writing more than we'll be able to store.
+        count_written = 0
+        bytes_written = 0
+        byte_limit = self._protected.limit
         for entry in entries:
+            bytes_written += len(entry)
+            count_written += 1
+            if bytes_written > byte_limit:
+                break
+
             dump((entry._p_oid, entry.value))
 
         then = time.time()
         stats = self.stats()
         log.info("Wrote %d items to %s in %s. Total hits %s; misses %s; ratio %s",
-                 stats['size'], cache_file, then - now,
+                 count_written, cache_file, then - now,
                  stats['hits'], stats['misses'], stats['ratio'])
 
 
