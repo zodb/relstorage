@@ -11,7 +11,7 @@
 # FOR A PARTICULAR PURPOSE.
 #
 ##############################################################################
-from __future__ import print_function, absolute_import
+from __future__ import print_function, absolute_import, division
 import unittest
 
 from .util import skipOnCI
@@ -842,7 +842,7 @@ def local_benchmark():
     from relstorage.cache import LocalClient, LocalClientBucket
     options = MockOptions()
     options.cache_local_mb = 100
-    options.cache_local_compression = 'none'
+    #options.cache_local_compression = 'none'
 
     REPEAT_COUNT = 4
 
@@ -882,7 +882,8 @@ def local_benchmark():
     # pop  average 4.849317686690483 stddev 0.3407186386084065
     # read average 0.7788464936699407 stddev 0.011301417502572604
 
-    # Following numbers are all with 100/142/none
+    # Following numbers are all with 100/142/none (Python 3.4),
+    # except as noted
 
     # Tracking popularity, but not aging:
     # epop average 3.8351666433348632 stddev 0.016045702030828404
@@ -915,6 +916,21 @@ def local_benchmark():
     # pop  average 9.935747388653303 stddev 0.10084787068640827
     # read average 0.42481018069277826 stddev 0.0225555561
 
+    # ^ The incredibly low read times are due to *nothing* actually
+    # getting promoted to the protected generation, so there is
+    # nothing to read. Once we pre-populate the protected segment,
+    # that times goes to 3.8 seconds (python 2.7):
+
+    # read average 3.85280092557 stddev 0.29397446809
+
+    # With that pre-population done, and compression back on, we
+    # still find the 3s slowdown for reads, which is unacceptable:
+
+    # epop average 37.56022281331631 stddev 2.3185901813555603
+    # mix  average 32.643460757661764 stddev 0.4262010697672024
+    # pop  average 34.260926674314156 stddev 0.5609715096223009
+    # read average 3.956128183985129 stddev 0.20373283218514573
+
     with open('/dev/urandom', 'rb') as f:
         random_data = f.read(DATA_SIZE)
 
@@ -940,6 +956,7 @@ def local_benchmark():
             for k, v in ALL_DATA.items():
                 client.set(k, v)
 
+
         def populate_empty():
             c = LocalClient(options)
             for k, v in ALL_DATA.items():
@@ -949,6 +966,9 @@ def local_benchmark():
             for keys in key_groups:
                 res = client.get_multi(keys)
                 #assert len(res) == len(keys)
+                if not res:
+                    print("Failed to get any keys", keys)
+                    continue
                 assert res.popitem()[1] == random_data
 
         def mixed():
@@ -995,7 +1015,7 @@ def local_benchmark():
         for name, func in (('pop ', populate),
                            ('epop', populate_empty),
                            ('read', read),
-                           ('mix ', mixed)):
+                           ('mix ', mixed),):
             times[name] = run_func(func)
 
         for name, time in sorted(times.items()):

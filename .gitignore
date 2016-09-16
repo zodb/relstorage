@@ -4,6 +4,7 @@
 .project
 *.egg-info
 *.pyc
+*.pyo
 *.sublime-*
 .coverage
 htmlcov/

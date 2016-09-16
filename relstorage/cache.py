@@ -781,6 +781,8 @@ class _SizedLRU(object):
     def __bool__(self):
         return bool(len(self._ring))
 
+    __nonzero__ = __bool__ # Python 2
+
     @property
     def over_size(self):
         return self.size > self.limit
@@ -793,7 +795,7 @@ class _SizedLRU(object):
         return entry
 
     def take_ownership_of_entry_MRU(self, entry):
-        assert entry.__parent__ is None
+        #assert entry.__parent__ is None
         entry.__parent__ = self
         # But don't increment here, we're just moving
         # from one ring to another
@@ -801,7 +803,7 @@ class _SizedLRU(object):
         self.size += len(entry)
 
     def update_MRU(self, entry, value):
-        assert entry.__parent__ is self
+        #assert entry.__parent__ is self
         sizedelta = len(value)
         oldvalue = entry.value
         sizedelta -= len(oldvalue)
@@ -811,14 +813,14 @@ class _SizedLRU(object):
         entry.frequency += 1
 
     def make_MRU(self, entry):
-        assert entry.__parent__ is self
+        #assert entry.__parent__ is self
         self._ring.move_to_head(entry)
 
     def get_LRU(self):
         return next(iter(self._ring))
 
     def remove(self, entry):
-        assert entry.__parent__ is self
+        #assert entry.__parent__ is self
         oldkey = entry._p_oid
         oldvalue = entry.value
         self._ring.delete(entry)
@@ -834,7 +836,7 @@ class _SizedLRU(object):
         entry.__parent__ = None
 
     def on_hit(self, entry):
-        assert entry.__parent__ is self
+        #assert entry.__parent__ is self
         entry.frequency += 1
         self.make_MRU(entry)
 
@@ -848,9 +850,10 @@ class _SizedLRU(object):
 
 class _EdenLRU(_SizedLRU):
 
-    def __init__(self, limit, probation_lru, entry_dict):
+    def __init__(self, limit, probation_lru, protected_lru, entry_dict):
         _SizedLRU.__init__(self, limit)
         self.probation_lru = probation_lru
+        self.protected_lru = protected_lru
         self.entry_dict = entry_dict
 
     def add_MRU(self, key, value):
@@ -861,18 +864,35 @@ class _EdenLRU(_SizedLRU):
 
         dct = self.entry_dict
         probation_lru = self.probation_lru
-        while dct and self.size > self.limit:
+        protected_lru = self.protected_lru
+
+        if not probation_lru and not protected_lru.over_size:
+            # This is a modification of the algorithm. When we start out
+            # go ahead and populate the protected_lru directly
+            # from eden; only when its full do we start doing the probationary
+            # dance. This helps mitigate any issues with choosing segment sizes;
+            # we're going to occupy all the memory anyway, why not, it's reserved for us,
+            # so go ahead and fill it.
+            while self.size > self.limit:
+                eden_oldest = self.get_LRU()
+                if eden_oldest._p_oid is key:
+                    break
+                self.remove(eden_oldest)
+                protected_lru.take_ownership_of_entry_MRU(eden_oldest)
+            return new_entry
+
+        while self.size > self.limit:
             eden_oldest = self.get_LRU()
             if eden_oldest._p_oid is key:
                 break
             self.remove(eden_oldest)
-            assert eden_oldest.__parent__ is None
-            assert eden_oldest._Persistent__ring is None
+            #assert eden_oldest.__parent__ is None
+            #assert eden_oldest._Persistent__ring is None
 
             if probation_lru.size + len(eden_oldest) < probation_lru.limit:
                 # Cool, we can keep it.
                 probation_lru.take_ownership_of_entry_MRU(eden_oldest)
-                assert eden_oldest.__parent__ is probation_lru
+                #assert eden_oldest.__parent__ is probation_lru
             else:
                 # Snap, somebody has to go.
                 try:
@@ -894,7 +914,7 @@ class _EdenLRU(_SizedLRU):
                     probation_lru.remove(oldest_main_ring)
                     del dct[oldest_main_ring._p_oid]
                     probation_lru.take_ownership_of_entry_MRU(eden_oldest)
-                    assert eden_oldest.__parent__ is probation_lru
+                    #assert eden_oldest.__parent__ is probation_lru
 
         return new_entry
 
@@ -914,7 +934,7 @@ class _ProbationLRU(_SizedLRU):
         self.remove(entry)
         protected_lru = self.protected_lru
         protected_lru.take_ownership_of_entry_MRU(entry)
-
+        #return
         if protected_lru.over_size:
             # Demote the LRU back to probation
             demoting_entry = protected_lru.get_LRU()
@@ -973,7 +993,10 @@ class LocalClientBucket(object):
 
         self._protected = _ProtectedLRU(int(limit * self._gen_protected_pct))
         self._probation = _ProbationLRU(int(limit * self._gen_probation_pct), self._protected)
-        self._eden = _EdenLRU(int(limit * self._gen_eden_pct), self._probation, self._dict)
+        self._eden = _EdenLRU(int(limit * self._gen_eden_pct),
+                              self._probation,
+                              self._protected,
+                              self._dict)
         self._hits = 0
         self._misses = 0
         self._sets = 0
@@ -1053,7 +1076,7 @@ class LocalClientBucket(object):
         else:
             lru = self._eden
             entry = lru.add_MRU(key, value)
-            assert entry.__parent__ is self._eden
+            #assert entry.__parent__ is self._eden
             dct[key] = entry
 
         self._sets += 1
