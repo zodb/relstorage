@@ -400,10 +400,12 @@ class LocalClientBucketTests(unittest.TestCase):
         self.assertEqual(b.size, 5)
         b['abc'] = b'z'
         self.assertEqual(b.size, 4)
-        b['abcd'] = 'xyz'
-        self.assertEqual(b.size, 7)
-        self.assertEqual(b.get('abc'), None)
-        self.assertEqual(b.get("abcd"), 'xyz')
+        b['abcd'] = b'xyz'
+        # In the past this was 7 and 'abc' was ejected. But the generational
+        # system lets us go a bit over.
+        self.assertEqual(b.size, 11)
+        self.assertEqual(b.get('abc'), b'z')
+        self.assertEqual(b.get("abcd"), b'xyz')
 
     def _load(self, bio, bucket, options):
         from relstorage.cache import _Loader
@@ -570,7 +572,7 @@ class LocalClientTests(unittest.TestCase):
         self.assertEqual(c.get_multi(['k2', 'k3']), {})
 
     def test_bucket_sizes_without_compression(self):
-        # LocalClient is a simple LRU cache.  Confirm it keeps the right keys.
+        # LocalClient is a simple w-TinyLRU cache.  Confirm it keeps the right keys.
         c = self._makeOne(cache_local_compression='none')
         c._bucket_limit = 51
         c.flush_all()
@@ -587,13 +589,17 @@ class LocalClientTests(unittest.TestCase):
         self.assertEqual(c._bucket0.size, 50)
 
         for i in range(4):
-            # add 10 bytes
+            # add 10 bytes (2 for the key, 8 for the value)
             c.set('x%d' % i, b'01234567')
         self.assertEqual(c._bucket0.size, 50)
 
+        # x0 and x1 started in eden and got promoted to the main ring.
+        # x2 was pushed out of eden and the main ring was full.
+        # k2 was allowed to remain because it'd been accessed
+        # more often
         self.assertEqual(c.get('x0'), b'01234567')
         self.assertEqual(c.get('x1'), b'01234567')
-        self.assertEqual(c.get('x2'), b'01234567')
+        self.assertEqual(c.get('x2'), None)
         self.assertEqual(c.get('x3'), b'01234567')
         self.assertEqual(c.get('k2'), b'01234567')
         self.assertEqual(c._bucket0.size, 50)
@@ -604,7 +610,7 @@ class LocalClientTests(unittest.TestCase):
         self.assertEqual(c.get('k2'), b'01234567')
         self.assertEqual(c.get('k3'), None)
         self.assertEqual(c.get('k4'), None)
-        self.assertEqual(c.get('k5'), None)
+        self.assertEqual(c.get('k5'), b'01234567')
 
 
         self.assertEqual(c._bucket0.size, 50)
@@ -811,6 +817,12 @@ def local_benchmark():
     # mix  average 6.08575853901372 stddev 0.0651629903238879
     # pop  average 4.854507520659051 stddev 0.16709270096300968
     # read average 0.9192146409768611 stddev 0.010830646982195127
+
+    # Eden generation, unoptimized
+    # epop average 8.394099957639506 stddev 0.1772435870640342
+    # mix  average 5.722020475019235 stddev 0.11354930215079416
+    # pop  average 9.779178152016053 stddev 0.2953541870308067
+    # read average 0.9772441836539656 stddev 0.010378042791130002
 
     with open('/dev/urandom', 'rb') as f:
         random_data = f.read(DATA_SIZE)
