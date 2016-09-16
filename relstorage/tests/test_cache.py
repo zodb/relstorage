@@ -574,50 +574,101 @@ class LocalClientTests(unittest.TestCase):
     def test_bucket_sizes_without_compression(self):
         # LocalClient is a simple w-TinyLRU cache.  Confirm it keeps the right keys.
         c = self._makeOne(cache_local_compression='none')
+        # This limit will result in
+        # eden and probation of 5, protected of 40. This means that eden
+        # and probation each can hold one item, while protected can hold 4,
+        # so our max size will be 60
         c._bucket_limit = 51
         c.flush_all()
+        k = None
         for i in range(5):
-            # add 10 bytes
-            c.set('k%d' % i, b'01234567')
+            # add 10 bytes (2 for the key, 8 for the value)
+            k = 'k%d' % i
+            # This will go to eden, replacing any value that was there
+            # into probation.
+            c.set(k, b'01234567')
+
+            # Promote the old value from probation to protected.
+            old_k = 'k%d' % (i - 1)
+            c.get(old_k)
+
         self.assertEqual(c._bucket0.size, 50)
 
         c.set('k5', b'01234567')
-        self.assertEqual(c._bucket0.size, 50)
+
+        #import pprint
+
+        # Right now, we're one entry over size, because we put k5
+        # in eden, which dropped k4 to probation; since probation was empty, we
+        # allowed it to stay there
+        self.assertEqual(c._bucket0.size, 60)
 
         v = c.get('k2')
         self.assertEqual(v, b'01234567')
-        self.assertEqual(c._bucket0.size, 50)
+        self.assertEqual(c._bucket0.size, 60)
+
+        c.set('k1', b'b')
+        self.assertEqual(c._bucket0.size, 53)
 
         for i in range(4):
             # add 10 bytes (2 for the key, 8 for the value)
             c.set('x%d' % i, b'01234567')
-        self.assertEqual(c._bucket0.size, 50)
+            # Notice that we're not promoting these through the layers. So
+            # when we're done, we'll wind up with one key each in
+            # eden and probation, and all the K keys in protected (since
+            # they have been promoted)
+        self.assertEqual(c._bucket0.size, 53)
 
         # x0 and x1 started in eden and got promoted to the main ring.
         # x2 was pushed out of eden and the main ring was full.
         # k2 was allowed to remain because it'd been accessed
         # more often
-        self.assertEqual(c.get('x0'), b'01234567')
-        self.assertEqual(c.get('x1'), b'01234567')
-        self.assertEqual(c.get('x2'), None)
+
+        def list_lrukeys(lru_name):
+            # Remember, these lists will be from LRU to MRU
+            return [e.key for e in getattr(c._bucket0, '_' + lru_name)]
+        self.assertEqual(list_lrukeys('eden'), ['x3'])
+        self.assertEqual(list_lrukeys('probation'), ['x2'])
+        self.assertEqual(list_lrukeys('protected'), ['k0', 'k3', 'k2', 'k1'])
+
+        #pprint.pprint(c._bucket0.stats())
+        self.assertEqual(c.get('x0'), None)
+        self.assertEqual(c.get('x1'), None)
+        self.assertEqual(c.get('x2'), b'01234567')
         self.assertEqual(c.get('x3'), b'01234567')
         self.assertEqual(c.get('k2'), b'01234567')
-        self.assertEqual(c._bucket0.size, 50)
+        self.assertEqual(c._bucket0.size, 53)
 
+        # Note that this last set of checks perturbed protected and probation;
+        # We lost a key
+        #pprint.pprint(c._bucket0.stats())
+        self.assertEqual(list_lrukeys('eden'), ['x3'])
+        self.assertEqual(list_lrukeys('probation'), ['k0'])
+        self.assertEqual(list_lrukeys('protected'), ['k3', 'k1', 'x2', 'k2'])
+        self.assertEqual(c._bucket0.size, 53)
 
-        self.assertEqual(c.get('k0'), None)
-        self.assertEqual(c.get('k1'), None)
+        self.assertEqual(c.get('k0'), b'01234567')
+        self.assertEqual(c.get('k1'), b'b')
         self.assertEqual(c.get('k2'), b'01234567')
-        self.assertEqual(c.get('k3'), None)
+        self.assertEqual(c.get('k3'), b'01234567')
         self.assertEqual(c.get('k4'), None)
-        self.assertEqual(c.get('k5'), b'01234567')
+        self.assertEqual(c.get('k5'), None)
+
+        # Let's promote from probation, causing places to switch
+        c.get('x2')
+        self.assertEqual(list_lrukeys('probation'), ['k0'])
 
 
-        self.assertEqual(c._bucket0.size, 50)
+        self.assertEqual(c._bucket0.size, 53)
 
 
         c.set('z0', b'01234567')
-        self.assertEqual(c._bucket0.size, 50)
+        self.assertEqual(c._bucket0.size, 53)
+
+        # Now, because we had accessed k0 (probation) more than we'd
+        # accessed the last key from eden (x3), that's the one we keep
+        self.assertEqual(c.get('x3'), None)
+        self.assertEqual(list_lrukeys('probation'), ['k0'])
 
 
     def test_bucket_sizes_with_compression(self):
@@ -823,6 +874,12 @@ def local_benchmark():
     # mix  average 5.722020475019235 stddev 0.11354930215079416
     # pop  average 9.779178152016053 stddev 0.2953541870308067
     # read average 0.9772441836539656 stddev 0.010378042791130002
+
+    # Full segmented LRU, unoptimized
+    # epop average 9.370241302996874 stddev 0.20596681998331154
+    # mix  average 8.483468734678658 stddev 0.051873515883878445
+    # pop  average 9.935747388653303 stddev 0.10084787068640827
+    # read average 0.42481018069277826 stddev 0.0225555561
 
     with open('/dev/urandom', 'rb') as f:
         random_data = f.read(DATA_SIZE)

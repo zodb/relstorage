@@ -717,12 +717,8 @@ class StorageCache(object):
             log.debug("Checkpoints already shifted to %s. "
                       "len(delta_after0) == %d.", old_value, len(self.delta_after0))
 
-_RS_INITIAL = "Initial"
-_RS_EDEN = 'Eden'
-_RS_MAIN = 'Main'
 
-
-class _RingEntry(object):
+class _LRURingEntry(object):
 
     # _p_oid is what the persistent.ring.Ring implementations use as their
     # key.
@@ -732,13 +728,14 @@ class _RingEntry(object):
     # value is self-explanatory.
     # See `increment` and `age` for `_frequency`
     __slots__ = ('_p_oid', '_Persistent__ring',
-                 'value', '_frequency', 'ring_state')
+                 'value', 'frequency', '__parent__')
 
-    def __init__(self, key, value, ring_name):
+    def __init__(self, key, value, parent):
         self._p_oid = key
         self.value = value
-        self._frequency = 0
-        self.ring_state = ring_name
+        self.frequency = 0
+        self.__parent__ = parent
+        self._Persistent__ring = None
 
 
     # def get_ring_state(self):
@@ -760,70 +757,68 @@ class _RingEntry(object):
     def key(self):
         return self._p_oid
 
-    def __reduce__(self):
-        return _RingEntry, (self._p_oid, self.value)
-
-    def increment(self):
-        "Increment the frequency (poplarity) count of this entry."
-        #print("Incrementing frequency of", self.key)
-        #import traceback
-        #traceback.print_stack(limit=3)
-        self._frequency += 1
-
-    def age(self):
-        "Reduce the popularity of this entry by half, flooring it at zero."
-        self._frequency //= 2
 
     def __len__(self):
         "Return the byte size of self."
         return len(self.value) + len(self.key)
+
+    def __repr__(self):
+        return "<%s key=%r f=%d size=%d>" % (type(self).__name__, self._p_oid, self.frequency, len(self))
 
 class _SizedLRU(object):
     """
     A LRU list that keeps track of its size.
     """
 
-    def __init__(self, limit, ring_name):
+    def __init__(self, limit):
         self.limit = limit
         self.size = 0
         self._ring = Ring()
-        assert ring_name is not _RS_INITIAL
-        self._ring_name = ring_name
+
+    def __iter__(self):
+        return iter(self._ring)
+
+    def __bool__(self):
+        return bool(len(self._ring))
+
+    @property
+    def over_size(self):
+        return self.size > self.limit
 
     def add_MRU(self, key, value):
-        entry = _RingEntry(key, value, self._ring_name)
+        entry = _LRURingEntry(key, value, self)
         self._ring.add(entry)
         self.size += len(entry)
-        entry.increment()
+        entry.frequency += 1
         return entry
 
     def take_ownership_of_entry_MRU(self, entry):
-        assert entry.ring_state is _RS_INITIAL
-        entry.ring_state = self._ring_name
+        assert entry.__parent__ is None
+        entry.__parent__ = self
         # But don't increment here, we're just moving
         # from one ring to another
         self._ring.add(entry)
         self.size += len(entry)
 
     def update_MRU(self, entry, value):
-        assert entry.ring_state is self._ring_name
+        assert entry.__parent__ is self
         sizedelta = len(value)
         oldvalue = entry.value
         sizedelta -= len(oldvalue)
         entry.value = value
         self.size += sizedelta
         self._ring.move_to_head(entry)
-        entry.increment()
+        entry.frequency += 1
 
     def make_MRU(self, entry):
-        assert entry.ring_state is self._ring_name
+        assert entry.__parent__ is self
         self._ring.move_to_head(entry)
 
     def get_LRU(self):
         return next(iter(self._ring))
 
     def remove(self, entry):
-        assert entry.ring_state is self._ring_name
+        assert entry.__parent__ is self
         oldkey = entry._p_oid
         oldvalue = entry.value
         self._ring.delete(entry)
@@ -836,7 +831,100 @@ class _SizedLRU(object):
         sizedelta += len(oldvalue)
         self.size -= sizedelta
 
-        entry.ring_state = _RS_INITIAL
+        entry.__parent__ = None
+
+    def on_hit(self, entry):
+        assert entry.__parent__ is self
+        entry.frequency += 1
+        self.make_MRU(entry)
+
+    def stats(self):
+        return {
+            'limit': self.limit,
+            'size': self.size,
+            'count': len(self._ring),
+        }
+
+
+class _EdenLRU(_SizedLRU):
+
+    def __init__(self, limit, probation_lru, entry_dict):
+        _SizedLRU.__init__(self, limit)
+        self.probation_lru = probation_lru
+        self.entry_dict = entry_dict
+
+    def add_MRU(self, key, value):
+        new_entry = _SizedLRU.add_MRU(self, key, value)
+
+        if not self.over_size:
+            return new_entry
+
+        dct = self.entry_dict
+        probation_lru = self.probation_lru
+        while dct and self.size > self.limit:
+            eden_oldest = self.get_LRU()
+            if eden_oldest._p_oid is key:
+                break
+            self.remove(eden_oldest)
+            assert eden_oldest.__parent__ is None
+            assert eden_oldest._Persistent__ring is None
+
+            if probation_lru.size + len(eden_oldest) < probation_lru.limit:
+                # Cool, we can keep it.
+                probation_lru.take_ownership_of_entry_MRU(eden_oldest)
+                assert eden_oldest.__parent__ is probation_lru
+            else:
+                # Snap, somebody has to go.
+                try:
+                    oldest_main_ring = probation_lru.get_LRU()
+                except StopIteration:
+                    # probation ring is empty, nothing to eject. This must be a large
+                    # item. Well, just accept it then to match what we used to do.
+                    probation_lru.take_ownership_of_entry_MRU(eden_oldest)
+                    continue
+
+                if oldest_main_ring.frequency > eden_oldest.frequency:
+                    # Discard this entry, it loses
+                    # print("Completely evicting item", oldest.key,
+                    #       "because main ring item", oldest_main_ring.key,
+                    #       "has better frequency", oldest_main_ring.frequency, oldest.frequency)
+                    del dct[eden_oldest._p_oid]
+                else:
+                    # eden item is more popular, keep it
+                    probation_lru.remove(oldest_main_ring)
+                    del dct[oldest_main_ring._p_oid]
+                    probation_lru.take_ownership_of_entry_MRU(eden_oldest)
+                    assert eden_oldest.__parent__ is probation_lru
+
+        return new_entry
+
+class _ProtectedLRU(_SizedLRU):
+    pass
+
+class _ProbationLRU(_SizedLRU):
+
+    def __init__(self, limit, protected_lru):
+        _SizedLRU.__init__(self, limit)
+        self.protected_lru = protected_lru
+
+    def on_hit(self, entry):
+        # Move the entry to the Protected LRU on its very first hit;
+        # It will become the MRU there.
+        entry.frequency += 1
+        self.remove(entry)
+        protected_lru = self.protected_lru
+        protected_lru.take_ownership_of_entry_MRU(entry)
+
+        if protected_lru.over_size:
+            # Demote the LRU back to probation
+            demoting_entry = protected_lru.get_LRU()
+            if demoting_entry is not entry:
+                protected_lru.remove(demoting_entry)
+                # Don't worry about checking our size now, we'll handle that
+                # when items get added to us. The _EdenLRU does this.
+                # This way we don't have to worry about dictionary membership
+                # rules.
+                self.take_ownership_of_entry_MRU(demoting_entry)
 
 class LocalClientBucket(object):
     """
@@ -865,13 +953,10 @@ class LocalClientBucket(object):
         # This holds all the ring entries, no matter which ring they are in.
         self._dict = {}
 
-        # Entries start out here in this small LRU ring. When they are about to
-        # be aged out of here, we decide whether to move it to the main
-        # ring or forget it. We move it to the main ring if there's room,
-        # *or* if the entry that we would evict from the main ring is less
-        # popular than this entry is.
-        self._eden = _SizedLRU(int(limit * .1), _RS_EDEN)
-        self._main = _SizedLRU(int(limit * .9), _RS_MAIN)
+
+        self._protected = _ProtectedLRU(int(limit * .8))
+        self._probation = _ProbationLRU(int(limit * .1), self._protected)
+        self._eden = _EdenLRU(int(limit * .1), self._probation, self._dict)
         self._hits = 0
         self._misses = 0
         self._sets = 0
@@ -879,7 +964,7 @@ class LocalClientBucket(object):
 
     @property
     def size(self):
-        return self._eden.size + self._main.size
+        return self._eden.size + self._protected.size + self._probation.size
 
     def reset_stats(self):
         self._hits = 0
@@ -895,7 +980,10 @@ class LocalClientBucket(object):
             'sets': self._sets,
             'ratio': self._hits/total if total else 0,
             'size': len(self._dict),
-            'bytes': self.size
+            'bytes': self.size,
+            'eden_stats': self._eden.stats(),
+            'prot_stats': self._protected.stats(),
+            'prob_stats': self._probation.stats(),
         }
 
     def __len__(self):
@@ -939,67 +1027,12 @@ class LocalClientBucket(object):
 
         if key in dct:
             entry = dct[key]
-            assert entry.ring_state is not _RS_INITIAL
-            lru = self._main if entry.ring_state is _RS_MAIN else self._eden
-            lru.update_MRU(entry, value)
+            entry.__parent__.update_MRU(entry, value)
         else:
             lru = self._eden
             entry = lru.add_MRU(key, value)
-            assert entry.ring_state is _RS_EDEN
+            assert entry.__parent__ is self._eden
             dct[key] = entry
-
-        # Now trim to size.
-
-        # First, move any items from eden down if we updated eden.
-
-        if lru is self._eden:
-            while dct and lru.size > lru.limit:
-                oldest = lru.get_LRU()
-                if oldest._p_oid is key:
-                    break
-                lru.remove(oldest)
-                assert oldest.ring_state is _RS_INITIAL
-                assert oldest._Persistent__ring is None
-
-                if self._main.size + len(oldest) < self._main.limit:
-                    # Cool, we can keep it.
-                    self._main.take_ownership_of_entry_MRU(oldest)
-                    assert oldest.ring_state is _RS_MAIN
-                else:
-                    # Snap, somebody has to go.
-                    try:
-                        oldest_main_ring = self._main.get_LRU()
-                    except StopIteration:
-                        # Main ring is empty, nothing to eject. This must be a large
-                        # item. Well, just accept it then to match what we used to do.
-                        self._main.take_ownership_of_entry_MRU(oldest)
-                        continue
-
-                    if oldest_main_ring._frequency > oldest._frequency:
-                        # Discard this entry, it loses
-                        # print("Completely evicting item", oldest.key,
-                        #       "because main ring item", oldest_main_ring.key,
-                        #       "has better frequency", oldest_main_ring._frequency, oldest._frequency)
-                        del dct[oldest._p_oid]
-                    else:
-                        # eden item is more popular, keep it
-                        self._main.remove(oldest_main_ring)
-                        del dct[oldest_main_ring._p_oid]
-                        self._main.take_ownership_of_entry_MRU(oldest)
-                        assert oldest.ring_state is _RS_MAIN
-
-        # Now size the main ring; we either added to it or we moved items from eden
-        while dct and self._main.size > self._main.limit:
-            oldest = self._main.get_LRU()
-            if oldest._p_oid is key:
-                break
-            self._main.remove(oldest)
-            del dct[oldest._p_oid]
-
-        # for k,v in iteritems(dct):
-        #     if v.ring_state is _RS_INITIAL:
-        #         from IPython.core.debugger import Tracer; Tracer()() ## DEBUG ##
-
 
         self._sets += 1
 
@@ -1014,21 +1047,16 @@ class LocalClientBucket(object):
     def __delitem__(self, key):
         entry = self._dict[key]
         del self._dict[key]
-        rng = self._main if entry.ring_state is _RS_MAIN else self._eden
-        rng.remove(entry)
+        entry.__parent__.remove(entry)
 
     def get_and_bubble_all(self, keys):
         dct = self._dict
         res = {}
-        main_rng = self._main
-        eden_rng = self._eden
         for key in keys:
             entry = dct.get(key)
             if entry is not None:
                 self._hits += 1
-                entry.increment()
-                rng = main_rng if entry.ring_state is _RS_MAIN else eden_rng
-                rng.make_MRU(entry)
+                entry.__parent__.on_hit(entry)
                 res[key] = entry.value
             else:
                 self._misses += 1
@@ -1041,9 +1069,9 @@ class LocalClientBucket(object):
             return entry.value
 
     def __getitem__(self, key):
-        # Testing only
+        # Testing only. Doesn't bubble.
         entry = self._dict[key]
-        entry.increment()
+        entry.frequency += 1
         return entry.value
 
     # Benchmark for the general approach:
@@ -1101,10 +1129,8 @@ class LocalClientBucket(object):
             stored = 0
 
             # local optimizations
-            RE = _RingEntry
-
             data = self._dict
-            main = self._main
+            main = self._protected
             ring_add = main.add_MRU
             limit = main.limit
 
@@ -1166,8 +1192,8 @@ class LocalClientBucket(object):
         # so that when we read them back in the least popular items end up LRU).
         # Anything with a popularity of 0 hasn't been accessed in a long
         # time, so don't dump it
-        entries = list(sorted((e for e in itervalues(self._dict) if e._frequency),
-                              key=lambda e: e._frequency))
+        entries = list(sorted((e for e in itervalues(self._dict) if e.frequency),
+                              key=lambda e: e.frequency))
         dump(len(entries)) # how many
         if len(entries) < len(self._dict):
             log.info("Ignoring %d items for writing due to inactivity",
