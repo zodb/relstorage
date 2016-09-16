@@ -34,6 +34,7 @@ import struct
 
 from ._compat import string_types
 from ._compat import iteritems
+from ._compat import itervalues
 from ._compat import PY3
 if PY3:
     # On Py3, use the built-in pickle, so that we can get
@@ -759,6 +760,9 @@ class LocalClientBucket(object):
     must be protected by a lock.
     """
 
+    # When did we last age?
+    _aged_at = 0
+
     def __init__(self, limit):
         # We experimented with using OOBTree and LOBTree
         # for the type of self._dict. The OOBTree has a similar
@@ -773,18 +777,22 @@ class LocalClientBucket(object):
         self._ring = Ring()
         self._hits = 0
         self._misses = 0
+        self._sets = 0
         self.size = 0
         self.limit = limit
 
     def reset_stats(self):
         self._hits = 0
         self._misses = 0
+        self._sets = 0
+        self._aged_at = 0
 
     def stats(self):
         total = self._hits + self._misses
         return {
             'hits': self._hits,
             'misses': self._misses,
+            'sets': self._sets,
             'ratio': self._hits/total if total else 0,
             'size': len(self._dict),
             'bytes': self.size
@@ -793,12 +801,36 @@ class LocalClientBucket(object):
     def __len__(self):
         return len(self._dict)
 
+    def _age(self):
+        dct = self._dict
+
+        # Age only when we're full and would thus need to evict; this
+        # makes initial population faster.
+        if self.size < self.limit:
+            return
+
+        # Age the whole thing periodically based on the number of
+        # operations we've done that would have altered popularity.
+        # Dynamically calculate how often we need to age. This is
+        # based on what Caffeine's PerfectFrequency does: 10 * max
+        # cache entries
+        age_period = 10 * len(dct)
+        operations = self._hits + self._sets
+        if operations - self._aged_at > age_period:
+            now = time.time()
+            self._aged_at = operations
+            for entry in itervalues(dct):
+                entry.age()
+            done = time.time()
+
     def __setitem__(self, key, value):
         """
         Set an item.
 
         If the memory limit would be exceeded, remove old items until
         that is no longer the case.
+
+        If we need to age popularity counts, do so.
         """
         # These types are gated by LocalClient, we don't need to double
         # check.
@@ -807,8 +839,10 @@ class LocalClientBucket(object):
 
         sizedelta = len(value)
 
-        if key in self._dict:
-            entry = self._dict[key]
+        dct = self._dict
+
+        if key in dct:
+            entry = dct[key]
             oldvalue = entry.value
             sizedelta -= len(oldvalue)
             entry.value = value
@@ -818,16 +852,22 @@ class LocalClientBucket(object):
             sizedelta += len(key)
             entry = _RingEntry(key, value)
             self._ring.add(entry)
-            self._dict[key] = entry
+            dct[key] = entry
 
         # Now trim to size.
-        while self._dict and self.size + sizedelta > self.limit:
+        while dct and self.size + sizedelta > self.limit:
             oldest = next(iter(self._ring))
             if oldest._p_oid is key:
                 break
             self.__delitem__(oldest._p_oid)
 
         self.size += sizedelta
+        self._sets += 1
+
+        # XXX: Note: Once we start evicting based on popularity, we'll need to move this
+        # up above the eviction choices.
+        self._age()
+
         return True
 
     def __contains__(self, key):

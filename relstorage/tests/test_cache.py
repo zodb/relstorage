@@ -765,6 +765,8 @@ def local_benchmark():
     # A group size of 100 produces 9100 keys with 9318400 = 8.8MB of data.
     # Likewise, group of 200 produces 36380 keys with 35.5MB of data.
 
+    # Group size of 400 produces 145480 keys with 142MB of data.
+
     # Most of our time is spent in compression, it seems.
     # In the 8.8mb case, populating all the data with default compression
     # takes about 2.5-2.8s. Using no compression, it takes 0.38 to 0.42s.
@@ -777,23 +779,38 @@ def local_benchmark():
     # pop  average 2.2137693379966854 stddev 0.09458639191519878
     # read average 1.0852473539998755 stddev 0.023173488388016424
 
-    # cache_local_mb = 100, datasize=142, comp=none
-    # epop average 3.8289742503354014 stddev 0.138905518890246
-    # mix  average 6.044395485989905 stddev 0.12402917755863634
-    # pop  average 4.849317686690483 stddev 0.3407186386084065
-    # read average 0.7788464936699407 stddev 0.011301417502572604
-
     # cache_local_mb = 100, datasize=142, comp=default
     # epop average 30.283703678986058 stddev 0.349105696895158
     # mix  average 32.43547729967395 stddev 0.6131160273617585
     # pop  average 31.683537834013503 stddev 0.9313916809959417
     # read average 0.7965960823348723 stddev 0.013812922826548332
 
+    # cache_local_mb = 100, datasize=142, comp=none
+    # epop average 3.8289742503354014 stddev 0.138905518890246
+    # mix  average 6.044395485989905 stddev 0.12402917755863634
+    # pop  average 4.849317686690483 stddev 0.3407186386084065
+    # read average 0.7788464936699407 stddev 0.011301417502572604
+
+    # Following numbers are all with 100/142/none
+
     # Tracking popularity, but not aging:
     # epop average 3.8351666433348632 stddev 0.016045702030828404
     # mix  average 6.063804395322222 stddev 0.05007505835225963
     # pop  average 4.915782862672738 stddev 0.20628836098923425
     # read average 0.8606604933350658 stddev 0.01461748647882393
+
+    # Aging periodically, adjusted for size. We aged three times
+    # during the 'mixed' workload at about  0.024s each. That should be
+    # linear, so the 800MB case would take 0.14s....but it would only be done
+    # every 9,091,000 operations.
+
+    # I noticed differences accounted for by hash ranomization between runs.
+    # From now on, run with 'PYTHONHASHSEED=0 python -O ...'
+    # Still same code
+    # epop average 3.896360943307324 stddev 0.05112068256616049
+    # mix  average 6.08575853901372 stddev 0.0651629903238879
+    # pop  average 4.854507520659051 stddev 0.16709270096300968
+    # read average 0.9192146409768611 stddev 0.010830646982195127
 
     with open('/dev/urandom', 'rb') as f:
         random_data = f.read(DATA_SIZE)
@@ -860,6 +877,7 @@ def local_benchmark():
 
         number = REPEAT_COUNT
         def run_func(func):
+            print("Timing func", func)
             pop_timer = timeit.Timer(func)
             pr = cProfile.Profile()
             pr.enable()
