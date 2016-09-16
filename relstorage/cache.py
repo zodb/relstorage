@@ -720,11 +720,19 @@ class StorageCache(object):
 
 class _RingEntry(object):
 
-    __slots__ = ('_p_oid', '_Persistent__ring', 'value')
+    # _p_oid is what the persistent.ring.Ring implementations use as their
+    # key.
+    # _Persistent__ring is a private implementation detail---the CFFI
+    # version has to maintain a reference to the C Node structure and it uses
+    # this.
+    # value is self-explanatory.
+    # See `increment` and `age` for `_frequency`
+    __slots__ = ('_p_oid', '_Persistent__ring', 'value', '_frequency')
 
     def __init__(self, key, value):
         self._p_oid = key
         self.value = value
+        self._frequency = 0
 
     @property
     def key(self):
@@ -732,6 +740,14 @@ class _RingEntry(object):
 
     def __reduce__(self):
         return _RingEntry, (self._p_oid, self.value)
+
+    def increment(self):
+        "Increment the frequency (poplarity) count of this entry."
+        self._frequency += 1
+
+    def age(self):
+        "Reduce the popularity of this entry by half, flooring it at zero."
+        self._frequency //= 2
 
 class LocalClientBucket(object):
     """
@@ -766,11 +782,13 @@ class LocalClientBucket(object):
 
     def stats(self):
         total = self._hits + self._misses
-        return {'hits': self._hits,
-                'misses': self._misses,
-                'ratio': self._hits/total if total else 0,
-                'size': len(self._dict),
-                'bytes': self.size}
+        return {
+            'hits': self._hits,
+            'misses': self._misses,
+            'ratio': self._hits/total if total else 0,
+            'size': len(self._dict),
+            'bytes': self.size
+        }
 
     def __len__(self):
         return len(self._dict)
@@ -795,12 +813,14 @@ class LocalClientBucket(object):
             sizedelta -= len(oldvalue)
             entry.value = value
             self._ring.move_to_head(entry)
+            entry.increment()
         else:
             sizedelta += len(key)
             entry = _RingEntry(key, value)
             self._ring.add(entry)
             self._dict[key] = entry
 
+        # Now trim to size.
         while self._dict and self.size + sizedelta > self.limit:
             oldest = next(iter(self._ring))
             if oldest._p_oid is key:
@@ -830,6 +850,7 @@ class LocalClientBucket(object):
             entry = dct.get(key)
             if entry is not None:
                 self._hits += 1
+                entry.increment()
                 rng.move_to_head(entry)
                 res[key] = entry.value
             else:
@@ -844,7 +865,9 @@ class LocalClientBucket(object):
 
     def __getitem__(self, key):
         # Testing only
-        return self._dict[key].value
+        entry = self._dict[key]
+        entry.increment()
+        return entry.value
 
     # Benchmark for the general approach:
 

@@ -751,7 +751,7 @@ def local_benchmark():
     from relstorage.cache import LocalClient, LocalClientBucket
     options = MockOptions()
     options.cache_local_mb = 100
-    #options.cache_local_compression = 'none'
+    options.cache_local_compression = 'none'
 
     REPEAT_COUNT = 4
 
@@ -788,6 +788,12 @@ def local_benchmark():
     # mix  average 32.43547729967395 stddev 0.6131160273617585
     # pop  average 31.683537834013503 stddev 0.9313916809959417
     # read average 0.7965960823348723 stddev 0.013812922826548332
+
+    # Tracking popularity, but not aging:
+    # epop average 3.8351666433348632 stddev 0.016045702030828404
+    # mix  average 6.063804395322222 stddev 0.05007505835225963
+    # pop  average 4.915782862672738 stddev 0.20628836098923425
+    # read average 0.8606604933350658 stddev 0.01461748647882393
 
     with open('/dev/urandom', 'rb') as f:
         random_data = f.read(DATA_SIZE)
