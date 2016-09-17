@@ -24,6 +24,16 @@ if Ring.__name__ == '_DequeRing': # pragma: no cover
     import warnings
     warnings.warn("Install CFFI for best cache performance")
 
+else:
+
+    class __Ring(Ring):
+
+        # XXX: This function breaks test_bucket_sizes_with_compression, the buckets
+        # are too big.
+        def lru(self):
+            return self.ring_to_obj[self.ring_home.r_prev]
+
+
 import importlib
 import logging
 import threading
@@ -817,7 +827,8 @@ class _SizedLRU(object):
         self._ring.move_to_head(entry)
 
     def get_LRU(self):
-        return next(iter(self._ring))
+        #return next(iter(self._ring))
+        return self._ring.lru()
 
     def remove(self, entry):
         #assert entry.__parent__ is self

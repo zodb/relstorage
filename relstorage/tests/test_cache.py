@@ -842,7 +842,7 @@ def local_benchmark():
     from relstorage.cache import LocalClient, LocalClientBucket
     options = MockOptions()
     options.cache_local_mb = 100
-    #options.cache_local_compression = 'none'
+    options.cache_local_compression = 'none'
 
     REPEAT_COUNT = 4
 
@@ -930,6 +930,17 @@ def local_benchmark():
     # mix  average 32.643460757661764 stddev 0.4262010697672024
     # pop  average 34.260926674314156 stddev 0.5609715096223009
     # read average 3.956128183985129 stddev 0.20373283218514573
+
+    # If we add a function for dedicated access to the LRU item,
+    # our times almost become acceptable:
+    # - mix is faster than original;
+    # - pop is faster than original;
+    # - epop is slightly slower than original;
+    # - read is about twice as slow as the original.
+    # epop average 5.056254096988899 stddev 0.07991501317283245
+    # mix  average 3.79573760201068 stddev 0.17857980670336743
+    # pop  average 2.814852144336328 stddev 0.3669570906504935
+    # read average 1.3201618876773864 stddev 0.008809367575729931
 
     with open('/dev/urandom', 'rb') as f:
         random_data = f.read(DATA_SIZE)
