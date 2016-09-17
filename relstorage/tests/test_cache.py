@@ -1071,6 +1071,12 @@ def local_benchmark():
     # pop  average 5.598568096330079 stddev 0.31457757182924395
     # read average 3.0701343226634585 stddev 0.19113773305717596
 
+    # PyPy is *wicked* fast at this, BTW
+    # epop average 1.30581800143 stddev 0.0167331686883
+    # mix  average 0.690402587255 stddev 0.0491290787176
+    # pop  average 0.915206670761 stddev 0.126843920891
+    # read average 0.579447031021 stddev 0.0305893529027
+
     with open('/dev/urandom', 'rb') as f:
         random_data = f.read(DATA_SIZE)
 
@@ -1081,40 +1087,58 @@ def local_benchmark():
         assert len(set(keys)) == len(keys)
         key_groups.append(keys)
 
-    ALL_DATA = {}
+
+    # Recent PyPy and Python 3.6 preserves iteration order of a dict
+    # to match insertion order. If we use a dict for ALL_DATA, this
+    # gives slightly different results due to the key lengths being
+    # different and so things being ejected at slightly different
+    # times (on PyPy, 8 key groups have *no* matches in read() using a dict,
+    # while that doesn't occur in cPython 2.7/3.4). To
+    # make this all line up the same, we preserve order everywhere by using
+    # a list of tuples (sure enough, that change makes 8 groups go missing)
+    ALL_DATA = []
     for group in key_groups:
         for key in group:
-            ALL_DATA[key] = random_data
-    print(len(ALL_DATA), sum((len(v) for v in ALL_DATA.values()))/1024/1024)
+            ALL_DATA.append((key, random_data))
+    print(len(ALL_DATA), sum((len(v[1]) for v in ALL_DATA))/1024/1024)
     assert all(isinstance(k, str) for k in ALL_DATA)
+    # If we sort by the hash of the key, we get the iteration order that
+    # CPython used for a dict, making all groups of keys be found in read(). This
+    # Keeps the benchmark consistent
+    ALL_DATA.sort(key=lambda x: hash(x[0]))
 
     def do_times(client_type=LocalClient):
         client = client_type(options)
         print("Testing", type(client._bucket0._dict))
 
         def populate():
-            for k, v in ALL_DATA.items():
+            for k, v in ALL_DATA:
                 client.set(k, v)
 
 
         def populate_empty():
             c = LocalClient(options)
-            for k, v in ALL_DATA.items():
+            for k, v in ALL_DATA:
                 c.set(k, v)
 
         def read():
+            miss_count = 0
             for keys in key_groups:
                 res = client.get_multi(keys)
                 #assert len(res) == len(keys)
                 if not res:
-                    print("Failed to get any keys", keys)
+                    miss_count += 1
                     continue
                 assert res.popitem()[1] == random_data
+
+            if miss_count:
+                print("Failed to get any keys in %d of %d groups"
+                      % (miss_count, len(key_groups)))
 
         def mixed():
             hot_keys = key_groups[0]
             i = 0
-            for k, v in ALL_DATA.items():
+            for k, v in ALL_DATA:
                 i += 1
                 client.set(k, v)
                 if i == len(hot_keys):
