@@ -30,11 +30,49 @@ if Ring.__name__ == '_DequeRing': # pragma: no cover
             return self.ring[0]
 
 else:
+    from persistent.ring import _FFI_RING
+
+    _ring_move_to_head = _FFI_RING.ring_move_to_head
+    _ring_move_to_head_from_foreign = _FFI_RING.ring_move_to_head_from_foreign
 
     class Ring(Ring):
 
         def lru(self):
             return self.ring_to_obj[self.ring_home.r_next]
+
+        def next_mru_to(self, entry):
+            """
+            Return the object that is the *next* most recently used, compared
+            to the given entry.
+            """
+            return self.ring_to_obj[entry._Persistent__ring.r_prev]
+
+        def next_lru_to(self, entry):
+            """
+            Return the object that is the *next* least recently used, compared
+            to the given entry.
+            """
+            return self.ring_to_obj[entry._Persistent__ring.r_next]
+
+        def move_entry_from_other_ring(self, entry, other_ring):
+            node = entry._Persistent__ring
+            assert node is not None
+
+            #other_ring.delete(entry)
+
+            _ring_move_to_head_from_foreign(self.ring_home, node)
+            self.ring_to_obj[node] = entry
+
+        def move_to_head(self, entry):
+            _ring_move_to_head(self.ring_home, entry._Persistent__ring)
+
+        def XXdelete(self, entry):
+            node = entry._Persistent__ring
+            del self.ring_to_obj[node]
+            node.r_next.r_prev = node.r_prev
+            node.r_prev.r_next = node.r_next
+            # XXX: We leave these dangling
+            # node.r_next = node.r_prev = _FFI_RING.NULL
 
 
 import importlib
@@ -800,10 +838,14 @@ class _SizedLRU(object):
 
     def take_ownership_of_entry_MRU(self, entry):
         #assert entry.__parent__ is None
-        entry.__parent__ = self
+        old_parent = entry.__parent__
+        assert old_parent is not None
+        assert old_parent is not self
+
         # But don't increment here, we're just moving
         # from one ring to another
-        self._ring.add(entry)
+        self._ring.move_entry_from_other_ring(entry, old_parent._ring)
+        entry.__parent__ = self
         self.size += entry.len
 
     def update_MRU(self, entry, value):
@@ -820,11 +862,15 @@ class _SizedLRU(object):
         #assert entry.__parent__ is self
         self._ring.delete(entry)
         self.size -= entry.len
+        # XXX We must leave these.
         # All released versions of CFFI Ring don't clear this to None;
         # that can cause a crash if there's a bug in our code and we reuse
         # the node in the wrong place.
-        entry._Persistent__ring = None
-        entry.__parent__ = None
+        #entry._Persistent__ring = None
+        #entry.__parent__ = None
+
+    def decrement_size(self, entry):
+        self.size -= entry.len
 
     def on_hit(self, entry):
         #assert entry.__parent__ is self
@@ -868,7 +914,7 @@ class _EdenLRU(_SizedLRU):
                 eden_oldest = self.get_LRU()
                 if eden_oldest._p_oid is key:
                     break
-                self.remove(eden_oldest)
+                self.decrement_size(eden_oldest)
 
                 if eden_oldest.len + protected_lru.size > protected_lru.limit:
                     # This would oversize protected. Move it to probation instead,
@@ -884,7 +930,7 @@ class _EdenLRU(_SizedLRU):
             eden_oldest = self.get_LRU()
             if eden_oldest._p_oid is key:
                 break
-            self.remove(eden_oldest)
+            self.decrement_size(eden_oldest)
             #assert eden_oldest.__parent__ is None
             #assert eden_oldest._Persistent__ring is None
 
@@ -907,11 +953,13 @@ class _EdenLRU(_SizedLRU):
                     # print("Completely evicting item", oldest.key,
                     #       "because main ring item", oldest_main_ring.key,
                     #       "has better frequency", oldest_main_ring.frequency, oldest.frequency)
+                    self._ring.delete(eden_oldest)
                     del dct[eden_oldest._p_oid]
                 else:
                     # eden item is more popular, keep it
                     probation_lru.remove(oldest_main_ring)
                     del dct[oldest_main_ring._p_oid]
+
                     probation_lru.take_ownership_of_entry_MRU(eden_oldest)
                     #assert eden_oldest.__parent__ is probation_lru
 
@@ -919,31 +967,63 @@ class _EdenLRU(_SizedLRU):
 
 class _ProtectedLRU(_SizedLRU):
     pass
+    #def add_MRU(self, key, value):
+    #    raise NotImplementedError("We only accept ownership")
 
 class _ProbationLRU(_SizedLRU):
 
-    def __init__(self, limit, protected_lru):
+    promote_count = 0
+    demote_count = 0
+    remove_count = 0
+
+    def __init__(self, limit, protected_lru, entry_dict):
         _SizedLRU.__init__(self, limit)
         self.protected_lru = protected_lru
+        self.entry_dict = entry_dict
 
     def on_hit(self, entry):
         # Move the entry to the Protected LRU on its very first hit;
         # It will become the MRU there.
-        entry.frequency += 1
-        self.remove(entry)
+        #self.promote_count += 1
+        entry.frequency += 1 # duplicate super code to avoid method call
+
+    #     self._promote(entry)
+
+    # def _promote(self, entry):
+
+        #self.decrement_size(entry)
+        self.size -= entry.len
         protected_lru = self.protected_lru
         protected_lru.take_ownership_of_entry_MRU(entry)
-        #return
+
+
         if protected_lru.over_size:
+    #         self._demote(entry)
+
+    # def _demote(self, entry):
+            #self.demote_count += 1
+            protected_lru = self.protected_lru
             # Demote the LRU back to probation
+            # XXX LOOP
             demoting_entry = protected_lru.get_LRU()
             if demoting_entry is not entry:
-                protected_lru.remove(demoting_entry)
-                # Don't worry about checking our size now, we'll handle that
-                # when items get added to us. The _EdenLRU does this.
-                # This way we don't have to worry about dictionary membership
-                # rules.
+                #protected_lru.decrement_size(demoting_entry)
+                protected_lru.size -= demoting_entry.len
                 self.take_ownership_of_entry_MRU(demoting_entry)
+    #           self._resize()
+
+    # def _resize(self):
+                # Resize, losing the oldest entries if needed.
+
+            # Note that we don't resize ourself here until
+            # an object is added from eden.
+                # dct = self.entry_dict
+                # while self.over_size:
+                #     self.remove_count += 1
+                #     lru = self.get_LRU()
+                #     self.remove(lru)
+                #     del dct[lru._p_oid]
+
 
 class LocalClientBucket(object):
     """
@@ -991,7 +1071,9 @@ class LocalClientBucket(object):
 
 
         self._protected = _ProtectedLRU(int(limit * self._gen_protected_pct))
-        self._probation = _ProbationLRU(int(limit * self._gen_probation_pct), self._protected)
+        self._probation = _ProbationLRU(int(limit * self._gen_probation_pct),
+                                        self._protected,
+                                        self._dict)
         self._eden = _EdenLRU(int(limit * self._gen_eden_pct),
                               self._probation,
                               self._protected,

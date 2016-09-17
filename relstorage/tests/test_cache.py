@@ -1077,6 +1077,15 @@ def local_benchmark():
     # pop  average 0.915206670761 stddev 0.126843920891
     # read average 0.579447031021 stddev 0.0305893529027
 
+    # ""Inlining"" Ring.add into Ring.move_entry_from_other_ring
+    # got us down to about 2.5s on the read test (by not allocating new
+    # CPersistentRing structures).
+    # Introducing the C function ring_move_to_head_from_foreign gives us these numbers:
+    # epop average 6.472030825718927 stddev 0.06240653685961519
+    # mix  average 5.4434908026984585 stddev 0.07889832553078663
+    # pop  average 4.920183609317367 stddev 0.23233663177104144
+    # read average 1.7981388796276103 stddev 0.0625821728436513
+
     with open('/dev/urandom', 'rb') as f:
         random_data = f.read(DATA_SIZE)
 
@@ -1096,16 +1105,20 @@ def local_benchmark():
     # while that doesn't occur in cPython 2.7/3.4). To
     # make this all line up the same, we preserve order everywhere by using
     # a list of tuples (sure enough, that change makes 8 groups go missing)
-    ALL_DATA = []
+    # Alternately, if we sort by the hash of the key, we get the iteration order that
+    # CPython used for a dict, making all groups of keys be found in read(). This
+    # keeps the benchmark consistent
+
+    ALL_DATA = {}
     for group in key_groups:
         for key in group:
-            ALL_DATA.append((key, random_data))
+            ALL_DATA[key] = random_data
+
+    ALL_DATA = list(ALL_DATA.items())
+    ALL_DATA.sort(key=lambda x: hash(x[0]))
     print(len(ALL_DATA), sum((len(v[1]) for v in ALL_DATA))/1024/1024)
     assert all(isinstance(k, str) for k in ALL_DATA)
-    # If we sort by the hash of the key, we get the iteration order that
-    # CPython used for a dict, making all groups of keys be found in read(). This
-    # Keeps the benchmark consistent
-    ALL_DATA.sort(key=lambda x: hash(x[0]))
+
 
     def do_times(client_type=LocalClient):
         client = client_type(options)
@@ -1122,6 +1135,12 @@ def local_benchmark():
                 c.set(k, v)
 
         def read():
+            # This is basically the worst-case scenario for a basic
+            # segmented LRU: A repeating sequential scan, where no new
+            # keys are added and all existing keys fit in the two parts of the
+            # cache. Thus, entries just keep bouncing back and forth between
+            # probation and protected. It so happens that this is our slowest
+            # case.
             miss_count = 0
             for keys in key_groups:
                 res = client.get_multi(keys)
@@ -1134,6 +1153,12 @@ def local_benchmark():
             if miss_count:
                 print("Failed to get any keys in %d of %d groups"
                       % (miss_count, len(key_groups)))
+
+            # import pprint
+            # pprint.pprint(client._bucket0.stats())
+            # print("Probation promotes", client._bucket0._probation.promote_count)
+            # print("Probation demotes", client._bucket0._probation.demote_count)
+            # print("Probation removes", client._bucket0._probation.remove_count)
 
         def mixed():
             hot_keys = key_groups[0]
@@ -1148,8 +1173,10 @@ def local_benchmark():
         import timeit
         import statistics
         try:
+            import sys
             import cProfile, pstats
-            raise ImportError
+            if '--profile' not in sys.argv:
+                raise ImportError
         except ImportError:
             class cProfile(object):
                 class Profile(object):
