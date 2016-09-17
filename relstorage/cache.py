@@ -730,6 +730,7 @@ class StorageCache(object):
             log.debug("Checkpoints already shifted to %s. "
                       "len(delta_after0) == %d.", old_value, len(self.delta_after0))
 
+_OSA = object.__setattr__
 
 class _LRURingEntry(object):
 
@@ -741,39 +742,24 @@ class _LRURingEntry(object):
     # value is self-explanatory.
     # See `increment` and `age` for `_frequency`
     __slots__ = ('_p_oid', '_Persistent__ring',
-                 'value', 'frequency', '__parent__')
+                 'value', 'frequency', '__parent__',
+                 'len')
 
     def __init__(self, key, value, parent):
         self._p_oid = key
         self.value = value
+        self.len = len(key) + len(value)
         self.frequency = 0
         self.__parent__ = parent
         self._Persistent__ring = None
 
-
-    # def get_ring_state(self):
-    #     return self._ring_state
-
-    # _tracking = False
-    # def set_ring_state(self, value):
-    #     if value is _RS_INITIAL:
-    #         import traceback; traceback.print_stack()
-    #         print("Set on", self.key)
-    #         self._tracking = True
-    #     if self._tracking:
-    #         print("Changing", self.key, value)
-    #     self._ring_state = value
-
-    # ring_state = property(get_ring_state, set_ring_state)
+    def set_value(self, value):
+        self.value = value
+        self.len = len(self._p_oid) + len(value)
 
     @property
     def key(self):
         return self._p_oid
-
-
-    def __len__(self):
-        "Return the byte size of self."
-        return len(self.value) + len(self.key)
 
     def __repr__(self):
         return "<%s key=%r f=%d size=%d>" % (type(self).__name__, self._p_oid, self.frequency, len(self))
@@ -787,6 +773,8 @@ class _SizedLRU(object):
         self.limit = limit
         self.size = 0
         self._ring = Ring()
+        self.get_LRU = self._ring.lru
+        self.make_MRU = self._ring.move_to_head
 
     def __iter__(self):
         return iter(self._ring)
@@ -796,6 +784,9 @@ class _SizedLRU(object):
 
     __nonzero__ = __bool__ # Python 2
 
+    def __len__(self):
+        return len(self._ring)
+
     @property
     def over_size(self):
         return self.size > self.limit
@@ -803,7 +794,7 @@ class _SizedLRU(object):
     def add_MRU(self, key, value):
         entry = _LRURingEntry(key, value, self)
         self._ring.add(entry)
-        self.size += len(entry)
+        self.size += entry.len
         entry.frequency += 1
         return entry
 
@@ -813,40 +804,26 @@ class _SizedLRU(object):
         # But don't increment here, we're just moving
         # from one ring to another
         self._ring.add(entry)
-        self.size += len(entry)
+        self.size += entry.len
 
     def update_MRU(self, entry, value):
         #assert entry.__parent__ is self
-        sizedelta = len(value)
-        oldvalue = entry.value
-        sizedelta -= len(oldvalue)
-        entry.value = value
-        self.size += sizedelta
+        size = self.size
+        size -= entry.len
+        entry.set_value(value)
+        size += entry.len
+        self.size = size
         self._ring.move_to_head(entry)
         entry.frequency += 1
 
-    def make_MRU(self, entry):
-        #assert entry.__parent__ is self
-        self._ring.move_to_head(entry)
-
-    def get_LRU(self):
-        #return next(iter(self._ring))
-        return self._ring.lru()
-
     def remove(self, entry):
         #assert entry.__parent__ is self
-        oldkey = entry._p_oid
-        oldvalue = entry.value
         self._ring.delete(entry)
+        self.size -= entry.len
         # All released versions of CFFI Ring don't clear this to None;
         # that can cause a crash if there's a bug in our code and we reuse
         # the node in the wrong place.
         entry._Persistent__ring = None
-
-        sizedelta = len(oldkey)
-        sizedelta += len(oldvalue)
-        self.size -= sizedelta
-
         entry.__parent__ = None
 
     def on_hit(self, entry):
@@ -893,7 +870,7 @@ class _EdenLRU(_SizedLRU):
                     break
                 self.remove(eden_oldest)
 
-                if len(eden_oldest) + protected_lru.size > protected_lru.limit:
+                if eden_oldest.len + protected_lru.size > protected_lru.limit:
                     # This would oversize protected. Move it to probation instead,
                     # which is currently empty, so there's no need to choose a victim.
                     # This may temporarily oversize us.
@@ -911,7 +888,7 @@ class _EdenLRU(_SizedLRU):
             #assert eden_oldest.__parent__ is None
             #assert eden_oldest._Persistent__ring is None
 
-            if probation_lru.size + len(eden_oldest) < probation_lru.limit:
+            if probation_lru.size + eden_oldest.len < probation_lru.limit:
                 # Cool, we can keep it.
                 probation_lru.take_ownership_of_entry_MRU(eden_oldest)
                 #assert eden_oldest.__parent__ is probation_lru
@@ -1281,7 +1258,7 @@ class LocalClientBucket(object):
         bytes_written = 0
         byte_limit = self._protected.limit
         for entry in entries:
-            bytes_written += len(entry)
+            bytes_written += entry.len
             count_written += 1
             if bytes_written > byte_limit:
                 break

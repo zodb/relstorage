@@ -837,6 +837,26 @@ class LocalClientTests(unittest.TestCase):
         c.add('k1', b'ghi')
         self.assertEqual(c.get_multi(['k0', 'k1']), {'k0': b'abc', 'k1': b'ghi'})
 
+    def test_mru_lru_ring(self):
+        from relstorage.cache import _SizedLRU
+        lru = _SizedLRU(100)
+        entrya = lru.add_MRU(b'a', b'1')
+        self.assertEqual(lru.get_LRU(), entrya)
+
+        entryb = lru.add_MRU(b'b', b'2')
+        self.assertEqual(lru.get_LRU(), entrya)
+
+        entryc = lru.add_MRU(b'c', b'3')
+        self.assertEqual(lru.get_LRU(), entrya)
+
+        lru.make_MRU(entryb)
+        self.assertEqual(lru.get_LRU(), entrya)
+
+        lru.make_MRU(entrya)
+        self.assertEqual(lru.get_LRU(), entryc)
+
+        self.assertEqual(len(lru), 3)
+
     def test_load_and_save(self, _make_dir=True):
         import tempfile
         import shutil
@@ -1041,6 +1061,15 @@ def local_benchmark():
     # mix  average 3.79573760201068 stddev 0.17857980670336743
     # pop  average 2.814852144336328 stddev 0.3669570906504935
     # read average 1.3201618876773864 stddev 0.008809367575729931
+
+    # ^ Sigh, no, those times were a bug. our dedicated LRU access method
+    # was actually returning the MRU item, which means we usually skipped all
+    # the manipulation of lists. With that fixed, and some minor opts, we're at these times:
+    # - mix is faster; everything else is slower; read is *much* slower.
+    # epop average 7.55050067200015 stddev 0.1184560690858881
+    # mix  average 5.364189800301877 stddev 0.015863679783528113
+    # pop  average 5.598568096330079 stddev 0.31457757182924395
+    # read average 3.0701343226634585 stddev 0.19113773305717596
 
     with open('/dev/urandom', 'rb') as f:
         random_data = f.read(DATA_SIZE)
