@@ -24,14 +24,17 @@ if Ring.__name__ == '_DequeRing': # pragma: no cover
     import warnings
     warnings.warn("Install CFFI for best cache performance")
 
+    class Ring(Ring):
+
+        def lru(self):
+            return self.ring[0]
+
 else:
 
-    class __Ring(Ring):
+    class Ring(Ring):
 
-        # XXX: This function breaks test_bucket_sizes_with_compression, the buckets
-        # are too big.
         def lru(self):
-            return self.ring_to_obj[self.ring_home.r_prev]
+            return self.ring_to_obj[self.ring_home.r_next]
 
 
 import importlib
@@ -889,7 +892,15 @@ class _EdenLRU(_SizedLRU):
                 if eden_oldest._p_oid is key:
                     break
                 self.remove(eden_oldest)
-                protected_lru.take_ownership_of_entry_MRU(eden_oldest)
+
+                if len(eden_oldest) + protected_lru.size > protected_lru.limit:
+                    # This would oversize protected. Move it to probation instead,
+                    # which is currently empty, so there's no need to choose a victim.
+                    # This may temporarily oversize us.
+                    probation_lru.take_ownership_of_entry_MRU(eden_oldest)
+                    break
+                else:
+                    protected_lru.take_ownership_of_entry_MRU(eden_oldest)
             return new_entry
 
         while self.size > self.limit:
@@ -908,7 +919,7 @@ class _EdenLRU(_SizedLRU):
                 # Snap, somebody has to go.
                 try:
                     oldest_main_ring = probation_lru.get_LRU()
-                except StopIteration:
+                except (StopIteration, KeyError):
                     # probation ring is empty, nothing to eject. This must be a large
                     # item. Well, just accept it then to match what we used to do.
                     probation_lru.take_ownership_of_entry_MRU(eden_oldest)

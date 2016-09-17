@@ -612,7 +612,16 @@ class LocalClientTests(unittest.TestCase):
         # so our max size will be 60
         c._bucket_limit = 51
         c.flush_all()
+
+        def list_lrukeys(lru_name):
+            # Remember, these lists will be from LRU to MRU
+            return [e.key for e in getattr(c._bucket0, '_' + lru_name)]
+
+        def list_lrufreq(lru_name):
+            return [e.frequency for e in getattr(c._bucket0, '_' + lru_name)]
+
         k = None
+
         for i in range(5):
             # add 10 bytes (2 for the key, 8 for the value)
             k = 'k%d' % i
@@ -620,19 +629,22 @@ class LocalClientTests(unittest.TestCase):
             # into probation.
             c.set(k, b'01234567')
 
-            # Promote the old value from probation to protected.
-            old_k = 'k%d' % (i - 1)
-            c.get(old_k)
 
+        # While we have the room, we initially put items into the protected
+        # space when they graduate from eden.
+        self.assertEqual(list_lrukeys('eden'), ['k4'])
+        self.assertEqual(list_lrukeys('probation'), [])
+        self.assertEqual(list_lrukeys('protected'), ['k0', 'k1', 'k2', 'k3'])
         self.assertEqual(c._bucket0.size, 50)
 
         c.set('k5', b'01234567')
 
-        #import pprint
-
         # Right now, we're one entry over size, because we put k5
         # in eden, which dropped k4 to probation; since probation was empty, we
         # allowed it to stay there
+        self.assertEqual(list_lrukeys('eden'), ['k5'])
+        self.assertEqual(list_lrukeys('probation'), ['k4'])
+        self.assertEqual(list_lrukeys('protected'), ['k0', 'k1', 'k2', 'k3'])
         self.assertEqual(c._bucket0.size, 60)
 
         v = c.get('k2')
@@ -640,6 +652,10 @@ class LocalClientTests(unittest.TestCase):
         self.assertEqual(c._bucket0.size, 60)
 
         c.set('k1', b'b')
+        self.assertEqual(list_lrukeys('eden'), ['k5'])
+        self.assertEqual(list_lrukeys('probation'), ['k4'])
+        self.assertEqual(list_lrukeys('protected'), ['k0', 'k3', 'k2', 'k1'])
+
         self.assertEqual(c._bucket0.size, 53)
 
         for i in range(4):
@@ -649,19 +665,17 @@ class LocalClientTests(unittest.TestCase):
             # when we're done, we'll wind up with one key each in
             # eden and probation, and all the K keys in protected (since
             # they have been promoted)
-        self.assertEqual(c._bucket0.size, 53)
+
 
         # x0 and x1 started in eden and got promoted to the main ring.
         # x2 was pushed out of eden and the main ring was full.
         # k2 was allowed to remain because it'd been accessed
         # more often
 
-        def list_lrukeys(lru_name):
-            # Remember, these lists will be from LRU to MRU
-            return [e.key for e in getattr(c._bucket0, '_' + lru_name)]
         self.assertEqual(list_lrukeys('eden'), ['x3'])
         self.assertEqual(list_lrukeys('probation'), ['x2'])
         self.assertEqual(list_lrukeys('protected'), ['k0', 'k3', 'k2', 'k1'])
+        self.assertEqual(c._bucket0.size, 53)
 
         #pprint.pprint(c._bucket0.stats())
         self.assertEqual(c.get('x0'), None)
@@ -680,25 +694,45 @@ class LocalClientTests(unittest.TestCase):
         self.assertEqual(c._bucket0.size, 53)
 
         self.assertEqual(c.get('k0'), b'01234567')
+        self.assertEqual(c.get('k0'), b'01234567') # One more to increase its freq count
         self.assertEqual(c.get('k1'), b'b')
         self.assertEqual(c.get('k2'), b'01234567')
         self.assertEqual(c.get('k3'), b'01234567')
         self.assertEqual(c.get('k4'), None)
         self.assertEqual(c.get('k5'), None)
 
-        # Let's promote from probation, causing places to switch
+        # Let's promote from probation, causing places to switch.
+        # First, verify our current state after those gets.
+        self.assertEqual(list_lrukeys('eden'), ['x3'])
+        self.assertEqual(list_lrukeys('probation'), ['x2'])
+        self.assertEqual(list_lrukeys('protected'), ['k0', 'k1', 'k2', 'k3'])
+        # Now get and switch
         c.get('x2')
+        self.assertEqual(list_lrukeys('eden'), ['x3'])
         self.assertEqual(list_lrukeys('probation'), ['k0'])
-
-
+        self.assertEqual(list_lrukeys('protected'), ['k1', 'k2', 'k3', 'x2'])
         self.assertEqual(c._bucket0.size, 53)
 
+        # Confirm frequency counts
+        self.assertEqual(list_lrufreq('eden'), [2])
+        self.assertEqual(list_lrufreq('probation'), [3])
+        self.assertEqual(list_lrufreq('protected'), [3, 4, 2, 3])
+        # A brand new key is in eden, shifting eden to probation
 
         c.set('z0', b'01234567')
-        self.assertEqual(c._bucket0.size, 53)
 
         # Now, because we had accessed k0 (probation) more than we'd
         # accessed the last key from eden (x3), that's the one we keep
+        self.assertEqual(list_lrukeys('eden'), ['z0'])
+        self.assertEqual(list_lrukeys('probation'), ['k0'])
+        self.assertEqual(list_lrukeys('protected'), ['k1', 'k2', 'k3', 'x2'])
+
+        self.assertEqual(list_lrufreq('eden'), [1])
+        self.assertEqual(list_lrufreq('probation'), [3])
+        self.assertEqual(list_lrufreq('protected'), [3, 4, 2, 3])
+
+        self.assertEqual(c._bucket0.size, 53)
+
         self.assertEqual(c.get('x3'), None)
         self.assertEqual(list_lrukeys('probation'), ['k0'])
 
@@ -707,27 +741,93 @@ class LocalClientTests(unittest.TestCase):
         c = self._makeOne(cache_local_compression='zlib')
         c._bucket_limit = 23 * 2 + 1
         c.flush_all()
+        def list_lrukeys(lru_name):
+            # Remember, these lists will be from LRU to MRU
+            return [e.key for e in getattr(c._bucket0, '_' + lru_name)]
 
-        c.set('k0', b'01234567' * 15)
-        self.assertEqual(c._bucket0.size, 23)
+        k0_data = b'01234567' * 15
+        c.set('k0', k0_data)
+        self.assertEqual(c._bucket0.size, 23) # One entry in eden
+        self.assertEqual(list_lrukeys('eden'), ['k0'])
+        self.assertEqual(list_lrukeys('probation'), [])
+        self.assertEqual(list_lrukeys('protected'), [])
 
-        c.set('k1', b'76543210' * 15)
+        k1_data = b'76543210' * 15
+        c.set('k1', k1_data)
         self.assertEqual(len(c._bucket0), 2)
         self.assertEqual(c._bucket0.size, 23 * 2)
+        # Since k0 would fit in protected and we had nothing in
+        # probation, that's where it went
+        self.assertEqual(list_lrukeys('eden'), ['k1'])
+        self.assertEqual(list_lrukeys('probation'), [])
+        self.assertEqual(list_lrukeys('protected'), ['k0'])
 
-        c.set('k2', b'abcdefgh' * 15)
-        self.assertEqual(c._bucket0.size, 23 * 2)
+        k2_data = b'abcdefgh' * 15
+        c.set('k2', k2_data)
+
+        # New key is in eden, old eden goes to probation because
+        # protected is full. Note we're slightly oversize
+        self.assertEqual(list_lrukeys('eden'), ['k2'])
+        self.assertEqual(list_lrukeys('probation'), ['k1'])
+        self.assertEqual(list_lrukeys('protected'), ['k0'])
+
+        self.assertEqual(c._bucket0.size, 23 * 3)
 
         v = c.get('k0')
-        self.assertEqual(v, None) # This one got evicted :(
+        self.assertEqual(v, k0_data)
+        self.assertEqual(list_lrukeys('eden'), ['k2'])
+        self.assertEqual(list_lrukeys('probation'), ['k1'])
+        self.assertEqual(list_lrukeys('protected'), ['k0'])
+
 
         v = c.get('k1')
-        self.assertEqual(v, b'76543210' * 15)
-        self.assertEqual(c._bucket0.size, 46)
+        self.assertEqual(v, k1_data)
+        self.assertEqual(c._bucket0.size, 23 * 3)
+        self.assertEqual(list_lrukeys('eden'), ['k2'])
+        self.assertEqual(list_lrukeys('probation'), ['k0'])
+        self.assertEqual(list_lrukeys('protected'), ['k1'])
+
 
         v = c.get('k2')
-        self.assertEqual(v, b'abcdefgh' * 15)
-        self.assertEqual(c._bucket0.size, 46)
+        self.assertEqual(v, k2_data)
+        self.assertEqual(c._bucket0.size, 23 * 3)
+        self.assertEqual(list_lrukeys('eden'), ['k2'])
+        self.assertEqual(list_lrukeys('probation'), ['k0'])
+        self.assertEqual(list_lrukeys('protected'), ['k1'])
+
+        c.set('k3', b'1')
+        self.assertEqual(list_lrukeys('eden'), ['k3'])
+        self.assertEqual(list_lrukeys('probation'), ['k2'])
+        self.assertEqual(list_lrukeys('protected'), ['k1'])
+
+        c.set('k4', b'1')
+        self.assertEqual(list_lrukeys('eden'), ['k4'])
+        self.assertEqual(list_lrukeys('probation'), ['k2'])
+        self.assertEqual(list_lrukeys('protected'), ['k1'])
+
+        c.set('k5', b'')
+        self.assertEqual(list_lrukeys('eden'), ['k5'])
+        self.assertEqual(list_lrukeys('probation'), ['k2'])
+        self.assertEqual(list_lrukeys('protected'), ['k1'])
+
+        c.set('k6', b'')
+        self.assertEqual(list_lrukeys('eden'), ['k5', 'k6'])
+        self.assertEqual(list_lrukeys('probation'), ['k2'])
+        self.assertEqual(list_lrukeys('protected'), ['k1'])
+
+
+        c.get('k6')
+        c.get('k6')
+        c.get('k6')
+        c.set('k7', b'')
+        self.assertEqual(list_lrukeys('eden'), ['k6', 'k7'])
+        self.assertEqual(list_lrukeys('probation'), ['k2'])
+        self.assertEqual(list_lrukeys('protected'), ['k1'])
+
+        c.set('k8', b'')
+        self.assertEqual(list_lrukeys('eden'), ['k7', 'k8'])
+        self.assertEqual(list_lrukeys('probation'), ['k6'])
+        self.assertEqual(list_lrukeys('protected'), ['k1'])
 
     def test_add(self):
         c = self._makeOne()
