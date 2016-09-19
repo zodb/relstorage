@@ -19,7 +19,8 @@ from ZODB.utils import u64
 from ZODB.utils import z64
 from ZODB.POSException import ReadConflictError
 from persistent.timestamp import TimeStamp
-from persistent.ring import Ring
+
+from .ring import Ring
 if Ring.__name__ == '_DequeRing': # pragma: no cover
     import warnings
     warnings.warn("Install CFFI for best cache performance")
@@ -30,7 +31,7 @@ if Ring.__name__ == '_DequeRing': # pragma: no cover
             return self.ring[0]
 
 else:
-    from persistent.ring import _FFI_RING
+    from .ring import _FFI_RING
 
     _ring_move_to_head = _FFI_RING.ring_move_to_head
     _ring_move_to_head_from_foreign = _FFI_RING.ring_move_to_head_from_foreign
