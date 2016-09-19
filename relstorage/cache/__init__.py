@@ -83,10 +83,10 @@ import zlib
 import bz2
 import struct
 
-from ._compat import string_types
-from ._compat import iteritems
-from ._compat import itervalues
-from ._compat import PY3
+from relstorage._compat import string_types
+from relstorage._compat import iteritems
+from relstorage._compat import itervalues
+from relstorage._compat import PY3
 if PY3:
     # On Py3, use the built-in pickle, so that we can get
     # protocol 4 when available. It is *much* faster at writing out
@@ -96,8 +96,8 @@ if PY3:
 else:
     # On Py2, zodbpickle gives us protocol 3, but we don't
     # use its special binary type
-    from ._compat import Unpickler
-    from ._compat import Pickler
+    from relstorage._compat import Unpickler
+    from relstorage._compat import Pickler
 
 log = logging.getLogger(__name__)
 

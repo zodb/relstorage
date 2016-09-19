@@ -14,7 +14,7 @@
 from __future__ import print_function, absolute_import, division
 import unittest
 
-from .util import skipOnCI
+from relstorage.tests.util import skipOnCI
 
 class StorageCacheTests(unittest.TestCase):
 
