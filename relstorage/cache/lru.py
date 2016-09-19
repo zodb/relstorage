@@ -32,6 +32,7 @@ _lru_update_mru = _FFI_RING.lru_update_mru
 _ring_move_to_head_from_foreign = _FFI_RING.ring_move_to_head_from_foreign
 _lru_probation_on_hit = _FFI_RING.lru_probation_on_hit
 _eden_add = _FFI_RING.eden_add
+_lru_on_hit = _FFI_RING.lru_on_hit
 
 class SizedLRURingEntry(object):
 
@@ -81,7 +82,8 @@ class SizedLRU(object):
         self._ring = Ring()
         self._ring.ring_home.max_len = limit
         self._ring.ring_home.r_parent = self.cffi_handle
-
+        # caches
+        self._ring_home = self._ring.ring_home
         self.get_LRU = self._ring.lru
         self.make_MRU = self._ring.move_to_head
         self.remove = self.delete
@@ -130,14 +132,12 @@ class SizedLRU(object):
         new_size = entry.len
         self.over_size = _lru_update_mru(self._ring.ring_home, entry.cffi_ring_node, old_size, new_size)
 
+    def on_hit(self, entry):
+        return _lru_on_hit(self._ring_home, entry.cffi_ring_node)
+
     def delete(self, entry):
         self._ring.delete(entry)
         self.over_size = self.size > self.limit
-
-    def on_hit(self, entry):
-        #assert entry.__parent__ is self
-        entry.frequency += 1
-        self.make_MRU(entry)
 
     def stats(self):
         return {
@@ -153,13 +153,15 @@ class EdenLRU(SizedLRU):
         SizedLRU.__init__(self, limit)
         self.probation_lru = probation_lru
         self.protected_lru = protected_lru
+        self._protected_lru_ring_home = protected_lru._ring.ring_home
+        self._probation_lru_ring_home = probation_lru._ring.ring_home
         self.entry_dict = entry_dict
 
     def add_MRU(self, key, value):
         new_entry = SizedLRURingEntry(key, value, self)
         rejected_items = _eden_add(self._ring.ring_home,
-                                   self.protected_lru._ring.ring_home,
-                                   self.probation_lru._ring.ring_home,
+                                   self._protected_lru_ring_home,
+                                   self._probation_lru_ring_home,
                                    new_entry.cffi_ring_node)
         # XXX The various over_size attributes? Are they updated? Do they need to be?
         if not rejected_items.r_next:
@@ -179,19 +181,14 @@ class ProtectedLRU(SizedLRU):
 
 class ProbationLRU(SizedLRU):
 
-    promote_count = 0
-    demote_count = 0
-    remove_count = 0
-
     def __init__(self, limit, protected_lru, entry_dict):
         SizedLRU.__init__(self, limit)
         self.protected_lru = protected_lru
-        self.entry_dict = entry_dict
+        self._protected_ring_home = self.protected_lru._ring.ring_home
 
     def on_hit(self, entry):
-        # Move the entry to the Protected LRU on its very first hit;
-        # It will become the MRU there.
-        protected_lru = self.protected_lru
-        protected_lru.over_size = _lru_probation_on_hit(self._ring.ring_home,
-                                                        protected_lru._ring.ring_home,
-                                                        entry.cffi_ring_node)
+        # Move the entry to the protected LRU on its very first hit, where
+        # it becomes the MRU.
+        return _lru_probation_on_hit(self._ring_home,
+                                     self._protected_ring_home,
+                                     entry.cffi_ring_node)

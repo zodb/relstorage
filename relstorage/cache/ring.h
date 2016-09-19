@@ -91,3 +91,4 @@ CPersistentRing eden_add(CPersistentRing* eden_ring,
                          CPersistentRing* protected_ring,
                          CPersistentRing* probation_ring,
                          CPersistentRing* entry);
+void lru_on_hit(CPersistentRing* ring, CPersistentRing* entry);

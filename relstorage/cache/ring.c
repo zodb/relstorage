@@ -113,6 +113,12 @@ static CPersistentRing* ring_lru(CPersistentRing* ring)
     return ring->r_next;
 }
 
+void lru_on_hit(CPersistentRing* ring, CPersistentRing* entry)
+{
+    entry->frequency++;
+    ring_move_to_head(ring, entry);
+}
+
 int lru_probation_on_hit(CPersistentRing* probation_ring,
                          CPersistentRing* protected_ring,
                          CPersistentRing* entry)
