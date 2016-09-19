@@ -720,37 +720,7 @@ class StorageCache(object):
 
 _OSA = object.__setattr__
 
-class _LRURingEntry(object):
-
-    # _p_oid is what the persistent.ring.Ring implementations use as their
-    # key.
-    # _Persistent__ring is a private implementation detail---the CFFI
-    # version has to maintain a reference to the C Node structure and it uses
-    # this.
-    # value is self-explanatory.
-    # See `increment` and `age` for `_frequency`
-    __slots__ = ('_p_oid', '_Persistent__ring',
-                 'value', 'frequency', '__parent__',
-                 'len')
-
-    def __init__(self, key, value, parent):
-        self._p_oid = key
-        self.value = value
-        self.len = len(key) + len(value)
-        self.frequency = 0
-        self.__parent__ = parent
-        self._Persistent__ring = None
-
-    def set_value(self, value):
-        self.value = value
-        self.len = len(self._p_oid) + len(value)
-
-    @property
-    def key(self):
-        return self._p_oid
-
-    def __repr__(self):
-        return "<%s key=%r f=%d size=%d>" % (type(self).__name__, self._p_oid, self.frequency, len(self))
+from .ring import LRURingEntry as _LRURingEntry
 
 class _SizedLRU(object):
     """
@@ -862,7 +832,7 @@ class _EdenLRU(_SizedLRU):
             # so go ahead and fill it.
             while self.size > self.limit:
                 eden_oldest = self.get_LRU()
-                if eden_oldest._p_oid is key:
+                if eden_oldest.key is key:
                     break
                 self.decrement_size(eden_oldest)
 
@@ -878,7 +848,7 @@ class _EdenLRU(_SizedLRU):
 
         while self.size > self.limit:
             eden_oldest = self.get_LRU()
-            if eden_oldest._p_oid is key:
+            if eden_oldest.key is key:
                 break
             self.decrement_size(eden_oldest)
             #assert eden_oldest.__parent__ is None
@@ -904,11 +874,11 @@ class _EdenLRU(_SizedLRU):
                     #       "because main ring item", oldest_main_ring.key,
                     #       "has better frequency", oldest_main_ring.frequency, oldest.frequency)
                     self._ring.delete(eden_oldest)
-                    del dct[eden_oldest._p_oid]
+                    del dct[eden_oldest.key]
                 else:
                     # eden item is more popular, keep it
                     probation_lru.remove(oldest_main_ring)
-                    del dct[oldest_main_ring._p_oid]
+                    del dct[oldest_main_ring.key]
 
                     probation_lru.take_ownership_of_entry_MRU(eden_oldest)
                     #assert eden_oldest.__parent__ is probation_lru
@@ -972,7 +942,7 @@ class _ProbationLRU(_SizedLRU):
                 #     self.remove_count += 1
                 #     lru = self.get_LRU()
                 #     self.remove(lru)
-                #     del dct[lru._p_oid]
+                #     del dct[lru.key]
 
 
 class LocalClientBucket(object):
@@ -1295,7 +1265,7 @@ class LocalClientBucket(object):
             if bytes_written > byte_limit:
                 break
 
-            dump((entry._p_oid, entry.value))
+            dump((entry.key, entry.value))
 
         then = time.time()
         stats = self.stats()

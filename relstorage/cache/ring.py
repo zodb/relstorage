@@ -91,6 +91,37 @@ class IRing(Interface):
         undefined consequences.
         """
 
+class LRURingEntry(object):
+
+    # _p_oid is what the persistent.ring.Ring implementations use as their
+    # key.
+    # _Persistent__ring is a private implementation detail---the CFFI
+    # version has to maintain a reference to the C Node structure and it uses
+    # this.
+    # value is self-explanatory.
+    __slots__ = ('key', 'cffi_ring_node',
+                 'value', '__parent__', 'frequency',
+                 'len')
+
+    def __init__(self, key, value, parent):
+        self.key = key
+        self.value = value
+        self.len = len(key) + len(value)
+        self.frequency = 0
+        self.__parent__ = parent
+        self.cffi_ring_node = None
+
+    def set_value(self, value):
+        self.value = value
+        self.len = len(self.key) + len(value)
+
+    def __len__(self):
+        return self.len
+
+    def __repr__(self):
+        return ("<%s key=%r f=%d size=%d>" %
+                (type(self).__name__, self._p_oid, self.frequency, self.len))
+
 from collections import deque
 
 @implementer(IRing)
@@ -113,23 +144,19 @@ class _DequeRing(object):
         return len(self.ring)
 
     def __contains__(self, pobj):
-        return pobj._p_oid in self.ring_oids
+        return pobj.key in self.ring_oids
 
     def add(self, pobj):
         self.ring.append(pobj)
-        self.ring_oids.add(pobj._p_oid)
+        self.ring_oids.add(pobj.key)
 
-    def delete(self, pobj):
-        # Note that we do not use self.ring.remove() because that
-        # uses equality semantics and we don't want to call the persistent
-        # object's __eq__ method (which might wake it up just after we
-        # tried to ghost it)
-        for i, o in enumerate(self.ring):
-            if o is pobj:
-                del self.ring[i]
-                self.ring_oids.discard(pobj._p_oid)
-                return 1
-        raise KeyError(pobj)
+    def delete(self, entry):
+        try:
+            self.ring.remove(entry)
+        except ValueError:
+            raise KeyError("%r not in the ring" % entry)
+        self.ring_oids.discard(entry.key)
+        return 1
 
     def move_to_head(self, pobj):
         self.delete(pobj)
@@ -138,7 +165,7 @@ class _DequeRing(object):
     def delete_all(self, indexes_and_values):
         for ix, value in reversed(indexes_and_values):
             del self.ring[ix]
-            self.ring_oids.discard(value._p_oid)
+            self.ring_oids.discard(value.key)
 
     def __iter__(self):
         return iter(self.ring)
@@ -160,9 +187,6 @@ else:
     _FFI_RING = ffi.verify("""
     #include "ring.c"
     """, include_dirs=[this_dir])
-
-    _OGA = object.__getattribute__
-    _OSA = object.__setattr__
 
     _ring_move_to_head = _FFI_RING.ring_move_to_head
     _ring_move_to_head_from_foreign = _FFI_RING.ring_move_to_head_from_foreign
@@ -195,22 +219,22 @@ else:
             return len(self.ring_to_obj)
 
         def __contains__(self, pobj):
-            return getattr(pobj, '_Persistent__ring', self) in self.ring_to_obj
+            return getattr(pobj, 'cffi_ring_node', self) in self.ring_to_obj
 
         def add(self, pobj):
             node = ffi_new("CPersistentRing*")
             _ring_add(self.ring_home, node)
             self.ring_to_obj[node] = pobj
-            _OSA(pobj, '_Persistent__ring', node)
+            _OSA(pobj, 'cffi_ring_node', node)
 
         def delete(self, pobj):
-            its_node = pobj._Persistent__ring
+            its_node = pobj.cffi_ring_node
             del self.ring_to_obj[its_node]
             _ring_del(its_node)
             return 1
 
         def move_to_head(self, entry):
-            _ring_move_to_head(self.ring_home, entry._Persistent__ring)
+            _ring_move_to_head(self.ring_home, entry.cffi_ring_node)
 
         def delete_all(self, indexes_and_values):
             for _, value in indexes_and_values:
@@ -236,17 +260,17 @@ else:
             Return the object that is the *next* most recently used, compared
             to the given entry.
             """
-            return self.ring_to_obj[entry._Persistent__ring.r_prev]
+            return self.ring_to_obj[entry.cffi_ring_node.r_prev]
 
         def next_lru_to(self, entry):
             """
             Return the object that is the *next* least recently used, compared
             to the given entry.
             """
-            return self.ring_to_obj[entry._Persistent__ring.r_next]
+            return self.ring_to_obj[entry.cffi_ring_node.r_next]
 
         def move_entry_from_other_ring(self, entry, other_ring):
-            node = entry._Persistent__ring
+            node = entry.cffi_ring_node
             assert node is not None
 
             #other_ring.delete(entry)

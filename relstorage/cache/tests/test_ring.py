@@ -18,7 +18,7 @@ from .. import ring
 #pylint: disable=R0904,W0212,E1101
 
 class DummyPersistent(object):
-    _p_oid = None
+    key = None
 
     __next_oid = 0
 
@@ -29,10 +29,10 @@ class DummyPersistent(object):
 
     def __init__(self, oid=None):
         if oid is None:
-            self._p_oid = self._next_oid()
+            self.key = self._next_oid()
 
     def __repr__(self):
-        return "<Dummy %r>" % self._p_oid
+        return "<Dummy %r>" % self.key
 
 class _Ring_Base(object):
 
