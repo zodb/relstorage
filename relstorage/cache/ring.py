@@ -154,7 +154,6 @@ else:
         ffi.cdef(f.read())
 
     _FFI_RING = ffi.verify("""
-    #include "lru.h"
     #include "ring.c"
     """, include_dirs=[this_dir])
 
@@ -201,17 +200,17 @@ else:
                 entry.cffi_ring_node = node
             assert node.user_data
             _ring_add(self.ring_home, node)
-            self.ring_home.len += 1
+            #self.ring_home.len += 1
 
         def delete(self, pobj):
             if not self.ring_home.len:
                 raise KeyError("No items in ring %r" % self)
             its_node = pobj.cffi_ring_node
             #if its_node.r_next: # Don't do if null
-            _ring_del(its_node)
-            self.ring_home.len -= 1
+            _ring_del(self.ring_home, its_node)
+            #self.ring_home.len -= 1
             return 1
-            raise KeyError()
+
 
         def move_to_head(self, entry):
             _ring_move_to_head(self.ring_home, entry.cffi_ring_node)
@@ -256,9 +255,9 @@ else:
 
             #other_ring.delete(entry)
 
-            _ring_move_to_head_from_foreign(self.ring_home, node)
-            self.ring_home.len += 1
-            other_ring.ring_home.len -= 1
+            _ring_move_to_head_from_foreign(other_ring.ring_home,
+                                            self.ring_home,
+                                            node)
 
 
 

@@ -751,7 +751,6 @@ class _EdenLRU(_SizedLRU):
                 eden_oldest = self.get_LRU()
                 if eden_oldest.key is key:
                     break
-                self.decrement_size(eden_oldest)
 
                 if eden_oldest.len + protected_lru.size > protected_lru.limit:
                     # This would oversize protected. Move it to probation instead,
@@ -767,7 +766,7 @@ class _EdenLRU(_SizedLRU):
             eden_oldest = self.get_LRU()
             if eden_oldest.key is key:
                 break
-            self.decrement_size(eden_oldest)
+
             #assert eden_oldest.__parent__ is None
             #assert eden_oldest._Persistent__ring is None
 
@@ -807,6 +806,10 @@ class _ProtectedLRU(_SizedLRU):
     #def add_MRU(self, key, value):
     #    raise NotImplementedError("We only accept ownership")
 
+from .ring import _FFI_RING as ffi
+
+_lru_probation_on_hit = ffi.lru_probation_on_hit
+
 class _ProbationLRU(_SizedLRU):
 
     promote_count = 0
@@ -822,16 +825,20 @@ class _ProbationLRU(_SizedLRU):
         # Move the entry to the Protected LRU on its very first hit;
         # It will become the MRU there.
         #self.promote_count += 1
-        entry.frequency += 1 # duplicate super code to avoid method call
+        _lru_probation_on_hit(self._ring.ring_home,
+                              self.protected_lru._ring.ring_home,
+                              entry.cffi_ring_node)
+        entry.__parent__ = self.protected_lru
+    #     entry.frequency += 1 # duplicate super code to avoid method call
 
-    #     self._promote(entry)
+    # #     self._promote(entry)
 
-    # def _promote(self, entry):
+    # # def _promote(self, entry):
 
-        #self.decrement_size(entry)
-        self.size -= entry.len
+    #     #self.decrement_size(entry)
+    #     self.size -= entry.len
         protected_lru = self.protected_lru
-        protected_lru.take_ownership_of_entry_MRU(entry)
+    #     protected_lru.take_ownership_of_entry_MRU(entry)
 
 
         if protected_lru.over_size:
@@ -845,7 +852,7 @@ class _ProbationLRU(_SizedLRU):
             demoting_entry = protected_lru.get_LRU()
             if demoting_entry is not entry:
                 #protected_lru.decrement_size(demoting_entry)
-                protected_lru.size -= demoting_entry.len
+                #protected_lru.size -= demoting_entry.len
                 self.take_ownership_of_entry_MRU(demoting_entry)
     #           self._resize()
 

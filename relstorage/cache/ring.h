@@ -52,7 +52,7 @@ void ring_add(CPersistentRing *ring, CPersistentRing *elt);
 /* Remove elt from the list.  elt must already be in the list, although
  * this isn't checked.
  */
-void ring_del(CPersistentRing *elt);
+void ring_del(CPersistentRing* ring, CPersistentRing *elt);
 
 /* elt must already be in the list, although this isn't checked.  It's
  * unlinked from its current position, and relinked into the list as the
@@ -69,4 +69,16 @@ void ring_move_to_head(CPersistentRing *ring, CPersistentRing *elt);
 
 
 void
-ring_move_to_head_from_foreign(CPersistentRing* ring, CPersistentRing* elt);
+ring_move_to_head_from_foreign(CPersistentRing* current_ring,
+                               CPersistentRing* new_ring,
+                               CPersistentRing* elt);
+
+
+void lru_probation_on_hit(CPersistentRing* probation_ring,
+                          CPersistentRing* protected_ring,
+                          CPersistentRing* entry);
+
+void lru_update_mru(CPersistentRing* ring,
+                    CPersistentRing* entry,
+                    uint_fast64_t old_entry_size,
+                    uint_fast64_t new_entry_size);
