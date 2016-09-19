@@ -42,14 +42,24 @@ class SizedLRURingEntry(object):
     def __init__(self, key, value, parent):
         self.key = key
         self.value = value
-        #self.__parent__ = parent
-        handle = self.cffi_ring_handle = ffi_new_handle(self)
+
         # Passing the string is faster than passing a cdecl because we
         # have the string directly in bytecode without a lookup
-        node = self.cffi_ring_node = ffi_new('CPersistentRing*')
-        node.len = len(key) + len(value)
+        node = ffi_new('CPersistentRing*')
+        self.cffi_ring_node = node
+
+        # Directly setting attributes is faster than the initializer
+        handle = self.cffi_ring_handle = ffi_new_handle(self)
         node.user_data = handle
+        node.len = len(key) + len(value)
         node.frequency = 1
+
+    def reset(self, key, value):
+        self.key = key
+        self.value = value
+        node = self.cffi_ring_node
+        node.frequency = 1
+        node.len = len(key) + len(value)
 
     @property
     def __parent__(self):
@@ -158,9 +168,15 @@ class EdenLRU(SizedLRU):
         self._protected_lru_ring_home = protected_lru._ring.ring_home
         self._probation_lru_ring_home = probation_lru._ring.ring_home
         self.entry_dict = entry_dict
+        self._node_free_list = []
 
     def add_MRU(self, key, value):
-        new_entry = SizedLRURingEntry(key, value, self)
+        node_free_list = self._node_free_list
+        if node_free_list:
+            new_entry = node_free_list.pop()
+            new_entry.reset(key, value)
+        else:
+            new_entry = SizedLRURingEntry(key, value, self)
         rejected_items = _eden_add(self._ring.ring_home,
                                    self._protected_lru_ring_home,
                                    self._probation_lru_ring_home,
@@ -173,7 +189,10 @@ class EdenLRU(SizedLRU):
         dct = self.entry_dict
         node = rejected_items.r_next
         while node:
-            del dct[ffi_from_handle(node.user_data).key]
+            old_entry = dct.pop(ffi_from_handle(node.user_data).key)
+            node_free_list.append(old_entry)
+            old_entry.key = None
+            old_entry.value = None
             node = node.r_next
         return new_entry
 
