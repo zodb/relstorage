@@ -85,3 +85,9 @@ int lru_update_mru(CPersistentRing* ring,
                     CPersistentRing* entry,
                     uint_fast64_t old_entry_size,
                     uint_fast64_t new_entry_size);
+
+
+CPersistentRing eden_add(CPersistentRing* eden_ring,
+                         CPersistentRing* protected_ring,
+                         CPersistentRing* probation_ring,
+                         CPersistentRing* entry);

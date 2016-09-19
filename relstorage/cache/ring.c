@@ -46,6 +46,11 @@ static int ring_oversize(CPersistentRing* ring)
     return ring->frequency > ring->max_len;
 }
 
+static int ring_is_empty(CPersistentRing* ring)
+{
+    return ring == NULL || ring->r_next == ring || ring->r_next == NULL;
+}
+
 int
 ring_add(CPersistentRing *ring, CPersistentRing *elt)
 {
@@ -101,6 +106,10 @@ ring_move_to_head_from_foreign(CPersistentRing* current_ring,
 
 static CPersistentRing* ring_lru(CPersistentRing* ring)
 {
+    if(ring->r_next == ring) {
+        // empty list
+        return NULL;
+    }
     return ring->r_next;
 }
 
@@ -119,7 +128,7 @@ int lru_probation_on_hit(CPersistentRing* probation_ring,
 	// just added, or the ring only has one item left)
 	while( ring_oversize(protected_ring) && protected_ring->len > 1 ) {
         CPersistentRing* protected_lru = ring_lru(protected_ring);
-		if( protected_lru == entry ) {
+		if( protected_lru == entry || protected_lru == NULL) {
             break;
 		}
         ring_move_to_head_from_foreign(protected_ring, probation_ring, protected_lru);
@@ -138,4 +147,102 @@ int lru_update_mru(CPersistentRing* ring,
     ring->frequency += new_entry_size;
     ring_move_to_head(ring, entry);
     return ring->frequency > ring->max_len;
+}
+
+static int lru_will_fit(CPersistentRing* ring, CPersistentRing* entry)
+{
+    return ring->max_len >= (entry->len + ring->frequency);
+}
+
+CPersistentRing eden_add(CPersistentRing* eden_ring,
+                         CPersistentRing* protected_ring,
+                         CPersistentRing* probation_ring,
+                         CPersistentRing* entry)
+{
+    CPersistentRing rejects = {};
+    rejects.r_next = rejects.r_prev = NULL;
+
+    int eden_oversize = ring_add(eden_ring, entry);
+    if(!eden_oversize) {
+        return rejects;
+    }
+
+    // Ok, we have to move things. Begin by filling up the
+    // protected space
+    if( ring_is_empty(probation_ring) && !ring_oversize(protected_ring)) {
+        /*
+          # This is a modification of the algorithm. When we start out
+          # go ahead and populate the protected_lru directly
+          # from eden; only when its full do we start doing the probationary
+          # dance. This helps mitigate any issues with choosing segment sizes;
+          # we're going to occupy all the memory anyway, why not, it's reserved for us,
+          # so go ahead and fill it.
+        */
+        while(ring_oversize(eden_ring)) {
+            CPersistentRing* eden_oldest = ring_lru(eden_ring);
+            if(!eden_oldest || eden_oldest == entry) {
+                break;
+            }
+            if( !lru_will_fit(protected_ring, eden_oldest) ) {
+                /*
+                    # This would oversize protected. Move it to probation instead,
+                    # which is currently empty, so there's no need to choose a victim.
+                    # This may temporarily oversize us in the aggregate of the three.
+                */
+                ring_move_to_head_from_foreign(eden_ring, probation_ring, eden_oldest);
+                break;
+            }
+            else {
+                ring_move_to_head_from_foreign(eden_ring, protected_ring, eden_oldest);
+            }
+        }
+        return rejects;
+    }
+
+    // OK, we've already filled protected and have started putting
+    // things in probation. So we may need to choose victims.
+    // Initialize the list to hold them.
+    rejects.r_next = rejects.r_prev = &rejects;
+    while(ring_oversize(eden_ring)) {
+        CPersistentRing* eden_oldest = ring_lru(eden_ring);
+        if(!eden_oldest || eden_oldest == entry) {
+            break;
+        }
+
+        if(lru_will_fit(probation_ring, eden_oldest)){
+            // Good, there's room. No victims to choose.
+            ring_move_to_head_from_foreign(eden_ring, probation_ring, eden_oldest);
+        }
+        else {
+            // Darn, we're too big. We must choose (and record) a
+            // victim.
+            CPersistentRing* probation_oldest = ring_lru(probation_ring);
+            if(!probation_oldest) {
+                //Hmm, the ring got emptied, but there's also no space
+                //in protected. This must be a very large object. Take
+                //ownership of it anyway, but quite trying.
+               ring_move_to_head_from_foreign(eden_ring, probation_ring, eden_oldest);
+               break;
+            }
+
+            if(probation_oldest->frequency > eden_oldest->frequency) {
+                // Discard the eden entry, it's used less than the
+                // probation entry.
+                ring_move_to_head_from_foreign(eden_ring, &rejects, eden_oldest);
+            }
+            else {
+                // good bye to the item on probation.
+                ring_move_to_head_from_foreign(probation_ring, &rejects, probation_oldest);
+                // hello to eden item, who is now on probation
+                ring_move_to_head_from_foreign(eden_ring, probation_ring, eden_oldest);
+            }
+        }
+    }
+
+    // we return rejects by value, so the next/prev pointers that were
+    // initialized to its address here are now junk. break the link so
+    // we don't run into them.
+    rejects.r_prev->r_next = NULL;
+
+    return rejects;
 }
