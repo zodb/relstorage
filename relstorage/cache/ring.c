@@ -54,7 +54,6 @@ static int ring_is_empty(CPersistentRing* ring)
 int
 ring_add(CPersistentRing *ring, CPersistentRing *elt)
 {
-    assert(!elt->r_next);
     elt->r_next = ring;
     elt->r_prev = ring->r_prev;
     ring->r_prev->r_next = elt;
@@ -77,7 +76,9 @@ ring_del(CPersistentRing* ring, CPersistentRing *elt)
     elt->r_prev->r_next = elt->r_next;
     elt->r_next = NULL;
     elt->r_prev = NULL;
-    elt->r_parent = NULL;
+    // Leave the parent so the node can be reused; it gets reset
+    //anyway when it goes to a different list.
+    //elt->r_parent = NULL;
 
     ring->len -= 1;
     ring->frequency -= elt->len;
