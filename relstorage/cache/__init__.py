@@ -747,7 +747,8 @@ class _EdenLRU(_SizedLRU):
             # dance. This helps mitigate any issues with choosing segment sizes;
             # we're going to occupy all the memory anyway, why not, it's reserved for us,
             # so go ahead and fill it.
-            while self.size > self.limit:
+
+            while self.over_size:
                 eden_oldest = self.get_LRU()
                 if eden_oldest.key is key:
                     break
@@ -760,9 +761,10 @@ class _EdenLRU(_SizedLRU):
                     break
                 else:
                     protected_lru.take_ownership_of_entry_MRU(eden_oldest)
+
             return new_entry
 
-        while self.size > self.limit:
+        while self.over_size:
             eden_oldest = self.get_LRU()
             if eden_oldest.key is key:
                 break
@@ -798,7 +800,7 @@ class _EdenLRU(_SizedLRU):
 
                     probation_lru.take_ownership_of_entry_MRU(eden_oldest)
                     #assert eden_oldest.__parent__ is probation_lru
-
+            self.over_size = self.size > self.limit
         return new_entry
 
 class _ProtectedLRU(_SizedLRU):
@@ -825,10 +827,11 @@ class _ProbationLRU(_SizedLRU):
         # Move the entry to the Protected LRU on its very first hit;
         # It will become the MRU there.
         #self.promote_count += 1
-        _lru_probation_on_hit(self._ring.ring_home,
-                              self.protected_lru._ring.ring_home,
-                              entry.cffi_ring_node)
-        entry.__parent__ = self.protected_lru
+        protected_lru = self.protected_lru
+        protected_lru.over_size = _lru_probation_on_hit(self._ring.ring_home,
+                                                        protected_lru._ring.ring_home,
+                                                        entry.cffi_ring_node)
+        entry.__parent__ = protected_lru
     #     entry.frequency += 1 # duplicate super code to avoid method call
 
     # #     self._promote(entry)
@@ -837,7 +840,7 @@ class _ProbationLRU(_SizedLRU):
 
     #     #self.decrement_size(entry)
     #     self.size -= entry.len
-        protected_lru = self.protected_lru
+
     #     protected_lru.take_ownership_of_entry_MRU(entry)
 
 

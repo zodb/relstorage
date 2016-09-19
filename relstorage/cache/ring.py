@@ -199,7 +199,7 @@ else:
                                {'user_data': handle})
                 entry.cffi_ring_node = node
             assert node.user_data
-            _ring_add(self.ring_home, node)
+            return _ring_add(self.ring_home, node)
             #self.ring_home.len += 1
 
         def delete(self, pobj):
@@ -207,10 +207,7 @@ else:
                 raise KeyError("No items in ring %r" % self)
             its_node = pobj.cffi_ring_node
             #if its_node.r_next: # Don't do if null
-            _ring_del(self.ring_home, its_node)
-            #self.ring_home.len -= 1
-            return 1
-
+            return _ring_del(self.ring_home, its_node)
 
         def move_to_head(self, entry):
             _ring_move_to_head(self.ring_home, entry.cffi_ring_node)
@@ -230,8 +227,6 @@ else:
             for node in self.iteritems():
                 yield ffi_from_handle(node.user_data)
 
-
-
         def lru(self):
             return ffi_from_handle(self.ring_home.r_next.user_data)
 
@@ -250,14 +245,9 @@ else:
         #     return self.ring_to_obj[entry.cffi_ring_node.r_next]
 
         def move_entry_from_other_ring(self, entry, other_ring):
-            node = entry.cffi_ring_node
-            assert node is not None
-
-            #other_ring.delete(entry)
-
-            _ring_move_to_head_from_foreign(other_ring.ring_home,
-                                            self.ring_home,
-                                            node)
+            return _ring_move_to_head_from_foreign(other_ring.ring_home,
+                                                   self.ring_home,
+                                                   entry.cffi_ring_node)
 
 
 

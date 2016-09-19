@@ -53,6 +53,7 @@ ffi_new_handle = ffi.new_handle
 from .ring import _FFI_RING
 
 _lru_update_mru = _FFI_RING.lru_update_mru
+_ring_move_to_head_from_foreign = _FFI_RING.ring_move_to_head_from_foreign
 
 class SizedLRURingEntry(object):
 
@@ -95,9 +96,11 @@ class SizedLRU(object):
     def __init__(self, limit):
         self.limit = limit
         self._ring = Ring()
+        self._ring.ring_home.max_len = limit
         self.get_LRU = self._ring.lru
         self.make_MRU = self._ring.move_to_head
-        self.remove = self._ring.delete
+        self.remove = self.delete
+        self.over_size = False
 
     def __iter__(self):
         return iter(self._ring)
@@ -114,13 +117,9 @@ class SizedLRU(object):
     def size(self):
         return self._ring.ring_home.frequency
 
-    @property
-    def over_size(self):
-        return self.size > self.limit
-
     def add_MRU(self, key, value):
         entry = SizedLRURingEntry(key, value, self)
-        self._ring.add(entry)
+        self.over_size = self._ring.add(entry)
         #self.size += entry.len
         #entry.frequency += 1
         return entry
@@ -128,13 +127,15 @@ class SizedLRU(object):
     def take_ownership_of_entry_MRU(self, entry):
         #assert entry.__parent__ is None
         old_parent = entry.__parent__
-        assert old_parent is not None
-        assert old_parent is not self
 
         # But don't increment here, we're just moving
         # from one ring to another
-        self._ring.move_entry_from_other_ring(entry, old_parent._ring)
         entry.__parent__ = self
+        self.over_size = _ring_move_to_head_from_foreign(old_parent._ring.ring_home,
+                                                         self._ring.ring_home,
+                                                         entry.cffi_ring_node)
+
+        old_parent.over_size = old_parent.size > old_parent.limit
 
 
     def update_MRU(self, entry, value):
@@ -142,18 +143,11 @@ class SizedLRU(object):
         old_size = entry.len
         entry.set_value(value)
         new_size = entry.len
-        _lru_update_mru(self._ring.ring_home, entry.cffi_ring_node, old_size, new_size)
+        self.over_size = _lru_update_mru(self._ring.ring_home, entry.cffi_ring_node, old_size, new_size)
 
-    # def remove(self, entry):
-    #     #assert entry.__parent__ is self
-    #     self._ring.delete(entry)
-
-    #     # XXX We must leave these.
-    #     # All released versions of CFFI Ring don't clear this to None;
-    #     # that can cause a crash if there's a bug in our code and we reuse
-    #     # the node in the wrong place.
-    #     #entry._Persistent__ring = None
-    #     #entry.__parent__ = None
+    def delete(self, entry):
+        self._ring.delete(entry)
+        self.over_size = self.size > self.limit
 
     def on_hit(self, entry):
         #assert entry.__parent__ is self

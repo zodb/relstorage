@@ -754,8 +754,10 @@ class LocalClientTests(unittest.TestCase):
         self.assertEqual(list_lrukeys('protected'), [])
 
         k1_data = b'76543210' * 15
+
         c.set('k1', k1_data)
         self.assertEqual(len(c._bucket0), 2)
+
         self.assertEqual(c._bucket0.size, 23 * 2)
         # Since k0 would fit in protected and we had nothing in
         # probation, that's where it went

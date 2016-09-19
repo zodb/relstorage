@@ -38,7 +38,7 @@ starting with the most recently used object.
  * and `frequency` to record the sum of the `len` of the members.
  */
 
-void
+int
 ring_add(CPersistentRing *ring, CPersistentRing *elt)
 {
     assert(!elt->r_next);
@@ -49,6 +49,8 @@ ring_add(CPersistentRing *ring, CPersistentRing *elt)
 
     ring->frequency += elt->len;
     ring->len++;
+
+    return ring->frequency > ring->max_len;
 }
 
 void
@@ -77,32 +79,34 @@ ring_move_to_head(CPersistentRing *ring, CPersistentRing *elt)
     ring->r_prev = elt;
 }
 
-void
+int
 ring_move_to_head_from_foreign(CPersistentRing* current_ring,
                                CPersistentRing* new_ring,
                                CPersistentRing* elt)
 {
 	ring_del(current_ring, elt);
 	ring_add(new_ring, elt);
+    return new_ring->frequency > new_ring->max_len;
 }
 
 
-void lru_probation_on_hit(CPersistentRing* probation_ring,
-                          CPersistentRing* protected_ring,
-                          CPersistentRing* entry)
+int lru_probation_on_hit(CPersistentRing* probation_ring,
+                         CPersistentRing* protected_ring,
+                         CPersistentRing* entry)
 {
     entry->frequency++;
 
-    ring_move_to_head_from_foreign(probation_ring, protected_ring, entry);
+    return ring_move_to_head_from_foreign(probation_ring, protected_ring, entry);
 }
 
-void lru_update_mru(CPersistentRing* ring,
-                    CPersistentRing* entry,
-                    uint_fast64_t old_entry_size,
-                    uint_fast64_t new_entry_size)
+int lru_update_mru(CPersistentRing* ring,
+                   CPersistentRing* entry,
+                   uint_fast64_t old_entry_size,
+                   uint_fast64_t new_entry_size)
 {
     entry->frequency++;
     ring->frequency -= old_entry_size;
     ring->frequency += new_entry_size;
     ring_move_to_head(ring, entry);
+    return ring->frequency > ring->max_len;
 }
