@@ -33,8 +33,9 @@ object in it.
 */
 
 typedef struct CPersistentRing_struct {
-    struct CPersistentRing_struct *r_prev;
-    struct CPersistentRing_struct *r_next;
+    struct CPersistentRing_struct* r_prev;
+    struct CPersistentRing_struct* r_next;
+    void* r_parent;
     void* user_data;
     uint_fast64_t frequency;
     uint_fast64_t len;

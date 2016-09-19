@@ -826,50 +826,10 @@ class _ProbationLRU(_SizedLRU):
     def on_hit(self, entry):
         # Move the entry to the Protected LRU on its very first hit;
         # It will become the MRU there.
-        #self.promote_count += 1
         protected_lru = self.protected_lru
         protected_lru.over_size = _lru_probation_on_hit(self._ring.ring_home,
                                                         protected_lru._ring.ring_home,
                                                         entry.cffi_ring_node)
-        entry.__parent__ = protected_lru
-    #     entry.frequency += 1 # duplicate super code to avoid method call
-
-    # #     self._promote(entry)
-
-    # # def _promote(self, entry):
-
-    #     #self.decrement_size(entry)
-    #     self.size -= entry.len
-
-    #     protected_lru.take_ownership_of_entry_MRU(entry)
-
-
-        if protected_lru.over_size:
-    #         self._demote(entry)
-
-    # def _demote(self, entry):
-            #self.demote_count += 1
-            protected_lru = self.protected_lru
-            # Demote the LRU back to probation
-            # XXX LOOP
-            demoting_entry = protected_lru.get_LRU()
-            if demoting_entry is not entry:
-                #protected_lru.decrement_size(demoting_entry)
-                #protected_lru.size -= demoting_entry.len
-                self.take_ownership_of_entry_MRU(demoting_entry)
-    #           self._resize()
-
-    # def _resize(self):
-                # Resize, losing the oldest entries if needed.
-
-            # Note that we don't resize ourself here until
-            # an object is added from eden.
-                # dct = self.entry_dict
-                # while self.over_size:
-                #     self.remove_count += 1
-                #     lru = self.get_LRU()
-                #     self.remove(lru)
-                #     del dct[lru.key]
 
 
 class LocalClientBucket(object):

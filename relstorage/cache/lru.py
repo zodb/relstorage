@@ -49,6 +49,7 @@ this_dir = os.path.dirname(os.path.abspath(__file__))
 from .ring import ffi
 ffi_new = ffi.new
 ffi_new_handle = ffi.new_handle
+ffi_from_handle = ffi.from_handle
 
 from .ring import _FFI_RING
 
@@ -57,18 +58,22 @@ _ring_move_to_head_from_foreign = _FFI_RING.ring_move_to_head_from_foreign
 
 class SizedLRURingEntry(object):
 
-    __slots__ = ('key', 'value', '__parent__',
+    __slots__ = ('key', 'value',
                  'cffi_ring_node', 'cffi_ring_handle')
 
     def __init__(self, key, value, parent):
         self.key = key
         self.value = value
-        self.__parent__ = parent
+        #self.__parent__ = parent
         self.cffi_ring_handle = ffi_new_handle(self)
         self.cffi_ring_node = ffi_new('CPersistentRing*',
                                       {'len': len(key) + len(value),
                                        'user_data': self.cffi_ring_handle,
-                                       'frequency': 1})
+                                       'frequency': 1,
+                                       'r_parent': parent.cffi_handle})
+    @property
+    def __parent__(self):
+        return ffi_from_handle(self.cffi_ring_node.r_parent)
 
     @property
     def len(self):
@@ -95,8 +100,11 @@ class SizedLRU(object):
 
     def __init__(self, limit):
         self.limit = limit
+        self.cffi_handle = ffi_new_handle(self)
         self._ring = Ring()
         self._ring.ring_home.max_len = limit
+        self._ring.ring_home.r_parent = self.cffi_handle
+
         self.get_LRU = self._ring.lru
         self.make_MRU = self._ring.move_to_head
         self.remove = self.delete
@@ -130,7 +138,7 @@ class SizedLRU(object):
 
         # But don't increment here, we're just moving
         # from one ring to another
-        entry.__parent__ = self
+        #entry.__parent__ = self
         self.over_size = _ring_move_to_head_from_foreign(old_parent._ring.ring_home,
                                                          self._ring.ring_home,
                                                          entry.cffi_ring_node)
