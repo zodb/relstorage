@@ -841,8 +841,8 @@ class LocalClientTests(unittest.TestCase):
         self.assertEqual(c.get_multi(['k0', 'k1']), {'k0': b'abc', 'k1': b'ghi'})
 
     def test_mru_lru_ring(self):
-        from relstorage.cache import _SizedLRU
-        lru = _SizedLRU(100)
+        from relstorage.cache.lru import SizedLRU
+        lru = SizedLRU(100)
         entrya = lru.add_MRU(b'a', b'1')
         self.assertEqual(lru.get_LRU(), entrya)
 
