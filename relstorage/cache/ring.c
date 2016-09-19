@@ -252,3 +252,24 @@ CPersistentRing eden_add(CPersistentRing* eden_ring,
 
     return rejects;
 }
+
+static void lru_age_list(CPersistentRing* ring)
+{
+    if (ring_is_empty(ring)) {
+        return;
+    }
+    uint_fast64_t count = 0;
+    CPersistentRing* here = ring->r_next;
+    while (here != ring) {
+        count++;
+        here->frequency = here->frequency / 2;
+        here = here->r_next;
+    }
+}
+
+void lru_age_lists(CPersistentRing* ring1, CPersistentRing* ring2, CPersistentRing* ring3)
+{
+    lru_age_list(ring1);
+    lru_age_list(ring2);
+    lru_age_list(ring3);
+}

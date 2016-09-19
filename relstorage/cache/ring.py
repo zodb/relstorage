@@ -230,20 +230,6 @@ else:
         def lru(self):
             return ffi_from_handle(self.ring_home.r_next.user_data)
 
-        # def next_mru_to(self, entry):
-        #     """
-        #     Return the object that is the *next* most recently used, compared
-        #     to the given entry.
-        #     """
-        #     return self.ring_to_obj[entry.cffi_ring_node.r_prev]
-
-        # def next_lru_to(self, entry):
-        #     """
-        #     Return the object that is the *next* least recently used, compared
-        #     to the given entry.
-        #     """
-        #     return self.ring_to_obj[entry.cffi_ring_node.r_next]
-
         def move_entry_from_other_ring(self, entry, other_ring):
             return _ring_move_to_head_from_foreign(other_ring.ring_home,
                                                    self.ring_home,

@@ -720,6 +720,7 @@ class StorageCache(object):
 
 _OSA = object.__setattr__
 
+from .lru import SizedLRU
 from .lru import ProtectedLRU
 from .lru import ProbationLRU
 from .lru import EdenLRU
@@ -824,14 +825,13 @@ class LocalClientBucket(object):
         age_period = self._age_factor * len(dct)
         operations = self._hits + self._sets
         if operations - self._aged_at > age_period:
-            now = time.time()
-            log.info("Beginning frequency aging for %d cache entries",
-                     len(dct))
             self._aged_at = operations
-            for entry in itervalues(dct):
-                entry.frequency //= 2
+            now = time.time()
+            log.debug("Beginning frequency aging for %d cache entries",
+                     len(dct))
+            SizedLRU.age_lists(self._eden, self._probation, self._protected)
             done = time.time()
-            log.info("Aged %d cache entries in %s", done - now)
+            log.debug("Aged %d cache entries in %s", done - now)
         return self._aged_at
 
     def __setitem__(self, key, value):

@@ -33,6 +33,7 @@ _ring_move_to_head_from_foreign = _FFI_RING.ring_move_to_head_from_foreign
 _lru_probation_on_hit = _FFI_RING.lru_probation_on_hit
 _eden_add = _FFI_RING.eden_add
 _lru_on_hit = _FFI_RING.lru_on_hit
+_lru_age_lists = _FFI_RING.lru_age_lists
 
 class SizedLRURingEntry(object):
 
@@ -88,6 +89,10 @@ class SizedLRU(object):
     A LRU list that keeps track of its size.
     """
 
+    @classmethod
+    def age_lists(cls, a, b, c):
+        _lru_age_lists(a._ring_home, b._ring_home, c._ring_home)
+
     def __init__(self, limit):
         self.limit = limit
         self.cffi_handle = ffi_new_handle(self)
@@ -110,11 +115,11 @@ class SizedLRU(object):
     __nonzero__ = __bool__ # Python 2
 
     def __len__(self):
-        return self._ring.ring_home.len
+        return self._ring_home.len
 
     @property
     def size(self):
-        return self._ring.ring_home.frequency
+        return self._ring_home.frequency
 
     def add_MRU(self, key, value):
         entry = SizedLRURingEntry(key, value, self)
