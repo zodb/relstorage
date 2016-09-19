@@ -225,7 +225,7 @@ else:
             node = ffi_new("CPersistentRing*")
             _ring_add(self.ring_home, node)
             self.ring_to_obj[node] = pobj
-            _OSA(pobj, 'cffi_ring_node', node)
+            pobj.cffi_ring_node = node
 
         def delete(self, pobj):
             its_node = pobj.cffi_ring_node
