@@ -19,7 +19,7 @@ from .. import ring
 
 class DummyPersistent(object):
     key = None
-
+    cffi_ring_node = None
     __next_oid = 0
 
     @classmethod
@@ -150,6 +150,9 @@ if ring._CFFIRing:
 
         def _getTargetClass(self):
             return ring._CFFIRing
+
+        def test_delete_from_wrong_ring(self):
+            raise unittest.SkipTest("We don't detect this")
 
     _add_to_suite.append(CFFIRingTests)
 

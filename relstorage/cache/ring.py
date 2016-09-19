@@ -91,37 +91,6 @@ class IRing(Interface):
         undefined consequences.
         """
 
-class LRURingEntry(object):
-
-    # _p_oid is what the persistent.ring.Ring implementations use as their
-    # key.
-    # _Persistent__ring is a private implementation detail---the CFFI
-    # version has to maintain a reference to the C Node structure and it uses
-    # this.
-    # value is self-explanatory.
-    __slots__ = ('key', 'cffi_ring_node',
-                 'value', '__parent__', 'frequency',
-                 'len')
-
-    def __init__(self, key, value, parent):
-        self.key = key
-        self.value = value
-        self.len = len(key) + len(value)
-        self.frequency = 0
-        self.__parent__ = parent
-        self.cffi_ring_node = None
-
-    def set_value(self, value):
-        self.value = value
-        self.len = len(self.key) + len(value)
-
-    def __len__(self):
-        return self.len
-
-    def __repr__(self):
-        return ("<%s key=%r f=%d size=%d>" %
-                (type(self).__name__, self._p_oid, self.frequency, self.len))
-
 from collections import deque
 
 @implementer(IRing)
@@ -185,6 +154,7 @@ else:
         ffi.cdef(f.read())
 
     _FFI_RING = ffi.verify("""
+    #include "lru.h"
     #include "ring.c"
     """, include_dirs=[this_dir])
 
@@ -193,6 +163,8 @@ else:
     _ring_del = _FFI_RING.ring_del
     _ring_add = _FFI_RING.ring_add
     ffi_new = ffi.new
+    ffi_new_handle = ffi.new_handle
+    ffi_from_handle = ffi.from_handle
 
     #pylint: disable=E1101
     @implementer(IRing)
@@ -201,37 +173,45 @@ else:
         A ring backed by a C implementation. All operations are constant time.
 
         It is only available on platforms with ``cffi`` installed.
+
+        You must keep the entries alive! Otherwise memory will be freed.
         """
 
-        __slots__ = ('ring_home', 'ring_to_obj')
-
-        def __init__(self):
-            node = self.ring_home = ffi.new("CPersistentRing*")
+        def __init__(self, ring_type='CPersistentRing*', ffi=ffi):
+            self.ring_type = ring_type
+            node = self.ring_home = ffi.new(self.ring_type)
             node.r_next = node
             node.r_prev = node
 
-            # In order for the CFFI objects to stay alive, we must keep
-            # a strong reference to them, otherwise they get freed. We must
-            # also keep strong references to the objects so they can be deactivated
-            self.ring_to_obj = dict()
-
         def __len__(self):
-            return len(self.ring_to_obj)
+            return self.ring_home.len
 
-        def __contains__(self, pobj):
-            return getattr(pobj, 'cffi_ring_node', self) in self.ring_to_obj
+        def __contains__(self, k):
+            import warnings
+            warnings.warn("Contains is linear", stacklevel=2)
+            return k in list(self)
 
-        def add(self, pobj):
-            node = ffi_new("CPersistentRing*")
+        def add(self, entry):
+            node = entry.cffi_ring_node
+            if node is None:
+                handle = ffi_new_handle(entry)
+                entry.cffi_ring_handle = handle
+                node = ffi_new(self.ring_type,
+                               {'user_data': handle})
+                entry.cffi_ring_node = node
+            assert node.user_data
             _ring_add(self.ring_home, node)
-            self.ring_to_obj[node] = pobj
-            pobj.cffi_ring_node = node
+            self.ring_home.len += 1
 
         def delete(self, pobj):
+            if not self.ring_home.len:
+                raise KeyError("No items in ring %r" % self)
             its_node = pobj.cffi_ring_node
-            del self.ring_to_obj[its_node]
+            #if its_node.r_next: # Don't do if null
             _ring_del(its_node)
+            self.ring_home.len -= 1
             return 1
+            raise KeyError()
 
         def move_to_head(self, entry):
             _ring_move_to_head(self.ring_home, entry.cffi_ring_node)
@@ -248,26 +228,27 @@ else:
                 here = here.r_next
 
         def __iter__(self):
-            ring_to_obj = self.ring_to_obj
             for node in self.iteritems():
-                yield ring_to_obj[node]
+                yield ffi_from_handle(node.user_data)
+
+
 
         def lru(self):
-            return self.ring_to_obj[self.ring_home.r_next]
+            return ffi_from_handle(self.ring_home.r_next.user_data)
 
-        def next_mru_to(self, entry):
-            """
-            Return the object that is the *next* most recently used, compared
-            to the given entry.
-            """
-            return self.ring_to_obj[entry.cffi_ring_node.r_prev]
+        # def next_mru_to(self, entry):
+        #     """
+        #     Return the object that is the *next* most recently used, compared
+        #     to the given entry.
+        #     """
+        #     return self.ring_to_obj[entry.cffi_ring_node.r_prev]
 
-        def next_lru_to(self, entry):
-            """
-            Return the object that is the *next* least recently used, compared
-            to the given entry.
-            """
-            return self.ring_to_obj[entry.cffi_ring_node.r_next]
+        # def next_lru_to(self, entry):
+        #     """
+        #     Return the object that is the *next* least recently used, compared
+        #     to the given entry.
+        #     """
+        #     return self.ring_to_obj[entry.cffi_ring_node.r_next]
 
         def move_entry_from_other_ring(self, entry, other_ring):
             node = entry.cffi_ring_node
@@ -276,7 +257,9 @@ else:
             #other_ring.delete(entry)
 
             _ring_move_to_head_from_foreign(self.ring_home, node)
-            self.ring_to_obj[node] = entry
+            self.ring_home.len += 1
+            other_ring.ring_home.len -= 1
+
 
 
 # Export the best available implementation

@@ -481,7 +481,9 @@ class LocalClientBucketTests(unittest.TestCase):
         self.assertEqual(stored, 0)
         self.assertEqual(2, len(client1))
 
+
         # Half duplicate keys
+        self.assertEqual(2, len(client1))
         del client1['abc']
         self.assertEqual(1, len(client1))
 
@@ -667,11 +669,10 @@ class LocalClientTests(unittest.TestCase):
             # they have been promoted)
 
 
-        # x0 and x1 started in eden and got promoted to the main ring.
-        # x2 was pushed out of eden and the main ring was full.
+        # x0 and x1 started in eden and got promoted to the probation ring,
+        # from whence they were ejected because of never being accessed.
         # k2 was allowed to remain because it'd been accessed
         # more often
-
         self.assertEqual(list_lrukeys('eden'), ['x3'])
         self.assertEqual(list_lrukeys('probation'), ['x2'])
         self.assertEqual(list_lrukeys('protected'), ['k0', 'k3', 'k2', 'k1'])

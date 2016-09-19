@@ -32,10 +32,12 @@ bumped at least once, the list does hold a strong reference to each
 object in it.
 */
 
-typedef struct CPersistentRing_struct
-{
+typedef struct CPersistentRing_struct {
     struct CPersistentRing_struct *r_prev;
     struct CPersistentRing_struct *r_next;
+    void* user_data;
+    uint_fast64_t frequency;
+    uint_fast64_t len;
 } CPersistentRing;
 
 /* The list operations here take constant time independent of the

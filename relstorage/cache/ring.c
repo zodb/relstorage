@@ -29,7 +29,9 @@ starting with the most recently used object.
 
 #include <stddef.h>
 #include <assert.h>
+#ifndef __RING_H
 #include "ring.h"
+#endif
 
 void
 ring_add(CPersistentRing *ring, CPersistentRing *elt)
@@ -44,6 +46,9 @@ ring_add(CPersistentRing *ring, CPersistentRing *elt)
 void
 ring_del(CPersistentRing *elt)
 {
+	if( elt->r_next == NULL && elt->r_prev == NULL)
+		return;
+
     elt->r_next->r_prev = elt->r_prev;
     elt->r_prev->r_next = elt->r_next;
     elt->r_next = NULL;
