@@ -43,12 +43,14 @@ class SizedLRURingEntry(object):
         self.key = key
         self.value = value
         #self.__parent__ = parent
-        self.cffi_ring_handle = ffi_new_handle(self)
-        self.cffi_ring_node = ffi_new('CPersistentRing*',
-                                      {'len': len(key) + len(value),
-                                       'user_data': self.cffi_ring_handle,
-                                       'frequency': 1,
-                                       'r_parent': parent.cffi_handle})
+        handle = self.cffi_ring_handle = ffi_new_handle(self)
+        # Passing the string is faster than passing a cdecl because we
+        # have the string directly in bytecode without a lookup
+        node = self.cffi_ring_node = ffi_new('CPersistentRing*')
+        node.len = len(key) + len(value)
+        node.user_data = handle
+        node.frequency = 1
+
     @property
     def __parent__(self):
         return ffi_from_handle(self.cffi_ring_node.r_parent)
