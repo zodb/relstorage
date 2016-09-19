@@ -129,6 +129,7 @@ class _DequeRing(object):
                 del self.ring[i]
                 self.ring_oids.discard(pobj._p_oid)
                 return 1
+        raise KeyError(pobj)
 
     def move_to_head(self, pobj):
         self.delete(pobj)
@@ -163,10 +164,17 @@ else:
     _OGA = object.__getattribute__
     _OSA = object.__setattr__
 
+    _ring_move_to_head = _FFI_RING.ring_move_to_head
+    _ring_move_to_head_from_foreign = _FFI_RING.ring_move_to_head_from_foreign
+    _ring_del = _FFI_RING.ring_del
+    _ring_add = _FFI_RING.ring_add
+    ffi_new = ffi.new
+
     #pylint: disable=E1101
     @implementer(IRing)
     class _CFFIRing(object):
-        """A ring backed by a C implementation. All operations are constant time.
+        """
+        A ring backed by a C implementation. All operations are constant time.
 
         It is only available on platforms with ``cffi`` installed.
         """
@@ -190,21 +198,19 @@ else:
             return getattr(pobj, '_Persistent__ring', self) in self.ring_to_obj
 
         def add(self, pobj):
-            node = ffi.new("CPersistentRing*")
-            _FFI_RING.ring_add(self.ring_home, node)
+            node = ffi_new("CPersistentRing*")
+            _ring_add(self.ring_home, node)
             self.ring_to_obj[node] = pobj
             _OSA(pobj, '_Persistent__ring', node)
 
         def delete(self, pobj):
-            its_node = getattr(pobj, '_Persistent__ring', None)
-            our_obj = self.ring_to_obj.pop(its_node, None)
-            if its_node is not None and our_obj is not None and its_node.r_next:
-                _FFI_RING.ring_del(its_node)
-                return 1
+            its_node = pobj._Persistent__ring
+            del self.ring_to_obj[its_node]
+            _ring_del(its_node)
+            return 1
 
-        def move_to_head(self, pobj):
-            node = _OGA(pobj, '_Persistent__ring')
-            _FFI_RING.ring_move_to_head(self.ring_home, node)
+        def move_to_head(self, entry):
+            _ring_move_to_head(self.ring_home, entry._Persistent__ring)
 
         def delete_all(self, indexes_and_values):
             for _, value in indexes_and_values:
@@ -221,6 +227,33 @@ else:
             ring_to_obj = self.ring_to_obj
             for node in self.iteritems():
                 yield ring_to_obj[node]
+
+        def lru(self):
+            return self.ring_to_obj[self.ring_home.r_next]
+
+        def next_mru_to(self, entry):
+            """
+            Return the object that is the *next* most recently used, compared
+            to the given entry.
+            """
+            return self.ring_to_obj[entry._Persistent__ring.r_prev]
+
+        def next_lru_to(self, entry):
+            """
+            Return the object that is the *next* least recently used, compared
+            to the given entry.
+            """
+            return self.ring_to_obj[entry._Persistent__ring.r_next]
+
+        def move_entry_from_other_ring(self, entry, other_ring):
+            node = entry._Persistent__ring
+            assert node is not None
+
+            #other_ring.delete(entry)
+
+            _ring_move_to_head_from_foreign(self.ring_home, node)
+            self.ring_to_obj[node] = entry
+
 
 # Export the best available implementation
 Ring = _CFFIRing if _CFFIRing else _DequeRing

@@ -1113,11 +1113,10 @@ def local_benchmark():
     for group in key_groups:
         for key in group:
             ALL_DATA[key] = random_data
-
+    assert all(isinstance(k, str) for k in ALL_DATA)
     ALL_DATA = list(ALL_DATA.items())
     ALL_DATA.sort(key=lambda x: hash(x[0]))
     print(len(ALL_DATA), sum((len(v[1]) for v in ALL_DATA))/1024/1024)
-    assert all(isinstance(k, str) for k in ALL_DATA)
 
 
     def do_times(client_type=LocalClient):

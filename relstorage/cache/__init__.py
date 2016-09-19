@@ -25,57 +25,6 @@ if Ring.__name__ == '_DequeRing': # pragma: no cover
     import warnings
     warnings.warn("Install CFFI for best cache performance")
 
-    class Ring(Ring):
-
-        def lru(self):
-            return self.ring[0]
-
-else:
-    from .ring import _FFI_RING
-
-    _ring_move_to_head = _FFI_RING.ring_move_to_head
-    _ring_move_to_head_from_foreign = _FFI_RING.ring_move_to_head_from_foreign
-
-    class Ring(Ring):
-
-        def lru(self):
-            return self.ring_to_obj[self.ring_home.r_next]
-
-        def next_mru_to(self, entry):
-            """
-            Return the object that is the *next* most recently used, compared
-            to the given entry.
-            """
-            return self.ring_to_obj[entry._Persistent__ring.r_prev]
-
-        def next_lru_to(self, entry):
-            """
-            Return the object that is the *next* least recently used, compared
-            to the given entry.
-            """
-            return self.ring_to_obj[entry._Persistent__ring.r_next]
-
-        def move_entry_from_other_ring(self, entry, other_ring):
-            node = entry._Persistent__ring
-            assert node is not None
-
-            #other_ring.delete(entry)
-
-            _ring_move_to_head_from_foreign(self.ring_home, node)
-            self.ring_to_obj[node] = entry
-
-        def move_to_head(self, entry):
-            _ring_move_to_head(self.ring_home, entry._Persistent__ring)
-
-        def XXdelete(self, entry):
-            node = entry._Persistent__ring
-            del self.ring_to_obj[node]
-            node.r_next.r_prev = node.r_prev
-            node.r_prev.r_next = node.r_next
-            # XXX: We leave these dangling
-            # node.r_next = node.r_prev = _FFI_RING.NULL
-
-
 import importlib
 import logging
 import threading

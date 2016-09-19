@@ -80,7 +80,7 @@ class _Ring_Base(object):
         self.assertEqual(0, len(r))
         self.assertFalse(p in r)
 
-        r.delete(p)
+        self.assertRaises(KeyError, r.delete, p)
         self.assertEqual(0, len(r))
         self.assertFalse(p in r)
 
@@ -93,7 +93,7 @@ class _Ring_Base(object):
         r1.add(p1)
         r2.add(p2)
 
-        r2.delete(p1)
+        self.assertRaises(KeyError, r2.delete, p1)
 
         self.assertEqual(1, len(r1))
         self.assertEqual(1, len(r2))
