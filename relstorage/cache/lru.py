@@ -110,7 +110,7 @@ class SizedLRU(object):
         return iter(self._ring)
 
     def __bool__(self):
-        return bool(len(self._ring))
+        return bool(self._ring_home.len)
 
     __nonzero__ = __bool__ # Python 2
 

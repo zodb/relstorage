@@ -812,9 +812,10 @@ class LocalClientBucket(object):
 
     def _age(self):
         # Age only when we're full and would thus need to evict; this
-        # makes initial population faster.
-        if self.size < self.limit:
-            return
+        # makes initial population faster. It's cheaper to calculate this
+        # AFTER the operations, though, because we read it from C.
+        #if self.size < self.limit:
+        #    return
 
         # Age the whole thing periodically based on the number of
         # operations we've done that would have altered popularity.
@@ -824,14 +825,18 @@ class LocalClientBucket(object):
         dct = self._dict
         age_period = self._age_factor * len(dct)
         operations = self._hits + self._sets
-        if operations - self._aged_at > age_period:
-            self._aged_at = operations
-            now = time.time()
-            log.debug("Beginning frequency aging for %d cache entries",
-                     len(dct))
-            SizedLRU.age_lists(self._eden, self._probation, self._protected)
-            done = time.time()
-            log.debug("Aged %d cache entries in %s", done - now)
+        if operations - self._aged_at < age_period:
+            return
+        if self.size < self.limit:
+            return
+
+        self._aged_at = operations
+        now = time.time()
+        log.debug("Beginning frequency aging for %d cache entries",
+                 len(dct))
+        SizedLRU.age_lists(self._eden, self._probation, self._protected)
+        done = time.time()
+        log.debug("Aged %d cache entries in %s", done - now)
         return self._aged_at
 
     def __setitem__(self, key, value):
