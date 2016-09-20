@@ -265,7 +265,7 @@ class SizedLRUMapping(object):
             data = self._dict
             main = self._eden
             ring_add = main.add_MRU
-            limit = main.limit
+            limit = self.limit
             # Cache and track the size locally so we're not
             # reading from CFFI every time.
             size = self.size
@@ -339,8 +339,17 @@ class SizedLRUMapping(object):
         # workload may be very different than the one that wrote this cache file. Allow
         # the new process to build up its own frequencies.
 
-        entries = list(sorted((e for e in itervalues(self._dict)),
-                              key=lambda e: e.frequency))
+        # Also note that entries with the same frequency are stored in the order of iteration.
+        # Sorting is guaranteed to be stable, so this means that MRU of the same frequency comes
+        # before less recently used.
+
+        # We get the entries from our MRU lists (in careful order) rather than from the dict
+        # so that we have stable iteration order regardless of PYTHONHASHSEED or insertion order.
+
+        entries = list(self._probation)
+        entries.extend(self._protected)
+        entries.extend(self._eden)
+        entries.sort(key=lambda e: e.frequency) # Adding key as a tie-breaker makes no sense, and is slow
 
         assert len(entries) == len(self._dict)
 
