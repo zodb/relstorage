@@ -373,11 +373,11 @@ class StorageCacheTests(unittest.TestCase):
         self.assertEqual(c.delta_after1, {})
 
 
-class LocalClientBucketTests(unittest.TestCase):
+class SizedLRUMappingTests(unittest.TestCase):
 
     def getClass(self):
-        from relstorage.cache import LocalClientBucket
-        return LocalClientBucket
+        from relstorage.cache.mapping import SizedLRUMapping
+        return SizedLRUMapping
 
     def test_set_bytes_value(self):
         b = self.getClass()(100)
@@ -962,7 +962,8 @@ class MockPoller(object):
                 if tid > after_tid and tid <= last_tid)
 
 def local_benchmark():
-    from relstorage.cache import LocalClient, LocalClientBucket
+    from relstorage.cache.mapping import SizedLRUMapping
+    from relstorage.cache import LocalClient
     options = MockOptions()
     options.cache_local_mb = 100
     options.cache_local_compression = 'none'
@@ -1219,7 +1220,8 @@ def local_benchmark():
     do_times()
 
 def save_load_benchmark():
-    from relstorage.cache import LocalClientBucket, _Loader
+    from relstorage.cache.mapping import SizedLRUMapping as LocalClientBucket
+    from relstorage.cache import _Loader
     from io import BytesIO
     import os
     import itertools
@@ -1297,7 +1299,7 @@ def save_load_benchmark():
 def test_suite():
     suite = unittest.TestSuite()
     suite.addTest(unittest.makeSuite(StorageCacheTests))
-    suite.addTest(unittest.makeSuite(LocalClientBucketTests))
+    suite.addTest(unittest.makeSuite(SizedLRUMappingTests))
     suite.addTest(unittest.makeSuite(LocalClientTests))
     return suite
 
