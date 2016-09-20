@@ -786,6 +786,7 @@ class LocalClientBucket(object):
         self._misses = 0
         self._sets = 0
         self.limit = limit
+        self._next_age_at = 1000
 
     @property
     def size(self):
@@ -796,6 +797,7 @@ class LocalClientBucket(object):
         self._misses = 0
         self._sets = 0
         self._aged_at = 0
+        self._next_age_at = 0
 
     def stats(self):
         total = self._hits + self._misses
@@ -830,6 +832,7 @@ class LocalClientBucket(object):
         age_period = self._age_factor * len(dct)
         operations = self._hits + self._sets
         if operations - self._aged_at < age_period:
+            self._next_age_at = age_period
             return
         if self.size < self.limit:
             return
@@ -841,6 +844,9 @@ class LocalClientBucket(object):
         SizedLRU.age_lists(self._eden, self._probation, self._protected)
         done = time.time()
         log.debug("Aged %d cache entries in %s", done - now)
+
+        self._next_age_at = int(self._aged_at * 1.5) # in case the dict shrinks
+
         return self._aged_at
 
     def __setitem__(self, key, value):
@@ -870,7 +876,10 @@ class LocalClientBucket(object):
         self._sets += 1
 
         # Do we need to move this up above the eviction choices?
-        self._age()
+        # Inline some of the logic about whether to age or not; avoiding the
+        # call helps speed
+        if self._hits + self._sets > self._next_age_at:
+            self._age()
 
         return True
 
