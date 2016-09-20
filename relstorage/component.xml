@@ -86,6 +86,9 @@
     <key name="cache-local-dir-compress" datatype="boolean" required="no" default="false">
       <description>See the RelStorage README.txt file.</description>
     </key>
+    <key name="cache-local-dir-write-max-size" datatype="byte-size" required="no" default="0">
+      <description>See the RelStorage README.txt file.</description>
+    </key>
     <key name="cache-local-object-max" datatype="byte-size" required="no">
       <description>See the RelStorage README.txt file.</description>
     </key>

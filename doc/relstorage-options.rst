@@ -441,6 +441,21 @@ cache-local-dir-read-count
 
         .. versionadded:: 2.0b5
 
+cache-local-dir-write-max-size
+        The *approximate* maximum size of each individual cache file
+        on disk. When not specified (the default), the maximum file
+        size will be the same as ``cache-local-mb``.
+
+        This is an approximate number because there is some overhead
+        associated with the storage format that varies based on the
+        number of entries in the cache.
+
+        RelStorage will write to disk, from most important to least
+        important, the entries in the cache until all the entries are
+        written or this limit is reached. If you use a size smaller
+        than ``cache-local-mb``, however, you may miss important
+        entries that are only used at application startup.
+
 Remote Caching
 --------------
 
