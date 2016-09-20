@@ -406,13 +406,13 @@ class SizedLRUMappingTests(unittest.TestCase):
         reader = _Loader._gzip_file(options, None, bio, mode='rb')
         return bucket.load_from_file(reader)
 
-    def _save(self, bio, bucket, options):
+    def _save(self, bio, bucket, options, byte_limit=None):
         from relstorage.cache import _persistence as _Loader
         bio.seek(0)
         if options.cache_local_dir_compress:
             self.assertEqual(".rscache.gz", _Loader._gzip_ext(options))
         writer = _Loader._gzip_file(options, None, bio, mode='wb')
-        bucket.write_to_file(writer)
+        bucket.write_to_file(writer, byte_limit or options.cache_local_dir_write_max_size)
         writer.flush()
         if writer is not bio:
             writer.close()
@@ -489,9 +489,11 @@ class SizedLRUMappingTests(unittest.TestCase):
         client1._age_factor = 0
         client1._age()
         client1._age()
+        self.assertEqual(len(client1), 2)
+        self.assertEqual(client1.size, client1_max_size)
 
         bio = BytesIO()
-        self._save(bio, client1, options)
+        self._save(bio, client1, options, client1_max_size * 2)
 
 
         client1 = self.getClass()(100)
@@ -499,6 +501,13 @@ class SizedLRUMappingTests(unittest.TestCase):
         self.assertEqual(count, 2)
         self.assertEqual(stored, 2)
         self.assertEqual(client1.size, client1_max_size)
+
+        def list_lrukeys(lru_name):
+            # Remember, these lists will be from LRU to MRU
+            return [e.key for e in getattr(client1, '_' + lru_name)]
+        self.assertEqual(list_lrukeys('eden'), ['abc'])
+        self.assertEqual(list_lrukeys('probation'), [])
+        self.assertEqual(list_lrukeys('protected'), ['def'])
 
 
     def test_load_and_store_to_gzip(self):

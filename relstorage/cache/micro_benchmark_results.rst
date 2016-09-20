@@ -195,4 +195,13 @@ write average 7.996576041332446 stddev 0.05586695632417015
 
 .. note:: In this version, even though there are 651,065 objects for a
           total size of 524,285,508, we're only loading/storing
-          521,182 of them (because we're only filling the protected space).
+          521,182 of them (because we're only filling the protected
+          space).
+
+When we stop aging an write and limit simply by byte count, and start
+flowing items through eden, not just the protected ring, our write
+time goes back to about 2.6s, while (with some other optimizations)
+our read time decreases to 1.1s, giving these benchmarks:
+
+read  average 3.9413027376673804 stddev 0.24814264079261292
+write average 8.434393537667347 stddev 0.155851543062577

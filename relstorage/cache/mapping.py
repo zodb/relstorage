@@ -263,23 +263,24 @@ class SizedLRUMapping(object):
 
             # local optimizations
             data = self._dict
-            main = self._protected
+            main = self._eden
             ring_add = main.add_MRU
             limit = main.limit
-
-            # Need to reoptimize this.
-#            size = self.size # update locally, copy back at end
+            # Cache and track the size locally so we're not
+            # reading from CFFI every time.
+            size = self.size
 
             for k, v in entries:
                 if k in data:
                     continue
 
-                if main.size >= limit:
-                    break
-
-                data[k] = ring_add(k, v)
+                entry = data[k] = ring_add(k, v)
+                size += entry.len
 
                 stored += 1
+
+                if size >= limit:
+                    break
 
             return stored
 
@@ -301,7 +302,7 @@ class SizedLRUMapping(object):
                  count, stored, cache_file, then - now)
         return count, stored
 
-    def write_to_file(self, cache_file):
+    def write_to_file(self, cache_file, byte_limit=None):
         now = time.time()
         # pickling the items is about 3x faster than marshal
 
@@ -321,10 +322,9 @@ class SizedLRUMapping(object):
 
         dump(self._FILE_VERSION) # Version marker
 
-        # Dump all the entries in increasing order of popularity (
-        # so that when we read them back in the least popular items end up LRU).
-        # Anything with a popularity of 0 probably hasn't been accessed in a long
-        # time, so don't dump it.
+        # Dump all the entries in increasing order of popularity (so
+        # that when we read them back in the least popular items end
+        # up LRU).
 
         # Note that we write the objects, regardless of frequency. We
         # don't age them here, either. This is one of the goals of the
@@ -334,20 +334,21 @@ class SizedLRUMapping(object):
         # at least have a very low frequency. But if they're still here,
         # go ahead and write them.
 
-
-        # Maybe we should fill up probation and eden too. We probably
-        # want to allow the user to specify a size limit at this
-        # point.
+        # Also note that we *do not* try to preserve the frequency in the cache file.
+        # If we did, that would penalize new entries that the new process creates. It's
+        # workload may be very different than the one that wrote this cache file. Allow
+        # the new process to build up its own frequencies.
 
         entries = list(sorted((e for e in itervalues(self._dict)),
                               key=lambda e: e.frequency))
 
         assert len(entries) == len(self._dict)
 
-        # Don't bother writing more than we'll be able to store.
+        # Write up to the byte limit
         count_written = 0
         bytes_written = 0
-        byte_limit = self._protected.limit
+        if not byte_limit:
+            byte_limit = self.limit
         for entry in entries:
             bytes_written += entry.len
             count_written += 1
@@ -358,6 +359,6 @@ class SizedLRUMapping(object):
 
         then = time.time()
         stats = self.stats()
-        log.info("Wrote %d items to %s in %s. Total hits %s; misses %s; ratio %s",
-                 count_written, cache_file, then - now,
+        log.info("Wrote %d items (%d bytes) to %s in %s. Total hits %s; misses %s; ratio %s",
+                 count_written, bytes_written, cache_file, then - now,
                  stats['hits'], stats['misses'], stats['ratio'])
