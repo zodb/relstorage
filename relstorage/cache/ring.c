@@ -51,7 +51,7 @@ static int ring_is_empty(CPersistentRing* ring)
     return ring == NULL || ring->r_next == ring || ring->r_next == NULL;
 }
 
-int
+void
 ring_add(CPersistentRing *ring, CPersistentRing *elt)
 {
     elt->r_next = ring;
@@ -63,7 +63,6 @@ ring_add(CPersistentRing *ring, CPersistentRing *elt)
     ring->frequency += elt->len;
     ring->len++;
 
-    return ring_oversize(ring);
 }
 
 void
@@ -95,7 +94,7 @@ ring_move_to_head(CPersistentRing *ring, CPersistentRing *elt)
     ring->r_prev = elt;
 }
 
-int
+static int
 ring_move_to_head_from_foreign(CPersistentRing* current_ring,
                                CPersistentRing* new_ring,
                                CPersistentRing* elt)
@@ -120,14 +119,14 @@ void lru_on_hit(CPersistentRing* ring, CPersistentRing* entry)
     ring_move_to_head(ring, entry);
 }
 
-int lru_probation_on_hit(CPersistentRing* probation_ring,
+void lru_probation_on_hit(CPersistentRing* probation_ring,
                          CPersistentRing* protected_ring,
                          CPersistentRing* entry)
 {
     entry->frequency++;
     int protected_oversize = ring_move_to_head_from_foreign(probation_ring, protected_ring, entry);
 	if( !protected_oversize ) {
-		return 0;
+		return;
 	}
 
 	// Protected got too big. Demote entries back to probation until
@@ -141,10 +140,10 @@ int lru_probation_on_hit(CPersistentRing* probation_ring,
         ring_move_to_head_from_foreign(protected_ring, probation_ring, protected_lru);
 	}
 
-    return ring_oversize(protected_ring);
+
 }
 
-int lru_update_mru(CPersistentRing* ring,
+void lru_update_mru(CPersistentRing* ring,
                    CPersistentRing* entry,
                    rs_counter_t old_entry_size,
                    rs_counter_t new_entry_size)
@@ -153,7 +152,7 @@ int lru_update_mru(CPersistentRing* ring,
     ring->frequency -= old_entry_size;
     ring->frequency += new_entry_size;
     ring_move_to_head(ring, entry);
-    return ring->frequency > ring->max_len;
+    // XXX TODO: Rebalance all the rings!
 }
 
 static int lru_will_fit(CPersistentRing* ring, CPersistentRing* entry)
@@ -169,8 +168,8 @@ CPersistentRing eden_add(CPersistentRing* eden_ring,
     CPersistentRing rejects = {};
     rejects.r_next = rejects.r_prev = NULL;
 
-    int eden_oversize = ring_add(eden_ring, entry);
-    if(!eden_oversize) {
+    ring_add(eden_ring, entry);
+    if(!ring_oversize(eden_ring)) {
         return rejects;
     }
 

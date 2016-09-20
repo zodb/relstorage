@@ -29,7 +29,6 @@ ffi_from_handle = ffi.from_handle
 from .ring import _FFI_RING
 
 _lru_update_mru = _FFI_RING.lru_update_mru
-_ring_move_to_head_from_foreign = _FFI_RING.ring_move_to_head_from_foreign
 _lru_probation_on_hit = _FFI_RING.lru_probation_on_hit
 _eden_add = _FFI_RING.eden_add
 _lru_on_hit = _FFI_RING.lru_on_hit
@@ -101,7 +100,6 @@ class SizedLRU(object):
         self.get_LRU = self._ring.lru
         self.make_MRU = self._ring.move_to_head
         self.remove = self.delete
-        self.over_size = False
 
     def __iter__(self):
         return iter(self._ring)
@@ -120,22 +118,21 @@ class SizedLRU(object):
 
     def add_MRU(self, key, value):
         entry = SizedLRURingEntry(key, value)
-        self.over_size = self._ring.add(entry)
+        self._ring.add(entry)
         return entry
 
     def update_MRU(self, entry, value):
-        #assert entry.__parent__ is self
         old_size = entry.len
         entry.set_value(value)
         new_size = entry.len
-        self.over_size = _lru_update_mru(self._ring.ring_home, entry.cffi_ring_node, old_size, new_size)
+        # XXX: Need to rebalance, if needed.
+        _lru_update_mru(self._ring.ring_home, entry.cffi_ring_node, old_size, new_size)
 
     def on_hit(self, entry):
         return _lru_on_hit(self._ring_home, entry.cffi_ring_node)
 
     def delete(self, entry):
         self._ring.delete(entry)
-        self.over_size = self.size > self.limit
 
     def stats(self):
         return {
@@ -169,7 +166,7 @@ class EdenLRU(SizedLRU):
                                    self._protected_lru_ring_home,
                                    self._probation_lru_ring_home,
                                    new_entry.cffi_ring_node)
-        # XXX The various over_size attributes? Are they updated? Do they need to be?
+
         if not rejected_items.r_next:
             # Nothing rejected.
             return new_entry

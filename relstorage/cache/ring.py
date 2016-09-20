@@ -158,7 +158,6 @@ else:
     """, include_dirs=[this_dir])
 
     _ring_move_to_head = _FFI_RING.ring_move_to_head
-    _ring_move_to_head_from_foreign = _FFI_RING.ring_move_to_head_from_foreign
     _ring_del = _FFI_RING.ring_del
     _ring_add = _FFI_RING.ring_add
     ffi_new = ffi.new
@@ -230,10 +229,6 @@ else:
         def lru(self):
             return ffi_from_handle(self.ring_home.r_next.user_data)
 
-        def move_entry_from_other_ring(self, entry, other_ring):
-            return _ring_move_to_head_from_foreign(other_ring.ring_home,
-                                                   self.ring_home,
-                                                   entry.cffi_ring_node)
 
 
 

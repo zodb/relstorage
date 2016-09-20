@@ -53,7 +53,7 @@ typedef struct CPersistentRing_struct {
 /* Add elt as the most recently used object.  elt must not already be
  * in the list, although this isn't checked.
  */
-int ring_add(CPersistentRing *ring, CPersistentRing *elt);
+void ring_add(CPersistentRing *ring, CPersistentRing *elt);
 
 /* Remove elt from the list.  elt must already be in the list, although
  * this isn't checked.
@@ -74,18 +74,12 @@ void ring_del(CPersistentRing* ring, CPersistentRing *elt);
 void ring_move_to_head(CPersistentRing *ring, CPersistentRing *elt);
 
 
-
-int ring_move_to_head_from_foreign(CPersistentRing* current_ring,
-                                   CPersistentRing* new_ring,
-                                   CPersistentRing* elt);
-
-
-int lru_probation_on_hit(CPersistentRing* probation_ring,
+void lru_probation_on_hit(CPersistentRing* probation_ring,
                          CPersistentRing* protected_ring,
                          CPersistentRing* entry);
 
 
-int lru_update_mru(CPersistentRing* ring,
+void lru_update_mru(CPersistentRing* ring,
                     CPersistentRing* entry,
                     rs_counter_t old_entry_size,
                     rs_counter_t new_entry_size);
