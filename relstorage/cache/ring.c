@@ -146,8 +146,8 @@ int lru_probation_on_hit(CPersistentRing* probation_ring,
 
 int lru_update_mru(CPersistentRing* ring,
                    CPersistentRing* entry,
-                   uint_fast64_t old_entry_size,
-                   uint_fast64_t new_entry_size)
+                   rs_counter_t old_entry_size,
+                   rs_counter_t new_entry_size)
 {
     entry->frequency++;
     ring->frequency -= old_entry_size;
@@ -259,10 +259,9 @@ static void lru_age_list(CPersistentRing* ring)
     if (ring_is_empty(ring)) {
         return;
     }
-    uint_fast64_t count = 0;
+
     CPersistentRing* here = ring->r_next;
     while (here != ring) {
-        count++;
         here->frequency = here->frequency / 2;
         here = here->r_next;
     }

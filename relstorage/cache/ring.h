@@ -32,16 +32,16 @@ bumped at least once, the list does hold a strong reference to each
 object in it.
 */
 
-typedef unsigned long long uint_fast64_t; // For old CFFI versions.
+typedef unsigned long long rs_counter_t; // For old CFFI versions.
 
 typedef struct CPersistentRing_struct {
     struct CPersistentRing_struct* r_prev;
     struct CPersistentRing_struct* r_next;
     void* user_data;
 
-    uint_fast64_t frequency;
-    uint_fast64_t len;
-    uint_fast64_t max_len;
+    rs_counter_t frequency;
+    rs_counter_t len;
+    rs_counter_t max_len;
 
     int r_parent;
 } CPersistentRing;
@@ -87,8 +87,8 @@ int lru_probation_on_hit(CPersistentRing* probation_ring,
 
 int lru_update_mru(CPersistentRing* ring,
                     CPersistentRing* entry,
-                    uint_fast64_t old_entry_size,
-                    uint_fast64_t new_entry_size);
+                    rs_counter_t old_entry_size,
+                    rs_counter_t new_entry_size);
 
 
 CPersistentRing eden_add(CPersistentRing* eden_ring,
