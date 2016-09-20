@@ -232,38 +232,7 @@ class SizedLRUMapping(object):
         entry.frequency += 1
         return entry.value
 
-    # Benchmark for the general approach:
-
-    # Pickle is about 3x faster than marshal if we write single large
-    # objects, surprisingly. If we stick to writing smaller objects, the
-    # difference narrows to almost negligible.
-
-    # Writing 525MB of data, 655K keys (no compression):
-    # - code as-of commit e58126a (the previous major optimizations for version 1 format)
-    #    version 1 format, solid dict under 3.4: write: 3.8s/read 7.09s
-    #    2.68s to update ring, 2.6s to read pickle
-    #
-    # -in a btree under 3.4: write: 4.8s/read 8.2s
-    #    written as single list of the items
-    #    3.1s to load the pickle, 2.6s to update the ring
-    #
-    # -in a dict under 3.4: write: 3.7s/read 7.6s
-    #    written as the dict and updated into the dict
-    #    2.7s loading the pickle, 2.9s to update the dict
-    # - in a dict under 3.4: write: 3.0s/read 12.8s
-    #    written by iterating the ring and writing one key/value pair
-    #     at a time, so this is the only solution that
-    #     automatically preserves the LRU property (and would be amenable to
-    #     capping read based on time, and written file size); this format also lets us avoid the
-    #     full write buffer for HIGHEST_PROTOCOL < 4
-    #    2.5s spent in pickle.load, 8.9s spent in __setitem__,5.7s in ring.add
-    # - in a dict: write 3.2/read 9.1s
-    #    same as above, but custom code to set the items
-    #   1.9s in pickle.load, 4.3s in ring.add
-    # - same as above, but in a btree: write 2.76s/read 10.6
-    #    1.8s in pickle.load, 3.8s in ring.add,
-    #
-    # For the final version with optimizations, the write time is 2.3s/read is 6.4s
+    # See micro_benchmark_results.rst for a discussion about the approach.
 
     _FILE_VERSION = 4
 
@@ -342,7 +311,7 @@ class SizedLRUMapping(object):
         # writing to an io.BufferedWriter, a <file> opened by name or
         # fd, with default buffer or a large (16K) buffer, putting the
         # Pickler directly on top of that stream is SLOW for large
-        # singe objects. Writing a 512MB dict takes ~40-50seconds. If
+        # single objects. Writing a 512MB dict takes ~40-50seconds. If
         # instead we use a BytesIO to buffer in memory, that time goes
         # down to about 7s. However, since we switched to writing many
         # smaller objects, that need goes away.
