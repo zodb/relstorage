@@ -26,36 +26,60 @@ class MockOptions(Options):
     cache_local_dir_compress = False
     cache_local_dir_count = 1
 
-class MockOptionsWithFakeCache(MockOptions):
-    cache_module_name = 'relstorage.tests.fakecache'
-    cache_servers = 'host:9999'
 
-class MockAdapter(object):
-    def __init__(self):
-        self.mover = MockObjectMover()
-        self.poller = MockPoller()
+import timeit
+import statistics
+try:
+    import sys
+    import cProfile, pstats
+    if '--profile' not in sys.argv:
+        raise ImportError
+except ImportError:
+    class cProfile(object):
+        class Profile(object):
+            def enable(self):
+                pass
+            def disable(self):
+                pass
+    class pstats(object):
+        class Stats(object):
+            def __init__(self, *args):
+                pass
+            def sort_stats(self, *args):
+                return self
+            def print_stats(self, *args):
+                pass
 
-class MockObjectMover(object):
-    def __init__(self):
-        self.data = {}  # {oid_int: (state, tid_int)}
-    def load_current(self, cursor, oid_int):
-        return self.data.get(oid_int, (None, None))
+NUMBER = 4
+REPEAT_COUNT = 3
 
-class MockPoller(object):
-    def __init__(self):
-        self.changes = []  # [(oid, tid)]
-    def list_changes(self, cursor, after_tid, last_tid):
-        return ((oid, tid) for (oid, tid) in self.changes
-                if tid > after_tid and tid <= last_tid)
+def run_func(func, number=NUMBER, repeat_count=REPEAT_COUNT):
+    print("Timing func", func)
+    pop_timer = timeit.Timer(func)
+    pr = cProfile.Profile()
+    pr.enable()
+    pop_times = pop_timer.repeat(number=repeat_count)
+    pr.disable()
+    ps = pstats.Stats(pr).sort_stats('cumulative')
+    ps.print_stats(.4)
+
+    return pop_times
+
+def run_and_report_funcs(named_funcs, **kwargs):
+    times = {}
+    for name, func in named_funcs:
+        times[name] = run_func(func, **kwargs)
+
+    for name, time in sorted(times.items()):
+        print(name, "average", statistics.mean(time), "stddev", statistics.stdev(time))
+
 
 def local_benchmark():
-    from relstorage.cache.mapping import SizedLRUMapping
     from relstorage.cache import LocalClient
     options = MockOptions()
     options.cache_local_mb = 100
     options.cache_local_compression = 'none'
 
-    REPEAT_COUNT = 4
 
     KEY_GROUP_SIZE = 400
     DATA_SIZE = 1024
@@ -158,56 +182,18 @@ def local_benchmark():
                     client.get_multi(hot_keys)
                     i = 0
 
-        import timeit
-        import statistics
-        try:
-            import sys
-            import cProfile, pstats
-            if '--profile' not in sys.argv:
-                raise ImportError
-        except ImportError:
-            class cProfile(object):
-                class Profile(object):
-                    def enable(self): pass
-                    def disable(self): pass
-            class pstats(object):
-                class Stats(object):
-                    def __init__(self, *args): pass
-                    def sort_stats(self, *args): return self
-                    def print_stats(self, *args): pass
 
-
-        number = REPEAT_COUNT
-        def run_func(func):
-            print("Timing func", func)
-            pop_timer = timeit.Timer(func)
-            pr = cProfile.Profile()
-            pr.enable()
-            pop_times = pop_timer.repeat(number=number)
-            pr.disable()
-            ps = pstats.Stats(pr).sort_stats('cumulative')
-            ps.print_stats(.4)
-
-            return pop_times
-
-        times = {}
-        for name, func in (('pop ', populate),
-                           ('epop', populate_empty),
-                           ('read', read),
-                           ('mix ', mixed),):
-            times[name] = run_func(func)
-
-        for name, time in sorted(times.items()):
-
-            print(name, "average", statistics.mean(time), "stddev", statistics.stdev(time))
-
+        run_and_report_funcs((('pop ', populate),
+                              ('epop', populate_empty),
+                              ('read', read),
+                              ('mix ', mixed),))
 
     do_times()
 
 def save_load_benchmark():
     from relstorage.cache.mapping import SizedLRUMapping as LocalClientBucket
     from relstorage.cache import _persistence as _Loader
-    from io import BytesIO
+
     import os
     import itertools
 
@@ -233,53 +219,28 @@ def save_load_benchmark():
         #print("Len", len(bucket), "size", bucket.size, "dlen", len(datum))
 
     print("Len", len(bucket), "size", bucket.size)
-    number = 1
-    import timeit
-    import statistics
-    import cProfile
-    import pstats
+
 
     cache_pfx = "pfx"
     cache_options = MockOptions()
     cache_options.cache_local_dir = '/tmp'
     cache_options.cache_local_dir_compress = False
 
+    fnames = set()
+
     def write():
         fname = _Loader.save_local_cache(cache_options, cache_pfx, bucket)
-        os.remove(fname)
+        fnames.add(fname)
 
 
     def load():
         b2 = LocalClientBucket(bucket.limit)
         _Loader.load_local_cache(cache_options, cache_pfx, b2)
 
-    #write_timer = timeit.Timer(write)
-    #write_times = write_timer.repeat(number=number)
-    #print("write average", statistics.mean(write_times), "stddev", statistics.stdev(write_times))
-
-    #read_timer = timeit.Timer(load)
-    #read_times = read_timer.repeat(number=number)
-    #print("read average", statistics.mean(read_times), "stddev", statistics.stdev(read_times))
-
-    #pr = cProfile.Profile()
-    #pr.enable()
-
-    fname = _Loader.save_local_cache(cache_options, cache_pfx, bucket)
-    print("Saved to", fname)
-    #pr.disable()
-    #ps = pstats.Stats(pr).sort_stats('cumulative')
-    #ps.print_stats()
-    #return
-
-    pr = cProfile.Profile()
-    pr.enable()
-    _Loader.load_local_cache(cache_options, cache_pfx, LocalClientBucket(bucket.limit))
-    pr.disable()
-    ps = pstats.Stats(pr).sort_stats('cumulative')
-    ps.print_stats(.4)
-
-
-    #os.remove(fname)
+    run_and_report_funcs( (('write', write),
+                           ('read ', load)))
+    for fname in fnames:
+        os.remove(fname)
 
 if __name__ == '__main__':
     import sys

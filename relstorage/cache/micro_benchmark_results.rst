@@ -144,4 +144,14 @@ Writing 525MB of data, 655K keys (no compression):
 For the final version with optimizations (file format two), the write
 time is 2.3s/read is 6.4s.
 
-This needs to be redone for the segmented LRU approach.
+Segmented LRU
+=============
+
+With the code before any modifications
+(1b3910195c2b7ce666e4bd2cbecf28a79aa094b3) and using the same
+benchmark framework along with PYTHONHASHSEED=0, we load and store
+650987 objects. The write time is 1.7s and the read time is 2.4s; the
+total benchmark results (number=4, repeat_conut=3) are:
+
+read  average 8.927879446661487 stddev 0.03242392820916275
+write average 5.86237387000195 stddev 0.025450127071328835
