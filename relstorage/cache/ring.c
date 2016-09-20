@@ -160,10 +160,18 @@ static int lru_will_fit(CPersistentRing* ring, CPersistentRing* entry)
     return ring->max_len >= (entry->len + ring->frequency);
 }
 
-CPersistentRing eden_add(CPersistentRing* eden_ring,
-                         CPersistentRing* protected_ring,
-                         CPersistentRing* probation_ring,
-                         CPersistentRing* entry)
+/**
+ * When `allow_victims` is Falce, then we stop once we fill up all
+ * three rings and we avoid producing any victims. If we *would*
+ * have produced victims, we return with rejects.frequency = 1 so the
+ * caller can know to stop feeding us.
+ */
+static
+CPersistentRing _eden_add(CPersistentRing* eden_ring,
+                          CPersistentRing* protected_ring,
+                          CPersistentRing* probation_ring,
+                          CPersistentRing* entry,
+                          int allow_victims)
 {
     CPersistentRing rejects = {};
     rejects.r_next = rejects.r_prev = NULL;
@@ -175,7 +183,7 @@ CPersistentRing eden_add(CPersistentRing* eden_ring,
 
     // Ok, we have to move things. Begin by filling up the
     // protected space
-    if( ring_is_empty(probation_ring) && !ring_oversize(protected_ring)) {
+    if(ring_is_empty(probation_ring) && !ring_oversize(protected_ring)) {
         /*
           # This is a modification of the algorithm. When we start out
           # go ahead and populate the protected_lru directly
@@ -196,6 +204,8 @@ CPersistentRing eden_add(CPersistentRing* eden_ring,
                     # This may temporarily oversize us in the aggregate of the three.
                 */
                 ring_move_to_head_from_foreign(eden_ring, probation_ring, eden_oldest);
+                // Signal whether we would need to cull something.
+                rejects.frequency = ring_oversize(probation_ring);
                 break;
             }
             else {
@@ -222,6 +232,13 @@ CPersistentRing eden_add(CPersistentRing* eden_ring,
         else {
             // Darn, we're too big. We must choose (and record) a
             // victim.
+
+            if(!allow_victims) {
+                // set the signal and quit.
+                rejects.frequency = 1;
+                break;
+            }
+
             CPersistentRing* probation_oldest = ring_lru(probation_ring);
             if(!probation_oldest) {
                 //Hmm, the ring got emptied, but there's also no space
@@ -252,6 +269,39 @@ CPersistentRing eden_add(CPersistentRing* eden_ring,
 
     return rejects;
 }
+
+CPersistentRing eden_add(CPersistentRing* eden_ring,
+                         CPersistentRing* protected_ring,
+                         CPersistentRing* probation_ring,
+                         CPersistentRing* entry)
+{
+    return _eden_add(eden_ring, protected_ring, probation_ring, entry, 1);
+}
+
+
+int eden_add_many(CPersistentRing* eden_ring,
+                  CPersistentRing* protected_ring,
+                  CPersistentRing* probation_ring,
+                  CPersistentRing* entry_array,
+                  int entry_count)
+{
+    int i = 0;
+    for (i = 0; i < entry_count; i++) {
+        CPersistentRing add_rejects = _eden_add(eden_ring, protected_ring, probation_ring, entry_array + i, 0);
+        if (add_rejects.frequency) {
+             // We would have rejected something, so     we must be full.
+             // XXX: This isn't strictly true. It could be one really
+             // large item in the middle that we can't fit, but we
+             // might be able to fit items after it.
+             break;
+        }
+    }
+
+    return i;
+}
+
+
+
 
 static void lru_age_list(CPersistentRing* ring)
 {

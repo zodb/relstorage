@@ -260,28 +260,15 @@ class SizedLRUMapping(object):
 
         def _insert_entries(entries):
             stored = 0
-
             # local optimizations
             data = self._dict
-            main = self._eden
-            ring_add = main.add_MRU
-            limit = self.limit
-            # Cache and track the size locally so we're not
-            # reading from CFFI every time.
-            size = self.size
 
-            for k, v in entries:
-                if k in data:
-                    continue
+            added_entries = self._eden.add_MRUs(entries)
 
-                entry = data[k] = ring_add(k, v)
-                size += entry.len
-
+            for e in added_entries:
+                assert e.key not in data
+                data[e.key] = e
                 stored += 1
-
-                if size >= limit:
-                    break
-
             return stored
 
         stored = 0
@@ -293,9 +280,10 @@ class SizedLRUMapping(object):
             # Loading more data into an existing bucket.
             # Load only the *new* keys, trying to get the newest ones
             # because LRU is going to get messed up anyway.
-
-            entries_newest_first = reversed(entries_oldest_first)
-            stored = _insert_entries(entries_newest_first)
+            new_entries_newest_first = [t for t in entries_oldest_first
+                                        if t[0] not in self._dict]
+            new_entries_newest_first.reverse()
+            stored = _insert_entries(new_entries_newest_first)
 
         then = time.time()
         log.info("Examined %d and stored %d items from %s in %s",

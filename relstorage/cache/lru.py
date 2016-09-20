@@ -33,26 +33,32 @@ _lru_probation_on_hit = _FFI_RING.lru_probation_on_hit
 _eden_add = _FFI_RING.eden_add
 _lru_on_hit = _FFI_RING.lru_on_hit
 _lru_age_lists = _FFI_RING.lru_age_lists
+_eden_add_many = _FFI_RING.eden_add_many
 
 class SizedLRURingEntry(object):
 
-    __slots__ = ('key', 'value',
-                 'cffi_ring_node', 'cffi_ring_handle')
+    __slots__ = (
+        'key', 'value',
+        'cffi_ring_node', 'cffi_ring_handle',
+        # This is an owning pointer that is allocated when we
+        # are imported from a persistent file. It keeps a whole array alive
+        '_cffi_owning_node'
+    )
 
-    def __init__(self, key, value):
+    def __init__(self, key, value, node=None):
         self.key = key
         self.value = value
 
         # Passing the string is faster than passing a cdecl because we
         # have the string directly in bytecode without a lookup
-        node = ffi_new('CPersistentRing*')
+        if node is None:
+            node = ffi_new('CPersistentRing*')
         self.cffi_ring_node = node
 
         # Directly setting attributes is faster than the initializer
-        handle = self.cffi_ring_handle = ffi_new_handle(self)
-        node.user_data = handle
-        node.len = len(key) + len(value)
+        node.user_data = self.cffi_ring_handle = ffi_new_handle(self)
         node.frequency = 1
+        node.len = len(key) + len(value)
 
     def reset(self, key, value):
         self.key = key
@@ -155,6 +161,33 @@ class EdenLRU(SizedLRU):
         self.entry_dict = entry_dict
         self._node_free_list = []
 
+    def _preallocate_entries(self, ordered_keys_and_values):
+        count = len(ordered_keys_and_values)
+        nodes = ffi.new('CPersistentRing[]', count)
+        entries = []
+        for i in range(count):
+            k, v = ordered_keys_and_values[i]
+            node = nodes + i # this gets CPersistentRing*; nodes[i] returns the struct
+            entry = SizedLRURingEntry(k, v, node)
+            entry._cffi_owning_node = nodes
+            entries.append(entry)
+        return nodes, entries
+
+    def add_MRUs(self, ordered_keys_and_values):
+
+
+        nodes, entries = self._preallocate_entries(ordered_keys_and_values)
+        number_nodes = len(ordered_keys_and_values)
+        added_count = _eden_add_many(self._ring_home,
+                                     self._protected_lru_ring_home,
+                                     self._probation_lru_ring_home,
+                                     nodes,
+                                     number_nodes)
+        # Only return the objects we added, allowing the rest to become garbage.
+        if added_count < number_nodes:
+            return entries[:added_count]
+        return entries
+
     def add_MRU(self, key, value):
         node_free_list = self._node_free_list
         if node_free_list:
@@ -162,7 +195,7 @@ class EdenLRU(SizedLRU):
             new_entry.reset(key, value)
         else:
             new_entry = SizedLRURingEntry(key, value)
-        rejected_items = _eden_add(self._ring.ring_home,
+        rejected_items = _eden_add(self._ring_home,
                                    self._protected_lru_ring_home,
                                    self._probation_lru_ring_home,
                                    new_entry.cffi_ring_node)

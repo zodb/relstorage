@@ -92,3 +92,9 @@ CPersistentRing eden_add(CPersistentRing* eden_ring,
 void lru_on_hit(CPersistentRing* ring, CPersistentRing* entry);
 
 void lru_age_lists(CPersistentRing* eden_ring, CPersistentRing* protected_ring, CPersistentRing* probation_ring);
+
+int eden_add_many(CPersistentRing* eden_ring,
+                  CPersistentRing* protected_ring,
+                  CPersistentRing* probation_ring,
+                  CPersistentRing* entry_array,
+                  int entry_count);

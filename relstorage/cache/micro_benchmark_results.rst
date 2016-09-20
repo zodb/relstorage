@@ -200,8 +200,8 @@ write average 7.996576041332446 stddev 0.05586695632417015
 
 When we stop aging an write and limit simply by byte count, and start
 flowing items through eden, not just the protected ring, our write
-time goes back to about 2.6s, while (with some other optimizations)
-our read time decreases to 1.1s, giving these benchmarks:
+time goes back to about 2.6s. Our read time increased substantially,
+so we added a bulk method in C, giving us times once again comparable:
 
-read  average 3.9413027376673804 stddev 0.24814264079261292
-write average 8.434393537667347 stddev 0.155851543062577
+read  average 6.240402834334721 stddev 0.5385303523379349
+write average 7.7160701316703735 stddev 0.505427296067659
