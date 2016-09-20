@@ -326,23 +326,23 @@ class SizedLRUMapping(object):
         # Anything with a popularity of 0 probably hasn't been accessed in a long
         # time, so don't dump it.
 
-        # Age them now, writing only the most popular. (But don't age in place just
-        # in case we're still being used.)
+        # Note that we write the objects, regardless of frequency. We
+        # don't age them here, either. This is one of the goals of the
+        # cache is to speed up startup, which (during initialization)
+        # may access objects that are never or rarely used again.
+        # They'll tend to wind up in the probation space over time, or
+        # at least have a very low frequency. But if they're still here,
+        # go ahead and write them.
 
-        # XXX: Together with only writing what will fit in the protected space,
-        # is this optimal? One of the goals is to speed up startup, which may access
-        # objects that are never or rarely used again. They'll tend to wind up in
-        # the probation space over time, or at least have a very low frequency.
-        # Maybe we shouldn't prevent writing aged items, and maybe we should fill up
-        # probation and eden too. We probably want to allow the user to specify
-        # a size limit at this point.
 
-        entries = list(sorted((e for e in itervalues(self._dict) if e.frequency // 2),
+        # Maybe we should fill up probation and eden too. We probably
+        # want to allow the user to specify a size limit at this
+        # point.
+
+        entries = list(sorted((e for e in itervalues(self._dict)),
                               key=lambda e: e.frequency))
 
-        if len(entries) < len(self._dict):
-            log.info("Ignoring %d items for writing due to inactivity",
-                     len(self._dict) - len(entries))
+        assert len(entries) == len(self._dict)
 
         # Don't bother writing more than we'll be able to store.
         count_written = 0

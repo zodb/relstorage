@@ -429,16 +429,11 @@ class SizedLRUMappingTests(unittest.TestCase):
         bio = BytesIO()
 
         self._save(bio, client1, options)
-        # Nothing is written this time because it hasn't been read
+        # Regardless of its read frequency, it's still written
         client2 = self.getClass()(100)
         count, stored = self._load(bio, client2, options)
         self.assertEqual(count, stored)
-        self.assertEqual(count, 0)
-
-        client1['abc'] # Increment its frequency count so it gets written
-        bio = BytesIO()
-
-        self._save(bio, client1, options)
+        self.assertEqual(count, 1)
 
         client2 = self.getClass()(100)
         count, stored = self._load(bio, client2, options)
@@ -487,11 +482,12 @@ class SizedLRUMappingTests(unittest.TestCase):
         self.assertEqual(stored, 1)
         self.assertEqual(client1.size, client1_max_size)
 
-        # Age the keys so that when we age them again for writing
-        # we lose some
+        # Even keys that have been aged down to 0 still get
+        # written.
         # Force the conditions for it to actually do something.
         client1.limit = 0
         client1._age_factor = 0
+        client1._age()
         client1._age()
 
         bio = BytesIO()
@@ -500,9 +496,9 @@ class SizedLRUMappingTests(unittest.TestCase):
 
         client1 = self.getClass()(100)
         count, stored = self._load(bio, client1, options)
-        self.assertEqual(count, 0)
-        self.assertEqual(stored, 0)
-        self.assertEqual(client1.size, 0)
+        self.assertEqual(count, 2)
+        self.assertEqual(stored, 2)
+        self.assertEqual(client1.size, client1_max_size)
 
 
     def test_load_and_store_to_gzip(self):
