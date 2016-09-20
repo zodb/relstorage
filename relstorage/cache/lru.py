@@ -40,7 +40,7 @@ class SizedLRURingEntry(object):
     __slots__ = ('key', 'value',
                  'cffi_ring_node', 'cffi_ring_handle')
 
-    def __init__(self, key, value, parent):
+    def __init__(self, key, value):
         self.key = key
         self.value = value
 
@@ -61,10 +61,6 @@ class SizedLRURingEntry(object):
         node = self.cffi_ring_node
         node.frequency = 1
         node.len = len(key) + len(value)
-
-    @property
-    def __parent__(self):
-        return ffi_from_handle(self.cffi_ring_node.r_parent)
 
     @property
     def len(self):
@@ -89,16 +85,17 @@ class SizedLRU(object):
     A LRU list that keeps track of its size.
     """
 
+    PARENT_CONST = 0
+
     @classmethod
     def age_lists(cls, a, b, c):
         _lru_age_lists(a._ring_home, b._ring_home, c._ring_home)
 
     def __init__(self, limit):
         self.limit = limit
-        self.cffi_handle = ffi_new_handle(self)
         self._ring = Ring()
         self._ring.ring_home.max_len = limit
-        self._ring.ring_home.r_parent = self.cffi_handle
+        self._ring.ring_home.r_parent = self.PARENT_CONST
         # caches
         self._ring_home = self._ring.ring_home
         self.get_LRU = self._ring.lru
@@ -122,25 +119,9 @@ class SizedLRU(object):
         return self._ring_home.frequency
 
     def add_MRU(self, key, value):
-        entry = SizedLRURingEntry(key, value, self)
+        entry = SizedLRURingEntry(key, value)
         self.over_size = self._ring.add(entry)
-        #self.size += entry.len
-        #entry.frequency += 1
         return entry
-
-    def take_ownership_of_entry_MRU(self, entry):
-        #assert entry.__parent__ is None
-        old_parent = entry.__parent__
-
-        # But don't increment here, we're just moving
-        # from one ring to another
-        #entry.__parent__ = self
-        self.over_size = _ring_move_to_head_from_foreign(old_parent._ring.ring_home,
-                                                         self._ring.ring_home,
-                                                         entry.cffi_ring_node)
-
-        old_parent.over_size = old_parent.size > old_parent.limit
-
 
     def update_MRU(self, entry, value):
         #assert entry.__parent__ is self
@@ -165,6 +146,8 @@ class SizedLRU(object):
 
 
 class EdenLRU(SizedLRU):
+
+    PARENT_CONST = 1
 
     def __init__(self, limit, probation_lru, protected_lru, entry_dict):
         SizedLRU.__init__(self, limit)
@@ -202,10 +185,12 @@ class EdenLRU(SizedLRU):
         return new_entry
 
 class ProtectedLRU(SizedLRU):
-    pass
+    PARENT_CONST = 2
 
 
 class ProbationLRU(SizedLRU):
+
+    PARENT_CONST = 3
 
     def __init__(self, limit, protected_lru, entry_dict):
         SizedLRU.__init__(self, limit)

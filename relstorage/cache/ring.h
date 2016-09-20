@@ -35,11 +35,13 @@ object in it.
 typedef struct CPersistentRing_struct {
     struct CPersistentRing_struct* r_prev;
     struct CPersistentRing_struct* r_next;
-    void* r_parent;
     void* user_data;
+
     uint_fast64_t frequency;
     uint_fast64_t len;
     uint_fast64_t max_len;
+
+    int r_parent;
 } CPersistentRing;
 
 /* The list operations here take constant time independent of the

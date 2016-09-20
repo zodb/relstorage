@@ -778,6 +778,10 @@ class LocalClientBucket(object):
                              self._probation,
                              self._protected,
                              self._dict)
+        self._gens = [None, None, None, None] # 0 isn't used
+        for x in (self._protected, self._probation, self._eden):
+            self._gens[x.PARENT_CONST] = x
+        self._gens = tuple(self._gens)
         self._hits = 0
         self._misses = 0
         self._sets = 0
@@ -857,11 +861,10 @@ class LocalClientBucket(object):
 
         if key in dct:
             entry = dct[key]
-            entry.__parent__.update_MRU(entry, value)
+            self._gens[entry.cffi_ring_node.r_parent].update_MRU(entry, value)
         else:
             lru = self._eden
             entry = lru.add_MRU(key, value)
-            #assert entry.__parent__ is self._eden
             dct[key] = entry
 
         self._sets += 1
@@ -877,16 +880,17 @@ class LocalClientBucket(object):
     def __delitem__(self, key):
         entry = self._dict[key]
         del self._dict[key]
-        entry.__parent__.remove(entry)
+        self._gens[entry.cffi_ring_node.r_parent].remove(entry)
 
     def get_and_bubble_all(self, keys):
         dct = self._dict
+        gens = self._gens
         res = {}
         for key in keys:
             entry = dct.get(key)
             if entry is not None:
                 self._hits += 1
-                entry.__parent__.on_hit(entry)
+                gens[entry.cffi_ring_node.r_parent].on_hit(entry)
                 res[key] = entry.value
             else:
                 self._misses += 1
