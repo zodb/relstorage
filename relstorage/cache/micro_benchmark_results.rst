@@ -180,7 +180,7 @@ With the code before any modifications
 (1b3910195c2b7ce666e4bd2cbecf28a79aa094b3) and using the same
 benchmark framework along with PYTHONHASHSEED=0, we load and store
 650987 objects. The write time is 1.7s and the read time is 2.4s; the
-total benchmark results (number=4, repeat_conut=3) are:
+total benchmark results (number=4, repeat_count=3) are:
 
 read  average 8.927879446661487 stddev 0.03242392820916275
 write average 5.86237387000195 stddev 0.025450127071328835
@@ -205,3 +205,10 @@ so we added a bulk method in C, giving us times once again comparable:
 
 read  average 6.240402834334721 stddev 0.5385303523379349
 write average 7.7160701316703735 stddev 0.505427296067659
+
+A little work on optimization of writing (limiting CFFI attribute
+access) gets us to these numbers, which are either faster or very
+close to the same as the original numbers:
+
+read  average 6.509062864002772 stddev 0.08413966528299127
+write average 6.0874157809982234 stddev 0.04251385543342157

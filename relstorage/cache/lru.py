@@ -38,7 +38,7 @@ _eden_add_many = _FFI_RING.eden_add_many
 class SizedLRURingEntry(object):
 
     __slots__ = (
-        'key', 'value',
+        'key', 'value', 'len',
         'cffi_ring_node', 'cffi_ring_handle',
         # This is an owning pointer that is allocated when we
         # are imported from a persistent file. It keeps a whole array alive
@@ -58,25 +58,23 @@ class SizedLRURingEntry(object):
         # Directly setting attributes is faster than the initializer
         node.user_data = self.cffi_ring_handle = ffi_new_handle(self)
         node.frequency = 1
-        node.len = len(key) + len(value)
+        # We denormalize len to avoid accessing through CFFI (but it is needed
+        # by the C code)
+        self.len = node.len = len(key) + len(value)
 
     def reset(self, key, value):
         self.key = key
         self.value = value
         node = self.cffi_ring_node
         node.frequency = 1
-        node.len = len(key) + len(value)
-
-    @property
-    def len(self):
-        return self.cffi_ring_node.len
+        self.len = node.len = len(key) + len(value)
 
     frequency = property(lambda self: self.cffi_ring_node.frequency,
                          lambda self, nv: setattr(self.cffi_ring_node, 'frequency', nv))
 
     def set_value(self, value):
         self.value = value
-        self.cffi_ring_node.len = len(self.key) + len(value)
+        self.len = self.cffi_ring_node.len = len(self.key) + len(value)
 
     def __len__(self):
         return self.len

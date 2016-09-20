@@ -14,7 +14,7 @@
 from __future__ import absolute_import, print_function, division
 
 import logging
-
+import operator
 import time
 
 from relstorage._compat import itervalues
@@ -337,7 +337,10 @@ class SizedLRUMapping(object):
         entries = list(self._probation)
         entries.extend(self._protected)
         entries.extend(self._eden)
-        entries.sort(key=lambda e: e.frequency) # Adding key as a tie-breaker makes no sense, and is slow
+        # Adding key as a tie-breaker makes no sense, and is slow.
+        # We use an attrgetter directly on the node for speed
+
+        entries.sort(key=operator.attrgetter('cffi_ring_node.frequency'))
 
         assert len(entries) == len(self._dict)
 
