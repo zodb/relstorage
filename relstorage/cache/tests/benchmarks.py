@@ -215,8 +215,11 @@ def save_load_benchmark():
         # To ensure the pickle memo cache doesn't just write out "use object X",
         # but distinct copies of the strings, we need to copy them
         bucket[str(j)] = datum[:-1] + b'x'
-        assert bucket[str(j)] is not datum
-        #print("Len", len(bucket), "size", bucket.size, "dlen", len(datum))
+        # We need to get the item so its frequency goes up enough to be written
+        # (this is while we're doing an aging at write time, which may go away).
+        # Using an assert statement causes us to write nothing if -O is used.
+        if bucket[str(j)] is datum:
+            raise AssertionError()
 
     print("Len", len(bucket), "size", bucket.size)
 

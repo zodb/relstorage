@@ -108,6 +108,35 @@ mix  average 5.4434908026984585 stddev 0.07889832553078663
 pop  average 4.920183609317367 stddev 0.23233663177104144
 read average 1.7981388796276103 stddev 0.0625821728436513
 
+Here are more modern numbers for the same benchmark suite. Before
+modifications (1b3910195c2b7ce666e4bd2cbecf28a79aa094b3/master) with
+PYTHONHASHSEED=0 and -O, I get these results:
+
+epop average 2.9002058423357084 stddev 0.04144877721013096
+mix  average 4.471249947004253 stddev 0.04006648891850737
+pop  average 3.7491709959964887 stddev 0.23962025010454424
+read average 0.6041574839910027 stddev 0.009453648365701957
+
+(I can't explain why these numbers are so much better than the earlier
+numbers, except maybe particularly bad hash seeds? And I think the
+machine had been rebooted.)
+
+With the Segmented LRU code (cb663604a969ad894c74d6fc06fa47fd3be49f94)
+and the same settings, I get these results:
+
+epop average 2.428182589666297 stddev 0.009184376367680394
+mix  average 2.637423994000225 stddev 0.07304547795654234
+pop  average 2.274654309003381 stddev 0.3010997744565152
+read average 0.5964773539938809 stddev 0.009971825488847518
+
+Here's PyPy for the Segmented LRU (it's back to missing all keys for
+22 groups for some reason):
+
+epop average 0.688376029332 stddev 0.0117758786196
+mix  average 0.453514734904 stddev 0.0258164430069
+pop  average 0.397752523422 stddev 0.0734281091208
+read average 0.110461314519 stddev 0.0189612338017
+
 Persistence Tests
 =================
 
@@ -155,3 +184,15 @@ total benchmark results (number=4, repeat_conut=3) are:
 
 read  average 8.927879446661487 stddev 0.03242392820916275
 write average 5.86237387000195 stddev 0.025450127071328835
+
+With the code fully implementing segmented LRU
+(cb663604a969ad894c74d6fc06fa47fd3be49f94), PYTHONHASHSEED=0, number=4
+repeat=3 the write time is 2.5s and the read time is 2.3s. Full
+benchmark results:
+
+read  average 6.9280044683255255 stddev 0.07165229299434527
+write average 7.996576041332446 stddev 0.05586695632417015
+
+.. note:: In this version, even though there are 651,065 objects for a
+          total size of 524,285,508, we're only loading/storing
+          521,182 of them (because we're only filling the protected space).
