@@ -74,8 +74,6 @@ class StorageCacheTests(unittest.TestCase):
         self.assertEqual(res, (b'abc', 55))
 
     def test_load_using_delta_after0_miss(self):
-        from relstorage.tests.fakecache import data
-        from ZODB.utils import p64
         adapter = MockAdapter()
         c = self.getClass()(adapter, MockOptionsWithFakeCache(), 'myprefix')
         c.current_tid = 60
@@ -86,8 +84,6 @@ class StorageCacheTests(unittest.TestCase):
         self.assertEqual(res, (b'abc', 55))
 
     def test_load_using_delta_after0_inconsistent(self):
-        from relstorage.tests.fakecache import data
-        from ZODB.utils import p64
         adapter = MockAdapter()
         c = self.getClass()(adapter, MockOptionsWithFakeCache(), 'myprefix')
         c.current_tid = 60
@@ -102,8 +98,6 @@ class StorageCacheTests(unittest.TestCase):
             self.fail("Failed to report cache inconsistency")
 
     def test_load_using_delta_after0_future_error(self):
-        from relstorage.tests.fakecache import data
-        from ZODB.utils import p64
         adapter = MockAdapter()
         c = self.getClass()(adapter, MockOptionsWithFakeCache(), 'myprefix')
         c.current_tid = 55
@@ -408,13 +402,13 @@ class SizedLRUMappingTests(unittest.TestCase):
         self.assertEqual(b.get("abcd"), b'xyz')
 
     def _load(self, bio, bucket, options):
-        from relstorage.cache import _Loader
+        from relstorage.cache import _persistence as _Loader
         bio.seek(0)
         reader = _Loader._gzip_file(options, None, bio, mode='rb')
         return bucket.load_from_file(reader)
 
     def _save(self, bio, bucket, options):
-        from relstorage.cache import _Loader
+        from relstorage.cache import _persistence as _Loader
         bio.seek(0)
         if options.cache_local_dir_compress:
             self.assertEqual(".rscache.gz", _Loader._gzip_ext(options))
@@ -519,7 +513,7 @@ class SizedLRUMappingTests(unittest.TestCase):
 
     @skipOnCI("Sometimes the files_loaded is just 1 on Travis.")
     def test_load_from_multiple_files_hit_limit(self):
-        from relstorage.cache import _Loader
+        from relstorage.cache import _persistence as _Loader
         import tempfile
         client = self.getClass()(100)
         options = MockOptions()
@@ -1221,7 +1215,7 @@ def local_benchmark():
 
 def save_load_benchmark():
     from relstorage.cache.mapping import SizedLRUMapping as LocalClientBucket
-    from relstorage.cache import _Loader
+    from relstorage.cache import _persistence as _Loader
     from io import BytesIO
     import os
     import itertools
