@@ -164,7 +164,7 @@ class EdenLRU(SizedLRU):
             new_entry = node_free_list.pop()
             new_entry.reset(key, value)
         else:
-            new_entry = SizedLRURingEntry(key, value, self)
+            new_entry = SizedLRURingEntry(key, value)
         rejected_items = _eden_add(self._ring.ring_home,
                                    self._protected_lru_ring_home,
                                    self._probation_lru_ring_home,

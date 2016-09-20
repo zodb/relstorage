@@ -32,6 +32,8 @@ bumped at least once, the list does hold a strong reference to each
 object in it.
 */
 
+typedef unsigned long long uint_fast64_t; // For old CFFI versions.
+
 typedef struct CPersistentRing_struct {
     struct CPersistentRing_struct* r_prev;
     struct CPersistentRing_struct* r_next;
