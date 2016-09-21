@@ -99,9 +99,24 @@ ring_move_to_head_from_foreign(RSRing current_ring,
                                RSRing new_ring,
                                RSRingNode* elt)
 {
-    ring_del(current_ring, elt);
-    ring_add(new_ring, elt);
-    return ring_oversize(new_ring);
+    //ring_del(current_ring, elt);
+    elt->r_next->r_prev = elt->r_prev;
+    elt->r_prev->r_next = elt->r_next;
+    current_ring->len -= 1;
+    current_ring->frequency -= elt->len;
+
+    //ring_add(new_ring, elt);
+    elt->r_next = new_ring;
+    elt->r_prev = new_ring->r_prev;
+    new_ring->r_prev->r_next = elt;
+    new_ring->r_prev = elt;
+    elt->r_parent = new_ring->r_parent;
+
+    new_ring->frequency += elt->len;
+    new_ring->len++;
+
+    //return ring_oversize(new_ring);
+    return new_ring->frequency > new_ring->max_len;
 }
 
 static RSRingNode* ring_lru(RSRing ring)
@@ -204,6 +219,23 @@ RSRingNode _spill_from_ring_to_ring(RSRing updated_ring,
             }
         }
     }
+
+    /**
+     * This can happen, but it's tricky to write a test for. It also
+     * slows down the 'mixed' benchmark from 2.6 to 3.5s or so
+     * (because it reduces hit rates?). It's probably not a big deal.
+     */
+    /*
+    if (allow_victims && !overfill_destination && ring_oversize(destination_ring)) {
+        // Trim the destination. It may have been oversize when we got
+        // here.
+        int oversize = 1;
+        while (destination_ring->len > 1 && oversize) {
+            RSRingNode* dest_oldest = destination_ring->r_next; //ring_lru(destination_ring);
+            oversize = ring_move_to_head_from_foreign(destination_ring, &rejects, dest_oldest);
+        }
+    }
+    */
 
     // we return rejects by value, so the next/prev pointers that were
     // initialized to its address here are now junk. break the link so

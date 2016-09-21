@@ -123,10 +123,10 @@ void lru_probation_on_hit(RSCache* cache,
  * - The final entry in the chain has an r_next of NULL;
  */
 RSRingNode lru_update_mru(RSCache* cache,
-						  RSRing ring,
-						  RSRingNode* entry,
-						  rs_counter_t old_entry_size,
-						  rs_counter_t new_entry_size);
+                          RSRing ring,
+                          RSRingNode* entry,
+                          rs_counter_t old_entry_size,
+                          rs_counter_t new_entry_size);
 
 
 RSRingNode eden_add(RSCache* cache,
