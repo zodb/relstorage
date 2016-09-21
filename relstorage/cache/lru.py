@@ -91,8 +91,8 @@ class SizedLRU(object):
     PARENT_CONST = 0
 
     @classmethod
-    def age_lists(cls, a, b, c):
-        _lru_age_lists(a._ring_home, b._ring_home, c._ring_home)
+    def age_lists(cls, eden):
+        _lru_age_lists(eden._cffi_cache)
 
     def __init__(self, limit):
         self.limit = limit
@@ -154,8 +154,12 @@ class EdenLRU(SizedLRU):
         SizedLRU.__init__(self, limit)
         self.probation_lru = probation_lru
         self.protected_lru = protected_lru
-        self._protected_lru_ring_home = protected_lru._ring.ring_home
-        self._probation_lru_ring_home = probation_lru._ring.ring_home
+        self._cffi_cache = ffi_new("RSCache*",
+                                   {'eden': self._ring.ring_home,
+                                    'protected': self.protected_lru._ring.ring_home,
+                                    'probation': self.probation_lru._ring.ring_home})
+        probation_lru._cffi_cache = self._cffi_cache
+        protected_lru._cffi_cache = self._cffi_cache
         self.entry_dict = entry_dict
         self._node_free_list = []
 
@@ -172,13 +176,9 @@ class EdenLRU(SizedLRU):
         return nodes, entries
 
     def add_MRUs(self, ordered_keys_and_values):
-
-
         nodes, entries = self._preallocate_entries(ordered_keys_and_values)
         number_nodes = len(ordered_keys_and_values)
-        added_count = _eden_add_many(self._ring_home,
-                                     self._protected_lru_ring_home,
-                                     self._probation_lru_ring_home,
+        added_count = _eden_add_many(self._cffi_cache,
                                      nodes,
                                      number_nodes)
         # Only return the objects we added, allowing the rest to become garbage.
@@ -193,9 +193,7 @@ class EdenLRU(SizedLRU):
             new_entry.reset(key, value)
         else:
             new_entry = SizedLRURingEntry(key, value)
-        rejected_items = _eden_add(self._ring_home,
-                                   self._protected_lru_ring_home,
-                                   self._probation_lru_ring_home,
+        rejected_items = _eden_add(self._cffi_cache,
                                    new_entry.cffi_ring_node)
 
         if not rejected_items.r_next:
@@ -223,11 +221,10 @@ class ProbationLRU(SizedLRU):
     def __init__(self, limit, protected_lru, entry_dict):
         SizedLRU.__init__(self, limit)
         self.protected_lru = protected_lru
-        self._protected_ring_home = self.protected_lru._ring.ring_home
+        self._cffi_cache = None # Will be set when we're added to eden
 
     def on_hit(self, entry):
         # Move the entry to the protected LRU on its very first hit, where
         # it becomes the MRU.
-        return _lru_probation_on_hit(self._ring_home,
-                                     self._protected_ring_home,
+        return _lru_probation_on_hit(self._cffi_cache,
                                      entry.cffi_ring_node)

@@ -156,7 +156,7 @@ class SizedLRUMapping(object):
         now = time.time()
         log.debug("Beginning frequency aging for %d cache entries",
                  len(dct))
-        SizedLRU.age_lists(self._eden, self._probation, self._protected)
+        SizedLRU.age_lists(self._eden)
         done = time.time()
         log.debug("Aged %d cache entries in %s", done - now)
 

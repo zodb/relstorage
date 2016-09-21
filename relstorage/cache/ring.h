@@ -48,6 +48,12 @@ typedef struct RSRingNode_struct {
 
 typedef RSRingNode* RSRing;
 
+typedef struct RSCache_struct {
+	RSRing eden;
+	RSRing protected;
+	RSRing probation;
+} RSCache;
+
 /* The list operations here take constant time independent of the
  * number of objects in the list:
  */
@@ -76,8 +82,7 @@ void ring_del(RSRing ring, RSRingNode *elt);
 void ring_move_to_head(RSRing ring, RSRingNode *elt);
 
 
-void lru_probation_on_hit(RSRing probation_ring,
-						  RSRing protected_ring,
+void lru_probation_on_hit(RSCache* cache,
 						  RSRingNode* entry);
 
 
@@ -87,16 +92,12 @@ void lru_update_mru(RSRing ring,
                     rs_counter_t new_entry_size);
 
 
-RSRingNode eden_add(RSRing eden_ring,
-					RSRing protected_ring,
-					RSRing probation_ring,
+RSRingNode eden_add(RSCache* cache,
 					RSRingNode* entry);
 void lru_on_hit(RSRing ring, RSRingNode* entry);
 
-void lru_age_lists(RSRing eden_ring, RSRing protected_ring, RSRing probation_ring);
+void lru_age_lists(RSCache* cache);
 
-int eden_add_many(RSRing eden_ring,
-                  RSRing protected_ring,
-                  RSRing probation_ring,
+int eden_add_many(RSCache* cache,
                   RSRingNode* entry_array,
                   int entry_count);

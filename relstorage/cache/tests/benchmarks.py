@@ -75,7 +75,7 @@ def run_and_report_funcs(named_funcs, **kwargs):
 
 
 def local_benchmark():
-    from relstorage.cache import LocalClient
+    from relstorage.cache.local_client import LocalClient
     options = MockOptions()
     options.cache_local_mb = 100
     options.cache_local_compression = 'none'

@@ -119,11 +119,12 @@ void lru_on_hit(RSRing ring, RSRingNode* entry)
     ring_move_to_head(ring, entry);
 }
 
-void lru_probation_on_hit(RSRing probation_ring,
-                          RSRing protected_ring,
+void lru_probation_on_hit(RSCache* cache,
                           RSRingNode* entry)
 {
     entry->frequency++;
+    RSRing protected_ring = cache->protected;
+    RSRing probation_ring = cache->probation;
     int protected_oversize = ring_move_to_head_from_foreign(probation_ring, protected_ring, entry);
 	if( !protected_oversize ) {
 		return;
@@ -167,12 +168,14 @@ static int lru_will_fit(RSRingNode* ring, RSRingNode* entry)
  * caller can know to stop feeding us.
  */
 static
-RSRingNode _eden_add(RSRingNode* eden_ring,
-                     RSRingNode* protected_ring,
-                     RSRingNode* probation_ring,
+RSRingNode _eden_add(RSCache* cache,
                      RSRingNode* entry,
                      int allow_victims)
 {
+    RSRingNode* eden_ring = cache->eden;
+    RSRingNode* protected_ring = cache->protected;
+    RSRingNode* probation_ring = cache->probation;
+
     RSRingNode rejects = {};
     rejects.r_next = rejects.r_prev = NULL;
 
@@ -270,24 +273,20 @@ RSRingNode _eden_add(RSRingNode* eden_ring,
     return rejects;
 }
 
-RSRingNode eden_add(RSRingNode* eden_ring,
-                         RSRingNode* protected_ring,
-                         RSRingNode* probation_ring,
-                         RSRingNode* entry)
+RSRingNode eden_add(RSCache* cache,
+        RSRingNode* entry)
 {
-    return _eden_add(eden_ring, protected_ring, probation_ring, entry, 1);
+    return _eden_add(cache, entry, 1);
 }
 
 
-int eden_add_many(RSRingNode* eden_ring,
-                  RSRingNode* protected_ring,
-                  RSRingNode* probation_ring,
+int eden_add_many(RSCache* cache,
                   RSRingNode* entry_array,
                   int entry_count)
 {
     int i = 0;
     for (i = 0; i < entry_count; i++) {
-        RSRingNode add_rejects = _eden_add(eden_ring, protected_ring, probation_ring, entry_array + i, 0);
+        RSRingNode add_rejects = _eden_add(cache, entry_array + i, 0);
         if (add_rejects.frequency) {
              // We would have rejected something, so     we must be full.
              // XXX: This isn't strictly true. It could be one really
@@ -316,9 +315,9 @@ static void lru_age_list(RSRingNode* ring)
     }
 }
 
-void lru_age_lists(RSRingNode* ring1, RSRingNode* ring2, RSRingNode* ring3)
+void lru_age_lists(RSCache* cache)
 {
-    lru_age_list(ring1);
-    lru_age_list(ring2);
-    lru_age_list(ring3);
+    lru_age_list(cache->eden);
+    lru_age_list(cache->probation);
+    lru_age_list(cache->protected);
 }
