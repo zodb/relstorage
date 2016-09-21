@@ -118,7 +118,7 @@ class LocalClient(object):
     def set(self, key, value):
         self.set_multi({key: value})
 
-    def set_multi(self, d, allow_replace=True):
+    def set_multi(self, d):
         if not self._bucket_limit:
             # don't bother
             return
@@ -139,20 +139,19 @@ class LocalClient(object):
             items.append((key, cvalue))
 
         bucket0 = self.__bucket
-        has_key = bucket0.__contains__
         set_key = bucket0.__setitem__
 
         with self._lock:
             for key, cvalue in items:
-                if not allow_replace and has_key(key):
-                    continue
-                    # Bucket0 could be shifted out at any
-                    # point during this operation, and that's ok
-                    # because it would mean the key still goes away
                 set_key(key, cvalue)
 
     def add(self, key, value):
-        self.set_multi({key: value}, allow_replace=False)
+        # We don't use this method. We used to implement it by adding
+        # an extra parameter to set_multi and checking for each key
+        # before we set it if the param was true, but that was an
+        # extra boolean check we don't need to make because we don't use
+        # this method.
+        raise NotImplementedError()
 
     def disconnect_all(self):
         # Compatibility with memcache.

@@ -988,9 +988,8 @@ class LocalClientTests(unittest.TestCase):
         c = self._makeOne()
         c.set('k0', b'abc')
         self.assertEqual(c.get('k0'), b'abc')
-        c.add('k0', b'def')
-        c.add('k1', b'ghi')
-        self.assertEqual(c.get_multi(['k0', 'k1']), {'k0': b'abc', 'k1': b'ghi'})
+        self.assertRaises(NotImplementedError,
+                          c.add, 'k0', b'def')
 
     def test_mru_lru_ring(self):
         from relstorage.cache.lru import SizedLRU
