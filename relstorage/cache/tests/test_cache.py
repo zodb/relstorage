@@ -377,6 +377,14 @@ def list_lrufreq_(lru, lru_name):
 
 class SizedLRUMappingTests(unittest.TestCase):
 
+    def assertNone(self, o):
+        if o is not None:
+            raise AssertionError("Expected None, not %r" % (o,))
+
+    def assertNotNone(self, o):
+        if o is None:
+            raise AssertionError("Expected not None")
+
     def getClass(self):
         from relstorage.cache.mapping import SizedLRUMapping
         return SizedLRUMapping
@@ -523,12 +531,19 @@ class SizedLRUMappingTests(unittest.TestCase):
         self.assertEqual(b.size, 40)
 
         # Now bump protected over size, ejecting to probation.
-        # Note that we don't drop an element (yet)
+        # Note that we drop an element to get us in size
         b['3'] = 'abcd'
         self.assertEqual(list_lrukeys('eden'), ['9'])
         self.assertEqual(list_lrukeys('protected'), ['1', '2', '4', '5', '6', '7', '3'])
-        self.assertEqual(list_lrukeys('probation'), ['8', '0'])
-        self.assertEqual(b.size, 41)
+        self.assertEqual(list_lrukeys('probation'), ['0'])
+        self.assertEqual(b.size, 37)
+
+        # We can access only the ones that remain
+        for k in range(8):
+            self.assertNotNone(b.get(str(k)))
+
+        self.assertNone(b.get('8'))
+        self.assertNotNone(b.get('9'))
 
     def test_increasing_size_in_full_probation_full_protection_bumps_to_probation(self):
         # Fill up in the normal way
@@ -550,17 +565,18 @@ class SizedLRUMappingTests(unittest.TestCase):
 
         # Now increase an entry in probation. This will move it to protected, which
         # will now be oversize.
-        # Note that we don't drop an element (yet)
+        # Note that we drop an element to get us within size
         b['8'] = 'abcd'
         self.assertEqual(list_lrukeys('eden'), ['9'])
         self.assertEqual(list_lrukeys('protected'), ['2', '3', '4', '5', '6', '7', '8'])
-        self.assertEqual(list_lrukeys('probation'), ['0', '1'])
-        self.assertEqual(b.size, 41)
+        self.assertEqual(list_lrukeys('probation'), ['1'])
+        self.assertEqual(b.size, 37)
 
-        # All ten can be accessed
-        for k in range(10):
-            b.get(str(k))
+        # We can access only the ones that remain
+        for k in range(1, 10):
+            self.assertNotNone(b.get(str(k)))
 
+        self.assertNone(b.get('0'))
 
     def _load(self, bio, bucket, options):
         from relstorage.cache import persistence as _Loader

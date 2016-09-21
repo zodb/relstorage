@@ -82,15 +82,51 @@ void ring_del(RSRing ring, RSRingNode *elt);
 void ring_move_to_head(RSRing ring, RSRingNode *elt);
 
 
+/**
+ * Move the `entry` from the probation ring of the `cache`
+ * to become the MRU of the protected ring of the cache.
+ *
+ * If the protected ring was full, demote as many of its least
+ * recently used objects to the probation ring as needed. This may
+ * cause the probation ring to become over full (but the total size of
+ * the cache remains unchanged), a condition that won't be corrected
+ * until new entries are added to the eden ring that flow down, or
+ * until an entry is resized with `lru_update_mru`.
+ */
 void lru_probation_on_hit(RSCache* cache,
                           RSRingNode* entry);
 
-
-void lru_update_mru(RSCache* cache,
-                    RSRing ring,
-                    RSRingNode* entry,
-                    rs_counter_t old_entry_size,
-                    rs_counter_t new_entry_size);
+/**
+ * Change the weight of the `entry` (and thus its containing `ring`),
+ * while also acting as a "hit" on the entry (increasing its frequency
+ * and causing it to become the MRU element in the appropriate ring).
+ *
+ * The `len` of the `entry` should already be `new_entry_size`.
+ *
+ * If this action causes any ring to become over full,
+ * entries are shifted to correct this:
+ *
+ * - If the entry was in the eden ring, then older eden entries will move to
+ *   probation or protected rings, as needed;
+ * - If the entry was in the protected ring, entries may shift to the
+ *   probation ring, and if the probation ring is over full, the least
+ *   frequently used of the entries will be rejected.
+ * - If the entry was in the probation ring, it is now in the
+ *   protected ring, which may have caused the protection ring to
+ *   become over full, so proceed as above.
+ *
+ * The return value is a RSRingNode containing all the rejected
+ * entries:
+ *
+ * - r_prev is always NULL;
+ * - If r_next is NULL, there were no rejected entries;
+ * - The final entry in the chain has an r_next of NULL;
+ */
+RSRingNode lru_update_mru(RSCache* cache,
+						  RSRing ring,
+						  RSRingNode* entry,
+						  rs_counter_t old_entry_size,
+						  rs_counter_t new_entry_size);
 
 
 RSRingNode eden_add(RSCache* cache,

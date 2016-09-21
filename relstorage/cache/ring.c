@@ -68,8 +68,8 @@ ring_add(RSRing ring, RSRingNode *elt)
 void
 ring_del(RSRing ring, RSRingNode *elt)
 {
-	if( elt->r_next == NULL && elt->r_prev == NULL)
-		return;
+    if( elt->r_next == NULL && elt->r_prev == NULL)
+        return;
 
     elt->r_next->r_prev = elt->r_prev;
     elt->r_prev->r_next = elt->r_next;
@@ -99,8 +99,8 @@ ring_move_to_head_from_foreign(RSRing current_ring,
                                RSRing new_ring,
                                RSRingNode* elt)
 {
-	ring_del(current_ring, elt);
-	ring_add(new_ring, elt);
+    ring_del(current_ring, elt);
+    ring_add(new_ring, elt);
     return ring_oversize(new_ring);
 }
 
@@ -149,18 +149,18 @@ static int lru_will_fit(RSRingNode* ring, RSRingNode* entry)
 #define _SPILL_NO_VICTIMS 0
 static
 RSRingNode _spill_from_ring_to_ring(RSRing updated_ring,
-									RSRing destination_ring,
-									RSRingNode* ignore_me,
-									int allow_victims,
-									int overfill_destination)
+                                    RSRing destination_ring,
+                                    RSRingNode* ignore_me,
+                                    int allow_victims,
+                                    int overfill_destination)
 {
     RSRingNode rejects = {};
-	if(overfill_destination) {
-		rejects.r_next = rejects.r_prev = NULL;
-	}
+    if(overfill_destination) {
+        rejects.r_next = rejects.r_prev = NULL;
+    }
     else {
-		rejects.r_next = rejects.r_prev = &rejects;
-	}
+        rejects.r_next = rejects.r_prev = &rejects;
+    }
 
     while(updated_ring->len > 1 && ring_oversize(updated_ring)) {
         RSRingNode* eden_oldest = ring_lru(updated_ring);
@@ -208,9 +208,10 @@ RSRingNode _spill_from_ring_to_ring(RSRing updated_ring,
     // we return rejects by value, so the next/prev pointers that were
     // initialized to its address here are now junk. break the link so
     // we don't run into them.
-	if(rejects.r_prev) {
-		rejects.r_prev->r_next = NULL;
-	}
+    if(rejects.r_prev) {
+        rejects.r_prev->r_next = NULL;
+    }
+    rejects.r_prev = NULL;
     return rejects;
 }
 
@@ -222,16 +223,16 @@ void lru_probation_on_hit(RSCache* cache,
     RSRing protected_ring = cache->protected;
     RSRing probation_ring = cache->probation;
     int protected_oversize = ring_move_to_head_from_foreign(probation_ring, protected_ring, entry);
-	if( !protected_oversize ) {
-		return;
-	}
+    if( !protected_oversize ) {
+        return;
+    }
 
-	// Protected got too big. Demote entries back to probation until
-	// protected is the right size (or we happen to hit the entry we
-	// just added, or the ring only has one item left)
-	_spill_from_ring_to_ring(protected_ring, probation_ring, entry,
-							 _SPILL_NO_VICTIMS,
-							 _SPILL_OVERFILL);
+    // Protected got too big. Demote entries back to probation until
+    // protected is the right size (or we happen to hit the entry we
+    // just added, or the ring only has one item left)
+    _spill_from_ring_to_ring(protected_ring, probation_ring, entry,
+                             _SPILL_NO_VICTIMS,
+                             _SPILL_OVERFILL);
 
 }
 
@@ -300,9 +301,9 @@ RSRingNode _eden_add(RSCache* cache,
 
 
 RSRingNode eden_add(RSCache* cache,
-        RSRingNode* entry)
+                    RSRingNode* entry)
 {
-    return _eden_add(cache, entry, 1);
+    return _eden_add(cache, entry, _SPILL_VICTIMS);
 }
 
 
@@ -327,48 +328,58 @@ int eden_add_many(RSCache* cache,
 
 
 
-void lru_update_mru(RSCache* cache,
-					RSRing home_ring,
-                    RSRingNode* entry,
-                    rs_counter_t old_entry_size,
-                    rs_counter_t new_entry_size)
+RSRingNode lru_update_mru(RSCache* cache,
+                          RSRing home_ring,
+                          RSRingNode* entry,
+                          rs_counter_t old_entry_size,
+                          rs_counter_t new_entry_size)
 {
-	// XXX: All this checking of ring equality isn't very elegant.
-	// Should we have three functions? But then we'd have three places
-	// to remember to resize the ring
+    // XXX: All this checking of ring equality isn't very elegant.
+    // Should we have three functions? But then we'd have three places
+    // to remember to resize the ring
+    RSRing protected_ring = cache->protected;
+    RSRing probation_ring = cache->probation;
+    RSRing eden_ring = cache->eden;
 
-	// resize the ring
-	home_ring->frequency -= old_entry_size;
-	home_ring->frequency += new_entry_size;
-
-	if(home_ring == cache->probation) {
-		// This is just like a hit.
-		// This takes care of transferring the item and
-		// rebalancing the rings if needed.
-		lru_probation_on_hit(cache, entry);
-		return;
-	}
-
+    // Always update the frequency
     entry->frequency++;
-    ring_move_to_head(home_ring, entry);
+    // always resize the ring because the entry size changed behind
+    // our back
+    assert(entry->len == new_entry_size);
+    home_ring->frequency -= old_entry_size;
+    home_ring->frequency += new_entry_size;
 
-	if(ring_oversize(home_ring)) {
-		// Narf. Balance.
-		if(home_ring == cache->eden) {
-			// let eden balance itself, but don't actually
-			// evict anything yet.
-			ring_del(home_ring, entry);
-			_eden_add(cache, entry, _SPILL_NO_VICTIMS);
-		}
-		else if(home_ring == cache->protected) {
-			RSRing protected = cache->protected;
-			RSRing probation = cache->probation;
-			_spill_from_ring_to_ring(protected, probation, entry,
-									 _SPILL_NO_VICTIMS,
-									 _SPILL_OVERFILL);
-		}
-	}
 
+    if (home_ring == eden_ring) {
+        // The simplest thing to do is to act like a delete and an
+        // addition, since adding to eden always rebalances the rings
+        // in addition to moving it to head.
+
+        // This might be ever-so-slightly slower in the case where the size
+        // went down or there was still room.
+        ring_del(home_ring, entry);
+        return eden_add(cache, entry);
+    }
+
+    int protected_ring_oversize = 0;
+    if (home_ring == probation_ring) {
+        protected_ring_oversize = ring_move_to_head_from_foreign(home_ring, protected_ring, entry);
+    }
+    else {
+        assert(home_ring == protected_ring);
+        ring_move_to_head(home_ring, entry);
+        protected_ring_oversize = ring_oversize(home_ring);
+    }
+
+    if (protected_ring_oversize) {
+        // bubble down, rejecting as needed
+        return _spill_from_ring_to_ring(protected_ring, probation_ring, entry,
+                                        _SPILL_VICTIMS, _SPILL_FIT);
+    }
+
+    RSRingNode result = {};
+    result.r_next = result.r_prev = NULL;
+    return result;
 }
 
 static void lru_age_list(RSRingNode* ring)

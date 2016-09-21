@@ -129,8 +129,19 @@ class SizedLRU(object):
         old_size = entry.len
         entry.set_value(value)
         new_size = entry.len
-        # XXX: Need to rebalance, if needed.
-        _lru_update_mru(self._cffi_cache, self._ring_home, entry.cffi_ring_node, old_size, new_size)
+        # XXX: Need to evict
+        rejected_items = _lru_update_mru(self._cffi_cache, self._ring_home, entry.cffi_ring_node, old_size, new_size)
+
+        if not rejected_items.r_next:
+            # Nothing rejected.
+            return
+
+        dct = self.entry_dict
+        node = rejected_items.r_next
+        while node:
+            # TODO: Should we add these to the eden's free list?
+            del dct[ffi_from_handle(node.user_data).key]
+            node = node.r_next
 
     def on_hit(self, entry):
         return _lru_on_hit(self._ring_home, entry.cffi_ring_node)
@@ -160,6 +171,8 @@ class EdenLRU(SizedLRU):
                                     'probation': self.probation_lru._ring.ring_home})
         probation_lru._cffi_cache = self._cffi_cache
         protected_lru._cffi_cache = self._cffi_cache
+        probation_lru.entry_dict = entry_dict
+        protected_lru.entry_dict = entry_dict
         self.entry_dict = entry_dict
         self._node_free_list = []
 
@@ -182,6 +195,7 @@ class EdenLRU(SizedLRU):
                                      nodes,
                                      number_nodes)
         # Only return the objects we added, allowing the rest to become garbage.
+        # TODO: Put them on the node_free_list?
         if added_count < number_nodes:
             return entries[:added_count]
         return entries
