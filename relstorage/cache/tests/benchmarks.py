@@ -182,12 +182,28 @@ def local_benchmark():
                     client.get_multi(hot_keys)
                     i = 0
 
+        def mixed_for_stats():
+            # This is a trivial function that simulates the way
+            # new keys can come in over time as we reset our checkpoints.
+            # (Actually, it mostly shows our superiority over the plain LRU;
+            # that one scored a 0.0 hit ratio, where our segmented LRU scores 1.0)
+            client.reset_stats()
+            hot_keys = key_groups[0]
+            i = 0
+            for k, v in ALL_DATA:
+                i += 1
+                client._bucket0[str(i)] = v
+
+
+            client.get_multi(hot_keys)
+
+            print("Hit ratio", client.stats()['ratio'])
 
         run_and_report_funcs((('pop ', populate),
                               ('epop', populate_empty),
                               ('read', read),
                               ('mix ', mixed),))
-
+        mixed_for_stats()
     do_times()
 
 def save_load_benchmark():

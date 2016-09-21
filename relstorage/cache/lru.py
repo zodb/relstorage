@@ -73,6 +73,8 @@ class SizedLRURingEntry(object):
                          lambda self, nv: setattr(self.cffi_ring_node, 'frequency', nv))
 
     def set_value(self, value):
+        if value == self.value:
+            return
         self.value = value
         self.len = self.cffi_ring_node.len = len(self.key) + len(value)
 
@@ -129,6 +131,9 @@ class SizedLRU(object):
         old_size = entry.len
         entry.set_value(value)
         new_size = entry.len
+        if old_size == new_size:
+            # Treat it as a simple hit
+            return self.on_hit(entry)
         # XXX: Need to evict
         rejected_items = _lru_update_mru(self._cffi_cache, self._ring_home, entry.cffi_ring_node, old_size, new_size)
 
