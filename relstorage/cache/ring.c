@@ -41,18 +41,18 @@ starting with the most recently used object.
  * this is copied to the children when they move.
  */
 
-static int ring_oversize(CPersistentRing* ring)
+static int ring_oversize(RSLRURingNode* ring)
 {
     return ring->frequency > ring->max_len;
 }
 
-static int ring_is_empty(CPersistentRing* ring)
+static int ring_is_empty(RSLRURingNode* ring)
 {
     return ring == NULL || ring->r_next == ring || ring->r_next == NULL;
 }
 
 void
-ring_add(CPersistentRing *ring, CPersistentRing *elt)
+ring_add(RSLRURingNode *ring, RSLRURingNode *elt)
 {
     elt->r_next = ring;
     elt->r_prev = ring->r_prev;
@@ -66,7 +66,7 @@ ring_add(CPersistentRing *ring, CPersistentRing *elt)
 }
 
 void
-ring_del(CPersistentRing* ring, CPersistentRing *elt)
+ring_del(RSLRURingNode* ring, RSLRURingNode *elt)
 {
 	if( elt->r_next == NULL && elt->r_prev == NULL)
 		return;
@@ -84,7 +84,7 @@ ring_del(CPersistentRing* ring, CPersistentRing *elt)
 }
 
 void
-ring_move_to_head(CPersistentRing *ring, CPersistentRing *elt)
+ring_move_to_head(RSLRURingNode *ring, RSLRURingNode *elt)
 {
     elt->r_prev->r_next = elt->r_next;
     elt->r_next->r_prev = elt->r_prev;
@@ -95,16 +95,16 @@ ring_move_to_head(CPersistentRing *ring, CPersistentRing *elt)
 }
 
 static int
-ring_move_to_head_from_foreign(CPersistentRing* current_ring,
-                               CPersistentRing* new_ring,
-                               CPersistentRing* elt)
+ring_move_to_head_from_foreign(RSLRURingNode* current_ring,
+                               RSLRURingNode* new_ring,
+                               RSLRURingNode* elt)
 {
 	ring_del(current_ring, elt);
 	ring_add(new_ring, elt);
     return ring_oversize(new_ring);
 }
 
-static CPersistentRing* ring_lru(CPersistentRing* ring)
+static RSLRURingNode* ring_lru(RSLRURingNode* ring)
 {
     if(ring->r_next == ring) {
         // empty list
@@ -113,15 +113,15 @@ static CPersistentRing* ring_lru(CPersistentRing* ring)
     return ring->r_next;
 }
 
-void lru_on_hit(CPersistentRing* ring, CPersistentRing* entry)
+void lru_on_hit(RSLRURingNode* ring, RSLRURingNode* entry)
 {
     entry->frequency++;
     ring_move_to_head(ring, entry);
 }
 
-void lru_probation_on_hit(CPersistentRing* probation_ring,
-                         CPersistentRing* protected_ring,
-                         CPersistentRing* entry)
+void lru_probation_on_hit(RSLRURingNode* probation_ring,
+                         RSLRURingNode* protected_ring,
+                         RSLRURingNode* entry)
 {
     entry->frequency++;
     int protected_oversize = ring_move_to_head_from_foreign(probation_ring, protected_ring, entry);
@@ -133,7 +133,7 @@ void lru_probation_on_hit(CPersistentRing* probation_ring,
 	// protected is the right size (or we happen to hit the entry we
 	// just added, or the ring only has one item left)
 	while( ring_oversize(protected_ring) && protected_ring->len > 1 ) {
-        CPersistentRing* protected_lru = ring_lru(protected_ring);
+        RSLRURingNode* protected_lru = ring_lru(protected_ring);
 		if( protected_lru == entry || protected_lru == NULL) {
             break;
 		}
@@ -143,8 +143,8 @@ void lru_probation_on_hit(CPersistentRing* probation_ring,
 
 }
 
-void lru_update_mru(CPersistentRing* ring,
-                    CPersistentRing* entry,
+void lru_update_mru(RSLRURingNode* ring,
+                    RSLRURingNode* entry,
                     rs_counter_t old_entry_size,
                     rs_counter_t new_entry_size)
 {
@@ -155,7 +155,7 @@ void lru_update_mru(CPersistentRing* ring,
     // XXX TODO: Rebalance all the rings!
 }
 
-static int lru_will_fit(CPersistentRing* ring, CPersistentRing* entry)
+static int lru_will_fit(RSLRURingNode* ring, RSLRURingNode* entry)
 {
     return ring->max_len >= (entry->len + ring->frequency);
 }
@@ -167,13 +167,13 @@ static int lru_will_fit(CPersistentRing* ring, CPersistentRing* entry)
  * caller can know to stop feeding us.
  */
 static
-CPersistentRing _eden_add(CPersistentRing* eden_ring,
-                          CPersistentRing* protected_ring,
-                          CPersistentRing* probation_ring,
-                          CPersistentRing* entry,
-                          int allow_victims)
+RSLRURingNode _eden_add(RSLRURingNode* eden_ring,
+                        RSLRURingNode* protected_ring,
+                        RSLRURingNode* probation_ring,
+                        RSLRURingNode* entry,
+                        int allow_victims)
 {
-    CPersistentRing rejects = {};
+    RSLRURingNode rejects = {};
     rejects.r_next = rejects.r_prev = NULL;
 
     ring_add(eden_ring, entry);
@@ -193,7 +193,7 @@ CPersistentRing _eden_add(CPersistentRing* eden_ring,
           # so go ahead and fill it.
         */
         while(ring_oversize(eden_ring)) {
-            CPersistentRing* eden_oldest = ring_lru(eden_ring);
+            RSLRURingNode* eden_oldest = ring_lru(eden_ring);
             if(!eden_oldest || eden_oldest == entry) {
                 break;
             }
@@ -220,7 +220,7 @@ CPersistentRing _eden_add(CPersistentRing* eden_ring,
     // Initialize the list to hold them.
     rejects.r_next = rejects.r_prev = &rejects;
     while(ring_oversize(eden_ring)) {
-        CPersistentRing* eden_oldest = ring_lru(eden_ring);
+        RSLRURingNode* eden_oldest = ring_lru(eden_ring);
         if(!eden_oldest || eden_oldest == entry) {
             break;
         }
@@ -239,7 +239,7 @@ CPersistentRing _eden_add(CPersistentRing* eden_ring,
                 break;
             }
 
-            CPersistentRing* probation_oldest = ring_lru(probation_ring);
+            RSLRURingNode* probation_oldest = ring_lru(probation_ring);
             if(!probation_oldest) {
                 //Hmm, the ring got emptied, but there's also no space
                 //in protected. This must be a very large object. Take
@@ -270,24 +270,24 @@ CPersistentRing _eden_add(CPersistentRing* eden_ring,
     return rejects;
 }
 
-CPersistentRing eden_add(CPersistentRing* eden_ring,
-                         CPersistentRing* protected_ring,
-                         CPersistentRing* probation_ring,
-                         CPersistentRing* entry)
+RSLRURingNode eden_add(RSLRURingNode* eden_ring,
+                         RSLRURingNode* protected_ring,
+                         RSLRURingNode* probation_ring,
+                         RSLRURingNode* entry)
 {
     return _eden_add(eden_ring, protected_ring, probation_ring, entry, 1);
 }
 
 
-int eden_add_many(CPersistentRing* eden_ring,
-                  CPersistentRing* protected_ring,
-                  CPersistentRing* probation_ring,
-                  CPersistentRing* entry_array,
+int eden_add_many(RSLRURingNode* eden_ring,
+                  RSLRURingNode* protected_ring,
+                  RSLRURingNode* probation_ring,
+                  RSLRURingNode* entry_array,
                   int entry_count)
 {
     int i = 0;
     for (i = 0; i < entry_count; i++) {
-        CPersistentRing add_rejects = _eden_add(eden_ring, protected_ring, probation_ring, entry_array + i, 0);
+        RSLRURingNode add_rejects = _eden_add(eden_ring, protected_ring, probation_ring, entry_array + i, 0);
         if (add_rejects.frequency) {
              // We would have rejected something, so     we must be full.
              // XXX: This isn't strictly true. It could be one really
@@ -303,20 +303,20 @@ int eden_add_many(CPersistentRing* eden_ring,
 
 
 
-static void lru_age_list(CPersistentRing* ring)
+static void lru_age_list(RSLRURingNode* ring)
 {
     if (ring_is_empty(ring)) {
         return;
     }
 
-    CPersistentRing* here = ring->r_next;
+    RSLRURingNode* here = ring->r_next;
     while (here != ring) {
         here->frequency = here->frequency / 2;
         here = here->r_next;
     }
 }
 
-void lru_age_lists(CPersistentRing* ring1, CPersistentRing* ring2, CPersistentRing* ring3)
+void lru_age_lists(RSLRURingNode* ring1, RSLRURingNode* ring2, RSLRURingNode* ring3)
 {
     lru_age_list(ring1);
     lru_age_list(ring2);
