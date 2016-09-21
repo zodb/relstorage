@@ -15,6 +15,7 @@ from __future__ import print_function, absolute_import, division
 import unittest
 
 from relstorage.tests.util import skipOnCI
+from functools import partial
 
 class StorageCacheTests(unittest.TestCase):
 
@@ -365,6 +366,14 @@ class StorageCacheTests(unittest.TestCase):
         self.assertEqual(c.delta_after0, {1: 45, 2: 46})
         self.assertEqual(c.delta_after1, {})
 
+def list_lrukeys_(lru, lru_name):
+    # Remember, these lists will be from LRU to MRU
+    return [e.key for e in getattr(lru, '_' + lru_name)]
+
+
+def list_lrufreq_(lru, lru_name):
+    return [e.frequency for e in getattr(lru, '_' + lru_name)]
+
 
 class SizedLRUMappingTests(unittest.TestCase):
 
@@ -399,6 +408,159 @@ class SizedLRUMappingTests(unittest.TestCase):
         self.assertEqual(b.size, 11)
         self.assertEqual(b.get('abc'), b'z')
         self.assertEqual(b.get("abcd"), b'xyz')
+
+    def test_increasing_size_in_eden_w_empty_protected_bumps_to_protected(self):
+        b = self.getClass()(40)
+        list_lrukeys = partial(list_lrukeys_, b)
+
+        self.assertEqual(b._eden.limit, 4)
+        self.assertEqual(b._probation.limit, 4)
+        self.assertEqual(b._protected.limit, 32)
+
+        # Get eden to exactly its size.
+        b['a'] = b'x'
+        self.assertEqual(b.size, 2)
+        self.assertEqual(list_lrukeys('eden'), ['a'])
+
+        b['b'] = b'y'
+        self.assertEqual(b.size, 4)
+        self.assertEqual(list_lrukeys('eden'), ['a', 'b'])
+
+        # Now increase an existing key, thus making it in MRU,
+        # and going over size of eden, and bumping down to protected.
+        b['a'] = b'xyz'
+        self.assertEqual(list_lrukeys('eden'), ['a'])
+        self.assertEqual(list_lrukeys('protected'), ['b'])
+
+        self.assertEqual(b.size, 6)
+
+    def test_increasing_size_in_eden_w_partial_protected_bumps_to_protected(self):
+        b = self.getClass()(40)
+        list_lrukeys = partial(list_lrukeys_, b)
+
+        self.assertEqual(b._eden.limit, 4)
+        self.assertEqual(b._probation.limit, 4)
+        self.assertEqual(b._protected.limit, 32)
+
+        # Fill up eden and begin spilling to protected
+        b['a'] = b'x'
+        self.assertEqual(b.size, 2)
+        self.assertEqual(list_lrukeys('eden'), ['a'])
+
+        b['b'] = b'y'
+        self.assertEqual(b.size, 4)
+        self.assertEqual(list_lrukeys('eden'), ['a', 'b'])
+
+        b['c'] = b'z'
+        self.assertEqual(b.size, 6)
+        self.assertEqual(list_lrukeys('eden'), ['b', 'c'])
+        self.assertEqual(list_lrukeys('protected'), ['a'])
+
+        # Now increase an existing key, thus making it in MRU,
+        # and going over size of eden, and bumping down to protected.
+        b['b'] = b'xyz'
+        self.assertEqual(list_lrukeys('eden'), ['b'])
+        self.assertEqual(list_lrukeys('protected'), ['a', 'c'])
+        self.assertEqual(b.size, 8)
+
+    def test_increasing_size_in_eden_w_full_protected_bumps_to_probation(self):
+        b = self.getClass()(40)
+        list_lrukeys = partial(list_lrukeys_, b)
+
+        self.assertEqual(b._eden.limit, 4)
+        self.assertEqual(b._probation.limit, 4)
+        self.assertEqual(b._protected.limit, 32)
+
+        # This actually stays in eden because it's the newest key,
+        # even though it's too big
+        b['a'] = b'x' * 31
+        self.assertEqual(b.size, 32)
+        self.assertEqual(list_lrukeys('eden'), ['a'])
+
+        # But this will immediately force a into protected
+        b['b'] = b'y'
+        self.assertEqual(b.size, 34)
+        self.assertEqual(list_lrukeys('eden'), ['b'])
+        self.assertEqual(list_lrukeys('protected'), ['a'])
+        self.assertEqual(list_lrukeys('probation'), [])
+
+        # Ok, now fill up eden with another key
+        b['c'] = b'z'
+        self.assertEqual(b.size, 36)
+        self.assertEqual(list_lrukeys('eden'), ['b', 'c'])
+        self.assertEqual(list_lrukeys('protected'), ['a'])
+        self.assertEqual(list_lrukeys('probation'), [])
+
+        # Now increase an existing key, thus making it in MRU,
+        # and going over size of eden. protected is full, so we go to probation.
+        b['b'] = b'xyz'
+        self.assertEqual(list_lrukeys('eden'), ['b'])
+        self.assertEqual(list_lrukeys('protected'), ['a'])
+        self.assertEqual(list_lrukeys('probation'), ['c'])
+        self.assertEqual(b.size, 38)
+
+        # Nothing was evicted
+        self.assertEqual(b['a'], b'x' * 31)
+        self.assertEqual(b['b'], b'xyz')
+        self.assertEqual(b['c'], b'z')
+
+    def test_increasing_size_in_full_protected_bumps_to_probation(self):
+        # Fill up in the normal way
+        b = self.getClass()(40)
+        list_lrukeys = partial(list_lrukeys_, b)
+
+        self.assertEqual(b._eden.limit, 4)
+        self.assertEqual(b._probation.limit, 4)
+        self.assertEqual(b._protected.limit, 32)
+
+        for k in range(10):
+            # 10 4 byte entries
+            b[str(k)] = 'abc'
+
+        self.assertEqual(list_lrukeys('eden'), ['9'])
+        self.assertEqual(list_lrukeys('protected'), ['0', '1', '2', '3', '4', '5', '6', '7'])
+        self.assertEqual(list_lrukeys('probation'), ['8'])
+        self.assertEqual(b.size, 40)
+
+        # Now bump protected over size, ejecting to probation.
+        # Note that we don't drop an element (yet)
+        b['3'] = 'abcd'
+        self.assertEqual(list_lrukeys('eden'), ['9'])
+        self.assertEqual(list_lrukeys('protected'), ['1', '2', '4', '5', '6', '7', '3'])
+        self.assertEqual(list_lrukeys('probation'), ['8', '0'])
+        self.assertEqual(b.size, 41)
+
+    def test_increasing_size_in_full_probation_full_protection_bumps_to_probation(self):
+        # Fill up in the normal way
+        b = self.getClass()(40)
+        list_lrukeys = partial(list_lrukeys_, b)
+
+        self.assertEqual(b._eden.limit, 4)
+        self.assertEqual(b._probation.limit, 4)
+        self.assertEqual(b._protected.limit, 32)
+
+        for k in range(10):
+            # 10 4 byte entries
+            b[str(k)] = 'abc'
+
+        self.assertEqual(list_lrukeys('eden'), ['9'])
+        self.assertEqual(list_lrukeys('protected'), ['0', '1', '2', '3', '4', '5', '6', '7'])
+        self.assertEqual(list_lrukeys('probation'), ['8'])
+        self.assertEqual(b.size, 40)
+
+        # Now increase an entry in probation. This will move it to protected, which
+        # will now be oversize.
+        # Note that we don't drop an element (yet)
+        b['8'] = 'abcd'
+        self.assertEqual(list_lrukeys('eden'), ['9'])
+        self.assertEqual(list_lrukeys('protected'), ['2', '3', '4', '5', '6', '7', '8'])
+        self.assertEqual(list_lrukeys('probation'), ['0', '1'])
+        self.assertEqual(b.size, 41)
+
+        # All ten can be accessed
+        for k in range(10):
+            b.get(str(k))
+
 
     def _load(self, bio, bucket, options):
         from relstorage.cache import persistence as _Loader
@@ -502,9 +664,7 @@ class SizedLRUMappingTests(unittest.TestCase):
         self.assertEqual(stored, 2)
         self.assertEqual(client1.size, client1_max_size)
 
-        def list_lrukeys(lru_name):
-            # Remember, these lists will be from LRU to MRU
-            return [e.key for e in getattr(client1, '_' + lru_name)]
+        list_lrukeys = partial(list_lrukeys_, client1)
         self.assertEqual(list_lrukeys('eden'), ['abc'])
         self.assertEqual(list_lrukeys('probation'), [])
         self.assertEqual(list_lrukeys('protected'), ['def'])
@@ -613,12 +773,8 @@ class LocalClientTests(unittest.TestCase):
         c._bucket_limit = 51
         c.flush_all()
 
-        def list_lrukeys(lru_name):
-            # Remember, these lists will be from LRU to MRU
-            return [e.key for e in getattr(c._bucket0, '_' + lru_name)]
-
-        def list_lrufreq(lru_name):
-            return [e.frequency for e in getattr(c._bucket0, '_' + lru_name)]
+        list_lrukeys = partial(list_lrukeys_, c._bucket0)
+        list_lrufreq = partial(list_lrufreq_, c._bucket0)
 
         k = None
 
@@ -740,9 +896,7 @@ class LocalClientTests(unittest.TestCase):
         c = self._makeOne(cache_local_compression='zlib')
         c._bucket_limit = 23 * 2 + 1
         c.flush_all()
-        def list_lrukeys(lru_name):
-            # Remember, these lists will be from LRU to MRU
-            return [e.key for e in getattr(c._bucket0, '_' + lru_name)]
+        list_lrukeys = partial(list_lrukeys_, c._bucket0)
 
         k0_data = b'01234567' * 15
         c.set('k0', k0_data)

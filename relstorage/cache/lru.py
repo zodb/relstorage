@@ -130,7 +130,7 @@ class SizedLRU(object):
         entry.set_value(value)
         new_size = entry.len
         # XXX: Need to rebalance, if needed.
-        _lru_update_mru(self._ring.ring_home, entry.cffi_ring_node, old_size, new_size)
+        _lru_update_mru(self._cffi_cache, self._ring_home, entry.cffi_ring_node, old_size, new_size)
 
     def on_hit(self, entry):
         return _lru_on_hit(self._ring_home, entry.cffi_ring_node)

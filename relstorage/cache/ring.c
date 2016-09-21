@@ -119,6 +119,102 @@ void lru_on_hit(RSRing ring, RSRingNode* entry)
     ring_move_to_head(ring, entry);
 }
 
+static int lru_will_fit(RSRingNode* ring, RSRingNode* entry)
+{
+    return ring->max_len >= (entry->len + ring->frequency);
+}
+
+/**
+ * Call when `updated_ring` has gotten too big, and we should transfer
+ * items to `destination_ring`. The item `ignore_me` is the item that
+ * caused the `updated_ring` to get too big, so if it's the only thing
+ * in the ring, we don't move it.
+ *
+ * When `allow_victims` is False, then we stop once we fill up all
+ * three rings and we avoid producing any victims. If we *would*
+ * have produced victims, we return with rejects.frequency = 1 so the
+ * caller can know to stop feeding us.
+ *
+ * When `overfill_destination` is True, then we will move all the
+ * items we have to in order to make updated_ring its correct size,
+ * even though this could cause the destination to become too large.
+ * There will never be victims in this case. `allow_victims` is
+ * ignored in this case.
+ *
+ * You must only call this when the ring is already full.
+ */
+#define _SPILL_OVERFILL 1
+#define _SPILL_FIT 0
+#define _SPILL_VICTIMS 1
+#define _SPILL_NO_VICTIMS 0
+static
+RSRingNode _spill_from_ring_to_ring(RSRing updated_ring,
+									RSRing destination_ring,
+									RSRingNode* ignore_me,
+									int allow_victims,
+									int overfill_destination)
+{
+    RSRingNode rejects = {};
+	if(overfill_destination) {
+		rejects.r_next = rejects.r_prev = NULL;
+	}
+    else {
+		rejects.r_next = rejects.r_prev = &rejects;
+	}
+
+    while(updated_ring->len > 1 && ring_oversize(updated_ring)) {
+        RSRingNode* eden_oldest = ring_lru(updated_ring);
+        if(!eden_oldest || eden_oldest == ignore_me) {
+            break;
+        }
+
+        if(overfill_destination || lru_will_fit(destination_ring, eden_oldest)){
+            // Good, there's room. No victims to choose.
+            ring_move_to_head_from_foreign(updated_ring, destination_ring, eden_oldest);
+        }
+        else {
+            // Darn, we're too big. We must choose (and record) a
+            // victim.
+
+            if(!allow_victims) {
+                // set the signal and quit.
+                rejects.frequency = 1;
+                break;
+            }
+
+            RSRingNode* probation_oldest = ring_lru(destination_ring);
+            if(!probation_oldest) {
+                //Hmm, the ring got emptied, but there's also no space
+                //in protected. This must be a very large object. Take
+                //ownership of it anyway, but quite trying.
+               ring_move_to_head_from_foreign(updated_ring, destination_ring, eden_oldest);
+               break;
+            }
+
+            if(probation_oldest->frequency > eden_oldest->frequency) {
+                // Discard the eden entry, it's used less than the
+                // probation entry.
+                ring_move_to_head_from_foreign(updated_ring, &rejects, eden_oldest);
+            }
+            else {
+                // good bye to the item on probation.
+                ring_move_to_head_from_foreign(destination_ring, &rejects, probation_oldest);
+                // hello to eden item, who is now on probation
+                ring_move_to_head_from_foreign(updated_ring, destination_ring, eden_oldest);
+            }
+        }
+    }
+
+    // we return rejects by value, so the next/prev pointers that were
+    // initialized to its address here are now junk. break the link so
+    // we don't run into them.
+	if(rejects.r_prev) {
+		rejects.r_prev->r_next = NULL;
+	}
+    return rejects;
+}
+
+
 void lru_probation_on_hit(RSCache* cache,
                           RSRingNode* entry)
 {
@@ -133,32 +229,10 @@ void lru_probation_on_hit(RSCache* cache,
 	// Protected got too big. Demote entries back to probation until
 	// protected is the right size (or we happen to hit the entry we
 	// just added, or the ring only has one item left)
-	while( ring_oversize(protected_ring) && protected_ring->len > 1 ) {
-        RSRingNode* protected_lru = ring_lru(protected_ring);
-		if( protected_lru == entry || protected_lru == NULL) {
-            break;
-		}
-        ring_move_to_head_from_foreign(protected_ring, probation_ring, protected_lru);
-	}
+	_spill_from_ring_to_ring(protected_ring, probation_ring, entry,
+							 _SPILL_NO_VICTIMS,
+							 _SPILL_OVERFILL);
 
-
-}
-
-void lru_update_mru(RSRing ring,
-                    RSRingNode* entry,
-                    rs_counter_t old_entry_size,
-                    rs_counter_t new_entry_size)
-{
-    entry->frequency++;
-    ring->frequency -= old_entry_size;
-    ring->frequency += new_entry_size;
-    ring_move_to_head(ring, entry);
-    // XXX TODO: Rebalance all the rings!
-}
-
-static int lru_will_fit(RSRingNode* ring, RSRingNode* entry)
-{
-    return ring->max_len >= (entry->len + ring->frequency);
 }
 
 /**
@@ -220,58 +294,10 @@ RSRingNode _eden_add(RSCache* cache,
 
     // OK, we've already filled protected and have started putting
     // things in probation. So we may need to choose victims.
-    // Initialize the list to hold them.
-    rejects.r_next = rejects.r_prev = &rejects;
-    while(ring_oversize(eden_ring)) {
-        RSRingNode* eden_oldest = ring_lru(eden_ring);
-        if(!eden_oldest || eden_oldest == entry) {
-            break;
-        }
-
-        if(lru_will_fit(probation_ring, eden_oldest)){
-            // Good, there's room. No victims to choose.
-            ring_move_to_head_from_foreign(eden_ring, probation_ring, eden_oldest);
-        }
-        else {
-            // Darn, we're too big. We must choose (and record) a
-            // victim.
-
-            if(!allow_victims) {
-                // set the signal and quit.
-                rejects.frequency = 1;
-                break;
-            }
-
-            RSRingNode* probation_oldest = ring_lru(probation_ring);
-            if(!probation_oldest) {
-                //Hmm, the ring got emptied, but there's also no space
-                //in protected. This must be a very large object. Take
-                //ownership of it anyway, but quite trying.
-               ring_move_to_head_from_foreign(eden_ring, probation_ring, eden_oldest);
-               break;
-            }
-
-            if(probation_oldest->frequency > eden_oldest->frequency) {
-                // Discard the eden entry, it's used less than the
-                // probation entry.
-                ring_move_to_head_from_foreign(eden_ring, &rejects, eden_oldest);
-            }
-            else {
-                // good bye to the item on probation.
-                ring_move_to_head_from_foreign(probation_ring, &rejects, probation_oldest);
-                // hello to eden item, who is now on probation
-                ring_move_to_head_from_foreign(eden_ring, probation_ring, eden_oldest);
-            }
-        }
-    }
-
-    // we return rejects by value, so the next/prev pointers that were
-    // initialized to its address here are now junk. break the link so
-    // we don't run into them.
-    rejects.r_prev->r_next = NULL;
-
-    return rejects;
+    return _spill_from_ring_to_ring(eden_ring, probation_ring, entry, allow_victims, _SPILL_FIT);
 }
+
+
 
 RSRingNode eden_add(RSCache* cache,
         RSRingNode* entry)
@@ -301,6 +327,49 @@ int eden_add_many(RSCache* cache,
 
 
 
+void lru_update_mru(RSCache* cache,
+					RSRing home_ring,
+                    RSRingNode* entry,
+                    rs_counter_t old_entry_size,
+                    rs_counter_t new_entry_size)
+{
+	// XXX: All this checking of ring equality isn't very elegant.
+	// Should we have three functions? But then we'd have three places
+	// to remember to resize the ring
+
+	// resize the ring
+	home_ring->frequency -= old_entry_size;
+	home_ring->frequency += new_entry_size;
+
+	if(home_ring == cache->probation) {
+		// This is just like a hit.
+		// This takes care of transferring the item and
+		// rebalancing the rings if needed.
+		lru_probation_on_hit(cache, entry);
+		return;
+	}
+
+    entry->frequency++;
+    ring_move_to_head(home_ring, entry);
+
+	if(ring_oversize(home_ring)) {
+		// Narf. Balance.
+		if(home_ring == cache->eden) {
+			// let eden balance itself, but don't actually
+			// evict anything yet.
+			ring_del(home_ring, entry);
+			_eden_add(cache, entry, _SPILL_NO_VICTIMS);
+		}
+		else if(home_ring == cache->protected) {
+			RSRing protected = cache->protected;
+			RSRing probation = cache->probation;
+			_spill_from_ring_to_ring(protected, probation, entry,
+									 _SPILL_NO_VICTIMS,
+									 _SPILL_OVERFILL);
+		}
+	}
+
+}
 
 static void lru_age_list(RSRingNode* ring)
 {

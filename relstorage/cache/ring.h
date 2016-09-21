@@ -49,9 +49,9 @@ typedef struct RSRingNode_struct {
 typedef RSRingNode* RSRing;
 
 typedef struct RSCache_struct {
-	RSRing eden;
-	RSRing protected;
-	RSRing probation;
+    RSRing eden;
+    RSRing protected;
+    RSRing probation;
 } RSCache;
 
 /* The list operations here take constant time independent of the
@@ -83,17 +83,18 @@ void ring_move_to_head(RSRing ring, RSRingNode *elt);
 
 
 void lru_probation_on_hit(RSCache* cache,
-						  RSRingNode* entry);
+                          RSRingNode* entry);
 
 
-void lru_update_mru(RSRing ring,
+void lru_update_mru(RSCache* cache,
+                    RSRing ring,
                     RSRingNode* entry,
                     rs_counter_t old_entry_size,
                     rs_counter_t new_entry_size);
 
 
 RSRingNode eden_add(RSCache* cache,
-					RSRingNode* entry);
+                    RSRingNode* entry);
 void lru_on_hit(RSRing ring, RSRingNode* entry);
 
 void lru_age_lists(RSCache* cache);

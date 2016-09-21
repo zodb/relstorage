@@ -172,6 +172,10 @@ class SizedLRUMapping(object):
         that is no longer the case.
 
         If we need to age popularity counts, do so.
+
+        The item is considered to be the most-recently-used item
+        (because this is called in the event of a cache miss, when
+        we needed the item).
         """
         # These types are gated by LocalClient, we don't need to double
         # check.
