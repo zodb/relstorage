@@ -176,7 +176,7 @@ For the final version with optimizations (file format two), the write
 time is 2.3s/read is 6.4s.
 
 Segmented LRU
-=============
+-------------
 
 With the code before any modifications
 (1b3910195c2b7ce666e4bd2cbecf28a79aa094b3) and using the same
@@ -214,3 +214,56 @@ close to the same as the original numbers:
 
 read  average 6.509062864002772 stddev 0.08413966528299127
 write average 6.0874157809982234 stddev 0.04251385543342157
+
+Simulations
+===========
+
+These are the results of some simulations based on the data from
+http://traces.cs.umass.edu/index.php/Storage/Storage.
+
+WebSearch1 has 1055448 operations on 480446 keys.
+WebSearch2 has 4579809 operations on 726501 keys.
+WebSearch3 has 4261709 operations on 707802 keys.
+Financial1 has 5334987 operations on 710908 keys.
+Financial2 has 3699194 operations on 296072 keys.
+
+============  ==========  =========  =========  ========  =========
+ File         Cache Size   Hits LRU  Hits SLRU  Time LRU  Time SLRU
+============  ==========  =========  =========  ========  =========
+WebSearch1      100           0.007      0.023      12.1       10.5
+WebSearch1      512           0.042      0.120      11.8        9.5
+WebSearch1     1024           0.187      0.223      11.5        9.5
+WebSearch2      100           0.007      0.029      51.5       49.3
+WebSearch2      512           0.044      0.146      52.5       43.4
+WebSearch2     1024           0.214      0.271      46.0       39.0
+WebSearch3      100           0.007      0.029      46.4       40.0
+WebSearch3      512           0.048      0.147      50.1       40.3
+WebSearch3     1024           0.222      0.279      42.9       35.6
+Financial1      100           0.716      0.664      40.1       37.9
+Financial1      512           0.839      0.826      37.7       35.5
+Financial1     1024           0.881      0.893      36.3       36.0
+Financial2      100           0.851      0.847      21.3       19.4
+Financial2      512           0.920      0.920      18.8       17.7
+Financial2     1024           0.921      0.921      18.0       18.0
+============  ==========  =========  =========  ========  =========
+
+
+============  =========  ==========  ==========
+ File         Limit       Mem LRU    Mem SLRU
+============  =========  ==========  ==========
+WebSearch1      100        99997049   100161316
+WebSearch1      512       511995883   512160824
+WebSearch1     1024      1023998683  1024165996
+WebSearch2      100        99997319    99989083
+WebSearch2      512       511997956   511997222
+WebSearch2     1024      1023995277  1023993396
+WebSearch3      100        99997030    99988784
+WebSearch3      512       511998677   511998234
+WebSearch3     1024      1023994322  1023994405
+Financial1      100        99999247   103871759
+Financial1      512       511997869   514070549
+Financial1     1024      1023998982  1023998356
+Financial2      100        99999189   100601745
+Financial2      512       511992446   512268118
+Financial2     1024       606137999   606137999
+============  =========  ==========  ==========

@@ -206,6 +206,60 @@ def local_benchmark():
         mixed_for_stats()
     do_times()
 
+def storage_simulator(filename=None):
+    # Trace files can be obtained from http://traces.cs.umass.edu/index.php/Storage/Storage
+    from relstorage.cache.local_client import LocalClient
+    options = MockOptions()
+    options.cache_local_mb = int(sys.argv[3])
+    options.cache_local_compression = 'none'
+
+    client = LocalClient(options)
+
+    import bz2
+    import os.path
+    from collections import namedtuple
+    import time
+
+    Record = namedtuple('Record', ['asu', 'lba', 'size', 'opcode', 'ts'])
+
+    if filename is None:
+        filename = sys.argv[2]
+    filename = os.path.abspath(os.path.expanduser(filename))
+
+    records = []
+    with bz2.BZ2File(filename, 'r') as f:
+        for line in f:
+            line = line.decode('ascii') if isinstance(line, bytes) else line
+            fields = [x.strip() for x in line.split(",")]
+            try:
+                fields[2] = int(fields[2])
+                fields[3] = fields[3].lower()
+            except IndexError:
+                print("Invalid line", line)
+                continue
+
+            records.append(Record(*fields[:5]))
+
+    print("Simulating", len(records), "operations to", len(set(x.lba for x in records)), "distinct keys",
+          "with cache limit", client._bucket_limit)
+    now = time.time()
+    for record in records:
+        key = record.lba
+        if record.opcode == 'r':
+            data = client.get(key)
+            if data is None:
+                # Fill it in from the backend
+                client.set(key, b'r' * record.size)
+        else:
+            assert record.opcode == 'w'
+            client.set(key, b'x' * record.size)
+
+    done = time.time()
+    print("Done simulating records in ", done - now)
+    import pprint
+    pprint.pprint(client.stats())
+
+
 def save_load_benchmark():
     from relstorage.cache.mapping import SizedLRUMapping as LocalClientBucket
     from relstorage.cache import persistence as _Loader
@@ -269,3 +323,5 @@ if __name__ == '__main__':
         import logging
         logging.basicConfig(level=logging.DEBUG)
         save_load_benchmark()
+    elif '--simulate' in sys.argv:
+        storage_simulator()
