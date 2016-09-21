@@ -144,9 +144,9 @@ void lru_probation_on_hit(CPersistentRing* probation_ring,
 }
 
 void lru_update_mru(CPersistentRing* ring,
-                   CPersistentRing* entry,
-                   rs_counter_t old_entry_size,
-                   rs_counter_t new_entry_size)
+                    CPersistentRing* entry,
+                    rs_counter_t old_entry_size,
+                    rs_counter_t new_entry_size)
 {
     entry->frequency++;
     ring->frequency -= old_entry_size;
@@ -161,7 +161,7 @@ static int lru_will_fit(CPersistentRing* ring, CPersistentRing* entry)
 }
 
 /**
- * When `allow_victims` is Falce, then we stop once we fill up all
+ * When `allow_victims` is False, then we stop once we fill up all
  * three rings and we avoid producing any victims. If we *would*
  * have produced victims, we return with rejects.frequency = 1 so the
  * caller can know to stop feeding us.

@@ -144,7 +144,7 @@ Benchmark for the general approach:
 
 Pickle is about 3x faster than marshal if we write single large
 objects, surprisingly. If we stick to writing smaller objects, the
-difference narrows but is still perciptable. (Naturally on PyPy the
+difference narrows but is still perceptible. (Naturally on PyPy the
 reverse is true: pickle and zodbpickle are very slow, but marshal is
 much faster. We could, but don't, take advantage of that.)
 

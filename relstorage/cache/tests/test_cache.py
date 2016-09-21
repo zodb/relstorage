@@ -401,13 +401,13 @@ class SizedLRUMappingTests(unittest.TestCase):
         self.assertEqual(b.get("abcd"), b'xyz')
 
     def _load(self, bio, bucket, options):
-        from relstorage.cache import _persistence as _Loader
+        from relstorage.cache import persistence as _Loader
         bio.seek(0)
         reader = _Loader._gzip_file(options, None, bio, mode='rb')
         return bucket.load_from_file(reader)
 
     def _save(self, bio, bucket, options, byte_limit=None):
-        from relstorage.cache import _persistence as _Loader
+        from relstorage.cache import persistence as _Loader
         bio.seek(0)
         if options.cache_local_dir_compress:
             self.assertEqual(".rscache.gz", _Loader._gzip_ext(options))
@@ -517,7 +517,7 @@ class SizedLRUMappingTests(unittest.TestCase):
 
     @skipOnCI("Sometimes the files_loaded is just 1 on Travis.")
     def test_load_from_multiple_files_hit_limit(self):
-        from relstorage.cache import _persistence as _Loader
+        from relstorage.cache import persistence as _Loader
         import tempfile
         client = self.getClass()(100)
         options = MockOptions()
@@ -547,7 +547,7 @@ class SizedLRUMappingTests(unittest.TestCase):
 class LocalClientTests(unittest.TestCase):
 
     def getClass(self):
-        from relstorage.cache import LocalClient
+        from relstorage.cache.local_client import LocalClient
         return LocalClient
 
     def _makeOne(self, **kw):

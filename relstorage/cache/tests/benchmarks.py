@@ -192,7 +192,7 @@ def local_benchmark():
 
 def save_load_benchmark():
     from relstorage.cache.mapping import SizedLRUMapping as LocalClientBucket
-    from relstorage.cache import _persistence as _Loader
+    from relstorage.cache import persistence as _Loader
 
     import os
     import itertools
