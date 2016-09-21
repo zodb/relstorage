@@ -175,7 +175,7 @@ else:
         You must keep the entries alive! Otherwise memory will be freed.
         """
 
-        def __init__(self, ring_type='RSLRURingNode*', ffi=ffi):
+        def __init__(self, ring_type='RSRing', ffi=ffi):
             self.ring_type = ring_type
             node = self.ring_home = ffi.new(self.ring_type)
             node.r_next = node

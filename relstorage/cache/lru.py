@@ -52,7 +52,7 @@ class SizedLRURingEntry(object):
         # Passing the string is faster than passing a cdecl because we
         # have the string directly in bytecode without a lookup
         if node is None:
-            node = ffi_new('RSLRURingNode*')
+            node = ffi_new('RSRingNode*')
         self.cffi_ring_node = node
 
         # Directly setting attributes is faster than the initializer
@@ -161,11 +161,11 @@ class EdenLRU(SizedLRU):
 
     def _preallocate_entries(self, ordered_keys_and_values):
         count = len(ordered_keys_and_values)
-        nodes = ffi.new('RSLRURingNode[]', count)
+        nodes = ffi.new('RSRingNode[]', count)
         entries = []
         for i in range(count):
             k, v = ordered_keys_and_values[i]
-            node = nodes + i # this gets RSLRURingNode*; nodes[i] returns the struct
+            node = nodes + i # this gets RSRingNode*; nodes[i] returns the struct
             entry = SizedLRURingEntry(k, v, node)
             entry._cffi_owning_node = nodes
             entries.append(entry)

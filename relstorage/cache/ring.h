@@ -34,9 +34,9 @@ object in it.
 
 typedef unsigned long long rs_counter_t; // For old CFFI versions.
 
-typedef struct RSLRURingNode_struct {
-    struct RSLRURingNode_struct* r_prev;
-    struct RSLRURingNode_struct* r_next;
+typedef struct RSRingNode_struct {
+    struct RSRingNode_struct* r_prev;
+    struct RSRingNode_struct* r_next;
     void* user_data;
 
     rs_counter_t frequency;
@@ -44,7 +44,9 @@ typedef struct RSLRURingNode_struct {
     rs_counter_t max_len;
 
     int r_parent;
-} RSLRURingNode;
+} RSRingNode;
+
+typedef RSRingNode* RSRing;
 
 /* The list operations here take constant time independent of the
  * number of objects in the list:
@@ -53,12 +55,12 @@ typedef struct RSLRURingNode_struct {
 /* Add elt as the most recently used object.  elt must not already be
  * in the list, although this isn't checked.
  */
-void ring_add(RSLRURingNode *ring, RSLRURingNode *elt);
+void ring_add(RSRing ring, RSRingNode *elt);
 
 /* Remove elt from the list.  elt must already be in the list, although
  * this isn't checked.
  */
-void ring_del(RSLRURingNode* ring, RSLRURingNode *elt);
+void ring_del(RSRing ring, RSRingNode *elt);
 
 /* elt must already be in the list, although this isn't checked.  It's
  * unlinked from its current position, and relinked into the list as the
@@ -71,30 +73,30 @@ void ring_del(RSLRURingNode* ring, RSLRURingNode *elt);
  *
  * but may be a little quicker.
  */
-void ring_move_to_head(RSLRURingNode *ring, RSLRURingNode *elt);
+void ring_move_to_head(RSRing ring, RSRingNode *elt);
 
 
-void lru_probation_on_hit(RSLRURingNode* probation_ring,
-                         RSLRURingNode* protected_ring,
-                         RSLRURingNode* entry);
+void lru_probation_on_hit(RSRing probation_ring,
+						  RSRing protected_ring,
+						  RSRingNode* entry);
 
 
-void lru_update_mru(RSLRURingNode* ring,
-                    RSLRURingNode* entry,
+void lru_update_mru(RSRing ring,
+                    RSRingNode* entry,
                     rs_counter_t old_entry_size,
                     rs_counter_t new_entry_size);
 
 
-RSLRURingNode eden_add(RSLRURingNode* eden_ring,
-                         RSLRURingNode* protected_ring,
-                         RSLRURingNode* probation_ring,
-                         RSLRURingNode* entry);
-void lru_on_hit(RSLRURingNode* ring, RSLRURingNode* entry);
+RSRingNode eden_add(RSRing eden_ring,
+					RSRing protected_ring,
+					RSRing probation_ring,
+					RSRingNode* entry);
+void lru_on_hit(RSRing ring, RSRingNode* entry);
 
-void lru_age_lists(RSLRURingNode* eden_ring, RSLRURingNode* protected_ring, RSLRURingNode* probation_ring);
+void lru_age_lists(RSRing eden_ring, RSRing protected_ring, RSRing probation_ring);
 
-int eden_add_many(RSLRURingNode* eden_ring,
-                  RSLRURingNode* protected_ring,
-                  RSLRURingNode* probation_ring,
-                  RSLRURingNode* entry_array,
+int eden_add_many(RSRing eden_ring,
+                  RSRing protected_ring,
+                  RSRing probation_ring,
+                  RSRingNode* entry_array,
                   int entry_count);
