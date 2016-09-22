@@ -96,11 +96,8 @@ class Cache(object):
 
 
         self.protected = ProtectedRing(int(byte_limit * self._gen_protected_pct))
-        self.probation = ProbationRing(int(byte_limit * self._gen_probation_pct),
-                                       self.protected)
-        self.eden = EdenRing(int(byte_limit * self._gen_eden_pct),
-                             self.probation,
-                             self.protected)
+        self.probation = ProbationRing(int(byte_limit * self._gen_probation_pct))
+        self.eden = EdenRing(int(byte_limit * self._gen_eden_pct))
 
         self.cffi_cache = ffi_new("RSCache*",
                                    {'eden': self.eden.ring_home,
@@ -167,8 +164,8 @@ class CacheRingNode(object):
         self.value = value
         self.len = self.cffi_ring_node.len = len(self.key) + len(value)
 
-    def __len__(self):
-        return self.len
+    # We don't implement __len__---we want people to access .len
+    # directly to avoid the function call as it showed up in benchmarks
 
     def __repr__(self):
         return ("<%s key=%r f=%d size=%d>" %
@@ -271,7 +268,7 @@ class CacheRing(object):
             node = node.r_next
 
     def on_hit(self, entry):
-        return _lru_on_hit(self.ring_home, entry.cffi_ring_node)
+        _lru_on_hit(self.ring_home, entry.cffi_ring_node)
 
     def delete(self, entry):
         its_node = entry.cffi_ring_node
@@ -290,11 +287,6 @@ class CacheRing(object):
 class EdenRing(CacheRing):
 
     PARENT_CONST = 1
-
-    def __init__(self, limit, probation_lru, protected_lru):
-        CacheRing.__init__(self, limit)
-        self.probation_lru = probation_lru
-        self.protected_lru = protected_lru
 
     def _preallocate_entries(self, ordered_keys_and_values):
         count = len(ordered_keys_and_values)
@@ -355,12 +347,7 @@ class ProbationRing(CacheRing):
 
     PARENT_CONST = 3
 
-    def __init__(self, limit, protected_lru):
-        CacheRing.__init__(self, limit)
-        self.protected_lru = protected_lru
-
     def on_hit(self, entry):
         # Move the entry to the protected LRU on its very first hit, where
         # it becomes the MRU.
-        return _lru_probation_on_hit(self.cffi_cache,
-                                     entry.cffi_ring_node)
+        _lru_probation_on_hit(self.cffi_cache, entry.cffi_ring_node)
