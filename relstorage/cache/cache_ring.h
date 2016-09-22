@@ -37,20 +37,32 @@ typedef struct RSRingNode_struct {
     struct RSRingNode_struct* r_next;
     void* user_data;
 
-    // How popular this item is.
-    rs_counter_t frequency;
-    // The weight of this item.
-    rs_counter_t len;
-    // Only in the head node: maximum allowed weight of all children.
-    rs_counter_t max_len;
+    union {
+        struct {
+            // How popular this item is.
+            rs_counter_t frequency;
+            // The weight of this item.
+            rs_counter_t weight;
+            // The number of the parent generation
+            int r_parent;
+        } entry;
+        struct {
+            // How many items are in this list
+            rs_counter_t len;
+            // The sum of their weights.
+            rs_counter_t sum_weights;
+            // The maximum allowed weight
+            rs_counter_t max_weight;
+            // The generation number
+            int generation;
+        } head;
+    } u;
 
-    int r_parent;
 } RSRingNode;
 
 /**
  * A typedef for the distinguished head of the list.
- * NOTE: We use `len` to count the number of children
- * and `frequency` to sum their weights.
+ * Use the 'head' union member for this item.
  */
 typedef RSRingNode* RSRing;
 

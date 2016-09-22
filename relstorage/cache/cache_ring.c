@@ -34,16 +34,10 @@ starting with the most recently used object.
 #include "cache_ring.h"
 #endif
 
-/**
- * The LRU ring heads use `len` to record the number of items,
- * and `frequency` to record the sum of the `len` of the members.
- * They also use the r_parent member to be the void* CDATA pointer;
- * this is copied to the children when they move.
- */
 
 static inline int ring_oversize(RSRing ring)
 {
-    return ring->frequency > ring->max_len;
+    return ring->u.head.sum_weights > ring->u.head.max_weight;
 }
 
 static inline int ring_is_empty(RSRing ring)
@@ -58,10 +52,10 @@ rsc_ring_add(RSRing ring, RSRingNode *elt)
     elt->r_prev = ring->r_prev;
     ring->r_prev->r_next = elt;
     ring->r_prev = elt;
-    elt->r_parent = ring->r_parent;
+    elt->u.entry.r_parent = ring->u.head.generation;
 
-    ring->frequency += elt->len;
-    ring->len++;
+    ring->u.head.sum_weights += elt->u.entry.weight;
+    ring->u.head.len++;
 
 }
 
@@ -79,8 +73,8 @@ rsc_ring_del(RSRing ring, RSRingNode *elt)
     //anyway when it goes to a different list.
     //elt->r_parent = NULL;
 
-    ring->len -= 1;
-    ring->frequency -= elt->len;
+    ring->u.head.len -= 1;
+    ring->u.head.sum_weights -= elt->u.entry.weight;
 }
 
 inline void
@@ -102,21 +96,21 @@ ring_move_to_head_from_foreign(RSRing current_ring,
     //ring_del(current_ring, elt);
     elt->r_next->r_prev = elt->r_prev;
     elt->r_prev->r_next = elt->r_next;
-    current_ring->len -= 1;
-    current_ring->frequency -= elt->len;
+    current_ring->u.head.len -= 1;
+    current_ring->u.head.sum_weights -= elt->u.entry.weight;
 
     //ring_add(new_ring, elt);
     elt->r_next = new_ring;
     elt->r_prev = new_ring->r_prev;
     new_ring->r_prev->r_next = elt;
     new_ring->r_prev = elt;
-    elt->r_parent = new_ring->r_parent;
+    elt->u.entry.r_parent = new_ring->u.head.generation;
 
-    new_ring->frequency += elt->len;
-    new_ring->len++;
+    new_ring->u.head.sum_weights += elt->u.entry.weight;
+    new_ring->u.head.len++;
 
     //return ring_oversize(new_ring);
-    return new_ring->frequency > new_ring->max_len;
+    return new_ring->u.head.sum_weights > new_ring->u.head.max_weight;
 }
 
 static inline RSRingNode* ring_lru(RSRing ring)
@@ -130,13 +124,13 @@ static inline RSRingNode* ring_lru(RSRing ring)
 
 void rsc_on_hit(RSRing ring, RSRingNode* entry)
 {
-    entry->frequency++;
+    entry->u.entry.frequency++;
     rsc_ring_move_to_head(ring, entry);
 }
 
 static inline int lru_will_fit(RSRingNode* ring, RSRingNode* entry)
 {
-    return ring->max_len >= (entry->len + ring->frequency);
+    return ring->u.head.max_weight >= (entry->u.entry.weight + ring->u.head.sum_weights);
 }
 
 /**
@@ -177,7 +171,7 @@ RSRingNode _spill_from_ring_to_ring(RSRing updated_ring,
         rejects.r_next = rejects.r_prev = &rejects;
     }
 
-    while(updated_ring->len > 1 && ring_oversize(updated_ring)) {
+    while(updated_ring->u.head.sum_weights > 1 && ring_oversize(updated_ring)) {
         RSRingNode* eden_oldest = ring_lru(updated_ring);
         if(!eden_oldest || eden_oldest == ignore_me) {
             break;
@@ -193,7 +187,7 @@ RSRingNode _spill_from_ring_to_ring(RSRing updated_ring,
 
             if(!allow_victims) {
                 // set the signal and quit.
-                rejects.frequency = 1;
+                rejects.u.entry.frequency = 1;
                 break;
             }
 
@@ -206,7 +200,7 @@ RSRingNode _spill_from_ring_to_ring(RSRing updated_ring,
                break;
             }
 
-            if (eden_oldest->frequency >= probation_oldest->frequency) {
+            if (eden_oldest->u.entry.frequency >= probation_oldest->u.entry.frequency) {
                 // good bye to the item on probation.
                 ring_move_to_head_from_foreign(destination_ring, &rejects, probation_oldest);
                 // hello to eden item, who is now on probation
@@ -251,7 +245,7 @@ RSRingNode _spill_from_ring_to_ring(RSRing updated_ring,
 void rsc_probation_on_hit(RSCache* cache,
                           RSRingNode* entry)
 {
-    entry->frequency++;
+    entry->u.entry.frequency++;
     RSRing protected_ring = cache->protected;
     RSRing probation_ring = cache->probation;
     int protected_oversize = ring_move_to_head_from_foreign(probation_ring, protected_ring, entry);
@@ -315,7 +309,7 @@ RSRingNode _eden_add(RSCache* cache,
                 */
                 ring_move_to_head_from_foreign(eden_ring, probation_ring, eden_oldest);
                 // Signal whether we would need to cull something.
-                rejects.frequency = ring_oversize(probation_ring);
+                rejects.u.entry.frequency = ring_oversize(probation_ring);
                 break;
             }
             else {
@@ -346,7 +340,7 @@ int rsc_eden_add_many(RSCache* cache,
     int i = 0;
     for (i = 0; i < entry_count; i++) {
         RSRingNode add_rejects = _eden_add(cache, entry_array + i, 0);
-        if (add_rejects.frequency) {
+        if (add_rejects.u.entry.frequency) {
              // We would have rejected something, so     we must be full.
              // XXX: This isn't strictly true. It could be one really
              // large item in the middle that we can't fit, but we
@@ -374,12 +368,12 @@ RSRingNode rsc_update_mru(RSCache* cache,
     RSRing eden_ring = cache->eden;
 
     // Always update the frequency
-    entry->frequency++;
+    entry->u.entry.frequency++;
     // always resize the ring because the entry size changed behind
     // our back
-    assert(entry->len == new_entry_size);
-    home_ring->frequency -= old_entry_size;
-    home_ring->frequency += new_entry_size;
+    assert(entry->u.entry.weight == new_entry_size);
+    home_ring->u.head.sum_weights -= old_entry_size;
+    home_ring->u.head.sum_weights += new_entry_size;
 
 
     if (home_ring == eden_ring) {
@@ -422,7 +416,7 @@ static inline void lru_age_list(RSRingNode* ring)
 
     RSRingNode* here = ring->r_next;
     while (here != ring) {
-        here->frequency = here->frequency / 2;
+        here->u.entry.frequency = here->u.entry.frequency / 2;
         here = here->r_next;
     }
 }

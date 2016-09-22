@@ -146,26 +146,26 @@ class CacheRingNode(object):
 
         # Directly setting attributes is faster than the initializer
         node.user_data = self.cffi_ring_handle = ffi_new_handle(self)
-        node.frequency = 1
+        node.u.entry.frequency = 1
         # We denormalize len to avoid accessing through CFFI (but it is needed
         # by the C code)
-        self.len = node.len = len(key) + len(value)
+        self.len = node.u.entry.weight = len(key) + len(value)
 
     def reset(self, key, value):
         self.key = key
         self.value = value
         node = self.cffi_ring_node
-        node.frequency = 1
-        self.len = node.len = len(key) + len(value)
+        node.u.entry.frequency = 1
+        self.len = node.u.entry.weight = len(key) + len(value)
 
-    frequency = property(lambda self: self.cffi_ring_node.frequency,
-                         lambda self, nv: setattr(self.cffi_ring_node, 'frequency', nv))
+    frequency = property(lambda self: self.cffi_ring_node.u.entry.frequency,
+                         lambda self, nv: setattr(self.cffi_ring_node.u.entry, 'frequency', nv))
 
     def set_value(self, value):
         if value == self.value:
             return
         self.value = value
-        self.len = self.cffi_ring_node.len = len(self.key) + len(value)
+        self.len = self.cffi_ring_node.u.entry.weight = len(self.key) + len(value)
 
     # We don't implement __len__---we want people to access .len
     # directly to avoid the function call as it showed up in benchmarks
@@ -197,8 +197,8 @@ class CacheRing(object):
         node = self.ring_home = ffi.new("RSRing")
         node.r_next = node
         node.r_prev = node
-        node.max_len = limit
-        node.r_parent = self.PARENT_CONST
+        node.u.head.max_weight = limit
+        node.u.head.generation = self.PARENT_CONST
 
         self.node_free_list = []
 
@@ -215,16 +215,16 @@ class CacheRing(object):
 
 
     def __bool__(self):
-        return bool(self.ring_home.len)
+        return bool(self.ring_home.u.head.len)
 
     __nonzero__ = __bool__ # Python 2
 
     def __len__(self):
-        return self.ring_home.len
+        return self.ring_home.u.head.len
 
     @property
     def size(self):
-        return self.ring_home.frequency
+        return self.ring_home.u.head.sum_weights
 
     def add_MRU(self, key, value):
         node_free_list = self.node_free_list
