@@ -165,7 +165,7 @@ class SizedLRUMapping(object):
 
         if key in dct:
             entry = dct[key]
-            self._gens[entry.cffi_ring_node.u.entry.r_parent].update_MRU(entry, value)
+            self._gens[entry.cffi_entry.r_parent].update_MRU(entry, value)
         else:
             lru = self._eden
             entry = lru.add_MRU(key, value)
@@ -187,7 +187,7 @@ class SizedLRUMapping(object):
     def __delitem__(self, key):
         entry = self._dict[key]
         del self._dict[key]
-        self._gens[entry.cffi_ring_node.u.entry.r_parent].remove(entry)
+        self._gens[entry.cffi_entry.r_parent].remove(entry)
 
     def get_and_bubble_all(self, keys):
         dct = self._dict
@@ -197,7 +197,7 @@ class SizedLRUMapping(object):
             entry = dct.get(key)
             if entry is not None:
                 self._hits += 1
-                gens[entry.cffi_ring_node.u.entry.r_parent].on_hit(entry)
+                gens[entry.cffi_entry.r_parent].on_hit(entry)
                 res[key] = entry.value
             else:
                 self._misses += 1
@@ -323,7 +323,7 @@ class SizedLRUMapping(object):
         # Adding key as a tie-breaker makes no sense, and is slow.
         # We use an attrgetter directly on the node for speed
 
-        entries.sort(key=operator.attrgetter('cffi_ring_node.u.entry.frequency'))
+        entries.sort(key=operator.attrgetter('cffi_entry.frequency'))
 
         assert len(entries) == len(self._dict)
 

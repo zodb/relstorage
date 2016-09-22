@@ -129,6 +129,7 @@ class CacheRingNode(object):
     __slots__ = (
         'key', 'value', 'len',
         'cffi_ring_node', 'cffi_ring_handle',
+        'cffi_entry',
         # This is an owning pointer that is allocated when we
         # are imported from a persistent file. It keeps a whole array alive
         '_cffi_owning_node'
@@ -146,26 +147,27 @@ class CacheRingNode(object):
 
         # Directly setting attributes is faster than the initializer
         node.user_data = self.cffi_ring_handle = ffi_new_handle(self)
-        node.u.entry.frequency = 1
+        entry = self.cffi_entry = node.u.entry
+        entry.frequency = 1
         # We denormalize len to avoid accessing through CFFI (but it is needed
         # by the C code)
-        self.len = node.u.entry.weight = len(key) + len(value)
+        self.len = entry.weight = len(key) + len(value)
 
     def reset(self, key, value):
         self.key = key
         self.value = value
-        node = self.cffi_ring_node
-        node.u.entry.frequency = 1
-        self.len = node.u.entry.weight = len(key) + len(value)
+        entry = self.cffi_entry
+        entry.frequency = 1
+        self.len = entry.weight = len(key) + len(value)
 
-    frequency = property(lambda self: self.cffi_ring_node.u.entry.frequency,
-                         lambda self, nv: setattr(self.cffi_ring_node.u.entry, 'frequency', nv))
+    frequency = property(lambda self: self.cffi_entry.frequency,
+                         lambda self, nv: setattr(self.cffi_entry, 'frequency', nv))
 
     def set_value(self, value):
         if value == self.value:
             return
         self.value = value
-        self.len = self.cffi_ring_node.u.entry.weight = len(self.key) + len(value)
+        self.len = self.cffi_entry.weight = len(self.key) + len(value)
 
     # We don't implement __len__---we want people to access .len
     # directly to avoid the function call as it showed up in benchmarks
