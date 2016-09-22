@@ -27,10 +27,5 @@ ffi.set_source('relstorage.cache._cache_ring',
                '#include "cache_ring.c"',
                include_dirs=[this_dir])
 
-def verify():
-    return ffi.verify('#include "cache_ring.c"',
-                      include_dirs=[this_dir])
-
-
 if __name__ == '__main__':
     ffi.compile()

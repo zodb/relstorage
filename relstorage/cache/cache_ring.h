@@ -38,8 +38,8 @@ typedef struct RSRingNode_struct {
     struct RSRingNode_struct* r_next;
     void* user_data;
 
-    union {
-        struct {
+    union entry_or_head_t {
+        struct entry_t {
             // How popular this item is.
             rs_counter_t frequency;
             // The weight of this item.
@@ -47,7 +47,7 @@ typedef struct RSRingNode_struct {
             // The number of the parent generation
             int r_parent;
         } entry;
-        struct {
+        struct head_t {
             // How many items are in this list
             rs_counter_t len;
             // The sum of their weights.

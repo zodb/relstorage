@@ -9,9 +9,9 @@ addons:
 # Use postgresql 9.4 to get support for BLOB SQL functions for pg8000
   postgresql: "9.4"
 python:
+  - pypy
   - 2.7
   - 3.4
-  - pypy
 env:
   matrix:
     - ENV=mysql
@@ -39,6 +39,9 @@ notifications:
   email: false
 
 install:
+  - if [[ $TRAVIS_PYTHON_VERSION == 'pypy' ]]; then .travis/install.sh $TRAVIS_PYTHON_VERSION; fi
+  - if [[ $TRAVIS_PYTHON_VERSION == 'pypy' ]]; then export PATH=$HOME/.runtimes/versions/$TRAVIS_PYTHON_VERSION/bin:$PATH; fi
+  - python --version
   - pip install -U pip setuptools
   - pip install -U tox coveralls
   - if [[ $TRAVIS_PYTHON_VERSION == 'pypy' ]]; then pip install -U python-memcached; fi
