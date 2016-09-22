@@ -206,16 +206,16 @@ RSRingNode _spill_from_ring_to_ring(RSRing updated_ring,
                break;
             }
 
-            if(probation_oldest->frequency > eden_oldest->frequency) {
-                // Discard the eden entry, it's used less than the
-                // probation entry.
-                ring_move_to_head_from_foreign(updated_ring, &rejects, eden_oldest);
-            }
-            else {
+            if (eden_oldest->frequency >= probation_oldest->frequency) {
                 // good bye to the item on probation.
                 ring_move_to_head_from_foreign(destination_ring, &rejects, probation_oldest);
                 // hello to eden item, who is now on probation
                 ring_move_to_head_from_foreign(updated_ring, destination_ring, eden_oldest);
+            }
+            else {
+                // Discard the eden entry, it's used less than the
+                // probation entry.
+                ring_move_to_head_from_foreign(updated_ring, &rejects, eden_oldest);
             }
         }
     }
