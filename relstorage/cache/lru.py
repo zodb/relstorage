@@ -19,14 +19,27 @@ Segmented LRU implementations.
 
 """
 
-from .ring import Ring
+import os
+from cffi import FFI
 
-from .ring import ffi
+this_dir = os.path.dirname(os.path.abspath(__file__))
+
+ffi = FFI()
+with open(os.path.join(this_dir, 'ring.h')) as f:
+    ffi.cdef(f.read())
+
+_FFI_RING = ffi.verify("""
+#include "ring.c"
+""", include_dirs=[this_dir])
+
+_ring_move_to_head = _FFI_RING.ring_move_to_head
+_ring_del = _FFI_RING.ring_del
+_ring_add = _FFI_RING.ring_add
+
+
 ffi_new = ffi.new
 ffi_new_handle = ffi.new_handle
 ffi_from_handle = ffi.from_handle
-
-from .ring import _FFI_RING
 
 _lru_update_mru = _FFI_RING.lru_update_mru
 _lru_probation_on_hit = _FFI_RING.lru_probation_on_hit
@@ -90,9 +103,9 @@ class Cache(object):
                              self.protected)
 
         self.cffi_cache = ffi_new("RSCache*",
-                                   {'eden': self.eden._ring.ring_home,
-                                    'protected': self.protected._ring.ring_home,
-                                    'probation': self.probation._ring.ring_home})
+                                   {'eden': self.eden.ring_home,
+                                    'protected': self.protected.ring_home,
+                                    'probation': self.probation.ring_home})
 
         self.generations = [None, None, None, None] # 0 isn't used
         for x in (self.protected, self.probation, self.eden):
@@ -179,35 +192,39 @@ class CacheRing(object):
 
     PARENT_CONST = 0
 
-
-    def __init__(self, limit):
+    def __init__(self, limit): #, _ring_type=ffi.typeof("RSRing")):
         self.limit = limit
-        self._ring = Ring()
-        self._ring.ring_home.max_len = limit
-        self._ring.ring_home.r_parent = self.PARENT_CONST
+        node = self.ring_home = ffi.new("RSRing")
+        node.r_next = node
+        node.r_prev = node
+        node.max_len = limit
+        node.r_parent = self.PARENT_CONST
 
         self.node_free_list = []
 
-        # caches
-        self._ring_home = self._ring.ring_home
-        self.get_LRU = self._ring.lru
-        self.make_MRU = self._ring.move_to_head
-        self.remove = self.delete
+    def iteritems(self):
+        head = self.ring_home
+        here = head.r_next
+        while here != head:
+            yield here
+            here = here.r_next
 
     def __iter__(self):
-        return iter(self._ring)
+        for node in self.iteritems():
+            yield ffi_from_handle(node.user_data)
+
 
     def __bool__(self):
-        return bool(self._ring_home.len)
+        return bool(self.ring_home.len)
 
     __nonzero__ = __bool__ # Python 2
 
     def __len__(self):
-        return self._ring_home.len
+        return self.ring_home.len
 
     @property
     def size(self):
-        return self._ring_home.frequency
+        return self.ring_home.frequency
 
     def add_MRU(self, key, value):
         node_free_list = self.node_free_list
@@ -217,9 +234,16 @@ class CacheRing(object):
         else:
             new_entry = CacheRingNode(key, value)
 
-
-        self._ring.add(new_entry)
+        _ring_add(self.ring_home, new_entry.cffi_ring_node)
         return new_entry
+
+    def get_LRU(self):
+        # Only for testing
+        return ffi_from_handle(self.ring_home.r_next.user_data)
+
+    def make_MRU(self, entry):
+        # Only for testing
+        _ring_move_to_head(self.ring_home, entry.cffi_ring_node)
 
     def update_MRU(self, entry, value):
         old_size = entry.len
@@ -229,7 +253,7 @@ class CacheRing(object):
             # Treat it as a simple hit
             return self.on_hit(entry)
 
-        rejected_items = _lru_update_mru(self.cffi_cache, self._ring_home, entry.cffi_ring_node, old_size, new_size)
+        rejected_items = _lru_update_mru(self.cffi_cache, self.ring_home, entry.cffi_ring_node, old_size, new_size)
 
         if not rejected_items.r_next:
             # Nothing rejected.
@@ -247,16 +271,19 @@ class CacheRing(object):
             node = node.r_next
 
     def on_hit(self, entry):
-        return _lru_on_hit(self._ring_home, entry.cffi_ring_node)
+        return _lru_on_hit(self.ring_home, entry.cffi_ring_node)
 
     def delete(self, entry):
-        self._ring.delete(entry)
+        its_node = entry.cffi_ring_node
+        return _ring_del(self.ring_home, its_node)
+
+    remove = delete
 
     def stats(self):
         return {
             'limit': self.limit,
             'size': self.size,
-            'count': len(self._ring),
+            'count': len(self),
         }
 
 

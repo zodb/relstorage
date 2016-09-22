@@ -32,7 +32,6 @@ def make_suite():
         'relstorage.adapters.tests.test_replica',
         'relstorage.cache.tests.test_cache',
         'relstorage.cache.tests.test_cache_stats',
-        'relstorage.cache.tests.test_ring',
         'relstorage.tests.test_autotemp',
         'relstorage.tests.test_blobhelper',
         'relstorage.tests.test_treemark',
