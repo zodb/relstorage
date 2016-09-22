@@ -31,6 +31,7 @@ typedef unsigned long long rs_counter_t; // For old CFFI versions.
 
 /**
  * All entries are of this type.
+ * On a 64-bit platform, this is 56 bytes in size.
  */
 typedef struct RSRingNode_struct {
     struct RSRingNode_struct* r_prev;

@@ -89,6 +89,14 @@ class Cache(object):
     # overcommit by making them sum to more than 1.0. (For very small
     # limits, the rounding will also make them overcommit).
 
+    # Should we allocate some nodes in a contiguous block on startup?
+    _preallocate_entries = True
+    # If so, how many? Try to get enough to fill the cache assuming objects are
+    # this size on average
+    _preallocate_avg_size = 512
+    # But no more than this number.
+    _preallocate_max_count = 150000 # 8 MB array
+
     #: A "mapping" between the __parent__ of an entry and the generation
     #: ring that holds it.
     generations = (None, None, None, None)
@@ -96,7 +104,6 @@ class Cache(object):
     def __init__(self, byte_limit):
         # This must hold all the ring entries, no matter which ring they are in.
         self.data = {}
-
 
         self.protected = ProtectedRing(int(byte_limit * self._gen_protected_pct))
         self.probation = ProbationRing(int(byte_limit * self._gen_probation_pct))
@@ -112,13 +119,20 @@ class Cache(object):
             self.generations[x.PARENT_CONST] = x
         self.generations = tuple(self.generations)
 
-
+        node_free_list = []
         for value, name in ((self.data, 'data'),
                             (self.cffi_cache, 'cffi_cache'),
-                            ([], 'node_free_list')):
+                            (node_free_list, 'node_free_list')):
             for ring in self.generations[1:]:
                 setattr(ring, name, value)
 
+        if self._preallocate_entries:
+            needed_entries = byte_limit // self._preallocate_avg_size
+            entry_count = min(self._preallocate_max_count, needed_entries)
+
+            keys_and_values = [('', b'')] * entry_count
+            _, nodes = self.eden._preallocate_entries(keys_and_values)
+            node_free_list.extend(nodes)
 
     def age_lists(self):
         _lru_age_lists(self.cffi_cache)
@@ -204,6 +218,18 @@ class CacheRing(object):
 
         self.node_free_list = []
 
+    def _preallocate_entries(self, ordered_keys_and_values):
+        count = len(ordered_keys_and_values)
+        nodes = ffi.new('RSRingNode[]', count)
+        entries = []
+        for i in range(count):
+            k, v = ordered_keys_and_values[i]
+            node = nodes + i # this gets RSRingNode*; nodes[i] returns the struct
+            entry = CacheRingNode(k, v, node)
+            entry._cffi_owning_node = nodes
+            entries.append(entry)
+        return nodes, entries
+
     def iteritems(self):
         head = self.ring_home
         here = head.r_next
@@ -286,6 +312,7 @@ class CacheRing(object):
             'limit': self.limit,
             'size': self.size,
             'count': len(self),
+            'free_list': len(self.node_free_list),
         }
 
 
@@ -293,17 +320,6 @@ class EdenRing(CacheRing):
 
     PARENT_CONST = 1
 
-    def _preallocate_entries(self, ordered_keys_and_values):
-        count = len(ordered_keys_and_values)
-        nodes = ffi.new('RSRingNode[]', count)
-        entries = []
-        for i in range(count):
-            k, v = ordered_keys_and_values[i]
-            node = nodes + i # this gets RSRingNode*; nodes[i] returns the struct
-            entry = CacheRingNode(k, v, node)
-            entry._cffi_owning_node = nodes
-            entries.append(entry)
-        return nodes, entries
 
     def add_MRUs(self, ordered_keys_and_values):
         nodes, entries = self._preallocate_entries(ordered_keys_and_values)
