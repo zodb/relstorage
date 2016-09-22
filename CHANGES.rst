@@ -27,7 +27,7 @@
   The internal implementation details of the cache have been
   completely changed. Only the ``StorageCache`` public class remains
   unchanged (though that's also an implementation class). CFFI is now
-  required.
+  required, and support for PyPy versions older than 2.6.1 has been dropped.
 
 
 2.0.0b6 (2016-09-08)
