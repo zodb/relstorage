@@ -19,18 +19,17 @@ Segmented LRU implementations.
 
 """
 
-import os
-from cffi import FFI
-
-this_dir = os.path.dirname(os.path.abspath(__file__))
-
-ffi = FFI()
-with open(os.path.join(this_dir, 'cache_ring.h')) as f:
-    ffi.cdef(f.read())
-
-_FFI_RING = ffi.verify("""
-#include "cache_ring.c"
-""", include_dirs=[this_dir])
+try:
+    from relstorage.cache import _cache_ring
+except ImportError:
+    # Must be on an old pypy version, stuck with an old
+    # CFFI
+    from relstorage.cache import _cache_ring_build
+    _FFI_RING = _cache_ring_build.verify()
+    ffi = _cache_ring_build.ffi
+else:
+    ffi = _cache_ring.ffi
+    _FFI_RING = _cache_ring.lib
 
 _ring_move_to_head = _FFI_RING.rsc_ring_move_to_head
 _ring_del = _FFI_RING.rsc_ring_del
