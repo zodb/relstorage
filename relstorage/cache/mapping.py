@@ -17,7 +17,6 @@ import logging
 import operator
 import time
 
-from relstorage._compat import itervalues
 from relstorage._compat import PY3
 if PY3:
     # On Py3, use the built-in pickle, so that we can get
@@ -32,10 +31,7 @@ else:
     from relstorage._compat import Pickler
 
 
-from .lru import SizedLRU
-from .lru import ProtectedLRU
-from .lru import ProbationLRU
-from .lru import EdenLRU
+from .lru import Cache
 
 log = logging.getLogger(__name__)
 
@@ -57,18 +53,7 @@ class SizedLRUMapping(object):
     # When did we last age?
     _aged_at = 0
 
-    # Percentage of our byte limit that should be dedicated
-    # to the main "protected" generation
-    _gen_protected_pct = 0.8
-    # Percentage of our byte limit that should be dedicated
-    # to the initial "eden" generation
-    _gen_eden_pct = 0.1
-    # Percentage of our byte limit that should be dedicated
-    # to the "probationary"generation
-    _gen_probation_pct = 0.1
-    # By default these numbers add up to 1.0, but it would be possible to
-    # overcommit by making them sum to more than 1.0. (For very small
-    # limits, the rounding will also make them overcommit).
+
 
     def __init__(self, limit):
         # We experimented with using OOBTree and LOBTree
@@ -82,21 +67,15 @@ class SizedLRUMapping(object):
         # large BTrees, but since that's not the case, we abandoned the idea.
 
         # This holds all the ring entries, no matter which ring they are in.
-        self._dict = {}
+        cache = self._cache = Cache(limit)
+        self._dict = cache.data
 
 
-        self._protected = ProtectedLRU(int(limit * self._gen_protected_pct))
-        self._probation = ProbationLRU(int(limit * self._gen_probation_pct),
-                                        self._protected,
-                                        self._dict)
-        self._eden = EdenLRU(int(limit * self._gen_eden_pct),
-                             self._probation,
-                             self._protected,
-                             self._dict)
-        self._gens = [None, None, None, None] # 0 isn't used
-        for x in (self._protected, self._probation, self._eden):
-            self._gens[x.PARENT_CONST] = x
-        self._gens = tuple(self._gens)
+        self._protected = cache.protected
+        self._probation = cache.probation
+        self._eden = cache.eden
+        self._gens = cache.generations
+
         self._hits = 0
         self._misses = 0
         self._sets = 0
@@ -120,7 +99,7 @@ class SizedLRUMapping(object):
             'hits': self._hits,
             'misses': self._misses,
             'sets': self._sets,
-            'ratio': self._hits/total if total else 0,
+            'ratio': self._hits / total if total else 0,
             'size': len(self._dict),
             'bytes': self.size,
             'eden_stats': self._eden.stats(),
@@ -156,7 +135,7 @@ class SizedLRUMapping(object):
         now = time.time()
         log.debug("Beginning frequency aging for %d cache entries",
                  len(dct))
-        SizedLRU.age_lists(self._eden)
+        self._cache.age_lists()
         done = time.time()
         log.debug("Aged %d cache entries in %s", done - now)
 
