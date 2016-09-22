@@ -389,6 +389,11 @@ class SizedLRUMappingTests(unittest.TestCase):
         from relstorage.cache.mapping import SizedLRUMapping
         return SizedLRUMapping
 
+    def test_age_empty(self):
+        c = self.getClass()(100)
+        c._age_factor = 0
+        c._age()
+
     def test_set_bytes_value(self):
         b = self.getClass()(100)
         self.assertEqual(b.size, 0)
@@ -684,6 +689,16 @@ class SizedLRUMappingTests(unittest.TestCase):
         self.assertEqual(list_lrukeys('eden'), ['abc'])
         self.assertEqual(list_lrukeys('probation'), [])
         self.assertEqual(list_lrukeys('protected'), ['def'])
+
+        # Don't write anything if the limit is too small, but
+        # we can still read it.
+        bio = BytesIO()
+        self._save(bio, client1, options, 1)
+
+        client2 = self.getClass()(3)
+        count, stored = self._load(bio, client2, options)
+        self.assertEqual(count, 0)
+        self.assertEqual(stored, 0)
 
 
     def test_load_and_store_to_gzip(self):
@@ -1006,26 +1021,7 @@ class LocalClientTests(unittest.TestCase):
         self.assertEqual(c.get('k0'), b'abc')
         self.assertRaises(NotImplementedError,
                           c.add, 'k0', b'def')
-
-    def test_mru_lru_ring(self):
-        from relstorage.cache.cache_ring import CacheRing
-        lru = CacheRing(100)
-        entrya = lru.add_MRU(b'a', b'1')
-        self.assertEqual(lru.get_LRU(), entrya)
-
-        entryb = lru.add_MRU(b'b', b'2')
-        self.assertEqual(lru.get_LRU(), entrya)
-
-        entryc = lru.add_MRU(b'c', b'3')
-        self.assertEqual(lru.get_LRU(), entrya)
-
-        lru.make_MRU(entryb)
-        self.assertEqual(lru.get_LRU(), entrya)
-
-        lru.make_MRU(entrya)
-        self.assertEqual(lru.get_LRU(), entryc)
-
-        self.assertEqual(len(lru), 3)
+        self.assertIn('k0', c._bucket0)
 
     def test_load_and_save(self, _make_dir=True):
         import tempfile
@@ -1093,6 +1089,59 @@ class LocalClientTests(unittest.TestCase):
         # automatically create directories as needed
         self.test_load_and_save(False)
 
+class CacheRingTests(unittest.TestCase):
+
+    def _makeOne(self, limit):
+        from relstorage.cache.cache_ring import CacheRing
+        return CacheRing(limit)
+
+    def test_mru_lru_ring(self):
+        lru = self._makeOne(100)
+        entrya = lru.add_MRU(b'a', b'1')
+        self.assertEqual(lru.get_LRU(), entrya)
+
+        entryb = lru.add_MRU(b'b', b'2')
+        self.assertEqual(lru.get_LRU(), entrya)
+
+        entryc = lru.add_MRU(b'c', b'3')
+        self.assertEqual(lru.get_LRU(), entrya)
+
+        lru.make_MRU(entryb)
+        self.assertEqual(lru.get_LRU(), entrya)
+
+        lru.make_MRU(entrya)
+        self.assertEqual(lru.get_LRU(), entryc)
+
+        self.assertEqual(len(lru), 3)
+
+    def test_bool(self):
+        lru = self._makeOne(100)
+        self.assertFalse(lru)
+        entrya = lru.add_MRU('a', b'b')
+        self.assertTrue(lru)
+        lru.remove(entrya)
+        self.assertFalse(lru)
+
+    def test_free_reuse(self):
+        from relstorage.cache.cache_ring import Cache
+        cache = Cache(20)
+        lru = cache.protected
+        self.assertEqual(lru.limit, 16)
+        entrya = lru.add_MRU('a', b'')
+        entryb = lru.add_MRU('b', b'')
+        entryc = lru.add_MRU('c', b'1')
+        entryd = lru.add_MRU('d', b'1')
+        for e in entrya, entryb, entryc, entryd:
+            cache.data[e.key] = e
+        lru.update_MRU(entryb, b'1234567890')
+        lru.update_MRU(entryb, b'1234567890') # coverage
+        lru.update_MRU(entryc, b'1234567890')
+        self.assertEqual(2, len(lru.node_free_list))
+
+        lru.add_MRU('c', b'1')
+        self.assertEqual(1, len(lru.node_free_list))
+
+
 from relstorage.options import Options
 
 class MockOptions(Options):
@@ -1133,6 +1182,7 @@ def test_suite():
     suite.addTest(unittest.makeSuite(StorageCacheTests))
     suite.addTest(unittest.makeSuite(SizedLRUMappingTests))
     suite.addTest(unittest.makeSuite(LocalClientTests))
+    suite.addTest(unittest.makeSuite(CacheRingTests))
     return suite
 
 if __name__ == '__main__':
