@@ -206,58 +206,91 @@ def local_benchmark():
         mixed_for_stats()
     do_times()
 
-def storage_simulator(filename=None):
+def storage_simulator():
     # Trace files can be obtained from http://traces.cs.umass.edu/index.php/Storage/Storage
-    from relstorage.cache.local_client import LocalClient
-    options = MockOptions()
-    options.cache_local_mb = int(sys.argv[3])
-    options.cache_local_compression = 'none'
-
-    client = LocalClient(options)
 
     import bz2
+    import os
     import os.path
     from collections import namedtuple
     import time
 
     Record = namedtuple('Record', ['asu', 'lba', 'size', 'opcode', 'ts'])
 
-    if filename is None:
-        filename = sys.argv[2]
-    filename = os.path.abspath(os.path.expanduser(filename))
-
-    records = []
-    with bz2.BZ2File(filename, 'r') as f:
-        for line in f:
-            line = line.decode('ascii') if isinstance(line, bytes) else line
-            fields = [x.strip() for x in line.split(",")]
-            try:
-                fields[2] = int(fields[2])
-                fields[3] = fields[3].lower()
-            except IndexError:
-                print("Invalid line", line)
-                continue
-
-            records.append(Record(*fields[:5]))
-
-    print("Simulating", len(records), "operations to", len(set(x.lba for x in records)), "distinct keys",
-          "with cache limit", client._bucket_limit)
-    now = time.time()
-    for record in records:
-        key = record.lba
-        if record.opcode == 'r':
-            data = client.get(key)
-            if data is None:
-                # Fill it in from the backend
-                client.set(key, b'r' * record.size)
+    def read_records(filename):
+        records = []
+        if filename.endswith('.bz2'):
+            f = bz2.BZ2File(filename, 'r')
         else:
-            assert record.opcode == 'w'
-            client.set(key, b'x' * record.size)
+            f = open(filename, 'r')
+        with f:
+            for line in f:
+                line = line.decode('ascii') if isinstance(line, bytes) and str is not bytes else line
+                fields = [x.strip() for x in line.split(",")]
+                try:
+                    fields[2] = int(fields[2])
+                    fields[3] = fields[3].lower()
+                except IndexError:
+                    print("Invalid line", line)
+                    continue
 
-    done = time.time()
-    print("Done simulating records in ", done - now)
-    import pprint
-    pprint.pprint(client.stats())
+                records.append(Record(*fields[:5]))
+
+        return records
+
+    def simulate(records, cache_local_mb, f):
+        from relstorage.cache.local_client import LocalClient
+        options = MockOptions()
+        options.cache_local_mb = cache_local_mb
+        options.cache_local_compression = 'none'
+        client = LocalClient(options)
+
+
+        print("Simulating", len(records), "operations to", len(set(x.lba for x in records)), "distinct keys",
+              "with cache limit", cache_local_mb)
+        now = time.time()
+        for record in records:
+            key = record.lba
+            if record.opcode == 'r':
+                data = client.get(key)
+                if data is None:
+                    # Fill it in from the backend
+                    client.set(key, b'r' * record.size)
+            else:
+                assert record.opcode == 'w'
+                client.set(key, b'x' * record.size)
+
+        done = time.time()
+        stats = client.stats()
+        #print("Done simulating records in ", done - now)
+        stats['time'] = done - now
+        print("{:15s} {:>5s} {:>7s} {:>7s} {:>5s}".format("File", "Limit", "Size", "Time", "Hits"))
+        print("{:15s} {:5d} {:7.2f} {:7.2f} {:.3f}".format(os.path.basename(f), size, stats['bytes'] / 1024 / 1024, stats['time'], stats['ratio']))
+        #print(os.path.basename(f), cache_local_mb, stats['bytes'], done - now, stats['ratio'])
+        #import pprint
+        #pprint.pprint(client.stats())
+
+        return stats
+
+
+    filename = sys.argv[2]
+    filename = os.path.abspath(os.path.expanduser(filename))
+    if os.path.isdir(filename):
+        all_stats = []
+        for f in sorted(os.listdir(filename)):
+            records = read_records(os.path.join(filename, f))
+            for size in (100, 512, 1024):
+                stats = simulate(records, size, f)
+                all_stats.append((f, size, stats))
+
+        print("{:15s} {:>5s} {:>7s} {:>7s} {:>5s}".format("File", "Limit", "Size", "Time", "Hits"))
+        for f, size, stats in all_stats:
+            print("{:15s} {:5d} {:7.2f} {:7.2f} {:.3f}".format(os.path.basename(f), size, stats['bytes'] / 1024 / 1024, stats['time'], stats['ratio']))
+
+    else:
+        size = int(sys.argv[3])
+        records = read_records(filename)
+        simulate(records, size, filename)
 
 
 def save_load_benchmark():
