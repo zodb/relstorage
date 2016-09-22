@@ -39,6 +39,7 @@ notifications:
   email: false
 
 before_install:
+  - export BUILD_RUNTIMES=$HOME/.runtimes
   - if [[ $TRAVIS_PYTHON_VERSION == 'pypy' ]]; then .travis/install.sh $TRAVIS_PYTHON_VERSION; fi
   - if [[ $TRAVIS_PYTHON_VERSION == 'pypy' ]]; then ls -l $HOME/.runtimes/versions/pypy/bin; fi
   - if [[ $TRAVIS_PYTHON_VERSION == 'pypy' ]]; then deactivate; fi
