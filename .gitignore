@@ -12,6 +12,7 @@
 htmlcov/
 bin/
 develop-eggs/
+wheelhouse/
 dist/
 eggs/
 include/
