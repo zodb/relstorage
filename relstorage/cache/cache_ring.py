@@ -32,21 +32,21 @@ _FFI_RING = ffi.verify("""
 #include "cache_ring.c"
 """, include_dirs=[this_dir])
 
-_ring_move_to_head = _FFI_RING.ring_move_to_head
-_ring_del = _FFI_RING.ring_del
-_ring_add = _FFI_RING.ring_add
+_ring_move_to_head = _FFI_RING.rsc_ring_move_to_head
+_ring_del = _FFI_RING.rsc_ring_del
+_ring_add = _FFI_RING.rsc_ring_add
 
 
 ffi_new = ffi.new
 ffi_new_handle = ffi.new_handle
 ffi_from_handle = ffi.from_handle
 
-_lru_update_mru = _FFI_RING.lru_update_mru
-_lru_probation_on_hit = _FFI_RING.lru_probation_on_hit
-_eden_add = _FFI_RING.eden_add
-_lru_on_hit = _FFI_RING.lru_on_hit
-_lru_age_lists = _FFI_RING.lru_age_lists
-_eden_add_many = _FFI_RING.eden_add_many
+_lru_update_mru = _FFI_RING.rsc_update_mru
+_lru_probation_on_hit = _FFI_RING.rsc_probation_on_hit
+_eden_add = _FFI_RING.rsc_eden_add
+_lru_on_hit = _FFI_RING.rsc_on_hit
+_lru_age_lists = _FFI_RING.rsc_age_lists
+_eden_add_many = _FFI_RING.rsc_eden_add_many
 
 class Cache(object):
     """

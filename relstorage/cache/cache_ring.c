@@ -41,18 +41,18 @@ starting with the most recently used object.
  * this is copied to the children when they move.
  */
 
-static int ring_oversize(RSRing ring)
+static inline int ring_oversize(RSRing ring)
 {
     return ring->frequency > ring->max_len;
 }
 
-static int ring_is_empty(RSRing ring)
+static inline int ring_is_empty(RSRing ring)
 {
     return ring == NULL || ring->r_next == ring || ring->r_next == NULL;
 }
 
-void
-ring_add(RSRing ring, RSRingNode *elt)
+inline void
+rsc_ring_add(RSRing ring, RSRingNode *elt)
 {
     elt->r_next = ring;
     elt->r_prev = ring->r_prev;
@@ -65,8 +65,8 @@ ring_add(RSRing ring, RSRingNode *elt)
 
 }
 
-void
-ring_del(RSRing ring, RSRingNode *elt)
+inline void
+rsc_ring_del(RSRing ring, RSRingNode *elt)
 {
     if( elt->r_next == NULL && elt->r_prev == NULL)
         return;
@@ -83,8 +83,8 @@ ring_del(RSRing ring, RSRingNode *elt)
     ring->frequency -= elt->len;
 }
 
-void
-ring_move_to_head(RSRing ring, RSRingNode *elt)
+inline void
+rsc_ring_move_to_head(RSRing ring, RSRingNode *elt)
 {
     elt->r_prev->r_next = elt->r_next;
     elt->r_next->r_prev = elt->r_prev;
@@ -94,7 +94,7 @@ ring_move_to_head(RSRing ring, RSRingNode *elt)
     ring->r_prev = elt;
 }
 
-static int
+static inline int
 ring_move_to_head_from_foreign(RSRing current_ring,
                                RSRing new_ring,
                                RSRingNode* elt)
@@ -119,7 +119,7 @@ ring_move_to_head_from_foreign(RSRing current_ring,
     return new_ring->frequency > new_ring->max_len;
 }
 
-static RSRingNode* ring_lru(RSRing ring)
+static inline RSRingNode* ring_lru(RSRing ring)
 {
     if(ring->r_next == ring) {
         // empty list
@@ -128,13 +128,13 @@ static RSRingNode* ring_lru(RSRing ring)
     return ring->r_next;
 }
 
-void lru_on_hit(RSRing ring, RSRingNode* entry)
+void rsc_on_hit(RSRing ring, RSRingNode* entry)
 {
     entry->frequency++;
-    ring_move_to_head(ring, entry);
+    rsc_ring_move_to_head(ring, entry);
 }
 
-static int lru_will_fit(RSRingNode* ring, RSRingNode* entry)
+static inline int lru_will_fit(RSRingNode* ring, RSRingNode* entry)
 {
     return ring->max_len >= (entry->len + ring->frequency);
 }
@@ -162,7 +162,7 @@ static int lru_will_fit(RSRingNode* ring, RSRingNode* entry)
 #define _SPILL_FIT 0
 #define _SPILL_VICTIMS 1
 #define _SPILL_NO_VICTIMS 0
-static
+static inline
 RSRingNode _spill_from_ring_to_ring(RSRing updated_ring,
                                     RSRing destination_ring,
                                     RSRingNode* ignore_me,
@@ -248,7 +248,7 @@ RSRingNode _spill_from_ring_to_ring(RSRing updated_ring,
 }
 
 
-void lru_probation_on_hit(RSCache* cache,
+void rsc_probation_on_hit(RSCache* cache,
                           RSRingNode* entry)
 {
     entry->frequency++;
@@ -274,7 +274,7 @@ void lru_probation_on_hit(RSCache* cache,
  * have produced victims, we return with rejects.frequency = 1 so the
  * caller can know to stop feeding us.
  */
-static
+static inline
 RSRingNode _eden_add(RSCache* cache,
                      RSRingNode* entry,
                      int allow_victims)
@@ -286,7 +286,7 @@ RSRingNode _eden_add(RSCache* cache,
     RSRingNode rejects = {};
     rejects.r_next = rejects.r_prev = NULL;
 
-    ring_add(eden_ring, entry);
+    rsc_ring_add(eden_ring, entry);
     if(!ring_oversize(eden_ring)) {
         return rejects;
     }
@@ -332,14 +332,14 @@ RSRingNode _eden_add(RSCache* cache,
 
 
 
-RSRingNode eden_add(RSCache* cache,
-                    RSRingNode* entry)
+RSRingNode rsc_eden_add(RSCache* cache,
+                        RSRingNode* entry)
 {
     return _eden_add(cache, entry, _SPILL_VICTIMS);
 }
 
 
-int eden_add_many(RSCache* cache,
+int rsc_eden_add_many(RSCache* cache,
                   RSRingNode* entry_array,
                   int entry_count)
 {
@@ -360,7 +360,7 @@ int eden_add_many(RSCache* cache,
 
 
 
-RSRingNode lru_update_mru(RSCache* cache,
+RSRingNode rsc_update_mru(RSCache* cache,
                           RSRing home_ring,
                           RSRingNode* entry,
                           rs_counter_t old_entry_size,
@@ -389,8 +389,8 @@ RSRingNode lru_update_mru(RSCache* cache,
 
         // This might be ever-so-slightly slower in the case where the size
         // went down or there was still room.
-        ring_del(home_ring, entry);
-        return eden_add(cache, entry);
+        rsc_ring_del(home_ring, entry);
+        return rsc_eden_add(cache, entry);
     }
 
     int protected_ring_oversize = 0;
@@ -399,7 +399,7 @@ RSRingNode lru_update_mru(RSCache* cache,
     }
     else {
         assert(home_ring == protected_ring);
-        ring_move_to_head(home_ring, entry);
+        rsc_ring_move_to_head(home_ring, entry);
         protected_ring_oversize = ring_oversize(home_ring);
     }
 
@@ -414,7 +414,7 @@ RSRingNode lru_update_mru(RSCache* cache,
     return result;
 }
 
-static void lru_age_list(RSRingNode* ring)
+static inline void lru_age_list(RSRingNode* ring)
 {
     if (ring_is_empty(ring)) {
         return;
@@ -427,7 +427,7 @@ static void lru_age_list(RSRingNode* ring)
     }
 }
 
-void lru_age_lists(RSCache* cache)
+void rsc_age_lists(RSCache* cache)
 {
     lru_age_list(cache->eden);
     lru_age_list(cache->probation);

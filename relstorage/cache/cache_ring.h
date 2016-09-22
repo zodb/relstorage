@@ -12,63 +12,80 @@
 
  ****************************************************************************/
 
-/* Support routines for the doubly-linked list of cached objects.
-
-The cache stores a headed, doubly-linked, circular list of persistent
-objects, with space for the pointers allocated in the objects themselves.
-The cache stores the distinguished head of the list, which is not a valid
-persistent object.  The other list members are non-ghost persistent
-objects, linked in LRU (least-recently used) order.
-
-The r_next pointers traverse the ring starting with the least recently used
-object.  The r_prev pointers traverse the ring starting with the most
-recently used object.
-
-Obscure:  While each object is pointed at twice by list pointers (once by
-its predecessor's r_next, again by its successor's r_prev), the refcount
-on the object is bumped only by 1.  This leads to some possibly surprising
-sequences of incref and decref code.  Note that since the refcount is
-bumped at least once, the list does hold a strong reference to each
-object in it.
+/**
+ * Support routines for the doubly-linked lists of cached objects
+ * and their grouping into three generations.
+ *
+ * Each ring stores a headed, doubly-linked, circular list of nodes;
+ * the nodes don't store any data other than statistics, the Python
+ * wrapper objects do. The ring stores the distinguished head of the
+ * list. The other list members are linked in LRU (least-recently
+ * used) order.
+ *
+ * The r_next pointers traverse the ring starting with the least
+ * recently used object. The r_prev pointers traverse the ring
+ * starting with the most recently used object.
 */
 
 typedef unsigned long long rs_counter_t; // For old CFFI versions.
 
+/**
+ * All entries are of this type.
+ */
 typedef struct RSRingNode_struct {
     struct RSRingNode_struct* r_prev;
     struct RSRingNode_struct* r_next;
     void* user_data;
 
+    // How popular this item is.
     rs_counter_t frequency;
+    // The weight of this item.
     rs_counter_t len;
+    // Only in the head node: maximum allowed weight of all children.
     rs_counter_t max_len;
 
     int r_parent;
 } RSRingNode;
 
+/**
+ * A typedef for the distinguished head of the list.
+ * NOTE: We use `len` to count the number of children
+ * and `frequency` to sum their weights.
+ */
 typedef RSRingNode* RSRing;
 
+/**
+ * The cache itself is three generations. See individual methods
+ * or the Python code for information about how items move between rings.
+ */
 typedef struct RSCache_struct {
     RSRing eden;
     RSRing protected;
     RSRing probation;
 } RSCache;
 
-/* The list operations here take constant time independent of the
- * number of objects in the list:
- */
+/*********
+ * Generic ring operations.
+ **********/
 
-/* Add elt as the most recently used object.  elt must not already be
+/**
+ * Add elt as the most recently used object.  elt must not already be
  * in the list, although this isn't checked.
+ *
+ * Constant time.
  */
-void ring_add(RSRing ring, RSRingNode *elt);
+void rsc_ring_add(RSRing ring, RSRingNode *elt);
 
-/* Remove elt from the list.  elt must already be in the list, although
+/**
+ * Remove elt from the list.  elt must already be in the list, although
  * this isn't checked.
+ *
+ * Constant time.
  */
-void ring_del(RSRing ring, RSRingNode *elt);
+void rsc_ring_del(RSRing ring, RSRingNode *elt);
 
-/* elt must already be in the list, although this isn't checked.  It's
+/**
+ * elt must already be in the list, although this isn't checked.  It's
  * unlinked from its current position, and relinked into the list as the
  * most recently used object (which is arguably the tail of the list
  * instead of the head -- but the name of this function could be argued
@@ -78,9 +95,46 @@ void ring_del(RSRing ring, RSRingNode *elt);
  *     ring_add(ring, elt);
  *
  * but may be a little quicker.
+ *
+ * Constant time.
  */
-void ring_move_to_head(RSRing ring, RSRingNode *elt);
+void rsc_ring_move_to_head(RSRing ring, RSRingNode *elt);
 
+/**********
+ * Operations on the Eden ring.
+ **********/
+
+/**
+ * Add the node to the eden ring, and flow entries through
+ * the rest of the cache generations as needed, possibly rejecting
+ * some if the cache is too full.
+ *
+ * This operation takes linear time in the number of entries that
+ * have to be moved.
+ *
+ * The return value is a RSRingNode containing all the rejected
+ * entries:
+ *
+ * - r_prev is always NULL;
+ * - If r_next is NULL, there were no rejected entries;
+ * - The final entry in the chain has an r_next of NULL;
+ */
+RSRingNode rsc_eden_add(RSCache* cache,
+                        RSRingNode* entry);
+
+/**
+ * Add as many entries as possible from the array, stopping
+ * when we would get full.
+ *
+ * Returns the number of entries actually added.
+ */
+int rsc_eden_add_many(RSCache* cache,
+                      RSRingNode* entry_array,
+                      int entry_count);
+
+/**********
+ * Operations on the probation ring.
+ **********/
 
 /**
  * Move the `entry` from the probation ring of the `cache`
@@ -92,9 +146,15 @@ void ring_move_to_head(RSRing ring, RSRingNode *elt);
  * the cache remains unchanged), a condition that won't be corrected
  * until new entries are added to the eden ring that flow down, or
  * until an entry is resized with `lru_update_mru`.
+ *
+ * This operation takes linear time in the number of entries that must
+ * be moved.
  */
-void lru_probation_on_hit(RSCache* cache,
+void rsc_probation_on_hit(RSCache* cache,
                           RSRingNode* entry);
+/**********
+ * General caching operations.
+ **********/
 
 /**
  * Change the weight of the `entry` (and thus its containing `ring`),
@@ -122,19 +182,23 @@ void lru_probation_on_hit(RSCache* cache,
  * - If r_next is NULL, there were no rejected entries;
  * - The final entry in the chain has an r_next of NULL;
  */
-RSRingNode lru_update_mru(RSCache* cache,
+RSRingNode rsc_update_mru(RSCache* cache,
                           RSRing ring,
                           RSRingNode* entry,
                           rs_counter_t old_entry_size,
                           rs_counter_t new_entry_size);
 
+/**
+ * Record that the entry has been used.
+ * This updates its popularity counter  and makes it the
+ * most recently used item in its ring. This is constant time.
+ */
+void rsc_on_hit(RSRing ring, RSRingNode* entry);
 
-RSRingNode eden_add(RSCache* cache,
-                    RSRingNode* entry);
-void lru_on_hit(RSRing ring, RSRingNode* entry);
-
-void lru_age_lists(RSCache* cache);
-
-int eden_add_many(RSCache* cache,
-                  RSRingNode* entry_array,
-                  int entry_count);
+/**
+ * Decrease the popularity of all the items in the cache by half.
+ *
+ * Do this periodically to allow newer entries to compete with older
+ * entries that were popular but no longer are.
+ */
+void rsc_age_lists(RSCache* cache);
