@@ -1008,7 +1008,7 @@ class LocalClientTests(unittest.TestCase):
                           c.add, 'k0', b'def')
 
     def test_mru_lru_ring(self):
-        from relstorage.cache.lru import CacheRing
+        from relstorage.cache.cache_ring import CacheRing
         lru = CacheRing(100)
         entrya = lru.add_MRU(b'a', b'1')
         self.assertEqual(lru.get_LRU(), entrya)

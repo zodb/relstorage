@@ -25,11 +25,11 @@ from cffi import FFI
 this_dir = os.path.dirname(os.path.abspath(__file__))
 
 ffi = FFI()
-with open(os.path.join(this_dir, 'ring.h')) as f:
+with open(os.path.join(this_dir, 'cache_ring.h')) as f:
     ffi.cdef(f.read())
 
 _FFI_RING = ffi.verify("""
-#include "ring.c"
+#include "cache_ring.c"
 """, include_dirs=[this_dir])
 
 _ring_move_to_head = _FFI_RING.ring_move_to_head
@@ -71,6 +71,9 @@ class Cache(object):
 
     This cache only approximately follows its size limit. It may temporarily become
     larger.
+
+    You are responsible for moving items into and out of the `data` and determining
+    what a hit is.
     """
 
     # Percentage of our byte limit that should be dedicated

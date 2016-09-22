@@ -31,7 +31,7 @@ else:
     from relstorage._compat import Pickler
 
 
-from .lru import Cache
+from relstorage.cache.cache_ring import Cache
 
 log = logging.getLogger(__name__)
 

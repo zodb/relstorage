@@ -31,7 +31,7 @@ starting with the most recently used object.
 #include <assert.h>
 #include <stdint.h>
 #ifndef __RING_H
-#include "ring.h"
+#include "cache_ring.h"
 #endif
 
 /**
