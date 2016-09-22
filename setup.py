@@ -78,6 +78,7 @@ setup(
     long_description=read_file("README.rst"),
     zip_safe=False,  # otherwise ZConfig can't see component.xml
     install_requires=[
+        'cffi',
         'perfmetrics',
         'zope.interface',
         'zc.lockfile',
