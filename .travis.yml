@@ -38,10 +38,15 @@ after_success:
 notifications:
   email: false
 
-install:
+before_install:
   - if [[ $TRAVIS_PYTHON_VERSION == 'pypy' ]]; then .travis/install.sh $TRAVIS_PYTHON_VERSION; fi
+  - if [[ $TRAVIS_PYTHON_VERSION == 'pypy' ]]; then ls -l $HOME/.runtimes/versions/pypy/bin; fi
+  - if [[ $TRAVIS_PYTHON_VERSION == 'pypy' ]]; then deactivate; fi
   - if [[ $TRAVIS_PYTHON_VERSION == 'pypy' ]]; then export PATH=$HOME/.runtimes/versions/$TRAVIS_PYTHON_VERSION/bin:$PATH; fi
+  - hash -r
   - python --version
+
+install:
   - pip install -U pip setuptools
   - pip install -U tox coveralls
   - if [[ $TRAVIS_PYTHON_VERSION == 'pypy' ]]; then pip install -U python-memcached; fi
