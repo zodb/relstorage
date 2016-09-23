@@ -226,21 +226,21 @@ LRU/master XXX -> The time numbers are preliminary
 ==============  ===== ======= ======= =====
 File            Limit    Size    Time  Hits
 ==============  ===== ======= ======= =====
-Financial1.spc    100   95.36  241.33 0.779 X
-Financial1.spc    512  488.28  241.39 0.781 X
-Financial1.spc   1024  976.55  233.74 0.781 X
-Financial2.spc    100   95.37   73.02 0.712 X
-Financial2.spc    512  488.28   72.31 0.751 X
-Financial2.spc   1024  976.56   77.19 0.751 X
-WebSearch1.spc    100   95.37   29.50 0.008
-WebSearch1.spc    512  488.28   29.22 0.043
-WebSearch1.spc   1024  976.56   30.04 0.188
-WebSearch2.spc    100   95.37  141.12 0.008
-WebSearch2.spc    512  488.28  145.05 0.046
-WebSearch2.spc   1024  976.56  161.80 0.213
-WebSearch3.spc    100   95.37  158.46 0.008
-WebSearch3.spc    512  488.27   96.51 0.051
-WebSearch3.spc   1024  976.55   72.29 0.222
+Financial1.spc    100   95.36  226.75 0.779 X
+Financial1.spc    512  488.28  232.16 0.781 X
+Financial1.spc   1024  976.55  222.40 0.781 X
+Financial2.spc    100   95.37   71.05 0.712 X
+Financial2.spc    512  488.28   71.47 0.751 X
+Financial2.spc   1024  976.56   71.89 0.751 X
+WebSearch1.spc    100   95.37   17.38 0.008
+WebSearch1.spc    512  488.28   16.85 0.043
+WebSearch1.spc   1024  976.56   15.14 0.188
+WebSearch2.spc    100   95.37   73.49 0.008
+WebSearch2.spc    512  488.28   73.87 0.046
+WebSearch2.spc   1024  976.56   66.59 0.213
+WebSearch3.spc    100   95.37   68.66 0.008
+WebSearch3.spc    512  488.27   68.02 0.051
+WebSearch3.spc   1024  976.55   60.87 0.222
 ==============  ===== ======= ======= =====
 
 We can see that the write heavy operations perform somewhat worse in
