@@ -206,26 +206,60 @@ def local_benchmark():
 import os
 import os.path
 import time
-
+import random
+from collections import namedtuple
+StorageRecord = namedtuple('Record', ['asu', 'lba', 'size', 'opcode', 'ts'])
 
 class StorageTraceSimulator(object):
-    # Trace files can be obtained from http://traces.cs.umass.edu/index.php/Storage/Storage
+    # Text trace files can be obtained from http://traces.cs.umass.edu/index.php/Storage/Storage
+    # Binary trace files can be obtained from https://github.com/cache2k/cache2k-benchmark
 
-    def read_records(self, filename):
-        from collections import namedtuple
-        import bz2
+    def _open_file(self, filename, mode='r'):
+        if filename.endswith('.bz2'):
+            import bz2
+            f = bz2.BZ2File(filename, mode)
+        else:
+            f = open(filename, mode)
+        return f
+
+    def _read_binary_records(self, filename, num_clients=8, write_pct=.30,
+                             mean_size=10000, stddev_size=512):
+        import struct
+        keys = []
+        i = 0
+        with self._open_file(filename, 'rb') as f:
+            while True:
+                key = f.read(4)
+                if not key:
+                    break
+                key = struct.unpack(">I", key)[0]
+                key = str(key)
+                keys.append((i, key))
+                i += 1
+
+        random.seed("read_binary_records")
+        write_keys = set(random.sample(keys, int(len(keys) * write_pct)))
+
+        records = []
+        for key in keys:
+            size = int(random.normalvariate(mean_size, stddev_size))
+            opcode = 'r'
+            if key in write_keys:
+                opcode = 'w'
+            asu = 1 if num_clients == 1 else random.randrange(num_clients)
+
+            records.append(StorageRecord(asu, key[1], size, opcode, 0.0))
+        return records
+
+    def _read_text_records(self, filename):
         try:
             from sys import intern as _intern
         except ImportError:
             # Py2
             _intern = intern
-        Record = namedtuple('Record', ['asu', 'lba', 'size', 'opcode', 'ts'])
+
         records = []
-        if filename.endswith('.bz2'):
-            f = bz2.BZ2File(filename, 'r')
-        else:
-            f = open(filename, 'r')
-        with f:
+        with self._open_file(filename) as f:
             for line in f:
                 line = line.decode('ascii') if isinstance(line, bytes) and str is not bytes else line
                 fields = [x.strip() for x in line.split(",")]
@@ -239,9 +273,14 @@ class StorageTraceSimulator(object):
                     print("Invalid line", line)
                     continue
 
-                records.append(Record(*fields[:5]))
+                records.append(StorageRecord(*fields[:5]))
 
         return records
+
+    def read_records(self, filename):
+        if filename.endswith(".trace"):
+            return self._read_binary_records(filename)
+        return self._read_text_records(filename)
 
     def _report_one(self, stats, f, cache_local_mb, begin_time, end_time):
         stats['time'] = end_time - begin_time

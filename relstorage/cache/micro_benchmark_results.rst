@@ -125,11 +125,11 @@ close to the same as the original numbers::
 Simulations
 ===========
 
-These are the results of some simulations based on the data from
-http://traces.cs.umass.edu/index.php/Storage/Storage.
-
 ASU is the application identifier. Here, we will treat that like a
 connection.
+
+There are two distinct datasets. One is based on storage traces
+(http://traces.cs.umass.edu/index.php/Storage/Storage):
 
 ==========  ========== ======== =========  ========== ====
    File     Operations    Keys    Reads      Writes   ASUs
@@ -141,12 +141,30 @@ WebSearch2   4,579,809  726,501 4,578,819         990    6
 WebSearch3   4,261,709  707,802 4,260,449        1260    9
 ==========  ========== ======== =========  ========== ====
 
+The other is based on caches used for an ORM and HTTP system
+(https://github.com/cache2k/cache2k-benchmark). It does not include
+the read/write distinction or the size of the requests, so we choose
+those as additional parameters. Here, we used a 30% write ratio and a
+mean object size of 8192 bytes with a standard deviation of 512. We
+also arbitrarily choose the number of connections to be 8.
+
+==========  ========== ======== =========  ========== ====
+   File     Operations    Keys    Reads      Writes   ASUs
+==========  ========== ======== =========  ========== ====
+orm-busy     5,000,000   76,349 3,500,000   1,500,000   8
+orm-night    5,000,000   86,466 3,500,000   1,500,000   8
+web07           76,118   20,484    53,283      22,835   8
+web12           95,607   13,756    66,925      28,682   8
+==========  ========== ======== =========  ========== ====
+
 Cache simulation
 ----------------
 
 This works at the raw, low level if the recently used lists. It
 doesn't incorporate any notion of connections or transactions, and it
 doesn't know anything about key checkpoints.
+
+* Storage Traces
 
 ============  ==========  =========  =========  ========  =========
  File         Cache Size   Hits LRU  Hits SLRU  Time LRU  Time SLRU
@@ -168,26 +186,35 @@ WebSearch3      512           0.048      0.147      50.1     36.41
 WebSearch3     1024           0.222      0.279      42.9     32.09
 ============  ==========  =========  =========  ========  =========
 
+* Cache Traces
 
-============  =========  ==========  ==========
- File         Limit       Mem LRU    Mem SLRU
-============  =========  ==========  ==========
-Financial1      100        99999247   103871759
-Financial1      512       511997869   514070549
-Financial1     1024      1023998982  1023998356
-Financial2      100        99999189   100601745
-Financial2      512       511992446   512268118
-Financial2     1024       606137999   606137999
-WebSearch1      100        99997049   100161316
-WebSearch1      512       511995883   512160824
-WebSearch1     1024      1023998683  1024165996
-WebSearch2      100        99997319    99989083
-WebSearch2      512       511997956   511997222
-WebSearch2     1024      1023995277  1023993396
-WebSearch3      100        99997030    99988784
-WebSearch3      512       511998677   511998234
-WebSearch3     1024      1023994322  1023994405
-============  =========  ==========  ==========
+Most of these results were similar or identical given the small size
+of the data. Only tests that show a difference are reported. In 8
+cases the results were identical, in the remaining four they each one two.
+
+SLRU
+
+==============  ===== ======= ======= =====
+File            Limit    Size    Time  Hits
+==============  ===== ======= ======= =====
+orm-busy          100   95.36   25.63 0.909
+orm-busy          512  488.27   24.68 0.980
+orm-night         100   95.34   27.90 0.928
+web07             100   95.36    0.49 0.683
+==============  ===== ======= ======= =====
+
+LRU
+
+
+==============  ===== ======= ======= =====
+File            Limit    Size    Time  Hits
+==============  ===== ======= ======= =====
+orm-busy          100   95.36   26.99 0.895
+orm-busy          512  488.28   23.69 0.978
+orm-night         100   95.36   25.33 0.941
+web07             100   95.37    0.59 0.689
+==============  ===== ======= ======= =====
+
 
 Storage Simulation
 ------------------
@@ -198,6 +225,8 @@ checkpointed at regular intervals (here, 10,000 changes, the default).
 Connections only poll for changes periodically to simulate
 transactions (here, after every 10 operations, or if there would be a
 read conflict.)
+
+* Storage Traces
 
 SLRU f8890082770af24c08a0656579fd6d3bd77e2658
 
@@ -261,4 +290,46 @@ Financial1.spc   1024  980.41  215.15 0.801
 Financial2.spc    100  100.13   67.01 0.551 X
 Financial2.spc    512  496.51   63.53 0.707 X
 Financial2.spc   1024  977.41   64.95 0.776
+==============  ===== ======= ======= =====
+
+* Cache Traces
+
+SLRU
+
+
+==============  ===== ======= ======= =====
+File            Limit    Size    Time  Hits
+==============  ===== ======= ======= =====
+orm-busy          100   95.37  104.43 0.699
+orm-busy          512  488.36  105.70 0.739
+orm-busy         1024  976.63  102.10 0.757
+orm-night         100   95.39  102.70 0.649
+orm-night         512  488.43  104.88 0.739
+orm-night        1024  976.73  104.25 0.797
+web07             100   95.39    1.67 0.688
+web07             512  355.72    1.59 0.796
+web07            1024  355.72    1.64 0.796
+web12             100   95.40    1.95 0.781
+web12             512  366.35    1.91 0.891
+web12            1024  366.35    1.86 0.891
+==============  ===== ======= ======= =====
+
+LRU
+
+
+==============  ===== ======= ======= =====
+File            Limit    Size    Time  Hits
+==============  ===== ======= ======= =====
+orm-busy          100   95.36  117.10 0.750
+orm-busy          512  488.28  117.71 0.802
+orm-busy         1024  976.56  120.82 0.826
+orm-night         100   95.36  110.87 0.789
+orm-night         512  488.27  109.66 0.838
+orm-night        1024  976.56  104.90 0.868
+web07             100   95.36    1.79 0.739
+web07             512  355.72    1.51 0.796
+web07            1024  355.72    1.49 0.796
+web12             100   95.36    2.00 0.856
+web12             512  366.35    1.77 0.891
+web12            1024  366.35    1.77 0.891
 ==============  ===== ======= ======= =====
