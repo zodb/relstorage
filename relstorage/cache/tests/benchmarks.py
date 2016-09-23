@@ -320,6 +320,39 @@ class StorageTraceSimulator(object):
         assert len(adapter.mover.data) == len(first_sizes)
         root_cache = StorageCache(adapter, options, None)
 
+        if '--store-trace' in sys.argv:
+            class RecordingCache(object):
+
+                def __init__(self, cache):
+                    self._cache = cache
+                    self.operations = []
+
+                def set_multi(self, data):
+                    for k, v in data.items():
+                        self.operations.append(('w', k, len(v)))
+                    return self._cache.set_multi(data)
+
+                def set(self, k, v):
+                    self.operations.append(('w', k, len(v)))
+                    return self._cache.set(k, v)
+
+                def get(self, k):
+                    self.operations.append(('r', k, -1))
+                    return self._cache.get(k)
+
+                def get_multi(self, keys):
+                    for k in keys:
+                        self.operations.append(('r', k, -1))
+                    return self._cache.get_multi(keys)
+
+                def stats(self):
+                    return self._cache.stats()
+
+            local_client = root_cache.clients_local_first[0]
+            local_client = RecordingCache(local_client)
+            root_cache.clients_local_first[0] = local_client
+            root_cache.clients_global_first[0] = local_client
+
         # Initialize to the current TID
         current_tid_int = 2
         root_cache.after_poll(None, 1, current_tid_int, [])
@@ -366,6 +399,10 @@ class StorageTraceSimulator(object):
         stats = root_cache.clients_local_first[0].stats()
         self._report_one(stats, f, cache_local_mb, now, done)
 
+        if hasattr(root_cache.clients_local_first[0], 'operations'):
+            with open(f + '.' + str(options.cache_local_mb) + '.ctrace', 'w') as f:
+                for o in root_cache.clients_local_first[0].operations:
+                    f.write("%s,%s,%d\n" % o)
         return stats
 
     def simulate(self, s_type='local'):
