@@ -50,15 +50,15 @@ except ImportError:
             def print_stats(self, *args):
                 pass
 
-NUMBER = 4
-REPEAT_COUNT = 3
+NUMBER = 3
+REPEAT_COUNT = 4
 
 def run_func(func, number=NUMBER, repeat_count=REPEAT_COUNT):
     print("Timing func", func)
     pop_timer = timeit.Timer(func)
     pr = cProfile.Profile()
     pr.enable()
-    pop_times = pop_timer.repeat(number=repeat_count)
+    pop_times = pop_timer.repeat(number=number, repeat=repeat_count)
     pr.disable()
     ps = pstats.Stats(pr).sort_stats('cumulative')
     ps.print_stats(.4)
@@ -206,18 +206,24 @@ def local_benchmark():
         mixed_for_stats()
     do_times()
 
-def storage_simulator():
+
+import os
+import os.path
+import time
+
+
+class StorageTraceSimulator(object):
     # Trace files can be obtained from http://traces.cs.umass.edu/index.php/Storage/Storage
 
-    import bz2
-    import os
-    import os.path
-    from collections import namedtuple
-    import time
-
-    Record = namedtuple('Record', ['asu', 'lba', 'size', 'opcode', 'ts'])
-
-    def read_records(filename):
+    def read_records(self, filename):
+        from collections import namedtuple
+        import bz2
+        try:
+            from sys import intern as _intern
+        except ImportError:
+            # Py2
+            _intern = intern
+        Record = namedtuple('Record', ['asu', 'lba', 'size', 'opcode', 'ts'])
         records = []
         if filename.endswith('.bz2'):
             f = bz2.BZ2File(filename, 'r')
@@ -227,9 +233,12 @@ def storage_simulator():
             for line in f:
                 line = line.decode('ascii') if isinstance(line, bytes) and str is not bytes else line
                 fields = [x.strip() for x in line.split(",")]
+                fields[0] = int(fields[0]) # asu
                 try:
-                    fields[2] = int(fields[2])
-                    fields[3] = fields[3].lower()
+                    fields[1] = _intern(fields[1]) # lba
+                    fields[2] = int(fields[2]) # size
+                    fields[3] = _intern(fields[3].lower()) # opcode
+                    fields[4] = float(fields[4]) # ts
                 except IndexError:
                     print("Invalid line", line)
                     continue
@@ -238,19 +247,24 @@ def storage_simulator():
 
         return records
 
-    def simulate(records, cache_local_mb, f):
+    def _report_one(self, stats, f, cache_local_mb, begin_time, end_time):
+        stats['time'] = end_time - begin_time
+        print("{:15s} {:>5s} {:>7s} {:>7s} {:>5s}".format("File", "Limit", "Size", "Time", "Hits"))
+        print("{:15s} {:5d} {:7.2f} {:7.2f} {:.3f}".format(os.path.basename(f), cache_local_mb,
+                                                           stats['bytes'] / 1024 / 1024, stats['time'],
+                                                           stats['ratio']))
+
+    def _simulate_local(self, records, cache_local_mb, f):
         from relstorage.cache.local_client import LocalClient
         options = MockOptions()
         options.cache_local_mb = cache_local_mb
         options.cache_local_compression = 'none'
         client = LocalClient(options)
 
-
-        print("Simulating", len(records), "operations to", len(set(x.lba for x in records)), "distinct keys",
-              "with cache limit", cache_local_mb)
         now = time.time()
         for record in records:
             key = record.lba
+
             if record.opcode == 'r':
                 data = client.get(key)
                 if data is None:
@@ -262,35 +276,138 @@ def storage_simulator():
 
         done = time.time()
         stats = client.stats()
-        #print("Done simulating records in ", done - now)
-        stats['time'] = done - now
-        print("{:15s} {:>5s} {:>7s} {:>7s} {:>5s}".format("File", "Limit", "Size", "Time", "Hits"))
-        print("{:15s} {:5d} {:7.2f} {:7.2f} {:.3f}".format(os.path.basename(f), size, stats['bytes'] / 1024 / 1024, stats['time'], stats['ratio']))
-        #print(os.path.basename(f), cache_local_mb, stats['bytes'], done - now, stats['ratio'])
-        #import pprint
-        #pprint.pprint(client.stats())
+        self._report_one(stats, f, cache_local_mb, now, done)
 
         return stats
 
+    def _simulate_storage(self, records, cache_local_mb, f):
+        from relstorage.cache.storage_cache import StorageCache
+        from relstorage.cache.tests.test_cache import MockAdapter
+        from ZODB.utils import p64
 
-    filename = sys.argv[2]
-    filename = os.path.abspath(os.path.expanduser(filename))
-    if os.path.isdir(filename):
-        all_stats = []
-        for f in sorted(os.listdir(filename)):
-            records = read_records(os.path.join(filename, f))
-            for size in (100, 512, 1024):
-                stats = simulate(records, size, f)
-                all_stats.append((f, size, stats))
+        TRANSACTION_SIZE = 10
 
-        print("{:15s} {:>5s} {:>7s} {:>7s} {:>5s}".format("File", "Limit", "Size", "Time", "Hits"))
-        for f, size, stats in all_stats:
-            print("{:15s} {:5d} {:7.2f} {:7.2f} {:.3f}".format(os.path.basename(f), size, stats['bytes'] / 1024 / 1024, stats['time'], stats['ratio']))
+        options  = MockOptions()
+        options.cache_local_mb = cache_local_mb
+        options.cache_local_compression = 'none'
 
-    else:
-        size = int(sys.argv[3])
-        records = read_records(filename)
-        simulate(records, size, filename)
+        adapter = MockAdapter()
+
+        # Populate the backend with data, all as of tid 1 Use the size
+        # for the first time we see the data, just like
+        # _simulate_local does. If we choose a small fixed size, we
+        # get much better hit rates than _simulate_local If we use the
+        # actual size of the first time we see each record, we use an
+        # insane amount of memory even interning the strings
+        # (WebSearch3 requires 12GB of memory), so we create just the biggest value
+        # and then take memoryviews of it to avoid any copies.
+
+        max_size = 0
+        first_sizes = {}
+        for record in records:
+            max_size = max(record.size, max_size)
+            if record.lba in first_sizes:
+                continue
+            first_sizes[record.lba] = record.size
+
+        # Create one very big value, and then use subviews of a memoryview to reference
+        # the same memory
+
+        max_size = max(first_sizes.values())
+        biggest_value = b'i' * max_size
+        biggest_value = memoryview(biggest_value)
+
+        for lba, size in first_sizes.items():
+            oid = int(lba)
+            adapter.mover.data[oid] = (biggest_value[:size], 1)
+            assert len(adapter.mover.data[oid][0]) == size
+        assert len(adapter.mover.data) == len(first_sizes)
+        root_cache = StorageCache(adapter, options, None)
+
+        # Initialize to the current TID
+        current_tid_int = 2
+        root_cache.after_poll(None, 1, current_tid_int, [])
+
+        # Each ASU is a connection, so it has its own storage cache instance.
+        asu_caches = {asu: root_cache.new_instance()
+                      for asu
+                      in set((x.asu for x in records))}
+
+        for cache in asu_caches.values():
+            cache.after_poll(None, 0, current_tid_int, [])
+            cache.bm_current_tid = current_tid_int
+            cache.bm_changes = {}
+
+        now = time.time()
+
+        for record in records:
+            oid_int = int(record.lba)
+            cache = asu_caches[record.asu]
+
+            # Poll after a certain number of operations, or of we know we would get a
+            # conflict.
+            if current_tid_int - cache.bm_current_tid >= TRANSACTION_SIZE or oid_int in cache.bm_changes:
+                cache.after_poll(None, cache.bm_current_tid, current_tid_int,
+                                 cache.bm_changes.items())
+                cache.bm_current_tid = current_tid_int
+                cache.bm_changes.clear()
+
+            if record.opcode == 'r':
+                cache.load(None, oid_int)
+            else:
+                assert record.opcode == 'w'
+                current_tid_int += 1
+                cache.tpc_begin()
+                new_state = biggest_value[:record.size]
+                cache.store_temp(oid_int, new_state)
+                adapter.mover.data[oid_int] = (new_state, current_tid_int)
+                cache.after_tpc_finish(p64(current_tid_int))
+
+                for cache in asu_caches.values():
+                    cache.bm_changes[oid_int] = current_tid_int
+
+        done = time.time()
+        stats = root_cache.clients_local_first[0].stats()
+        self._report_one(stats, f, cache_local_mb, now, done)
+
+        return stats
+
+    def simulate(self, s_type='local'):
+        meth = getattr(self, '_simulate_' + s_type)
+
+        def _print(size, records):
+            print("Simulating", len(records),
+                  "operations (reads:", (len([x for x in records if x.opcode == 'r'])),
+                  "writes:", (len([x for x in records if x.opcode == 'w'])), ")",
+                  "to", len(set(x.lba for x in records)), "distinct keys",
+                  "from", len(set((x.asu for x in records))), "connections",
+                  "with cache limit", size)
+
+        filename = sys.argv[2]
+        filename = os.path.abspath(os.path.expanduser(filename))
+        if os.path.isdir(filename):
+            all_stats = []
+            for f in sorted(os.listdir(filename)):
+                records = self.read_records(os.path.join(filename, f))
+                for size in (100, 512, 1024):
+                    _print(size, records)
+                    stats = meth(records, size, f)
+                    all_stats.append((f, size, stats))
+
+            print("{:15s} {:>5s} {:>7s} {:>7s} {:>5s}".format("File", "Limit", "Size", "Time", "Hits"))
+            for f, size, stats in all_stats:
+                print("{:15s} {:5d} {:7.2f} {:7.2f} {:.3f}".format(os.path.basename(f), size, stats['bytes'] / 1024 / 1024, stats['time'], stats['ratio']))
+
+        else:
+            size = int(sys.argv[3])
+            records = self.read_records(filename)
+            _print(size, records)
+            pr = cProfile.Profile()
+            pr.enable()
+            meth(records, size, filename)
+            pr.disable()
+            ps = pstats.Stats(pr).sort_stats('cumulative')
+            ps.print_stats(.4)
 
 
 def save_load_benchmark():
@@ -356,5 +473,7 @@ if __name__ == '__main__':
         import logging
         logging.basicConfig(level=logging.DEBUG)
         save_load_benchmark()
-    elif '--simulate' in sys.argv:
-        storage_simulator()
+    elif '--simulatelocal' in sys.argv:
+        StorageTraceSimulator().simulate('local')
+    elif '--simulatestorage' in sys.argv:
+        StorageTraceSimulator().simulate('storage')

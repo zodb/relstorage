@@ -137,7 +137,7 @@ class SizedLRUMapping(object):
                  len(dct))
         self._cache.age_lists()
         done = time.time()
-        log.debug("Aged %d cache entries in %s", done - now)
+        log.debug("Aged %d cache entries in %s", len(dct), done - now)
 
         self._next_age_at = int(self._aged_at * 1.5) # in case the dict shrinks
 

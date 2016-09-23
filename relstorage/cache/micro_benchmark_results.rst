@@ -128,19 +128,33 @@ Simulations
 These are the results of some simulations based on the data from
 http://traces.cs.umass.edu/index.php/Storage/Storage.
 
-WebSearch1 has 1055448 operations on 480446 keys.
-WebSearch2 has 4579809 operations on 726501 keys.
-WebSearch3 has 4261709 operations on 707802 keys.
-Financial1 has 5334987 operations on 710908 keys.
-Financial2 has 3699194 operations on 296072 keys.
+ASU is the application identifier. Here, we will treat that like a
+connection.
+
+==========  ========== ======== =========  ========== ====
+   File     Operations    Keys    Reads      Writes   ASUs
+==========  ========== ======== =========  ========== ====
+Financial1   5,334,987  710,908 1,235,633   4,099,354   24
+Financial2   3,699,194  296,072 3,046,112     653,082   19
+WebSearch1   1,055,448  480,446 1,055,236         212    6
+WebSearch2   4,579,809  726,501 4,578,819         990    6
+WebSearch3   4,261,709  707,802 4,260,449        1260    9
+==========  ========== ======== =========  ========== ====
+
+Cache simulation
+----------------
+
+This works at the raw, low level if the recently used lists. It
+doesn't incorporate any notion of connections or transactions, and it
+doesn't know anything about key checkpoints.
 
 ============  ==========  =========  =========  ========  =========
  File         Cache Size   Hits LRU  Hits SLRU  Time LRU  Time SLRU
 ============  ==========  =========  =========  ========  =========
-Financial1      100           0.716      0.664      40.1     36.09
-Financial1      512           0.839      0.826      37.7     29.64
+Financial1      100           0.716      0.664      40.1     36.09  X
+Financial1      512           0.839      0.826      37.7     29.64  X
 Financial1     1024           0.881      0.893      36.3     28.82
-Financial2      100           0.851      0.847      21.3     17.64
+Financial2      100           0.851      0.847      21.3     17.64  X
 Financial2      512           0.920      0.920      18.8     17.46
 Financial2     1024           0.921      0.921      18.0     17.68
 WebSearch1      100           0.007      0.023      12.1      8.72
@@ -175,18 +189,61 @@ WebSearch3      512       511998677   511998234
 WebSearch3     1024      1023994322  1023994405
 ============  =========  ==========  ==========
 
-Financial1.spc    100   99.06    0.664
-Financial1.spc    512  490.26    0.826
-Financial1.spc   1024  976.56    0.893
-Financial2.spc    100   95.94    0.848
-Financial2.spc    512  488.54    0.920
-Financial2.spc   1024  578.06    0.921
-WebSearch1.spc    100   95.52    0.023
-WebSearch1.spc    512  488.43    0.120
-WebSearch1.spc   1024  976.72    0.223
-WebSearch2.spc    100   95.36    0.030
-WebSearch2.spc    512  488.28    0.146
-WebSearch2.spc   1024  976.56    0.271
-WebSearch3.spc    100   95.36    0.029
-WebSearch3.spc    512  488.28    0.147
-WebSearch3.spc   1024  976.56    0.279
+Storage Simulation
+------------------
+
+Compared to the above, this operates at the same level as the actual
+``StorageCache``. Operations are divided by connection, and keys are
+checkpointed at regular intervals (here, 10,000 changes, the default).
+Connections only poll for changes periodically to simulate
+transactions (here, after every 10 operations, or if there would be a
+read conflict.)
+
+SLRU f8890082770af24c08a0656579fd6d3bd77e2658
+
+==============  ===== ======= ======= =====
+File            Limit    Size    Time  Hits
+==============  ===== ======= ======= =====
+Financial1.spc    100   95.49  184.22 0.715
+Financial1.spc    512  495.55  204.71 0.767
+Financial1.spc   1024  980.42  195.23 0.780
+Financial2.spc    100   96.55   64.12 0.477
+Financial2.spc    512  493.01   63.53 0.665
+Financial2.spc   1024  980.09   61.54 0.731
+WebSearch1.spc    100   95.52   13.71 0.023
+WebSearch1.spc    512  488.44   13.87 0.117
+WebSearch1.spc   1024  976.72   13.23 0.216
+WebSearch2.spc    100   95.37   62.54 0.030
+WebSearch2.spc    512  488.27   62.94 0.143
+WebSearch2.spc   1024  976.55   57.40 0.265
+WebSearch3.spc    100   95.36   58.12 0.030
+WebSearch3.spc    512  488.27   57.85 0.145
+WebSearch3.spc   1024  976.55   52.62 0.269
+==============  ===== ======= ======= =====
+
+LRU/master XXX -> The time numbers are preliminary
+
+==============  ===== ======= ======= =====
+File            Limit    Size    Time  Hits
+==============  ===== ======= ======= =====
+Financial1.spc    100   95.36  241.33 0.779 X
+Financial1.spc    512  488.28  241.39 0.781 X
+Financial1.spc   1024  976.55  233.74 0.781 X
+Financial2.spc    100   95.37   73.02 0.712 X
+Financial2.spc    512  488.28   72.31 0.751 X
+Financial2.spc   1024  976.56   77.19 0.751 X
+WebSearch1.spc    100   95.37   29.50 0.008
+WebSearch1.spc    512  488.28   29.22 0.043
+WebSearch1.spc   1024  976.56   30.04 0.188
+WebSearch2.spc    100   95.37  141.12 0.008
+WebSearch2.spc    512  488.28  145.05 0.046
+WebSearch2.spc   1024  976.56  161.80 0.213
+WebSearch3.spc    100   95.37  158.46 0.008
+WebSearch3.spc    512  488.27   96.51 0.051
+WebSearch3.spc   1024  976.55   72.29 0.222
+==============  ===== ======= ======= =====
+
+We can see that the write heavy operations perform somewhat worse in
+the SLRU scheme. The worst case scenario is Financial2 with a cache
+size of 100 MB; simple LRU gets a hit ratio that's .23 better. On the
+plus side, the new code is at least faster than the old code.
