@@ -1145,15 +1145,10 @@ class CacheRingTests(unittest.TestCase):
 from relstorage.options import Options
 
 class MockOptions(Options):
-    cache_module_name = ''
+    cache_module_name = '' # disable
     cache_servers = ''
     cache_local_mb = 1
-    cache_local_object_max = 16384
-    cache_local_compression = 'zlib'
-    cache_delta_size_limit = 10000
-    cache_local_dir = None
-    cache_local_dir_compress = False
-    cache_local_dir_count = 1
+    cache_local_dir_count = 1 # shrink
 
 class MockOptionsWithFakeCache(MockOptions):
     cache_module_name = 'relstorage.tests.fakecache'
