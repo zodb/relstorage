@@ -18,12 +18,8 @@ from relstorage.options import Options
 class MockOptions(Options):
     cache_module_name = ''
     cache_servers = ''
-    cache_local_mb = 1
     cache_local_object_max = 16384
-    cache_local_compression = 'zlib'
-    cache_delta_size_limit = 10000
-    cache_local_dir = None
-    cache_local_dir_compress = False
+    cache_local_compression = 'none'
     cache_local_dir_count = 1
 
 
@@ -290,7 +286,7 @@ class StorageTraceSimulator(object):
         options  = MockOptions()
         options.cache_local_mb = cache_local_mb
         options.cache_local_compression = 'none'
-
+        #options.cache_delta_size_limit = 30000
         adapter = MockAdapter()
 
         # Populate the backend with data, all as of tid 1 Use the size
@@ -476,4 +472,7 @@ if __name__ == '__main__':
     elif '--simulatelocal' in sys.argv:
         StorageTraceSimulator().simulate('local')
     elif '--simulatestorage' in sys.argv:
+        #import logging
+        #logging.basicConfig(level=logging.DEBUG)
+
         StorageTraceSimulator().simulate('storage')

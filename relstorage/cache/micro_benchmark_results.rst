@@ -247,3 +247,18 @@ We can see that the write heavy operations perform somewhat worse in
 the SLRU scheme. The worst case scenario is Financial2 with a cache
 size of 100 MB; simple LRU gets a hit ratio that's .23 better. On the
 plus side, the new code is at least faster than the old code.
+
+If we triple the ``cache_delta_size_limit`` to 30000, then SLRU does
+substantially better:
+
+
+==============  ===== ======= ======= =====
+File            Limit    Size    Time  Hits
+==============  ===== ======= ======= =====
+Financial1.spc    100   95.87  194.94 0.730 X
+Financial1.spc    512  496.59  204.31 0.773 X
+Financial1.spc   1024  980.41  215.15 0.801
+Financial2.spc    100  100.13   67.01 0.551 X
+Financial2.spc    512  496.51   63.53 0.707 X
+Financial2.spc   1024  977.41   64.95 0.776
+==============  ===== ======= ======= =====

@@ -290,13 +290,6 @@ cache-prefix
         .. versionchanged:: 1.6.0b1
            Start defaulting to the database name.
 
-cache-delta-size-limit
-        This is an advanced option. RelStorage uses a system of
-        checkpoints to improve the cache hit rate. This option
-        configures how many objects should be stored before creating a
-        new checkpoint.
-
-        The default is 10000.
 
 Local Caching
 -------------
@@ -341,6 +334,16 @@ cache-local-compression
         wrappers this should be set to ``none``.
 
         .. versionadded:: 1.6
+
+cache-delta-size-limit
+        This is an advanced option. RelStorage uses a system of
+        checkpoints to improve the cache hit rate. This option
+        configures how many new objects should be stored before creating a
+        new checkpoint.
+
+        For write heavy workloads, increasing this can be very beneficial.
+
+        The default is 10000.
 
 Persistent Local Caching
 ~~~~~~~~~~~~~~~~~~~~~~~~
