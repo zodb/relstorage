@@ -157,6 +157,18 @@ web07           76,118   20,484    53,283      22,835   8
 web12           95,607   13,756    66,925      28,682   8
 ==========  ========== ======== =========  ========== ====
 
+Note that Financial1 and Financial2 are OLTP traces of a journal file,
+and orm-busy and orm-night are traces of an ORM session cache with
+short transactions. Both of these are dominated by *recency* and are
+thus very easy for LRU caches; a frequency cache like the new code has
+more trouble with them at smaller sizes. They are included to
+demonstrate worst-case performance and are probably not representative
+of typical RelStorage cache workloads (a RelStorage workload will have
+some objects, such as catalog BTree objects, that are frequently
+accessed which shouldn't be ejected if a more rare query occurs).
+The hit rates of these workloads are strongly correlated to the size
+of the eden generation.
+
 Cache simulation
 ----------------
 

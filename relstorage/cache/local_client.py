@@ -37,6 +37,8 @@ class LocalClient(object):
         b'.b': bz2.decompress
     }
 
+    _bucket_type = LocalClientBucket
+
     def __init__(self, options, prefix=None):
         self._lock = threading.Lock()
         self.options = options
@@ -87,7 +89,7 @@ class LocalClient(object):
 
     def flush_all(self):
         with self._lock:
-            self.__bucket = LocalClientBucket(self._bucket_limit)
+            self.__bucket = self._bucket_type(self._bucket_limit)
             options = self.options
             if options.cache_local_dir:
                 _Loader.load_local_cache(options, self.prefix, self._bucket0)

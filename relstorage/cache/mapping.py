@@ -53,7 +53,7 @@ class SizedLRUMapping(object):
     # When did we last age?
     _aged_at = 0
 
-
+    _cache_type = Cache
 
     def __init__(self, limit):
         # We experimented with using OOBTree and LOBTree
@@ -67,7 +67,7 @@ class SizedLRUMapping(object):
         # large BTrees, but since that's not the case, we abandoned the idea.
 
         # This holds all the ring entries, no matter which ring they are in.
-        cache = self._cache = Cache(limit)
+        cache = self._cache = self._cache_type(limit)
         self._dict = cache.data
 
 

@@ -17,6 +17,23 @@ import unittest
 from relstorage.tests.util import skipOnCI
 from functools import partial
 
+from relstorage.cache.cache_ring import Cache as _BaseCache
+class Cache(_BaseCache):
+    # Tweak the generation sizes to match what we developed the tests with
+    _gen_protected_pct = 0.8
+    _gen_eden_pct = 0.1
+
+from relstorage.cache.mapping import SizedLRUMapping as _BaseSizedLRUMapping
+
+class SizedLRUMapping(_BaseSizedLRUMapping):
+    _cache_type = Cache
+
+from relstorage.cache.local_client import LocalClient as _BaseLocalClient
+
+class LocalClient(_BaseLocalClient):
+    _bucket_type = SizedLRUMapping
+
+
 class StorageCacheTests(unittest.TestCase):
 
     def setUp(self):
@@ -386,7 +403,6 @@ class SizedLRUMappingTests(unittest.TestCase):
             raise AssertionError("Expected not None")
 
     def getClass(self):
-        from relstorage.cache.mapping import SizedLRUMapping
         return SizedLRUMapping
 
     def test_age_empty(self):
@@ -738,7 +754,6 @@ class SizedLRUMappingTests(unittest.TestCase):
 class LocalClientTests(unittest.TestCase):
 
     def getClass(self):
-        from relstorage.cache.local_client import LocalClient
         return LocalClient
 
     def _makeOne(self, **kw):
@@ -1123,7 +1138,6 @@ class CacheRingTests(unittest.TestCase):
         self.assertFalse(lru)
 
     def test_free_reuse(self):
-        from relstorage.cache.cache_ring import Cache
         cache = Cache(20)
         lru = cache.protected
         self.assertEqual(lru.limit, 16)
