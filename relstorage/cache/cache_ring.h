@@ -136,8 +136,10 @@ RSRingNode rsc_eden_add(RSCache* cache,
                         RSRingNode* entry);
 
 /**
- * Add as many entries as possible from the array, stopping
- * when we would get full.
+ * Add as many entries as possible from the array
+ *
+ * This will traverse the full array. Entries that don't fit will have
+ * their r_parent set to -1.
  *
  * Returns the number of entries actually added.
  */

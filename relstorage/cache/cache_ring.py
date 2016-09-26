@@ -366,7 +366,6 @@ class EdenRing(CacheRing):
                                      number_nodes)
         if not added_count:
             # Allow any nodes we preallocated to get GC'd now
-
             return ()
 
         # Because we went to the trouble of allocating them, we might
@@ -374,11 +373,15 @@ class EdenRing(CacheRing):
         # whole array will stay around around as long as any one
         # object does
         if added_count < number_nodes:
-            free = entries[added_count:]
-            for e in free:
-                e.key = e.value = None
-            self.node_free_list.extend(free)
-            return entries[:added_count]
+            node_free_list = self.node_free_list
+            added_entries = []
+            for e in entries:
+                if e.cffi_ring_node.u.entry.r_parent == -1:
+                    e.key = e.value = None
+                    node_free_list.append(e)
+                else:
+                    added_entries.append(e)
+            return added_entries
         return entries
 
     @_mutates_free_list

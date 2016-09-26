@@ -1177,11 +1177,35 @@ class CacheTests(unittest.TestCase):
                                        ('5', 'defg'),
                                        ('6', 'defg'),])
 
-        self.assertEqual(5, len(entries))
-        self.assertEqual(['1', '2', '3', '4', '5'], [e.key for e in entries])
-        self.assertEqual(1, len(cache.eden.node_free_list))
+        self.assertEqual(4, len(entries))
+        self.assertEqual(['1', '2', '3', '4'], [e.key for e in entries])
+        self.assertEqual(2, len(cache.eden.node_free_list))
         self.assertIsNone(cache.eden.node_free_list[0].key)
         self.assertIsNone(cache.eden.node_free_list[0].value)
+
+    def test_add_too_many_MRUs_works_aronud_big_entry(self):
+        cache = Cache(20)
+
+        entries = cache.eden.add_MRUs([('1', 'a'),
+                                       # This entry itself will fit nowhere
+                                       ('2', '12345678901234567890'),
+                                       ('3', 'bc'),
+                                       ('4', 'cd'),
+                                       ('5', 'deh'),
+                                       ('6', 'efghijkl'),])
+
+        self.assertEqual(4, len(entries))
+        self.assertEqual(['1', '3', '4', '5'], [e.key for e in entries])
+        self.assertEqual(2, len(cache.eden.node_free_list))
+        for e in cache.eden.node_free_list:
+            self.assertIsNone(e.key)
+            self.assertIsNone(e.value)
+
+        entry = cache.eden.node_free_list[-1]
+        cache.eden.add_MRU('1', b'1')
+        self.assertEqual(1, len(cache.eden.node_free_list))
+
+        self.assertEqual(cache.eden.PARENT_CONST, entry.cffi_ring_node.u.entry.r_parent)
 
     def test_add_MRUs_uses_existing_free_list(self):
         class _Cache(Cache):
@@ -1200,11 +1224,11 @@ class CacheTests(unittest.TestCase):
                                        ('5', 'defg'),
                                        ('6', 'defg'),])
 
-        self.assertEqual(5, len(entries))
-        self.assertEqual(['1', '2', '3', '4', '5'], [e.key for e in entries])
+        self.assertEqual(4, len(entries))
+        self.assertEqual(['1', '2', '3', '4'], [e.key for e in entries])
         for i, e in enumerate(begin_nodes):
             self.assertIs(e, entries[i])
-        self.assertEqual(1, len(cache.eden.node_free_list))
+        self.assertEqual(2, len(cache.eden.node_free_list))
         last_entry = entries[-1]
         for free in cache.eden.node_free_list:
             self.assertIs(last_entry._cffi_owning_node, free._cffi_owning_node)

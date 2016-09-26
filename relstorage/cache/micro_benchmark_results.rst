@@ -116,11 +116,11 @@ so we added a bulk method in C, giving us times once again comparable::
   write average 7.7160701316703735 stddev 0.505427296067659
 
 A little work on optimization of writing (limiting CFFI attribute
-access) gets us to these numbers, which are either faster or very
-close to the same as the original numbers::
+access) gets us to these numbers, which are both faster than
+the original numbers::
 
-  read  average 6.509062864002772 stddev 0.08413966528299127
-  write average 6.0874157809982234 stddev 0.04251385543342157
+  read  average 6.409313925498282 stddev 0.18588680639842908
+  write average 5.651123669245862 stddev 0.023198867394568865
 
 Simulations
 ===========

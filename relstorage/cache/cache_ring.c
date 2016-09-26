@@ -331,7 +331,14 @@ RSRingNode _eden_add(RSCache* cache,
 
     // OK, we've already filled protected and have started putting
     // things in probation. So we may need to choose victims.
-    return _spill_from_ring_to_ring(eden_ring, probation_ring, entry, allow_victims, _SPILL_FIT);
+    rejects = _spill_from_ring_to_ring(eden_ring, probation_ring, entry, allow_victims, _SPILL_FIT);
+    if (!allow_victims && rejects.u.entry.frequency && !ring_oversize(protected_ring)) {
+        // We were asked to spill, and we wanted to go to probation,
+        // but we couldn't because that would fill it up. There's room
+        // in protected, though, so go there instead.
+        rejects = _spill_from_ring_to_ring(eden_ring, protected_ring, entry, allow_victims, _SPILL_FIT);
+    }
+    return rejects;
 }
 
 
@@ -352,16 +359,28 @@ int rsc_eden_add_many(RSCache* cache,
     }
 
     int added_count = 0;
-    for (int i = 0; i < entry_count; i++) {
-        // _eden_add *always* adds, but it may or may not be able to rebalance.
+    int i = 0;
+    for (i = 0; i < entry_count; i++) {
+        // Don't try if we know we won't find a place for it.
+        RSRingNode* incoming = entry_array + i;
+        if (!cache_will_fit(cache, incoming)) {
+            incoming->u.entry.r_parent = -1;
+            continue;
+        }
+
+        // _eden_add *always* adds, but it may or may not be able to
+        // rebalance.
         added_count += 1;
         RSRingNode add_rejects = _eden_add(cache, entry_array + i, _SPILL_NO_VICTIMS);
         if (add_rejects.u.entry.frequency) {
-             // We would have rejected something, so     we must be full.
-             // XXX: This isn't strictly true. It could be one really
-             // large item in the middle that we can't fit, but we
-             // might be able to fit items after it.
-             break;
+            // We would have rejected something, so we must be full.
+            // Well, this isn't strictly true. It could be one really
+            // large item in the middle that we can't fit, but we
+            // might be able to fit items after it.
+            // However, we *thought* we could fit this one in the
+            // cache, but we couldn't. So we really are full. THis
+            // one's already in here, so quit.
+            break;
         }
     }
 
