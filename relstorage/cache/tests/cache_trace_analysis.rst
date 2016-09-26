@@ -7,7 +7,7 @@ Check to make sure the cache analysis scripts work.
     >>> import os
     >>> from ZODB.utils import p64, z64, u64
     >>> import relstorage.cache, sys
-    >>> from relstorage.tests.test_cache import MockOptions, MockAdapter
+    >>> from relstorage.cache.tests.test_cache import MockOptions, MockAdapter
 
     >>> os.environ["ZEO_CACHE_TRACE"] = 'single'
     >>> import random2 as random

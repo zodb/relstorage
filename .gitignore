@@ -4,11 +4,15 @@
 .project
 *.egg-info
 *.pyc
+*.pyo
+*.so
 *.sublime-*
 .coverage
+.runtimes
 htmlcov/
 bin/
 develop-eggs/
+wheelhouse/
 dist/
 eggs/
 include/

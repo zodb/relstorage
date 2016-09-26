@@ -23,13 +23,13 @@ import ZODB.tests.util
 import zope.testing.setupstack
 import zope.testing.renormalizing
 
-# Yes, these are unused. But two of my virtualenvs gives be trouble
+# Yes, these are unused. But two of my virtualenvs gives me trouble
 # without them. Don't feel like debugging that just now.
 # However, this does force us to not capture time.time when
 # relstorage.cache is imported because the test wants to monkey-patch
 # it.
 import relstorage.cache # pylint:disable=unused-import
-import relstorage.tests.test_cache # pylint:disable=unused-import
+import relstorage.cache.tests.test_cache # pylint:disable=unused-import
 
 def test_suite():
     suite = unittest.TestSuite()

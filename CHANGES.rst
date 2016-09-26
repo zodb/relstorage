@@ -6,7 +6,31 @@
 2.0.0b7 (unreleased)
 ====================
 
-- Nothing changed yet.
+- Add the ability to limit the persistent cache files size. Thanks to
+  Josh Zuech for the suggestion, which led to the next change.
+
+- Move the RelStorage shared cache to a `windowed-LFU with segmented
+  LRU
+  <http://highscalability.com/blog/2016/1/25/design-of-a-modern-cache.html>`_
+  instead of a pure LRU model. This can be a nearly optimal caching
+  strategy for many workloads. The caching code itself is also faster
+  in all tested cases.
+
+  It's especially helpful when using persistent cache files together
+  with a file size limit, as we can now ensure we write out the most
+  frequently useful data to the file instead of just the newest.
+
+  For more information see :issue:`127` and :pr:`128`. Thanks to Ben
+  Manes for assistance talking through issues related to the cache
+  strategy.
+
+  For write-heavy workloads, you may want to increase
+  ``cache_delta_size_limit``.
+
+  The internal implementation details of the cache have been
+  completely changed. Only the ``StorageCache`` public class remains
+  unchanged (though that's also an implementation class). CFFI is now
+  required, and support for PyPy versions older than 2.6.1 has been dropped.
 
 
 2.0.0b6 (2016-09-08)

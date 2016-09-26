@@ -78,11 +78,16 @@ setup(
     long_description=read_file("README.rst"),
     zip_safe=False,  # otherwise ZConfig can't see component.xml
     install_requires=[
+        'cffi',
         'perfmetrics',
         'zope.interface',
         'zc.lockfile',
         # ZODB and ZEO are handled as environment-markers in extras.
     ],
+    # If a new-enough CFFI is installed, build the module as part of installation.
+    # Otherwise, we'll build it at import time. The wheels we distribute should have
+    # cffi installed so we distribute the built binaries.
+    cffi_modules = ['relstorage/cache/_cache_ring_build.py:ffi'],
     tests_require=tests_require,
     extras_require={
         # We previously used MySQL-python (C impl) on CPython 2.7,

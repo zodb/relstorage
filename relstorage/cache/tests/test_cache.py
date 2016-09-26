@@ -11,10 +11,28 @@
 # FOR A PARTICULAR PURPOSE.
 #
 ##############################################################################
-from __future__ import print_function, absolute_import
+from __future__ import print_function, absolute_import, division
 import unittest
 
-from .util import skipOnCI
+from relstorage.tests.util import skipOnCI
+from functools import partial
+
+from relstorage.cache.cache_ring import Cache as _BaseCache
+class Cache(_BaseCache):
+    # Tweak the generation sizes to match what we developed the tests with
+    _gen_protected_pct = 0.8
+    _gen_eden_pct = 0.1
+
+from relstorage.cache.mapping import SizedLRUMapping as _BaseSizedLRUMapping
+
+class SizedLRUMapping(_BaseSizedLRUMapping):
+    _cache_type = Cache
+
+from relstorage.cache.local_client import LocalClient as _BaseLocalClient
+
+class LocalClient(_BaseLocalClient):
+    _bucket_type = SizedLRUMapping
+
 
 class StorageCacheTests(unittest.TestCase):
 
@@ -74,8 +92,6 @@ class StorageCacheTests(unittest.TestCase):
         self.assertEqual(res, (b'abc', 55))
 
     def test_load_using_delta_after0_miss(self):
-        from relstorage.tests.fakecache import data
-        from ZODB.utils import p64
         adapter = MockAdapter()
         c = self.getClass()(adapter, MockOptionsWithFakeCache(), 'myprefix')
         c.current_tid = 60
@@ -86,8 +102,6 @@ class StorageCacheTests(unittest.TestCase):
         self.assertEqual(res, (b'abc', 55))
 
     def test_load_using_delta_after0_inconsistent(self):
-        from relstorage.tests.fakecache import data
-        from ZODB.utils import p64
         adapter = MockAdapter()
         c = self.getClass()(adapter, MockOptionsWithFakeCache(), 'myprefix')
         c.current_tid = 60
@@ -102,8 +116,6 @@ class StorageCacheTests(unittest.TestCase):
             self.fail("Failed to report cache inconsistency")
 
     def test_load_using_delta_after0_future_error(self):
-        from relstorage.tests.fakecache import data
-        from ZODB.utils import p64
         adapter = MockAdapter()
         c = self.getClass()(adapter, MockOptionsWithFakeCache(), 'myprefix')
         c.current_tid = 55
@@ -240,7 +252,6 @@ class StorageCacheTests(unittest.TestCase):
         self.assertEqual(data, {})
 
     def test_after_tpc_finish(self):
-        from relstorage.tests.fakecache import data
         from ZODB.utils import p64
         c = self._makeOne()
         c.tpc_begin()
@@ -372,12 +383,32 @@ class StorageCacheTests(unittest.TestCase):
         self.assertEqual(c.delta_after0, {1: 45, 2: 46})
         self.assertEqual(c.delta_after1, {})
 
+def list_lrukeys_(lru, lru_name):
+    # Remember, these lists will be from LRU to MRU
+    return [e.key for e in getattr(lru, '_' + lru_name)]
 
-class LocalClientBucketTests(unittest.TestCase):
+
+def list_lrufreq_(lru, lru_name):
+    return [e.frequency for e in getattr(lru, '_' + lru_name)]
+
+
+class SizedLRUMappingTests(unittest.TestCase):
+
+    def assertNone(self, o):
+        if o is not None:
+            raise AssertionError("Expected None, not %r" % (o,))
+
+    def assertNotNone(self, o):
+        if o is None:
+            raise AssertionError("Expected not None")
 
     def getClass(self):
-        from relstorage.cache import LocalClientBucket
-        return LocalClientBucket
+        return SizedLRUMapping
+
+    def test_age_empty(self):
+        c = self.getClass()(100)
+        c._age_factor = 0
+        c._age()
 
     def test_set_bytes_value(self):
         b = self.getClass()(100)
@@ -400,24 +431,187 @@ class LocalClientBucketTests(unittest.TestCase):
         self.assertEqual(b.size, 5)
         b['abc'] = b'z'
         self.assertEqual(b.size, 4)
-        b['abcd'] = 'xyz'
-        self.assertEqual(b.size, 7)
-        self.assertEqual(b.get('abc'), None)
-        self.assertEqual(b.get("abcd"), 'xyz')
+        b['abcd'] = b'xyz'
+        # In the past this was 7 and 'abc' was ejected. But the generational
+        # system lets us go a bit over.
+        self.assertEqual(b.size, 11)
+        self.assertEqual(b.get('abc'), b'z')
+        self.assertEqual(b.get("abcd"), b'xyz')
+
+    def test_increasing_size_in_eden_w_empty_protected_bumps_to_protected(self):
+        b = self.getClass()(40)
+        list_lrukeys = partial(list_lrukeys_, b)
+
+        self.assertEqual(b._eden.limit, 4)
+        self.assertEqual(b._probation.limit, 4)
+        self.assertEqual(b._protected.limit, 32)
+
+        # Get eden to exactly its size.
+        b['a'] = b'x'
+        self.assertEqual(b.size, 2)
+        self.assertEqual(list_lrukeys('eden'), ['a'])
+
+        b['b'] = b'y'
+        self.assertEqual(b.size, 4)
+        self.assertEqual(list_lrukeys('eden'), ['a', 'b'])
+
+        # Now increase an existing key, thus making it in MRU,
+        # and going over size of eden, and bumping down to protected.
+        b['a'] = b'xyz'
+        self.assertEqual(list_lrukeys('eden'), ['a'])
+        self.assertEqual(list_lrukeys('protected'), ['b'])
+
+        self.assertEqual(b.size, 6)
+
+    def test_increasing_size_in_eden_w_partial_protected_bumps_to_protected(self):
+        b = self.getClass()(40)
+        list_lrukeys = partial(list_lrukeys_, b)
+
+        self.assertEqual(b._eden.limit, 4)
+        self.assertEqual(b._probation.limit, 4)
+        self.assertEqual(b._protected.limit, 32)
+
+        # Fill up eden and begin spilling to protected
+        b['a'] = b'x'
+        self.assertEqual(b.size, 2)
+        self.assertEqual(list_lrukeys('eden'), ['a'])
+
+        b['b'] = b'y'
+        self.assertEqual(b.size, 4)
+        self.assertEqual(list_lrukeys('eden'), ['a', 'b'])
+
+        b['c'] = b'z'
+        self.assertEqual(b.size, 6)
+        self.assertEqual(list_lrukeys('eden'), ['b', 'c'])
+        self.assertEqual(list_lrukeys('protected'), ['a'])
+
+        # Now increase an existing key, thus making it in MRU,
+        # and going over size of eden, and bumping down to protected.
+        b['b'] = b'xyz'
+        self.assertEqual(list_lrukeys('eden'), ['b'])
+        self.assertEqual(list_lrukeys('protected'), ['a', 'c'])
+        self.assertEqual(b.size, 8)
+
+    def test_increasing_size_in_eden_w_full_protected_bumps_to_probation(self):
+        b = self.getClass()(40)
+        list_lrukeys = partial(list_lrukeys_, b)
+
+        self.assertEqual(b._eden.limit, 4)
+        self.assertEqual(b._probation.limit, 4)
+        self.assertEqual(b._protected.limit, 32)
+
+        # This actually stays in eden because it's the newest key,
+        # even though it's too big
+        b['a'] = b'x' * 31
+        self.assertEqual(b.size, 32)
+        self.assertEqual(list_lrukeys('eden'), ['a'])
+
+        # But this will immediately force a into protected
+        b['b'] = b'y'
+        self.assertEqual(b.size, 34)
+        self.assertEqual(list_lrukeys('eden'), ['b'])
+        self.assertEqual(list_lrukeys('protected'), ['a'])
+        self.assertEqual(list_lrukeys('probation'), [])
+
+        # Ok, now fill up eden with another key
+        b['c'] = b'z'
+        self.assertEqual(b.size, 36)
+        self.assertEqual(list_lrukeys('eden'), ['b', 'c'])
+        self.assertEqual(list_lrukeys('protected'), ['a'])
+        self.assertEqual(list_lrukeys('probation'), [])
+
+        # Now increase an existing key, thus making it in MRU,
+        # and going over size of eden. protected is full, so we go to probation.
+        b['b'] = b'xyz'
+        self.assertEqual(list_lrukeys('eden'), ['b'])
+        self.assertEqual(list_lrukeys('protected'), ['a'])
+        self.assertEqual(list_lrukeys('probation'), ['c'])
+        self.assertEqual(b.size, 38)
+
+        # Nothing was evicted
+        self.assertEqual(b['a'], b'x' * 31)
+        self.assertEqual(b['b'], b'xyz')
+        self.assertEqual(b['c'], b'z')
+
+    def test_increasing_size_in_full_protected_bumps_to_probation(self):
+        # Fill up in the normal way
+        b = self.getClass()(40)
+        list_lrukeys = partial(list_lrukeys_, b)
+
+        self.assertEqual(b._eden.limit, 4)
+        self.assertEqual(b._probation.limit, 4)
+        self.assertEqual(b._protected.limit, 32)
+
+        for k in range(10):
+            # 10 4 byte entries
+            b[str(k)] = 'abc'
+
+        self.assertEqual(list_lrukeys('eden'), ['9'])
+        self.assertEqual(list_lrukeys('protected'), ['0', '1', '2', '3', '4', '5', '6', '7'])
+        self.assertEqual(list_lrukeys('probation'), ['8'])
+        self.assertEqual(b.size, 40)
+
+        # Now bump protected over size, ejecting to probation.
+        # Note that we drop an element to get us in size
+        b['3'] = 'abcd'
+        self.assertEqual(list_lrukeys('eden'), ['9'])
+        self.assertEqual(list_lrukeys('protected'), ['1', '2', '4', '5', '6', '7', '3'])
+        self.assertEqual(list_lrukeys('probation'), ['0'])
+        self.assertEqual(b.size, 37)
+
+        # We can access only the ones that remain
+        for k in range(8):
+            self.assertNotNone(b.get(str(k)))
+
+        self.assertNone(b.get('8'))
+        self.assertNotNone(b.get('9'))
+
+    def test_increasing_size_in_full_probation_full_protection_bumps_to_probation(self):
+        # Fill up in the normal way
+        b = self.getClass()(40)
+        list_lrukeys = partial(list_lrukeys_, b)
+
+        self.assertEqual(b._eden.limit, 4)
+        self.assertEqual(b._probation.limit, 4)
+        self.assertEqual(b._protected.limit, 32)
+
+        for k in range(10):
+            # 10 4 byte entries
+            b[str(k)] = 'abc'
+
+        self.assertEqual(list_lrukeys('eden'), ['9'])
+        self.assertEqual(list_lrukeys('protected'), ['0', '1', '2', '3', '4', '5', '6', '7'])
+        self.assertEqual(list_lrukeys('probation'), ['8'])
+        self.assertEqual(b.size, 40)
+
+        # Now increase an entry in probation. This will move it to protected, which
+        # will now be oversize.
+        # Note that we drop an element to get us within size
+        b['8'] = 'abcd'
+        self.assertEqual(list_lrukeys('eden'), ['9'])
+        self.assertEqual(list_lrukeys('protected'), ['2', '3', '4', '5', '6', '7', '8'])
+        self.assertEqual(list_lrukeys('probation'), ['1'])
+        self.assertEqual(b.size, 37)
+
+        # We can access only the ones that remain
+        for k in range(1, 10):
+            self.assertNotNone(b.get(str(k)))
+
+        self.assertNone(b.get('0'))
 
     def _load(self, bio, bucket, options):
-        from relstorage.cache import _Loader
+        from relstorage.cache import persistence as _Loader
         bio.seek(0)
         reader = _Loader._gzip_file(options, None, bio, mode='rb')
         return bucket.load_from_file(reader)
 
-    def _save(self, bio, bucket, options):
-        from relstorage.cache import _Loader
+    def _save(self, bio, bucket, options, byte_limit=None):
+        from relstorage.cache import persistence as _Loader
         bio.seek(0)
         if options.cache_local_dir_compress:
             self.assertEqual(".rscache.gz", _Loader._gzip_ext(options))
         writer = _Loader._gzip_file(options, None, bio, mode='wb')
-        bucket.write_to_file(writer)
+        bucket.write_to_file(writer, byte_limit or options.cache_local_dir_write_max_size)
         writer.flush()
         if writer is not bio:
             writer.close()
@@ -434,28 +628,41 @@ class LocalClientBucketTests(unittest.TestCase):
         bio = BytesIO()
 
         self._save(bio, client1, options)
+        # Regardless of its read frequency, it's still written
+        client2 = self.getClass()(100)
+        count, stored = self._load(bio, client2, options)
+        self.assertEqual(count, stored)
+        self.assertEqual(count, 1)
 
         client2 = self.getClass()(100)
         count, stored = self._load(bio, client2, options)
         self.assertEqual(count, stored)
         self.assertEqual(count, 1)
+
         self.assertEqual(client1['abc'], client2['abc'])
         self.assertEqual(1, len(client2))
         self.assertEqual(client1.size, client2.size)
 
         client1.reset_stats()
         client1['def'] = b'123'
+        client1['def']
         self.assertEqual(2, len(client1))
         client1_max_size = client1.size
         self._save(bio, client1, options)
 
         # This time there's too much data, so an arbitrary
         # entry gets dropped
-        client2 = self.getClass()(3)
+        client2 = self.getClass()(7)
         count, stored = self._load(bio, client2, options)
-        self.assertEqual(1, len(client2))
+        self.assertEqual(0, len(client2))
         self.assertEqual(count, 2)
-        self.assertEqual(stored, 1)
+        self.assertEqual(stored, 0)
+
+        client2 = self.getClass()(8)
+        count, stored = self._load(bio, client2, options)
+        self.assertEqual(2, len(client2))
+        self.assertEqual(count, 2)
+        self.assertEqual(stored, 2)
 
 
         # Duplicate keys ignored.
@@ -467,7 +674,9 @@ class LocalClientBucketTests(unittest.TestCase):
         self.assertEqual(stored, 0)
         self.assertEqual(2, len(client1))
 
+
         # Half duplicate keys
+        self.assertEqual(2, len(client1))
         del client1['abc']
         self.assertEqual(1, len(client1))
 
@@ -478,6 +687,42 @@ class LocalClientBucketTests(unittest.TestCase):
         self.assertEqual(stored, 1)
         self.assertEqual(client1.size, client1_max_size)
 
+        # Even keys that have been aged down to 0 still get
+        # written.
+        # Force the conditions for it to actually do something.
+        client1.limit = 0
+        client1._age_factor = 0
+        client1._age()
+        client1._age()
+        self.assertEqual(len(client1), 2)
+        self.assertEqual(client1.size, client1_max_size)
+
+        bio = BytesIO()
+        self._save(bio, client1, options, client1_max_size * 2)
+
+
+        client1 = self.getClass()(100)
+        count, stored = self._load(bio, client1, options)
+        self.assertEqual(count, 2)
+        self.assertEqual(stored, 2)
+        self.assertEqual(client1.size, client1_max_size)
+
+        list_lrukeys = partial(list_lrukeys_, client1)
+        self.assertEqual(list_lrukeys('eden'), ['abc'])
+        self.assertEqual(list_lrukeys('probation'), [])
+        self.assertEqual(list_lrukeys('protected'), ['def'])
+
+        # Don't write anything if the limit is too small, but
+        # we can still read it.
+        bio = BytesIO()
+        self._save(bio, client1, options, 1)
+
+        client2 = self.getClass()(3)
+        count, stored = self._load(bio, client2, options)
+        self.assertEqual(count, 0)
+        self.assertEqual(stored, 0)
+
+
     def test_load_and_store_to_gzip(self):
         options = MockOptions()
         options.cache_local_dir_compress = True
@@ -485,7 +730,7 @@ class LocalClientBucketTests(unittest.TestCase):
 
     @skipOnCI("Sometimes the files_loaded is just 1 on Travis.")
     def test_load_from_multiple_files_hit_limit(self):
-        from relstorage.cache import _Loader
+        from relstorage.cache import persistence as _Loader
         import tempfile
         client = self.getClass()(100)
         options = MockOptions()
@@ -499,6 +744,8 @@ class LocalClientBucketTests(unittest.TestCase):
             if i > 0:
                 del client[str(i - 1)]
             client[str(i)] = b'abc'
+            client[str(i)] # Increment so it gets saved
+
             _Loader.save_local_cache(options, 'test', client, _pid=i)
             self.assertEqual(_Loader.count_cache_files(options, 'test'),
                              i + 1)
@@ -513,7 +760,6 @@ class LocalClientBucketTests(unittest.TestCase):
 class LocalClientTests(unittest.TestCase):
 
     def getClass(self):
-        from relstorage.cache import LocalClient
         return LocalClient
 
     def _makeOne(self, **kw):
@@ -570,83 +816,233 @@ class LocalClientTests(unittest.TestCase):
         self.assertEqual(c.get_multi(['k2', 'k3']), {})
 
     def test_bucket_sizes_without_compression(self):
-        # LocalClient is a simple LRU cache.  Confirm it keeps the right keys.
+        # LocalClient is a simple w-TinyLRU cache.  Confirm it keeps the right keys.
         c = self._makeOne(cache_local_compression='none')
+        # This limit will result in
+        # eden and probation of 5, protected of 40. This means that eden
+        # and probation each can hold one item, while protected can hold 4,
+        # so our max size will be 60
         c._bucket_limit = 51
         c.flush_all()
+
+        list_lrukeys = partial(list_lrukeys_, c._bucket0)
+        list_lrufreq = partial(list_lrufreq_, c._bucket0)
+
+        k = None
+
         for i in range(5):
-            # add 10 bytes
-            c.set('k%d' % i, b'01234567')
+            # add 10 bytes (2 for the key, 8 for the value)
+            k = 'k%d' % i
+            # This will go to eden, replacing any value that was there
+            # into probation.
+            c.set(k, b'01234567')
+
+
+        # While we have the room, we initially put items into the protected
+        # space when they graduate from eden.
+        self.assertEqual(list_lrukeys('eden'), ['k4'])
+        self.assertEqual(list_lrukeys('probation'), [])
+        self.assertEqual(list_lrukeys('protected'), ['k0', 'k1', 'k2', 'k3'])
         self.assertEqual(c._bucket0.size, 50)
 
         c.set('k5', b'01234567')
-        self.assertEqual(c._bucket0.size, 50)
+
+        # Right now, we're one entry over size, because we put k5
+        # in eden, which dropped k4 to probation; since probation was empty, we
+        # allowed it to stay there
+        self.assertEqual(list_lrukeys('eden'), ['k5'])
+        self.assertEqual(list_lrukeys('probation'), ['k4'])
+        self.assertEqual(list_lrukeys('protected'), ['k0', 'k1', 'k2', 'k3'])
+        self.assertEqual(c._bucket0.size, 60)
 
         v = c.get('k2')
         self.assertEqual(v, b'01234567')
-        self.assertEqual(c._bucket0.size, 50)
+        self.assertEqual(c._bucket0.size, 60)
+
+        c.set('k1', b'b')
+        self.assertEqual(list_lrukeys('eden'), ['k5'])
+        self.assertEqual(list_lrukeys('probation'), ['k4'])
+        self.assertEqual(list_lrukeys('protected'), ['k0', 'k3', 'k2', 'k1'])
+
+        self.assertEqual(c._bucket0.size, 53)
 
         for i in range(4):
-            # add 10 bytes
+            # add 10 bytes (2 for the key, 8 for the value)
             c.set('x%d' % i, b'01234567')
-        self.assertEqual(c._bucket0.size, 50)
+            # Notice that we're not promoting these through the layers. So
+            # when we're done, we'll wind up with one key each in
+            # eden and probation, and all the K keys in protected (since
+            # they have been promoted)
 
-        self.assertEqual(c.get('x0'), b'01234567')
-        self.assertEqual(c.get('x1'), b'01234567')
+
+        # x0 and x1 started in eden and got promoted to the probation ring,
+        # from whence they were ejected because of never being accessed.
+        # k2 was allowed to remain because it'd been accessed
+        # more often
+        self.assertEqual(list_lrukeys('eden'), ['x3'])
+        self.assertEqual(list_lrukeys('probation'), ['x2'])
+        self.assertEqual(list_lrukeys('protected'), ['k0', 'k3', 'k2', 'k1'])
+        self.assertEqual(c._bucket0.size, 53)
+
+        #pprint.pprint(c._bucket0.stats())
+        self.assertEqual(c.get('x0'), None)
+        self.assertEqual(c.get('x1'), None)
         self.assertEqual(c.get('x2'), b'01234567')
         self.assertEqual(c.get('x3'), b'01234567')
         self.assertEqual(c.get('k2'), b'01234567')
-        self.assertEqual(c._bucket0.size, 50)
+        self.assertEqual(c._bucket0.size, 53)
 
+        # Note that this last set of checks perturbed protected and probation;
+        # We lost a key
+        #pprint.pprint(c._bucket0.stats())
+        self.assertEqual(list_lrukeys('eden'), ['x3'])
+        self.assertEqual(list_lrukeys('probation'), ['k0'])
+        self.assertEqual(list_lrukeys('protected'), ['k3', 'k1', 'x2', 'k2'])
+        self.assertEqual(c._bucket0.size, 53)
 
-        self.assertEqual(c.get('k0'), None)
-        self.assertEqual(c.get('k1'), None)
+        self.assertEqual(c.get('k0'), b'01234567')
+        self.assertEqual(c.get('k0'), b'01234567') # One more to increase its freq count
+        self.assertEqual(c.get('k1'), b'b')
         self.assertEqual(c.get('k2'), b'01234567')
-        self.assertEqual(c.get('k3'), None)
+        self.assertEqual(c.get('k3'), b'01234567')
         self.assertEqual(c.get('k4'), None)
         self.assertEqual(c.get('k5'), None)
 
+        # Let's promote from probation, causing places to switch.
+        # First, verify our current state after those gets.
+        self.assertEqual(list_lrukeys('eden'), ['x3'])
+        self.assertEqual(list_lrukeys('probation'), ['x2'])
+        self.assertEqual(list_lrukeys('protected'), ['k0', 'k1', 'k2', 'k3'])
+        # Now get and switch
+        c.get('x2')
+        self.assertEqual(list_lrukeys('eden'), ['x3'])
+        self.assertEqual(list_lrukeys('probation'), ['k0'])
+        self.assertEqual(list_lrukeys('protected'), ['k1', 'k2', 'k3', 'x2'])
+        self.assertEqual(c._bucket0.size, 53)
 
-        self.assertEqual(c._bucket0.size, 50)
-
+        # Confirm frequency counts
+        self.assertEqual(list_lrufreq('eden'), [2])
+        self.assertEqual(list_lrufreq('probation'), [3])
+        self.assertEqual(list_lrufreq('protected'), [3, 4, 2, 3])
+        # A brand new key is in eden, shifting eden to probation
 
         c.set('z0', b'01234567')
-        self.assertEqual(c._bucket0.size, 50)
+
+        # Now, because we had accessed k0 (probation) more than we'd
+        # accessed the last key from eden (x3), that's the one we keep
+        self.assertEqual(list_lrukeys('eden'), ['z0'])
+        self.assertEqual(list_lrukeys('probation'), ['k0'])
+        self.assertEqual(list_lrukeys('protected'), ['k1', 'k2', 'k3', 'x2'])
+
+        self.assertEqual(list_lrufreq('eden'), [1])
+        self.assertEqual(list_lrufreq('probation'), [3])
+        self.assertEqual(list_lrufreq('protected'), [3, 4, 2, 3])
+
+        self.assertEqual(c._bucket0.size, 53)
+
+        self.assertEqual(c.get('x3'), None)
+        self.assertEqual(list_lrukeys('probation'), ['k0'])
 
 
     def test_bucket_sizes_with_compression(self):
         c = self._makeOne(cache_local_compression='zlib')
         c._bucket_limit = 23 * 2 + 1
         c.flush_all()
+        list_lrukeys = partial(list_lrukeys_, c._bucket0)
 
-        c.set('k0', b'01234567' * 15)
-        self.assertEqual(c._bucket0.size, 23)
+        k0_data = b'01234567' * 15
+        c.set('k0', k0_data)
+        self.assertEqual(c._bucket0.size, 23) # One entry in eden
+        self.assertEqual(list_lrukeys('eden'), ['k0'])
+        self.assertEqual(list_lrukeys('probation'), [])
+        self.assertEqual(list_lrukeys('protected'), [])
 
-        c.set('k1', b'76543210' * 15)
+        k1_data = b'76543210' * 15
+
+        c.set('k1', k1_data)
         self.assertEqual(len(c._bucket0), 2)
-        self.assertEqual(c._bucket0.size, 23 * 2)
 
-        c.set('k2', b'abcdefgh' * 15)
         self.assertEqual(c._bucket0.size, 23 * 2)
+        # Since k0 would fit in protected and we had nothing in
+        # probation, that's where it went
+        self.assertEqual(list_lrukeys('eden'), ['k1'])
+        self.assertEqual(list_lrukeys('probation'), [])
+        self.assertEqual(list_lrukeys('protected'), ['k0'])
+
+        k2_data = b'abcdefgh' * 15
+        c.set('k2', k2_data)
+
+        # New key is in eden, old eden goes to probation because
+        # protected is full. Note we're slightly oversize
+        self.assertEqual(list_lrukeys('eden'), ['k2'])
+        self.assertEqual(list_lrukeys('probation'), ['k1'])
+        self.assertEqual(list_lrukeys('protected'), ['k0'])
+
+        self.assertEqual(c._bucket0.size, 23 * 3)
 
         v = c.get('k0')
-        self.assertEqual(v, None) # This one got evicted :(
+        self.assertEqual(v, k0_data)
+        self.assertEqual(list_lrukeys('eden'), ['k2'])
+        self.assertEqual(list_lrukeys('probation'), ['k1'])
+        self.assertEqual(list_lrukeys('protected'), ['k0'])
+
 
         v = c.get('k1')
-        self.assertEqual(v, b'76543210' * 15)
-        self.assertEqual(c._bucket0.size, 46)
+        self.assertEqual(v, k1_data)
+        self.assertEqual(c._bucket0.size, 23 * 3)
+        self.assertEqual(list_lrukeys('eden'), ['k2'])
+        self.assertEqual(list_lrukeys('probation'), ['k0'])
+        self.assertEqual(list_lrukeys('protected'), ['k1'])
+
 
         v = c.get('k2')
-        self.assertEqual(v, b'abcdefgh' * 15)
-        self.assertEqual(c._bucket0.size, 46)
+        self.assertEqual(v, k2_data)
+        self.assertEqual(c._bucket0.size, 23 * 3)
+        self.assertEqual(list_lrukeys('eden'), ['k2'])
+        self.assertEqual(list_lrukeys('probation'), ['k0'])
+        self.assertEqual(list_lrukeys('protected'), ['k1'])
+
+        c.set('k3', b'1')
+        self.assertEqual(list_lrukeys('eden'), ['k3'])
+        self.assertEqual(list_lrukeys('probation'), ['k2'])
+        self.assertEqual(list_lrukeys('protected'), ['k1'])
+
+        c.set('k4', b'1')
+        self.assertEqual(list_lrukeys('eden'), ['k4'])
+        self.assertEqual(list_lrukeys('probation'), ['k2'])
+        self.assertEqual(list_lrukeys('protected'), ['k1'])
+
+        c.set('k5', b'')
+        self.assertEqual(list_lrukeys('eden'), ['k5'])
+        self.assertEqual(list_lrukeys('probation'), ['k2'])
+        self.assertEqual(list_lrukeys('protected'), ['k1'])
+
+        c.set('k6', b'')
+        self.assertEqual(list_lrukeys('eden'), ['k5', 'k6'])
+        self.assertEqual(list_lrukeys('probation'), ['k2'])
+        self.assertEqual(list_lrukeys('protected'), ['k1'])
+
+
+        c.get('k6')
+        c.get('k6')
+        c.get('k6')
+        c.set('k7', b'')
+        self.assertEqual(list_lrukeys('eden'), ['k6', 'k7'])
+        self.assertEqual(list_lrukeys('probation'), ['k2'])
+        self.assertEqual(list_lrukeys('protected'), ['k1'])
+
+        c.set('k8', b'')
+        self.assertEqual(list_lrukeys('eden'), ['k7', 'k8'])
+        self.assertEqual(list_lrukeys('probation'), ['k6'])
+        self.assertEqual(list_lrukeys('protected'), ['k1'])
 
     def test_add(self):
         c = self._makeOne()
         c.set('k0', b'abc')
         self.assertEqual(c.get('k0'), b'abc')
-        c.add('k0', b'def')
-        c.add('k1', b'ghi')
-        self.assertEqual(c.get_multi(['k0', 'k1']), {'k0': b'abc', 'k1': b'ghi'})
+        self.assertRaises(NotImplementedError,
+                          c.add, 'k0', b'def')
+        self.assertIn('k0', c._bucket0)
 
     def test_load_and_save(self, _make_dir=True):
         import tempfile
@@ -667,6 +1063,7 @@ class LocalClientTests(unittest.TestCase):
             self.assertEqual([], os.listdir(root_temp_dir))
 
             c.set('k0', b'abc')
+            c.get('k0') # Increment the count so it gets saved
             c.save()
             cache_files = os.listdir(temp_dir)
             self.assertEqual(1, len(cache_files))
@@ -679,6 +1076,7 @@ class LocalClientTests(unittest.TestCase):
             # Change and save and we overwrite the
             # existing file.
             c2.set('k1', b'def')
+            c2.get('k1') # increment
             c2.save()
             new_cache_files = os.listdir(temp_dir)
             self.assertEqual(cache_files, new_cache_files)
@@ -709,21 +1107,155 @@ class LocalClientTests(unittest.TestCase):
             shutil.rmtree(root_temp_dir)
 
     def test_load_and_save_new_dir(self):
-         # automatically create directories as needed
-         self.test_load_and_save(False)
+        # automatically create directories as needed
+        self.test_load_and_save(False)
+
+class CacheRingTests(unittest.TestCase):
+
+    def _makeOne(self, limit):
+        from relstorage.cache.cache_ring import CacheRing
+        return CacheRing(limit)
+
+    def test_mru_lru_ring(self):
+        lru = self._makeOne(100)
+        entrya = lru.add_MRU(b'a', b'1')
+        self.assertEqual(lru.get_LRU(), entrya)
+
+        entryb = lru.add_MRU(b'b', b'2')
+        self.assertEqual(lru.get_LRU(), entrya)
+
+        entryc = lru.add_MRU(b'c', b'3')
+        self.assertEqual(lru.get_LRU(), entrya)
+
+        lru.make_MRU(entryb)
+        self.assertEqual(lru.get_LRU(), entrya)
+
+        lru.make_MRU(entrya)
+        self.assertEqual(lru.get_LRU(), entryc)
+
+        self.assertEqual(len(lru), 3)
+
+    def test_bool(self):
+        lru = self._makeOne(100)
+        self.assertFalse(lru)
+        entrya = lru.add_MRU('a', b'b')
+        self.assertTrue(lru)
+        lru.remove(entrya)
+        self.assertFalse(lru)
+
+class CacheTests(unittest.TestCase):
+
+    def test_free_reuse(self):
+        cache = Cache(20)
+        lru = cache.protected
+        self.assertEqual(lru.limit, 16)
+        entrya = lru.add_MRU('a', b'')
+        entryb = lru.add_MRU('b', b'')
+        entryc = lru.add_MRU('c', b'1')
+        entryd = lru.add_MRU('d', b'1')
+        for e in entrya, entryb, entryc, entryd:
+            cache.data[e.key] = e
+        lru.update_MRU(entryb, b'1234567890')
+        lru.update_MRU(entryb, b'1234567890') # coverage
+        lru.update_MRU(entryc, b'1234567890')
+        self.assertEqual(2, len(lru.node_free_list))
+
+        lru.add_MRU('c', b'1')
+        self.assertEqual(1, len(lru.node_free_list))
+
+    def test_add_too_many_MRUs_goes_to_free_list(self):
+        class _Cache(Cache):
+            _preallocate_entries = False
+
+        cache = _Cache(20)
+        self.assertEqual(0, len(cache.eden.node_free_list))
+
+        entries = cache.eden.add_MRUs([('1', 'abcd'),
+                                       ('2', 'defg'),
+                                       ('3', 'defg'),
+                                       ('4', 'defg'),
+                                       ('5', 'defg'),
+                                       ('6', 'defg'),])
+
+        self.assertEqual(4, len(entries))
+        self.assertEqual(['1', '2', '3', '4'], [e.key for e in entries])
+        self.assertEqual(2, len(cache.eden.node_free_list))
+        self.assertIsNone(cache.eden.node_free_list[0].key)
+        self.assertIsNone(cache.eden.node_free_list[0].value)
+
+    def test_add_too_many_MRUs_works_aronud_big_entry(self):
+        cache = Cache(20)
+
+        entries = cache.eden.add_MRUs([('1', 'a'),
+                                       # This entry itself will fit nowhere
+                                       ('2', '12345678901234567890'),
+                                       ('3', 'bc'),
+                                       ('4', 'cd'),
+                                       ('5', 'deh'),
+                                       ('6', 'efghijkl'),])
+
+        self.assertEqual(4, len(entries))
+        self.assertEqual(['1', '3', '4', '5'], [e.key for e in entries])
+        self.assertEqual(2, len(cache.eden.node_free_list))
+        for e in cache.eden.node_free_list:
+            self.assertIsNone(e.key)
+            self.assertIsNone(e.value)
+
+        entry = cache.eden.node_free_list[-1]
+        cache.eden.add_MRU('1', b'1')
+        self.assertEqual(1, len(cache.eden.node_free_list))
+
+        self.assertEqual(cache.eden.PARENT_CONST, entry.cffi_ring_node.u.entry.r_parent)
+
+    def test_add_MRUs_uses_existing_free_list(self):
+        class _Cache(Cache):
+            _preallocate_avg_size = 7
+            _preallocate_entries = True
+
+        cache = _Cache(20)
+        self.assertEqual(2, len(cache.eden.node_free_list))
+
+        begin_nodes = list(cache.eden.node_free_list)
+
+        entries = cache.eden.add_MRUs([('1', 'abcd'),
+                                       ('2', 'defg'),
+                                       ('3', 'defg'),
+                                       ('4', 'defg'),
+                                       ('5', 'defg'),
+                                       ('6', 'defg'),])
+
+        self.assertEqual(4, len(entries))
+        self.assertEqual(['1', '2', '3', '4'], [e.key for e in entries])
+        for i, e in enumerate(begin_nodes):
+            self.assertIs(e, entries[i])
+        self.assertEqual(2, len(cache.eden.node_free_list))
+        last_entry = entries[-1]
+        for free in cache.eden.node_free_list:
+            self.assertIs(last_entry._cffi_owning_node, free._cffi_owning_node)
+
+        # Now just one that exactly fits.
+        cache = _Cache(20)
+        self.assertEqual(2, len(cache.eden.node_free_list))
+
+        begin_nodes = list(cache.eden.node_free_list)
+
+        entries = cache.eden.add_MRUs([('1', 'abcd'),
+                                       ('2', 'defg'),
+                                       ('3', 'defg'),
+                                       ('4', 'defg'),])
+        self.assertEqual(4, len(entries))
+        self.assertEqual(['1', '2', '3', '4'], [e.key for e in entries])
+        for i, e in enumerate(begin_nodes):
+            self.assertIs(e, entries[i])
+        self.assertEqual(0, len(cache.eden.node_free_list))
 
 from relstorage.options import Options
 
 class MockOptions(Options):
-    cache_module_name = ''
+    cache_module_name = '' # disable
     cache_servers = ''
     cache_local_mb = 1
-    cache_local_object_max = 16384
-    cache_local_compression = 'zlib'
-    cache_delta_size_limit = 10000
-    cache_local_dir = None
-    cache_local_dir_compress = False
-    cache_local_dir_count = 1
+    cache_local_dir_count = 1 # shrink
 
 class MockOptionsWithFakeCache(MockOptions):
     cache_module_name = 'relstorage.tests.fakecache'
@@ -747,213 +1279,14 @@ class MockPoller(object):
         return ((oid, tid) for (oid, tid) in self.changes
                 if tid > after_tid and tid <= last_tid)
 
-def local_benchmark():
-    from relstorage.cache import LocalClient, LocalClientBucket
-    options = MockOptions()
-    options.cache_local_mb = 500
-    #options.cache_local_compression = 'none'
-
-    REPEAT_COUNT = 4
-
-    KEY_GROUP_SIZE = 400
-    DATA_SIZE = 1024
-
-    # With 1000 in a key group, and 1024 bytes of data, we produce
-    # 909100 keys, and 930918400 = 887MB of data, which will overflow
-    # a cache of 500 MB.
-
-    # A group size of 100 produces 9100 keys with 9318400 = 8.8MB of data.
-    # Likewise, group of 200 produces 36380 keys with 35.5MB of data.
-
-    # Most of our time is spent in compression, it seems.
-    # In the 8.8mb case, populating all the data with default compression
-    # takes about 2.5-2.8s. Using no compression, it takes 0.38 to 0.42s.
-    # Reading is the same at about 0.2s.
-
-    with open('/dev/urandom', 'rb') as f:
-        random_data = f.read(DATA_SIZE)
-
-    key_groups = []
-    key_groups.append([int(str(i)) for i in range(KEY_GROUP_SIZE)])
-    for i in range(1, KEY_GROUP_SIZE):
-        keys = [int(str(i) + str(j)) for j in range(KEY_GROUP_SIZE)]
-        key_groups.append(keys)
-
-    ALL_DATA = {}
-    for group in key_groups:
-        for key in group:
-            ALL_DATA[key] = random_data
-    print(len(ALL_DATA), sum((len(v) for v in ALL_DATA.values()))/1024/1024)
-
-    class DLocalBucket(LocalClientBucket):
-        CACHE_TYPE = dict
-
-    class DLocalClient(LocalClient):
-        bucket_type = DLocalBucket
-
-    from BTrees.OOBTree import OOBTree
-    from BTrees.LOBTree import LOBTree
-    class BLocalBucket(LocalClientBucket):
-        CACHE_TYPE = OOBTree
-
-    class BLocalClient(LocalClient):
-        bucket_type = BLocalBucket
-
-    def do_times(client_type):
-        client = client_type(options)
-        print("Testing", type(client._bucket0._dict))
-
-        def populate():
-            for k, v in ALL_DATA.items():
-                client.set(k, v)
-
-        def populate_empty():
-            c = LocalClient(options)
-            for k, v in ALL_DATA.items():
-                c.set(k, v)
-
-        def read():
-            for keys in key_groups:
-                res = client.get_multi(keys)
-                assert len(res) == len(keys)
-                assert res.popitem()[1] == random_data
-
-
-
-        import timeit
-        import statistics
-        try:
-            import cProfile, pstats
-            raise ImportError
-        except ImportError:
-            class cProfile(object):
-                class Profile(object):
-                    def enable(self): pass
-                    def disable(self): pass
-            class pstats(object):
-                class Stats(object):
-                    def __init__(self, *args): pass
-                    def sort_stats(self, *args): return self
-                    def print_stats(self, *args): pass
-
-
-        number = REPEAT_COUNT
-        pop_timer = timeit.Timer(populate)
-        pr = cProfile.Profile()
-        pr.enable()
-        pop_times = pop_timer.repeat(number=number)
-        pr.disable()
-        ps = pstats.Stats(pr).sort_stats('cumulative')
-        ps.print_stats(.4)
-
-        read_timer = timeit.Timer(read)
-        pr = cProfile.Profile()
-        pr.enable()
-        read_times = read_timer.repeat(number=number)
-        pr.disable()
-        ps = pstats.Stats(pr).sort_stats('cumulative')
-        ps.print_stats(.4)
-
-        empty_pop = timeit.Timer(populate_empty)
-        epop_times = empty_pop.repeat(number=number)
-
-        print("pop  average", statistics.mean(pop_times), "stddev", statistics.stdev(pop_times))
-        print("epop average", statistics.mean(epop_times), "stddev", statistics.stdev(epop_times))
-        print("read average", statistics.mean(read_times), "stddev", statistics.stdev(read_times))
-
-    do_times(DLocalClient)
-    do_times(BLocalClient)
-
-def save_load_benchmark():
-    from relstorage.cache import LocalClientBucket, _Loader
-    from io import BytesIO
-    import os
-    import itertools
-
-    import sys
-    sys.setrecursionlimit(500000)
-    bucket = LocalClientBucket(500*1024*1024)
-    print("Testing", type(bucket._dict))
-
-
-    size_dists = [100] * 800 + [300] * 500 + [1024] * 300 + [2048] * 200 + [4096] * 150
-
-    with open('/dev/urandom', 'rb') as rnd:
-        data = [rnd.read(x) for x in size_dists]
-    data_iter = itertools.cycle(data)
-
-    for j, datum in enumerate(data_iter):
-        if len(datum) > bucket.limit or bucket.size + len(datum) > bucket.limit:
-            break
-        # To ensure the pickle memo cache doesn't just write out "use object X",
-        # but distinct copies of the strings, we need to copy them
-        bucket[str(j)] = datum[:-1] + b'x'
-        assert bucket[str(j)] is not datum
-        #print("Len", len(bucket), "size", bucket.size, "dlen", len(datum))
-
-    print("Len", len(bucket), "size", bucket.size)
-    number = 1
-    import timeit
-    import statistics
-    import cProfile
-    import pstats
-
-    cache_pfx = "pfx"
-    cache_options = MockOptions()
-    cache_options.cache_local_dir = '/tmp'
-    cache_options.cache_local_dir_compress = False
-
-    def write():
-        fname = _Loader.save_local_cache(cache_options, cache_pfx, bucket)
-        os.remove(fname)
-
-
-    def load():
-        b2 = LocalClientBucket(bucket.limit)
-        _Loader.load_local_cache(cache_options, cache_pfx, b2)
-
-    #write_timer = timeit.Timer(write)
-    #write_times = write_timer.repeat(number=number)
-    #print("write average", statistics.mean(write_times), "stddev", statistics.stdev(write_times))
-
-    #read_timer = timeit.Timer(load)
-    #read_times = read_timer.repeat(number=number)
-    #print("read average", statistics.mean(read_times), "stddev", statistics.stdev(read_times))
-
-    #pr = cProfile.Profile()
-    #pr.enable()
-
-    fname = _Loader.save_local_cache(cache_options, cache_pfx, bucket)
-    print("Saved to", fname)
-    #pr.disable()
-    #ps = pstats.Stats(pr).sort_stats('cumulative')
-    #ps.print_stats()
-    #return
-
-    pr = cProfile.Profile()
-    pr.enable()
-    _Loader.load_local_cache(cache_options, cache_pfx, LocalClientBucket(bucket.limit))
-    pr.disable()
-    ps = pstats.Stats(pr).sort_stats('cumulative')
-    ps.print_stats(.4)
-
-
-    #os.remove(fname)
-
 def test_suite():
     suite = unittest.TestSuite()
     suite.addTest(unittest.makeSuite(StorageCacheTests))
-    suite.addTest(unittest.makeSuite(LocalClientBucketTests))
+    suite.addTest(unittest.makeSuite(SizedLRUMappingTests))
     suite.addTest(unittest.makeSuite(LocalClientTests))
+    suite.addTest(unittest.makeSuite(CacheRingTests))
+    suite.addTest(unittest.makeSuite(CacheTests))
     return suite
 
 if __name__ == '__main__':
-    import sys
-    if '--localbench' in sys.argv:
-        local_benchmark()
-    elif '--iobench' in sys.argv:
-        import logging
-        logging.basicConfig(level=logging.DEBUG)
-        save_load_benchmark()
-    else:
-        unittest.main(defaultTest='test_suite')
+    unittest.main(defaultTest='test_suite')
