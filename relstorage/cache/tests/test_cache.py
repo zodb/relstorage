@@ -652,11 +652,17 @@ class SizedLRUMappingTests(unittest.TestCase):
 
         # This time there's too much data, so an arbitrary
         # entry gets dropped
-        client2 = self.getClass()(3)
+        client2 = self.getClass()(7)
         count, stored = self._load(bio, client2, options)
-        self.assertEqual(1, len(client2))
+        self.assertEqual(0, len(client2))
         self.assertEqual(count, 2)
-        self.assertEqual(stored, 1)
+        self.assertEqual(stored, 0)
+
+        client2 = self.getClass()(8)
+        count, stored = self._load(bio, client2, options)
+        self.assertEqual(2, len(client2))
+        self.assertEqual(count, 2)
+        self.assertEqual(stored, 2)
 
 
         # Duplicate keys ignored.
@@ -1137,6 +1143,8 @@ class CacheRingTests(unittest.TestCase):
         lru.remove(entrya)
         self.assertFalse(lru)
 
+class CacheTests(unittest.TestCase):
+
     def test_free_reuse(self):
         cache = Cache(20)
         lru = cache.protected
@@ -1155,6 +1163,67 @@ class CacheRingTests(unittest.TestCase):
         lru.add_MRU('c', b'1')
         self.assertEqual(1, len(lru.node_free_list))
 
+    def test_add_too_many_MRUs_goes_to_free_list(self):
+        class _Cache(Cache):
+            _preallocate_entries = False
+
+        cache = _Cache(20)
+        self.assertEqual(0, len(cache.eden.node_free_list))
+
+        entries = cache.eden.add_MRUs([('1', 'abcd'),
+                                       ('2', 'defg'),
+                                       ('3', 'defg'),
+                                       ('4', 'defg'),
+                                       ('5', 'defg'),
+                                       ('6', 'defg'),])
+
+        self.assertEqual(5, len(entries))
+        self.assertEqual(['1', '2', '3', '4', '5'], [e.key for e in entries])
+        self.assertEqual(1, len(cache.eden.node_free_list))
+        self.assertIsNone(cache.eden.node_free_list[0].key)
+        self.assertIsNone(cache.eden.node_free_list[0].value)
+
+    def test_add_MRUs_uses_existing_free_list(self):
+        class _Cache(Cache):
+            _preallocate_avg_size = 7
+            _preallocate_entries = True
+
+        cache = _Cache(20)
+        self.assertEqual(2, len(cache.eden.node_free_list))
+
+        begin_nodes = list(cache.eden.node_free_list)
+
+        entries = cache.eden.add_MRUs([('1', 'abcd'),
+                                       ('2', 'defg'),
+                                       ('3', 'defg'),
+                                       ('4', 'defg'),
+                                       ('5', 'defg'),
+                                       ('6', 'defg'),])
+
+        self.assertEqual(5, len(entries))
+        self.assertEqual(['1', '2', '3', '4', '5'], [e.key for e in entries])
+        for i, e in enumerate(begin_nodes):
+            self.assertIs(e, entries[i])
+        self.assertEqual(1, len(cache.eden.node_free_list))
+        last_entry = entries[-1]
+        for free in cache.eden.node_free_list:
+            self.assertIs(last_entry._cffi_owning_node, free._cffi_owning_node)
+
+        # Now just one that exactly fits.
+        cache = _Cache(20)
+        self.assertEqual(2, len(cache.eden.node_free_list))
+
+        begin_nodes = list(cache.eden.node_free_list)
+
+        entries = cache.eden.add_MRUs([('1', 'abcd'),
+                                       ('2', 'defg'),
+                                       ('3', 'defg'),
+                                       ('4', 'defg'),])
+        self.assertEqual(4, len(entries))
+        self.assertEqual(['1', '2', '3', '4'], [e.key for e in entries])
+        for i, e in enumerate(begin_nodes):
+            self.assertIs(e, entries[i])
+        self.assertEqual(0, len(cache.eden.node_free_list))
 
 from relstorage.options import Options
 
@@ -1192,6 +1261,7 @@ def test_suite():
     suite.addTest(unittest.makeSuite(SizedLRUMappingTests))
     suite.addTest(unittest.makeSuite(LocalClientTests))
     suite.addTest(unittest.makeSuite(CacheRingTests))
+    suite.addTest(unittest.makeSuite(CacheTests))
     return suite
 
 if __name__ == '__main__':

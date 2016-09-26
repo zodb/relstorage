@@ -18,6 +18,13 @@ from __future__ import absolute_import, print_function, division
 Segmented LRU implementations.
 
 """
+import functools
+import itertools
+try:
+    izip = itertools.izip
+except AttributeError:
+    # Python 3
+    izip = zip
 
 from relstorage.cache import _cache_ring
 
@@ -122,8 +129,8 @@ class Cache(object):
             needed_entries = byte_limit // self._preallocate_avg_size
             entry_count = min(self._preallocate_max_count, needed_entries)
 
-            keys_and_values = [('', b'')] * entry_count
-            _, nodes = self.eden._preallocate_entries(keys_and_values)
+            keys_and_values = itertools.repeat(('', b''), entry_count)
+            _, nodes = self.eden._preallocate_entries(keys_and_values, entry_count)
             node_free_list.extend(nodes)
 
     def age_lists(self):
@@ -182,8 +189,20 @@ class CacheRingNode(object):
         return ("<%s key=%r f=%d size=%d>" %
                 (type(self).__name__, self.key, self.frequency, self.len))
 
+def _mutates_free_list(func):
+    @functools.wraps(func)
+    def mutates(self, *args, **kwargs):
+        try:
+            return func(self, *args, **kwargs)
+        finally:
+            self._mutated_free_list = True
+            setattr(self, func.__name__, lambda *args: func(self, *args))
+
+    return mutates
 
 class CacheRing(object):
+
+    _mutated_free_list = False
 
     # The CFFI pointer to the RSCache structure. It should be shared
     # among all the rings of the cache.
@@ -210,12 +229,12 @@ class CacheRing(object):
 
         self.node_free_list = []
 
-    def _preallocate_entries(self, ordered_keys_and_values):
-        count = len(ordered_keys_and_values)
+    def _preallocate_entries(self, ordered_keys_and_values, count=None):
+        count = len(ordered_keys_and_values) if count is None else count
         nodes = ffi.new('RSRingNode[]', count)
         entries = []
-        for i in range(count):
-            k, v = ordered_keys_and_values[i]
+        for i, (k, v) in enumerate(ordered_keys_and_values):
+            #k, v = ordered_keys_and_values[i]
             node = nodes + i # this gets RSRingNode*; nodes[i] returns the struct
             entry = CacheRingNode(k, v, node)
             entry._cffi_owning_node = nodes
@@ -246,6 +265,7 @@ class CacheRing(object):
     def size(self):
         return self.ring_home.u.head.sum_weights
 
+    @_mutates_free_list
     def add_MRU(self, key, value):
         node_free_list = self.node_free_list
         if node_free_list:
@@ -265,6 +285,7 @@ class CacheRing(object):
         # Only for testing
         _ring_move_to_head(self.ring_home, entry.cffi_ring_node)
 
+    @_mutates_free_list
     def update_MRU(self, entry, value):
         old_size = entry.len
         entry.set_value(value)
@@ -312,21 +333,55 @@ class EdenRing(CacheRing):
 
     PARENT_CONST = 1
 
-
+    @_mutates_free_list
     def add_MRUs(self, ordered_keys_and_values):
-        nodes, entries = self._preallocate_entries(ordered_keys_and_values)
         number_nodes = len(ordered_keys_and_values)
+        # Start by using existing entries *if* we haven't mutated the free list.
+        if not self._mutated_free_list and self.node_free_list:
+            self._mutated_free_list = True
+            entries = self.node_free_list[:number_nodes]
+            nodes = entries[0]._cffi_owning_node
+            del self.node_free_list[:number_nodes]
+            for entry, (k, v) in izip(entries, ordered_keys_and_values):
+                entry.reset(k, v)
+
+            remaining_keys_and_values = ordered_keys_and_values[len(entries):]
+            added_entries = self.__add_MRUs(nodes, entries)
+            if (len(added_entries) == len(entries)) and remaining_keys_and_values:
+                added_entries.extend(self.add_MRUs(remaining_keys_and_values))
+
+            return added_entries
+
+        nodes, entries = self._preallocate_entries(ordered_keys_and_values, number_nodes)
+        return self.__add_MRUs(nodes, entries)
+
+
+
+    def __add_MRUs(self, nodes, entries):
+        number_nodes = len(entries)
+        # Only return the objects we added, allowing the rest to become garbage.
+
         added_count = _eden_add_many(self.cffi_cache,
                                      nodes,
                                      number_nodes)
-        # Only return the objects we added, allowing the rest to become garbage.
-        # TODO: Put them on the node_free_list? Or try to allow the node array to be
-        # gc'd (eventually)?
+        if not added_count:
+            # Allow any nodes we preallocated to get GC'd now
+
+            return ()
+
+        # Because we went to the trouble of allocating them, we might
+        # as well put them on the free list if we didn't use them. The
+        # whole array will stay around around as long as any one
+        # object does
         if added_count < number_nodes:
-            # We're always going to add at least one.
+            free = entries[added_count:]
+            for e in free:
+                e.key = e.value = None
+            self.node_free_list.extend(free)
             return entries[:added_count]
         return entries
 
+    @_mutates_free_list
     def add_MRU(self, key, value):
         node_free_list = self.node_free_list
         if node_free_list:

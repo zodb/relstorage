@@ -45,6 +45,21 @@ static inline int ring_is_empty(RSRing ring)
     return ring == NULL || ring->r_next == ring || ring->r_next == NULL;
 }
 
+static inline int cache_oversize(RSCache* cache)
+{
+    return ring_oversize(cache->eden) && ring_oversize(cache->probation) && ring_oversize(cache->protected);
+}
+
+static inline int lru_will_fit(RSRingNode* ring, RSRingNode* entry)
+{
+    return ring->u.head.max_weight >= (entry->u.entry.weight + ring->u.head.sum_weights);
+}
+
+static inline int cache_will_fit(RSCache* cache, RSRingNode* entry)
+{
+    return lru_will_fit(cache->eden, entry) || lru_will_fit(cache->probation, entry) || lru_will_fit(cache->protected, entry);
+}
+
 inline void
 rsc_ring_add(RSRing ring, RSRingNode *elt)
 {
@@ -126,11 +141,6 @@ void rsc_on_hit(RSRing ring, RSRingNode* entry)
 {
     entry->u.entry.frequency++;
     rsc_ring_move_to_head(ring, entry);
-}
-
-static inline int lru_will_fit(RSRingNode* ring, RSRingNode* entry)
-{
-    return ring->u.head.max_weight >= (entry->u.entry.weight + ring->u.head.sum_weights);
 }
 
 /**
@@ -337,6 +347,10 @@ int rsc_eden_add_many(RSCache* cache,
                       RSRingNode* entry_array,
                       int entry_count)
 {
+    if (cache_oversize(cache) || !entry_count || !cache_will_fit(cache, entry_array)) {
+        return 0;
+    }
+
     int added_count = 0;
     for (int i = 0; i < entry_count; i++) {
         // _eden_add *always* adds, but it may or may not be able to rebalance.
