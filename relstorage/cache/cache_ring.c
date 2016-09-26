@@ -334,12 +334,14 @@ RSRingNode rsc_eden_add(RSCache* cache,
 
 
 int rsc_eden_add_many(RSCache* cache,
-                  RSRingNode* entry_array,
-                  int entry_count)
+                      RSRingNode* entry_array,
+                      int entry_count)
 {
-    int i = 0;
-    for (i = 0; i < entry_count; i++) {
-        RSRingNode add_rejects = _eden_add(cache, entry_array + i, 0);
+    int added_count = 0;
+    for (int i = 0; i < entry_count; i++) {
+        // _eden_add *always* adds, but it may or may not be able to rebalance.
+        added_count += 1;
+        RSRingNode add_rejects = _eden_add(cache, entry_array + i, _SPILL_NO_VICTIMS);
         if (add_rejects.u.entry.frequency) {
              // We would have rejected something, so     we must be full.
              // XXX: This isn't strictly true. It could be one really
@@ -349,7 +351,7 @@ int rsc_eden_add_many(RSCache* cache,
         }
     }
 
-    return i;
+    return added_count;
 }
 
 

@@ -245,7 +245,6 @@ class SizedLRUMapping(object):
             stored = 0
             # local optimizations
             data = self._dict
-
             added_entries = self._eden.add_MRUs(entries)
 
             for e in added_entries:

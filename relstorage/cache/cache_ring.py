@@ -323,6 +323,7 @@ class EdenRing(CacheRing):
         # TODO: Put them on the node_free_list? Or try to allow the node array to be
         # gc'd (eventually)?
         if added_count < number_nodes:
+            # We're always going to add at least one.
             return entries[:added_count]
         return entries
 
