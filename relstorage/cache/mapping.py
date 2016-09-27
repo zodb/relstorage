@@ -320,7 +320,7 @@ class SizedLRUMapping(object):
         entries.extend(self._protected)
         entries.extend(self._eden)
 
-        if len(entries) != len(self._dict):
+        if len(entries) != len(self._dict): # pragma: no cover
             log.warning("Cache consistency problem. There are %d ring entries and %d dict entries. "
                         "Refusing to write.",
                         len(entries), len(self._dict))
