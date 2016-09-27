@@ -20,6 +20,8 @@ from ZODB.utils import u64
 from ZODB.POSException import ReadConflictError
 from persistent.timestamp import TimeStamp
 
+import BTrees
+
 import importlib
 import logging
 import os
@@ -28,6 +30,7 @@ import threading
 
 from relstorage._compat import string_types
 from relstorage._compat import iteritems
+from relstorage._compat import PYPY
 
 from relstorage.cache import persistence as _Loader
 from relstorage.cache.local_client import LocalClient
@@ -39,6 +42,9 @@ class _UsedAfterRelease(object):
     pass
 _UsedAfterRelease = _UsedAfterRelease()
 
+# An LLBTree uses much less memory than a dict, and is still plenty fast on CPython;
+# it's just as big and slower on PyPy, though.
+_delta_map_type = BTrees.family64.II.BTree if not PYPY else dict
 
 class StorageCache(object):
     """RelStorage integration with memcached or similar.
@@ -99,12 +105,12 @@ class StorageCache(object):
 
         # delta_after0 contains {oid: tid} after checkpoint 0
         # and before or at self.current_tid.
-        self.delta_after0 = {}
+        self.delta_after0 = _delta_map_type()
 
         # delta_after1 contains {oid: tid} after checkpoint 1 and
         # before or at checkpoint 0. The content of delta_after1 only
         # changes when checkpoints move.
-        self.delta_after1 = {}
+        self.delta_after1 = _delta_map_type()
 
         # delta_size_limit places an approximate limit on the number of
         # entries in the delta_after maps.
