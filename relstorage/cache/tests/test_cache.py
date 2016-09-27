@@ -55,8 +55,11 @@ class StorageCacheTests(unittest.TestCase):
         from relstorage.cache import StorageCache
         return StorageCache
 
-    def _makeOne(self):
-        inst = self.getClass()(MockAdapter(), MockOptionsWithFakeCache(),
+    def _makeOne(self, **kwargs):
+        options = MockOptionsWithFakeCache()
+        for k, v in kwargs.items():
+            setattr(options, k, v)
+        inst = self.getClass()(MockAdapter(), options,
                                'myprefix')
         self._instances.append(inst)
         return inst.new_instance() # coverage and sharing testing
@@ -82,6 +85,7 @@ class StorageCacheTests(unittest.TestCase):
 
     def test_save(self):
         c = self._makeOne()
+        c.checkpoints = (0, 0)
         c.tpc_begin()
         c.store_temp(2, b'abc')
         c.after_tpc_finish(p64(1))
@@ -92,6 +96,10 @@ class StorageCacheTests(unittest.TestCase):
         try:
             c.save()
             self.assertEqual(1, len(os.listdir(c.options.cache_local_dir)))
+
+            # Creating one in the same place automatically loads it.
+            c2 = self._makeOne(cache_local_dir=c.options.cache_local_dir)
+            self.assertEqual(1, len(c2))
         finally:
             import shutil
             shutil.rmtree(c.options.cache_local_dir, True)
@@ -246,6 +254,10 @@ class StorageCacheTests(unittest.TestCase):
         self.assertEqual(c.queue_contents, {1: (3, 6), 2: (6, 9)})
         c.queue.seek(0)
         self.assertEqual(c.queue.read(), b'abcdefghi')
+        c.checkpoints = (1, 0)
+        c.after_tpc_finish(p64(3))
+
+        self.assertEqual(dict(c.delta_after0), {2: 3, 1: 3})
 
     def test_send_queue_small(self):
         from relstorage.tests.fakecache import data
@@ -800,7 +812,9 @@ class LocalClientTests(unittest.TestCase):
     def _makeOne(self, **kw):
         options = MockOptions()
         vars(options).update(kw)
-        return self.getClass()(options)
+        inst = self.getClass()(options)
+        inst.restore()
+        return inst
 
     def test_ctor(self):
         c = self._makeOne()

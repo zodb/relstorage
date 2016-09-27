@@ -81,9 +81,16 @@ class LocalClient(object):
         return data
 
     def save(self):
-        options = self.options
-        if options.cache_local_dir and self._bucket0.size:
-            _Loader.save_local_cache(options, self.prefix, self._bucket0)
+        with self._lock:
+            options = self.options
+            if options.cache_local_dir and self._bucket0.size:
+                _Loader.save_local_cache(options, self.prefix, self._bucket0)
+
+    def restore(self):
+        with self._lock:
+            options = self.options
+            if options.cache_local_dir:
+                _Loader.load_local_cache(options, self.prefix, self._bucket0)
 
     @property
     def _bucket0(self):
@@ -93,9 +100,6 @@ class LocalClient(object):
     def flush_all(self):
         with self._lock:
             self.__bucket = self._bucket_type(self._bucket_limit)
-            options = self.options
-            if options.cache_local_dir:
-                _Loader.load_local_cache(options, self.prefix, self._bucket0)
 
     def reset_stats(self):
         self.__bucket.reset_stats()

@@ -83,21 +83,6 @@ class StorageCache(object):
         self.adapter = adapter
         self.options = options
         self.prefix = prefix or ''
-        if local_client is None:
-            local_client = LocalClient(options, self.prefix)
-        self.clients_local_first = [local_client]
-
-        if options.cache_servers:
-            module_name = options.cache_module_name
-            module = importlib.import_module(module_name)
-            servers = options.cache_servers
-            if isinstance(servers, string_types):
-                servers = servers.split()
-            self.clients_local_first.append(module.Client(servers))
-
-        # self.clients_local_first is in order from local to global caches,
-        # while self.clients_global_first is in order from global to local.
-        self.clients_global_first = list(reversed(self.clients_local_first))
 
         # checkpoints_key holds the current checkpoints.
         self.checkpoints_key = '%s:checkpoints' % self.prefix
@@ -115,6 +100,27 @@ class StorageCache(object):
         # delta_size_limit places an approximate limit on the number of
         # entries in the delta_after maps.
         self.delta_size_limit = options.cache_delta_size_limit
+
+        self.clients_local_first = []
+        if local_client is None:
+            self.clients_local_first.append(LocalClient(options, self.prefix))
+        else:
+            self.clients_local_first.append(local_client)
+
+        if options.cache_servers:
+            module_name = options.cache_module_name
+            module = importlib.import_module(module_name)
+            servers = options.cache_servers
+            if isinstance(servers, string_types):
+                servers = servers.split()
+            self.clients_local_first.append(module.Client(servers))
+
+        # self.clients_local_first is in order from local to global caches,
+        # while self.clients_global_first is in order from global to local.
+        self.clients_global_first = list(reversed(self.clients_local_first))
+
+        if local_client is None:
+            self.restore()
 
         if _tracer is None:
             tracefile = _Loader.trace_file(options, self.prefix)
@@ -188,6 +194,11 @@ class StorageCache(object):
         if self.options.cache_local_dir and len(self):
             self.local_client.save()
 
+    def restore(self):
+        options = self.options
+        if options.cache_local_dir:
+            self.local_client.restore()
+
     def close(self):
         """
         Release resources held by this instance, and
@@ -204,14 +215,28 @@ class StorageCache(object):
             del self._trace_store_current
             del self._tracer
 
-    def clear(self):
-        """Remove all data from the cache.  Called by speed tests."""
+    def clear(self, load_persistent=True):
+        """
+        Remove all data from the cache.  Called by speed tests.
+
+        Starting from the introduction of persistent cache files,
+        this also results in the local client being repopulated with
+        the current set of persistent data. The *load_persistent* keyword can
+        be used to control this.
+
+        .. versionchanged:: 2.0b6
+           Added the ``load_persistent`` keyword. This argument is provisional.
+        """
         for client in self.clients_local_first:
             client.flush_all()
+
         self.checkpoints = None
         self.delta_after0 = {}
         self.delta_after1 = {}
         self.current_tid = 0
+
+        if load_persistent:
+            self.restore()
 
     @staticmethod
     def _trace(*_args, **_kwargs): # pylint:disable=method-hidden

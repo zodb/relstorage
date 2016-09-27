@@ -427,7 +427,7 @@ class RelStorage(UndoLogCompatible,
         self._adapter.schema.zap_all(**kwargs)
         self._drop_load_connection()
         self._drop_store_connection()
-        self._cache.clear()
+        self._cache.clear(load_persistent=False)
 
     def release(self):
         """
