@@ -17,6 +17,8 @@ import unittest
 from relstorage.tests.util import skipOnCI
 from functools import partial
 
+from ZODB.utils import p64
+
 from relstorage.cache.cache_ring import Cache as _BaseCache
 class Cache(_BaseCache):
     # Tweak the generation sizes to match what we developed the tests with
@@ -39,16 +41,25 @@ class StorageCacheTests(unittest.TestCase):
     def setUp(self):
         from relstorage.tests.fakecache import data
         data.clear()
+        self._instances = []
 
-    tearDown = setUp
+    def tearDown(self):
+        from relstorage.tests.fakecache import data
+        data.clear()
+        for inst in self._instances:
+            inst.close()
+            assert len(inst) == 0
+            assert bool(inst)
 
     def getClass(self):
         from relstorage.cache import StorageCache
         return StorageCache
 
     def _makeOne(self):
-        return self.getClass()(MockAdapter(), MockOptionsWithFakeCache(),
+        inst = self.getClass()(MockAdapter(), MockOptionsWithFakeCache(),
                                'myprefix')
+        self._instances.append(inst)
+        return inst.new_instance() # coverage and sharing testing
 
     def test_ctor(self):
         from relstorage.tests.fakecache import Client
@@ -62,6 +73,28 @@ class StorageCacheTests(unittest.TestCase):
         # can be closed multiple times
         c.close()
         c.close()
+
+    def test_stats(self):
+        inst = self._makeOne()
+        self.assertIsInstance(inst.stats(), dict)
+        inst.close()
+        self.assertIsInstance(inst.stats(), dict)
+
+    def test_save(self):
+        c = self._makeOne()
+        c.tpc_begin()
+        c.store_temp(2, b'abc')
+        c.after_tpc_finish(p64(1))
+
+        import tempfile
+        import os
+        c.options.cache_local_dir = tempfile.mkdtemp()
+        try:
+            c.save()
+            self.assertEqual(1, len(os.listdir(c.options.cache_local_dir)))
+        finally:
+            import shutil
+            shutil.rmtree(c.options.cache_local_dir, True)
 
     def test_clear(self):
         from relstorage.tests.fakecache import data
@@ -209,6 +242,7 @@ class StorageCacheTests(unittest.TestCase):
         c.store_temp(2, b'abc')
         c.store_temp(1, b'def')
         c.store_temp(2, b'ghi')
+        self.assertEqual(b'ghi', c.read_temp(2))
         self.assertEqual(c.queue_contents, {1: (3, 6), 2: (6, 9)})
         c.queue.seek(0)
         self.assertEqual(c.queue.read(), b'abcdefghi')
@@ -226,6 +260,7 @@ class StorageCacheTests(unittest.TestCase):
             'myprefix:state:55:2': tid + b'abc',
             'myprefix:state:55:3': tid + b'def',
             })
+        self.assertEqual(len(c), 2)
 
     def test_send_queue_large(self):
         from relstorage.tests.fakecache import data

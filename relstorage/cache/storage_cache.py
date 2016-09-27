@@ -127,12 +127,37 @@ class StorageCache(object):
             self._trace = self._tracer.trace
             self._trace_store_current = self._tracer.trace_store_current
 
+    def __bool__(self):
+        return True
+    __nonzero__ = __bool__
+
+    def __len__(self):
+        if self.clients_local_first is _UsedAfterRelease:
+            return 0
+        return len(self.local_client)
+
+    @property
+    def local_client(self):
+        """
+        The (shared) local in-memory cache client.
+        """
+        return self.clients_local_first[0]
+
+    def stats(self):
+        """
+        Return stats. This is a debugging aid only. The format is undefined and intended
+        for human inspection only.
+        """
+        try:
+            local_client = self.local_client
+        except TypeError:
+            return {'closed': True}
+        else:
+            return local_client.stats()
 
     def new_instance(self):
         """Return a copy of this instance sharing the same local client"""
-        local_client = None
-        if self.options.share_local_cache:
-            local_client = self.clients_local_first[0]
+        local_client = self.local_client if self.options.share_local_cache else None
 
         cache = type(self)(self.adapter, self.options, self.prefix,
                            local_client,
@@ -156,22 +181,24 @@ class StorageCache(object):
         self.clients_local_first = _UsedAfterRelease
         self.clients_global_first = _UsedAfterRelease
 
+    def save(self):
+        """
+        Store any persistent client data.
+        """
+        if self.options.cache_local_dir and len(self):
+            self.local_client.save()
+
     def close(self):
         """
         Release resources held by this instance, and
         save any persistent data necessary.
         """
-        clients = self.clients_local_first if self.clients_local_first is not _UsedAfterRelease else ()
-        for client in clients:
-            try:
-                save = getattr(client, 'save')
-            except AttributeError:
-                continue
-            else:
-                save()
+        self.save()
         self.release()
 
         if self._tracer:
+            # Note we can't do this in release(). Release is called on
+            # all instances, while close() is only called on the main one.
             self._tracer.close()
             del self._trace
             del self._trace_store_current
@@ -345,7 +372,7 @@ class StorageCache(object):
                 cache_data = response.get(cp0_key)
                 if cache_data and len(cache_data) >= 8:
                     # Cache hit on the preferred cache key.
-                    local_client = self.clients_local_first[0]
+                    local_client = self.local_client
                     if client is not local_client:
                         # Copy to the local client.
                         local_client.set(cp0_key, cache_data)
