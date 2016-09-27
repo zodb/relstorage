@@ -9,7 +9,10 @@ from __future__ import print_function, absolute_import, division
 # pylint:disable=unused-import
 
 import sys
+import platform
+
 PY3 = sys.version_info[0] == 3
+PYPY = platform.python_implementation() == 'PyPy'
 
 # Dict support
 

@@ -32,6 +32,8 @@
   unchanged (though that's also an implementation class). CFFI is now
   required, and support for PyPy versions older than 2.6.1 has been dropped.
 
+- On CPython, use LLBTrees for the cache delta maps. This allows using
+  a larger, more effective size while reducing memory usage. Fixes :issue:`130`.
 
 2.0.0b6 (2016-09-08)
 ====================

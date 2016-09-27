@@ -341,9 +341,11 @@ cache-delta-size-limit
         configures how many new objects should be stored before creating a
         new checkpoint.
 
-        For write heavy workloads, increasing this can be very beneficial.
+        For write heavy workloads, increasing this can be very
+        beneficial. The cost is about 300K of memory for every 10000
+        on CPython.
 
-        The default is 10000.
+        The default is 20000 on CPython, 10000 on PyPy.
 
 Persistent Local Caching
 ~~~~~~~~~~~~~~~~~~~~~~~~

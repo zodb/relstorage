@@ -319,12 +319,19 @@ class SizedLRUMapping(object):
         entries = list(self._probation)
         entries.extend(self._protected)
         entries.extend(self._eden)
+
+        if len(entries) != len(self._dict): # pragma: no cover
+            log.warning("Cache consistency problem. There are %d ring entries and %d dict entries. "
+                        "Refusing to write.",
+                        len(entries), len(self._dict))
+            return
+
         # Adding key as a tie-breaker makes no sense, and is slow.
         # We use an attrgetter directly on the node for speed
 
         entries.sort(key=operator.attrgetter('cffi_entry.frequency'))
 
-        assert len(entries) == len(self._dict)
+
 
         # Write up to the byte limit
         count_written = 0

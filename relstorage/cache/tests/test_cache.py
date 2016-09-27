@@ -309,8 +309,8 @@ class StorageCacheTests(unittest.TestCase):
         # the existing checkpoints.
         self.assertEqual(c.checkpoints, (40, 30))
         self.assertEqual(data['myprefix:checkpoints'], b'90 80')
-        self.assertEqual(c.delta_after0, {2: 45})
-        self.assertEqual(c.delta_after1, {})
+        self.assertEqual(dict(c.delta_after0), {2: 45})
+        self.assertEqual(dict(c.delta_after1), {})
 
     def test_after_poll_future_checkpoints_when_cp_nonexistent(self):
         from relstorage.tests.fakecache import data
@@ -334,8 +334,8 @@ class StorageCacheTests(unittest.TestCase):
         c.after_poll(None, 40, 50, [(2, 45), (2, 41)])
         self.assertEqual(c.checkpoints, (40, 30))
         self.assertEqual(data['myprefix:checkpoints'], b'40 30')
-        self.assertEqual(c.delta_after0, {2: 45})
-        self.assertEqual(c.delta_after1, {1: 35})
+        self.assertEqual(dict(c.delta_after0), {2: 45})
+        self.assertEqual(dict(c.delta_after1), {1: 35})
 
     def test_after_poll_new_checkpoints(self):
         from relstorage.tests.fakecache import data
@@ -380,8 +380,8 @@ class StorageCacheTests(unittest.TestCase):
         c.after_poll(None, 40, 314, [(1, 45), (2, 46)])
         self.assertEqual(c.checkpoints, (40, 30))
         self.assertEqual(data['myprefix:checkpoints'], b'314 40')
-        self.assertEqual(c.delta_after0, {1: 45, 2: 46})
-        self.assertEqual(c.delta_after1, {})
+        self.assertEqual(dict(c.delta_after0), {1: 45, 2: 46})
+        self.assertEqual(dict(c.delta_after1), {})
 
 def list_lrukeys_(lru, lru_name):
     # Remember, these lists will be from LRU to MRU
