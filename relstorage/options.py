@@ -15,6 +15,7 @@
 from __future__ import absolute_import
 
 import warnings
+from relstorage._compat import PYPY
 
 class Options(object):
     """Options for configuring and tuning RelStorage.
@@ -60,7 +61,7 @@ class Options(object):
     cache_local_dir_read_count = None
     cache_local_dir_write_max_size = None
     cache_local_dir_compress = False
-    cache_delta_size_limit = 10000
+    cache_delta_size_limit = 20000 if not PYPY else 10000
     commit_lock_timeout = 30
     commit_lock_id = 0
     create_schema = True
