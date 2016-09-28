@@ -81,10 +81,14 @@ class LocalClient(object):
         return data
 
     def save(self):
+        options = self.options
+        if options.cache_local_dir and self._bucket0.size:
+            _Loader.save_local_cache(options, self.prefix, self.write_to_stream)
+
+    def write_to_stream(self, stream):
         with self._lock:
             options = self.options
-            if options.cache_local_dir and self._bucket0.size:
-                _Loader.save_local_cache(options, self.prefix, self._bucket0.write_to_stream)
+            return self._bucket0.write_to_stream(stream, options.cache_local_dir_write_max_size)
 
     def restore(self):
         with self._lock:

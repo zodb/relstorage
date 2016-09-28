@@ -192,11 +192,11 @@ class StorageCache(object):
         Store any persistent client data.
         """
         if self.options.cache_local_dir and len(self):
-            persistence.save_local_cache(self.options, self.prefix, self._write_to_stream)
+            persistence.save_local_cache(self.options, self.prefix, self.write_to_stream)
 
-    def _write_to_stream(self, fd):
+    def write_to_stream(self, fd):
         # Accepts a file-like object and writes content to it.
-        self.local_client._bucket0.write_to_stream(fd, self.options.cache_local_dir_write_max_size)
+        self.local_client.write_to_stream(fd)
 
     def restore(self):
         options = self.options
