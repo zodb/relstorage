@@ -221,7 +221,7 @@ class SizedLRUMapping(object):
 
     def load_from_file(self, cache_file):
         now = time.time()
-        # Unlike write_to_file, using the raw stream
+        # Unlike write_to_stream, using the raw stream
         # is fine for both Py 2 and 3.
         unpick = Unpickler(cache_file)
 
@@ -272,7 +272,7 @@ class SizedLRUMapping(object):
                  count, stored, cache_file, then - now)
         return count, stored
 
-    def write_to_file(self, cache_file, byte_limit=None):
+    def write_to_stream(self, cache_file, byte_limit=None):
         now = time.time()
         # pickling the items is about 3x faster than marshal
 

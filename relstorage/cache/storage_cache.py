@@ -196,7 +196,7 @@ class StorageCache(object):
 
     def _write_to_stream(self, fd):
         # Accepts a file-like object and writes content to it.
-        self.local_client._bucket0.write_to_file(fd, self.options.cache_local_dir_write_max_size)
+        self.local_client._bucket0.write_to_stream(fd, self.options.cache_local_dir_write_max_size)
 
     def restore(self):
         options = self.options

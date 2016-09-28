@@ -658,7 +658,7 @@ class SizedLRUMappingTests(unittest.TestCase):
         if options.cache_local_dir_compress:
             self.assertEqual(".rscache.gz", _Loader._gzip_ext(options))
         writer = _Loader._gzip_file(options, None, bio, mode='wb')
-        bucket.write_to_file(writer, byte_limit or options.cache_local_dir_write_max_size)
+        bucket.write_to_stream(writer, byte_limit or options.cache_local_dir_write_max_size)
         writer.flush()
         if writer is not bio:
             writer.close()
@@ -793,7 +793,7 @@ class SizedLRUMappingTests(unittest.TestCase):
             mapping[str(i)] = b'abc'
             mapping[str(i)] # Increment so it gets saved
 
-            _Loader.save_local_cache(options, 'test', mapping.write_to_file, _pid=i)
+            _Loader.save_local_cache(options, 'test', mapping.write_to_stream, _pid=i)
             self.assertEqual(_Loader.count_cache_files(options, 'test'),
                              i + 1)
 
@@ -1146,7 +1146,7 @@ class LocalClientTests(unittest.TestCase):
             # Now lets break saving
             def badwrite(*args):
                 raise OSError("Nope")
-            c2._bucket0.write_to_file = badwrite
+            c2._bucket0.write_to_stream = badwrite
 
             c2.save()
             cache_files = os.listdir(temp_dir)
