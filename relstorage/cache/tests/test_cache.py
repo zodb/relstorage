@@ -35,6 +35,34 @@ from relstorage.cache.local_client import LocalClient as _BaseLocalClient
 class LocalClient(_BaseLocalClient):
     _bucket_type = SizedLRUMapping
 
+def _check_load_and_store_multiple_files_hit_limit(self, mapping, wrapping_storage=None):
+    from relstorage.cache import persistence
+    import tempfile
+
+    options = MockOptions()
+    options.cache_local_dir_count = 5
+    options.cache_local_dir_read_count = 2
+    options.cache_local_dir = tempfile.mkdtemp()
+
+    for i in range(5):
+        # They all have to have unique keys so something gets loaded
+        # from each one
+        if i > 0:
+            del mapping[str(i - 1)]
+        mapping[str(i)] = b'abc'
+        mapping[str(i)] # Increment so it gets saved
+
+        persistence.save_local_cache(options, 'test', mapping.write_to_stream, _pid=i)
+        self.assertEqual(persistence.count_cache_files(options, 'test'),
+                         i + 1)
+
+    files_loaded = persistence.load_local_cache(options, 'test',
+                                                mapping if wrapping_storage is None else wrapping_storage)
+    # XXX: This sometimes fails on Travis, returning 1 Why?
+    self.assertEqual(files_loaded, 2)
+
+    import shutil
+    shutil.rmtree(options.cache_local_dir)
 
 class StorageCacheTests(unittest.TestCase):
 
@@ -50,6 +78,8 @@ class StorageCacheTests(unittest.TestCase):
             inst.close()
             assert len(inst) == 0
             assert bool(inst)
+            assert inst.size == 0
+            assert inst.limit == 0
 
     def getClass(self):
         from relstorage.cache import StorageCache
@@ -103,6 +133,12 @@ class StorageCacheTests(unittest.TestCase):
         finally:
             import shutil
             shutil.rmtree(c.options.cache_local_dir, True)
+
+    @skipOnCI("Sometimes the files_loaded is just 1 on Travis.")
+    def test_load_from_multiple_files_hit_limit(self):
+        cache = self._makeOne(cache_local_mb=0.01)
+        _check_load_and_store_multiple_files_hit_limit(self, cache.local_client._bucket0, cache)
+
 
     def test_clear(self):
         from relstorage.tests.fakecache import data
@@ -650,7 +686,7 @@ class SizedLRUMappingTests(unittest.TestCase):
         from relstorage.cache import persistence as _Loader
         bio.seek(0)
         reader = _Loader._gzip_file(options, None, bio, mode='rb')
-        return bucket.load_from_file(reader)
+        return bucket.read_from_stream(reader)
 
     def _save(self, bio, bucket, options, byte_limit=None):
         from relstorage.cache import persistence as _Loader
@@ -777,32 +813,8 @@ class SizedLRUMappingTests(unittest.TestCase):
 
     @skipOnCI("Sometimes the files_loaded is just 1 on Travis.")
     def test_load_from_multiple_files_hit_limit(self):
-        from relstorage.cache import persistence as _Loader
-        import tempfile
         mapping = self.getClass()(100)
-        options = MockOptions()
-        options.cache_local_dir_count = 5
-        options.cache_local_dir_read_count = 2
-        options.cache_local_dir = tempfile.mkdtemp()
-
-        for i in range(5):
-            # They all have to have unique keys so something gets loaded
-            # from each one
-            if i > 0:
-                del mapping[str(i - 1)]
-            mapping[str(i)] = b'abc'
-            mapping[str(i)] # Increment so it gets saved
-
-            _Loader.save_local_cache(options, 'test', mapping.write_to_stream, _pid=i)
-            self.assertEqual(_Loader.count_cache_files(options, 'test'),
-                             i + 1)
-
-        files_loaded = _Loader.load_local_cache(options, 'test', mapping)
-        # XXX: This sometimes fails on Travis, returning 1 Why?
-        self.assertEqual(files_loaded, 2)
-
-        import shutil
-        shutil.rmtree(options.cache_local_dir)
+        _check_load_and_store_multiple_files_hit_limit(self, mapping)
 
 class LocalClientTests(unittest.TestCase):
 
@@ -818,7 +830,7 @@ class LocalClientTests(unittest.TestCase):
 
     def test_ctor(self):
         c = self._makeOne()
-        self.assertEqual(c._bucket_limit, 1000000)
+        self.assertEqual(c.limit, 1000000)
         self.assertEqual(c._value_limit, 16384)
         # cover
         self.assertIn('hits', c.stats())
@@ -850,7 +862,7 @@ class LocalClientTests(unittest.TestCase):
         options = MockOptions()
         options.cache_local_mb = 0
         c = self.getClass()(options)
-        self.assertEqual(c._bucket_limit, 0)
+        self.assertEqual(c.limit, 0)
         self.assertEqual(c._value_limit, 16384)
         c.set('abc', 1)
         c.set('def', b'')
@@ -871,7 +883,7 @@ class LocalClientTests(unittest.TestCase):
         # eden and probation of 5, protected of 40. This means that eden
         # and probation each can hold one item, while protected can hold 4,
         # so our max size will be 60
-        c._bucket_limit = 51
+        c.limit = 51
         c.flush_all()
 
         list_lrukeys = partial(list_lrukeys_, c._bucket0)
@@ -995,7 +1007,7 @@ class LocalClientTests(unittest.TestCase):
 
     def test_bucket_sizes_with_compression(self):
         c = self._makeOne(cache_local_compression='zlib')
-        c._bucket_limit = 23 * 2 + 1
+        c.limit = 23 * 2 + 1
         c.flush_all()
         list_lrukeys = partial(list_lrukeys_, c._bucket0)
 

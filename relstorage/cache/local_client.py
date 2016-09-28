@@ -43,7 +43,9 @@ class LocalClient(object):
         self._lock = threading.Lock()
         self.options = options
         self.prefix = prefix or ''
-        self._bucket_limit = int(1000000 * options.cache_local_mb)
+        # XXX: The calc for limit is substantially smaller
+        # The real MB value is 1024 * 1024 = 1048576
+        self.limit = int(1000000 * options.cache_local_mb)
         self._value_limit = options.cache_local_object_max
         self.__bucket = None
         self.flush_all()
@@ -58,6 +60,10 @@ class LocalClient(object):
             self.__compress = compression_markers[1]
             if self.__compress is None:
                 self._compress = None
+
+    @property
+    def size(self):
+        return self.__bucket.size
 
     def __len__(self):
         return len(self.__bucket)
@@ -91,10 +97,13 @@ class LocalClient(object):
             return self._bucket0.write_to_stream(stream, options.cache_local_dir_write_max_size)
 
     def restore(self):
+        options = self.options
+        if options.cache_local_dir:
+            _Loader.load_local_cache(options, self.prefix, self)
+
+    def read_from_stream(self, stream):
         with self._lock:
-            options = self.options
-            if options.cache_local_dir:
-                _Loader.load_local_cache(options, self.prefix, self._bucket0)
+            return self._bucket0.read_from_stream(stream)
 
     @property
     def _bucket0(self):
@@ -103,7 +112,7 @@ class LocalClient(object):
 
     def flush_all(self):
         with self._lock:
-            self.__bucket = self._bucket_type(self._bucket_limit)
+            self.__bucket = self._bucket_type(self.limit)
 
     def reset_stats(self):
         self.__bucket.reset_stats()
@@ -132,7 +141,7 @@ class LocalClient(object):
         self.set_multi({key: value})
 
     def set_multi(self, d):
-        if not self._bucket_limit:
+        if not self.limit:
             # don't bother
             return
 

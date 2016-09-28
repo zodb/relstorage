@@ -143,6 +143,18 @@ class StorageCache(object):
         return len(self.local_client)
 
     @property
+    def size(self):
+        if self.clients_local_first is _UsedAfterRelease:
+            return 0
+        return self.local_client.size
+
+    @property
+    def limit(self):
+        if self.clients_local_first is _UsedAfterRelease:
+            return 0
+        return self.local_client.limit
+
+    @property
     def local_client(self):
         """
         The (shared) local in-memory cache client.
@@ -201,7 +213,10 @@ class StorageCache(object):
     def restore(self):
         options = self.options
         if options.cache_local_dir:
-            self.local_client.restore()
+            persistence.load_local_cache(options, self.prefix, self)
+
+    def read_from_stream(self, stream):
+        return self.local_client.read_from_stream(stream)
 
     def close(self):
         """

@@ -160,7 +160,7 @@ def load_local_cache(options, prefix, local_client_bucket):
                 break
 
             try:
-                _, stored = local_client_bucket.load_from_file(fd)
+                _, stored = local_client_bucket.read_from_stream(fd)
                 loaded_count += 1
                 if not stored or local_client_bucket.size >= local_client_bucket.limit:
                     break # pragma: no cover

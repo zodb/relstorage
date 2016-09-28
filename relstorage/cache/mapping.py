@@ -219,7 +219,7 @@ class SizedLRUMapping(object):
 
     _FILE_VERSION = 4
 
-    def load_from_file(self, cache_file):
+    def read_from_stream(self, cache_file):
         now = time.time()
         # Unlike write_to_stream, using the raw stream
         # is fine for both Py 2 and 3.
