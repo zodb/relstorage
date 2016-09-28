@@ -44,6 +44,8 @@ def _check_load_and_store_multiple_files_hit_limit(self, mapping, wrapping_stora
     options.cache_local_dir_read_count = 2
     options.cache_local_dir = tempfile.mkdtemp()
 
+    dump_object = mapping if wrapping_storage is None else wrapping_storage
+
     for i in range(5):
         # They all have to have unique keys so something gets loaded
         # from each one
@@ -52,12 +54,11 @@ def _check_load_and_store_multiple_files_hit_limit(self, mapping, wrapping_stora
         mapping[str(i)] = b'abc'
         mapping[str(i)] # Increment so it gets saved
 
-        persistence.save_local_cache(options, 'test', mapping.write_to_stream, _pid=i)
+        persistence.save_local_cache(options, 'test', dump_object.write_to_stream, _pid=i)
         self.assertEqual(persistence.count_cache_files(options, 'test'),
                          i + 1)
 
-    files_loaded = persistence.load_local_cache(options, 'test',
-                                                mapping if wrapping_storage is None else wrapping_storage)
+    files_loaded = persistence.load_local_cache(options, 'test', dump_object)
     # XXX: This sometimes fails on Travis, returning 1 Why?
     self.assertEqual(files_loaded, 2)
 
@@ -130,6 +131,8 @@ class StorageCacheTests(unittest.TestCase):
             # Creating one in the same place automatically loads it.
             c2 = self._makeOne(cache_local_dir=c.options.cache_local_dir)
             self.assertEqual(1, len(c2))
+            self.assertEqual(c2.checkpoints, c.checkpoints)
+            self.assertEqual(dict(c2.delta_after0), {2: 1})
         finally:
             import shutil
             shutil.rmtree(c.options.cache_local_dir, True)
@@ -148,8 +151,8 @@ class StorageCacheTests(unittest.TestCase):
         c.clear()
         self.assertFalse(data)
         self.assertEqual(c.checkpoints, None)
-        self.assertEqual(c.delta_after0, {})
-        self.assertEqual(c.delta_after1, {})
+        self.assertEqual(dict(c.delta_after0), {})
+        self.assertEqual(dict(c.delta_after1), {})
 
     def test_load_without_checkpoints(self):
         c = self._makeOne()
@@ -404,8 +407,8 @@ class StorageCacheTests(unittest.TestCase):
         # existing checkpoints, so fall back to the current tid.
         self.assertEqual(c.checkpoints, (50, 50))
         self.assertEqual(data['myprefix:checkpoints'], b'90 80')
-        self.assertEqual(c.delta_after0, {})
-        self.assertEqual(c.delta_after1, {})
+        self.assertEqual(dict(c.delta_after0), {})
+        self.assertEqual(dict(c.delta_after1), {})
 
     def test_after_poll_retain_checkpoints(self):
         from relstorage.tests.fakecache import data
@@ -434,8 +437,8 @@ class StorageCacheTests(unittest.TestCase):
         c.after_poll(None, 40, 50, [(3, 42), (2, 45), (3, 41)])
         self.assertEqual(c.checkpoints, (50, 40))
         self.assertEqual(data['myprefix:checkpoints'], b'50 40')
-        self.assertEqual(c.delta_after0, {})
-        self.assertEqual(c.delta_after1, {2: 45, 3: 42})
+        self.assertEqual(dict(c.delta_after0), {})
+        self.assertEqual(dict(c.delta_after1), {2: 45, 3: 42})
 
     def test_after_poll_gap(self):
         from relstorage.tests.fakecache import data
@@ -450,8 +453,8 @@ class StorageCacheTests(unittest.TestCase):
         c.after_poll(None, 43, 50, [(2, 45)])
         self.assertEqual(c.checkpoints, (40, 30))
         self.assertEqual(data['myprefix:checkpoints'], b'40 30')
-        self.assertEqual(c.delta_after0, {2: 45, 3: 42})
-        self.assertEqual(c.delta_after1, {1: 35})
+        self.assertEqual(dict(c.delta_after0), {2: 45, 3: 42})
+        self.assertEqual(dict(c.delta_after1), {1: 35})
 
     def test_after_poll_shift_checkpoints(self):
         from relstorage.tests.fakecache import data
@@ -1195,6 +1198,11 @@ class CacheRingTests(unittest.TestCase):
         self.assertEqual(lru.get_LRU(), entryc)
 
         self.assertEqual(len(lru), 3)
+
+    def test_add_MRUs_empty(self):
+        from relstorage.cache.cache_ring import EdenRing
+        lru = EdenRing(100)
+        self.assertEqual((), lru.add_MRUs([]))
 
     def test_bool(self):
         lru = self._makeOne(100)

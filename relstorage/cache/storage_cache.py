@@ -42,9 +42,6 @@ class _UsedAfterRelease(object):
     pass
 _UsedAfterRelease = _UsedAfterRelease()
 
-# An LLBTree uses much less memory than a dict, and is still plenty fast on CPython;
-# it's just as big and slower on PyPy, though.
-_delta_map_type = BTrees.family64.II.BTree if not PYPY else dict
 
 class StorageCache(object):
     """RelStorage integration with memcached or similar.
@@ -78,6 +75,11 @@ class StorageCache(object):
 
     _tracer = None
 
+    # An LLBTree uses much less memory than a dict, and is still plenty fast on CPython;
+    # it's just as big and slower on PyPy, though.
+    _delta_map_type = BTrees.family64.II.BTree if not PYPY else dict
+
+
     def __init__(self, adapter, options, prefix, local_client=None,
                  _tracer=None):
         self.adapter = adapter
@@ -90,12 +92,12 @@ class StorageCache(object):
 
         # delta_after0 contains {oid: tid} after checkpoint 0
         # and before or at self.current_tid.
-        self.delta_after0 = _delta_map_type()
+        self.delta_after0 = self._delta_map_type()
 
         # delta_after1 contains {oid: tid} after checkpoint 1 and
         # before or at checkpoint 0. The content of delta_after1 only
         # changes when checkpoints move.
-        self.delta_after1 = _delta_map_type()
+        self.delta_after1 = self._delta_map_type()
 
         # delta_size_limit places an approximate limit on the number of
         # entries in the delta_after maps.
@@ -180,6 +182,12 @@ class StorageCache(object):
         cache = type(self)(self.adapter, self.options, self.prefix,
                            local_client,
                            _tracer=self._tracer or False)
+
+        if self.checkpoints:
+            cache.checkpoints = self.checkpoints
+            cache.delta_after0.update(self.delta_after0)
+            cache.delta_after1.update(self.delta_after1)
+            cache.current_tid = self.current_tid
         return cache
 
     def release(self):
@@ -206,9 +214,19 @@ class StorageCache(object):
         if self.options.cache_local_dir and len(self):
             persistence.save_local_cache(self.options, self.prefix, self.write_to_stream)
 
-    def write_to_stream(self, fd):
+    _STREAM_VERSION = 'StorageCache1'
+
+    def write_to_stream(self, stream):
         # Accepts a file-like object and writes content to it.
-        self.local_client.write_to_stream(fd)
+        pickler = persistence.Pickler(stream, -1)
+        pickler.dump(self._STREAM_VERSION)
+        pickler.dump(self.checkpoints)
+        pickler.dump(self.current_tid)
+        # We can't dump a BTree larger than about 25000 without getting
+        # into recursion problems.
+        pickler.dump(dict(self.delta_after0))
+        pickler.dump(dict(self.delta_after1))
+        self.local_client.write_to_stream(pickler)
 
     def restore(self):
         options = self.options
@@ -216,7 +234,20 @@ class StorageCache(object):
             persistence.load_local_cache(options, self.prefix, self)
 
     def read_from_stream(self, stream):
-        return self.local_client.read_from_stream(stream)
+        unpickler = persistence.Unpickler(stream)
+        ver = unpickler.load()
+        if ver != self._STREAM_VERSION:
+            raise ValueError("Incorrect version of cache_file", ver)
+        cp = unpickler.load()
+        tid = unpickler.load()
+        da0 = unpickler.load()
+        da1 = unpickler.load()
+        if not self.checkpoints and cp:
+            self.checkpoints = cp
+            self.current_tid = tid
+            self.delta_after0.update(da0)
+            self.delta_after1.update(da1)
+        return self.local_client.read_from_stream(unpickler)
 
     def close(self):
         """
@@ -250,8 +281,8 @@ class StorageCache(object):
             client.flush_all()
 
         self.checkpoints = None
-        self.delta_after0 = {}
-        self.delta_after1 = {}
+        self.delta_after0 = self._delta_map_type()
+        self.delta_after1 = self._delta_map_type()
         self.current_tid = 0
 
         if load_persistent:
@@ -600,8 +631,8 @@ class StorageCache(object):
                 client.set(self.checkpoints_key, cache_data)
 
             self.checkpoints = new_checkpoints
-            self.delta_after0 = {}
-            self.delta_after1 = {}
+            self.delta_after0 = self._delta_map_type()
+            self.delta_after1 = self._delta_map_type()
             self.current_tid = new_tid_int
             return
 
@@ -640,8 +671,8 @@ class StorageCache(object):
             log.debug("Using new checkpoints: %d %d", cp0, cp1)
             # Use the checkpoints specified by the cache.
             # Rebuild delta_after0 and delta_after1.
-            new_delta_after0 = {}
-            new_delta_after1 = {}
+            new_delta_after0 = self._delta_map_type()
+            new_delta_after1 = self._delta_map_type()
             if cp1 < new_tid_int:
                 # poller.list_changes provides an iterator of
                 # (oid, tid) where tid > after_tid and tid <= last_tid.

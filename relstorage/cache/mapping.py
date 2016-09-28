@@ -17,20 +17,8 @@ import logging
 import operator
 import time
 
-from relstorage._compat import PY3
-if PY3:
-    # On Py3, use the built-in pickle, so that we can get
-    # protocol 4 when available. It is *much* faster at writing out
-    # individual large objects such as the cache dict (about 3-4x faster)
-    from pickle import Unpickler
-    from pickle import Pickler
-else:
-    # On Py2, zodbpickle gives us protocol 3, but we don't
-    # use its special binary type
-    from relstorage._compat import Unpickler
-    from relstorage._compat import Pickler
-
-
+from relstorage.cache.persistence import Unpickler
+from relstorage.cache.persistence import Pickler
 from relstorage.cache.cache_ring import Cache
 
 log = logging.getLogger(__name__)
@@ -223,7 +211,10 @@ class SizedLRUMapping(object):
         now = time.time()
         # Unlike write_to_stream, using the raw stream
         # is fine for both Py 2 and 3.
-        unpick = Unpickler(cache_file)
+        if not hasattr(cache_file, 'load'):
+            unpick = Unpickler(cache_file)
+        else:
+            unpick = cache_file
 
         # Local optimizations
         load = unpick.load
@@ -286,8 +277,10 @@ class SizedLRUMapping(object):
         # instead we use a BytesIO to buffer in memory, that time goes
         # down to about 7s. However, since we switched to writing many
         # smaller objects, that need goes away.
-
-        pickler = Pickler(cache_file, -1) # Highest protocol
+        if not hasattr(cache_file, 'dump'):
+            pickler = Pickler(cache_file, -1) # Highest protocol
+        else:
+            pickler = cache_file
         dump = pickler.dump
 
         dump(self._FILE_VERSION) # Version marker

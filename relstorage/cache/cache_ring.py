@@ -336,6 +336,8 @@ class EdenRing(CacheRing):
     @_mutates_free_list
     def add_MRUs(self, ordered_keys_and_values):
         number_nodes = len(ordered_keys_and_values)
+        if not number_nodes:
+            return ()
         # Start by using existing entries *if* we haven't mutated the free list.
         if not self._mutated_free_list and self.node_free_list:
             self._mutated_free_list = True

@@ -22,6 +22,20 @@ import os
 import os.path
 import tempfile
 
+from relstorage._compat import PY3
+if PY3:
+    # On Py3, use the built-in pickle, so that we can get
+    # protocol 4 when available. It is *much* faster at writing out
+    # individual large objects such as the cache dict (about 3-4x faster)
+    from pickle import Unpickler
+    from pickle import Pickler
+else:
+    # On Py2, zodbpickle gives us protocol 3, but we don't
+    # use its special binary type
+    from relstorage._compat import Unpickler
+    from relstorage._compat import Pickler
+
+
 log = logging.getLogger(__name__)
 
 def _normalize_path(options):
@@ -164,6 +178,9 @@ def load_local_cache(options, prefix, local_client_bucket):
                 loaded_count += 1
                 if not stored or local_client_bucket.size >= local_client_bucket.limit:
                     break # pragma: no cover
+            except (NameError, AttributeError): # pragma: no cover
+                # Programming errors, need to be caught in testing
+                raise
             except: # pylint:disable=bare-except
                 log.exception("Invalid cache file %s", cache_path)
                 fd.close()
@@ -190,6 +207,9 @@ def save_local_cache(options, prefix, write_func, _pid=None):
         with _gzip_file(options, filename=path, fileobj=f, mode='wb', compresslevel=5) as fz:
             try:
                 write_func(fz)
+            except (NameError, AttributeError): # pragma: no cover
+                # Programming errors, need to be caught in testing
+                raise
             except:
                 log.exception("Failed to save cache file %s", path)
                 fz.close()

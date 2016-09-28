@@ -17,7 +17,6 @@ ignore-paths:
   - dist
   - .eggs
   - setup.py
-  - src/greentest/getaddrinfo_module.py
 #ignore-patterns:
 
 pyroma:
