@@ -32,7 +32,7 @@ from relstorage._compat import string_types
 from relstorage._compat import iteritems
 from relstorage._compat import PYPY
 
-from relstorage.cache import persistence as _Loader
+from relstorage.cache import persistence
 from relstorage.cache.local_client import LocalClient
 from relstorage.cache.trace import ZEOTracer
 
@@ -123,7 +123,7 @@ class StorageCache(object):
             self.restore()
 
         if _tracer is None:
-            tracefile = _Loader.trace_file(options, self.prefix)
+            tracefile = persistence.trace_file(options, self.prefix)
             if tracefile:
                 _tracer = ZEOTracer(tracefile)
                 _tracer.trace(0x00)
@@ -192,7 +192,11 @@ class StorageCache(object):
         Store any persistent client data.
         """
         if self.options.cache_local_dir and len(self):
-            self.local_client.save()
+            persistence.save_local_cache(self.options, self.prefix, self._write_to_stream)
+
+    def _write_to_stream(self, fd):
+        # Accepts a file-like object and writes content to it.
+        self.local_client._bucket0.write_to_file(fd, self.options.cache_local_dir_write_max_size)
 
     def restore(self):
         options = self.options

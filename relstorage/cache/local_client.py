@@ -84,7 +84,7 @@ class LocalClient(object):
         with self._lock:
             options = self.options
             if options.cache_local_dir and self._bucket0.size:
-                _Loader.save_local_cache(options, self.prefix, self._bucket0)
+                _Loader.save_local_cache(options, self.prefix, self._bucket0.write_to_file)
 
     def restore(self):
         with self._lock:

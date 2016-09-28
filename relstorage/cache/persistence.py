@@ -175,7 +175,7 @@ def load_local_cache(options, prefix, local_client_bucket):
     return loaded_count
 
 
-def save_local_cache(options, prefix, local_client_bucket, _pid=None):
+def save_local_cache(options, prefix, write_func, _pid=None):
     # Dump the file.
     tempdir = _normalize_path(options)
     try:
@@ -189,7 +189,7 @@ def save_local_cache(options, prefix, local_client_bucket, _pid=None):
     with _open(options, fd, 'wb') as f:
         with _gzip_file(options, filename=path, fileobj=f, mode='wb', compresslevel=5) as fz:
             try:
-                local_client_bucket.write_to_file(fz)
+                write_func(fz)
             except:
                 log.exception("Failed to save cache file %s", path)
                 fz.close()

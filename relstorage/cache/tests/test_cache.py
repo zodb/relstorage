@@ -779,7 +779,7 @@ class SizedLRUMappingTests(unittest.TestCase):
     def test_load_from_multiple_files_hit_limit(self):
         from relstorage.cache import persistence as _Loader
         import tempfile
-        client = self.getClass()(100)
+        mapping = self.getClass()(100)
         options = MockOptions()
         options.cache_local_dir_count = 5
         options.cache_local_dir_read_count = 2
@@ -789,15 +789,15 @@ class SizedLRUMappingTests(unittest.TestCase):
             # They all have to have unique keys so something gets loaded
             # from each one
             if i > 0:
-                del client[str(i - 1)]
-            client[str(i)] = b'abc'
-            client[str(i)] # Increment so it gets saved
+                del mapping[str(i - 1)]
+            mapping[str(i)] = b'abc'
+            mapping[str(i)] # Increment so it gets saved
 
-            _Loader.save_local_cache(options, 'test', client, _pid=i)
+            _Loader.save_local_cache(options, 'test', mapping.write_to_file, _pid=i)
             self.assertEqual(_Loader.count_cache_files(options, 'test'),
                              i + 1)
 
-        files_loaded = _Loader.load_local_cache(options, 'test', client)
+        files_loaded = _Loader.load_local_cache(options, 'test', mapping)
         # XXX: This sometimes fails on Travis, returning 1 Why?
         self.assertEqual(files_loaded, 2)
 
