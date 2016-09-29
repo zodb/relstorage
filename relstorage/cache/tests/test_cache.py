@@ -54,7 +54,7 @@ def _check_load_and_store_multiple_files_hit_limit(self, mapping, wrapping_stora
         mapping[str(i)] = b'abc'
         mapping[str(i)] # Increment so it gets saved
 
-        persistence.save_local_cache(options, 'test', dump_object.write_to_stream, _pid=i)
+        persistence.save_local_cache(options, 'test', dump_object, _pid=i)
         self.assertEqual(persistence.count_cache_files(options, 'test'),
                          i + 1)
 

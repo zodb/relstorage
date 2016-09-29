@@ -28,10 +28,13 @@ import os
 
 import threading
 
+from zope import interface
+
 from relstorage._compat import string_types
 from relstorage._compat import iteritems
 from relstorage._compat import PYPY
 
+from relstorage.cache.interfaces import IPersistentCache
 from relstorage.cache import persistence
 from relstorage.cache.local_client import LocalClient
 from relstorage.cache.trace import ZEOTracer
@@ -43,6 +46,7 @@ class _UsedAfterRelease(object):
 _UsedAfterRelease = _UsedAfterRelease()
 
 
+@interface.implementer(IPersistentCache)
 class StorageCache(object):
     """RelStorage integration with memcached or similar.
 
@@ -206,7 +210,7 @@ class StorageCache(object):
         Store any persistent client data.
         """
         if self.options.cache_local_dir and len(self):
-            persistence.save_local_cache(self.options, self.prefix, self.write_to_stream)
+            persistence.save_local_cache(self.options, self.prefix, self)
 
 
     def write_to_stream(self, stream):

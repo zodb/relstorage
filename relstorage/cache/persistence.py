@@ -195,7 +195,7 @@ def load_local_cache(options, prefix, local_client_bucket):
     return loaded_count
 
 
-def save_local_cache(options, prefix, write_func, _pid=None):
+def save_local_cache(options, prefix, persistent_cache, _pid=None):
     # Dump the file.
     tempdir = _normalize_path(options)
     try:
@@ -209,7 +209,7 @@ def save_local_cache(options, prefix, write_func, _pid=None):
     with _open(options, fd, 'wb') as f:
         with _gzip_file(options, filename=path, fileobj=f, mode='wb', compresslevel=5) as fz:
             try:
-                write_func(fz)
+                persistent_cache.write_to_stream(fz)
             except (NameError, AttributeError): # pragma: no cover
                 # Programming errors, need to be caught in testing
                 raise

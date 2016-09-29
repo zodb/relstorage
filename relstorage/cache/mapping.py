@@ -17,6 +17,9 @@ import logging
 import operator
 import time
 
+from zope import interface
+
+from relstorage.cache.interfaces import IPersistentCache
 from relstorage.cache.persistence import Unpickler
 from relstorage.cache.persistence import Pickler
 from relstorage.cache.cache_ring import Cache
@@ -24,6 +27,7 @@ from relstorage.cache.cache_ring import Cache
 log = logging.getLogger(__name__)
 
 
+@interface.implementer(IPersistentCache)
 class SizedLRUMapping(object):
     """
     A map that keeps a record of its approx. size.
