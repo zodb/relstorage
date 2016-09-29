@@ -252,8 +252,13 @@ def save_local_cache(options, prefix, persistent_cache, _pid=None):
         mod_time = f()
 
     if mod_time:
-        logger.debug("Setting date of %s to cache time %s (current time %s)",
+        logger.debug("Setting date of %r to cache time %s (current time %s)",
                      new_path, mod_time, time.time())
-        os.utime(new_path, (mod_time, mod_time))
+        try:
+            os.utime(os.path.realpath(new_path), (mod_time, mod_time))
+        except OSError:
+            logger.exception("Failed to set date of %r to cache time %s",
+                             new_path, mod_time)
+            raise
 
     return new_path
