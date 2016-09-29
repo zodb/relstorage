@@ -72,6 +72,9 @@ class LocalClient(object):
     def __len__(self):
         return len(self.__bucket)
 
+    def __iter__(self):
+        return iter(self.__bucket)
+
     def _decompress(self, data):
         pfx = data[:2]
         if pfx not in self._decompression_functions:

@@ -35,6 +35,10 @@
 - On CPython, use LLBTrees for the cache delta maps. This allows using
   a larger, more effective size while reducing memory usage. Fixes :issue:`130`.
 
+- Persistent cache files use the latest TID in the cache as the file's
+  modification time. This allows a more accurate choice of which file
+  to read at startup. Fixes :issue:`126`.
+
 2.0.0b6 (2016-09-08)
 ====================
 

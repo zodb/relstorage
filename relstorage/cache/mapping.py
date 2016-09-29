@@ -102,6 +102,9 @@ class SizedLRUMapping(object):
     def __len__(self):
         return len(self._dict)
 
+    def __iter__(self):
+        return iter(self._dict)
+
     def _age(self):
         # Age only when we're full and would thus need to evict; this
         # makes initial population faster. It's cheaper to calculate this

@@ -21,6 +21,7 @@ import io
 import os
 import os.path
 import tempfile
+import time
 
 from relstorage._compat import PY3
 if PY3:
@@ -39,7 +40,7 @@ else:
 Unpickler = Unpickler
 Pickler = Pickler
 
-log = logging.getLogger(__name__)
+logger = log = logging.getLogger(__name__)
 
 def _normalize_path(options):
     path = os.path.expanduser(os.path.expandvars(options.cache_local_dir))
@@ -251,6 +252,8 @@ def save_local_cache(options, prefix, persistent_cache, _pid=None):
         mod_time = f()
 
     if mod_time:
+        logger.debug("Setting date of %s to cache time %s (current time %s)",
+                     new_path, mod_time, time.time())
         os.utime(new_path, (mod_time, mod_time))
 
     return new_path

@@ -210,7 +210,7 @@ class StorageCache(object):
         Store any persistent client data.
         """
         if self.options.cache_local_dir and len(self):
-            persistence.save_local_cache(self.options, self.prefix, self)
+            return persistence.save_local_cache(self.options, self.prefix, self)
 
 
     def write_to_stream(self, stream):
@@ -232,6 +232,22 @@ class StorageCache(object):
         # can't dump a BTree larger than about 25000 without getting
         # into recursion problems.
         self.local_client.write_to_stream(stream)
+
+    def get_cache_modification_time_for_stream(self):
+        max_tid = 0
+        for key in self.local_client:
+            parts = key.split(':')
+            if len(parts) != 4:
+                continue
+            tid = int(parts[2])
+            max_tid = max(tid, max_tid)
+
+        if max_tid:
+            tid_str = p64(max_tid)
+            ts = TimeStamp(tid_str)
+            return ts.timeTime()
+        return max_tid
+
 
     def restore(self):
         options = self.options
