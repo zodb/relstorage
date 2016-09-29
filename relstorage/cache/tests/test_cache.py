@@ -54,7 +54,7 @@ def _check_load_and_store_multiple_files_hit_limit(self, mapping, wrapping_stora
         mapping[str(i)] = b'abc'
         mapping[str(i)] # Increment so it gets saved
 
-        persistence.save_local_cache(options, 'test', dump_object.write_to_stream, _pid=i)
+        persistence.save_local_cache(options, 'test', dump_object, _pid=i)
         self.assertEqual(persistence.count_cache_files(options, 'test'),
                          i + 1)
 
@@ -115,18 +115,33 @@ class StorageCacheTests(unittest.TestCase):
         self.assertIsInstance(inst.stats(), dict)
 
     def test_save(self):
+        from persistent.timestamp import TimeStamp
         c = self._makeOne()
         c.checkpoints = (0, 0)
         c.tpc_begin()
         c.store_temp(2, b'abc')
-        c.after_tpc_finish(p64(1))
+        # tid is 2016-09-29 11:35:58,120
+        tid = 268595726030645777
+        c.after_tpc_finish(p64(268595726030645777))
+
+        key = list(iter(c.local_client))[0]
+        self.assertEqual('myprefix:state:268595726030645777:2', key)
+
+        mod_time = TimeStamp(p64(tid)).timeTime()
 
         import tempfile
         import os
         c.options.cache_local_dir = tempfile.mkdtemp()
         try:
-            c.save()
+            new_path = c.save()
             self.assertEqual(1, len(os.listdir(c.options.cache_local_dir)))
+            self.assertEqual(os.path.basename(new_path), os.listdir(c.options.cache_local_dir)[0])
+
+            s = os.stat(new_path)
+            self.assertEqual(s.st_atime, s.st_mtime)
+            # Some platforms throw away fractional parts, notable OS X on HFS
+            self.assertEqual(int(mod_time), int(s.st_mtime))
+
 
             # Creating one in the same place automatically loads it.
             c2 = self._makeOne(cache_local_dir=c.options.cache_local_dir)

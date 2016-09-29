@@ -28,10 +28,13 @@ import os
 
 import threading
 
+from zope import interface
+
 from relstorage._compat import string_types
 from relstorage._compat import iteritems
 from relstorage._compat import PYPY
 
+from relstorage.cache.interfaces import IPersistentCache
 from relstorage.cache import persistence
 from relstorage.cache.local_client import LocalClient
 from relstorage.cache.trace import ZEOTracer
@@ -43,6 +46,7 @@ class _UsedAfterRelease(object):
 _UsedAfterRelease = _UsedAfterRelease()
 
 
+@interface.implementer(IPersistentCache)
 class StorageCache(object):
     """RelStorage integration with memcached or similar.
 
@@ -206,7 +210,7 @@ class StorageCache(object):
         Store any persistent client data.
         """
         if self.options.cache_local_dir and len(self):
-            persistence.save_local_cache(self.options, self.prefix, self.write_to_stream)
+            return persistence.save_local_cache(self.options, self.prefix, self)
 
 
     def write_to_stream(self, stream):
@@ -228,6 +232,20 @@ class StorageCache(object):
         # can't dump a BTree larger than about 25000 without getting
         # into recursion problems.
         self.local_client.write_to_stream(stream)
+
+    def get_cache_modification_time_for_stream(self):
+        max_tid = 0
+        for key in self.local_client:
+            parts = key.split(':')
+            if len(parts) != 4:
+                continue
+            tid = int(parts[2])
+            max_tid = max(tid, max_tid)
+
+        if max_tid:
+            tid_str = p64(max_tid)
+            ts = TimeStamp(tid_str)
+            return ts.timeTime()
 
     def restore(self):
         options = self.options
@@ -672,7 +690,17 @@ class StorageCache(object):
                 # (oid, tid) pairs puts the newest tid at the back, and constructing
                 # the dictionary from that sorted list preserves order, keeping the
                 # last key that it saw.
-                change_dict = self._delta_map_type(sorted(change_list))
+                try:
+                    change_dict = self._delta_map_type(sorted(change_list))
+                except TypeError:
+                    # pg8000 returns a list of lists, not a list of tuples. The
+                    # BTree constructor is very particular about that. Normally one
+                    # would use pg8000 on PyPy, where we don't use BTrees, so this shouldn't
+                    # actually come up in practice.
+                    change_dict = self._delta_map_type()
+                    for oid_int, tid_int in sorted(change_list):
+                        change_dict[oid_int] = tid_int
+
 
                 # Put the changes in new_delta_after*.
                 for oid_int, tid_int in change_dict.items():

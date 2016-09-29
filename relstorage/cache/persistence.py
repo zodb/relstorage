@@ -21,6 +21,7 @@ import io
 import os
 import os.path
 import tempfile
+import time
 
 from relstorage._compat import PY3
 if PY3:
@@ -39,7 +40,7 @@ else:
 Unpickler = Unpickler
 Pickler = Pickler
 
-log = logging.getLogger(__name__)
+logger = log = logging.getLogger(__name__)
 
 def _normalize_path(options):
     path = os.path.expanduser(os.path.expandvars(options.cache_local_dir))
@@ -195,7 +196,7 @@ def load_local_cache(options, prefix, local_client_bucket):
     return loaded_count
 
 
-def save_local_cache(options, prefix, write_func, _pid=None):
+def save_local_cache(options, prefix, persistent_cache, _pid=None):
     # Dump the file.
     tempdir = _normalize_path(options)
     try:
@@ -209,7 +210,7 @@ def save_local_cache(options, prefix, write_func, _pid=None):
     with _open(options, fd, 'wb') as f:
         with _gzip_file(options, filename=path, fileobj=f, mode='wb', compresslevel=5) as fz:
             try:
-                write_func(fz)
+                persistent_cache.write_to_stream(fz)
             except (NameError, AttributeError): # pragma: no cover
                 # Programming errors, need to be caught in testing
                 raise
@@ -242,4 +243,19 @@ def save_local_cache(options, prefix, write_func, _pid=None):
             for e in stats:
                 e[1].close()
                 e[3].close()
+
+    try:
+        f = persistent_cache.get_cache_modification_time_for_stream
+    except AttributeError:
+        mod_time = None
+    else:
+        mod_time = f()
+
+    if mod_time and mod_time > 0:
+        # PyPy on Linux raises an OSError/Errno22 if the mod_time is less than 0
+        # and is a float
+        logger.debug("Setting date of %r to cache time %s (current time %s)",
+                     new_path, mod_time, time.time())
+        os.utime(new_path, (mod_time, mod_time))
+
     return new_path

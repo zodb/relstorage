@@ -17,11 +17,15 @@ import bz2
 import threading
 import zlib
 
+from zope import interface
+
 from relstorage._compat import iteritems
 
+from relstorage.cache.interfaces import IPersistentCache
 from relstorage.cache import persistence as _Loader
 from relstorage.cache.mapping import SizedLRUMapping as LocalClientBucket
 
+@interface.implementer(IPersistentCache)
 class LocalClient(object):
     """A memcache-like object that stores in Python dictionaries."""
 
@@ -68,6 +72,9 @@ class LocalClient(object):
     def __len__(self):
         return len(self.__bucket)
 
+    def __iter__(self):
+        return iter(self.__bucket)
+
     def _decompress(self, data):
         pfx = data[:2]
         if pfx not in self._decompression_functions:
@@ -89,7 +96,7 @@ class LocalClient(object):
     def save(self):
         options = self.options
         if options.cache_local_dir and self._bucket0.size:
-            _Loader.save_local_cache(options, self.prefix, self.write_to_stream)
+            _Loader.save_local_cache(options, self.prefix, self)
 
     def write_to_stream(self, stream):
         with self._lock:
