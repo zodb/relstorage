@@ -242,4 +242,15 @@ def save_local_cache(options, prefix, persistent_cache, _pid=None):
             for e in stats:
                 e[1].close()
                 e[3].close()
+
+    try:
+        f = persistent_cache.get_cache_modification_time_for_stream
+    except AttributeError:
+        mod_time = None
+    else:
+        mod_time = f()
+
+    if mod_time:
+        os.utime(new_path, (mod_time, mod_time))
+
     return new_path
