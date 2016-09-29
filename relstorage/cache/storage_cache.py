@@ -668,16 +668,14 @@ class StorageCache(object):
                     cursor, cp1, new_tid_int)
 
                 # Make a dictionary that contains, for each oid, the most
-                # recent tid listed in changes.
-                change_dict = {}
-                if not isinstance(change_list, list):
-                    change_list = list(change_list)
-                change_list.sort()
-                for oid_int, tid_int in change_list:
-                    change_dict[oid_int] = tid_int
+                # recent tid listed in changes. This works because sorting the
+                # (oid, tid) pairs puts the newest tid at the back, and constructing
+                # the dictionary from that sorted list preserves order, keeping the
+                # last key that it saw.
+                change_dict = self._delta_map_type(sorted(change_list))
 
                 # Put the changes in new_delta_after*.
-                for oid_int, tid_int in iteritems(change_dict):
+                for oid_int, tid_int in change_dict.items():
                     # 0x1E = invalidate (hit, saving non-current)
                     self._trace(0x1C, oid_int, tid_int)
                     if tid_int > cp0:
