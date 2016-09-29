@@ -182,12 +182,6 @@ class StorageCache(object):
         cache = type(self)(self.adapter, self.options, self.prefix,
                            local_client,
                            _tracer=self._tracer or False)
-
-        if self.checkpoints:
-            cache.checkpoints = self.checkpoints
-            cache.delta_after0.update(self.delta_after0)
-            cache.delta_after1.update(self.delta_after1)
-            cache.current_tid = self.current_tid
         return cache
 
     def release(self):
@@ -214,19 +208,26 @@ class StorageCache(object):
         if self.options.cache_local_dir and len(self):
             persistence.save_local_cache(self.options, self.prefix, self.write_to_stream)
 
-    _STREAM_VERSION = 'StorageCache1'
 
     def write_to_stream(self, stream):
-        # Accepts a file-like object and writes content to it.
-        pickler = persistence.Pickler(stream, -1)
-        pickler.dump(self._STREAM_VERSION)
-        pickler.dump(self.checkpoints)
-        pickler.dump(self.current_tid)
-        # We can't dump a BTree larger than about 25000 without getting
+        # We currently don't write anything to the stream, delegating instead
+        # just to the local client.
+
+        # We experimented with trying to save and load chcekpoints and
+        # the delta maps, but this turned out to be complex (because
+        # the `new_instance`s that have the actual data are released
+        # before we are, so their data gets lost, and we have to
+        # implement a parent/child relationship to fix that) and no
+        # more effective than relying on the default checkpoints we
+        # get from polling, if there have been no changes---at least
+        # in the case of zodbshootout benchmark (in fact, it was
+        # somewhat *slower*, for reasons that aren't fully clear).
+
+        # Note that if we did want to dump the delta maps, we would
+        # need to either wrap them in a dict or dump them pairwise; We
+        # can't dump a BTree larger than about 25000 without getting
         # into recursion problems.
-        pickler.dump(dict(self.delta_after0))
-        pickler.dump(dict(self.delta_after1))
-        self.local_client.write_to_stream(pickler)
+        self.local_client.write_to_stream(stream)
 
     def restore(self):
         options = self.options
@@ -234,20 +235,7 @@ class StorageCache(object):
             persistence.load_local_cache(options, self.prefix, self)
 
     def read_from_stream(self, stream):
-        unpickler = persistence.Unpickler(stream)
-        ver = unpickler.load()
-        if ver != self._STREAM_VERSION:
-            raise ValueError("Incorrect version of cache_file", ver)
-        cp = unpickler.load()
-        tid = unpickler.load()
-        da0 = unpickler.load()
-        da1 = unpickler.load()
-        if not self.checkpoints and cp:
-            self.checkpoints = cp
-            self.current_tid = tid
-            self.delta_after0.update(da0)
-            self.delta_after1.update(da1)
-        return self.local_client.read_from_stream(unpickler)
+        return self.local_client.read_from_stream(stream)
 
     def close(self):
         """

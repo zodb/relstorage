@@ -131,8 +131,6 @@ class StorageCacheTests(unittest.TestCase):
             # Creating one in the same place automatically loads it.
             c2 = self._makeOne(cache_local_dir=c.options.cache_local_dir)
             self.assertEqual(1, len(c2))
-            self.assertEqual(c2.checkpoints, c.checkpoints)
-            self.assertEqual(dict(c2.delta_after0), {2: 1})
         finally:
             import shutil
             shutil.rmtree(c.options.cache_local_dir, True)

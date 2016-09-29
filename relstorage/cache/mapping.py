@@ -211,10 +211,7 @@ class SizedLRUMapping(object):
         now = time.time()
         # Unlike write_to_stream, using the raw stream
         # is fine for both Py 2 and 3.
-        if not hasattr(cache_file, 'load'):
-            unpick = Unpickler(cache_file)
-        else:
-            unpick = cache_file
+        unpick = Unpickler(cache_file)
 
         # Local optimizations
         load = unpick.load
@@ -277,10 +274,7 @@ class SizedLRUMapping(object):
         # instead we use a BytesIO to buffer in memory, that time goes
         # down to about 7s. However, since we switched to writing many
         # smaller objects, that need goes away.
-        if not hasattr(cache_file, 'dump'):
-            pickler = Pickler(cache_file, -1) # Highest protocol
-        else:
-            pickler = cache_file
+        pickler = Pickler(cache_file, -1) # Highest protocol
         dump = pickler.dump
 
         dump(self._FILE_VERSION) # Version marker
