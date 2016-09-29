@@ -251,14 +251,11 @@ def save_local_cache(options, prefix, persistent_cache, _pid=None):
     else:
         mod_time = f()
 
-    if mod_time:
+    if mod_time and mod_time > 0:
+        # PyPy on Linux raises an OSError/Errno22 if the mod_time is less than 0
+        # and is a float
         logger.debug("Setting date of %r to cache time %s (current time %s)",
                      new_path, mod_time, time.time())
-        try:
-            os.utime(os.path.realpath(new_path), (mod_time, mod_time))
-        except OSError:
-            logger.exception("Failed to set date of %r to cache time %s",
-                             new_path, mod_time)
-            raise
+        os.utime(new_path, (mod_time, mod_time))
 
     return new_path

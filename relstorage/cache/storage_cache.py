@@ -246,8 +246,6 @@ class StorageCache(object):
             tid_str = p64(max_tid)
             ts = TimeStamp(tid_str)
             return ts.timeTime()
-        return max_tid
-
 
     def restore(self):
         options = self.options
