@@ -35,6 +35,9 @@ else:
     from relstorage._compat import Unpickler
     from relstorage._compat import Pickler
 
+# Export
+Unpickler = Unpickler
+Pickler = Pickler
 
 log = logging.getLogger(__name__)
 
