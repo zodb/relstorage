@@ -17,6 +17,8 @@ import unittest
 from relstorage.tests.util import skipOnCI
 from functools import partial
 
+from ZODB.utils import p64
+
 from relstorage.cache.cache_ring import Cache as _BaseCache
 class Cache(_BaseCache):
     # Tweak the generation sizes to match what we developed the tests with
@@ -33,22 +35,65 @@ from relstorage.cache.local_client import LocalClient as _BaseLocalClient
 class LocalClient(_BaseLocalClient):
     _bucket_type = SizedLRUMapping
 
+def _check_load_and_store_multiple_files_hit_limit(self, mapping, wrapping_storage=None):
+    from relstorage.cache import persistence
+    import tempfile
+
+    options = MockOptions()
+    options.cache_local_dir_count = 5
+    options.cache_local_dir_read_count = 2
+    options.cache_local_dir = tempfile.mkdtemp()
+
+    dump_object = mapping if wrapping_storage is None else wrapping_storage
+
+    for i in range(5):
+        # They all have to have unique keys so something gets loaded
+        # from each one
+        if i > 0:
+            del mapping[str(i - 1)]
+        mapping[str(i)] = b'abc'
+        mapping[str(i)] # Increment so it gets saved
+
+        persistence.save_local_cache(options, 'test', dump_object.write_to_stream, _pid=i)
+        self.assertEqual(persistence.count_cache_files(options, 'test'),
+                         i + 1)
+
+    files_loaded = persistence.load_local_cache(options, 'test', dump_object)
+    # XXX: This sometimes fails on Travis, returning 1 Why?
+    self.assertEqual(files_loaded, 2)
+
+    import shutil
+    shutil.rmtree(options.cache_local_dir)
 
 class StorageCacheTests(unittest.TestCase):
 
     def setUp(self):
         from relstorage.tests.fakecache import data
         data.clear()
+        self._instances = []
 
-    tearDown = setUp
+    def tearDown(self):
+        from relstorage.tests.fakecache import data
+        data.clear()
+        for inst in self._instances:
+            inst.close()
+            assert len(inst) == 0
+            assert bool(inst)
+            assert inst.size == 0
+            assert inst.limit == 0
 
     def getClass(self):
         from relstorage.cache import StorageCache
         return StorageCache
 
-    def _makeOne(self):
-        return self.getClass()(MockAdapter(), MockOptionsWithFakeCache(),
+    def _makeOne(self, **kwargs):
+        options = MockOptionsWithFakeCache()
+        for k, v in kwargs.items():
+            setattr(options, k, v)
+        inst = self.getClass()(MockAdapter(), options,
                                'myprefix')
+        self._instances.append(inst)
+        return inst.new_instance() # coverage and sharing testing
 
     def test_ctor(self):
         from relstorage.tests.fakecache import Client
@@ -63,6 +108,39 @@ class StorageCacheTests(unittest.TestCase):
         c.close()
         c.close()
 
+    def test_stats(self):
+        inst = self._makeOne()
+        self.assertIsInstance(inst.stats(), dict)
+        inst.close()
+        self.assertIsInstance(inst.stats(), dict)
+
+    def test_save(self):
+        c = self._makeOne()
+        c.checkpoints = (0, 0)
+        c.tpc_begin()
+        c.store_temp(2, b'abc')
+        c.after_tpc_finish(p64(1))
+
+        import tempfile
+        import os
+        c.options.cache_local_dir = tempfile.mkdtemp()
+        try:
+            c.save()
+            self.assertEqual(1, len(os.listdir(c.options.cache_local_dir)))
+
+            # Creating one in the same place automatically loads it.
+            c2 = self._makeOne(cache_local_dir=c.options.cache_local_dir)
+            self.assertEqual(1, len(c2))
+        finally:
+            import shutil
+            shutil.rmtree(c.options.cache_local_dir, True)
+
+    @skipOnCI("Sometimes the files_loaded is just 1 on Travis.")
+    def test_load_from_multiple_files_hit_limit(self):
+        cache = self._makeOne(cache_local_mb=0.01)
+        _check_load_and_store_multiple_files_hit_limit(self, cache.local_client._bucket0, cache)
+
+
     def test_clear(self):
         from relstorage.tests.fakecache import data
         data.clear()
@@ -71,8 +149,8 @@ class StorageCacheTests(unittest.TestCase):
         c.clear()
         self.assertFalse(data)
         self.assertEqual(c.checkpoints, None)
-        self.assertEqual(c.delta_after0, {})
-        self.assertEqual(c.delta_after1, {})
+        self.assertEqual(dict(c.delta_after0), {})
+        self.assertEqual(dict(c.delta_after1), {})
 
     def test_load_without_checkpoints(self):
         c = self._makeOne()
@@ -209,9 +287,14 @@ class StorageCacheTests(unittest.TestCase):
         c.store_temp(2, b'abc')
         c.store_temp(1, b'def')
         c.store_temp(2, b'ghi')
+        self.assertEqual(b'ghi', c.read_temp(2))
         self.assertEqual(c.queue_contents, {1: (3, 6), 2: (6, 9)})
         c.queue.seek(0)
         self.assertEqual(c.queue.read(), b'abcdefghi')
+        c.checkpoints = (1, 0)
+        c.after_tpc_finish(p64(3))
+
+        self.assertEqual(dict(c.delta_after0), {2: 3, 1: 3})
 
     def test_send_queue_small(self):
         from relstorage.tests.fakecache import data
@@ -226,6 +309,7 @@ class StorageCacheTests(unittest.TestCase):
             'myprefix:state:55:2': tid + b'abc',
             'myprefix:state:55:3': tid + b'def',
             })
+        self.assertEqual(len(c), 2)
 
     def test_send_queue_large(self):
         from relstorage.tests.fakecache import data
@@ -321,8 +405,8 @@ class StorageCacheTests(unittest.TestCase):
         # existing checkpoints, so fall back to the current tid.
         self.assertEqual(c.checkpoints, (50, 50))
         self.assertEqual(data['myprefix:checkpoints'], b'90 80')
-        self.assertEqual(c.delta_after0, {})
-        self.assertEqual(c.delta_after1, {})
+        self.assertEqual(dict(c.delta_after0), {})
+        self.assertEqual(dict(c.delta_after1), {})
 
     def test_after_poll_retain_checkpoints(self):
         from relstorage.tests.fakecache import data
@@ -351,8 +435,8 @@ class StorageCacheTests(unittest.TestCase):
         c.after_poll(None, 40, 50, [(3, 42), (2, 45), (3, 41)])
         self.assertEqual(c.checkpoints, (50, 40))
         self.assertEqual(data['myprefix:checkpoints'], b'50 40')
-        self.assertEqual(c.delta_after0, {})
-        self.assertEqual(c.delta_after1, {2: 45, 3: 42})
+        self.assertEqual(dict(c.delta_after0), {})
+        self.assertEqual(dict(c.delta_after1), {2: 45, 3: 42})
 
     def test_after_poll_gap(self):
         from relstorage.tests.fakecache import data
@@ -367,8 +451,8 @@ class StorageCacheTests(unittest.TestCase):
         c.after_poll(None, 43, 50, [(2, 45)])
         self.assertEqual(c.checkpoints, (40, 30))
         self.assertEqual(data['myprefix:checkpoints'], b'40 30')
-        self.assertEqual(c.delta_after0, {2: 45, 3: 42})
-        self.assertEqual(c.delta_after1, {1: 35})
+        self.assertEqual(dict(c.delta_after0), {2: 45, 3: 42})
+        self.assertEqual(dict(c.delta_after1), {1: 35})
 
     def test_after_poll_shift_checkpoints(self):
         from relstorage.tests.fakecache import data
@@ -603,7 +687,7 @@ class SizedLRUMappingTests(unittest.TestCase):
         from relstorage.cache import persistence as _Loader
         bio.seek(0)
         reader = _Loader._gzip_file(options, None, bio, mode='rb')
-        return bucket.load_from_file(reader)
+        return bucket.read_from_stream(reader)
 
     def _save(self, bio, bucket, options, byte_limit=None):
         from relstorage.cache import persistence as _Loader
@@ -611,7 +695,7 @@ class SizedLRUMappingTests(unittest.TestCase):
         if options.cache_local_dir_compress:
             self.assertEqual(".rscache.gz", _Loader._gzip_ext(options))
         writer = _Loader._gzip_file(options, None, bio, mode='wb')
-        bucket.write_to_file(writer, byte_limit or options.cache_local_dir_write_max_size)
+        bucket.write_to_stream(writer, byte_limit or options.cache_local_dir_write_max_size)
         writer.flush()
         if writer is not bio:
             writer.close()
@@ -730,32 +814,8 @@ class SizedLRUMappingTests(unittest.TestCase):
 
     @skipOnCI("Sometimes the files_loaded is just 1 on Travis.")
     def test_load_from_multiple_files_hit_limit(self):
-        from relstorage.cache import persistence as _Loader
-        import tempfile
-        client = self.getClass()(100)
-        options = MockOptions()
-        options.cache_local_dir_count = 5
-        options.cache_local_dir_read_count = 2
-        options.cache_local_dir = tempfile.mkdtemp()
-
-        for i in range(5):
-            # They all have to have unique keys so something gets loaded
-            # from each one
-            if i > 0:
-                del client[str(i - 1)]
-            client[str(i)] = b'abc'
-            client[str(i)] # Increment so it gets saved
-
-            _Loader.save_local_cache(options, 'test', client, _pid=i)
-            self.assertEqual(_Loader.count_cache_files(options, 'test'),
-                             i + 1)
-
-        files_loaded = _Loader.load_local_cache(options, 'test', client)
-        # XXX: This sometimes fails on Travis, returning 1 Why?
-        self.assertEqual(files_loaded, 2)
-
-        import shutil
-        shutil.rmtree(options.cache_local_dir)
+        mapping = self.getClass()(100)
+        _check_load_and_store_multiple_files_hit_limit(self, mapping)
 
 class LocalClientTests(unittest.TestCase):
 
@@ -765,11 +825,13 @@ class LocalClientTests(unittest.TestCase):
     def _makeOne(self, **kw):
         options = MockOptions()
         vars(options).update(kw)
-        return self.getClass()(options)
+        inst = self.getClass()(options)
+        inst.restore()
+        return inst
 
     def test_ctor(self):
         c = self._makeOne()
-        self.assertEqual(c._bucket_limit, 1000000)
+        self.assertEqual(c.limit, 1000000)
         self.assertEqual(c._value_limit, 16384)
         # cover
         self.assertIn('hits', c.stats())
@@ -801,7 +863,7 @@ class LocalClientTests(unittest.TestCase):
         options = MockOptions()
         options.cache_local_mb = 0
         c = self.getClass()(options)
-        self.assertEqual(c._bucket_limit, 0)
+        self.assertEqual(c.limit, 0)
         self.assertEqual(c._value_limit, 16384)
         c.set('abc', 1)
         c.set('def', b'')
@@ -822,7 +884,7 @@ class LocalClientTests(unittest.TestCase):
         # eden and probation of 5, protected of 40. This means that eden
         # and probation each can hold one item, while protected can hold 4,
         # so our max size will be 60
-        c._bucket_limit = 51
+        c.limit = 51
         c.flush_all()
 
         list_lrukeys = partial(list_lrukeys_, c._bucket0)
@@ -946,7 +1008,7 @@ class LocalClientTests(unittest.TestCase):
 
     def test_bucket_sizes_with_compression(self):
         c = self._makeOne(cache_local_compression='zlib')
-        c._bucket_limit = 23 * 2 + 1
+        c.limit = 23 * 2 + 1
         c.flush_all()
         list_lrukeys = partial(list_lrukeys_, c._bucket0)
 
@@ -1097,7 +1159,7 @@ class LocalClientTests(unittest.TestCase):
             # Now lets break saving
             def badwrite(*args):
                 raise OSError("Nope")
-            c2._bucket0.write_to_file = badwrite
+            c2._bucket0.write_to_stream = badwrite
 
             c2.save()
             cache_files = os.listdir(temp_dir)
@@ -1134,6 +1196,11 @@ class CacheRingTests(unittest.TestCase):
         self.assertEqual(lru.get_LRU(), entryc)
 
         self.assertEqual(len(lru), 3)
+
+    def test_add_MRUs_empty(self):
+        from relstorage.cache.cache_ring import EdenRing
+        lru = EdenRing(100)
+        self.assertEqual((), lru.add_MRUs([]))
 
     def test_bool(self):
         lru = self._makeOne(100)

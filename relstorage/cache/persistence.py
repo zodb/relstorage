@@ -22,6 +22,23 @@ import os
 import os.path
 import tempfile
 
+from relstorage._compat import PY3
+if PY3:
+    # On Py3, use the built-in pickle, so that we can get
+    # protocol 4 when available. It is *much* faster at writing out
+    # individual large objects such as the cache dict (about 3-4x faster)
+    from pickle import Unpickler
+    from pickle import Pickler
+else:
+    # On Py2, zodbpickle gives us protocol 3, but we don't
+    # use its special binary type
+    from relstorage._compat import Unpickler
+    from relstorage._compat import Pickler
+
+# Export
+Unpickler = Unpickler
+Pickler = Pickler
+
 log = logging.getLogger(__name__)
 
 def _normalize_path(options):
@@ -160,10 +177,13 @@ def load_local_cache(options, prefix, local_client_bucket):
                 break
 
             try:
-                _, stored = local_client_bucket.load_from_file(fd)
+                _, stored = local_client_bucket.read_from_stream(fd)
                 loaded_count += 1
                 if not stored or local_client_bucket.size >= local_client_bucket.limit:
                     break # pragma: no cover
+            except (NameError, AttributeError): # pragma: no cover
+                # Programming errors, need to be caught in testing
+                raise
             except: # pylint:disable=bare-except
                 log.exception("Invalid cache file %s", cache_path)
                 fd.close()
@@ -175,7 +195,7 @@ def load_local_cache(options, prefix, local_client_bucket):
     return loaded_count
 
 
-def save_local_cache(options, prefix, local_client_bucket, _pid=None):
+def save_local_cache(options, prefix, write_func, _pid=None):
     # Dump the file.
     tempdir = _normalize_path(options)
     try:
@@ -189,7 +209,10 @@ def save_local_cache(options, prefix, local_client_bucket, _pid=None):
     with _open(options, fd, 'wb') as f:
         with _gzip_file(options, filename=path, fileobj=f, mode='wb', compresslevel=5) as fz:
             try:
-                local_client_bucket.write_to_file(fz)
+                write_func(fz)
+            except (NameError, AttributeError): # pragma: no cover
+                # Programming errors, need to be caught in testing
+                raise
             except:
                 log.exception("Failed to save cache file %s", path)
                 fz.close()

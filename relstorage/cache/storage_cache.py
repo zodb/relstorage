@@ -32,7 +32,7 @@ from relstorage._compat import string_types
 from relstorage._compat import iteritems
 from relstorage._compat import PYPY
 
-from relstorage.cache import persistence as _Loader
+from relstorage.cache import persistence
 from relstorage.cache.local_client import LocalClient
 from relstorage.cache.trace import ZEOTracer
 
@@ -42,9 +42,6 @@ class _UsedAfterRelease(object):
     pass
 _UsedAfterRelease = _UsedAfterRelease()
 
-# An LLBTree uses much less memory than a dict, and is still plenty fast on CPython;
-# it's just as big and slower on PyPy, though.
-_delta_map_type = BTrees.family64.II.BTree if not PYPY else dict
 
 class StorageCache(object):
     """RelStorage integration with memcached or similar.
@@ -78,14 +75,39 @@ class StorageCache(object):
 
     _tracer = None
 
+    # An LLBTree uses much less memory than a dict, and is still plenty fast on CPython;
+    # it's just as big and slower on PyPy, though.
+    _delta_map_type = BTrees.family64.II.BTree if not PYPY else dict
+
+
     def __init__(self, adapter, options, prefix, local_client=None,
                  _tracer=None):
         self.adapter = adapter
         self.options = options
         self.prefix = prefix or ''
+
+        # checkpoints_key holds the current checkpoints.
+        self.checkpoints_key = '%s:checkpoints' % self.prefix
+        assert isinstance(self.checkpoints_key, str) # no unicode on Py2
+
+        # delta_after0 contains {oid: tid} after checkpoint 0
+        # and before or at self.current_tid.
+        self.delta_after0 = self._delta_map_type()
+
+        # delta_after1 contains {oid: tid} after checkpoint 1 and
+        # before or at checkpoint 0. The content of delta_after1 only
+        # changes when checkpoints move.
+        self.delta_after1 = self._delta_map_type()
+
+        # delta_size_limit places an approximate limit on the number of
+        # entries in the delta_after maps.
+        self.delta_size_limit = options.cache_delta_size_limit
+
+        self.clients_local_first = []
         if local_client is None:
-            local_client = LocalClient(options, self.prefix)
-        self.clients_local_first = [local_client]
+            self.clients_local_first.append(LocalClient(options, self.prefix))
+        else:
+            self.clients_local_first.append(local_client)
 
         if options.cache_servers:
             module_name = options.cache_module_name
@@ -99,25 +121,11 @@ class StorageCache(object):
         # while self.clients_global_first is in order from global to local.
         self.clients_global_first = list(reversed(self.clients_local_first))
 
-        # checkpoints_key holds the current checkpoints.
-        self.checkpoints_key = '%s:checkpoints' % self.prefix
-        assert isinstance(self.checkpoints_key, str) # no unicode on Py2
-
-        # delta_after0 contains {oid: tid} after checkpoint 0
-        # and before or at self.current_tid.
-        self.delta_after0 = _delta_map_type()
-
-        # delta_after1 contains {oid: tid} after checkpoint 1 and
-        # before or at checkpoint 0. The content of delta_after1 only
-        # changes when checkpoints move.
-        self.delta_after1 = _delta_map_type()
-
-        # delta_size_limit places an approximate limit on the number of
-        # entries in the delta_after maps.
-        self.delta_size_limit = options.cache_delta_size_limit
+        if local_client is None:
+            self.restore()
 
         if _tracer is None:
-            tracefile = _Loader.trace_file(options, self.prefix)
+            tracefile = persistence.trace_file(options, self.prefix)
             if tracefile:
                 _tracer = ZEOTracer(tracefile)
                 _tracer.trace(0x00)
@@ -127,12 +135,49 @@ class StorageCache(object):
             self._trace = self._tracer.trace
             self._trace_store_current = self._tracer.trace_store_current
 
+    def __bool__(self):
+        return True
+    __nonzero__ = __bool__
+
+    def __len__(self):
+        if self.clients_local_first is _UsedAfterRelease:
+            return 0
+        return len(self.local_client)
+
+    @property
+    def size(self):
+        if self.clients_local_first is _UsedAfterRelease:
+            return 0
+        return self.local_client.size
+
+    @property
+    def limit(self):
+        if self.clients_local_first is _UsedAfterRelease:
+            return 0
+        return self.local_client.limit
+
+    @property
+    def local_client(self):
+        """
+        The (shared) local in-memory cache client.
+        """
+        return self.clients_local_first[0]
+
+    def stats(self):
+        """
+        Return stats. This is a debugging aid only. The format is undefined and intended
+        for human inspection only.
+        """
+        try:
+            local_client = self.local_client
+        except TypeError:
+            return {'closed': True}
+        else:
+            return local_client.stats()
 
     def new_instance(self):
         """Return a copy of this instance sharing the same local client"""
-        local_client = None
-        if self.options.share_local_cache:
-            local_client = self.clients_local_first[0]
+        local_client = self.local_client if self.options.share_local_cache else None
 
         cache = type(self)(self.adapter, self.options, self.prefix,
                            local_client,
@@ -156,35 +201,80 @@ class StorageCache(object):
         self.clients_local_first = _UsedAfterRelease
         self.clients_global_first = _UsedAfterRelease
 
+    def save(self):
+        """
+        Store any persistent client data.
+        """
+        if self.options.cache_local_dir and len(self):
+            persistence.save_local_cache(self.options, self.prefix, self.write_to_stream)
+
+
+    def write_to_stream(self, stream):
+        # We currently don't write anything to the stream, delegating instead
+        # just to the local client.
+
+        # We experimented with trying to save and load chcekpoints and
+        # the delta maps, but this turned out to be complex (because
+        # the `new_instance`s that have the actual data are released
+        # before we are, so their data gets lost, and we have to
+        # implement a parent/child relationship to fix that) and no
+        # more effective than relying on the default checkpoints we
+        # get from polling, if there have been no changes---at least
+        # in the case of zodbshootout benchmark (in fact, it was
+        # somewhat *slower*, for reasons that aren't fully clear).
+
+        # Note that if we did want to dump the delta maps, we would
+        # need to either wrap them in a dict or dump them pairwise; We
+        # can't dump a BTree larger than about 25000 without getting
+        # into recursion problems.
+        self.local_client.write_to_stream(stream)
+
+    def restore(self):
+        options = self.options
+        if options.cache_local_dir:
+            persistence.load_local_cache(options, self.prefix, self)
+
+    def read_from_stream(self, stream):
+        return self.local_client.read_from_stream(stream)
+
     def close(self):
         """
         Release resources held by this instance, and
         save any persistent data necessary.
         """
-        clients = self.clients_local_first if self.clients_local_first is not _UsedAfterRelease else ()
-        for client in clients:
-            try:
-                save = getattr(client, 'save')
-            except AttributeError:
-                continue
-            else:
-                save()
+        self.save()
         self.release()
 
         if self._tracer:
+            # Note we can't do this in release(). Release is called on
+            # all instances, while close() is only called on the main one.
             self._tracer.close()
             del self._trace
             del self._trace_store_current
             del self._tracer
 
-    def clear(self):
-        """Remove all data from the cache.  Called by speed tests."""
+    def clear(self, load_persistent=True):
+        """
+        Remove all data from the cache.  Called by speed tests.
+
+        Starting from the introduction of persistent cache files,
+        this also results in the local client being repopulated with
+        the current set of persistent data. The *load_persistent* keyword can
+        be used to control this.
+
+        .. versionchanged:: 2.0b6
+           Added the ``load_persistent`` keyword. This argument is provisional.
+        """
         for client in self.clients_local_first:
             client.flush_all()
+
         self.checkpoints = None
-        self.delta_after0 = {}
-        self.delta_after1 = {}
+        self.delta_after0 = self._delta_map_type()
+        self.delta_after1 = self._delta_map_type()
         self.current_tid = 0
+
+        if load_persistent:
+            self.restore()
 
     @staticmethod
     def _trace(*_args, **_kwargs): # pylint:disable=method-hidden
@@ -345,7 +435,7 @@ class StorageCache(object):
                 cache_data = response.get(cp0_key)
                 if cache_data and len(cache_data) >= 8:
                     # Cache hit on the preferred cache key.
-                    local_client = self.clients_local_first[0]
+                    local_client = self.local_client
                     if client is not local_client:
                         # Copy to the local client.
                         local_client.set(cp0_key, cache_data)
@@ -529,8 +619,8 @@ class StorageCache(object):
                 client.set(self.checkpoints_key, cache_data)
 
             self.checkpoints = new_checkpoints
-            self.delta_after0 = {}
-            self.delta_after1 = {}
+            self.delta_after0 = self._delta_map_type()
+            self.delta_after1 = self._delta_map_type()
             self.current_tid = new_tid_int
             return
 
@@ -569,8 +659,8 @@ class StorageCache(object):
             log.debug("Using new checkpoints: %d %d", cp0, cp1)
             # Use the checkpoints specified by the cache.
             # Rebuild delta_after0 and delta_after1.
-            new_delta_after0 = {}
-            new_delta_after1 = {}
+            new_delta_after0 = self._delta_map_type()
+            new_delta_after1 = self._delta_map_type()
             if cp1 < new_tid_int:
                 # poller.list_changes provides an iterator of
                 # (oid, tid) where tid > after_tid and tid <= last_tid.

@@ -17,20 +17,8 @@ import logging
 import operator
 import time
 
-from relstorage._compat import PY3
-if PY3:
-    # On Py3, use the built-in pickle, so that we can get
-    # protocol 4 when available. It is *much* faster at writing out
-    # individual large objects such as the cache dict (about 3-4x faster)
-    from pickle import Unpickler
-    from pickle import Pickler
-else:
-    # On Py2, zodbpickle gives us protocol 3, but we don't
-    # use its special binary type
-    from relstorage._compat import Unpickler
-    from relstorage._compat import Pickler
-
-
+from relstorage.cache.persistence import Unpickler
+from relstorage.cache.persistence import Pickler
 from relstorage.cache.cache_ring import Cache
 
 log = logging.getLogger(__name__)
@@ -134,7 +122,7 @@ class SizedLRUMapping(object):
         self._aged_at = operations
         now = time.time()
         log.debug("Beginning frequency aging for %d cache entries",
-                 len(dct))
+                  len(dct))
         self._cache.age_lists()
         done = time.time()
         log.debug("Aged %d cache entries in %s", len(dct), done - now)
@@ -219,9 +207,9 @@ class SizedLRUMapping(object):
 
     _FILE_VERSION = 4
 
-    def load_from_file(self, cache_file):
+    def read_from_stream(self, cache_file):
         now = time.time()
-        # Unlike write_to_file, using the raw stream
+        # Unlike write_to_stream, using the raw stream
         # is fine for both Py 2 and 3.
         unpick = Unpickler(cache_file)
 
@@ -272,7 +260,7 @@ class SizedLRUMapping(object):
                  count, stored, cache_file, then - now)
         return count, stored
 
-    def write_to_file(self, cache_file, byte_limit=None):
+    def write_to_stream(self, cache_file, byte_limit=None):
         now = time.time()
         # pickling the items is about 3x faster than marshal
 
@@ -286,7 +274,6 @@ class SizedLRUMapping(object):
         # instead we use a BytesIO to buffer in memory, that time goes
         # down to about 7s. However, since we switched to writing many
         # smaller objects, that need goes away.
-
         pickler = Pickler(cache_file, -1) # Highest protocol
         dump = pickler.dump
 
