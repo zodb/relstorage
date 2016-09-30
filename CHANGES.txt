@@ -1,8 +1,8 @@
 1.6.3 (unreleased)
 ------------------
 
-- Nothing changed yet.
-
+- Fix packing in Oracle history-preserving databases. Reported in
+  issue 135 by Peter Jacobs.
 
 1.6.2 (2016-08-31)
 ------------------

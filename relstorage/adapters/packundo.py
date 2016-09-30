@@ -46,6 +46,9 @@ class PackUndo(object):
         self.locker = locker
         self.options = options
 
+    def _fetchmany(self, cursor):
+        return fetchmany(cursor)
+
     def choose_pack_transaction(self, pack_point):
         """Return the transaction before or at the specified pack time.
 
@@ -427,7 +430,7 @@ class HistoryPreservingPackUndo(PackUndo):
         self.runner.run_script_stmt(cursor, stmt, {'tid': tid})
 
         add_rows = []  # [(from_oid, tid, to_oid)]
-        for from_oid, state in fetchmany(cursor):
+        for from_oid, state in self._fetchmany(cursor):
             if hasattr(state, 'read'):
                 # Oracle
                 state = state.read()
@@ -675,7 +678,7 @@ class HistoryPreservingPackUndo(PackUndo):
                 """
                 self.runner.run_script_stmt(
                     cursor, stmt, {'pack_tid': pack_tid})
-                tid_rows = list(fetchmany(cursor))
+                tid_rows = list(self._fetchmany(cursor))
                 tid_rows.sort()  # oldest first
 
                 total = len(tid_rows)
@@ -768,7 +771,7 @@ class HistoryPreservingPackUndo(PackUndo):
             WHERE pack_state.tid = %(tid)s
             """
             self.runner.run_script_stmt(cursor, stmt, {'tid': tid})
-            for (oid,) in fetchmany(cursor):
+            for (oid,) in self._fetchmany(cursor):
                 packed_list.append((oid, tid))
 
         # Find out whether the transaction is empty
@@ -915,6 +918,8 @@ class OracleHistoryPreservingPackUndo(HistoryPreservingPackUndo):
           AND rownum <= 1000
         """
 
+    _fetchmany = _oracle_fetchmany
+
 
 class HistoryFreePackUndo(PackUndo):
     implements(IPackUndo)
@@ -938,9 +943,6 @@ class HistoryFreePackUndo(PackUndo):
         CREATE UNIQUE INDEX temp_pack_visit_zoid ON temp_pack_visit (zoid);
         CREATE INDEX temp_pack_keep_tid ON temp_pack_visit (keep_tid)
         """
-
-    def _fetchmany(self, cursor):
-        return fetchmany(cursor)
 
     def verify_undoable(self, cursor, undo_tid):
         """Raise UndoError if it is not safe to undo the specified txn."""
@@ -986,7 +988,7 @@ class HistoryFreePackUndo(PackUndo):
             ORDER BY object_state.zoid
             """
             self.runner.run_script_stmt(cursor, stmt)
-            oids = [oid for (oid,) in fetchmany(cursor)]
+            oids = [oid for (oid,) in self._fetchmany(cursor)]
             log_at = time.time() + 60
             if oids:
                 if attempt == 1:
@@ -1168,7 +1170,7 @@ class HistoryFreePackUndo(PackUndo):
                 WHERE keep = %(FALSE)s
                 """
                 self.runner.run_script_stmt(cursor, stmt)
-                to_remove = list(fetchmany(cursor))
+                to_remove = list(self._fetchmany(cursor))
 
                 total = len(to_remove)
                 log.info("pack: will remove %d object(s)", total)
