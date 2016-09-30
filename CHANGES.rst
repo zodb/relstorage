@@ -28,7 +28,7 @@
   ``cache_delta_size_limit``.
 
   The internal implementation details of the cache have been
-  completely changed. Only the ``StorageCache`` public class remains
+  completely changed. Only the ``StorageCache`` class remains
   unchanged (though that's also an implementation class). CFFI is now
   required, and support for PyPy versions older than 2.6.1 has been dropped.
 
@@ -38,6 +38,9 @@
 - Persistent cache files use the latest TID in the cache as the file's
   modification time. This allows a more accurate choice of which file
   to read at startup. Fixes :issue:`126`.
+
+- Fix packing of history-preserving Oracle databases. Reported in
+  :issue:`135` by Peter Jacobs.
 
 2.0.0b6 (2016-09-08)
 ====================

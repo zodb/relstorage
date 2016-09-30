@@ -56,8 +56,9 @@ class OracleHistoryPreservingPackUndo(HistoryPreservingPackUndo):
           AND rownum <= 1000
         """
 
-    # XXX: This may not be necessary, the HP tests don't fail
-    # without it.
+    # XXX: This is necessary
+    # (https://github.com/zodb/relstorage/issues/135), but the HP
+    # tests don't fail without it.
     _fetchmany = _oracle_fetchmany
 
 
