@@ -332,10 +332,28 @@ class SizedLRUMapping(object):
         bytes_written = 0
         if not byte_limit:
             byte_limit = self.limit
+        else:
+            # They provided us a byte limit. Our normal approach of
+            # writing LRU won't work, because we'd wind up chopping of
+            # the most frequent items! So first we begin by taking out
+            # everything until we fit.
+            entries_to_write = []
+            for entry in reversed(entries):
+                bytes_written += entry.len
+                if bytes_written > byte_limit:
+                    bytes_written -= entry.len
+                    break
+                entries_to_write.append(entry)
+            # Now we can write in reverse popularity order
+            entries_to_write.reverse()
+            entries = entries_to_write
+            bytes_written = 0
+            del entries_to_write
         for entry in entries:
             bytes_written += entry.len
             count_written += 1
             if bytes_written > byte_limit:
+                bytes_written -= entry.len
                 break
 
             dump((entry.key, entry.value))

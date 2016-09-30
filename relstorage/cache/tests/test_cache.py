@@ -797,7 +797,7 @@ class SizedLRUMappingTests(unittest.TestCase):
         self.assertEqual(client1.size, client1_max_size)
 
         bio = BytesIO()
-        self._save(bio, client1, options, client1_max_size * 2)
+        self._save(bio, client1, options, client1_max_size)
 
 
         client1 = self.getClass()(100)
@@ -820,6 +820,33 @@ class SizedLRUMappingTests(unittest.TestCase):
         count, stored = self._load(bio, client2, options)
         self.assertEqual(count, 0)
         self.assertEqual(stored, 0)
+
+        # If the limit is smaller than the size, write the most frequently used
+        # items
+        client1 = self.getClass()(100)
+        list_lrukeys = partial(list_lrukeys_, client1)
+        client1['a'] = b'1'
+        client1['b'] = b'2'
+        self.assertEqual(list_lrukeys('eden'), ['a', 'b'])
+        client1.get_and_bubble_all(('a',))
+        client1.get_and_bubble_all(('a',))
+        client1.get_and_bubble_all(('a',))
+        self.assertEqual(list_lrukeys('eden'), ['b', 'a'])
+        client1.get_and_bubble_all(('b',))
+        self.assertEqual(list_lrukeys('eden'), ['a', 'b'])
+        client1.get_and_bubble_all(('a',))
+        self.assertEqual(list_lrukeys('eden'), ['b', 'a'])
+
+        # A is much more popular than b
+
+        bio = BytesIO()
+        self._save(bio, client1, options, 2)
+
+        client2 = self.getClass()(100)
+        count, stored = self._load(bio, client2, options)
+        self.assertEqual(count, 1)
+        self.assertEqual(stored, 1)
+        self.assertEqual(list_lrukeys_(client2, 'eden'), ['a'])
 
 
     def test_load_and_store_to_gzip(self):
