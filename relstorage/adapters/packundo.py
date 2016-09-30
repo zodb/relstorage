@@ -416,7 +416,7 @@ class HistoryPreservingPackUndo(PackUndo):
         self.runner.run_script_stmt(cursor, stmt, {'tid': tid})
 
         add_rows = []  # [(from_oid, tid, to_oid)]
-        for from_oid, state in fetchmany(cursor):
+        for from_oid, state in self._fetchmany(cursor):
             state = db_binary_to_bytes(state)
             if hasattr(state, 'read'):
                 # Oracle
@@ -663,7 +663,7 @@ class HistoryPreservingPackUndo(PackUndo):
                 """
                 self.runner.run_script_stmt(
                     cursor, stmt, {'pack_tid': pack_tid})
-                tid_rows = list(fetchmany(cursor))
+                tid_rows = list(self._fetchmany(cursor))
                 tid_rows.sort()  # oldest first
 
                 total = len(tid_rows)
@@ -756,7 +756,7 @@ class HistoryPreservingPackUndo(PackUndo):
             WHERE pack_state.tid = %(tid)s
             """
             self.runner.run_script_stmt(cursor, stmt, {'tid': tid})
-            for (oid,) in fetchmany(cursor):
+            for (oid,) in self._fetchmany(cursor):
                 packed_list.append((oid, tid))
 
         # Find out whether the transaction is empty
@@ -881,7 +881,7 @@ class HistoryFreePackUndo(PackUndo):
             ORDER BY object_state.zoid
             """
             self.runner.run_script_stmt(cursor, stmt)
-            oids = [oid for (oid,) in fetchmany(cursor)]
+            oids = [oid for (oid,) in self._fetchmany(cursor)]
             log_at = time.time() + 60
             if oids:
                 if attempt == 1:
@@ -1056,7 +1056,7 @@ class HistoryFreePackUndo(PackUndo):
                 WHERE keep = %(FALSE)s
                 """
                 self.runner.run_script_stmt(cursor, stmt)
-                to_remove = list(fetchmany(cursor))
+                to_remove = list(self._fetchmany(cursor))
 
                 total = len(to_remove)
                 log.info("pack: will remove %d object(s)", total)
