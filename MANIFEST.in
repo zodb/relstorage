@@ -5,6 +5,7 @@ include tox.ini
 include .pylintrc
 include BUILDOUT.rst
 include CHANGES.rst
+include .landscape.yml
 recursive-include .travis *
 
 recursive-include notes *.ods *.py *.sql *.txt
