@@ -3,7 +3,7 @@
 =========
 
 
-2.0.0b7 (unreleased)
+2.0.0b7 (2016-10-01)
 ====================
 
 - Add the ability to limit the persistent cache files size. Thanks to
