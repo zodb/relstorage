@@ -461,6 +461,8 @@ cache-local-dir-write-max-size
         than ``cache-local-mb``, however, you may miss important
         entries that are only used at application startup.
 
+        .. versionadded:: 2.0b7
+
 Remote Caching
 --------------
 
