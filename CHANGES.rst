@@ -3,7 +3,7 @@
 =========
 
 
-2.0.0b8 (unreleased)
+2.0.0b8 (2016-10-02)
 ====================
 
 - List CFFI in `setup_requires` for buildout users.
