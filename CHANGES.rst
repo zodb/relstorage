@@ -6,7 +6,7 @@
 2.0.0b8 (unreleased)
 ====================
 
-- Nothing changed yet.
+- List CFFI in `setup_requires` for buildout users.
 
 
 2.0.0b7 (2016-10-01)

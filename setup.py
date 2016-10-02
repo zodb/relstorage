@@ -77,6 +77,9 @@ setup(
     classifiers=filter(None, classifiers.split("\n")),
     long_description=read_file("README.rst"),
     zip_safe=False,  # otherwise ZConfig can't see component.xml
+    setup_requires=[
+        'cffi',
+    ],
     install_requires=[
         'cffi',
         'perfmetrics',
