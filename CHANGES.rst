@@ -6,7 +6,9 @@
 2.0.0b9 (unreleased)
 ====================
 
-- Nothing changed yet.
+- The MySQL adapter will now produce a more informative error if it
+  gets an unexpected result taking the commit lock. Reported by Josh
+  Zuech.
 
 
 2.0.0b8 (2016-10-02)

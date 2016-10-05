@@ -24,6 +24,9 @@ from ..interfaces import UnableToAcquireCommitLockError
 from ..interfaces import UnableToAcquirePackUndoLockError
 from zope.interface import implementer
 
+class CommitLockQueryFailedError(UnableToAcquireCommitLockError):
+    pass
+
 @implementer(ILocker)
 class MySQLLocker(AbstractLocker):
 
@@ -32,7 +35,14 @@ class MySQLLocker(AbstractLocker):
         timeout = not nowait and self.commit_lock_timeout or 0
         stmt = "SELECT GET_LOCK(CONCAT(DATABASE(), '.commit'), %s)"
         cursor.execute(stmt, (timeout,))
-        locked = cursor.fetchone()[0]
+        try:
+            locked = cursor.fetchone()[0]
+        except TypeError as e: # pragma: no cover
+            # This has been observed under certain database drivers and concurrency loads,
+            # specifically gevent with umysqldb and high concurrency. It's not clear what the cause
+            # is, so lets at least raise a specific message.
+            raise CommitLockQueryFailedError("The commit lock query failed: %s" % repr(e))
+
         if nowait and locked in (0, 1):
             return bool(locked)
         if not locked:
