@@ -10,6 +10,11 @@
   gets an unexpected result taking the commit lock. Reported by Josh
   Zuech.
 
+- Compatibility with transaction 2.0 on older versions of ZODB (prior
+  to the unreleased version that handles encoding meta data for us),
+  newer versions of ZODB (that do the encoding), while maintaining
+  compatibility with transaction 1.x. In particular, the ``history``
+  method consistently returns bytes for username and description.
 
 2.0.0b8 (2016-10-02)
 ====================

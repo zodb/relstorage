@@ -140,14 +140,16 @@ class HistoryPreservingRelStorageTests(
     def checkNonASCIITransactionMetadata(self):
         # Verify the database stores and retrieves non-ASCII text
         # in transaction metadata.
-        ugly_string = b''.join(chr(c) for c in range(256))
-        ugly_string = ugly_string.decode('latin-1') # always text
-        if not TRANSACTION_DATA_IS_TEXT:
-            # transaction 1.x
-            check_string = ugly_string.encode("latin-1")
-        else:
-            # transaction 2.x
-            check_string = ugly_string
+        ugly_string = ''.join(chr(c) for c in range(256))
+        if isinstance(ugly_string, bytes):
+            # Always text. Use latin 1 because it can decode any arbitrary
+            # bytes.
+            ugly_string = ugly_string.decode('latin-1')
+
+        # The storage layer is defined to take bytes (implicitly in
+        # older ZODB releases, explicitly in ZODB 5.something), but historically
+        # it can accept either text or bytes. However, it always returns bytes
+        check_string = ugly_string.encode("utf-8")
 
         db = DB(self._storage)
         try:
@@ -162,10 +164,7 @@ class HistoryPreservingRelStorageTests(
 
             info = self._storage.undoInfo()
             self.assertEqual(info[0]['description'], check_string)
-            if not TRANSACTION_DATA_IS_TEXT:
-                self.assertEqual(info[1]['user_name'], b'/ ' + check_string)
-            else:
-                self.assertEqual(info[1]['user_name'], '/ ' + ugly_string)
+            self.assertEqual(info[1]['user_name'], b'/ ' + check_string)
         finally:
             db.close()
 
