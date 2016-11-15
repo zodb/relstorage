@@ -61,6 +61,7 @@ from relstorage._compat import dumps, loads
 from relstorage._compat import base64_encodebytes
 from relstorage._compat import base64_decodebytes
 
+
 log = logging.getLogger("relstorage")
 
 # Set the RELSTORAGE_ABORT_EARLY environment variable when debugging
@@ -72,17 +73,12 @@ abort_early = os.environ.get('RELSTORAGE_ABORT_EARLY')
 
 z64 = b'\0' * 8
 
-def _to_latin1(data):
+def _to_utf8(data):
     if data is None:
         return data
     if isinstance(data, bytes):
         return data
-    return data.encode("latin-1")
-
-def _from_latin1(data):
-    if isinstance(data, str) or data is None:
-        return data
-    return data.decode('latin-1')
+    return data.encode("utf-8")
 
 class _DummyLock(object):
     # Enough like a lock for our purposes so we can switch
@@ -790,9 +786,17 @@ class RelStorage(UndoLogCompatible,
             self._transaction = transaction
             self._resolved = set()
 
-            user = _to_latin1(transaction.user)
-            desc = _to_latin1(transaction.description)
-            ext = transaction._extension
+            user = _to_utf8(transaction.user)
+            desc = _to_utf8(transaction.description)
+            try:
+                # Newer transaction package, the documented way to get this.
+                # Also the objects that "look like" a transaction, like TransactionRecord
+                # (Eventually, but not released yet for TransactionRecord.)
+                ext = transaction.extended_info
+            except AttributeError:
+                # Older versions, prior to transaction 2.0 and ZODB 5.?
+                ext = transaction._extension
+
             if ext:
                 ext = dumps(ext, 1)
             else:
@@ -1127,12 +1131,17 @@ class RelStorage(UndoLogCompatible,
                 # meaning bytes. But code in the wild and the ZODB test suite
                 # sets them as native strings, meaning unicode on Py3. OTOH, the
                 # test suite checks that this method *returns* them as bytes!
-                d = {'id': base64_encodebytes(tid)[:-1],
-                     'time': TimeStamp(tid).timeTime(),
-                     'user_name':  user or b'',
-                     'description': desc or b''}
+                # This is largely cleaned up with transaction 2.0/ZODB 5, where the storage
+                # interface is defined in terms of bytes only.
+                d = {
+                    'id': base64_encodebytes(tid)[:-1],
+                    'time': TimeStamp(tid).timeTime(),
+                    'user_name':  user or b'',
+                    'description': desc or b'',
+                }
                 if ext:
                     d.update(loads(ext))
+
                 if filter is None or filter(d):
                     if i >= first:
                         res.append(d)
@@ -1165,12 +1174,13 @@ class RelStorage(UndoLogCompatible,
                     d = loads(extension)
                 else:
                     d = {}
-                d.update({"time": TimeStamp(tid).timeTime(),
-                          "user_name": username or '',
-                          "description": description or '',
-                          "tid": tid,
-                          "version": '',
-                          "size": length,
+                d.update({
+                    "time": TimeStamp(tid).timeTime(),
+                    "user_name": username or b'',
+                    "description": description or b'',
+                    "tid": tid,
+                    "version": '',
+                    "size": length,
                 })
                 if filter is None or filter(d):
                     res.append(d)
@@ -1589,11 +1599,11 @@ class RelStorageTransactionRecord(TransactionRecord):
             extension = loads(ext)
         else:
             extension = {}
+
         TransactionRecord.__init__(self, tid, status, user, description, extension)
 
     def __iter__(self):
         return RecordIterator(self)
-
 
 class RecordIterator(object):
     """Iterate over the objects in a transaction."""

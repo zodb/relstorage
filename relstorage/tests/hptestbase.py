@@ -17,6 +17,7 @@ from persistent.mapping import PersistentMapping
 from relstorage.tests.RecoveryStorage import UndoableRecoveryStorage
 from relstorage.tests.reltestbase import GenericRelStorageTests
 from relstorage.tests.reltestbase import RelStorageTestBase
+from relstorage._compat import TRANSACTION_DATA_IS_TEXT
 from ZODB.DB import DB
 from ZODB.FileStorage import FileStorage
 from ZODB.serialize import referencesf
@@ -140,11 +141,15 @@ class HistoryPreservingRelStorageTests(
         # Verify the database stores and retrieves non-ASCII text
         # in transaction metadata.
         ugly_string = ''.join(chr(c) for c in range(256))
-        if not isinstance(ugly_string, bytes):
-            # Py3
-            check_string = ugly_string.encode("latin-1")
-        else:
-            check_string = ugly_string
+        if isinstance(ugly_string, bytes):
+            # Always text. Use latin 1 because it can decode any arbitrary
+            # bytes.
+            ugly_string = ugly_string.decode('latin-1')
+
+        # The storage layer is defined to take bytes (implicitly in
+        # older ZODB releases, explicitly in ZODB 5.something), but historically
+        # it can accept either text or bytes. However, it always returns bytes
+        check_string = ugly_string.encode("utf-8")
 
         db = DB(self._storage)
         try:
