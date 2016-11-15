@@ -9,7 +9,7 @@ addons:
 # Use postgresql 9.4 to get support for BLOB SQL functions for pg8000
   postgresql: "9.4"
 python:
-  - pypy
+  - pypy-5.4.1
   - 2.7
   - 3.4
 env:
@@ -25,33 +25,27 @@ matrix:
       env: ENV=umysqldb
     - python: pypy
       env: ENV=pymysql
-    - python: pypy
+    - python: pypy-5.4.1
       env: ENV=umysqldb
   fast_finish: true
 script:
 # coverage slows PyPy down from 2minutes to 12+.
 # But don't run the pymysql/pypy tests twice.
-  - if [[ $TRAVIS_PYTHON_VERSION == 'pypy' ]]; then python -m relstorage.tests.alltests -v; fi
-  - if [[ $TRAVIS_PYTHON_VERSION != 'pypy' ]]; then coverage run -m relstorage.tests.alltests -v; fi
+  - if [[ $TRAVIS_PYTHON_VERSION == pypy* ]]; then python -m relstorage.tests.alltests -v; fi
+  - if [[ $TRAVIS_PYTHON_VERSION != pypy* ]]; then coverage run -m relstorage.tests.alltests -v; fi
 after_success:
   - coveralls
 notifications:
   email: false
 
 before_install:
-  - export BUILD_RUNTIMES=$HOME/.runtimes
-  - if [[ $TRAVIS_PYTHON_VERSION == 'pypy' ]]; then .travis/install.sh $TRAVIS_PYTHON_VERSION; fi
-  - if [[ $TRAVIS_PYTHON_VERSION == 'pypy' ]]; then ls -l $HOME/.runtimes/versions/pypy/bin; fi
-  - if [[ $TRAVIS_PYTHON_VERSION == 'pypy' ]]; then deactivate; fi
-  - if [[ $TRAVIS_PYTHON_VERSION == 'pypy' ]]; then export PATH=$HOME/.runtimes/versions/$TRAVIS_PYTHON_VERSION/bin:$PATH; fi
-  - hash -r
   - python --version
 
 install:
   - pip install -U pip setuptools
   - pip install -U tox coveralls
-  - if [[ $TRAVIS_PYTHON_VERSION == 'pypy' ]]; then pip install -U python-memcached; fi
-  - if [[ $TRAVIS_PYTHON_VERSION != 'pypy' ]]; then pip install -U pylibmc cffi; fi
+  - if [[ $TRAVIS_PYTHON_VERSION == pypy* ]]; then pip install -U python-memcached; fi
+  - if [[ $TRAVIS_PYTHON_VERSION != pypy* ]]; then pip install -U pylibmc cffi; fi
   - pip install -U -e ".[test]"
   - .travis/setup-$ENV.sh
 # cache: pip seems not to work if `install` is replaced (https://github.com/travis-ci/travis-ci/issues/3239)
@@ -59,8 +53,6 @@ cache:
   directories:
     - $HOME/.cache/pip
     - $HOME/.venv
-    - $HOME/.runtimes
-    - $HOME/.wheelhouse
 
 before_cache:
     - rm -f $HOME/.cache/pip/log/debug.log
