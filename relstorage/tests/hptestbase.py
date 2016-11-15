@@ -17,6 +17,7 @@ from persistent.mapping import PersistentMapping
 from relstorage.tests.RecoveryStorage import UndoableRecoveryStorage
 from relstorage.tests.reltestbase import GenericRelStorageTests
 from relstorage.tests.reltestbase import RelStorageTestBase
+from relstorage._compat import TRANSACTION_DATA_IS_TEXT
 from ZODB.DB import DB
 from ZODB.FileStorage import FileStorage
 from ZODB.serialize import referencesf
@@ -139,11 +140,13 @@ class HistoryPreservingRelStorageTests(
     def checkNonASCIITransactionMetadata(self):
         # Verify the database stores and retrieves non-ASCII text
         # in transaction metadata.
-        ugly_string = ''.join(chr(c) for c in range(256))
-        if not isinstance(ugly_string, bytes):
-            # Py3
+        ugly_string = b''.join(chr(c) for c in range(256))
+        ugly_string = ugly_string.decode('latin-1') # always text
+        if not TRANSACTION_DATA_IS_TEXT:
+            # transaction 1.x
             check_string = ugly_string.encode("latin-1")
         else:
+            # transaction 2.x
             check_string = ugly_string
 
         db = DB(self._storage)
@@ -159,7 +162,10 @@ class HistoryPreservingRelStorageTests(
 
             info = self._storage.undoInfo()
             self.assertEqual(info[0]['description'], check_string)
-            self.assertEqual(info[1]['user_name'], b'/ ' + check_string)
+            if not TRANSACTION_DATA_IS_TEXT:
+                self.assertEqual(info[1]['user_name'], b'/ ' + check_string)
+            else:
+                self.assertEqual(info[1]['user_name'], '/ ' + ugly_string)
         finally:
             db.close()
 

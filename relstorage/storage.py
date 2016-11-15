@@ -60,6 +60,7 @@ from relstorage._compat import iterkeys, iteritems
 from relstorage._compat import dumps, loads
 from relstorage._compat import base64_encodebytes
 from relstorage._compat import base64_decodebytes
+from relstorage._compat import TRANSACTION_DATA_IS_TEXT
 
 log = logging.getLogger("relstorage")
 
@@ -83,6 +84,15 @@ def _from_latin1(data):
     if isinstance(data, str) or data is None:
         return data
     return data.decode('latin-1')
+
+if TRANSACTION_DATA_IS_TEXT:
+    def _from_latin1_tx2(data):
+        if isinstance(data, bytes):
+            return data.decode('latin-1')
+        return data
+else:
+    def _from_latin1_tx2(data):
+        return data
 
 class _DummyLock(object):
     # Enough like a lock for our purposes so we can switch
@@ -1127,12 +1137,16 @@ class RelStorage(UndoLogCompatible,
                 # meaning bytes. But code in the wild and the ZODB test suite
                 # sets them as native strings, meaning unicode on Py3. OTOH, the
                 # test suite checks that this method *returns* them as bytes!
-                d = {'id': base64_encodebytes(tid)[:-1],
-                     'time': TimeStamp(tid).timeTime(),
-                     'user_name':  user or b'',
-                     'description': desc or b''}
+                # This is largely cleaned up with transaction 2.0.
+                d = {
+                    'id': base64_encodebytes(tid)[:-1],
+                    'time': TimeStamp(tid).timeTime(),
+                    'user_name':  _from_latin1_tx2(user or b''),
+                    'description': _from_latin1_tx2(desc or b''),
+                }
                 if ext:
                     d.update(loads(ext))
+
                 if filter is None or filter(d):
                     if i >= first:
                         res.append(d)
@@ -1589,6 +1603,9 @@ class RelStorageTransactionRecord(TransactionRecord):
             extension = loads(ext)
         else:
             extension = {}
+
+        user = _from_latin1_tx2(user)
+        description = _from_latin1_tx2(description)
         TransactionRecord.__init__(self, tid, status, user, description, extension)
 
     def __iter__(self):
