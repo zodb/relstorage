@@ -170,15 +170,15 @@ class BasicRecoveryStorage(IteratorDeepCompare):
         root = conn.root()
         root.obj = obj1 = MinPO(1)
         txn = transaction.get()
-        txn.note('root -> obj')
+        txn.note(u'root -> obj')
         txn.commit()
         root.obj.obj = obj2 = MinPO(2)
         txn = transaction.get()
-        txn.note('root -> obj -> obj')
+        txn.note(u'root -> obj -> obj')
         txn.commit()
         del root.obj
         txn = transaction.get()
-        txn.note('root -X->')
+        txn.note(u'root -X->')
         txn.commit()
         # Now copy the transactions to the destination
         self._dst.copyTransactionsFrom(self._storage)
@@ -191,7 +191,7 @@ class BasicRecoveryStorage(IteratorDeepCompare):
         conn2 = db2.open()
         conn2.root().extra = 0
         txn = transaction.get()
-        txn.note('root.extra = 0')
+        txn.note(u'root.extra = 0')
         txn.commit()
         # Now pack the destination.
         snooze()
@@ -204,7 +204,7 @@ class BasicRecoveryStorage(IteratorDeepCompare):
 
     def checkRestoreAfterDoubleCommit(self):
         oid = self._storage.new_oid()
-        revid = b'\0'*8
+        revid = b'\0' * 8
         data1 = zodb_pickle(MinPO(11))
         data2 = zodb_pickle(MinPO(12))
         # Begin the transaction
