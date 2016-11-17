@@ -23,7 +23,7 @@ matrix:
   exclude:
     - python: 3.4
       env: ENV=umysqldb
-    - python: pypy
+    - python: pypy-5.4.1
       env: ENV=pymysql
     - python: pypy-5.4.1
       env: ENV=umysqldb
