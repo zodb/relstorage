@@ -789,10 +789,11 @@ class RelStorage(UndoLogCompatible,
             user = _to_utf8(transaction.user)
             desc = _to_utf8(transaction.description)
             try:
-                # Newer transaction package, the documented way to get this.
+                # Newer transaction package, the documented way to get this
+                # as of 2.0.3 (NOTE: 2.0.2/1/0 had an incompatible spelling.
+                # 2.0.3 makes everything consistent.)
                 # Also the objects that "look like" a transaction, like TransactionRecord
-                # (Eventually, but not released yet for TransactionRecord.)
-                ext = transaction.extended_info
+                ext = transaction.extension
             except AttributeError:
                 # Older versions, prior to transaction 2.0 and ZODB 5.?
                 ext = transaction._extension
