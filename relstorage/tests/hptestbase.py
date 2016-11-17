@@ -227,15 +227,15 @@ class HistoryPreservingRelStorageTests(
             r1['A'] = PersistentMapping()
             B = PersistentMapping()
             r1['A']['B'] = B
-            transaction.get().note('add A then add B to A')
+            transaction.get().note(u'add A then add B to A')
             transaction.commit()
 
             del r1['A']['B']
-            transaction.get().note('remove B from A')
+            transaction.get().note(u'remove B from A')
             transaction.commit()
 
             r1['A']['C'] = ''
-            transaction.get().note('add C to A')
+            transaction.get().note(u'add C to A')
             transaction.commit()
 
             now = packtime = time.time()

@@ -158,11 +158,11 @@ class GenericRelStorageTests(
 
             storage = c1._storage
             t = transaction.Transaction()
-            t.description = 'invalidation test'
-            storage.tpc_begin(t)
+            t.description = u'invalidation test'
+            c1.tpc_begin(t)
             c1.commit(t)
-            storage.tpc_vote(t)
-            storage.tpc_finish(t)
+            storage.tpc_vote(storage._transaction)
+            storage.tpc_finish(storage._transaction)
 
             self.assertNotIn('myobj', r2)
             c2.sync()
@@ -189,11 +189,11 @@ class GenericRelStorageTests(
 
             storage = c1._storage
             t = transaction.Transaction()
-            t.description = 'isolation test 1'
-            storage.tpc_begin(t)
+            t.description = u'isolation test 1'
+            c1.tpc_begin(t)
             c1.commit(t)
-            storage.tpc_vote(t)
-            storage.tpc_finish(t)
+            storage.tpc_vote(storage._transaction)
+            storage.tpc_finish(storage._transaction)
 
             # The second connection will now load root['alpha'], but due to
             # MVCC, it should continue to see the old state.
@@ -215,11 +215,11 @@ class GenericRelStorageTests(
 
             storage = c1._storage
             t = transaction.Transaction()
-            t.description = 'isolation test 2'
-            storage.tpc_begin(t)
+            t.description = u'isolation test 2'
+            c1.tpc_begin(t)
             c1.commit(t)
-            storage.tpc_vote(t)
-            storage.tpc_finish(t)
+            storage.tpc_vote(storage._transaction)
+            storage.tpc_finish(storage._transaction)
 
             # The second connection will now load root[3], but due to MVCC,
             # it should continue to see the old state.
@@ -384,7 +384,7 @@ class GenericRelStorageTests(
             c = db.open()
             r = c.root()
             r['key'] = 1
-            transaction.get().note('A long description. ' * 1000)
+            transaction.get().note(u'A long description. ' * 1000)
             transaction.commit()
         finally:
             db.close()
