@@ -371,7 +371,7 @@ int rsc_eden_add_many(RSCache* cache,
         // _eden_add *always* adds, but it may or may not be able to
         // rebalance.
         added_count += 1;
-        RSRingNode add_rejects = _eden_add(cache, entry_array + i, _SPILL_NO_VICTIMS);
+        RSRingNode add_rejects = _eden_add(cache, incoming, _SPILL_NO_VICTIMS);
         if (add_rejects.u.entry.frequency) {
             // We would have rejected something, so we must be full.
             // Well, this isn't strictly true. It could be one really
@@ -382,6 +382,13 @@ int rsc_eden_add_many(RSCache* cache,
             // one's already in here, so quit.
             break;
         }
+    }
+
+    // Anything left is because we broke out of the loop. They're
+    // rejects and need to be marked as such.
+    for (i += 1; i < entry_count; i++) {
+        RSRingNode* rejected = entry_array + i;
+        rejected->u.entry.r_parent = -1;
     }
 
     return added_count;

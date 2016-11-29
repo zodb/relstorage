@@ -44,7 +44,7 @@ typedef struct RSRingNode_struct {
             rs_counter_t frequency;
             // The weight of this item.
             rs_counter_t weight;
-            // The number of the parent generation
+            // The number of the parent (containing) generation
             int r_parent;
         } entry;
         struct head_t {
@@ -54,7 +54,10 @@ typedef struct RSRingNode_struct {
             rs_counter_t sum_weights;
             // The maximum allowed weight
             rs_counter_t max_weight;
-            // The generation number
+            // The generation number. We don't make any use of this
+            // number other than ensuring it is copied to r_parent
+            // as needed. You can use any value except for negative
+            // values in your RSCache generations.
             int generation;
         } head;
     } u;

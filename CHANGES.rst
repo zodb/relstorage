@@ -16,6 +16,11 @@
   compatibility with transaction 1.x. In particular, the ``history``
   method consistently returns bytes for username and description.
 
+- In very rare cases, persistent cache files could result in a corrupt
+  cache state in memory after loading them, resulting in
+  AttributeErrors until the cache files were removed and the instance
+  restarted. Reported in :issue:`140` by Carlos Sanchez.
+
 2.0.0b8 (2016-10-02)
 ====================
 
