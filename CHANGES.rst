@@ -3,7 +3,7 @@
 =========
 
 
-2.0.0b9 (unreleased)
+2.0.0b9 (2016-11-29)
 ====================
 
 - The MySQL adapter will now produce a more informative error if it
