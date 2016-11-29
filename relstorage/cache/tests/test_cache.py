@@ -1254,6 +1254,23 @@ class CacheRingTests(unittest.TestCase):
 
 class CacheTests(unittest.TestCase):
 
+    def test_bad_generation_index_attribute_error(self):
+        cache = Cache(20)
+        # Check proper init
+        getattr(cache.generations[1], 'limit')
+        getattr(cache.generations[2], 'limit')
+        getattr(cache.generations[3], 'limit')
+
+        # Gen 0 should be missing
+        with self.assertRaises(AttributeError) as ex:
+            cache.generations[0].on_hit()
+
+        msg = "Generation 0 has no attribute 'on_hit'"
+        if hasattr(ex.exception, 'message'):
+            # py2
+            self.assertEqual(ex.exception.message, msg)
+        self.assertEqual(ex.exception.args[0], msg)
+
     def test_free_reuse(self):
         cache = Cache(20)
         lru = cache.protected
@@ -1357,6 +1374,37 @@ class CacheTests(unittest.TestCase):
         for i, e in enumerate(begin_nodes):
             self.assertIs(e, entries[i])
         self.assertEqual(0, len(cache.eden.node_free_list))
+
+    def test_add_MRUs_reject_sets_sentinel_values(self):
+        # When we find an item that completely fills the cache,
+        # all the rest of the items are marked as rejected.
+        cache = Cache(20)
+        self.assertEqual(2, cache.eden.limit)
+        self.assertEqual(2, cache.probation.limit)
+        self.assertEqual(16, cache.protected.limit)
+
+        added_entries = cache.eden.add_MRUs([
+            # over fill eden
+            ('1', b'012345678901234'),
+            # 1 goes to protected, filling it. eden is also over full with 2. probation is empty
+            ('2', b'012'),
+            # 3 fills eden, bumping 2 to probation. But probation is actually overfull now
+            # so we'd like to spill something if we could (but we can't.)
+            ('3', b'0'),
+            # 4 should never be added because it won't fit anywhere.
+            ('4', b'e'),
+        ])
+
+        def keys(x):
+            return [e.key for e in x]
+
+        self.assertEqual(keys(cache.eden), ['3'])
+        self.assertEqual(keys(cache.protected), ['1'])
+        self.assertEqual(keys(cache.probation), ['2'])
+        self.assertEqual('1 2 3'.split(), [e.key for e in added_entries])
+        self.assertEqual(3, len(added_entries))
+
+
 
 from relstorage.options import Options
 

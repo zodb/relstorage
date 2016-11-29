@@ -47,6 +47,20 @@ _lru_on_hit = _FFI_RING.rsc_on_hit
 _lru_age_lists = _FFI_RING.rsc_age_lists
 _eden_add_many = _FFI_RING.rsc_eden_add_many
 
+class _NoSuchGeneration(object):
+    """Marker object for the missing generation ring"""
+    # For more specific error messages; if we get an AttributeError
+    # on this object, it means we have corrupted the cache. We only
+    # expect to wind up with this in generation 0.
+
+    def __init__(self, generation_number):
+        self.__gen_num = generation_number
+
+    def __getattr__(self, name):
+        msg = "Generation %s has no attribute %r" % (self.__gen_num, name)
+        raise AttributeError(msg)
+
+
 class Cache(object):
     """
     A sized cache.
@@ -97,10 +111,14 @@ class Cache(object):
     _preallocate_max_count = 150000 # 8 MB array
 
     #: A "mapping" between the __parent__ of an entry and the generation
-    #: ring that holds it.
-    generations = (None, None, None, None)
+    #: ring that holds it. (Indexing by ints is faster than a dictionary lookup
+    #: especially on PyPy.) Initialize to an object that will report a bad lookup
+    #: for the right generation. (The generator expression keeps us from leaking the
+    #: indexing variable on Py2.)
+    generations = tuple((_NoSuchGeneration(i) for i in range(4)))
 
     def __init__(self, byte_limit):
+        self._byte_limit = byte_limit
         # This must hold all the ring entries, no matter which ring they are in.
         self.data = {}
 
@@ -109,29 +127,34 @@ class Cache(object):
         self.eden = EdenRing(int(byte_limit * self._gen_eden_pct))
 
         self.cffi_cache = ffi_new("RSCache*",
-                                   {'eden': self.eden.ring_home,
-                                    'protected': self.protected.ring_home,
-                                    'probation': self.probation.ring_home})
+                                  {'eden': self.eden.ring_home,
+                                   'protected': self.protected.ring_home,
+                                   'probation': self.probation.ring_home})
 
-        self.generations = [None, None, None, None] # 0 isn't used
-        for x in (self.protected, self.probation, self.eden):
-            self.generations[x.PARENT_CONST] = x
-        self.generations = tuple(self.generations)
+        generations = list(Cache.generations) # Preserve the NoSuchGeneration initializers
+        for gen in (self.protected, self.probation, self.eden):
+            generations[gen.PARENT_CONST] = gen
+        self.generations = tuple(generations)
 
-        node_free_list = []
+        # Setup the shared data structures for the generations
+        node_free_list = self._make_node_free_list()
         for value, name in ((self.data, 'data'),
                             (self.cffi_cache, 'cffi_cache'),
                             (node_free_list, 'node_free_list')):
             for ring in self.generations[1:]:
                 setattr(ring, name, value)
 
+    def _make_node_free_list(self):
+        "Create the node free list and preallocate any desired entries"
+        node_free_list = []
         if self._preallocate_entries:
-            needed_entries = byte_limit // self._preallocate_avg_size
+            needed_entries = self._byte_limit // self._preallocate_avg_size
             entry_count = min(self._preallocate_max_count, needed_entries)
 
             keys_and_values = itertools.repeat(('', b''), entry_count)
             _, nodes = self.eden._preallocate_entries(keys_and_values, entry_count)
             node_free_list.extend(nodes)
+        return node_free_list
 
     def age_lists(self):
         _lru_age_lists(self.cffi_cache)
@@ -166,12 +189,22 @@ class CacheRingNode(object):
         # by the C code)
         self.len = entry.weight = len(key) + len(value)
 
-    def reset(self, key, value):
+    def reset(self, key='', value=b''):
         self.key = key
         self.value = value
         entry = self.cffi_entry
         entry.frequency = 1
         self.len = entry.weight = len(key) + len(value)
+
+    def reset_for_free_list(self):
+        """
+        Put this node into an invalid state, representing that it
+        should not be in a ring, but just the free list.
+
+        You must call `reset` to use this node again.
+        """
+        self.key = self.value = self.len = None
+        self.cffi_entry.r_parent = 0 # make sure we can't dereference a generation
 
     frequency = property(lambda self: self.cffi_entry.frequency,
                          lambda self, nv: setattr(self.cffi_entry, 'frequency', nv))
@@ -196,12 +229,17 @@ def _mutates_free_list(func):
             return func(self, *args, **kwargs)
         finally:
             self._mutated_free_list = True
+            # Now replace ourself with a "bound function" on the instance
+            # so our overhead somewhat goes away
             setattr(self, func.__name__, lambda *args: func(self, *args))
 
     return mutates
 
 class CacheRing(object):
 
+    # For the bulk insertion method add_MRUs in the eden generation, we need
+    # to know whether or not the node_free_list we have is still the original
+    # contiguous array that can be passed to C.
     _mutated_free_list = False
 
     # The CFFI pointer to the RSCache structure. It should be shared
@@ -230,12 +268,19 @@ class CacheRing(object):
         self.node_free_list = []
 
     def _preallocate_entries(self, ordered_keys_and_values, count=None):
+        """
+        Create and return *count* CacheRingNode values.
+
+        The underlying RSRingNode structs will be allocated in a single contiguous
+        C array.
+
+        Return the RSRingNode pointer and the CacheRingNodes.
+        """
         count = len(ordered_keys_and_values) if count is None else count
         nodes = ffi.new('RSRingNode[]', count)
         entries = []
         for i, (k, v) in enumerate(ordered_keys_and_values):
-            #k, v = ordered_keys_and_values[i]
-            node = nodes + i # this gets RSRingNode*; nodes[i] returns the struct
+            node = nodes + i # pointer arithmetic gets RSRingNode*; nodes[i] returns the struct
             entry = CacheRingNode(k, v, node)
             entry._cffi_owning_node = nodes
             entries.append(entry)
@@ -305,9 +350,8 @@ class CacheRing(object):
         node_free_list = self.node_free_list
         while node:
             old_entry = dct.pop(ffi_from_handle(node.user_data).key)
+            old_entry.reset_for_free_list()
             node_free_list.append(old_entry)
-            old_entry.key = None
-            old_entry.value = None
 
             node = node.r_next
 
@@ -338,18 +382,27 @@ class EdenRing(CacheRing):
         number_nodes = len(ordered_keys_and_values)
         if not number_nodes:
             return ()
-        # Start by using existing entries *if* we haven't mutated the free list.
+        # Start by using existing entries *if* we haven't mutated the free list
+        # (Because the C code needs contiguous data)
         if not self._mutated_free_list and self.node_free_list:
             self._mutated_free_list = True
+            # Take the number of entries out of the free list and
+            # pair them up with keys/values
             entries = self.node_free_list[:number_nodes]
             nodes = entries[0]._cffi_owning_node
             del self.node_free_list[:number_nodes]
             for entry, (k, v) in izip(entries, ordered_keys_and_values):
                 entry.reset(k, v)
 
-            remaining_keys_and_values = ordered_keys_and_values[len(entries):]
+            # Move the freelist nodes into the ring. Anything that
+            # doesn't fit is moved back onto the freelist
             added_entries = self.__add_MRUs(nodes, entries)
-            if (len(added_entries) == len(entries)) and remaining_keys_and_values:
+
+            # Did we have any more incoming key/values than we had freelist nodes?
+            remaining_keys_and_values = ordered_keys_and_values[len(entries):]
+            # If we did have mare, and we successfully added all the entries from the freelist,
+            # then go ahead and add as many of the leftovers as we can
+            if remaining_keys_and_values and (len(added_entries) == len(entries)):
                 added_entries.extend(self.add_MRUs(remaining_keys_and_values))
 
             return added_entries
@@ -370,21 +423,28 @@ class EdenRing(CacheRing):
             # Allow any nodes we preallocated to get GC'd now
             return ()
 
-        # Because we went to the trouble of allocating them, we might
+        if added_count == number_nodes:
+            # Yay, they all fit!
+            return entries
+
+        # Ok, some few did not fit, so we have to separate them out.
+        # Because we went to the trouble of pre-allocating them, we might
         # as well put them on the free list if we didn't use them. The
         # whole array will stay around around as long as any one
         # object does
-        if added_count < number_nodes:
-            node_free_list = self.node_free_list
-            added_entries = []
-            for e in entries:
-                if e.cffi_ring_node.u.entry.r_parent == -1:
-                    e.key = e.value = None
-                    node_free_list.append(e)
-                else:
-                    added_entries.append(e)
-            return added_entries
-        return entries
+        node_free_list = self.node_free_list
+        added_entries = []
+        for e in entries:
+            if e.cffi_entry.r_parent == -1:
+                # -1 is the sentinel meaning this node wasn't added,
+                # but we don't want to leave that around because that's a
+                # valid index in Python, so convert back to 0, which is not.
+                # Also free whatever python memory it was holding on to.
+                e.reset_for_free_list()
+                node_free_list.append(e)
+            else:
+                added_entries.append(e)
+        return added_entries
 
     @_mutates_free_list
     def add_MRU(self, key, value):
@@ -407,9 +467,8 @@ class EdenRing(CacheRing):
             old_entry = dct.pop(ffi_from_handle(node.user_data).key)
             # TODO: Should we avoid this if _cffi_owning_node is set?
             # To allow that big array to get GC'd sooner
+            old_entry.reset_for_free_list()
             node_free_list.append(old_entry)
-            old_entry.key = None
-            old_entry.value = None
             node = node.r_next
         return new_entry
 
