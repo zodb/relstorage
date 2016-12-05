@@ -54,12 +54,16 @@ def _check_load_and_store_multiple_files_hit_limit(self, mapping, wrapping_stora
         mapping[str(i)] = b'abc'
         mapping[str(i)] # Increment so it gets saved
 
-        persistence.save_local_cache(options, 'test', dump_object, _pid=i)
+        persistence.save_local_cache(options, 'test', dump_object)
         self.assertEqual(persistence.count_cache_files(options, 'test'),
                          i + 1)
 
+    # make sure it's not in the dict so that even if we find the most recent
+    # cache file first, we still have something to load. If we don't we can sometimes
+    # find that file and fail to store anything and prematurely break out of the loop
+    del mapping[str(i)]
     files_loaded = persistence.load_local_cache(options, 'test', dump_object)
-    # XXX: This sometimes fails on Travis, returning 1 Why?
+
     self.assertEqual(files_loaded, 2)
 
     import shutil
@@ -1152,6 +1156,7 @@ class LocalClientTests(unittest.TestCase):
         import tempfile
         import shutil
         import os
+        import time
         temp_dir = tempfile.mkdtemp(".rstest_cache")
         root_temp_dir = temp_dir
         if not _make_dir:
@@ -1177,13 +1182,27 @@ class LocalClientTests(unittest.TestCase):
             c2 = self._makeOne(cache_local_dir=temp_dir)
             self.assertEqual(c2.get('k0'), b'abc')
 
-            # Change and save and we overwrite the
+            # Change and save and we replace the
             # existing file.
             c2.set('k1', b'def')
             c2.get('k1') # increment
+
             c2.save()
             new_cache_files = os.listdir(temp_dir)
-            self.assertEqual(cache_files, new_cache_files)
+            self.assertEqual(len(cache_files), len(new_cache_files))
+            # No files in common
+            self.assertTrue(set(new_cache_files).isdisjoint(set(cache_files)))
+
+            # And again
+            cache_files = new_cache_files
+            c2.get_cache_modification_time_for_stream = lambda: time.time() + 2000
+            c2.save()
+            new_cache_files = os.listdir(temp_dir)
+            self.assertEqual(len(cache_files), len(new_cache_files))
+            # No files in common
+            self.assertTrue(set(new_cache_files).isdisjoint(set(cache_files)),
+                            (cache_files, new_cache_files))
+
 
             c3 = self._makeOne(cache_local_dir=temp_dir)
             self.assertEqual(c3.get('k0'), b'abc')

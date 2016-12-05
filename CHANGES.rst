@@ -6,7 +6,10 @@
 2.0.0b10 (unreleased)
 =====================
 
-- Nothing changed yet.
+- Writing persistent cache files has been changed to reduce the risk
+  of stale temporary files remaining. Also, files are kept open for a
+  shorter period of time and removed in a way that should work better
+  on Windows.
 
 
 2.0.0b9 (2016-11-29)
