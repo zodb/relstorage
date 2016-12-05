@@ -383,13 +383,17 @@ cache-local-dir
         combined to get the "warmest" possible cache.
 
         Each file could potentially be up to the size of
-        ``cache-local-mb``, but they are compressed and are usually
-        much smaller. However, the time taken to load the cache file
-        (which only occurs when RelStorage is first opened) and the
-        time taken to save the cache file (which only occurs when the
-        database is closed) are proportional to the total size of the
-        cache; thus, a cache that is too large (holding many unused
-        entries) will slow down startup/shutdown for no benefit.
+        ``cache-local-dir-write-max-size`` (but see
+        ``cache-local-dir-compress``) The time taken to load the cache
+        file (which only occurs when RelStorage is first opened) and
+        the time taken to save the cache file (which only occurs when
+        the database is closed) are proportional to the total size of
+        the cache; thus, a cache that is too large (holding many
+        unused entries) will slow down startup/shutdown for no
+        benefit. However, the timing is probably not a practical
+        concern compared to the disk usage; on one system, a 300MB
+        uncompressed cache file can be saved in 3-4 seconds and read
+        in 2-3 seconds.
 
         This directory can be shared among storages connected to
         different databases, so long as they all have a distinct
@@ -401,7 +405,7 @@ cache-local-dir
 
         .. tip::
            If the database (ZODB.DB object) is not properly
-           ``close()``, then the cache files will not be written.
+           :class:`closed <ZODB.interfaces.IDatabase>`, then the cache files will not be written.
 
 cache-local-dir-count
         How many files that ``cache-local-dir`` will be allowed to
