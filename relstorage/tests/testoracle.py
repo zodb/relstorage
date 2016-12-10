@@ -25,6 +25,8 @@ import os
 import sys
 import unittest
 
+# pylint:disable=no-member,too-many-ancestors
+
 
 base_dbname = os.environ.get('RELSTORAGETEST_DBNAME', 'relstoragetest')
 
@@ -49,6 +51,7 @@ class UseOracleAdapter(object):
 class ZConfigTests(object):
 
     def checkConfigureViaZConfig(self):
+        # pylint:disable=too-many-locals
         import tempfile
         dsn = os.environ.get('ORACLE_TEST_DSN', 'XE')
         fd, replica_conf = tempfile.mkstemp()
@@ -144,6 +147,7 @@ db_names = {
     }
 
 def test_suite():
+    # pylint:disable=too-many-locals
     import relstorage.adapters.oracle as _adapter
     try:
         _adapter.select_driver()
@@ -163,7 +167,7 @@ def test_suite():
     ]:
         suite.addTest(unittest.makeSuite(klass, "check"))
 
-    import ZODB.blob
+
     from .util import RUNNING_ON_CI
     if RUNNING_ON_CI or os.environ.get("RS_ORCL_SMALL_BLOB"):
         # cx_Oracle blob support can only address up to sys.maxint on

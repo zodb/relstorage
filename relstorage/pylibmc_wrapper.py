@@ -18,7 +18,7 @@ to zope.conf and set the 'cache-servers' parameter as well.
 """
 
 import pylibmc
-from _pylibmc import MemcachedError  # pylibmc >= 0.9
+from pylibmc import Error as MemcachedError
 import logging
 from functools import wraps
 

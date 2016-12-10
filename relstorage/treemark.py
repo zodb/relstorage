@@ -111,6 +111,7 @@ class TreeMarker(object):
         new OIDs marked and `next_pass` is the collection of OIDs to
         follow in the next pass.
         """
+        # pylint:disable=too-many-locals
         # next_pass: {oid_hi: IISet32X}
         next_pass = collections.defaultdict(IISet32X)
         found = 0

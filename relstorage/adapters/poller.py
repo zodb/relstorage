@@ -46,16 +46,14 @@ class Poller(object):
         that the changes are too complex to list.  new_polled_tid can be
         0 if there is no data in the database.
         """
+        # pylint:disable=unused-argument
         # find out the tid of the most recent transaction.
         cursor.execute(self.poll_query)
         rows = list(cursor)
-        if not rows:
+        if not rows or not rows[0][0]:
             # No data.
             return None, 0
         new_polled_tid = rows[0][0]
-        if not new_polled_tid:
-            # No data.
-            return None, 0
 
         if prev_polled_tid is None:
             # This is the first time the connection has polled.
@@ -65,54 +63,7 @@ class Poller(object):
             # No transactions have been committed since prev_polled_tid.
             return (), new_polled_tid
 
-        elif new_polled_tid > prev_polled_tid:
-            # New transaction(s) have been added.
-
-            if self.keep_history:
-                # If the previously polled transaction no longer exists,
-                # the cache is too old and needs to be cleared.
-                # XXX Do we actually need to detect this condition? I think
-                # if we delete this block of code, all the unreachable
-                # objects will be garbage collected anyway. So, as a test,
-                # there is no equivalent of this block of code for
-                # history-free storage. If something goes wrong, then we'll
-                # know there's some other edge condition we have to account
-                # for.
-                stmt = "SELECT 1 FROM transaction WHERE tid = %(tid)s"
-                cursor.execute(
-                    intern(stmt % self.runner.script_vars),
-                    {'tid': prev_polled_tid})
-                rows = cursor.fetchall()
-                if not rows:
-                    # Transaction not found; perhaps it has been packed.
-                    # The connection cache should be cleared.
-                    return None, new_polled_tid
-
-            # Get the list of changed OIDs and return it.
-            if self.keep_history:
-                stmt = """
-                SELECT zoid, tid
-                FROM current_object
-                WHERE tid > %(tid)s
-                """
-            else:
-                stmt = """
-                SELECT zoid, tid
-                FROM object_state
-                WHERE tid > %(tid)s
-                """
-            params = {'tid': prev_polled_tid}
-            if ignore_tid is not None:
-                stmt += " AND tid != %(self_tid)s"
-                params['self_tid'] = ignore_tid
-            stmt = intern(stmt % self.runner.script_vars)
-
-            cursor.execute(stmt, params)
-            changes = cursor.fetchall()
-
-            return changes, new_polled_tid
-
-        else:
+        if new_polled_tid <= prev_polled_tid:
             # The database connection is stale. This can happen after
             # reading an asynchronous slave that is not fully up to date.
             # (It may also suggest that transaction IDs are not being created
@@ -127,14 +78,61 @@ class Poller(object):
                 # We have to invalidate the whole cPickleCache, otherwise
                 # the cache would be inconsistent with the reverted state.
                 return None, new_polled_tid
-            else:
-                # This client never wants to revert to stale data, so
-                # raise ReadConflictError to trigger a retry.
-                # We're probably just waiting for async replication
-                # to catch up, so retrying could do the trick.
-                raise ReadConflictError(
-                    "The database connection is stale: new_polled_tid=%d, "
-                    "prev_polled_tid=%d." % (new_polled_tid, prev_polled_tid))
+
+            # This client never wants to revert to stale data, so
+            # raise ReadConflictError to trigger a retry.
+            # We're probably just waiting for async replication
+            # to catch up, so retrying could do the trick.
+            raise ReadConflictError(
+                "The database connection is stale: new_polled_tid=%d, "
+                "prev_polled_tid=%d." % (new_polled_tid, prev_polled_tid))
+
+
+        # New transaction(s) have been added.
+
+        if self.keep_history:
+            # If the previously polled transaction no longer exists,
+            # the cache is too old and needs to be cleared.
+            # XXX Do we actually need to detect this condition? I think
+            # if we delete this block of code, all the unreachable
+            # objects will be garbage collected anyway. So, as a test,
+            # there is no equivalent of this block of code for
+            # history-free storage. If something goes wrong, then we'll
+            # know there's some other edge condition we have to account
+            # for.
+            stmt = "SELECT 1 FROM transaction WHERE tid = %(tid)s"
+            cursor.execute(
+                intern(stmt % self.runner.script_vars),
+                {'tid': prev_polled_tid})
+            rows = cursor.fetchall()
+            if not rows:
+                # Transaction not found; perhaps it has been packed.
+                # The connection cache should be cleared.
+                return None, new_polled_tid
+
+        # Get the list of changed OIDs and return it.
+        if self.keep_history:
+            stmt = """
+            SELECT zoid, tid
+            FROM current_object
+            WHERE tid > %(tid)s
+            """
+        else:
+            stmt = """
+            SELECT zoid, tid
+            FROM object_state
+            WHERE tid > %(tid)s
+            """
+        params = {'tid': prev_polled_tid}
+        if ignore_tid is not None:
+            stmt += " AND tid != %(self_tid)s"
+            params['self_tid'] = ignore_tid
+        stmt = intern(stmt % self.runner.script_vars)
+
+        cursor.execute(stmt, params)
+        changes = cursor.fetchall()
+
+        return changes, new_polled_tid
 
     def list_changes(self, cursor, after_tid, last_tid):
         """Return the (oid, tid) values changed in a range of transactions.

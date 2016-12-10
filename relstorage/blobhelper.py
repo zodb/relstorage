@@ -323,6 +323,7 @@ class BlobCacheChecker(object):
             self.check(True)
 
     _check_blob_size_thread = None
+
     def check(self, check_loaded=False):
         """If appropriate, run blob cache cleanup in another thread."""
         if self._blob_cache_size is None:
@@ -341,7 +342,7 @@ class BlobCacheChecker(object):
         check_blob_size_thread = threading.Thread(
             target=_check_blob_cache_size,
             args=(self.blob_dir, target),
-            )
+        )
         check_blob_size_thread.setDaemon(True)
         check_blob_size_thread.start()
         self._check_blob_size_thread = check_blob_size_thread

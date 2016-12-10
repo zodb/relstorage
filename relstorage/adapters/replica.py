@@ -22,6 +22,9 @@ import time
 @implementer(IReplicaSelector)
 class ReplicaSelector(object):
 
+    # The time at which we checked the config
+    _config_checked = 0
+
     def __init__(self, fn, replica_timeout):
         self.replica_conf = fn
         self.replica_timeout = replica_timeout

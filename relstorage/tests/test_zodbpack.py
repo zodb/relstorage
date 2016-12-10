@@ -73,7 +73,6 @@ class ZODBPackScriptTests(unittest.TestCase):
     def test_pack_with_1_day(self):
         from ZODB.DB import DB
         from ZODB.FileStorage import FileStorage
-        from ZODB.POSException import POSKeyError
         import time
         import transaction
         from relstorage.zodbpack import main

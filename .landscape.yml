@@ -1,7 +1,7 @@
 doc-warnings: no # experimental, raises an exception
 test-warnings: no
 strictness: veryhigh
-max-line-length: 100
+max-line-length: 130
 # We don't use any of the auto-detected things, and
 # auto-detection slows down startup
 autodetect: false
@@ -10,13 +10,14 @@ requirements:
 
 python-targets:
   - 2
-  - 3
+#  - 3 # landscape.io seems to fail if we run both py2 and py3?
 ignore-paths:
   - doc/
   - build
   - dist
   - .eggs
   - setup.py
+  - bootstrap.py
 #ignore-patterns:
 
 pyroma:
@@ -42,6 +43,9 @@ pyflakes:
 
 pep8:
   disable:
+    # N803: argument should be lowercase. We have 'Binary' and
+    # camelCase names.
+    - N803
     # N805: first arg should be self; fails on metaclasses and
     # classmethods; pylint does a better job
     - N805

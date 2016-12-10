@@ -33,7 +33,7 @@ class ReplicaSelectorTests(unittest.TestCase):
         from relstorage.adapters.replica import ReplicaSelector
         rs = ReplicaSelector(self.fn, 600.0)
         self.assertEqual(rs._replicas,
-            ['example.com:1234', 'localhost:4321', 'localhost:9999'])
+                         ['example.com:1234', 'localhost:4321', 'localhost:9999'])
 
     def test__read_config_empty(self):
         from relstorage.adapters.replica import ReplicaSelector

@@ -146,9 +146,9 @@ class OracleSchemaInstaller(AbstractSchemaInstaller):
 
     def prepare(self):
         """Create the database schema if it does not already exist."""
-        def callback(conn, cursor):
+        def callback(_conn, cursor):
             tables = self.list_tables(cursor)
-            if not 'object_state' in tables:
+            if 'object_state' not in tables:
                 self.create(cursor)
             else:
                 self.check_compatibility(cursor, tables)

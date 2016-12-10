@@ -17,6 +17,8 @@ Stores pickles in the database.
 """
 from __future__ import absolute_import, print_function
 
+# pylint:disable=too-many-lines
+
 from ZODB import ConflictResolution
 
 from ZODB.BaseStorage import DataRecord
@@ -39,7 +41,7 @@ from ZODB.utils import u64
 from perfmetrics import Metric
 from perfmetrics import metricmethod
 
-from persistent.TimeStamp import TimeStamp
+from persistent.TimeStamp import TimeStamp # pylint:disable=import-error
 from relstorage.blobhelper import BlobHelper
 
 from relstorage.cache import StorageCache
@@ -106,6 +108,8 @@ class _DummyLock(object):
 class RelStorage(UndoLogCompatible,
                  ConflictResolution.ConflictResolvingStorage):
     """Storage to a relational database, based on invalidation polling"""
+
+    # pylint:disable=too-many-public-methods,too-many-instance-attributes
 
     _transaction = None  # Transaction that is being committed
     _tstatus = ' '  # Transaction status, used for copying data
@@ -187,6 +191,7 @@ class RelStorage(UndoLogCompatible,
                  # objects don't need to.
                  _use_locks=True,
                  **kwoptions):
+        # pylint:disable=too-many-branches
         self._adapter = adapter
 
         if options is None:
@@ -550,6 +555,7 @@ class RelStorage(UndoLogCompatible,
 
     @Metric(method=True, rate=0.1)
     def load(self, oid, version=''):
+        # pylint:disable=unused-argument
         if self._stale_error is not None:
             raise self._stale_error
 
@@ -634,7 +640,8 @@ class RelStorage(UndoLogCompatible,
                 if state is None:
                     # This can happen if something attempts to load
                     # an object whose creation has been undone, see load()
-                    # This change fixes the test in TransactionalUndoStorage.checkUndoCreationBranch1
+                    # This change fixes the test in
+                    # TransactionalUndoStorage.checkUndoCreationBranch1
                     # self._log_keyerror doesn't work here, only in certain states.
                     raise POSKeyError(oid)
                 end_int = self._adapter.mover.get_object_tid_after(
@@ -687,6 +694,7 @@ class RelStorage(UndoLogCompatible,
         # Like store(), but used for importing transactions.  See the
         # comments in FileStorage.restore().  The prev_txn optimization
         # is not used.
+        # pylint:disable=unused-argument
 
         if self._stale_error is not None:
             raise self._stale_error
@@ -884,6 +892,7 @@ class RelStorage(UndoLogCompatible,
         Returns a sequence of OIDs that were resolved to be received by
         Connection._handle_serial().
         """
+        # pylint:disable=too-many-locals
         assert self._tid is not None
         cursor = self._store_cursor
         adapter = self._adapter
@@ -927,8 +936,9 @@ class RelStorage(UndoLogCompatible,
             txn_has_blobs = self.blobhelper.txn_has_blobs
         else:
             txn_has_blobs = False
-        oid_ints = adapter.mover.move_from_temp(cursor, tid_int, txn_has_blobs)
 
+        # This returns the OID ints stored, but we don't use them here
+        adapter.mover.move_from_temp(cursor, tid_int, txn_has_blobs)
 
         return resolved
 
@@ -1087,7 +1097,7 @@ class RelStorage(UndoLogCompatible,
             if self._preallocated_oids:
                 oid_int = self._preallocated_oids.pop()
             else:
-                def f(conn, cursor):
+                def f(_conn, cursor):
                     return list(self._adapter.oidallocator.new_oids(cursor))
                 preallocated = self._with_store(f)
                 preallocated.sort(reverse=True)
@@ -1103,6 +1113,7 @@ class RelStorage(UndoLogCompatible,
         return False
 
     def modifiedInVersion(self, oid):
+        # pylint:disable=unused-argument
         return ''
 
     def supportsUndo(self):
@@ -1113,6 +1124,7 @@ class RelStorage(UndoLogCompatible,
 
     @metricmethod
     def undoLog(self, first=0, last=-20, filter=None):
+        # pylint:disable=too-many-locals
         if self._stale_error is not None:
             raise self._stale_error
         if last < 0:
@@ -1135,7 +1147,7 @@ class RelStorage(UndoLogCompatible,
                 # This is largely cleaned up with transaction 2.0/ZODB 5, where the storage
                 # interface is defined in terms of bytes only.
                 d = {
-                    'id': base64_encodebytes(tid)[:-1],
+                    'id': base64_encodebytes(tid)[:-1],  # pylint:disable=deprecated-method
                     'time': TimeStamp(tid).timeTime(),
                     'user_name':  user or b'',
                     'description': desc or b'',
@@ -1156,6 +1168,7 @@ class RelStorage(UndoLogCompatible,
 
     @metricmethod
     def history(self, oid, version=None, size=1, filter=None):
+        # pylint:disable=unused-argument,too-many-locals
         if self._stale_error is not None:
             raise self._stale_error
         with self._lock:
@@ -1205,7 +1218,7 @@ class RelStorage(UndoLogCompatible,
         if transaction is not self._transaction:
             raise StorageTransactionError(self, transaction)
 
-        undo_tid = base64_decodebytes(transaction_id + b'\n')
+        undo_tid = base64_decodebytes(transaction_id + b'\n') # pylint:disable=deprecated-method
         assert len(undo_tid) == 8
         undo_tid_int = u64(undo_tid)
 
@@ -1246,6 +1259,7 @@ class RelStorage(UndoLogCompatible,
     @metricmethod
     def pack(self, t, referencesf, prepack_only=False, skip_prepack=False,
              sleep=None):
+        # pylint:disable=too-many-branches
         if self._is_read_only:
             raise ReadOnlyError()
 
@@ -1468,6 +1482,7 @@ class RelStorage(UndoLogCompatible,
             self.blobhelper.restoreBlob(cursor, oid, serial, blobfilename)
 
     def copyTransactionsFrom(self, other):
+        # pylint:disable=too-many-locals
         # adapted from ZODB.blob.BlobStorageMixin
         begin_time = time.time()
         txnum = 0

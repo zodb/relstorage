@@ -32,6 +32,7 @@ class SuffixMultiplier(object):
         self._default = default
         # all keys must be the same size
         self._keysz = None
+
         def check(a, b):
             if len(a) != len(b):
                 raise ValueError("suffix length mismatch")
@@ -45,10 +46,11 @@ class SuffixMultiplier(object):
                 return int(v[:-self._keysz]) * m
         return int(v) * self._default
 
-convert_bytesize = SuffixMultiplier({'kb': 1024,
-                                     'mb': 1024*1024,
-                                     'gb': 1024*1024*1024,
-                                    })
+convert_bytesize = SuffixMultiplier({
+    'kb': 1024,
+    'mb': 1024 * 1024,
+    'gb': 1024 * 1024 * 1024,
+})
 
 
 def convert_int(value):
@@ -109,7 +111,7 @@ class PostgreSQLAdapterHelper(Resolver):
         kw, unused = self.interpret_kwargs(kw)
         dsn_args.extend(kw.items())
 
-        dsn = ' '.join("%s='%s'"%arg for arg in dsn_args)
+        dsn = ' '.join("%s='%s'" % arg for arg in dsn_args)
 
         def factory(options):
             from relstorage.adapters.postgresql import PostgreSQLAdapter
@@ -189,9 +191,7 @@ class RelStorageURIResolver(Resolver):
         def factory():
             adapter = adapter_factory(options)
             storage = RelStorage(adapter=adapter, options=options)
-            if demostorage:
-                storage = DemoStorage(base=storage)
-            return storage
+            return storage if not demostorage else DemoStorage(base=storage)
         return factory, unused
 
 postgresql_resolver = RelStorageURIResolver(PostgreSQLAdapterHelper())

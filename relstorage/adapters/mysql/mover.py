@@ -83,13 +83,15 @@ class MySQLObjectMover(AbstractObjectMover):
         cursor.execute(stmt, (tid,))
 
     @metricmethod_sampled
-    def update_current(self, cursor, tid):
+    def update_current(self, cursor, tid):  # pylint:disable=method-hidden
         """Update the current object pointers.
 
         tid is the integer tid of the transaction being committed.
         """
         if not self.keep_history:
             # nothing needs to be updated
+            # Can elide this check in the future.
+            self.update_current = lambda cursor, tid: None
             return
 
         cursor.execute("""

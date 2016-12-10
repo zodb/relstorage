@@ -160,7 +160,7 @@ class LocalClient(object):
             assert isinstance(key, str), (type(key), key)
             assert isinstance(value, bytes)
 
-            cvalue = compress(value) if compress else value
+            cvalue = compress(value) if compress else value # pylint:disable=not-callable
 
             if len(cvalue) >= self._value_limit:
                 # This value is too big, so don't cache it.

@@ -12,24 +12,23 @@
 # FOR A PARTICULAR PURPOSE.
 #
 ##############################################################################
-from __future__ import absolute_import, print_function, division
-
 """
 Segmented LRU implementations.
-
 """
+from __future__ import absolute_import, print_function, division
+
 import functools
 import itertools
 try:
     izip = itertools.izip
 except AttributeError:
     # Python 3
-    izip = zip
+    izip = zip # pylint:disable=redefined-variable-type
 
 from relstorage.cache import _cache_ring
 
-ffi = _cache_ring.ffi
-_FFI_RING = _cache_ring.lib
+ffi = _cache_ring.ffi # pylint:disable=no-member
+_FFI_RING = _cache_ring.lib # pylint:disable=no-member
 
 _ring_move_to_head = _FFI_RING.rsc_ring_move_to_head
 _ring_del = _FFI_RING.rsc_ring_del
@@ -174,7 +173,7 @@ class CacheRingNode(object):
     def __init__(self, key, value, node=None):
         self.key = key
         self.value = value
-
+        self._cffi_owning_node = None
         # Passing the string is faster than passing a cdecl because we
         # have the string directly in bytecode without a lookup
         if node is None:
@@ -257,7 +256,7 @@ class CacheRing(object):
 
     PARENT_CONST = 0
 
-    def __init__(self, limit): #, _ring_type=ffi.typeof("RSRing")):
+    def __init__(self, limit):
         self.limit = limit
         node = self.ring_home = ffi.new("RSRing")
         node.r_next = node

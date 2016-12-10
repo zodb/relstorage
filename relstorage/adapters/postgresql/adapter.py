@@ -47,6 +47,7 @@ def select_driver(options=None):
 class PostgreSQLAdapter(object):
     """PostgreSQL adapter for RelStorage."""
 
+    # pylint:disable=too-many-instance-attributes
     def __init__(self, dsn='', options=None):
         # options is a relstorage.options.Options or None
         self._dsn = dsn
@@ -63,32 +64,32 @@ class PostgreSQLAdapter(object):
             driver,
             dsn=dsn,
             options=options,
-            )
+        )
         self.runner = ScriptRunner()
         self.locker = PostgreSQLLocker(
             options=options,
             lock_exceptions=driver.lock_exceptions,
             version_detector=self.version_detector,
-            )
+        )
         self.schema = PostgreSQLSchemaInstaller(
             connmanager=self.connmanager,
             runner=self.runner,
             locker=self.locker,
             keep_history=self.keep_history,
-            )
+        )
         self.mover = PostgreSQLObjectMover(
             database_type='postgresql',
             options=options,
             runner=self.runner,
             version_detector=self.version_detector,
             Binary=driver.Binary,
-            )
+        )
         self.connmanager.set_on_store_opened(self.mover.on_store_opened)
         self.oidallocator = PostgreSQLOIDAllocator()
         self.txncontrol = PostgreSQLTransactionControl(
             keep_history=self.keep_history,
             driver=driver,
-            )
+        )
 
         self.poller = Poller(
             poll_query="EXECUTE get_latest_tid",
@@ -96,7 +97,7 @@ class PostgreSQLAdapter(object):
             runner=self.runner,
             revert_when_stale=options.revert_when_stale,
         )
-
+        # pylint:disable=redefined-variable-type
         if self.keep_history:
             self.packundo = HistoryPreservingPackUndo(
                 database_type='postgresql',
@@ -104,11 +105,11 @@ class PostgreSQLAdapter(object):
                 runner=self.runner,
                 locker=self.locker,
                 options=options,
-                )
+            )
             self.dbiter = HistoryPreservingDatabaseIterator(
                 database_type='postgresql',
                 runner=self.runner,
-                )
+            )
         else:
             self.packundo = HistoryFreePackUndo(
                 database_type='postgresql',
@@ -116,15 +117,15 @@ class PostgreSQLAdapter(object):
                 runner=self.runner,
                 locker=self.locker,
                 options=options,
-                )
+            )
             self.dbiter = HistoryFreeDatabaseIterator(
                 database_type='postgresql',
                 runner=self.runner,
-                )
+            )
 
         self.stats = PostgreSQLStats(
             connmanager=self.connmanager,
-            )
+        )
 
     def new_instance(self):
         inst = type(self)(dsn=self._dsn, options=self.options)

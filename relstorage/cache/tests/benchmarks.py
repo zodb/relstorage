@@ -15,6 +15,8 @@ from __future__ import print_function, absolute_import, division
 
 from relstorage.options import Options
 
+# pylint:disable=unused-argument,redefined-variable-type
+
 class MockOptions(Options):
     cache_module_name = ''
     cache_servers = ''
@@ -24,10 +26,11 @@ class MockOptions(Options):
 
 
 import timeit
-import statistics
+import statistics # pylint:disable=import-error
 try:
     import sys
-    import cProfile, pstats
+    import cProfile
+    import pstats
     if '--profile' not in sys.argv:
         raise ImportError
 except ImportError:
@@ -66,8 +69,8 @@ def run_and_report_funcs(named_funcs, **kwargs):
     for name, func in named_funcs:
         times[name] = run_func(func, **kwargs)
 
-    for name, time in sorted(times.items()):
-        print(name, "average", statistics.mean(time), "stddev", statistics.stdev(time))
+    for name, _time in sorted(times.items()):
+        print(name, "average", statistics.mean(_time), "stddev", statistics.stdev(_time))
 
 
 def local_benchmark():
@@ -186,7 +189,7 @@ def local_benchmark():
             client.reset_stats()
             hot_keys = key_groups[0]
             i = 0
-            for k, v in ALL_DATA:
+            for _k, v in ALL_DATA:
                 i += 1
                 client._bucket0[str(i)] = v
 
@@ -224,6 +227,7 @@ class StorageTraceSimulator(object):
 
     def _read_binary_records(self, filename, num_clients=8, write_pct=.30,
                              mean_size=10000, stddev_size=512):
+        # pylint:disable=too-many-locals
         import struct
         keys = []
         i = 0
@@ -252,11 +256,7 @@ class StorageTraceSimulator(object):
         return records
 
     def _read_text_records(self, filename):
-        try:
-            from sys import intern as _intern
-        except ImportError:
-            # Py2
-            _intern = intern
+        from relstorage._compat import intern as _intern
 
         records = []
         with self._open_file(filename) as f:
@@ -316,13 +316,14 @@ class StorageTraceSimulator(object):
         return stats
 
     def _simulate_storage(self, records, cache_local_mb, f):
+        # pylint:disable=too-many-locals
         from relstorage.cache.storage_cache import StorageCache
         from relstorage.cache.tests.test_cache import MockAdapter
         from ZODB.utils import p64
 
         TRANSACTION_SIZE = 10
 
-        options  = MockOptions()
+        options = MockOptions()
         options.cache_local_mb = cache_local_mb
         options.cache_local_compression = 'none'
         #options.cache_delta_size_limit = 30000
@@ -483,13 +484,12 @@ class StorageTraceSimulator(object):
 
 
 def save_load_benchmark():
+    # pylint:disable=too-many-locals
     from relstorage.cache.mapping import SizedLRUMapping as LocalClientBucket
     from relstorage.cache import persistence as _Loader
 
-    import os
     import itertools
 
-    import sys
     sys.setrecursionlimit(500000)
     bucket = LocalClientBucket(500*1024*1024)
     print("Testing", type(bucket._dict))
@@ -532,8 +532,8 @@ def save_load_benchmark():
         b2 = LocalClientBucket(bucket.limit)
         _Loader.load_local_cache(cache_options, cache_pfx, b2)
 
-    run_and_report_funcs( (('write', write),
-                           ('read ', load)))
+    run_and_report_funcs((('write', write),
+                          ('read ', load)))
     for fname in fnames:
         os.remove(fname)
 

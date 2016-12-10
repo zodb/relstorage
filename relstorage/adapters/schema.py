@@ -21,8 +21,6 @@ import logging
 
 from ZODB.POSException import StorageError
 
-import re
-
 log = logging.getLogger("relstorage")
 
 
@@ -247,16 +245,16 @@ class AbstractSchemaInstaller(object):
         """Create the database schema if it does not already exist."""
         # XXX: We can generalize this to handle triggers, procs, etc,
         # to make subclasses have easier time.
-        def callback(conn, cursor):
+        def callback(_conn, cursor):
             tables = self.list_tables(cursor)
-            if not 'object_state' in tables:
+            if 'object_state' not in tables:
                 self.create(cursor)
             else:
                 self.check_compatibility(cursor, tables)
                 self.update_schema(cursor, tables)
         self.connmanager.open_and_call(callback)
 
-    def check_compatibility(self, cursor, tables):
+    def check_compatibility(self, cursor, tables): # pylint:disable=unused-argument
         if self.keep_history:
             if 'transaction' not in tables and 'current_object' not in tables:
                 raise StorageError(
@@ -271,7 +269,7 @@ class AbstractSchemaInstaller(object):
                     "can not connect to a history-preserving database. "
                     "If you need to convert, use the zodbconvert utility."
                 )
-        if not 'blob_chunk' in tables:
+        if 'blob_chunk' not in tables:
             raise StorageError(
                 "Schema mismatch; please create the blob_chunk tables."
                 "See migration instructions for RelStorage 1.5."
@@ -320,7 +318,7 @@ class AbstractSchemaInstaller(object):
 
     def drop_all(self):
         """Drop all tables and sequences."""
-        def callback(conn, cursor):
+        def callback(_conn, cursor):
             existent = set(self.list_tables(cursor))
             todo = list(self.all_tables)
             todo.reverse()

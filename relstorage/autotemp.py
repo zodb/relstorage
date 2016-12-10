@@ -17,7 +17,7 @@ from tempfile import SpooledTemporaryFile
 class AutoTemporaryFile(SpooledTemporaryFile):
     # Exists for BWC and to preserve the default threshold
 
-    def __init__(self, threshold=10*1024*1024, **kw):
+    def __init__(self, threshold=10 * 1024 * 1024, **kw):
         # STF uses >, the old ATF used >= for the max_size check
         SpooledTemporaryFile.__init__(self, max_size=threshold - 1, **kw)
 

@@ -14,6 +14,8 @@
 """Pack/Undo implementations.
 """
 
+# pylint:disable=too-many-lines,unused-argument
+
 from ZODB.POSException import UndoError
 from ZODB.utils import u64
 from perfmetrics import metricmethod
@@ -33,6 +35,8 @@ class PackUndo(object):
     """Abstract base class for pack/undo"""
 
     verify_sane_database = False
+
+    _script_choose_pack_transaction = None
 
     def __init__(self, database_type, connmanager, runner, locker, options):
         self.database_type = database_type
@@ -354,7 +358,7 @@ class HistoryPreservingPackUndo(PackUndo):
         SELECT zoid, prev_tid FROM temp_undo
         """
         self.runner.run_script(cursor, stmt,
-            {'undo_tid': undo_tid, 'self_tid': self_tid})
+                               {'undo_tid': undo_tid, 'self_tid': self_tid})
         res = list(cursor)
 
         stmt = self._script_reset_temp_undo
@@ -420,7 +424,7 @@ class HistoryPreservingPackUndo(PackUndo):
             state = db_binary_to_bytes(state)
             if hasattr(state, 'read'):
                 # Oracle
-                state = state.read()
+                state = state.read() # pylint:disable=no-member
             if state:
                 assert isinstance(state, bytes), type(state) # PY3: used to be str(state)
                 from_count += 1
@@ -429,8 +433,8 @@ class HistoryPreservingPackUndo(PackUndo):
                 except:
                     log.error(
                         "pre_pack: can't unpickle "
-                        "object %d in transaction %d; state length = %d" % (
-                            from_oid, tid, len(state)))
+                        "object %d in transaction %d; state length = %d",
+                        from_oid, tid, len(state))
                     raise
                 for to_oid in to_oids:
                     add_rows.append((from_oid, tid, to_oid))
@@ -456,7 +460,7 @@ class HistoryPreservingPackUndo(PackUndo):
 
         to_count = len(add_rows)
         log.debug("pre_pack: transaction %d: has %d reference(s) "
-            "from %d object(s)", tid, to_count, from_count)
+                  "from %d object(s)", tid, to_count, from_count)
         return to_count
 
     @metricmethod
@@ -519,7 +523,7 @@ class HistoryPreservingPackUndo(PackUndo):
                     AND tid <= %(pack_tid)s
                 """
                 self.runner.run_script_stmt(
-                    cursor, stmt, {'pack_tid':pack_tid})
+                    cursor, stmt, {'pack_tid': pack_tid})
                 to_remove += cursor.rowcount
 
                 log.info("pre_pack: enumerating transactions to pack")
@@ -533,7 +537,7 @@ class HistoryPreservingPackUndo(PackUndo):
                 cursor.execute(stmt)
 
                 log.info("pre_pack: will remove %d object state(s)",
-                    to_remove)
+                         to_remove)
 
             except:
                 log.exception("pre_pack: failed")
@@ -645,10 +649,11 @@ class HistoryPreservingPackUndo(PackUndo):
     @metricmethod
     def pack(self, pack_tid, sleep=None, packed_func=None):
         """Pack.  Requires the information provided by pre_pack."""
-
+        # pylint:disable=too-many-locals
         # Read committed mode is sufficient.
+
         conn, cursor = self.connmanager.open()
-        try:
+        try: # pylint:disable=too-many-nested-blocks
             try:
                 stmt = """
                 SELECT transaction.tid,
@@ -697,9 +702,9 @@ class HistoryPreservingPackUndo(PackUndo):
                         statecounter += len(packed_list)
                         if counter >= lastreport + reportstep:
                             log.info("pack: packed %d (%.1f%%) transaction(s), "
-                                "affecting %d states",
-                                counter, counter/float(total)*100,
-                                statecounter)
+                                     "affecting %d states",
+                                     counter, counter / float(total) * 100,
+                                     statecounter)
                             lastreport = counter / reportstep * reportstep
                         del packed_list[:]
                         self.locker.release_commit_lock(cursor)
@@ -726,7 +731,7 @@ class HistoryPreservingPackUndo(PackUndo):
 
 
     def _pack_transaction(self, cursor, pack_tid, tid, packed,
-            has_removable, packed_list):
+                          has_removable, packed_list):
         """Pack one transaction.  Requires populated pack tables."""
         log.debug("pack: transaction %d: packing", tid)
         removed_objects = 0
@@ -748,7 +753,7 @@ class HistoryPreservingPackUndo(PackUndo):
                 AND tid <= %(pack_tid)s
             """
             self.runner.run_script_stmt(cursor, stmt,
-                {'pack_tid': pack_tid, 'tid': tid})
+                                        {'pack_tid': pack_tid, 'tid': tid})
 
             stmt = """
             SELECT pack_state.zoid
@@ -932,7 +937,7 @@ class HistoryFreePackUndo(PackUndo):
             state = db_binary_to_bytes(state)
             if hasattr(state, 'read'):
                 # Oracle
-                state = state.read()
+                state = state.read() # pylint:disable=no-member
             add_objects.append((from_oid, tid))
             if state:
                 assert isinstance(state, bytes), type(state)
@@ -1046,9 +1051,10 @@ class HistoryFreePackUndo(PackUndo):
 
         Requires the information provided by pre_pack.
         """
+        # pylint:disable=too-many-locals
         # Read committed mode is sufficient.
         conn, cursor = self.connmanager.open()
-        try:
+        try: # pylint:disable=too-many-nested-blocks
             try:
                 stmt = """
                 SELECT zoid, keep_tid
@@ -1090,7 +1096,7 @@ class HistoryFreePackUndo(PackUndo):
                         counter = total - len(to_remove)
                         if counter >= lastreport + reportstep:
                             log.info("pack: removed %d (%.1f%%) state(s)",
-                                     counter, counter/float(total)*100)
+                                     counter, counter / float(total) * 100)
                             lastreport = counter / reportstep * reportstep
                         self.locker.release_commit_lock(cursor)
                         self._pause_pack_until_lock(cursor, sleep)

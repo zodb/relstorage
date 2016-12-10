@@ -80,6 +80,7 @@ def select_driver(options=None):
 @implementer(IRelStorageAdapter)
 class MySQLAdapter(object):
     """MySQL adapter for RelStorage."""
+    # pylint:disable=too-many-instance-attributes
 
     def __init__(self, options=None, **params):
         if options is None:
@@ -95,28 +96,28 @@ class MySQLAdapter(object):
             driver,
             params=params,
             options=options,
-            )
+        )
         self.runner = ScriptRunner()
         self.locker = MySQLLocker(
             options=options,
             lock_exceptions=driver.lock_exceptions,
-            )
+        )
         self.schema = MySQLSchemaInstaller(
             connmanager=self.connmanager,
             runner=self.runner,
             keep_history=self.keep_history,
-            )
+        )
         self.mover = MySQLObjectMover(
             database_type='mysql',
             options=options,
             Binary=driver.Binary,
-            )
+        )
         self.connmanager.set_on_store_opened(self.mover.on_store_opened)
         self.oidallocator = MySQLOIDAllocator()
         self.txncontrol = MySQLTransactionControl(
             keep_history=self.keep_history,
             Binary=driver.Binary,
-            )
+        )
 
         if self.keep_history:
             poll_query = "SELECT MAX(tid) FROM transaction"
@@ -128,7 +129,7 @@ class MySQLAdapter(object):
             runner=self.runner,
             revert_when_stale=options.revert_when_stale,
         )
-
+        # pylint:disable=redefined-variable-type
         if self.keep_history:
             self.packundo = MySQLHistoryPreservingPackUndo(
                 database_type='mysql',
@@ -136,11 +137,11 @@ class MySQLAdapter(object):
                 runner=self.runner,
                 locker=self.locker,
                 options=options,
-                )
+            )
             self.dbiter = HistoryPreservingDatabaseIterator(
                 database_type='mysql',
                 runner=self.runner,
-                )
+            )
         else:
             self.packundo = MySQLHistoryFreePackUndo(
                 database_type='mysql',
@@ -148,15 +149,15 @@ class MySQLAdapter(object):
                 runner=self.runner,
                 locker=self.locker,
                 options=options,
-                )
+            )
             self.dbiter = HistoryFreeDatabaseIterator(
                 database_type='mysql',
                 runner=self.runner,
-                )
+            )
 
         self.stats = MySQLStats(
             connmanager=self.connmanager,
-            )
+        )
 
     def new_instance(self):
         return MySQLAdapter(options=self.options, **self._params)

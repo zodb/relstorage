@@ -32,7 +32,7 @@ def bigmark():
     for i in xrange(1, oid_count):
         if random() < 0.2:
             refs = []
-            for j in range(randint(0, 20)):
+            for _ in range(randint(0, 20)):
                 refs.append((i * k, randint(0, oid_count) * k))
             marker.add_refs(refs)
             refcount += len(refs)

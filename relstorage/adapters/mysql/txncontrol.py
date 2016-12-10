@@ -23,7 +23,7 @@ from ..txncontrol import AbstractTransactionControl
 @implementer(ITransactionControl)
 class MySQLTransactionControl(AbstractTransactionControl):
 
-    def __init__(self, keep_history, Binary):
+    def __init__(self, keep_history, Binary): # noqa
         self.keep_history = keep_history
         self.Binary = Binary
 

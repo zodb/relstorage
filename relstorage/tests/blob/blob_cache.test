@@ -79,7 +79,7 @@ directory.
     >>> def onfail():
     ...     return cache_size('blobs')
 
-    >>> from relstorage.tests.util import wait_until
+    >>> from ZEO.tests.forker import wait_until
     >>> wait_until("size is reduced", check, 99, onfail)
 
 If we read all of the blobs, data will be downloaded again, as

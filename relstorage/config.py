@@ -14,12 +14,15 @@
 """ZConfig directive implementations for binding RelStorage to Zope"""
 from __future__ import absolute_import
 
-from ZODB.config import BaseConfig
 
 from relstorage.options import Options
 from relstorage.storage import RelStorage
 
+class BaseConfig(object):
 
+    def __init__(self, config):
+        self.config = config
+        self.name = config.getSectionName()
 
 class RelStorageFactory(BaseConfig):
     """Open a storage configured via ZConfig"""
@@ -38,8 +41,7 @@ class PostgreSQLAdapterFactory(BaseConfig):
         from .adapters.postgresql import PostgreSQLAdapter
         return PostgreSQLAdapter(
             dsn=self.config.dsn,
-            options=options,
-            )
+            options=options)
 
 
 class OracleAdapterFactory(BaseConfig):
@@ -50,8 +52,7 @@ class OracleAdapterFactory(BaseConfig):
             user=config.user,
             password=config.password,
             dsn=config.dsn,
-            options=options,
-            )
+            options=options)
 
 
 class MySQLAdapterFactory(BaseConfig):

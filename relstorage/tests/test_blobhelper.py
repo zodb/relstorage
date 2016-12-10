@@ -1,11 +1,12 @@
 """Tests of relstorage.blobhelper"""
-
+# pylint:disable=too-many-public-methods,unused-argument
 from relstorage.tests.util import support_blob_cache
 import os
 import unittest
-
+import tempfile
+from ZODB.blob import remove_committed_dir
 from relstorage._compat import PY3
-from relstorage._compat import dumps
+
 
 test_oid = b'\0' * 7 + b'\x01'
 test_tid = b'\0' * 7 + b'\x02'
@@ -14,11 +15,11 @@ test_tid = b'\0' * 7 + b'\x02'
 class BlobHelperTest(unittest.TestCase):
 
     def setUp(self):
-        import tempfile
+        self.uploaded = None
         self.blob_dir = tempfile.mkdtemp()
 
     def tearDown(self):
-        from ZODB.blob import remove_committed_dir
+
         remove_committed_dir(self.blob_dir)
 
     def _class(self):
@@ -157,7 +158,7 @@ class BlobHelperTest(unittest.TestCase):
         obj = self._make_default(shared=False)
         with obj.openCommittedBlobFile(None, test_oid, test_tid) as f:
             if not PY3:
-                self.assertEqual(f.__class__, file)
+                self.assertEqual(f.__class__, file) # pylint:disable=undefined-variable
             self.assertEqual(f.read(), b'blob here')
 
     def test_openCommittedBlobFile_as_blobfile(self):
@@ -190,7 +191,7 @@ class BlobHelperTest(unittest.TestCase):
         with obj.openCommittedBlobFile(None, test_oid, test_tid) as f:
             self.assertEqual(loadBlob_calls, [1])
             if not PY3:
-                self.assertEqual(f.__class__, file)
+                self.assertEqual(f.__class__, file) # pylint:disable=undefined-variable
             self.assertEqual(f.read(), b'blob here')
 
     def test_openCommittedBlobFile_retry_as_blobfile(self):
@@ -273,11 +274,11 @@ class BlobHelperTest(unittest.TestCase):
         obj = self._make_default(shared=False)
         self.assertFalse(obj.txn_has_blobs)
         obj.storeBlob(None, store_func, test_oid, test_tid, 'blob pickle',
-            fn, '', dummy_txn)
+                      fn, '', dummy_txn)
         self.assertFalse(os.path.exists(fn))
         self.assertTrue(obj.txn_has_blobs)
         self.assertEqual(called,
-            [(test_oid, test_tid, 'blob pickle', '', dummy_txn)])
+                         [(test_oid, test_tid, 'blob pickle', '', dummy_txn)])
         self.assertEqual(self.uploaded[:2], (1, None))
         target_fn = self.uploaded[2]
         self.assertEqual(read_file(target_fn), 'here a blob')

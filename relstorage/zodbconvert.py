@@ -19,7 +19,7 @@ from __future__ import print_function
 
 import logging
 import argparse
-from persistent.TimeStamp import TimeStamp
+from persistent.TimeStamp import TimeStamp # pylint:disable=import-error
 from io import StringIO
 import sys
 import ZConfig
@@ -69,6 +69,7 @@ class _DefaultStartStorageIteration(object):
         return getattr(self._source, name)
 
 def main(argv=None):
+    # pylint:disable=too-many-branches
     if argv is None:
         argv = sys.argv
     parser = argparse.ArgumentParser(description=__doc__)
@@ -123,7 +124,7 @@ def main(argv=None):
                 # This *should* be a byte string.
                 last_tid = u64(last_tid)
 
-            next_tid = p64(last_tid+1)
+            next_tid = p64(last_tid + 1)
             # Compensate for the RelStorage bug(?) and get a reusable iterator
             # that starts where we want it to. There's no harm in wrapping it for
             # other sources like FileStorage too.

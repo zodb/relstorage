@@ -40,7 +40,7 @@ class OracleRowBatcher(RowBatcher):
 
         def replace_var(match):
             name = match.group(1)
-            new_name = '%s_%d' % (name, rownum)
+            new_name = '%s_%d' % (name, rownum) # pylint:disable=undefined-loop-variable
             if name in self.inputsizes:
                 stmt_inputsizes[new_name] = self.inputsizes[name]
             params[new_name] = row[name]
@@ -69,8 +69,8 @@ class OracleRowBatcher(RowBatcher):
                     mod_row = oracle_rowvar_re.sub(replace_var, row_schema)
                     parts.append("INTO %s VALUES (%s)" % (header, mod_row))
 
-                parts = '\n'.join(parts)
-                stmt = "INSERT ALL\n%s\nSELECT * FROM DUAL" % parts
+
+                stmt = "INSERT ALL\n%s\nSELECT * FROM DUAL" % '\n'.join(parts)
                 if stmt_inputsizes:
                     self.cursor.setinputsizes(**stmt_inputsizes)
                 self.cursor.execute(stmt, params)

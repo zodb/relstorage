@@ -25,7 +25,7 @@ class RowBatcher(object):
     """
 
     row_limit = 100
-    size_limit = 1<<20
+    size_limit = 1 << 20
 
     def __init__(self, cursor, row_limit=None):
         self.cursor = cursor
@@ -101,6 +101,6 @@ class RowBatcher(object):
             for row in rows.values():
                 parts.append(s)
                 params.extend(row)
-            parts = ',\n'.join(parts)
-            stmt = "%s INTO %s VALUES\n%s" % (command, header, parts)
+
+            stmt = "%s INTO %s VALUES\n%s" % (command, header, ',\n'.join(parts))
             self.cursor.execute(stmt, tuple(params))

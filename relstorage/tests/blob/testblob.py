@@ -49,11 +49,11 @@ def new_time():
     the packing time actually is before the commit time.
 
     """
-    now = new_time = time.time()
-    while new_time <= now:
-        new_time = time.time()
+    now = anew_time = time.time()
+    while anew_time <= now:
+        anew_time = time.time()
     time.sleep(1)
-    return new_time
+    return anew_time
 
 
 with open(__file__, 'rb') as _f:
@@ -85,21 +85,21 @@ def random_file(size, fd):
             b.rotate(1)
     datagen = fdata()
     bytes = 0
-    md5sum = md5()
+    hasher = md5()
     while bytes < size:
         data = next(datagen)
-        md5sum.update(data)
+        hasher.update(data)
         fd.write(data)
         bytes += len(data)
-    return md5sum.hexdigest()
+    return hasher.hexdigest()
 
 
 def md5sum(fd):
-    md5sum = md5()
-    blocksize = md5sum.block_size << 8
+    hasher = md5()
+    blocksize = hasher.block_size << 8
     for data in iter(lambda: fd.read(blocksize), b''):
-        md5sum.update(data)
-    return md5sum.hexdigest()
+        hasher.update(data)
+    return hasher.hexdigest()
 
 
 def sizeof_fmt(num):
@@ -113,7 +113,7 @@ class BlobTestBase(ZODB.tests.StorageTestBase.StorageTestBase):
 
     def setUp(self):
         ZODB.tests.StorageTestBase.StorageTestBase.setUp(self)
-        self._storage = self.create_storage()
+        self._storage = self.create_storage() # pylint:disable=no-member
 
 
 class BlobUndoTests(BlobTestBase):
@@ -249,7 +249,7 @@ class RecoveryBlobStorage(BlobTestBase,
 
     def setUp(self):
         BlobTestBase.setUp(self)
-        self._dst = self.create_storage('dest')
+        self._dst = self.create_storage('dest') # pylint:disable=no-member
 
     def tearDown(self):
         self._dst.close()
@@ -502,35 +502,35 @@ def do_not_depend_on_cwd():
     >>> bs.close()
     """
 
-if False:
-    # ZODB 3.8 fails this test because it creates a single
-    # 'savepoints' directory.
-    def savepoint_isolation():
-        """Make sure savepoint data is distinct accross transactions
+# if False:
+#     # ZODB 3.8 fails this test because it creates a single
+#     # 'savepoints' directory.
+#     def savepoint_isolation():
+#         """Make sure savepoint data is distinct accross transactions
 
-        >>> bs = create_storage()
-        >>> db = DB(bs)
-        >>> conn = db.open()
-        >>> conn.root().b = ZODB.blob.Blob()
-        >>> conn.root().b.open('w').write('initial')
-        >>> transaction.commit()
-        >>> conn.root().b.open('w').write('1')
-        >>> _ = transaction.savepoint()
-        >>> tm = transaction.TransactionManager()
-        >>> conn2 = db.open(transaction_manager=tm)
-        >>> conn2.root().b.open('w').write('2')
-        >>> _ = tm.savepoint()
-        >>> conn.root().b.open().read()
-        '1'
-        >>> conn2.root().b.open().read()
-        '2'
-        >>> transaction.abort()
-        >>> tm.commit()
-        >>> conn.sync()
-        >>> conn.root().b.open().read()
-        '2'
-        >>> db.close()
-        """
+#         >>> bs = create_storage()
+#         >>> db = DB(bs)
+#         >>> conn = db.open()
+#         >>> conn.root().b = ZODB.blob.Blob()
+#         >>> conn.root().b.open('w').write('initial')
+#         >>> transaction.commit()
+#         >>> conn.root().b.open('w').write('1')
+#         >>> _ = transaction.savepoint()
+#         >>> tm = transaction.TransactionManager()
+#         >>> conn2 = db.open(transaction_manager=tm)
+#         >>> conn2.root().b.open('w').write('2')
+#         >>> _ = tm.savepoint()
+#         >>> conn.root().b.open().read()
+#         '1'
+#         >>> conn2.root().b.open().read()
+#         '2'
+#         >>> transaction.abort()
+#         >>> tm.commit()
+#         >>> conn.sync()
+#         >>> conn.root().b.open().read()
+#         '2'
+#         >>> db.close()
+#         """
 
 def savepoint_cleanup():
     """Make sure savepoint data gets cleaned up.
@@ -651,6 +651,7 @@ def storage_reusable_suite(prefix, factory,
 
     Pass a factory taking a name and a blob directory name.
     """
+    # pylint:disable=unused-argument
     def setup(test):
         setUp(test)
         def create_storage(name='data', blob_dir=None, **kw):

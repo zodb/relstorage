@@ -61,7 +61,7 @@ class ZEOTracer(object):
                 _trace_file_write(
                     _pack(
                         _int(now), encoded, _len(oid), tid, end_tid) + oid,
-                    )
+                )
             except: # pragma: no cover
                 log.exception("Problem writing trace info for %r at tid %r and end tid %r",
                               oid, tid, end_tid)
@@ -78,7 +78,7 @@ class ZEOTracer(object):
         with self._lock:
             now = time.time()
             for startpos, endpos, oid_int in items:
-                self._trace(0x52, oid_int, tid_int, dlen=endpos-startpos, now=now)
+                self._trace(0x52, oid_int, tid_int, dlen=endpos - startpos, now=now)
 
     def close(self):
         self._trace_file.close()

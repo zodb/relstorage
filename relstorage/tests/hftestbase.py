@@ -17,7 +17,7 @@ from relstorage.tests.RecoveryStorage import BasicRecoveryStorage
 from relstorage.tests.RecoveryStorage import UndoableRecoveryStorage
 from relstorage.tests.reltestbase import GenericRelStorageTests
 from relstorage.tests.reltestbase import RelStorageTestBase
-from ZODB.DB import DB
+
 from ZODB.FileStorage import FileStorage
 from ZODB.serialize import referencesf
 from ZODB.tests.ConflictResolution import PCounter
@@ -27,13 +27,12 @@ from ZODB.tests.PackableStorage import Root
 from ZODB.tests.PackableStorage import ZERO
 from ZODB.tests.StorageTestBase import zodb_pickle
 from ZODB.tests.StorageTestBase import zodb_unpickle
-from relstorage._compat import loads
+
 import time
 
 
-class HistoryFreeRelStorageTests(
-    GenericRelStorageTests,
-    ):
+class HistoryFreeRelStorageTests(GenericRelStorageTests):
+    # pylint:disable=too-many-ancestors,abstract-method,too-many-locals,too-many-statements
 
     keep_history = False
 
@@ -41,6 +40,7 @@ class HistoryFreeRelStorageTests(
     # collects garbage but does not retain old versions.
 
     def checkPackAllRevisions(self):
+        from relstorage._compat import loads
         self._initroot()
         eq = self.assertEqual
         raises = self.assertRaises
@@ -235,7 +235,7 @@ class HistoryFreeRelStorageTests(
         s1.poll_invalidations()
 
         # commit a change
-        revid2 = self._dostoreNP(oid, revid=revid1, data=zodb_pickle(obj))
+        _revid2 = self._dostoreNP(oid, revid=revid1, data=zodb_pickle(obj))
 
         # commit a conflicting change using s1
         main_storage = self._storage
@@ -243,12 +243,12 @@ class HistoryFreeRelStorageTests(
         try:
             # we can resolve this conflict because s1 has an open
             # transaction that can read the old state of the object.
-            revid3 = self._dostoreNP(oid, revid=revid1, data=zodb_pickle(obj))
+            _revid3 = self._dostoreNP(oid, revid=revid1, data=zodb_pickle(obj))
             s1.release()
         finally:
             self._storage = main_storage
 
-        data, serialno = self._storage.load(oid, '')
+        data, _serialno = self._storage.load(oid, '')
         inst = zodb_unpickle(data)
         self.assertEqual(inst._value, 5)
 
@@ -282,11 +282,9 @@ class HistoryFreeRelStorageTests(
             db.close()
 
 
-class HistoryFreeToFileStorage(
-        RelStorageTestBase,
-        BasicRecoveryStorage,
-        ):
-
+class HistoryFreeToFileStorage(RelStorageTestBase,
+                               BasicRecoveryStorage):
+    # pylint:disable=abstract-method,too-many-ancestors
     keep_history = False
 
     def setUp(self):
@@ -303,11 +301,9 @@ class HistoryFreeToFileStorage(
         return FileStorage('Dest.fs')
 
 
-class HistoryFreeFromFileStorage(
-        RelStorageTestBase,
-        UndoableRecoveryStorage,
-        ):
-
+class HistoryFreeFromFileStorage(RelStorageTestBase,
+                                 UndoableRecoveryStorage):
+    # pylint:disable=abstract-method,too-many-ancestors
     keep_history = False
 
     def setUp(self):

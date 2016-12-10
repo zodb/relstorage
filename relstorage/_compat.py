@@ -6,7 +6,8 @@ Compatibility shims.
 
 from __future__ import print_function, absolute_import, division
 
-# pylint:disable=unused-import
+# pylint:disable=unused-import,invalid-name,no-member,undefined-variable
+# pylint:disable=no-name-in-module,redefined-variable-type
 
 import sys
 import platform
@@ -19,8 +20,10 @@ PYPY = platform.python_implementation() == 'PyPy'
 if PY3:
     def list_keys(d):
         return list(d.keys())
+
     def list_items(d):
         return list(d.items())
+
     def list_values(d):
         return list(d.values())
     iteritems = dict.items

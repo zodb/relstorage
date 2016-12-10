@@ -26,6 +26,8 @@ import logging
 import os
 import unittest
 
+# pylint:disable=no-member,too-many-ancestors
+
 
 base_dbname = os.environ.get('RELSTORAGETEST_DBNAME', 'relstoragetest')
 
@@ -121,18 +123,18 @@ class HPPostgreSQLSrcZODBConvertTests(UsePostgreSQLAdapter, _PgSQLCfgMixin, Abst
     pass
 
 class HPPostgreSQLTests(UsePostgreSQLAdapter, HistoryPreservingRelStorageTests,
-        ZConfigTests):
+                        ZConfigTests):
     pass
 
 class HPPostgreSQLToFile(UsePostgreSQLAdapter, HistoryPreservingToFileStorage):
     pass
 
 class HPPostgreSQLFromFile(UsePostgreSQLAdapter,
-        HistoryPreservingFromFileStorage):
+                           HistoryPreservingFromFileStorage):
     pass
 
 class HFPostgreSQLTests(UsePostgreSQLAdapter, HistoryFreeRelStorageTests,
-        ZConfigTests):
+                        ZConfigTests):
     pass
 
 class HFPostgreSQLToFile(UsePostgreSQLAdapter, HistoryFreeToFileStorage):
@@ -149,6 +151,7 @@ db_names = {
     }
 
 def test_suite():
+    # pylint:disable=too-many-locals
     import relstorage.adapters.postgresql as _adapter
     try:
         _adapter.select_driver()
@@ -171,7 +174,6 @@ def test_suite():
     suite.addTest(unittest.makeSuite(HPPostgreSQLDestZODBConvertTests))
     suite.addTest(unittest.makeSuite(HPPostgreSQLSrcZODBConvertTests))
 
-    import ZODB.blob
     from .util import RUNNING_ON_CI
     if RUNNING_ON_CI or os.environ.get("RS_PG_SMALL_BLOB"):
         # Avoid creating 2GB blobs to be friendly to neighbors

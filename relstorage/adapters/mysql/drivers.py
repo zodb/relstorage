@@ -15,8 +15,8 @@
 """
 MySQL IDBDriver implementations.
 """
-
 from __future__ import print_function, absolute_import
+# pylint:disable=redefined-variable-type
 
 import os
 import sys
@@ -30,6 +30,8 @@ from ZODB.POSException import TransactionTooLargeError
 from ..interfaces import IDBDriver, IDBDriverOptions
 
 from .._abstract_drivers import _standard_exceptions
+
+from relstorage._compat import intern
 
 logger = __import__('logging').getLogger(__name__)
 
@@ -82,7 +84,7 @@ else:  # pragma: no cover
             pymysql.err.Error,
             IOError,
             pymysql.err.DatabaseError
-            )
+        )
 
         disconnected_exceptions += (
             IOError, # This one can escape mapping;
@@ -105,6 +107,7 @@ else:  # pragma: no cover
 
         if hasattr(pymysql.converters, 'escape_string'):
             orig_escape_string = pymysql.converters.escape_string
+
             def escape_string(value, mapping=None):
                 if isinstance(value, bytearray) and not value:
                     return value
@@ -167,9 +170,11 @@ else:
     from pymysql.err import InternalError, InterfaceError, ProgrammingError
 
     class UConnection(umysqldb.connections.Connection):
+        # pylint:disable=abstract-method
+        _umysql_conn = None
 
         def __debug_lock(self, sql, ex=False): # pragma: no cover
-            if not 'GET_LOCK' in sql:
+            if 'GET_LOCK' not in sql:
                 return
 
             try:
@@ -270,7 +275,7 @@ else:
             assert not self._umysql_conn.is_connected()
             self._umysql_conn.close()
             del self._umysql_conn
-            self._umysql_conn = umysql.Connection()
+            self._umysql_conn = umysql.Connection() # pylint:disable=no-member
             self._connect()  # Potentially this could raise again?
 
         def connect(self, *_args, **_kwargs): # pragma: no cover
@@ -279,7 +284,7 @@ else:
             return self._connect()
 
     @implementer(IDBDriver)
-    class umysqldbDriver(PyMySQLDriver):
+    class umysqldbDriver(PyMySQLDriver): # noqa
         __name__ = 'umysqldb'
         connect = UConnection
         # umysql has a tendency to crash when given a bytearray (which
@@ -291,8 +296,8 @@ else:
 
 
     if (not preferred_driver_name
-        or (preferred_driver_name == 'PyMySQL'
-            and not hasattr(sys, 'pypy_version_info'))):
+            or (preferred_driver_name == 'PyMySQL'
+                and not hasattr(sys, 'pypy_version_info'))):
         preferred_driver_name = driver.__name__
     del driver
 
