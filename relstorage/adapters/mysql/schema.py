@@ -233,16 +233,16 @@ class MySQLSchemaInstaller(AbstractSchemaInstaller):
             self.runner.run_script(cursor, stmt)
 
     # Temp tables are created in a session-by-session basis
-    def _create_temp_store(self, cursor):
+    def _create_temp_store(self, _cursor):
         return
 
-    def _create_temp_blob_chunk(self, cursor):
+    def _create_temp_blob_chunk(self, _cursor):
         return
 
-    def _create_temp_pack_visit(self, cursor):
+    def _create_temp_pack_visit(self, _cursor):
         return
 
-    def _create_temp_undo(self, cursor):
+    def _create_temp_undo(self, _cursor):
         return
 
     def _init_after_create(self, cursor):

@@ -28,7 +28,7 @@ class RowBatcherTests(unittest.TestCase):
         self.assertEqual(batcher.rows_added, 1)
         self.assertEqual(batcher.size_added, 0)
         self.assertEqual(batcher.deletes,
-            {('mytable', ('id',)): set([("2",)])})
+                         {('mytable', ('id',)): set([("2",)])})
 
     def test_delete_multiple_column(self):
         cursor = MockCursor()
@@ -38,7 +38,7 @@ class RowBatcherTests(unittest.TestCase):
         self.assertEqual(batcher.rows_added, 1)
         self.assertEqual(batcher.size_added, 0)
         self.assertEqual(batcher.deletes,
-            {('mytable', ('id', 'tid')): set([("2", "10")])})
+                         {('mytable', ('id', 'tid')): set([("2", "10")])})
 
     def test_delete_auto_flush(self):
         cursor = MockCursor()
@@ -47,7 +47,7 @@ class RowBatcherTests(unittest.TestCase):
         batcher.delete_from("mytable", id=2)
         batcher.delete_from("mytable", id=1)
         self.assertEqual(cursor.executed,
-            [('DELETE FROM mytable WHERE id IN (1,2)', None)])
+                         [('DELETE FROM mytable WHERE id IN (1,2)', None)])
         self.assertEqual(batcher.rows_added, 0)
         self.assertEqual(batcher.size_added, 0)
         self.assertEqual(batcher.deletes, {})
@@ -130,12 +130,14 @@ class RowBatcherTests(unittest.TestCase):
             rowkey=2,
             size=5,
             )
-        self.assertEqual(cursor.executed, [(
-            'INSERT INTO mytable (id, name) VALUES\n'
-            '(%s, id || %s),\n'
-            '(%s, id || %s)',
-            (1, 'a', 2, 'B'))
-        ])
+        self.assertEqual(
+            cursor.executed,
+            [(
+                'INSERT INTO mytable (id, name) VALUES\n'
+                '(%s, id || %s),\n'
+                '(%s, id || %s)',
+                (1, 'a', 2, 'B'))
+            ])
         self.assertEqual(batcher.rows_added, 0)
         self.assertEqual(batcher.size_added, 0)
         self.assertEqual(batcher.inserts, {})
@@ -200,13 +202,15 @@ class OracleRowBatcherTests(unittest.TestCase):
             )
         self.assertEqual(cursor.executed, [])
         batcher.flush()
-        self.assertEqual(cursor.executed, [(
-            'INSERT ALL\n'
-            'INTO mytable (id, name) VALUES (:id_0, :id_0 || :name_0)\n'
-            'INTO mytable (id, name) VALUES (:id_1, :id_1 || :name_1)\n'
-            'SELECT * FROM DUAL',
-            {'id_0': 1, 'id_1': 2, 'name_1': 'b', 'name_0': 'a'})
-        ])
+        self.assertEqual(
+            cursor.executed,
+            [(
+                'INSERT ALL\n'
+                'INTO mytable (id, name) VALUES (:id_0, :id_0 || :name_0)\n'
+                'INTO mytable (id, name) VALUES (:id_1, :id_1 || :name_1)\n'
+                'SELECT * FROM DUAL',
+                {'id_0': 1, 'id_1': 2, 'name_1': 'b', 'name_0': 'a'})
+            ])
 
     def test_insert_one_raw_row(self):
         class MockRawType(object):
@@ -223,7 +227,7 @@ class OracleRowBatcherTests(unittest.TestCase):
         batcher.flush()
         self.assertEqual(cursor.executed, [
             ('INSERT INTO mytable (id, data) VALUES (:id, :rawdata)',
-                {'id': 1, 'rawdata': 'xyz'})
+             {'id': 1, 'rawdata': 'xyz'})
         ])
         self.assertEqual(cursor.inputsizes, {'rawdata': MockRawType})
 
@@ -247,13 +251,15 @@ class OracleRowBatcherTests(unittest.TestCase):
             size=3,
             )
         batcher.flush()
-        self.assertEqual(cursor.executed, [(
-            'INSERT ALL\n'
-            'INTO mytable (id, data) VALUES (:id_0, :rawdata_0)\n'
-            'INTO mytable (id, data) VALUES (:id_1, :rawdata_1)\n'
-            'SELECT * FROM DUAL',
-            {'id_0': 1, 'id_1': 2, 'rawdata_0': 'xyz', 'rawdata_1': 'abc'})
-        ])
+        self.assertEqual(
+            cursor.executed,
+            [(
+                'INSERT ALL\n'
+                'INTO mytable (id, data) VALUES (:id_0, :rawdata_0)\n'
+                'INTO mytable (id, data) VALUES (:id_1, :rawdata_1)\n'
+                'SELECT * FROM DUAL',
+                {'id_0': 1, 'id_1': 2, 'rawdata_0': 'xyz', 'rawdata_1': 'abc'})
+            ])
         self.assertEqual(cursor.inputsizes, {
             'rawdata_0': MockRawType,
             'rawdata_1': MockRawType,

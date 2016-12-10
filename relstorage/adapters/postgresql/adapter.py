@@ -47,6 +47,7 @@ def select_driver(options=None):
 class PostgreSQLAdapter(object):
     """PostgreSQL adapter for RelStorage."""
 
+    # pylint:disable=too-many-instance-attributes
     def __init__(self, dsn='', options=None):
         # options is a relstorage.options.Options or None
         self._dsn = dsn
@@ -96,7 +97,7 @@ class PostgreSQLAdapter(object):
             runner=self.runner,
             revert_when_stale=options.revert_when_stale,
         )
-
+        # pylint:disable=redefined-variable-type
         if self.keep_history:
             self.packundo = HistoryPreservingPackUndo(
                 database_type='postgresql',

@@ -12,12 +12,11 @@
 # FOR A PARTICULAR PURPOSE.
 #
 ##############################################################################
-from __future__ import absolute_import, print_function, division
-
 """
 Segmented LRU implementations.
-
 """
+from __future__ import absolute_import, print_function, division
+
 import functools
 import itertools
 try:
@@ -28,8 +27,8 @@ except AttributeError:
 
 from relstorage.cache import _cache_ring
 
-ffi = _cache_ring.ffi
-_FFI_RING = _cache_ring.lib
+ffi = _cache_ring.ffi # pylint:disable=no-member
+_FFI_RING = _cache_ring.lib # pylint:disable=no-member
 
 _ring_move_to_head = _FFI_RING.rsc_ring_move_to_head
 _ring_del = _FFI_RING.rsc_ring_del
@@ -174,7 +173,7 @@ class CacheRingNode(object):
     def __init__(self, key, value, node=None):
         self.key = key
         self.value = value
-
+        self._cffi_owning_node = None
         # Passing the string is faster than passing a cdecl because we
         # have the string directly in bytecode without a lookup
         if node is None:

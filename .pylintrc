@@ -10,8 +10,7 @@
 # comments at the end of the line does the same thing (though Py3 supports
 # mixing)
 
-
-# invalid-name, ; We get lots of these, especially in scripts. should fix many of them
+# invalid-name, ; Things like loadBlob get flagged
 # protected-access, ; We have many cases of this; legit ones need to be examinid and commented, then this removed
 # no-self-use, ; common in superclasses with extension points
 # too-few-public-methods, ; Exception and marker classes get tagged with this
@@ -29,10 +28,10 @@
 # useless-suppression: the only way to avoid repeating it for specific statements everywhere that we
 #   do Py2/Py3 stuff is to put it here. Sadly this means that we might get better but not realize it.
 disable=wrong-import-position,
+    invalid-name,
     wrong-import-order,
     missing-docstring,
     ungrouped-imports,
-    invalid-name,
     protected-access,
     no-self-use,
     too-few-public-methods,
@@ -43,8 +42,9 @@ disable=wrong-import-position,
     cyclic-import,
     too-many-arguments,
     redefined-builtin,
-	useless-suppression,
-#	undefined-all-variable
+    useless-suppression,
+    duplicate-code,
+#   undefined-all-variable
 
 
 [FORMAT]
@@ -72,15 +72,14 @@ generated-members=exc_clear
 # List of classes names for which member attributes should not be checked
 # (useful for classes with attributes dynamically set). This supports can work
 # with qualified names.
-# greenlet, Greenlet, parent, dead: all attempts to fix issues in greenlet.py
-# only seen on the service, e.g., self.parent.loop: class parent has no loop
-ignored-classes=SSLContext, SSLSocket, greenlet, Greenlet, parent, dead
+
+ignored-classes=SectionValue
 
 # List of module names for which member attributes should not be checked
 # (useful for modules/projects where namespaces are manipulated during runtime
 # and thus existing member attributes cannot be deduced by static analysis. It
 # supports qualified module names, as well as Unix pattern matching.
-ignored-modules=gevent._corecffi
+#ignored-modules=gevent._corecffi
 
 [DESIGN]
 max-attributes=12

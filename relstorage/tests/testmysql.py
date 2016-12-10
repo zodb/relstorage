@@ -27,6 +27,7 @@ import logging
 import os
 import unittest
 
+# pylint:disable=no-member,too-many-ancestors
 
 base_dbname = os.environ.get('RELSTORAGETEST_DBNAME', 'relstoragetest')
 
@@ -203,7 +204,6 @@ def test_suite():
     suite.addTest(unittest.makeSuite(HPMySQLDestZODBConvertTests))
     suite.addTest(unittest.makeSuite(HPMySQLSrcZODBConvertTests))
 
-    import ZODB.blob
     from relstorage.tests.blob.testblob import storage_reusable_suite
     from relstorage.tests.util import shared_blob_dir_choices
     for shared_blob_dir in shared_blob_dir_choices:

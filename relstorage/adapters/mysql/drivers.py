@@ -15,8 +15,8 @@
 """
 MySQL IDBDriver implementations.
 """
-
 from __future__ import print_function, absolute_import
+# pylint:disable=redefined-variable-type
 
 import os
 import sys
@@ -30,6 +30,8 @@ from ZODB.POSException import TransactionTooLargeError
 from ..interfaces import IDBDriver, IDBDriverOptions
 
 from .._abstract_drivers import _standard_exceptions
+
+from relstorage._compat import intern
 
 logger = __import__('logging').getLogger(__name__)
 
@@ -167,6 +169,7 @@ else:
     from pymysql.err import InternalError, InterfaceError, ProgrammingError
 
     class UConnection(umysqldb.connections.Connection):
+        _umysql_conn = None
 
         def __debug_lock(self, sql, ex=False): # pragma: no cover
             if not 'GET_LOCK' in sql:
@@ -291,8 +294,8 @@ else:
 
 
     if (not preferred_driver_name
-        or (preferred_driver_name == 'PyMySQL'
-            and not hasattr(sys, 'pypy_version_info'))):
+            or (preferred_driver_name == 'PyMySQL'
+                and not hasattr(sys, 'pypy_version_info'))):
         preferred_driver_name = driver.__name__
     del driver
 

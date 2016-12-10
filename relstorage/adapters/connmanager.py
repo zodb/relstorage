@@ -56,7 +56,7 @@ class AbstractConnectionManager(object):
         """Set the on_store_opened hook"""
         self.on_store_opened = f
 
-    def open(self):
+    def open(self, **kwargs):
         """Open a database connection and return (conn, cursor)."""
         raise NotImplementedError()
 

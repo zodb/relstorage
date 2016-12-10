@@ -16,6 +16,8 @@ from __future__ import absolute_import, print_function, division
 from zope.interface import Interface
 from zope.interface import Attribute
 
+#pylint: disable=inherit-non-class,no-method-argument,no-self-argument
+
 class IPersistentCache(Interface):
     """
     A cache that can be persisted to a file (or more generally, a stream)

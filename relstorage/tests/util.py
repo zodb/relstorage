@@ -1,9 +1,6 @@
 import os
-import time
-import unittest
-from relstorage._compat import string_types
 
-from ZEO.tests.forker import wait_until
+import unittest
 
 
 # ZODB >= 3.9.  The blob directory can be a private cache.
@@ -17,7 +14,7 @@ RUNNING_ON_CI = RUNNING_ON_TRAVIS or RUNNING_ON_APPVEYOR
 if RUNNING_ON_CI:
     skipOnCI = unittest.skip
 else:
-    def skipOnCI(reason):
+    def skipOnCI(reason): # pylint:disable=unused-argument
         def dec(f):
             return f
         return dec
@@ -28,6 +25,7 @@ CACHE_MODULE_NAME = None
 if RUNNING_ON_TRAVIS:
     # We expect to have access to a local memcache server
     # on travis. Use it if we can import drivers.
+    # pylint:disable=unused-import
     try:
         import pylibmc
         CACHE_SERVERS = ["localhost:11211"]

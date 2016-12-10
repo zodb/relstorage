@@ -6,7 +6,7 @@ Compatibility shims.
 
 from __future__ import print_function, absolute_import, division
 
-# pylint:disable=unused-import
+# pylint:disable=unused-import,invalid-name,no-member,undefined-variable
 
 import sys
 import platform

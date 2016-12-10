@@ -12,7 +12,7 @@
 #
 ##############################################################################
 """A foundation for RelStorage tests"""
-
+# pylint:disable=too-many-ancestors,abstract-method,too-many-public-methods
 from ZODB.DB import DB
 from ZODB.POSException import ReadConflictError
 from ZODB.serialize import referencesf
@@ -50,8 +50,9 @@ class StorageCreatingMixin(object):
         return storage
 
     def make_storage(self, zap=True, **kw):
-        if ('cache_servers' not in kw and 'cache_module_name' not in kw
-            and kw.get('share_local_cache', True)):
+        if ('cache_servers' not in kw
+                and 'cache_module_name' not in kw
+                and kw.get('share_local_cache', True)):
             if util.CACHE_SERVERS and util.CACHE_MODULE_NAME:
                 kw['cache_servers'] = util.CACHE_SERVERS
                 kw['cache_module_name'] = util.CACHE_MODULE_NAME
@@ -288,7 +289,7 @@ class GenericRelStorageTests(
         data = b'a 16 byte string' * (1024 * 1024)
         oid = self._storage.new_oid()
         self._dostoreNP(oid, data=data)
-        got, serialno = self._storage.load(oid, '')
+        got, _serialno = self._storage.load(oid, '')
         self.assertEqual(len(got), len(data))
         self.assertEqual(got, data)
 
@@ -296,19 +297,18 @@ class GenericRelStorageTests(
         # Store 99 objects each with 1900 bytes.  This is intended
         # to exercise possible buffer overfilling that the batching
         # code might cause.
-        import transaction
         data = b'0123456789012345678' * 100
         t = transaction.Transaction()
         self._storage.tpc_begin(t)
         oids = []
-        for i in range(99):
+        for _ in range(99):
             oid = self._storage.new_oid()
             self._storage.store(oid, b'\0'*8, data, '', t)
             oids.append(oid)
         self._storage.tpc_vote(t)
         self._storage.tpc_finish(t)
         for oid in oids:
-            got, serialno = self._storage.load(oid, '')
+            got, _serialno = self._storage.load(oid, '')
             self.assertEqual(len(got), len(data))
             self.assertEqual(got, data)
 
@@ -610,7 +610,7 @@ class GenericRelStorageTests(
 
             # extra1 should have been garbage collected
             self.assertRaises(KeyError,
-                self._storage.load, extra1._p_oid, '')
+                              self._storage.load, extra1._p_oid, '')
             # extra2 and extra3 should both still exist
             self._storage.load(extra2._p_oid, '')
             self._storage.load(extra3._p_oid, '')
@@ -832,6 +832,7 @@ class AbstractRSZodbConvertTests(StorageCreatingMixin,
     keep_history = True
     filestorage_name = 'source'
     relstorage_name = 'destination'
+    filestorage_file = None
 
     def _relstorage_contents(self):
         raise NotImplementedError()
@@ -905,5 +906,5 @@ class DoubleCommitter(Persistent):
     """A crazy persistent class that changes self in __getstate__"""
     def __getstate__(self):
         if not hasattr(self, 'new_attribute'):
-            self.new_attribute = 1
+            self.new_attribute = 1 # pylint:disable=attribute-defined-outside-init
         return Persistent.__getstate__(self)

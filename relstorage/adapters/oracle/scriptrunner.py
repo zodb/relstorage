@@ -74,7 +74,7 @@ class OracleScriptRunner(ScriptRunner):
                     params[k] = v
         else:
             stmt = generic_stmt % self.script_vars
-            params = ()
+            params = () # pylint:disable=redefined-variable-type
 
         try:
             cursor.execute(stmt, params)
@@ -116,6 +116,7 @@ class CXOracleScriptRunner(OracleScriptRunner):
         error indicating truncation.  The run_lob_stmt() method works
         around this.
         """
+        # pylint:disable=unused-argument
         if defaultType == self.driver.BLOB:
             # Default size for BLOB is 4, we want the whole blob inline.
             # Typical chunk size is 8132, we choose a multiple - 32528

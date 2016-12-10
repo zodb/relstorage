@@ -20,12 +20,6 @@ from __future__ import absolute_import
 import six
 import abc
 
-
-from perfmetrics import metricmethod
-from relstorage.adapters.interfaces import IOIDAllocator
-from zope.interface import implementer
-from relstorage._compat import mysql_connection
-
 @six.add_metaclass(abc.ABCMeta)
 class AbstractOIDAllocator(object):
     # All of these allocators allocate 16 OIDs at a time.  In the sequence

@@ -19,6 +19,7 @@ from relstorage.adapters.interfaces import IObjectMover
 
 from zope.interface import implementer
 import os
+import functools
 
 from relstorage._compat import xrange
 
@@ -110,7 +111,7 @@ class PostgreSQLObjectMover(AbstractObjectMover):
                 if f is None:
                     f = open(filename, 'ab') # Append, chunk 0 was an export
 
-                reader = iter(lambda: blob.read(read_chunk_size), b'')
+                reader = iter(functools.partial(blob.read, read_chunk_size), b'')
                 for read_chunk in reader:
                     f.write(read_chunk)
                     bytecount += len(read_chunk)
@@ -135,6 +136,7 @@ class PostgreSQLObjectMover(AbstractObjectMover):
 
         If serial is None, upload to the temporary table.
         """
+        # pylint:disable=too-many-branches,too-many-locals
         if tid is not None:
             if self.keep_history:
                 delete_stmt = """

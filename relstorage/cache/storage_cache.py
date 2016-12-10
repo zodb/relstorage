@@ -54,6 +54,7 @@ class StorageCache(object):
     most global.  The first is a LocalClient, which stores the cache
     in the Python process, but shares the cache between threads.
     """
+    # pylint:disable=too-many-instance-attributes,too-many-public-methods
 
     # send_limit: approximate limit on the bytes to buffer before
     # sending to the cache.
@@ -377,6 +378,7 @@ class StorageCache(object):
 
         Fall back to loading from the database.
         """
+        # pylint:disable=too-many-statements,too-many-branches,too-many-locals
         if not self.checkpoints:
             # No poll has occurred yet.  For safety, don't use the cache.
             self._trace(0x20, oid_int)
@@ -601,6 +603,7 @@ class StorageCache(object):
         prev_tid_int can be None, in which case the changes
         parameter will be ignored.  new_tid_int can not be None.
         """
+        # pylint:disable=too-many-statements,too-many-branches,too-many-locals
         new_checkpoints = None
         for client in self.clients_global_first:
             s = client.get(self.checkpoints_key)
@@ -659,7 +662,7 @@ class StorageCache(object):
                 and prev_tid_int
                 and prev_tid_int <= self.current_tid
                 and new_tid_int >= self.current_tid
-        ):
+           ):
             # All the conditions for keeping the checkpoints were met,
             # so just update self.delta_after0 and self.current_tid.
             m = self.delta_after0

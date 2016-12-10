@@ -47,7 +47,7 @@ def select_driver(options=None):
 @implementer(IRelStorageAdapter)
 class OracleAdapter(object):
     """Oracle adapter for RelStorage."""
-
+    # pylint:disable=too-many-instance-attributes
     def __init__(self, user, password, dsn, commit_lock_id=0,
                  twophase=False, options=None):
         """Create an Oracle adapter.
@@ -59,6 +59,7 @@ class OracleAdapter(object):
         commit process.  This is disabled by default.  Even when this option
         is disabled, the ZODB two-phase commit is still in effect.
         """
+        # pylint:disable=unused-argument
         self._user = user
         self._password = password
         self._dsn = dsn
@@ -128,6 +129,7 @@ class OracleAdapter(object):
             revert_when_stale=options.revert_when_stale,
         )
 
+        # pylint:disable=redefined-variable-type
         if self.keep_history:
             self.packundo = OracleHistoryPreservingPackUndo(
                 database_type='oracle',

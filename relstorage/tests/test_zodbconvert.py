@@ -119,15 +119,13 @@ class AbstractZODBConvertBase(unittest.TestCase):
         self._check_value_of_key_in_dest(None)
 
     def test_incremental(self):
-        x = 10
-        self._write_value_for_key_in_src(x)
+        self._write_value_for_key_in_src(10)
         main(['', self.cfgfile])
-        self._check_value_of_key_in_dest(x)
+        self._check_value_of_key_in_dest(10)
 
-        x = "hi"
-        self._write_value_for_key_in_src(x)
+        self._write_value_for_key_in_src("hi")
         main(['', '--incremental', self.cfgfile])
-        self._check_value_of_key_in_dest(x)
+        self._check_value_of_key_in_dest("hi")
 
     def test_incremental_empty_src_dest(self):
         # Should work and not raise a POSKeyError

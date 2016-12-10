@@ -68,7 +68,7 @@ class CXOracleConnectionManager(AbstractConnectionManager):
 
     @metricmethod
     def open(self, transaction_mode="ISOLATION LEVEL READ COMMITTED",
-             twophase=False, replica_selector=None):
+             twophase=False, replica_selector=None, **kwargs):
         """Open a database connection and return (conn, cursor)."""
         if replica_selector is None:
             replica_selector = self.replica_selector

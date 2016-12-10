@@ -17,7 +17,7 @@ PostgreSQL IDBDriver implementations.
 """
 
 from __future__ import print_function, absolute_import
-
+# pylint:disable=redefined-variable-type
 import sys
 import os
 
@@ -243,7 +243,7 @@ else:
                     key = 'database'
                 kwds[key] = value
             conn = self._connect(**kwds)
-            assert conn.__class__ is _Connection.__base__
+            assert conn.__class__ is _Connection.__base__ # pylint:disable=no-member
             conn.__class__ = _Connection
             return _ConnWrapper(conn) if self._wrap else conn
 

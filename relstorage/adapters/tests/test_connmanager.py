@@ -46,7 +46,7 @@ class AbstractConnectionManagerTests(unittest.TestCase):
         self.assertTrue(conn.rolled_back)
         conn.replica = 'other'
         self.assertRaises(ReplicaClosedException,
-            cm.restart_load, conn, MockCursor())
+                          cm.restart_load, conn, MockCursor())
 
         conn = MockConnection()
         conn.replica = 'localhost'
@@ -54,16 +54,16 @@ class AbstractConnectionManagerTests(unittest.TestCase):
         self.assertTrue(conn.rolled_back)
         conn.replica = 'other'
         self.assertRaises(ReplicaClosedException,
-            cm.restart_store, conn, MockCursor())
+                          cm.restart_store, conn, MockCursor())
 
     def test_with_ro_replica_conf(self):
         import os
         import relstorage.tests
         tests_dir = relstorage.tests.__file__
         replica_conf = os.path.join(os.path.dirname(tests_dir),
-            'replicas.conf')
+                                    'replicas.conf')
         ro_replica_conf = os.path.join(os.path.dirname(tests_dir),
-            'ro_replicas.conf')
+                                       'ro_replicas.conf')
         options = MockOptions(replica_conf, ro_replica_conf)
 
         from relstorage.adapters.connmanager \
@@ -77,7 +77,7 @@ class AbstractConnectionManagerTests(unittest.TestCase):
         self.assertTrue(conn.rolled_back)
         conn.replica = 'other'
         self.assertRaises(ReplicaClosedException,
-            cm.restart_load, conn, MockCursor())
+                          cm.restart_load, conn, MockCursor())
 
 
 class MockOptions(object):
@@ -87,6 +87,10 @@ class MockOptions(object):
         self.replica_timeout = 600.0
 
 class MockConnection(object):
+    rolled_back = False
+    closed = False
+    replica = None
+
     def rollback(self):
         self.rolled_back = True
 
@@ -94,6 +98,8 @@ class MockConnection(object):
         self.closed = True
 
 class MockCursor(object):
+    closed = False
+
     def close(self):
         self.closed = True
 

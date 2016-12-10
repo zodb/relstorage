@@ -17,7 +17,7 @@ from ZODB.POSException import StorageError
 from zope.interface import Attribute
 from zope.interface import Interface
 
-#pylint: disable=inherit-non-class,no-method-argument
+#pylint: disable=inherit-non-class,no-method-argument,no-self-argument
 
 class IRelStorageAdapter(Interface):
     """A database adapter for RelStorage"""
@@ -487,7 +487,7 @@ class ITransactionControl(Interface):
         """Returns the most recent tid."""
 
     def add_transaction(cursor, tid, username, description, extension,
-            packed=False):
+                        packed=False):
         """Add a transaction."""
 
     def commit_phase1(conn, cursor, tid):

@@ -80,6 +80,7 @@ def select_driver(options=None):
 @implementer(IRelStorageAdapter)
 class MySQLAdapter(object):
     """MySQL adapter for RelStorage."""
+    # pylint:disable=too-many-instance-attributes
 
     def __init__(self, options=None, **params):
         if options is None:
@@ -128,7 +129,7 @@ class MySQLAdapter(object):
             runner=self.runner,
             revert_when_stale=options.revert_when_stale,
         )
-
+        # pylint:disable=redefined-variable-type
         if self.keep_history:
             self.packundo = MySQLHistoryPreservingPackUndo(
                 database_type='mysql',

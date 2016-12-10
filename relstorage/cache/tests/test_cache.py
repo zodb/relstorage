@@ -12,6 +12,7 @@
 #
 ##############################################################################
 from __future__ import print_function, absolute_import, division
+# pylint:disable=too-many-lines,abstract-method,too-many-public-methods,attribute-defined-outside-init
 import unittest
 
 from relstorage.tests.util import skipOnCI
@@ -52,7 +53,7 @@ def _check_load_and_store_multiple_files_hit_limit(self, mapping, wrapping_stora
         if i > 0:
             del mapping[str(i - 1)]
         mapping[str(i)] = b'abc'
-        mapping[str(i)] # Increment so it gets saved
+        _ = mapping[str(i)] # Increment so it gets saved
 
         persistence.save_local_cache(options, 'test', dump_object)
         self.assertEqual(persistence.count_cache_files(options, 'test'),
@@ -61,7 +62,7 @@ def _check_load_and_store_multiple_files_hit_limit(self, mapping, wrapping_stora
     # make sure it's not in the dict so that even if we find the most recent
     # cache file first, we still have something to load. If we don't we can sometimes
     # find that file and fail to store anything and prematurely break out of the loop
-    del mapping[str(i)]
+    del mapping[str(i)] # pylint:disable=undefined-loop-variable
     files_loaded = persistence.load_local_cache(options, 'test', dump_object)
 
     self.assertEqual(files_loaded, 2)
@@ -178,7 +179,6 @@ class StorageCacheTests(unittest.TestCase):
 
     def test_load_using_delta_after0_hit(self):
         from relstorage.tests.fakecache import data
-        from ZODB.utils import p64
         adapter = MockAdapter()
         c = self.getClass()(adapter, MockOptionsWithFakeCache(), 'myprefix')
         c.current_tid = 60
@@ -229,7 +229,6 @@ class StorageCacheTests(unittest.TestCase):
 
     def test_load_using_checkpoint0_hit(self):
         from relstorage.tests.fakecache import data
-        from ZODB.utils import p64
         adapter = MockAdapter()
         c = self.getClass()(adapter, MockOptionsWithFakeCache(), 'myprefix')
         c.current_tid = 60
@@ -240,7 +239,6 @@ class StorageCacheTests(unittest.TestCase):
 
     def test_load_using_checkpoint0_miss(self):
         from relstorage.tests.fakecache import data
-        from ZODB.utils import p64
         adapter = MockAdapter()
         c = self.getClass()(adapter, MockOptionsWithFakeCache(), 'myprefix')
         c.current_tid = 60
@@ -252,7 +250,6 @@ class StorageCacheTests(unittest.TestCase):
 
     def test_load_using_delta_after1_hit(self):
         from relstorage.tests.fakecache import data
-        from ZODB.utils import p64
         adapter = MockAdapter()
         c = self.getClass()(adapter, MockOptionsWithFakeCache(), 'myprefix')
         c.current_tid = 60
@@ -265,7 +262,6 @@ class StorageCacheTests(unittest.TestCase):
 
     def test_load_using_delta_after1_miss(self):
         from relstorage.tests.fakecache import data
-        from ZODB.utils import p64
         adapter = MockAdapter()
         c = self.getClass()(adapter, MockOptionsWithFakeCache(), 'myprefix')
         c.current_tid = 60
@@ -278,7 +274,6 @@ class StorageCacheTests(unittest.TestCase):
 
     def test_load_using_checkpoint1_hit(self):
         from relstorage.tests.fakecache import data
-        from ZODB.utils import p64
         adapter = MockAdapter()
         c = self.getClass()(adapter, MockOptionsWithFakeCache(), 'myprefix')
         c.current_tid = 60
@@ -290,7 +285,6 @@ class StorageCacheTests(unittest.TestCase):
 
     def test_load_using_checkpoint1_miss(self):
         from relstorage.tests.fakecache import data
-        from ZODB.utils import p64
         adapter = MockAdapter()
         c = self.getClass()(adapter, MockOptionsWithFakeCache(), 'myprefix')
         c.current_tid = 60
@@ -317,7 +311,6 @@ class StorageCacheTests(unittest.TestCase):
 
     def test_send_queue_small(self):
         from relstorage.tests.fakecache import data
-        from ZODB.utils import p64
         c = self._makeOne()
         c.tpc_begin()
         c.store_temp(2, b'abc')
@@ -332,7 +325,6 @@ class StorageCacheTests(unittest.TestCase):
 
     def test_send_queue_large(self):
         from relstorage.tests.fakecache import data
-        from ZODB.utils import p64
         c = self._makeOne()
         c.send_limit = 100
         c.tpc_begin()
@@ -347,7 +339,6 @@ class StorageCacheTests(unittest.TestCase):
 
     def test_send_queue_none(self):
         from relstorage.tests.fakecache import data
-        from ZODB.utils import p64
         c = self._makeOne()
         c.tpc_begin()
         tid = p64(55)
@@ -355,7 +346,6 @@ class StorageCacheTests(unittest.TestCase):
         self.assertEqual(data, {})
 
     def test_after_tpc_finish(self):
-        from ZODB.utils import p64
         c = self._makeOne()
         c.tpc_begin()
         c.after_tpc_finish(p64(55))
@@ -722,6 +712,7 @@ class SizedLRUMappingTests(unittest.TestCase):
         return bio
 
     def test_load_and_store(self, options=None):
+        # pylint:disable=too-many-statements
         from io import BytesIO
         if options is None:
             options = MockOptions()
@@ -748,7 +739,7 @@ class SizedLRUMappingTests(unittest.TestCase):
 
         client1.reset_stats()
         client1['def'] = b'123'
-        client1['def']
+        _ = client1['def']
         self.assertEqual(2, len(client1))
         client1_max_size = client1.size
         self._save(bio, client1, options)
@@ -924,6 +915,7 @@ class LocalClientTests(unittest.TestCase):
         self.assertEqual(c.get_multi(['k2', 'k3']), {})
 
     def test_bucket_sizes_without_compression(self):
+        # pylint:disable=too-many-statements
         # LocalClient is a simple w-TinyLRU cache.  Confirm it keeps the right keys.
         c = self._makeOne(cache_local_compression='none')
         # This limit will result in
@@ -1053,6 +1045,7 @@ class LocalClientTests(unittest.TestCase):
 
 
     def test_bucket_sizes_with_compression(self):
+        # pylint:disable=too-many-statements
         c = self._makeOne(cache_local_compression='zlib')
         c.limit = 23 * 2 + 1
         c.flush_all()
@@ -1218,7 +1211,7 @@ class LocalClientTests(unittest.TestCase):
             self.assertEqual(0, len(cache_files))
 
             # Now lets break saving
-            def badwrite(*args):
+            def badwrite(*_args):
                 raise OSError("Nope")
             c2._bucket0.write_to_stream = badwrite
 
@@ -1445,13 +1438,13 @@ class MockAdapter(object):
 class MockObjectMover(object):
     def __init__(self):
         self.data = {}  # {oid_int: (state, tid_int)}
-    def load_current(self, cursor, oid_int):
+    def load_current(self, _cursor, oid_int):
         return self.data.get(oid_int, (None, None))
 
 class MockPoller(object):
     def __init__(self):
         self.changes = []  # [(oid, tid)]
-    def list_changes(self, cursor, after_tid, last_tid):
+    def list_changes(self, _cursor, after_tid, last_tid):
         return ((oid, tid) for (oid, tid) in self.changes
                 if tid > after_tid and tid <= last_tid)
 

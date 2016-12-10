@@ -17,7 +17,7 @@ from persistent.mapping import PersistentMapping
 from relstorage.tests.RecoveryStorage import UndoableRecoveryStorage
 from relstorage.tests.reltestbase import GenericRelStorageTests
 from relstorage.tests.reltestbase import RelStorageTestBase
-from relstorage._compat import TRANSACTION_DATA_IS_TEXT
+
 from ZODB.DB import DB
 from ZODB.FileStorage import FileStorage
 from ZODB.serialize import referencesf
@@ -34,16 +34,14 @@ import transaction
 import unittest
 
 
-class HistoryPreservingRelStorageTests(
-    GenericRelStorageTests,
-    TransactionalUndoStorage.TransactionalUndoStorage,
-    IteratorStorage.IteratorStorage,
-    IteratorStorage.ExtendedIteratorStorage,
-    RevisionStorage.RevisionStorage,
-    PackableStorage.PackableUndoStorage,
-    HistoryStorage.HistoryStorage,
-    ):
-
+class HistoryPreservingRelStorageTests(GenericRelStorageTests,
+                                       TransactionalUndoStorage.TransactionalUndoStorage,
+                                       IteratorStorage.IteratorStorage,
+                                       IteratorStorage.ExtendedIteratorStorage,
+                                       RevisionStorage.RevisionStorage,
+                                       PackableStorage.PackableUndoStorage,
+                                       HistoryStorage.HistoryStorage):
+    # pylint:disable=too-many-ancestors,abstract-method,too-many-locals
     keep_history = True
 
     def checkUndoMultipleConflictResolution(self, *_args, **_kwargs):
@@ -211,7 +209,7 @@ class HistoryPreservingRelStorageTests(
 
     def checkPackGCReusePrePackData(self):
         self._storage = self.make_storage(pack_prepack_only=True)
-        oid = self.checkPackGC(expect_object_deleted=False,close=False)
+        oid = self.checkPackGC(expect_object_deleted=False, close=False)
         # We now have pre-pack analysis data
         self._storage._options.pack_prepack_only = False
         self._storage.pack(0, referencesf, skip_prepack=True)
@@ -250,7 +248,9 @@ class HistoryPreservingRelStorageTests(
             db.close()
 
     def checkHistoricalConnection(self):
-        import datetime, persistent, ZODB.POSException
+        import datetime
+        import persistent
+        import ZODB.POSException
         db = DB(self._storage)
         conn = db.open()
         root = conn.root()
@@ -300,11 +300,9 @@ class HistoryPreservingRelStorageTests(
         self.assertFalse(ZODB.interfaces.IExternalGC.providedBy(self._storage))
         self.assertRaises(AttributeError, self._storage.deleteObject)
 
-class HistoryPreservingToFileStorage(
-        RelStorageTestBase,
-        UndoableRecoveryStorage,
-    ):
-
+class HistoryPreservingToFileStorage(RelStorageTestBase,
+                                     UndoableRecoveryStorage):
+    # pylint:disable=too-many-ancestors,abstract-method,too-many-locals
     keep_history = True
 
     def setUp(self):
@@ -321,11 +319,9 @@ class HistoryPreservingToFileStorage(
         return FileStorage('Dest.fs')
 
 
-class HistoryPreservingFromFileStorage(
-        RelStorageTestBase,
-        UndoableRecoveryStorage,
-    ):
-
+class HistoryPreservingFromFileStorage(RelStorageTestBase,
+                                       UndoableRecoveryStorage):
+    # pylint:disable=too-many-ancestors,abstract-method,too-many-locals
     keep_history = True
 
     def setUp(self):

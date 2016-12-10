@@ -48,7 +48,7 @@ class Psycopg2ConnectionManager(AbstractConnectionManager):
         return dsn
 
     @metricmethod
-    def open(self, isolation=None, replica_selector=None):
+    def open(self, isolation=None, replica_selector=None, **kwargs):
         """Open a database connection and return (conn, cursor)."""
         if isolation is None:
             isolation = self.isolation_read_committed

@@ -37,7 +37,8 @@ def _to_oracle_ordered(query_tuple):
 @implementer(IObjectMover)
 class OracleObjectMover(AbstractObjectMover):
 
-    inputsizes = ()
+    # This is assigned to by the adapter.
+    inputsizes = None
 
     _move_from_temp_hp_insert_query = format_to_named(AbstractObjectMover._move_from_temp_hp_insert_query)
     _move_from_temp_hf_insert_query = format_to_named(AbstractObjectMover._move_from_temp_hf_insert_query)
@@ -239,7 +240,7 @@ class OracleObjectMover(AbstractObjectMover):
             state = :blobdata
         WHERE zoid = :oid
         """
-        cursor.setinputsizes(blobdata=self.inputsizes['blobdata'])
+        cursor.setinputsizes(blobdata=self.inputsizes['blobdata']) # pylint:disable=unsubscriptable-object
         cursor.execute(stmt, oid=oid, prev_tid=prev_tid,
                        md5sum=md5sum, blobdata=self.Binary(data))
 
@@ -315,6 +316,7 @@ class OracleObjectMover(AbstractObjectMover):
 
         If serial is None, upload to the temporary table.
         """
+        # pylint:disable=too-many-locals
         if tid is not None:
             if self.keep_history:
                 delete_stmt = """

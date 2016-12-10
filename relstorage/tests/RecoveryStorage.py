@@ -15,6 +15,7 @@
 
 # This is copied from ZODB.tests.RecoveryStorage and expanded to fit
 # history-free storages.
+# pylint:disable=no-member,too-many-locals
 
 from ZODB.blob import is_blob_record
 from transaction import Transaction
@@ -117,7 +118,7 @@ class IteratorDeepCompare(object):
         in src.  Also note that the dest does not retain transaction
         metadata.
         """
-        missing = object()
+
         src_objects = {}  # {oid: (tid, data, blob or None)}
         for txn in src.iterator():
             for rec in txn:
@@ -195,10 +196,10 @@ class BasicRecoveryStorage(IteratorDeepCompare):
         txn.commit()
         # Now pack the destination.
         snooze()
-        self._dst.pack(time.time(),  referencesf)
+        self._dst.pack(time.time(), referencesf)
         # And check to see that the root object exists, but not the other
         # objects.
-        data, serial = self._dst.load(root._p_oid, '')
+        _data, _serial = self._dst.load(root._p_oid, '')
         raises(KeyError, self._dst.load, obj1._p_oid, '')
         raises(KeyError, self._dst.load, obj2._p_oid, '')
 
@@ -232,9 +233,9 @@ class UndoableRecoveryStorage(BasicRecoveryStorage):
         db = DB(self._storage)
         c = db.open()
         r = c.root()
-        obj = r["obj1"] = MinPO(1)
+        r["obj1"] = MinPO(1)
         transaction.commit()
-        obj = r["obj2"] = MinPO(1)
+        r["obj2"] = MinPO(1)
         transaction.commit()
 
         self._dst.copyTransactionsFrom(self._storage)
@@ -248,6 +249,7 @@ class UndoableRecoveryStorage(BasicRecoveryStorage):
         # Get the last transaction and its record iterator. Record iterators
         # can't be accessed out-of-order, so we need to do this in a bit
         # complicated way:
+        final = None
         for final  in it:
             records = list(final)
 
@@ -259,6 +261,7 @@ class UndoableRecoveryStorage(BasicRecoveryStorage):
         self._dst.tpc_finish(final)
 
     def checkRestoreWithMultipleObjectsInUndoRedo(self):
+        # pylint:disable=too-many-statements
         from ZODB.FileStorage import FileStorage
 
         # Undo creates backpointers in (at least) FileStorage.  ZODB 3.2.1
@@ -314,7 +317,7 @@ class UndoableRecoveryStorage(BasicRecoveryStorage):
         tid = info[0]['id']
         t = Transaction()
         self._storage.tpc_begin(t)
-        oids = self._storage.undo(tid, t)
+        _oids = self._storage.undo(tid, t)
         self._storage.tpc_vote(t)
         self._storage.tpc_finish(t)
 
@@ -338,7 +341,7 @@ class UndoableRecoveryStorage(BasicRecoveryStorage):
         tid = info[0]['id']
         t = Transaction()
         self._storage.tpc_begin(t)
-        oids = self._storage.undo(tid, t)
+        _oids = self._storage.undo(tid, t)
         self._storage.tpc_vote(t)
         self._storage.tpc_finish(t)
 

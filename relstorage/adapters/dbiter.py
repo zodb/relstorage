@@ -22,6 +22,7 @@ class DatabaseIterator(object):
 
     def __init__(self, database_type, runner):
         self.runner = runner
+        self.database_type = database_type
 
     def iter_objects(self, cursor, tid):
         """Iterate over object states in a transaction.
@@ -110,7 +111,7 @@ class HistoryPreservingDatabaseIterator(DatabaseIterator):
             stmt += " AND tid <= %(max_tid)s"
         stmt += " ORDER BY tid"
         self.runner.run_script_stmt(cursor, stmt,
-            {'min_tid': start, 'max_tid': stop})
+                                    {'min_tid': start, 'max_tid': stop})
         return self._transaction_iterator(cursor)
 
 
@@ -150,7 +151,10 @@ class HistoryFreeDatabaseIterator(DatabaseIterator):
 
         Skips packed transactions.
         Yields (tid, username, description, extension) for each transaction.
+
+        This always returns an empty iterable.
         """
+        # pylint:disable=unused-argument
         return []
 
     def iter_transactions_range(self, cursor, start=None, stop=None):
@@ -171,7 +175,7 @@ class HistoryFreeDatabaseIterator(DatabaseIterator):
             stmt += " AND tid <= %(max_tid)s"
         stmt += " ORDER BY tid"
         self.runner.run_script_stmt(cursor, stmt,
-            {'min_tid': start, 'max_tid': stop})
+                                    {'min_tid': start, 'max_tid': stop})
         return ((tid, '', '', '', True) for (tid,) in cursor)
 
     def iter_object_history(self, cursor, oid):

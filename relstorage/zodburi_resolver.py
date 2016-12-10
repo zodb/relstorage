@@ -189,9 +189,7 @@ class RelStorageURIResolver(Resolver):
         def factory():
             adapter = adapter_factory(options)
             storage = RelStorage(adapter=adapter, options=options)
-            if demostorage:
-                storage = DemoStorage(base=storage)
-            return storage
+            return storage if not demostorage else DemoStorage(base=storage)
         return factory, unused
 
 postgresql_resolver = RelStorageURIResolver(PostgreSQLAdapterHelper())
