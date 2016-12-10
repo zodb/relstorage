@@ -10,7 +10,7 @@ requirements:
 
 python-targets:
   - 2
-  - 3
+#  - 3
 ignore-paths:
   - doc/
   - build

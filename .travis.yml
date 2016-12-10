@@ -11,7 +11,7 @@ addons:
 python:
   - pypy-5.4.1
   - 2.7
-  - 3.4
+  - 3.5
 env:
   matrix:
     - ENV=mysql
@@ -21,7 +21,7 @@ env:
     - ENV=umysqldb
 matrix:
   exclude:
-    - python: 3.4
+    - python: 3.5
       env: ENV=umysqldb
     - python: pypy-5.4.1
       env: ENV=pymysql
@@ -31,8 +31,7 @@ matrix:
 script:
 # coverage slows PyPy down from 2minutes to 12+.
 # But don't run the pymysql/pypy tests twice.
-  - which pylint
-  - pylint --rcfile=.pylintrc relstorage -f parseable -r n
+  - if [[ $TRAVIS_PYTHON_VERSION == 2.7 ]]; then pylint --rcfile=.pylintrc relstorage -f parseable -r n; fi
   - if [[ $TRAVIS_PYTHON_VERSION == pypy* ]]; then python -m relstorage.tests.alltests -v; fi
   - if [[ $TRAVIS_PYTHON_VERSION != pypy* ]]; then coverage run -m relstorage.tests.alltests -v; fi
 after_success:
