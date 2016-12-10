@@ -170,6 +170,7 @@ else:
     from pymysql.err import InternalError, InterfaceError, ProgrammingError
 
     class UConnection(umysqldb.connections.Connection):
+        # pylint:disable=abstract-method
         _umysql_conn = None
 
         def __debug_lock(self, sql, ex=False): # pragma: no cover
@@ -274,7 +275,7 @@ else:
             assert not self._umysql_conn.is_connected()
             self._umysql_conn.close()
             del self._umysql_conn
-            self._umysql_conn = umysql.Connection()
+            self._umysql_conn = umysql.Connection() # pylint:disable=no-member
             self._connect()  # Potentially this could raise again?
 
         def connect(self, *_args, **_kwargs): # pragma: no cover
