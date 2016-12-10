@@ -33,6 +33,7 @@ def format_to_named(stmt):
         return _stmt_cache[stmt]
     except KeyError:
         matches = []
+
         def replace(_match):
             matches.append(None)
             return ':%d' % len(matches)

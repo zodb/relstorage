@@ -40,7 +40,7 @@ except ImportError:
 else:  # pragma: no cover
 
     @implementer(IDBDriver)
-    class cx_OracleDriver(object):
+    class cx_OracleDriver(object): # noqa
         __name__ = 'cx_Oracle'
         disconnected_exceptions, close_exceptions, lock_exceptions = _standard_exceptions(cx_Oracle)
         disconnected_exceptions += (cx_Oracle.DatabaseError,)

@@ -265,7 +265,7 @@ class OracleObjectMover(AbstractObjectMover):
         bytecount = 0
         # Current versions of cx_Oracle only support offsets up
         # to sys.maxint or 4GB, whichever comes first.
-        maxsize = min(sys.maxsize, 1<<32)
+        maxsize = min(sys.maxsize, 1 << 32)
         try:
             cursor.execute(stmt, (oid, tid))
             while True:
@@ -280,9 +280,11 @@ class OracleObjectMover(AbstractObjectMover):
                     f = open(filename, 'wb')
                 # round off the chunk-size to be a multiple of the oracle
                 # blob chunk size to maximize performance
-                read_chunk_size = int(max(round(
-                    1.0 * self.blob_chunk_size / blob.getchunksize()), 1) *
-                                      blob.getchunksize())
+                read_chunk_size = int(
+                    max(
+                        round(1.0 * self.blob_chunk_size / blob.getchunksize()),
+                        1)
+                    * blob.getchunksize())
                 offset = 1 # Oracle still uses 1-based indexing.
                 reader = iter(lambda: blob.read(offset, read_chunk_size), b'')
                 for read_chunk in reader:
@@ -308,7 +310,7 @@ class OracleObjectMover(AbstractObjectMover):
     # Current versions of cx_Oracle only support offsets up
     # to sys.maxint or 4GB, whichever comes first. We divide up our
     # upload into chunks within this limit.
-    oracle_blob_chunk_maxsize = min(sys.maxsize, 1<<32)
+    oracle_blob_chunk_maxsize = min(sys.maxsize, 1 << 32)
 
     @metricmethod_sampled
     def upload_blob(self, cursor, oid, tid, filename):

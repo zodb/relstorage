@@ -39,6 +39,7 @@ def _create_connection(mod):
     class Psycopg2Connection(mod.extensions.connection):
         # The replica attribute holds the name of the replica this
         # connection is bound to.
+        # pylint:disable=slots-on-old-class
         __slots__ = ('replica',)
 
     return Psycopg2Connection
@@ -163,6 +164,7 @@ else:
     class _ReadBlob(object):
         closed = False
         fetch_size = 1024 * 1024 * 9
+
         def __init__(self, conn, oid):
             self._cursor = conn.cursor()
             self.oid = oid

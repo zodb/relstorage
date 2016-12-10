@@ -536,7 +536,7 @@ class StorageCache(object):
         items = [
             (startpos, endpos, oid_int)
             for (oid_int, (startpos, endpos)) in iteritems(self.queue_contents)
-            ]
+        ]
         items.sort()
         # Trace these. This is the equivalent of ZEOs
         # ClientStorage._update_cache.
@@ -661,8 +661,7 @@ class StorageCache(object):
                 and changes is not None
                 and prev_tid_int
                 and prev_tid_int <= self.current_tid
-                and new_tid_int >= self.current_tid
-           ):
+                and new_tid_int >= self.current_tid):
             # All the conditions for keeping the checkpoints were met,
             # so just update self.delta_after0 and self.current_tid.
             m = self.delta_after0

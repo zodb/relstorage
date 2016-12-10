@@ -97,7 +97,7 @@ class PostgreSQLSchemaInstaller(AbstractSchemaInstaller):
         """Create the database schema if it does not already exist."""
         def callback(_conn, cursor):
             tables = self.list_tables(cursor)
-            if not 'object_state' in tables:
+            if 'object_state' not in tables:
                 self.create(cursor)
             else:
                 self.check_compatibility(cursor, tables)
@@ -111,7 +111,7 @@ class PostgreSQLSchemaInstaller(AbstractSchemaInstaller):
                         "installing the stored procedures.")
 
             triggers = self.list_triggers(cursor)
-            if not 'blob_chunk_delete' in triggers:
+            if 'blob_chunk_delete' not in triggers:
                 self.install_triggers(cursor)
 
         self.connmanager.open_and_call(callback)

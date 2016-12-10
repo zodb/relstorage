@@ -23,7 +23,7 @@ try:
     izip = itertools.izip
 except AttributeError:
     # Python 3
-    izip = zip
+    izip = zip # pylint:disable=redefined-variable-type
 
 from relstorage.cache import _cache_ring
 
@@ -256,7 +256,7 @@ class CacheRing(object):
 
     PARENT_CONST = 0
 
-    def __init__(self, limit): #, _ring_type=ffi.typeof("RSRing")):
+    def __init__(self, limit):
         self.limit = limit
         node = self.ring_home = ffi.new("RSRing")
         node.r_next = node

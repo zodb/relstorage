@@ -26,7 +26,7 @@ class MockOptions(Options):
 
 
 import timeit
-import statistics
+import statistics # pylint:disable=import-error
 try:
     import sys
     import cProfile

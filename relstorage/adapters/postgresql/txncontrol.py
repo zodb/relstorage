@@ -64,7 +64,7 @@ class PostgreSQLTransactionControl(AbstractTransactionControl):
                 %s, %s,
                 %s)
             """
-            Binary = self._Binary
+            binary = self._Binary
             cursor.execute(stmt, (tid, packed,
-                                  Binary(username), Binary(description),
-                                  Binary(extension)))
+                                  binary(username), binary(description),
+                                  binary(extension)))

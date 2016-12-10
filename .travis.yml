@@ -31,6 +31,7 @@ matrix:
 script:
 # coverage slows PyPy down from 2minutes to 12+.
 # But don't run the pymysql/pypy tests twice.
+  - which pylint
   - pylint --rcfile=.pylintrc relstorage -f parseable -r n
   - if [[ $TRAVIS_PYTHON_VERSION == pypy* ]]; then python -m relstorage.tests.alltests -v; fi
   - if [[ $TRAVIS_PYTHON_VERSION != pypy* ]]; then coverage run -m relstorage.tests.alltests -v; fi
@@ -43,11 +44,11 @@ before_install:
   - python --version
 
 install:
-  - pip install -U pip setuptools pylint
-  - pip install -U tox coveralls
+  - pip install -U pip setuptools
+  - pip install -U tox coveralls pylint
   - if [[ $TRAVIS_PYTHON_VERSION == pypy* ]]; then pip install -U python-memcached; fi
   - if [[ $TRAVIS_PYTHON_VERSION != pypy* ]]; then pip install -U pylibmc cffi; fi
-  - pip install -U -e ".[test]"
+  - pip install -U ".[test]"
   - .travis/setup-$ENV.sh
 
 cache: pip

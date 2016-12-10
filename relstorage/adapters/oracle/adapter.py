@@ -79,18 +79,18 @@ class OracleAdapter(object):
             dsn=dsn,
             twophase=twophase,
             options=options,
-            )
+        )
         self.runner = CXOracleScriptRunner(driver)
         self.locker = OracleLocker(
             options=self.options,
             lock_exceptions=driver.lock_exceptions,
             inputsize_NUMBER=driver.NUMBER,
-            )
+        )
         self.schema = OracleSchemaInstaller(
             connmanager=self.connmanager,
             runner=self.runner,
             keep_history=self.keep_history,
-            )
+        )
         inputsizes = {
             'blobdata': driver.BLOB,
             'rawdata': driver.BINARY,
@@ -106,17 +106,17 @@ class OracleAdapter(object):
             runner=self.runner,
             Binary=driver.Binary,
             batcher_factory=lambda cursor, row_limit: OracleRowBatcher(cursor, inputsizes, row_limit),
-            )
+        )
         self.mover.inputsizes = inputsizes
         self.connmanager.set_on_store_opened(self.mover.on_store_opened)
         self.oidallocator = OracleOIDAllocator(
             connmanager=self.connmanager,
-            )
+        )
         self.txncontrol = OracleTransactionControl(
             keep_history=self.keep_history,
             Binary=driver.Binary,
             twophase=twophase,
-            )
+        )
 
         if self.keep_history:
             poll_query = "SELECT MAX(tid) FROM transaction"
@@ -137,11 +137,11 @@ class OracleAdapter(object):
                 runner=self.runner,
                 locker=self.locker,
                 options=options,
-                )
+            )
             self.dbiter = HistoryPreservingDatabaseIterator(
                 database_type='oracle',
                 runner=self.runner,
-                )
+            )
         else:
             self.packundo = OracleHistoryFreePackUndo(
                 database_type='oracle',
@@ -149,15 +149,15 @@ class OracleAdapter(object):
                 runner=self.runner,
                 locker=self.locker,
                 options=options,
-                )
+            )
             self.dbiter = HistoryFreeDatabaseIterator(
                 database_type='oracle',
                 runner=self.runner,
-                )
+            )
 
         self.stats = OracleStats(
             connmanager=self.connmanager,
-            )
+        )
 
     def new_instance(self):
         # This adapter and its components are stateless, so it's
@@ -168,7 +168,7 @@ class OracleAdapter(object):
             dsn=self._dsn,
             twophase=self._twophase,
             options=self.options,
-            )
+        )
 
     def __str__(self):
         parts = [self.__class__.__name__]

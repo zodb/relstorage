@@ -142,7 +142,7 @@ class HistoryPreservingRelStorageTests(GenericRelStorageTests,
         if isinstance(ugly_string, bytes):
             # Always text. Use latin 1 because it can decode any arbitrary
             # bytes.
-            ugly_string = ugly_string.decode('latin-1')
+            ugly_string = ugly_string.decode('latin-1') # pylint:disable=redefined-variable-type
 
         # The storage layer is defined to take bytes (implicitly in
         # older ZODB releases, explicitly in ZODB 5.something), but historically

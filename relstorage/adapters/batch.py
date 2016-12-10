@@ -25,7 +25,7 @@ class RowBatcher(object):
     """
 
     row_limit = 100
-    size_limit = 1<<20
+    size_limit = 1 << 20
 
     def __init__(self, cursor, row_limit=None):
         self.cursor = cursor

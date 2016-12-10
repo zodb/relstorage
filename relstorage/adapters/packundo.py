@@ -523,7 +523,7 @@ class HistoryPreservingPackUndo(PackUndo):
                     AND tid <= %(pack_tid)s
                 """
                 self.runner.run_script_stmt(
-                    cursor, stmt, {'pack_tid':pack_tid})
+                    cursor, stmt, {'pack_tid': pack_tid})
                 to_remove += cursor.rowcount
 
                 log.info("pre_pack: enumerating transactions to pack")
@@ -703,7 +703,7 @@ class HistoryPreservingPackUndo(PackUndo):
                         if counter >= lastreport + reportstep:
                             log.info("pack: packed %d (%.1f%%) transaction(s), "
                                      "affecting %d states",
-                                     counter, counter/float(total)*100,
+                                     counter, counter / float(total) * 100,
                                      statecounter)
                             lastreport = counter / reportstep * reportstep
                         del packed_list[:]
@@ -1096,7 +1096,7 @@ class HistoryFreePackUndo(PackUndo):
                         counter = total - len(to_remove)
                         if counter >= lastreport + reportstep:
                             log.info("pack: removed %d (%.1f%%) state(s)",
-                                     counter, counter/float(total)*100)
+                                     counter, counter / float(total) * 100)
                             lastreport = counter / reportstep * reportstep
                         self.locker.release_commit_lock(cursor)
                         self._pause_pack_until_lock(cursor, sleep)

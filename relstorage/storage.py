@@ -41,7 +41,7 @@ from ZODB.utils import u64
 from perfmetrics import Metric
 from perfmetrics import metricmethod
 
-from persistent.TimeStamp import TimeStamp
+from persistent.TimeStamp import TimeStamp # pylint:disable=import-error
 from relstorage.blobhelper import BlobHelper
 
 from relstorage.cache import StorageCache
@@ -1124,7 +1124,7 @@ class RelStorage(UndoLogCompatible,
 
     @metricmethod
     def undoLog(self, first=0, last=-20, filter=None):
-         # pylint:disable=too-many-locals
+        # pylint:disable=too-many-locals
         if self._stale_error is not None:
             raise self._stale_error
         if last < 0:

@@ -84,7 +84,7 @@ else:  # pragma: no cover
             pymysql.err.Error,
             IOError,
             pymysql.err.DatabaseError
-            )
+        )
 
         disconnected_exceptions += (
             IOError, # This one can escape mapping;
@@ -107,6 +107,7 @@ else:  # pragma: no cover
 
         if hasattr(pymysql.converters, 'escape_string'):
             orig_escape_string = pymysql.converters.escape_string
+
             def escape_string(value, mapping=None):
                 if isinstance(value, bytearray) and not value:
                     return value
@@ -172,7 +173,7 @@ else:
         _umysql_conn = None
 
         def __debug_lock(self, sql, ex=False): # pragma: no cover
-            if not 'GET_LOCK' in sql:
+            if 'GET_LOCK' not in sql:
                 return
 
             try:
@@ -282,7 +283,7 @@ else:
             return self._connect()
 
     @implementer(IDBDriver)
-    class umysqldbDriver(PyMySQLDriver):
+    class umysqldbDriver(PyMySQLDriver): # noqa
         __name__ = 'umysqldb'
         connect = UConnection
         # umysql has a tendency to crash when given a bytearray (which

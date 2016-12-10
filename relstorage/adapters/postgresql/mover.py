@@ -128,7 +128,7 @@ class PostgreSQLObjectMover(AbstractObjectMover):
 
     # PostgreSQL < 9.3 only supports up to 2GB of data per BLOB.
     # Even above that, we can only use larger blobs on 64-bit builds.
-    postgresql_blob_chunk_maxsize = 1<<31
+    postgresql_blob_chunk_maxsize = 1 << 31
 
     @metricmethod_sampled
     def upload_blob(self, cursor, oid, tid, filename):

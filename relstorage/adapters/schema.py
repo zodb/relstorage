@@ -247,7 +247,7 @@ class AbstractSchemaInstaller(object):
         # to make subclasses have easier time.
         def callback(_conn, cursor):
             tables = self.list_tables(cursor)
-            if not 'object_state' in tables:
+            if 'object_state' not in tables:
                 self.create(cursor)
             else:
                 self.check_compatibility(cursor, tables)
@@ -269,7 +269,7 @@ class AbstractSchemaInstaller(object):
                     "can not connect to a history-preserving database. "
                     "If you need to convert, use the zodbconvert utility."
                 )
-        if not 'blob_chunk' in tables:
+        if 'blob_chunk' not in tables:
             raise StorageError(
                 "Schema mismatch; please create the blob_chunk tables."
                 "See migration instructions for RelStorage 1.5."
