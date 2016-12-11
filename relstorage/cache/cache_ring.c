@@ -87,8 +87,9 @@ rsc_ring_add(RSRing ring, RSRingNode *elt)
 RSR_INLINE void
 rsc_ring_del(RSRing ring, RSRingNode *elt)
 {
-    if( elt->r_next == NULL && elt->r_prev == NULL)
+    if( elt->r_next == NULL && elt->r_prev == NULL) {
         return;
+    }
 
     elt->r_next->r_prev = elt->r_prev;
     elt->r_prev->r_next = elt->r_next;
@@ -183,7 +184,10 @@ RSRingNode _spill_from_ring_to_ring(RSRing updated_ring,
                                     int allow_victims,
                                     int overfill_destination)
 {
+    RSRingNode* eden_oldest = NULL;
+    RSRingNode* probation_oldest = NULL;
     RSRingNode rejects = {0};
+
     if(overfill_destination) {
         rejects.r_next = rejects.r_prev = NULL;
     }
@@ -192,7 +196,7 @@ RSRingNode _spill_from_ring_to_ring(RSRing updated_ring,
     }
 
     while(updated_ring->u.head.sum_weights > 1 && ring_oversize(updated_ring)) {
-        RSRingNode* eden_oldest = ring_lru(updated_ring);
+        eden_oldest = ring_lru(updated_ring);
         if(!eden_oldest || eden_oldest == ignore_me) {
             break;
         }
@@ -211,7 +215,7 @@ RSRingNode _spill_from_ring_to_ring(RSRing updated_ring,
                 break;
             }
 
-            RSRingNode* probation_oldest = ring_lru(destination_ring);
+            probation_oldest = ring_lru(destination_ring);
             if(!probation_oldest) {
                 //Hmm, the ring got emptied, but there's also no space
                 //in protected. This must be a very large object. Take
@@ -265,10 +269,12 @@ RSRingNode _spill_from_ring_to_ring(RSRing updated_ring,
 void rsc_probation_on_hit(RSCache* cache,
                           RSRingNode* entry)
 {
-    entry->u.entry.frequency++;
     RSRing protected_ring = cache->protected;
     RSRing probation_ring = cache->probation;
     int protected_oversize = ring_move_to_head_from_foreign(probation_ring, protected_ring, entry);
+
+    entry->u.entry.frequency++;
+
     if( !protected_oversize ) {
         return;
     }
@@ -296,6 +302,7 @@ RSRingNode _eden_add(RSCache* cache,
     RSRingNode* eden_ring = cache->eden;
     RSRingNode* protected_ring = cache->protected;
     RSRingNode* probation_ring = cache->probation;
+    RSRingNode* eden_oldest = NULL;
 
     RSRingNode rejects = {0};
     rejects.r_next = rejects.r_prev = NULL;
@@ -317,7 +324,7 @@ RSRingNode _eden_add(RSCache* cache,
           # so go ahead and fill it.
         */
         while(ring_oversize(eden_ring)) {
-            RSRingNode* eden_oldest = ring_lru(eden_ring);
+            eden_oldest = ring_lru(eden_ring);
             if(!eden_oldest || eden_oldest == entry) {
                 break;
             }
@@ -364,15 +371,19 @@ int rsc_eden_add_many(RSCache* cache,
                       RSRingNode* entry_array,
                       int entry_count)
 {
+    int added_count = 0;
+    int i = 0;
+    RSRingNode add_rejects = {0};
+    RSRingNode* incoming = NULL;
+    RSRingNode* rejected = NULL;
+
     if (cache_oversize(cache) || !entry_count || !cache_will_fit(cache, entry_array)) {
         return 0;
     }
 
-    int added_count = 0;
-    int i = 0;
     for (i = 0; i < entry_count; i++) {
         // Don't try if we know we won't find a place for it.
-        RSRingNode* incoming = entry_array + i;
+        incoming = entry_array + i;
         if (!cache_will_fit(cache, incoming)) {
             incoming->u.entry.r_parent = -1;
             continue;
@@ -381,7 +392,7 @@ int rsc_eden_add_many(RSCache* cache,
         // _eden_add *always* adds, but it may or may not be able to
         // rebalance.
         added_count += 1;
-        RSRingNode add_rejects = _eden_add(cache, incoming, _SPILL_NO_VICTIMS);
+        add_rejects = _eden_add(cache, incoming, _SPILL_NO_VICTIMS);
         if (add_rejects.u.entry.frequency) {
             // We would have rejected something, so we must be full.
             // Well, this isn't strictly true. It could be one really
@@ -397,7 +408,7 @@ int rsc_eden_add_many(RSCache* cache,
     // Anything left is because we broke out of the loop. They're
     // rejects and need to be marked as such.
     for (i += 1; i < entry_count; i++) {
-        RSRingNode* rejected = entry_array + i;
+        rejected = entry_array + i;
         rejected->u.entry.r_parent = -1;
     }
 
@@ -418,6 +429,8 @@ RSRingNode rsc_update_mru(RSCache* cache,
     RSRing protected_ring = cache->protected;
     RSRing probation_ring = cache->probation;
     RSRing eden_ring = cache->eden;
+    int protected_ring_oversize = 0;
+    RSRingNode result = {0};
 
     // Always update the frequency
     entry->u.entry.frequency++;
@@ -439,7 +452,6 @@ RSRingNode rsc_update_mru(RSCache* cache,
         return rsc_eden_add(cache, entry);
     }
 
-    int protected_ring_oversize = 0;
     if (home_ring == probation_ring) {
         protected_ring_oversize = ring_move_to_head_from_foreign(home_ring, protected_ring, entry);
     }
@@ -455,18 +467,18 @@ RSRingNode rsc_update_mru(RSCache* cache,
                                         _SPILL_VICTIMS, _SPILL_FIT);
     }
 
-    RSRingNode result = {0};
     result.r_next = result.r_prev = NULL;
     return result;
 }
 
 RSR_SINLINE void lru_age_list(RSRingNode* ring)
 {
+    RSRingNode* here = NULL;
     if (ring_is_empty(ring)) {
         return;
     }
 
-    RSRingNode* here = ring->r_next;
+    here = ring->r_next;
     while (here != ring) {
         here->u.entry.frequency = here->u.entry.frequency / 2;
         here = here->r_next;
