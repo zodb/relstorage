@@ -18,21 +18,17 @@ install:
   - "SET PGPASSWORD=Password12!"
   - "SET PGUSER=postgres"
   - echo "C:\Program Files\Microsoft SDKs\Windows\v7.1\Bin\SetEnv.cmd" /x64 > "C:\Program Files (x86)\Microsoft Visual Studio 10.0\VC\bin\amd64\vcvars64.bat"
-  # mysqlclient won't compile on windows; but we're not running the DB
-  # tests anyway
+  # mysqlclient won't compile on windows
   - pip install -U pip setuptools
   - pip install -U PyMySQL
   - pip install -U wheel
-  - pip install -U -e .[test]
-  # For some reason, these run with no output, but don't actually seem
-  # to setup the required databases. We get permission denied errors
-  # in the tests
-  #- cmd /c .travis\postgres.sh
+  - pip install -U -e .[test,postgresql]
 
 build: false
 
 test_script:
   - cmd /c .travis\mysql.cmd
+  - cmd /c .travis\postgres.sh
   - python -m relstorage.tests.alltests
 
 after_test:
