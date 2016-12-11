@@ -34,6 +34,12 @@ starting with the most recently used object.
 #include "cache_ring.h"
 #endif
 
+/*
+ * No version of MSVC properly supports inline. Sigh.
+ */
+#ifdef _MSC_VER
+#define inline __inline
+#endif
 
 static inline int ring_oversize(RSRing ring)
 {
