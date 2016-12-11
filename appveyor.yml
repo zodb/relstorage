@@ -18,12 +18,12 @@ install:
   # mysqlclient won't compile on windows
   - pip install -U PyMySQL
   - pip install -U -e .[test,postgresql]
-  - cmd .travis\mysql.sh
-  - cmd .travis\postgres.sh
+  - cmd /c .travis\mysql.sh
+  - cmd /c .travis\postgres.sh
 
 build: false
 
 test_script:
-  - python -m relstorage.tests.alltests -v
+  - python -m relstorage.tests.alltests
 
 deploy : on
