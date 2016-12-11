@@ -38,35 +38,39 @@ starting with the most recently used object.
  * No version of MSVC properly supports inline. Sigh.
  */
 #ifdef _MSC_VER
-#define inline __inline
+#define RSR_SINLINE static
+#define RSR_INLINE
+#else
+#define RSR_SINLINE static inline
+#define RSR_INLINE inline
 #endif
 
-static inline int ring_oversize(RSRing ring)
+RSR_SINLINE int ring_oversize(RSRing ring)
 {
     return ring->u.head.sum_weights > ring->u.head.max_weight;
 }
 
-static inline int ring_is_empty(RSRing ring)
+RSR_SINLINE int ring_is_empty(RSRing ring)
 {
     return ring == NULL || ring->r_next == ring || ring->r_next == NULL;
 }
 
-static inline int cache_oversize(RSCache* cache)
+RSR_SINLINE int cache_oversize(RSCache* cache)
 {
     return ring_oversize(cache->eden) && ring_oversize(cache->probation) && ring_oversize(cache->protected);
 }
 
-static inline int lru_will_fit(RSRingNode* ring, RSRingNode* entry)
+RSR_SINLINE int lru_will_fit(RSRingNode* ring, RSRingNode* entry)
 {
     return ring->u.head.max_weight >= (entry->u.entry.weight + ring->u.head.sum_weights);
 }
 
-static inline int cache_will_fit(RSCache* cache, RSRingNode* entry)
+RSR_SINLINE int cache_will_fit(RSCache* cache, RSRingNode* entry)
 {
     return lru_will_fit(cache->eden, entry) || lru_will_fit(cache->probation, entry) || lru_will_fit(cache->protected, entry);
 }
 
-inline void
+RSR_INLINE void
 rsc_ring_add(RSRing ring, RSRingNode *elt)
 {
     elt->r_next = ring;
@@ -80,7 +84,7 @@ rsc_ring_add(RSRing ring, RSRingNode *elt)
 
 }
 
-inline void
+RSR_INLINE void
 rsc_ring_del(RSRing ring, RSRingNode *elt)
 {
     if( elt->r_next == NULL && elt->r_prev == NULL)
@@ -98,7 +102,7 @@ rsc_ring_del(RSRing ring, RSRingNode *elt)
     ring->u.head.sum_weights -= elt->u.entry.weight;
 }
 
-inline void
+RSR_INLINE void
 rsc_ring_move_to_head(RSRing ring, RSRingNode *elt)
 {
     elt->r_prev->r_next = elt->r_next;
@@ -109,7 +113,7 @@ rsc_ring_move_to_head(RSRing ring, RSRingNode *elt)
     ring->r_prev = elt;
 }
 
-static inline int
+RSR_SINLINE int
 ring_move_to_head_from_foreign(RSRing current_ring,
                                RSRing new_ring,
                                RSRingNode* elt)
@@ -134,7 +138,7 @@ ring_move_to_head_from_foreign(RSRing current_ring,
     return new_ring->u.head.sum_weights > new_ring->u.head.max_weight;
 }
 
-static inline RSRingNode* ring_lru(RSRing ring)
+RSR_SINLINE RSRingNode* ring_lru(RSRing ring)
 {
     if(ring->r_next == ring) {
         // empty list
@@ -172,7 +176,7 @@ void rsc_on_hit(RSRing ring, RSRingNode* entry)
 #define _SPILL_FIT 0
 #define _SPILL_VICTIMS 1
 #define _SPILL_NO_VICTIMS 0
-static inline
+RSR_SINLINE
 RSRingNode _spill_from_ring_to_ring(RSRing updated_ring,
                                     RSRing destination_ring,
                                     RSRingNode* ignore_me,
@@ -284,7 +288,7 @@ void rsc_probation_on_hit(RSCache* cache,
  * have produced victims, we return with rejects.frequency = 1 so the
  * caller can know to stop feeding us.
  */
-static inline
+RSR_SINLINE
 RSRingNode _eden_add(RSCache* cache,
                      RSRingNode* entry,
                      int allow_victims)
@@ -456,7 +460,7 @@ RSRingNode rsc_update_mru(RSCache* cache,
     return result;
 }
 
-static inline void lru_age_list(RSRingNode* ring)
+RSR_SINLINE void lru_age_list(RSRingNode* ring)
 {
     if (ring_is_empty(ring)) {
         return;
