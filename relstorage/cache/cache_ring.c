@@ -29,7 +29,7 @@ starting with the most recently used object.
 
 #include <stddef.h>
 #include <assert.h>
-#include <stdint.h>
+
 #ifndef __RING_H
 #include "cache_ring.h"
 #endif
