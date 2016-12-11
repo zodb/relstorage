@@ -43,6 +43,19 @@ RelStorage is hosted at GitHub:
     https://github.com/zodb/relstorage
 
 
+Continuous integration
+----------------------
+
+A test suite is run for every push and pull request submitted. Travis
+CI is used to test on Linux, and AppVeyor runs the builds on
+Windows.
+
+.. image:: https://travis-ci.org/zodb/relstorage.svg?branch=master
+    :target: https://travis-ci.org/zodb/relstorage
+
+.. image:: https://ci.appveyor.com/api/projects/status/pccddlgujdoqvl83?svg=true
+   :target: https://ci.appveyor.com/project/jamadden/relstorage/branch/master
+
 
 Project URLs
 ============

@@ -77,7 +77,8 @@ class PackUndo(object):
         # Download the list of object references into the TreeMarker.
 
         # Note the Oracle optimizer hints in the following statement; MySQL
-        # and PostgreSQL ignore these. Oracle fails to notice that pack_object
+        # and PostgreSQL ignore these (MySQL 5.7, though, emits a warning).
+        # Oracle fails to notice that pack_object
         # is now filled and chooses the wrong execution plan, completely
         # killing this query on large RelStorage databases, unless these hints
         # are included.

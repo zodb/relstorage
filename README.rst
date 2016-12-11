@@ -30,11 +30,14 @@ replaced the PGStorage project.
  Documentation
 ===============
 
-`Documentation`_ including `installation instructions`_ is hosted on `readthedocs`_.
+Documentation including `installation instructions`_ is hosted on `readthedocs`_.
 
 The complete `changelog`_ is also there.
 
-.. _`Documentation`: http://relstorage.readthedocs.io/en/latest/
+.. image:: https://readthedocs.org/projects/relstorage/badge/?version=latest
+     :target: http://relstorage.readthedocs.io/en/latest/?badge=latest
+
+
 .. _`installation instructions`: http://relstorage.readthedocs.io/en/latest/install.html
 .. _`readthedocs`: http://relstorage.readthedocs.io/en/latest/
 .. _`changelog`: http://relstorage.readthedocs.io/en/latest/changelog.html
@@ -47,3 +50,33 @@ The complete `changelog`_ is also there.
 RelStorage is hosted at GitHub:
 
     https://github.com/zodb/relstorage
+
+Continuous integration
+----------------------
+
+A test suite is run for every push and pull request submitted. Travis
+CI is used to test on Linux, and AppVeyor runs the builds on
+Windows.
+
+.. image:: https://travis-ci.org/zodb/relstorage.svg?branch=master
+    :target: https://travis-ci.org/zodb/relstorage
+
+.. image:: https://ci.appveyor.com/api/projects/status/pccddlgujdoqvl83?svg=true
+   :target: https://ci.appveyor.com/project/jamadden/relstorage/branch/master
+
+Builds on Travis CI automatically submit updates to `coveralls.io`_ to
+monitor test coverage.
+
+.. image:: https://coveralls.io/repos/zodb/relstorage/badge.svg?branch=master&service=github
+   :target: https://coveralls.io/github/zodb/relstorage?branch=master
+
+Likewise, builds on Travis CI will automatically submit updates to
+`landscape.io`_ to monitor code health (adherence to PEP8, absence of
+common code smells, etc).
+
+.. image:: https://landscape.io/github/zodb/relstorage/master/landscape.svg?style=flat
+   :target: https://landscape.io/github/zodb/relstorage/master
+   :alt: Code Health
+
+.. _coveralls.io: https://coveralls.io/github/zodb/relstorage
+.. _landscape.io: https://landscape.io/github/zodb/relstorage

@@ -1,0 +1,38 @@
+environment:
+
+  matrix:
+    - python : 27
+    - python : 34
+    - python : 35
+    - python : 27-x64
+    - python : 34-x64
+    - python : 35-x64
+
+services:
+  - mysql
+  - postgresql
+
+install:
+  - "SET PATH=C:\\Program Files\\PostgreSQL\\9.4\\bin;C:\\Program Files\\MySql\\MySQL Server 5.7\\bin;C:\\Python%PYTHON%;c:\\Python%PYTHON%\\scripts;%PATH%"
+  - "SET MYSQL_PWD=Password12!"
+  - "SET PGPASSWORD=Password12!"
+  - "SET PGUSER=postgres"
+  - echo "C:\Program Files\Microsoft SDKs\Windows\v7.1\Bin\SetEnv.cmd" /x64 > "C:\Program Files (x86)\Microsoft Visual Studio 10.0\VC\bin\amd64\vcvars64.bat"
+  # mysqlclient won't compile on windows
+  - pip install -U pip setuptools
+  - pip install -U PyMySQL
+  - pip install -U wheel
+  - pip install -U -e .[test,postgresql]
+
+build: false
+
+test_script:
+  - cmd /c .travis\mysql.cmd
+  - cmd /c .travis\postgres.cmd
+  - python -m relstorage.tests.alltests
+
+after_test:
+  - python setup.py bdist_wheel
+
+artifacts:
+  - path: dist\*
