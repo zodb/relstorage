@@ -183,7 +183,7 @@ RSRingNode _spill_from_ring_to_ring(RSRing updated_ring,
                                     int allow_victims,
                                     int overfill_destination)
 {
-    RSRingNode rejects = {};
+    RSRingNode rejects = {0};
     if(overfill_destination) {
         rejects.r_next = rejects.r_prev = NULL;
     }
@@ -297,7 +297,7 @@ RSRingNode _eden_add(RSCache* cache,
     RSRingNode* protected_ring = cache->protected;
     RSRingNode* probation_ring = cache->probation;
 
-    RSRingNode rejects = {};
+    RSRingNode rejects = {0};
     rejects.r_next = rejects.r_prev = NULL;
 
     rsc_ring_add(eden_ring, entry);
@@ -455,7 +455,7 @@ RSRingNode rsc_update_mru(RSCache* cache,
                                         _SPILL_VICTIMS, _SPILL_FIT);
     }
 
-    RSRingNode result = {};
+    RSRingNode result = {0};
     result.r_next = result.r_prev = NULL;
     return result;
 }
