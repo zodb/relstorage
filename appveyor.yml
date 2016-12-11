@@ -28,7 +28,7 @@ build: false
 
 test_script:
   - cmd /c .travis\mysql.cmd
-  - cmd /c .travis\postgres.sh
+  - cmd /c .travis\postgres.cmd
   - python -m relstorage.tests.alltests
 
 after_test:
