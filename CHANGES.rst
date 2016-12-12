@@ -3,7 +3,7 @@
 =========
 
 
-2.0.0b10 (unreleased)
+2.0.0rc1 (2016-12-12)
 =====================
 
 - Writing persistent cache files has been changed to reduce the risk
