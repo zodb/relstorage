@@ -9,10 +9,10 @@ addons:
 # Use postgresql 9.4 to get support for BLOB SQL functions for pg8000
   postgresql: "9.4"
 python:
+  - 3.6.0rc1
   - pypy-5.4.1
   - 2.7
   - 3.5
-  - 3.6.0rc1
 env:
   matrix:
     - ENV=mysql
