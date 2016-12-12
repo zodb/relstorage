@@ -2,6 +2,7 @@ include MANIFEST.in *.txt *.py setup.cfg
 include .coveragerc
 include buildout*.cfg
 include tox.ini
+include appveyor.yml
 include .pylintrc
 include BUILDOUT.rst
 include CHANGES.rst
