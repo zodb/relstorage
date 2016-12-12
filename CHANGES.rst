@@ -10,8 +10,11 @@
   of stale temporary files remaining. Also, files are kept open for a
   shorter period of time and removed in a way that should work better
   on Windows.
+
 - RelStorage is now tested on Windows for MySQL and PostgreSQL thanks
   to AppVeyor.
+
+- Add support for Python 3.6.
 
 2.0.0b9 (2016-11-29)
 ====================

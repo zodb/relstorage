@@ -25,6 +25,8 @@ License :: OSI Approved :: Zope Public License
 Programming Language :: Python
 Programming Language :: Python :: 2.7
 Programming Language :: Python :: 3.4
+Programming Language :: Python :: 3.5
+Programming Language :: Python :: 3.6
 Programming Language :: Python :: Implementation :: CPython
 Programming Language :: Python :: Implementation :: PyPy
 Topic :: Database
@@ -109,7 +111,7 @@ setup(
         'mysql:platform_python_implementation=="CPython" and python_version >= "3.3"': [
             'mysqlclient>=1.3.7',
         ],
-        'mysql:platform_python_implementation=="PyPy"' : [
+        'mysql:platform_python_implementation=="PyPy"': [
             'PyMySQL>=0.6.6',
         ],
         'postgresql: platform_python_implementation == "CPython"': [
