@@ -54,37 +54,55 @@ The MySQL adapter accepts most parameters supported by the mysqlclient
 library (the maintained version of MySQL-python), including:
 
 driver
-    Either "MySQLdb" (which can either by ``mysqlclient`` or
-	``MySQL-python``), or "PyMySQL", or "umysqldb".
+    Either "MySQLdb" (which can be provided by the either of the
+    PyPI distributions `mysqlclient
+    <https://pypi.python.org/pypi/mysqlclient>`_ or `MySQL-python
+    <https://pypi.python.org/pypi/MySQL-python/>`_), or "PyMySQL", or
+    "umysqldb".
+
 host
     string, host to connect
+
 user
     string, user to connect as
+
 passwd
     string, password to use
+
 db
     string, database to use
+
 port
     integer, TCP/IP port to connect to
+
 unix_socket
     string, location of unix_socket (UNIX-ish only)
+
 conv
     mapping, maps MySQL FIELD_TYPE.* to Python functions which convert a
     string to the appropriate Python type
+
 connect_timeout
     number of seconds to wait before the connection attempt fails.
+
 compress
     if set, gzip compression is enabled
+
 named_pipe
     if set, connect to server via named pipe (Windows only)
+
 init_command
     command which is run once the connection is created
+
 read_default_file
     see the MySQL documentation for mysql_options()
+
 read_default_group
     see the MySQL documentation for mysql_options()
+
 client_flag
     client flags from MySQLdb.constants.CLIENT
+
 load_infile
     int, non-zero enables LOAD LOCAL INFILE, zero disables
 
@@ -95,10 +113,13 @@ The Oracle adapter accepts:
 
 driver
         Other than "auto" the only supported value is "cx_Oracle".
+
 user
         The Oracle account name
+
 password
         The Oracle account password
+
 dsn
         The Oracle data source name.  The Oracle client library will
         normally expect to find the DSN in ``/etc/oratab``.

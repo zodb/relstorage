@@ -1,3 +1,5 @@
+.. _caching-checkpoints:
+
 ==========================
  Caching with checkpoints
 ==========================

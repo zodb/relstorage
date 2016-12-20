@@ -2,21 +2,23 @@
  Installation
 ==============
 
-RelStorage 1.7 is supported on Python 2.7, Python 3.4 and 3.5, and PyPy2.
+RelStorage 2.0 is supported on Python 2.7, Python 3.4, 3.5 and 3.6,
+and PyPy2 5.4.1 or later.
 
 You can install RelStorage using pip::
 
     pip install RelStorage
 
-Installing CFFI (and a functioning compiler) is also recommended::
-
-    pip install cffi
+If you use a recent version of pip to install RelStorage on a
+supported platform (OS X, Windows or "manylinx"), you can get a
+pre-built binary wheel. If you install from source or on a different
+platform, you will need to have a functioning C compiler.
 
 RelStorage requires a modern version of ZODB; it is tested with ZODB
-4.3 but *might* work with ZODB as old as 3.10. If you need to use an
-older version of ZODB, install RelStorage 1.6.0. Likewise, if you need
-Python 2.6 support, install RelStorage 1.6.0 (note that 1.6.0 *does
-not* run on Python 3 or PyPy).
+4.3 and 5.0 but *might* work with ZODB as old as 3.10. If you need to
+use an older version of ZODB, install RelStorage 1.6. Likewise, if
+you need Python 2.6 support, install RelStorage 1.6 (note that 1.6
+*does not* run on Python 3 or PyPy).
 
 Database Adapter
 ================
@@ -52,7 +54,7 @@ Platform   MySQL                 PostgreSQL            Oracle
 CPython2   MySQL-python;         **psycopg2**;         **cx_Oracle**
            **mysqlclient**;      psycopg2cffi;
            *PyMySQL*;            *pg8000*
-           umysql
+           umysqldb
 CPython3   **mysqlclient**;      **psycopg2**;         **cx_Oracle**
            *PyMySQL*             *pg8000*
 PyPy       **PyMySQL**           **psycopg2cffi**;
@@ -64,6 +66,16 @@ PyPy       **PyMySQL**           **psycopg2cffi**;
           make sure that RelStorage's ``blob-chunk-size`` is less than
           16MB as well.
 
+.. note:: `This fork of umysqldb
+           <https://github.com/NextThought/umysqldb.git>`_ is
+           recommended. The ``full-buffer`` branch of `this ultramysql
+           fork
+           <https://github.com/NextThought/ultramysql/tree/full-buffer>`_
+           is also recommended if you encounter strange MySQL packet
+           errors.
+
+mysqlclient, pg8000 and umysql are compatible (cooperative) with gevent.
+
 Memcache Integration
 ====================
 
@@ -72,7 +84,7 @@ RelStorage clients, you'll need to install either `pylibmc
 <https://pypi.python.org/pypi/pylibmc>`_ (C based, requires Memcache
 development libraries and CPython) or `python-memcached
 <https://pypi.python.org/pypi/python-memcached>`_ (pure-Python, works
-on CPython and PyPy).
+on CPython and PyPy, compatible with gevent).
 
 
 Once RelStorage is installed, it's time to :doc:`configure the database <configure-database>`

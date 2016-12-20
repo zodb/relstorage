@@ -336,8 +336,8 @@ cache-local-compression
         .. versionadded:: 1.6
 
 cache-delta-size-limit
-        This is an advanced option. RelStorage uses a system of
-        checkpoints to improve the cache hit rate. This option
+        This is an advanced option. RelStorage uses :ref:`a system of
+        checkpoints <caching-checkpoints>` to improve the cache hit rate. This option
         configures how many new objects should be stored before creating a
         new checkpoint.
 
@@ -346,6 +346,11 @@ cache-delta-size-limit
         on CPython.
 
         The default is 20000 on CPython, 10000 on PyPy.
+
+        .. versionchanged:: 2.0b7
+           Double the default size from 10000 to 20000 on CPython. The
+           use of LLBTree for the internal data structure means we use
+           much less memory than we did before.
 
 Persistent Local Caching
 ~~~~~~~~~~~~~~~~~~~~~~~~
