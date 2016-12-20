@@ -1,7 +1,12 @@
+.. _migrate-to-1.1:
 
-Migrating from RelStorage version 1.0 or 1.0.1 to version 1.1
+===============================================================
+ Migrating from RelStorage version 1.0 or 1.0.1 to version 1.1
+===============================================================
 
-PostgreSQL:
+.. highlight:: sql
+
+PostgreSQL::
 
     CREATE INDEX object_state_prev_tid ON object_state (prev_tid);
 
@@ -31,17 +36,17 @@ PostgreSQL:
     );
 
 Users of PostgreSQL 8.2 and above should also drop the pack_lock table since
-it has been replaced with an advisory lock:
+it has been replaced with an advisory lock::
 
     DROP TABLE pack_lock;
 
 Users of PostgreSQL 8.1 and below still need the pack_lock table.  If you
-have deleted it, please create it again with the following statement:
+have deleted it, please create it again with the following statement::
 
     CREATE TABLE pack_lock ();
 
 
-MySQL:
+MySQL::
 
     CREATE INDEX object_state_prev_tid ON object_state (prev_tid);
 
@@ -65,7 +70,7 @@ MySQL:
     ) ENGINE = MyISAM;
 
 
-Oracle:
+Oracle::
 
     CREATE INDEX object_state_prev_tid ON object_state (prev_tid);
 

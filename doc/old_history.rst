@@ -212,9 +212,10 @@
 - Valery Suhomlinov discovered a problem with non-ASCII data in transaction
   metadata.  The problem has been fixed for all supported databases.
 
-
+=================
 PGStorage history
------------------
+=================
+
 
 0.4
 ===

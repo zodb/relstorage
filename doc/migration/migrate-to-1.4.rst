@@ -1,6 +1,11 @@
+.. _migrate-to-1.4:
 
-Migrating to RelStorage version 1.4.2
--------------------------------------
+
+=======================================
+ Migrating to RelStorage version 1.4.2
+=======================================
+
+.. highlight:: sql
 
 If you are using a history-free storage, you need to drop and re-create
 the object_refs_added table.  It contains only temporary state used during
@@ -9,7 +14,7 @@ packing.
 
 Do not make these changes to history-preserving databases.
 
-PostgreSQL:
+PostgreSQL::
 
     DROP TABLE object_refs_added;
     CREATE TABLE object_refs_added (
@@ -17,7 +22,7 @@ PostgreSQL:
         tid         BIGINT NOT NULL
     );
 
-MySQL:
+MySQL::
 
     DROP TABLE object_refs_added;
     CREATE TABLE object_refs_added (
@@ -25,7 +30,7 @@ MySQL:
         tid         BIGINT NOT NULL
     ) ENGINE = MyISAM;
 
-Oracle:
+Oracle::
 
     DROP TABLE object_refs_added;
     CREATE TABLE object_refs_added (
@@ -34,11 +39,12 @@ Oracle:
     );
 
 
-Migrating to RelStorage version 1.4
------------------------------------
+=====================================
+ Migrating to RelStorage version 1.4
+=====================================
 
 Before following these directions, first upgrade to the schema of
-RelStorage version 1.1.2 by following the directions in "migrate-to-1.1.2.txt".
+RelStorage version 1.1.2 by following the directions in :ref:`migrate-to-1.1.2`.
 
 Only Oracle needs a change for this release.  The Oracle adapter
 now requires the EXECUTE permission on the DBMS_LOCK package.

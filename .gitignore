@@ -22,4 +22,3 @@ parts/
 doc/_build
 doc/__pycache__
 doc/relstorage.*.rst
-doc/changelog.rst

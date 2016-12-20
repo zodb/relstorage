@@ -1,10 +1,16 @@
+.. _migrate-to-1.1.1:
 
-Migrating from RelStorage version 1.1 to version 1.1.1
+========================================================
+ Migrating from RelStorage version 1.1 to version 1.1.1
+========================================================
+
+.. highlight:: sql
+
 
 Before following these directions, first upgrade to the schema of
-RelStorage version 1.1 by following the directions in "migrate-to-1.1.txt".
+RelStorage version 1.1 by following the directions in :ref:`migrate-to-1.1`.
 
-PostgreSQL:
+PostgreSQL::
 
     DROP TABLE pack_object;
     CREATE TABLE pack_object (
@@ -19,7 +25,7 @@ PostgreSQL:
         WHERE keep = true;
 
 
-MySQL:
+MySQL::
 
     DROP TABLE pack_object;
     CREATE TABLE pack_object (
@@ -31,7 +37,7 @@ MySQL:
     CREATE INDEX pack_object_keep_zoid ON pack_object (keep, zoid);
 
 
-Oracle:
+Oracle::
 
     DROP TABLE pack_object;
     CREATE TABLE pack_object (

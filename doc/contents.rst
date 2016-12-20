@@ -19,7 +19,7 @@ Contents:
    migration
    developing
    changelog
-   HISTORY
+   old_history
 
 
 

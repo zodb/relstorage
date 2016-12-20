@@ -1,6 +1,8 @@
+.. _migrate-to-1.5:
 
-Migrating to RelStorage version 1.5
-===================================
+=====================================
+ Migrating to RelStorage version 1.5
+=====================================
 
 All databases need a schema migration for this release.  This release
 adds a state_size column to the object_state table, making it possible
@@ -9,11 +11,13 @@ is intended for gathering statistics.
 
 Please note that if you are using the history-free schema, you need to
 first migrate to RelStorage 1.4.2 by following the instructions in
-migrate-to-1.4.txt.
+:ref:`migrate-to-1.4`.
+
+.. highlight:: sql
 
 
 PostgreSQL
-----------
+==========
 
 1. Migrate the object_state table::
 
@@ -50,7 +54,7 @@ PostgreSQL
         END;
     $blob_write$ LANGUAGE plpgsql;
     BEGIN;
-    ALTER TABLE blob_chunk RENAME COLUMN chunk TO oldbytea;    
+    ALTER TABLE blob_chunk RENAME COLUMN chunk TO oldbytea;
     ALTER TABLE blob_chunk ADD COLUMN chunk OID;
     UPDATE blob_chunk SET chunk = blob_write(oldbytea);
     ALTER TABLE blob_chunk
@@ -77,14 +81,18 @@ and then copying it back::
 
 
 MySQL history-preserving
-------------------------
+========================
+
+Execute::
 
     ALTER TABLE object_state ADD COLUMN state_size BIGINT AFTER md5;
     UPDATE object_state SET state_size = COALESCE(LENGTH(state), 0);
     ALTER TABLE object_state MODIFY state_size BIGINT NOT NULL AFTER md5;
 
 MySQL history-free
-------------------
+==================
+
+Execute::
 
     ALTER TABLE object_state ADD COLUMN state_size BIGINT AFTER tid;
     UPDATE object_state SET state_size = COALESCE(LENGTH(state), 0);
@@ -92,7 +100,9 @@ MySQL history-free
 
 
 Oracle
-------
+======
+
+Execute::
 
     ALTER TABLE object_state ADD state_size NUMBER(20);
     UPDATE object_state SET state_size = COALESCE(LENGTH(state), 0);

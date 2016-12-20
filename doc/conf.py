@@ -44,14 +44,6 @@ except ImportError:
 
 os.system('%s generate_rst.py generate' % sys.executable)
 
-if not os.path.exists('changelog.rst') and os.path.exists('../CHANGES.rst'):
-    print('Linking ../CHANGES.rst to changelog.rst')
-    if hasattr(os, 'symlink'):
-        os.symlink('../CHANGES.rst', 'changelog.rst')
-    else:
-        import shutil
-        shutil.copyfile('../CHANGES.rst', 'changelog.rst')
-
 extensions = [
     'sphinx.ext.autodoc',
     'sphinx.ext.doctest',
