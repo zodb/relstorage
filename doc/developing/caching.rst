@@ -1,10 +1,10 @@
+==========================
+ Caching with checkpoints
+==========================
 
-
-Caching with checkpoints
-------------------------
-
-The memcache strategy includes checkpoints. Checkpoint management is
-a bit complex, but important for achieving a decent cache hit rate.
+The caching strategy (both local in :class:`~relstorage.cache.storage_cache.StorageCache` and in
+memcache) includes checkpoints. Checkpoint management is a bit
+complex, but important for achieving a decent cache hit rate.
 
 Checkpoints are 64 bit integer transaction IDs. Invariant: checkpoint0
 is greater than or equal to checkpoint1, meaning that if they are
@@ -31,15 +31,15 @@ immutable, so it would be nice to share it between threads.
 
 When looking up an object in the cache, try to get:
 
-    - The state at delta_after0.
+    #. The state at delta_after0.
 
-    - The state at checkpoint0.
+    #. The state at checkpoint0.
 
-    - The state at delta_after1.
+    #.  The state at delta_after1.
 
-    - The state at checkpoint1.
+    #. The state at checkpoint1.
 
-    - The state from the database.
+    #. The state from the database.
 
     If the retrieved state is older than checkpoint0, but it
     was not retrieved from checkpoint0, cache it at checkpoint0.
@@ -70,3 +70,14 @@ adding data very quickly.  If that happens, the instance should
 ignore the checkpoint update, with the expectation that the new checkpoint
 will be visible after the next update.
 
+
+.. toctree::
+
+   ../relstorage.cache
+   ../relstorage.cache.interfaces
+   ../relstorage.cache.cache_ring
+   ../relstorage.cache.local_client
+   ../relstorage.cache.mapping
+   ../relstorage.cache.persistence
+   ../relstorage.cache.storage_cache
+   ../relstorage.cache.trace

@@ -35,6 +35,12 @@ Features
 See :doc:`the rest of the documentation <contents>` for more information.
 
 
+.. toctree::
+   :maxdepth: 2
+
+   contents
+
+
 Development
 ===========
 
@@ -56,15 +62,33 @@ Windows.
 .. image:: https://ci.appveyor.com/api/projects/status/pccddlgujdoqvl83?svg=true
    :target: https://ci.appveyor.com/project/jamadden/relstorage/branch/master
 
+.. image:: https://readthedocs.org/projects/relstorage/badge/?version=latest
+   :target: http://relstorage.readthedocs.io/en/latest/?badge=latest
+   :alt: Documentation Status
+
+Builds on Travis CI automatically submit updates to `coveralls.io`_ to
+monitor test coverage.
+
+.. image:: https://coveralls.io/repos/zodb/relstorage/badge.svg?branch=master&service=github
+   :target: https://coveralls.io/github/zodb/relstorage?branch=master
+
+Likewise, builds on Travis CI will automatically submit updates to
+`landscape.io`_ to monitor code health (adherence to PEP8, absence of
+common code smells, etc).
+
+.. image:: https://landscape.io/github/zodb/relstorage/master/landscape.svg?style=flat
+   :target: https://landscape.io/github/zodb/relstorage/master
+   :alt: Code Health
+
+.. _coveralls.io: https://coveralls.io/github/zodb/relstorage
+.. _landscape.io: https://landscape.io/github/zodb/relstorage
+
 
 Project URLs
 ============
 
 * http://pypi.python.org/pypi/RelStorage       (PyPI entry and downloads)
 * http://shane.willowrise.com/                 (blog)
-
-.. toctree::
-   contents
 
 Indices and tables
 ==================

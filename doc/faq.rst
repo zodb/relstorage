@@ -35,4 +35,4 @@ Q: Can RelStorage replace ZRS (Zope Replication Services)?
 
 Q: How do I set up an environment to run the RelStorage tests?
 
-    A: See README.txt in the relstorage/tests directory.
+    A: See :doc:`developing`.
