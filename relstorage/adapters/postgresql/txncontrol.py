@@ -15,56 +15,12 @@
 
 from __future__ import absolute_import
 
-from relstorage.adapters.interfaces import ITransactionControl
-from zope.interface import implementer
 
-from ..txncontrol import AbstractTransactionControl
+from ..txncontrol import GenericTransactionControl
 
+class PostgreSQLTransactionControl(GenericTransactionControl):
 
-@implementer(ITransactionControl)
-class PostgreSQLTransactionControl(AbstractTransactionControl):
+    _GET_TID_HP = _GET_TID_HF = 'EXECUTE get_latest_tid'
 
     def __init__(self, keep_history, driver):
-        self.keep_history = keep_history
-        self._Binary = driver.Binary
-
-    def get_tid(self, cursor):
-        """Returns the most recent tid."""
-        if self.keep_history:
-            stmt = """
-            SELECT tid
-            FROM transaction
-            ORDER BY tid DESC
-            LIMIT 1
-            """
-            cursor.execute(stmt)
-        else:
-            stmt = """
-            SELECT tid
-            FROM object_state
-            ORDER BY tid DESC
-            LIMIT 1
-            """
-            cursor.execute(stmt)
-            if not cursor.rowcount:
-                # nothing has been stored yet
-                return 0
-
-        assert cursor.rowcount == 1
-        return cursor.fetchone()[0]
-
-    def add_transaction(self, cursor, tid, username, description, extension,
-                        packed=False):
-        """Add a transaction."""
-        if self.keep_history:
-            stmt = """
-            INSERT INTO transaction
-                (tid, packed, username, description, extension)
-            VALUES (%s, %s,
-                %s, %s,
-                %s)
-            """
-            binary = self._Binary
-            cursor.execute(stmt, (tid, packed,
-                                  binary(username), binary(description),
-                                  binary(extension)))
+        GenericTransactionControl.__init__(self, keep_history, driver.Binary)

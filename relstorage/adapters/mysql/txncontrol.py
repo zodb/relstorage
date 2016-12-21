@@ -15,52 +15,7 @@
 
 from __future__ import absolute_import
 
-from zope.interface import implementer
+from ..txncontrol import GenericTransactionControl
 
-from ..interfaces import ITransactionControl
-from ..txncontrol import AbstractTransactionControl
-
-@implementer(ITransactionControl)
-class MySQLTransactionControl(AbstractTransactionControl):
-
-    def __init__(self, keep_history, Binary): # noqa
-        self.keep_history = keep_history
-        self.Binary = Binary
-
-    def get_tid(self, cursor):
-        """Returns the most recent tid."""
-        if self.keep_history:
-            stmt = """
-            SELECT tid
-            FROM transaction
-            ORDER BY tid DESC
-            LIMIT 1
-            """
-            cursor.execute(stmt)
-        else:
-            stmt = """
-            SELECT tid
-            FROM object_state
-            ORDER BY tid DESC
-            LIMIT 1
-            """
-            cursor.execute(stmt)
-            if not cursor.rowcount:
-                # nothing has been stored yet
-                return 0
-
-        assert cursor.rowcount == 1
-        return cursor.fetchone()[0]
-
-    def add_transaction(self, cursor, tid, username, description, extension,
-                        packed=False):
-        """Add a transaction."""
-        if self.keep_history:
-            stmt = """
-            INSERT INTO transaction
-                (tid, packed, username, description, extension)
-            VALUES (%s, %s, %s, %s, %s)
-            """
-            cursor.execute(stmt, (
-                tid, packed, self.Binary(username),
-                self.Binary(description), self.Binary(extension)))
+class MySQLTransactionControl(GenericTransactionControl):
+    pass

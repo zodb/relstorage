@@ -6,7 +6,9 @@
 2.0.0rc2 (unreleased)
 =====================
 
-- Nothing changed yet.
+- MySQL and Postgres now use the same optimized methods to get the
+  latest TID at transaction commit time as they do at poll time. This
+  is similar to :issue:`89`.
 
 
 2.0.0rc1 (2016-12-12)

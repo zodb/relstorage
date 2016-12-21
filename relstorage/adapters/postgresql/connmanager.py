@@ -80,13 +80,7 @@ class Psycopg2ConnectionManager(AbstractConnectionManager):
                 log.warning("Unable to connect: %s", e)
                 raise
 
-    def open_for_load(self):
-        """Open and initialize a connection for loading objects.
-
-        Returns (conn, cursor).
-        """
-        conn, cursor = self.open(self.isolation_serializable,
-                                 replica_selector=self.ro_replica_selector)
+    def _prepare_get_latest_tid(self, cursor):
         if self.keep_history:
             stmt = """
             PREPARE get_latest_tid AS
@@ -104,4 +98,18 @@ class Psycopg2ConnectionManager(AbstractConnectionManager):
             LIMIT 1
             """
         cursor.execute(stmt)
+
+    def open_for_load(self):
+        """Open and initialize a connection for loading objects.
+
+        Returns (conn, cursor).
+        """
+        conn, cursor = self.open(self.isolation_serializable,
+                                 replica_selector=self.ro_replica_selector)
+        self._prepare_get_latest_tid(cursor)
+        return conn, cursor
+
+    def open_for_store(self):
+        conn, cursor = super(Psycopg2ConnectionManager, self).open_for_store()
+        self._prepare_get_latest_tid(cursor)
         return conn, cursor

@@ -25,6 +25,8 @@ log = logging.getLogger(__name__)
 
 @implementer(ITransactionControl)
 class OracleTransactionControl(AbstractTransactionControl):
+    # XXX: Convert this to subclass GenericTransactionControl
+    # (should be simple, but needs tested).
 
     def __init__(self, keep_history, Binary, twophase):
         self.keep_history = keep_history

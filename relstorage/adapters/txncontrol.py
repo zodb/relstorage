@@ -19,6 +19,11 @@ import six
 import abc
 
 
+from zope.interface import implementer
+
+from .interfaces import ITransactionControl
+
+
 @six.add_metaclass(abc.ABCMeta)
 class AbstractTransactionControl(object):
     """Abstract base class"""
@@ -57,3 +62,54 @@ class AbstractTransactionControl(object):
                         packed=False):
         """Add a transaction"""
         raise NotImplementedError()
+
+@implementer(ITransactionControl)
+class GenericTransactionControl(AbstractTransactionControl):
+    """
+    A :class:`ITransactionControl` implementation that works for history-free
+    and history-preserving storages that share a common syntax.
+    """
+
+    _GET_TID_HP = "SELECT MAX(tid) FROM transaction"
+    _GET_TID_HF = "SELECT MAX(tid) FROM object_state"
+
+    def __init__(self, keep_history, Binary): # noqa
+        self.keep_history = keep_history
+        self.Binary = Binary
+
+        if keep_history:
+            self.add_transaction = self._add_transaction_preserve
+            self._get_tid_stmt = self._GET_TID_HP
+        else:
+            self.add_transaction = self._add_transaction_free
+            self._get_tid_stmt = self._GET_TID_HF
+
+    def get_tid(self, cursor):
+        cursor.execute(self._get_tid_stmt)
+        if not cursor.rowcount:
+            # nothing has been stored yet
+            return 0
+
+        assert cursor.rowcount == 1
+        tid = cursor.fetchone()[0]
+        return tid if tid is not None else 0
+
+
+    def _add_transaction_free(self, cursor, tid, username, description, extension,
+                              packed=False):
+        # pylint:disable=unused-argument
+        return
+
+    def _add_transaction_preserve(self, cursor, tid, username, description, extension,
+                                  packed=False):
+        stmt = """
+        INSERT INTO transaction
+            (tid, packed, username, description, extension)
+        VALUES (%s, %s, %s, %s, %s)
+        """
+        binary = self.Binary
+        cursor.execute(stmt, (
+            tid, packed, binary(username),
+            binary(description), binary(extension)))
+
+    add_transaction = lambda *args: None # dynamically replaced
