@@ -15,22 +15,18 @@
 
 from __future__ import absolute_import
 
-from ..interfaces import ITransactionControl
-from ..txncontrol import AbstractTransactionControl
+from ..txncontrol import GenericTransactionControl
 
-from zope.interface import implementer
+
 import logging
 
 log = logging.getLogger(__name__)
 
-@implementer(ITransactionControl)
-class OracleTransactionControl(AbstractTransactionControl):
-    # XXX: Convert this to subclass GenericTransactionControl
-    # (should be simple, but needs tested).
+
+class OracleTransactionControl(GenericTransactionControl):
 
     def __init__(self, keep_history, Binary, twophase):
-        self.keep_history = keep_history
-        self.Binary = Binary
+        GenericTransactionControl.__init__(self, keep_history, Binary)
         self.twophase = twophase
 
     def commit_phase1(self, conn, cursor, tid):
@@ -46,47 +42,18 @@ class OracleTransactionControl(AbstractTransactionControl):
             conn.prepare()
         return '-'
 
-    def get_tid(self, cursor):
-        """Returns the most recent tid.
+    def _add_transaction_preserve(self, cursor, tid, username, description, extension,
+                                  packed=False):
+        stmt = """
+        INSERT INTO transaction
+            (tid, packed, username, description, extension)
+        VALUES (:1, :2, :3, :4, :5)
         """
-        if self.keep_history:
-            stmt = """
-            SELECT MAX(tid)
-            FROM transaction
-            """
-            cursor.execute(stmt)
-            rows = list(cursor)
-        else:
-            stmt = """
-            SELECT MAX(tid)
-            FROM object_state
-            """
-            cursor.execute(stmt)
-            rows = list(cursor)
-            if not rows:
-                # nothing has been stored yet
-                return 0
-
-        assert len(rows) == 1
-        tid = rows[0][0]
-        if tid is None:
-            tid = 0
-        return tid
-
-    def add_transaction(self, cursor, tid, username, description, extension,
-                        packed=False):
-        """Add a transaction."""
-        if self.keep_history:
-            stmt = """
-            INSERT INTO transaction
-                (tid, packed, username, description, extension)
-            VALUES (:1, :2, :3, :4, :5)
-            """
-            max_desc_len = 2000
-            if len(description) > max_desc_len:
-                log.warning('Trimming description of transaction %s '
-                            'to %d characters', tid, max_desc_len)
-                description = description[:max_desc_len]
-            cursor.execute(stmt, (
-                tid, packed and 'Y' or 'N', self.Binary(username),
-                self.Binary(description), self.Binary(extension)))
+        max_desc_len = 2000
+        if len(description) > max_desc_len:
+            log.warning('Trimming description of transaction %s '
+                        'to %d characters', tid, max_desc_len)
+            description = description[:max_desc_len]
+        cursor.execute(stmt, (
+            tid, packed and 'Y' or 'N', self.Binary(username),
+            self.Binary(description), self.Binary(extension)))

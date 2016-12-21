@@ -20,6 +20,7 @@ from ..txncontrol import GenericTransactionControl
 
 class PostgreSQLTransactionControl(GenericTransactionControl):
 
+    # See connmanager.py for where these are prepared.
     _GET_TID_HP = _GET_TID_HF = 'EXECUTE get_latest_tid'
 
     def __init__(self, keep_history, driver):
