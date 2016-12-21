@@ -17,6 +17,7 @@ Contents:
    zodburi
    cache-tracing
    faq
+   performance
    migration
    developing
    changelog

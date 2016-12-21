@@ -20,7 +20,8 @@ Q: Can I perform SQL queries on the data in the database?
 Q: How does RelStorage performance compare with FileStorage?
 
     A: According to benchmarks, RelStorage with PostgreSQL is often faster than
-    FileStorage, especially under high concurrency.
+    FileStorage, especially under high concurrency. See
+    :doc:`performance` for more.
 
 Q: Why should I choose RelStorage?
 
