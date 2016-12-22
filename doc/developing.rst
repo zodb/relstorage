@@ -8,5 +8,6 @@ environment. Buildout may also be used.
 .. toctree::
    :maxdepth: 1
 
-   developing/running.rst
-   developing/caching.rst
+   developing/running
+   developing/caching
+   developing/packing
