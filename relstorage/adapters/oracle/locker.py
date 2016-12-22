@@ -44,7 +44,7 @@ class OracleLocker(AbstractLocker):
                 self.commit_lock_id,
                 6,  # exclusive (X_MODE)
                 timeout,
-                True,
+                True, # release on commit, yes please
             ))
         if status != 0:
             if nowait and status == 1:

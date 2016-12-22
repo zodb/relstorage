@@ -29,6 +29,23 @@ class CommitLockQueryFailedError(UnableToAcquireCommitLockError):
 
 @implementer(ILocker)
 class MySQLLocker(AbstractLocker):
+    """
+    MySQL locks.
+
+    Unlike PostgreSQL and Oracle locks which are implicitly released
+    at the end of a transaction, MySQL locks **must** be released explicitly.
+
+    .. caution::
+       Prior to MySQL 5.7.5, it is not possible to hold more
+       than one lock in a single session. Thus, the pack lock must be
+       held by a different connection than the commit lock during the
+       packing process (otherwise when
+       :meth:`relstorage.adapters.packundo.HistoryFreePackUndo.fill_object_refs`
+       acquires the commit lock, the pack lock held by :meth:`relstorage.storage.RelStorage.pack`
+       would be dropped).
+
+       http://dev.mysql.com/doc/refman/5.7/en/miscellaneous-functions.html#function_get-lock
+    """
 
     @metricmethod
     def hold_commit_lock(self, cursor, ensure_current=False, nowait=False):

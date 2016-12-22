@@ -1259,6 +1259,7 @@ class RelStorage(UndoLogCompatible,
     @metricmethod
     def pack(self, t, referencesf, prepack_only=False, skip_prepack=False,
              sleep=None):
+        """Pack the storage. Holds the pack lock for the duration."""
         # pylint:disable=too-many-branches
         if self._is_read_only:
             raise ReadOnlyError()
