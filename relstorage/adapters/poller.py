@@ -26,11 +26,50 @@ log = logging.getLogger(__name__)
 class Poller(object):
     """Database change notification poller"""
 
+    _HP_LIST_CHANGES_RANGE = """
+            SELECT zoid, tid
+            FROM current_object
+            WHERE tid > %(min_tid)s
+                AND tid <= %(max_tid)s
+            """
+    _HF_LIST_CHANGES_RANGE = """
+            SELECT zoid, tid
+            FROM object_state
+            WHERE tid > %(min_tid)s
+                AND tid <= %(max_tid)s
+            """
+
+    _HP_POLL_INV = """
+            SELECT zoid, tid
+            FROM current_object
+            WHERE tid > %(tid)s
+            """
+
+    _HF_POLL_INV = """
+            SELECT zoid, tid
+            FROM object_state
+            WHERE tid > %(tid)s
+            """
+
+    _HP_TRAN_EXISTS = "SELECT 1 FROM transaction WHERE tid = %(tid)s"
+
+
     def __init__(self, poll_query, keep_history, runner, revert_when_stale):
         self.poll_query = poll_query
         self.keep_history = keep_history
         self.runner = runner
         self.revert_when_stale = revert_when_stale
+
+        list_changes_range_stmt = self._HP_LIST_CHANGES_RANGE if self.keep_history else self._HF_LIST_CHANGES_RANGE
+        self._list_changes_range_stmt = intern(list_changes_range_stmt % self.runner.script_vars)
+
+        poll_inv_stmt = self._HP_POLL_INV if self.keep_history else self._HF_POLL_INV
+        poll_inv_stmt_exc = poll_inv_stmt + " AND tid != %(self_tid)s"
+
+        self._poll_inv_stmt = intern(poll_inv_stmt % self.runner.script_vars)
+        self._poll_inv_stmt_exc = intern(poll_inv_stmt_exc % self.runner.script_vars)
+
+        self._tran_exists_stmt = intern(self._HP_TRAN_EXISTS % self.runner.script_vars)
 
     def poll_invalidations(self, conn, cursor, prev_polled_tid, ignore_tid):
         """Polls for new transactions.
@@ -100,9 +139,8 @@ class Poller(object):
             # history-free storage. If something goes wrong, then we'll
             # know there's some other edge condition we have to account
             # for.
-            stmt = "SELECT 1 FROM transaction WHERE tid = %(tid)s"
             cursor.execute(
-                intern(stmt % self.runner.script_vars),
+                self._tran_exists_stmt,
                 {'tid': prev_polled_tid})
             rows = cursor.fetchall()
             if not rows:
@@ -111,23 +149,11 @@ class Poller(object):
                 return None, new_polled_tid
 
         # Get the list of changed OIDs and return it.
-        if self.keep_history:
-            stmt = """
-            SELECT zoid, tid
-            FROM current_object
-            WHERE tid > %(tid)s
-            """
-        else:
-            stmt = """
-            SELECT zoid, tid
-            FROM object_state
-            WHERE tid > %(tid)s
-            """
+        stmt = self._poll_inv_stmt
         params = {'tid': prev_polled_tid}
         if ignore_tid is not None:
-            stmt += " AND tid != %(self_tid)s"
+            stmt = self._poll_inv_stmt_exc
             params['self_tid'] = ignore_tid
-        stmt = intern(stmt % self.runner.script_vars)
 
         cursor.execute(stmt, params)
         changes = cursor.fetchall()
@@ -140,22 +166,6 @@ class Poller(object):
         The returned iterable must include the latest changes in the range
         after_tid < tid <= last_tid.
         """
-        if self.keep_history:
-            stmt = """
-            SELECT zoid, tid
-            FROM current_object
-            WHERE tid > %(min_tid)s
-                AND tid <= %(max_tid)s
-            """
-        else:
-            stmt = """
-            SELECT zoid, tid
-            FROM object_state
-            WHERE tid > %(min_tid)s
-                AND tid <= %(max_tid)s
-            """
         params = {'min_tid': after_tid, 'max_tid': last_tid}
-        stmt = intern(stmt % self.runner.script_vars)
-
-        cursor.execute(stmt, params)
+        cursor.execute(self._list_changes_range_stmt, params)
         return cursor.fetchall()
