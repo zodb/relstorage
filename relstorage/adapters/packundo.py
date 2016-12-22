@@ -155,6 +155,9 @@ class PackUndo(object):
 
 @implementer(IPackUndo)
 class HistoryPreservingPackUndo(PackUndo):
+    """
+    History-preserving pack/undo.
+    """
 
     keep_history = True
 
@@ -822,6 +825,9 @@ class HistoryPreservingPackUndo(PackUndo):
 
 @implementer(IPackUndo)
 class HistoryFreePackUndo(PackUndo):
+    """
+    History-free pack/undo.
+    """
 
     keep_history = False
 
@@ -868,6 +874,9 @@ class HistoryFreePackUndo(PackUndo):
         so this method runs repeatedly until it detects no changes between
         two passes.
         """
+        # XXX: We open the prepack connection in at most READ COMMITTED isolation mode,
+        # which is why the state can be changing. Why do we do that and not use a
+        # stronger isolation mode?
         holding_commit = False
         attempt = 0
         while True:
@@ -916,6 +925,12 @@ class HistoryFreePackUndo(PackUndo):
             else:
                 # No changes since last pass.
                 break
+
+        if holding_commit:
+            # The above `conn.commit()` will have released the locks
+            # under PostgreSQL and Oracle, this is necessary for MySQL.
+            # See https://github.com/zodb/relstorage/pull/9/
+            self.locker.release_commit_lock(cursor)
 
     def _add_refs_for_oids(self, cursor, oids, get_references):
         """Fill object_refs with the states for some objects.

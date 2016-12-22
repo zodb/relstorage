@@ -9,6 +9,10 @@
 - MySQL and Postgres now use the same optimized methods to get the
   latest TID at transaction commit time as they do at poll time. This
   is similar to :issue:`89`.
+- MySQL now releases the commit lock (if acquired) during pre-pack
+  with GC of a history-free storage at the same time as PostgreSQL and
+  Oracle did (much earlier). Reported and initial fix provided in
+  :pr:`9` by jplouis.
 
 
 2.0.0rc1 (2016-12-12)
