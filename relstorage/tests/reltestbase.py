@@ -643,8 +643,9 @@ class GenericRelStorageTests(
             packtime = time.time()
             self._storage.pack(packtime, referencesf)
 
-            self.assertEqual(len(expect_oids), 2,
-                             "The on_filling_object_refs hook should have been called once")
+            # "The on_filling_object_refs hook should have been called once")
+            self.assertEqual(len(expect_oids), 2, expect_oids)
+
             # Both children should still exist.
             self._storage.load(expect_oids[0], '')
             self._storage.load(expect_oids[1], '')
