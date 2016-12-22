@@ -35,16 +35,16 @@ What does this mean for each object?
 
 1
   Revisions 14, 13 and 12 are kept, while revision 10 is dropped.
-  The prev_tid of revision 12 is set to 0. Until the current revision,
+  The ``prev_tid`` of revision 12 is set to 0. Until the current revision,
   this object referred to object 9.
 2
   Both revisions (13 and 11) are kept. This object is keeping object
   3 alive. Although nothing refers to this object, packing does not
-  remove objects with revisions beyond pack_tid.
+  remove objects with revisions beyond ``pack_tid``.
 3
   Since a current revision of object 2 refers to this object,
   revision 12 is kept, but its history is cut short (revision 11 is
-  dropped and the prev_tid for revision 12 is set to 0).
+  dropped and the ``prev_tid`` for revision 12 is set to 0).
 5
   Nothing refers to this object, so the OID is completely removed from
   the database.
@@ -59,7 +59,7 @@ What does this mean for each object?
 0
   This is the root object since its OID is 0. The root object is
   never removed from the database, but its history will be cut short:
-  revision 10 will be removed and the prev_tid of revision 11 will be
+  revision 10 will be removed and the ``prev_tid`` of revision 11 will be
   set to 0.
 
 Notes
