@@ -13,14 +13,38 @@ RelStorage 2.0
 All RelStorage schemas were history free and used a memcache instance.
 ZEO was version 5.0.4 and used a FileStorage backend from ZODB 5.1.1
 MySQL was version 5.5.53 and PostgreSQL was version 9.6.1. The
-database drivers were mysqlclient-1.3.9 and psycopg2 2.6.2. All cache
-settings were at their default values.
+database drivers were mysqlclient-1.3.9 and psycopg2 2.6.2. All
+RelStorage cache settings were at their default values (MySQL
+configuration had been somewhat modified from its defaults but
+PostgreSQL was at its defaults).
 
 The test suite was zodbshootout 0.6 with a concurrency level of 2 (and
 all other options the default), running on CPython 2.7.12 on a 2.5Ghz
 Intel Core i7 (MacBookPro11,5) under macOS 10.12.2.
 
-.. objects_per_txn=1000, object_size=128, mappingtype=<class 'persistent.mapping.PersistentMapping'> and concurrency=2 (threads? False)
+.. objects_per_txn=1000, object_size=128, mappingtype=<class
+   'persistent.mapping.PersistentMapping'> and concurrency=2 (threads?
+   False)
+
+.. NOTE: mysql55 had previously had some perf tuning done to it, while
+   postgresql was using default out-of-box settings. So these numbers
+   aren't entirely fair. Here's the contetns of my.cnf:
+
+   [mysqld]
+   max_connections = 500
+   max_allowed_packet = 4M
+   slave_max_allowed_packet = 1073741824
+   #net_buffer_length = 32K
+   net_buffer_length = 20M
+   max_allowed_packet = 18M
+   innodb_data_file_path = ibdata1:10M:autoextend
+   innodb_buffer_pool_size=256M
+   innodb_additional_mem_pool_size=20M
+   innodb_log_file_size=64M
+   innodb_log_buffer_size=8M
+   innodb_flush_log_at_trx_commit=1
+   innodb_file_per_table
+   skip-networking = false
 
 ======================  ==========  =====  =====
 Transaction             PostgreSQL  MySQL	ZEO
