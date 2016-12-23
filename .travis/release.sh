@@ -15,16 +15,20 @@ unset CFLAGS
 unset CXXFLAGS
 unset CPPFLAGS
 
+BASE=`pwd`
+BASE=`dirname $BASE`
+
 cd /tmp/relstorage
 virtualenv -p $1 `basename $1`
 cd `basename $1`
 echo "Made tmpenv"
 echo `pwd`
 source bin/activate
-git clone https://github.com/zodb/relstorage
+echo cloning $BASE
+git clone $BASE
 cd relstorage
 pip install -U pip
-pip install -U setuptools cython greenlet cffi
+pip install -U setuptools cffi
 pip install -U wheel
 python ./setup.py sdist bdist_wheel
 cp dist/*whl /tmp/relstorage
