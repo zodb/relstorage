@@ -3,8 +3,8 @@
 =========
 
 
-2.0.0rc2 (unreleased)
-=====================
+2.0.0 (2016-12-23)
+==================
 
 - MySQL and Postgres now use the same optimized methods to get the
   latest TID at transaction commit time as they do at poll time. This
