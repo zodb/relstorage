@@ -19,6 +19,6 @@ include/
 lib/
 parts/
 
-doc/_build
+doc/_build/
 doc/__pycache__
 doc/relstorage.*.rst
