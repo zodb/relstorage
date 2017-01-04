@@ -6,7 +6,7 @@
 2.0.1 (unreleased)
 ==================
 
-- Nothing changed yet.
+- 3.6.0 final release is tested on CI servers.
 
 
 2.0.0 (2016-12-23)
