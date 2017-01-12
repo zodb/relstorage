@@ -18,12 +18,7 @@ connect to it, and specifying any additional options.
 Configuring Plone
 =================
 
-To install RelStorage in Plone, see the instructions in the following
-article:
-
-    http://shane.willowrise.com/archives/how-to-install-plone-with-relstorage-and-mysql/
-
-Plone uses the ``plone.recipe.zope2instance`` Buildout recipe to
+Plone uses the `plone.recipe.zope2instance`_ Buildout recipe to
 generate zope.conf, so the easiest way to configure RelStorage in a
 Plone site is to set the ``rel-storage`` parameter in ``buildout.cfg``.
 The ``rel-storage`` parameter contains options separated by newlines,
@@ -42,6 +37,22 @@ An example::
         user plone
         passwd PASSWORD
 
+You'll also need to make sure that the correct version of RelStorage
+and its database drivers are installed (typically by adding them to
+the ``[eggs]`` section in the ``buildout.cfg``).
+
+.. note:: For a detailed walk through of installing historic versions
+         of RelStorage in historic versions of Plone 3, see `this blog
+         post
+         <http://shane.willowrise.com/archives/how-to-install-plone-with-relstorage-and-mysql/>`_.
+         It's important to note that this information is not directly
+         applicable to newer versions (Plone 4 does not use fake eggs,
+         and the version of ZODB used by Plone 4, 3.9.5 and above,
+         does not need patched). The comments section may contain
+         further hints for newer versions.
+
+.. _plone.recipe.zope2instance: https://pypi.python.org/pypi/plone.recipe.zope2instance
+
 Configuring using ZConfig
 =========================
 
@@ -51,7 +62,7 @@ configuration file using the `ZConfig
 syntax. You will write a ``<relstorage>`` element containing
 the general RelStorage options, and containing one database-specific
 element (``<postgresql>``, ``<mysql>`` or ``<oracle>``). (Where in the
-file the ``<relstorage>>`` element goes is specific to the framework
+file the ``<relstorage>`` element goes is specific to the framework
 or application you're using and will be covered next.)
 
 In all cases, you'll need to add ``%import relstorage`` to the
