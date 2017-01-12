@@ -23,6 +23,8 @@ tests. Otherwise, tests for all installed drivers will be attempted;
 this can be bypassed with ``--no-db`` or limited to particular
 databases with ``--only-[mysql|pgsql|oracle]``.
 
+.. _test-databases:
+
 Databases
 =========
 
@@ -51,13 +53,10 @@ used to set up the continuous integration test environment in the
 PostgreSQL
 ----------
 
-Execute the following using the ``psql`` command::
+Execute the following using the ``psql`` command:
 
-    CREATE USER relstoragetest WITH PASSWORD 'relstoragetest';
-    CREATE DATABASE relstoragetest OWNER relstoragetest;
-    CREATE DATABASE relstoragetest2 OWNER relstoragetest;
-    CREATE DATABASE relstoragetest_hf OWNER relstoragetest;
-    CREATE DATABASE relstoragetest2_hf OWNER relstoragetest;
+.. literalinclude:: ../../.travis/postgres.sh
+   :language: shell
 
 Also, add the following lines to the top of pg_hba.conf (if you put
 them at the bottom, they may be overridden by other parameters)::
@@ -81,19 +80,10 @@ test run much faster.
 MySQL
 -----
 
-Execute the following using the ``mysql`` command::
+Execute the following using the ``mysql`` command:
 
-    CREATE USER 'relstoragetest'@'localhost' IDENTIFIED BY 'relstoragetest';
-    CREATE DATABASE relstoragetest;
-    GRANT ALL ON relstoragetest.* TO 'relstoragetest'@'localhost';
-    CREATE DATABASE relstoragetest2;
-    GRANT ALL ON relstoragetest2.* TO 'relstoragetest'@'localhost';
-    CREATE DATABASE relstoragetest_hf;
-    GRANT ALL ON relstoragetest_hf.* TO 'relstoragetest'@'localhost';
-    CREATE DATABASE relstoragetest2_hf;
-    GRANT ALL ON relstoragetest2_hf.* TO 'relstoragetest'@'localhost';
-    FLUSH PRIVILEGES;
-
+.. literalinclude:: ../../.travis/mysql.sh
+   :language: shell
 
 MySQL specific tests can be run by the testmysql module::
 

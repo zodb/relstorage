@@ -2,10 +2,15 @@
  Configuring Your Database
 ===========================
 
-You need to configure a database and user account for RelStorage.
+You need to configure a database (schema) and user account for RelStorage.
 RelStorage will populate the database with its schema the first time it
 connects. Once you have the database configured, you can
 :doc:`configure your application <configure-application>` to use RelStorage.
+
+.. note:: If you'll be developing on RelStorage itself, see :ref:`how
+          to set up databases to run tests <test-databases>`.
+
+.. highlight:: shell
 
 PostgreSQL
 ==========
@@ -20,6 +25,12 @@ example::
     $ sudo su - postgres
     $ createuser --pwprompt zodbuser
     $ createdb -O zodbuser zodb
+
+Alternately, you can use the ``psql`` PostgreSQL client and issue SQL
+statements to create users and databases. For example::
+
+    $ psql -U postgres -c "CREATE USER zodbuser WITH PASSWORD 'relstoragetest';"
+    $ psql -U postgres -c "CREATE DATABASE zodb OWNER zodbuser;"
 
 New PostgreSQL accounts often require modifications to ``pg_hba.conf``,
 which contains host-based access control rules. The location of
@@ -52,6 +63,8 @@ command, using any login account::
 
     $ mysql -u root -p
 
+.. highlight:: sql
+
 Here are some sample SQL statements for creating the user and database::
 
     CREATE USER 'zodbuser'@'localhost' IDENTIFIED BY 'mypassword';
@@ -66,11 +79,15 @@ performance.
 Oracle
 ======
 
+.. highlight:: shell
+
 Initial setup will require ``SYS`` privileges. Using Oracle 10g XE, you
 can start a ``SYS`` session with the following shell commands::
 
     $ su - oracle
     $ sqlplus / as sysdba
+
+.. highlight:: sql
 
 You need to create a database user and grant execute privileges on
 the DBMS_LOCK package to that user.

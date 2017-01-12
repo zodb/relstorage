@@ -5,6 +5,8 @@
 Once RelStorage is installed together with the appropriate database
 adapter, and you have created a user and database to use with
 RelStorage, it's time to configure the application to use RelStorage.
+This means telling RelStorage about the database to use, how to
+connect to it, and specifying any additional options.
 
 .. note:: This is just a quick-start guide. There is a :doc:`full list
           of supported options <relstorage-options>` in a separate
@@ -40,29 +42,34 @@ An example::
         user plone
         passwd PASSWORD
 
-Configuring Zope 2
-==================
+Configuring using ZConfig
+=========================
 
-To integrate RelStorage in Zope 2, specify a RelStorage backend in
-``etc/zope.conf``. Remove the main mount point and add one of the
-following blocks. For PostgreSQL::
+The most common way to configure RelStorage will involve writing a
+configuration file using the `ZConfig
+<https://github.com/zopefoundation/ZConfig/blob/master/doc/zconfig.pdf>`_
+syntax. You will write a ``<relstorage>`` element containing
+the general RelStorage options, and containing one database-specific
+element (``<postgresql>``, ``<mysql>`` or ``<oracle>``). (Where in the
+file the ``<relstorage>>`` element goes is specific to the framework
+or application you're using and will be covered next.)
 
-    %import relstorage
-    <zodb_db main>
-      mount-point /
+In all cases, you'll need to add ``%import relstorage`` to the
+top-level of the file to let ZConfig know about the RelStorage
+specific elements.
+
+
+Examples for PostgreSQL::
+
       <relstorage>
         <postgresql>
           # The dsn is optional, as are each of the parameters in the dsn.
           dsn dbname='zodb' user='username' host='localhost' password='pass'
         </postgresql>
       </relstorage>
-    </zodb_db>
 
-For MySQL::
+MySQL::
 
-    %import relstorage
-    <zodb_db main>
-      mount-point /
       <relstorage>
         <mysql>
           # Most of the options provided by MySQLdb are available.
@@ -70,13 +77,9 @@ For MySQL::
           db zodb
         </mysql>
       </relstorage>
-    </zodb_db>
 
-For Oracle (10g XE in this example)::
+And Oracle (10g XE in this example)::
 
-    %import relstorage
-    <zodb_db main>
-      mount-point /
       <relstorage>
         <oracle>
           user username
@@ -84,24 +87,38 @@ For Oracle (10g XE in this example)::
           dsn XE
         </oracle>
      </relstorage>
-    </zodb_db>
 
-To add ZODB blob support, provide a blob-dir option that specifies
+To add ZODB blob support, provide a ``blob-dir`` option that specifies
 where to store the blobs.  For example::
 
-    %import relstorage
-    <zodb_db main>
-      mount-point /
       <relstorage>
         blob-dir ./blobs
         <postgresql>
           dsn dbname='zodb' user='username' host='localhost' password='pass'
         </postgresql>
       </relstorage>
+
+
+Configuring Zope 2
+------------------
+
+To integrate RelStorage in Zope 2, specify a RelStorage backend in
+``etc/zope.conf``. Remove the main mount point replace it with the
+``<relstorage>`` element. For example (using PostgreSQL)::
+
+    %import relstorage
+    <zodb_db main>
+      mount-point /
+      <relstorage>
+        <postgresql>
+          dsn dbname='zodb' user='username' host='localhost' password='pass'
+        </postgresql>
+      </relstorage>
     </zodb_db>
 
+
 Configuring ``repoze.zodbconn``
-===============================
+-------------------------------
 
 To use RelStorage with ``repoze.zodbconn``, a package that makes ZODB
 available to WSGI applications, create a configuration file with
@@ -118,4 +135,19 @@ contents similar to the following::
     </zodb>
 
 ``repoze.zodbconn`` expects a ZODB URI.  Use a URI of the form
-``zconfig://path/to/configuration#main``.
+``zconfig://path/to/configuration#main`` where
+``path/to/configuration`` is the complete path to the configuration
+file, and ``main`` is the name given to the ``<zodb>`` element.
+
+Manually Opening a Database
+---------------------------
+
+You can also manually open a ZODB database in Python code. Once you
+have a configuration file as outlined above, you can use the
+``ZODB.config.databaseFromURL`` API to get a ZODB database::
+
+   path = "path/to/configuration"
+   import ZODB.config
+   db = ZODB.config.databaseFromURL(path)
+   conn = db.open()
+   ...
