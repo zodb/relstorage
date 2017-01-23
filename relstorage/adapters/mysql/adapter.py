@@ -119,16 +119,16 @@ class MySQLAdapter(object):
             Binary=driver.Binary,
         )
 
-        if self.keep_history:
-            poll_query = "SELECT MAX(tid) FROM transaction"
-        else:
-            poll_query = "SELECT MAX(tid) FROM object_state"
         self.poller = Poller(
-            poll_query=poll_query,
+            poll_query='EXECUTE get_latest_tid',
             keep_history=self.keep_history,
             runner=self.runner,
             revert_when_stale=options.revert_when_stale,
         )
+
+        self.connmanager.add_on_load_opened(self._prepare_get_latest_tid)
+        self.connmanager.add_on_store_opened(self._prepare_get_latest_tid)
+
         # pylint:disable=redefined-variable-type
         if self.keep_history:
             self.packundo = MySQLHistoryPreservingPackUndo(
@@ -158,6 +158,19 @@ class MySQLAdapter(object):
         self.stats = MySQLStats(
             connmanager=self.connmanager,
         )
+
+    def _prepare_get_latest_tid(self, cursor, restart=False):
+        if restart:
+            return
+
+        if self.keep_history:
+            stmt = 'SELECT MAX(tid) FROM transaction'
+        else:
+            stmt = 'SELECT MAX(tid) FROM object_state'
+
+        stmt = 'PREPARE get_latest_tid FROM "%s"' % (stmt,)
+
+        cursor.execute(stmt)
 
     def new_instance(self):
         return MySQLAdapter(options=self.options, **self._params)

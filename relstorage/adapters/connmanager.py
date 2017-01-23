@@ -191,7 +191,7 @@ class AbstractConnectionManager(object):
         conn.rollback()
         self._after_opened_for_store(conn, cursor)
         self._call_hooks(self._on_store_opened, conn, cursor,
-                         cursor, restart=False)
+                         cursor, restart=True)
 
 
     def open_for_pre_pack(self):
