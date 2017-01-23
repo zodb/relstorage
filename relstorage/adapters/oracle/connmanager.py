@@ -99,11 +99,7 @@ class CXOracleConnectionManager(AbstractConnectionManager):
                 log.warning("Unable to connect: %s", e)
                 raise
 
-    def open_for_load(self):
-        """Open and initialize a connection for loading objects.
-
-        Returns (conn, cursor).
-        """
+    def _do_open_for_load(self):
         return self.open(self.isolation_read_only,
                          replica_selector=self.ro_replica_selector)
 
@@ -136,30 +132,13 @@ class CXOracleConnectionManager(AbstractConnectionManager):
         xid = str(cursor.fetchone()[0])
         conn.begin(0, xid, '0')
 
-    def open_for_store(self):
-        """Open and initialize a connection for storing objects.
-
-        Returns (conn, cursor).
-        """
+    def _do_open_for_store(self):
         if self._twophase:
             conn, cursor = self.open(transaction_mode=None, twophase=True)
         else:
             conn, cursor = self.open()
-        try:
-            if self._twophase:
-                self._set_xid(conn, cursor)
-            if self.on_store_opened is not None:
-                self.on_store_opened(cursor, restart=False)
-            return conn, cursor
-        except:
-            self.close(conn, cursor)
-            raise
+        return conn, cursor
 
-    def restart_store(self, conn, cursor):
-        """Reuse a store connection."""
-        self.check_replica(conn, cursor)
-        conn.rollback()
+    def _after_opened_for_store(self, conn, cursor, restart=False):
         if self._twophase:
             self._set_xid(conn, cursor)
-        if self.on_store_opened is not None:
-            self.on_store_opened(cursor, restart=True)

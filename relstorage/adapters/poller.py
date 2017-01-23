@@ -19,8 +19,6 @@ from relstorage.adapters._util import formatted_query_property
 from zope.interface import implementer
 import logging
 
-from relstorage._compat import intern
-
 log = logging.getLogger(__name__)
 
 

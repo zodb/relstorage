@@ -112,7 +112,7 @@ class MySQLAdapter(object):
             options=options,
             Binary=driver.Binary,
         )
-        self.connmanager.set_on_store_opened(self.mover.on_store_opened)
+        self.connmanager.add_on_store_opened(self.mover.on_store_opened)
         self.oidallocator = MySQLOIDAllocator()
         self.txncontrol = MySQLTransactionControl(
             keep_history=self.keep_history,

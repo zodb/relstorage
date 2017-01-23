@@ -89,11 +89,7 @@ class MySQLdbConnectionManager(AbstractConnectionManager):
                 log.warning("Unable to connect: %s", e)
                 raise
 
-    def open_for_load(self):
-        """Open and initialize a connection for loading objects.
-
-        Returns (conn, cursor).
-        """
+    def _do_open_for_load(self):
         return self.open(self.isolation_repeatable_read,
                          replica_selector=self.ro_replica_selector)
 

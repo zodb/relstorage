@@ -84,7 +84,7 @@ class PostgreSQLAdapter(object):
             version_detector=self.version_detector,
             Binary=driver.Binary,
         )
-        self.connmanager.set_on_store_opened(self.mover.on_store_opened)
+        self.connmanager.add_on_store_opened(self.mover.on_store_opened)
         self.oidallocator = PostgreSQLOIDAllocator()
         self.txncontrol = PostgreSQLTransactionControl(
             keep_history=self.keep_history,
@@ -97,6 +97,8 @@ class PostgreSQLAdapter(object):
             runner=self.runner,
             revert_when_stale=options.revert_when_stale,
         )
+        self.connmanager.add_on_load_opened(self._prepare_get_latest_tid)
+        self.connmanager.add_on_store_opened(self._prepare_get_latest_tid)
         # pylint:disable=redefined-variable-type
         if self.keep_history:
             self.packundo = HistoryPreservingPackUndo(
@@ -126,6 +128,28 @@ class PostgreSQLAdapter(object):
         self.stats = PostgreSQLStats(
             connmanager=self.connmanager,
         )
+
+    def _prepare_get_latest_tid(self, cursor, **kwargs):
+        if kwargs.get('restart'):
+            return
+
+        if self.keep_history:
+            stmt = """
+            PREPARE get_latest_tid AS
+            SELECT tid
+            FROM transaction
+            ORDER BY tid DESC
+            LIMIT 1
+            """
+        else:
+            stmt = """
+            PREPARE get_latest_tid AS
+            SELECT tid
+            FROM object_state
+            ORDER BY tid DESC
+            LIMIT 1
+            """
+        cursor.execute(stmt)
 
     def new_instance(self):
         inst = type(self)(dsn=self._dsn, options=self.options)
