@@ -24,9 +24,19 @@ import functools
 from relstorage._compat import xrange
 
 from ..mover import metricmethod_sampled
+from .._util import query_property
 
 @implementer(IObjectMover)
 class PostgreSQLObjectMover(AbstractObjectMover):
+
+    _prepare_load_current_queries = [
+        'PREPARE load_current AS ' + x.replace('%s', '$1')
+        for x in AbstractObjectMover._load_current_queries
+    ]
+
+    _prepare_load_current_query = query_property('_prepare_load_current')
+
+    _load_current_query = 'EXECUTE load_current(%s)'
 
     @metricmethod_sampled
     def on_store_opened(self, cursor, restart=False):
@@ -67,6 +77,12 @@ class PostgreSQLObjectMover(AbstractObjectMover):
         ]
         for stmt in stmts:
             cursor.execute(stmt)
+
+        self.on_load_opened(cursor, restart)
+
+    def on_load_opened(self, cursor, restart=False):
+        if not restart:
+            cursor.execute(self._prepare_load_current_query)
 
     @metricmethod_sampled
     def store_temp(self, cursor, batcher, oid, prev_tid, data):

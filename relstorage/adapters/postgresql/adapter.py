@@ -85,6 +85,7 @@ class PostgreSQLAdapter(object):
             Binary=driver.Binary,
         )
         self.connmanager.add_on_store_opened(self.mover.on_store_opened)
+        self.connmanager.add_on_load_opened(self.mover.on_load_opened)
         self.oidallocator = PostgreSQLOIDAllocator()
         self.txncontrol = PostgreSQLTransactionControl(
             keep_history=self.keep_history,
