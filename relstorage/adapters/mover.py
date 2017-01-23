@@ -15,8 +15,9 @@
 """
 
 from perfmetrics import Metric
-from .batch import RowBatcher
+from relstorage.adapters.batch import RowBatcher
 from relstorage.adapters.interfaces import IObjectMover
+from relstorage.adapters._util import query_property as _query_property
 from relstorage.iter import fetchmany
 from zope.interface import implementer
 from hashlib import md5
@@ -32,27 +33,6 @@ def compute_md5sum(data):
 
 
 metricmethod_sampled = Metric(method=True, rate=0.1)
-
-class _Lazy(object):
-
-    def __init__(self, func, name=None):
-        self.func = func
-        self.name = name or func.__name__
-
-    def __get__(self, inst, klazz):
-        if inst is None:
-            return self
-
-        value = self.func(inst)
-        inst.__dict__[self.name] = value
-        return value
-
-def _query_property(base_name):
-    def prop(inst):
-        queries = getattr(inst, base_name + '_queries')
-        return queries[0] if inst.keep_history else queries[1]
-
-    return _Lazy(prop, base_name + '_query')
 
 @implementer(IObjectMover)
 class AbstractObjectMover(object):
