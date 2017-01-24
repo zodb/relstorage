@@ -122,7 +122,7 @@ class PostgreSQLObjectMover(AbstractObjectMover):
 
         AbstractObjectMover.on_store_opened(self, cursor, restart)
 
-    def _store_temp_95(self, cursor, batcher, oid, prev_tid, data):
+    def _store_temp_95(self, _cursor, batcher, oid, prev_tid, data):
 
         suffix = """
         ON CONFLICT (zoid) DO UPDATE SET state = excluded.state,
@@ -132,7 +132,7 @@ class PostgreSQLObjectMover(AbstractObjectMover):
         self._generic_store_temp(batcher, oid, prev_tid, data, suffix=suffix)
 
     @metricmethod_sampled
-    def store_temp(self, cursor, batcher, oid, prev_tid, data):
+    def store_temp(self, cursor, batcher, oid, prev_tid, data): # pylint:disable=method-hidden
         self._generic_store_temp(batcher, oid, prev_tid, data)
 
     @metricmethod_sampled
