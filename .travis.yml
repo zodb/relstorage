@@ -1,5 +1,6 @@
 language: python
 sudo: false
+dist: trusty # needed for postgres 9.5
 services:
   - mysql
   - postgresql
