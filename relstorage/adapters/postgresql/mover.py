@@ -26,22 +26,28 @@ from relstorage._compat import xrange
 from ..mover import metricmethod_sampled
 from .._util import query_property
 
+def _to_prepare(name, queries, datatypes=''):
+    # Only handles one param
+    return [
+        'PREPARE ' + name + ' ' + datatypes + ' AS ' + x.replace('%s', '$1')
+        for x in queries
+    ]
+
 @implementer(IObjectMover)
 class PostgreSQLObjectMover(AbstractObjectMover):
 
-    _prepare_load_current_queries = [
-        'PREPARE load_current (BIGINT) AS ' + x.replace('%s', '$1')
-        for x in AbstractObjectMover._load_current_queries
-    ]
+    __need_version_check = True
+
+    _prepare_load_current_queries = _to_prepare('load_current',
+                                                AbstractObjectMover._load_current_queries,
+                                                '(BIGINT)')
 
     _prepare_load_current_query = query_property('_prepare_load_current')
 
     _load_current_query = 'EXECUTE load_current(%s)'
 
-    _prepare_detect_conflict_queries = [
-        'PREPARE detect_conflicts AS ' + x
-        for x in AbstractObjectMover._detect_conflict_queries
-    ]
+    _prepare_detect_conflict_queries = _to_prepare('detect_conflicts',
+                                                   AbstractObjectMover._detect_conflict_queries)
 
     _prepare_detect_conflict_query = query_property('_prepare_detect_conflict')
 
@@ -49,6 +55,22 @@ class PostgreSQLObjectMover(AbstractObjectMover):
 
     on_load_opened_statement_names = ('_prepare_load_current_query',)
     on_store_opened_statement_names = on_load_opened_statement_names + ('_prepare_detect_conflict_query',)
+
+    # Sadly we can't PREPARE this statement; apparently it holds a
+    # lock on OBJECT_STATE that interferes with taking the commit lock.
+    _move_from_temp_object_state_95_query = """
+        INSERT INTO object_state (zoid, tid, state_size, state)
+        SELECT zoid, %s, COALESCE(LENGTH(state), 0), state
+        FROM temp_store
+        ON CONFLICT (zoid) DO UPDATE SET state_size = COALESCE(LENGTH(excluded.state), 0),
+                              tid = %s,
+                              STATE = excluded.state
+    """
+
+    def _move_from_temp_object_state_95(self, cursor, tid):
+        stmt = self._move_from_temp_object_state_95_query
+        cursor.execute(stmt, (tid, tid))
+
 
     @metricmethod_sampled
     def on_store_opened(self, cursor, restart=False):
@@ -89,6 +111,12 @@ class PostgreSQLObjectMover(AbstractObjectMover):
         ]
         for stmt in stmts:
             cursor.execute(stmt)
+
+        if self.__need_version_check:
+            self.__need_version_check = False
+            supports_conflict = self.version_detector.get_version(cursor) >= (9, 5)
+            if supports_conflict:
+                self._move_from_temp_object_state = self._move_from_temp_object_state_95
 
         AbstractObjectMover.on_store_opened(self, cursor, restart)
 

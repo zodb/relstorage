@@ -24,20 +24,28 @@ from ..mover import metricmethod_sampled
 from .._util import query_property
 
 
+def _to_prepare(name, queries, extension=''):
+
+    return [
+        'PREPARE ' + name + ' FROM "' + x.replace('%s', '?') + extension + '"'
+        for x in queries
+    ]
+
 @implementer(IObjectMover)
 class MySQLObjectMover(AbstractObjectMover):
 
-    _prepare_detect_conflict_queries = [
-        'PREPARE detect_conflicts FROM "' + x + ' LOCK IN SHARE MODE' + '"'
-        for x in AbstractObjectMover._detect_conflict_queries
-    ]
+    _prepare_detect_conflict_queries = _to_prepare('detect_conflicts',
+                                                   AbstractObjectMover._detect_conflict_queries,
+                                                   ' LOCK IN SHARE MODE')
 
     _prepare_detect_conflict_query = query_property('_prepare_detect_conflict')
 
     _detect_conflict_query = 'EXECUTE detect_conflicts'
 
-    on_load_opened_statement_names = ('_prepare_detect_conflict_query',)
+    on_load_opened_statement_names = ()
+
     on_store_opened_statement_names = on_load_opened_statement_names
+    on_store_opened_statement_names += ('_prepare_detect_conflict_query',)
 
     @metricmethod_sampled
     def on_store_opened(self, cursor, restart=False):

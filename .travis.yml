@@ -7,7 +7,8 @@ services:
 addons:
 # Use postgresql 9.3 to get commit-lock testing
 # Use postgresql 9.4 to get support for BLOB SQL functions for pg8000
-  postgresql: "9.4"
+# Use postgresql 9.5 to get support for INSERT ON CONFLICT UPDATE
+  postgresql: "9.5"
 python:
   - 3.6
   - pypy-5.4.1
