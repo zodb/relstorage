@@ -47,7 +47,7 @@ class OracleRowBatcher(RowBatcher):
             return ':%s' % new_name
 
         items = sorted(self.inserts.items())
-        for (_command, header, row_schema), rows in items:
+        for (_command, header, row_schema, _), rows in items:
             stmt_inputsizes = {}
 
             if len(rows) == 1:

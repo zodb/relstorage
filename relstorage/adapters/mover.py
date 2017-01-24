@@ -212,12 +212,13 @@ class AbstractObjectMover(object):
             for stmt_name in self.on_load_opened_statement_names:
                 cursor.execute(getattr(self, stmt_name))
 
-    def _generic_store_temp(self, batcher, oid, prev_tid, data, command='INSERT',):
+    def _generic_store_temp(self, batcher, oid, prev_tid, data,
+                            command='INSERT', suffix=''):
         md5sum = self._compute_md5sum(data)
 
-        if command == 'INSERT':
-            # XXX: As of PostgreSQL 9.5, it supports a native UPSERT
-            # (insert or replace), just like MySQL. Rework to use that.
+        if command == 'INSERT' and not suffix:
+            # MySQL uses command=REPLACE for an UPSERT
+            # PostgreSQL 9.5+ uses a suffix='ON CONFLICT UPDATE...' for an UPSERT
             batcher.delete_from('temp_store', zoid=oid)
         batcher.insert_into(
             "temp_store (zoid, prev_tid, md5, state)",
@@ -226,6 +227,7 @@ class AbstractObjectMover(object):
             rowkey=oid,
             size=len(data),
             command=command,
+            suffix=suffix
         )
 
     def store_temp(self, cursor, batcher, oid, prev_tid, data):

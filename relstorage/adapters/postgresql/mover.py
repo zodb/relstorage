@@ -71,7 +71,6 @@ class PostgreSQLObjectMover(AbstractObjectMover):
         stmt = self._move_from_temp_object_state_95_query
         cursor.execute(stmt, (tid, tid))
 
-
     @metricmethod_sampled
     def on_store_opened(self, cursor, restart=False):
         """Create the temporary tables for storing objects"""
@@ -117,8 +116,18 @@ class PostgreSQLObjectMover(AbstractObjectMover):
             supports_conflict = self.version_detector.get_version(cursor) >= (9, 5)
             if supports_conflict:
                 self._move_from_temp_object_state = self._move_from_temp_object_state_95
+                self.store_temp = self._store_temp_95
 
         AbstractObjectMover.on_store_opened(self, cursor, restart)
+
+    def _store_temp_95(self, cursor, batcher, oid, prev_tid, data):
+
+        suffix = """
+        ON CONFLICT (zoid) DO UPDATE SET state = excluded.state,
+                              prev_tid = excluded.prev_tid,
+                              md5 = excluded.md5
+        """
+        self._generic_store_temp(batcher, oid, prev_tid, data, suffix=suffix)
 
     @metricmethod_sampled
     def store_temp(self, cursor, batcher, oid, prev_tid, data):

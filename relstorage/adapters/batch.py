@@ -34,7 +34,7 @@ class RowBatcher(object):
         self.rows_added = 0
         self.size_added = 0
         self.deletes = defaultdict(set)   # {(table, columns_tuple): set([(column_value,)])}
-        self.inserts = defaultdict(dict)  # {(command, header, row_schema): {rowkey: [row]}}
+        self.inserts = defaultdict(dict)  # {(command, header, row_schema, suffix): {rowkey: [row]}}
 
     def delete_from(self, table, **kw):
         """
@@ -53,8 +53,8 @@ class RowBatcher(object):
             self.flush()
 
     def insert_into(self, header, row_schema, row, rowkey, size,
-                    command='INSERT'):
-        key = (command, header, row_schema)
+                    command='INSERT', suffix=''):
+        key = (command, header, row_schema, suffix)
         rows = self.inserts[key]
         rows[rowkey] = row  # note that this may replace a row
         self.rows_added += 1
@@ -96,7 +96,7 @@ class RowBatcher(object):
 
     def _do_inserts(self):
         items = sorted(iteritems(self.inserts))
-        for (command, header, row_schema), rows in items:
+        for (command, header, row_schema, suffix), rows in items:
             # Batched inserts
             parts = []
             params = []
@@ -105,7 +105,10 @@ class RowBatcher(object):
                 parts.append(s)
                 params.extend(row)
 
-            stmt = "%s INTO %s VALUES\n%s" % (command, header, ',\n'.join(parts))
+            stmt = "%s INTO %s VALUES\n%s\n%s" % (
+                command, header, ',\n'.join(parts), suffix)
             # e.g.,
-            # INSERT INTO table(c1, c2) VALUES (%s, %s), (%s, %s), (%s, %s)
+            # INSERT INTO table(c1, c2)
+            # VALUES (%s, %s), (%s, %s), (%s, %s)
+            # <suffix>
             self.cursor.execute(stmt, tuple(params))

@@ -68,13 +68,13 @@ class RowBatcherTests(unittest.TestCase):
             (1, 'a'),
             rowkey=1,
             size=3,
-            )
+        )
         self.assertEqual(cursor.executed, [])
         self.assertEqual(batcher.rows_added, 1)
         self.assertEqual(batcher.size_added, 3)
         self.assertEqual(batcher.inserts, {
-            ('INSERT', 'mytable (id, name)', '%s, id || %s'): {1: (1, 'a')}
-            })
+            ('INSERT', 'mytable (id, name)', '%s, id || %s', ''): {1: (1, 'a')}
+        })
 
     def test_insert_replace(self):
         cursor = MockCursor()
@@ -86,13 +86,13 @@ class RowBatcherTests(unittest.TestCase):
             rowkey=1,
             size=3,
             command='REPLACE',
-            )
+        )
         self.assertEqual(cursor.executed, [])
         self.assertEqual(batcher.rows_added, 1)
         self.assertEqual(batcher.size_added, 3)
         self.assertEqual(batcher.inserts, {
-            ('REPLACE', 'mytable (id, name)', '%s, id || %s'): {1: (1, 'a')}
-            })
+            ('REPLACE', 'mytable (id, name)', '%s, id || %s', ''): {1: (1, 'a')}
+        })
 
     def test_insert_duplicate(self):
         # A second insert on the same rowkey replaces the first insert.
@@ -116,8 +116,8 @@ class RowBatcherTests(unittest.TestCase):
         self.assertEqual(batcher.rows_added, 2)
         self.assertEqual(batcher.size_added, 6)
         self.assertEqual(batcher.inserts, {
-            ('INSERT', 'mytable (id, name)', '%s, id || %s'): {1: (1, 'b')}
-            })
+            ('INSERT', 'mytable (id, name)', '%s, id || %s', ''): {1: (1, 'b')}
+        })
 
     def test_insert_auto_flush(self):
         cursor = MockCursor()
@@ -142,7 +142,7 @@ class RowBatcherTests(unittest.TestCase):
             [(
                 'INSERT INTO mytable (id, name) VALUES\n'
                 '(%s, id || %s),\n'
-                '(%s, id || %s)',
+                '(%s, id || %s)\n',
                 (1, 'a', 2, 'B'))
             ])
         self.assertEqual(batcher.rows_added, 0)
@@ -163,9 +163,9 @@ class RowBatcherTests(unittest.TestCase):
         batcher.flush()
         self.assertEqual(cursor.executed, [
             ('DELETE FROM mytable WHERE id IN (1)', None),
-            ('INSERT INTO mytable (id, name) VALUES\n(%s, id || %s)',
+            ('INSERT INTO mytable (id, name) VALUES\n(%s, id || %s)\n',
              (1, 'a')),
-            ])
+        ])
 
 
 class OracleRowBatcherTests(unittest.TestCase):
