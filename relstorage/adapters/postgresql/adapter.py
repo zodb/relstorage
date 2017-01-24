@@ -26,7 +26,7 @@ from ..scriptrunner import ScriptRunner
 from . import drivers
 from .connmanager import Psycopg2ConnectionManager
 from .locker import PostgreSQLLocker
-from .mover import PostgreSQLObjectMover
+from .mover import PostgreSQLObjectMover, PG8000ObjectMover
 from .oidallocator import PostgreSQLOIDAllocator
 from .schema import PostgreSQLSchemaInstaller
 from .stats import PostgreSQLStats
@@ -77,7 +77,12 @@ class PostgreSQLAdapter(object):
             locker=self.locker,
             keep_history=self.keep_history,
         )
-        self.mover = PostgreSQLObjectMover(
+
+        mover_type = PostgreSQLObjectMover
+        if driver.__name__ == 'pg8000':
+            mover_type = PG8000ObjectMover
+
+        self.mover = mover_type(
             database_type='postgresql',
             options=options,
             runner=self.runner,

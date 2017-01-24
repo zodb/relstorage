@@ -36,6 +36,9 @@ class MySQLObjectMover(AbstractObjectMover):
 
     _detect_conflict_query = 'EXECUTE detect_conflicts'
 
+    on_load_opened_statement_names = ('_prepare_detect_conflict_query',)
+    on_store_opened_statement_names = on_load_opened_statement_names
+
     @metricmethod_sampled
     def on_store_opened(self, cursor, restart=False):
         """Create the temporary table for storing objects"""
@@ -66,11 +69,7 @@ class MySQLObjectMover(AbstractObjectMover):
         """
         cursor.execute(stmt)
 
-        self.on_load_opened(cursor)
-
-    def on_load_opened(self, cursor, restart=False):
-        if not restart:
-            cursor.execute(self._prepare_detect_conflict_query)
+        AbstractObjectMover.on_store_opened(self, cursor, restart=restart)
 
     @metricmethod_sampled
     def store_temp(self, cursor, batcher, oid, prev_tid, data):

@@ -30,7 +30,7 @@ from .._util import query_property
 class PostgreSQLObjectMover(AbstractObjectMover):
 
     _prepare_load_current_queries = [
-        'PREPARE load_current AS ' + x.replace('%s', '$1')
+        'PREPARE load_current (BIGINT) AS ' + x.replace('%s', '$1')
         for x in AbstractObjectMover._load_current_queries
     ]
 
@@ -47,6 +47,8 @@ class PostgreSQLObjectMover(AbstractObjectMover):
 
     _detect_conflict_query = 'EXECUTE detect_conflicts'
 
+    on_load_opened_statement_names = ('_prepare_load_current_query',)
+    on_store_opened_statement_names = on_load_opened_statement_names + ('_prepare_detect_conflict_query',)
 
     @metricmethod_sampled
     def on_store_opened(self, cursor, restart=False):
@@ -88,14 +90,7 @@ class PostgreSQLObjectMover(AbstractObjectMover):
         for stmt in stmts:
             cursor.execute(stmt)
 
-        if not restart:
-            cursor.execute(self._prepare_detect_conflict_query)
-        self.on_load_opened(cursor, restart)
-
-    def on_load_opened(self, cursor, restart=False):
-        if not restart:
-            cursor.execute(self._prepare_load_current_query)
-
+        AbstractObjectMover.on_store_opened(self, cursor, restart)
 
     @metricmethod_sampled
     def store_temp(self, cursor, batcher, oid, prev_tid, data):
@@ -233,3 +228,14 @@ class PostgreSQLObjectMover(AbstractObjectMover):
             f.close()
             if blob is not None and not blob.closed:
                 blob.close()
+
+
+class PG8000ObjectMover(PostgreSQLObjectMover):
+    # pg8000 1.10 can't handle prepared statements that take parameters
+    # but it doesn't need to because it prepares every statement
+    # anyway. https://github.com/mfenniak/pg8000/issues/132
+
+    on_load_opened_statement_names = ()
+    on_store_opened_statement_names = ('_prepare_detect_conflict_query',)
+
+    _load_current_query = AbstractObjectMover._load_current_query

@@ -193,8 +193,24 @@ class AbstractObjectMover(object):
                 res[oid] = tid
         return res
 
+    #: A sequence of *names* of attributes on this object that are statements to be
+    #: executed by ``on_store_opened`` when ``restart`` is False.
+    on_store_opened_statement_names = ()
+
     def on_store_opened(self, cursor, restart=False):
-        raise NotImplementedError()
+        if not restart:
+            for stmt_name in self.on_store_opened_statement_names:
+                cursor.execute(getattr(self, stmt_name))
+
+
+    #: A sequence of *names* of attributes on this object that are statements to be
+    #: executed by ``on_store_opened`` when ``restart`` is False.
+    on_load_opened_statement_names = ()
+
+    def on_load_opened(self, cursor, restart=False):
+        if not restart:
+            for stmt_name in self.on_load_opened_statement_names:
+                cursor.execute(getattr(self, stmt_name))
 
     def _generic_store_temp(self, batcher, oid, prev_tid, data, command='INSERT',):
         md5sum = self._compute_md5sum(data)
