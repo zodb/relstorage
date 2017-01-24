@@ -13,36 +13,46 @@ addons:
 # install it manually, but then you have to use 'sudo: required' which
 # slows everything down. So we resort to shenanigans with the matrix.
   postgresql: "9.5"
-python:
-  - 3.6
-  - pypy-5.4.1
-  - 2.7
-  - 3.5
-env:
-  matrix:
+
 matrix:
   include:
-    - env: ENV=mysql
+    - python: 3.6
+      env: ENV=mysql
+    - python: 3.5
+      env: ENV=mysql
+    - python: 2.7
+      env: ENV=mysql
+    - python: pypy-5.4.1
+      env: ENV=mysql
+
+    - python: 3.6
+      env: ENV=pymysql
+    - python: 3.5
+      env: ENV=pymysql
+    - python: 2.7
+      env: ENV=pymysql
+
+    - python: 2.7
+      env: ENV=umysqldb
+
     - dist: trusty
       env: ENV=postgres
+      python: 2.7
+    - dist: trusty
+      env: ENV=postgres
+      python: pypy-5.4.1
+    - dist: trusty
+      env: ENV=postgres
+      python: 3.6
+
+
     - dist: trusty
       env: ENV=pypostgres
-    - env: ENV=pymysql
-    - env: ENV=umysqldb
-
-  exclude:
-    - python: 3.5
-      env: ENV=umysqldb
-    - python: 3.6
-      env: ENV=umysqldb
-    - python: 3.6
+      python: 2.7
+    - dist: trusty
       env: ENV=pypostgres
-    - python: 3.6
-      env: ENV=pymysql
-    - python: pypy-5.4.1
-      env: ENV=pymysql
-    - python: pypy-5.4.1
-      env: ENV=umysqldb
+      python: 3.5
+
   fast_finish: true
 script:
 # coverage slows PyPy down from 2minutes to 12+.
