@@ -24,7 +24,7 @@ from ..mover import metricmethod_sampled
 from .._util import query_property
 
 
-def _to_prepare(name, queries, extension=''):
+def to_prepared_queries(name, queries, extension=''):
 
     return [
         'PREPARE ' + name + ' FROM "' + x.replace('%s', '?') + extension + '"'
@@ -34,9 +34,10 @@ def _to_prepare(name, queries, extension=''):
 @implementer(IObjectMover)
 class MySQLObjectMover(AbstractObjectMover):
 
-    _prepare_detect_conflict_queries = _to_prepare('detect_conflicts',
-                                                   AbstractObjectMover._detect_conflict_queries,
-                                                   ' LOCK IN SHARE MODE')
+    _prepare_detect_conflict_queries = to_prepared_queries(
+        'detect_conflicts',
+        AbstractObjectMover._detect_conflict_queries,
+        ' LOCK IN SHARE MODE')
 
     _prepare_detect_conflict_query = query_property('_prepare_detect_conflict')
 

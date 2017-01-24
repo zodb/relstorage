@@ -50,6 +50,7 @@ load_infile
 from __future__ import print_function, absolute_import
 
 from .._abstract_drivers import _select_driver
+from .._util import query_property
 from ..dbiter import HistoryFreeDatabaseIterator
 from ..dbiter import HistoryPreservingDatabaseIterator
 from ..interfaces import IRelStorageAdapter
@@ -60,6 +61,7 @@ from . import drivers
 from .connmanager import MySQLdbConnectionManager
 from .locker import MySQLLocker
 from .mover import MySQLObjectMover
+from .mover import to_prepared_queries
 from .oidallocator import MySQLOIDAllocator
 from .packundo import MySQLHistoryFreePackUndo
 from .packundo import MySQLHistoryPreservingPackUndo
@@ -160,17 +162,21 @@ class MySQLAdapter(object):
             connmanager=self.connmanager,
         )
 
+    _get_latest_tid_queries = (
+        "SELECT MAX(tid) FROM transaction",
+        "SELECT MAX(tid) FROM object_state",
+    )
+
+    _prepare_get_latest_tid_queries = to_prepared_queries(
+        'get_latest_tid',
+        _get_latest_tid_queries)
+
+    _prepare_get_latest_tid_query = query_property('_prepare_get_latest_tid')
+
     def _prepare_get_latest_tid(self, cursor, restart=False):
         if restart:
             return
-
-        if self.keep_history:
-            stmt = 'SELECT MAX(tid) FROM transaction'
-        else:
-            stmt = 'SELECT MAX(tid) FROM object_state'
-
-        stmt = 'PREPARE get_latest_tid FROM "%s"' % (stmt,)
-
+        stmt = self._prepare_get_latest_tid_query
         cursor.execute(stmt)
 
     def new_instance(self):

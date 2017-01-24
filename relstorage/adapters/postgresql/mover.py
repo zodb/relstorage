@@ -26,7 +26,7 @@ from relstorage._compat import xrange
 from ..mover import metricmethod_sampled
 from .._util import query_property
 
-def _to_prepare(name, queries, datatypes=''):
+def to_prepared_queries(name, queries, datatypes=''):
     # Only handles one param
     return [
         'PREPARE ' + name + ' ' + datatypes + ' AS ' + x.replace('%s', '$1')
@@ -38,16 +38,18 @@ class PostgreSQLObjectMover(AbstractObjectMover):
 
     __need_version_check = True
 
-    _prepare_load_current_queries = _to_prepare('load_current',
-                                                AbstractObjectMover._load_current_queries,
-                                                '(BIGINT)')
+    _prepare_load_current_queries = to_prepared_queries(
+        'load_current',
+        AbstractObjectMover._load_current_queries,
+        '(BIGINT)')
 
     _prepare_load_current_query = query_property('_prepare_load_current')
 
     _load_current_query = 'EXECUTE load_current(%s)'
 
-    _prepare_detect_conflict_queries = _to_prepare('detect_conflicts',
-                                                   AbstractObjectMover._detect_conflict_queries)
+    _prepare_detect_conflict_queries = to_prepared_queries(
+        'detect_conflicts',
+        AbstractObjectMover._detect_conflict_queries)
 
     _prepare_detect_conflict_query = query_property('_prepare_detect_conflict')
 

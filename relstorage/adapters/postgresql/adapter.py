@@ -15,6 +15,7 @@
 from __future__ import absolute_import
 
 from .._abstract_drivers import _select_driver
+from .._util import query_property
 from ..dbiter import HistoryFreeDatabaseIterator
 from ..dbiter import HistoryPreservingDatabaseIterator
 from ..interfaces import IRelStorageAdapter
@@ -27,6 +28,7 @@ from . import drivers
 from .connmanager import Psycopg2ConnectionManager
 from .locker import PostgreSQLLocker
 from .mover import PostgreSQLObjectMover, PG8000ObjectMover
+from .mover import to_prepared_queries
 from .oidallocator import PostgreSQLOIDAllocator
 from .schema import PostgreSQLSchemaInstaller
 from .stats import PostgreSQLStats
@@ -135,26 +137,31 @@ class PostgreSQLAdapter(object):
             connmanager=self.connmanager,
         )
 
-    def _prepare_get_latest_tid(self, cursor, **kwargs):
-        if kwargs.get('restart'):
-            return
+    _get_latest_tid_queries = (
+        """
+        SELECT tid
+        FROM transaction
+        ORDER BY tid DESC
+        LIMIT 1
+        """,
+        """
+        SELECT tid
+        FROM object_state
+        ORDER BY tid DESC
+        LIMIT 1
+        """
+    )
 
-        if self.keep_history:
-            stmt = """
-            PREPARE get_latest_tid AS
-            SELECT tid
-            FROM transaction
-            ORDER BY tid DESC
-            LIMIT 1
-            """
-        else:
-            stmt = """
-            PREPARE get_latest_tid AS
-            SELECT tid
-            FROM object_state
-            ORDER BY tid DESC
-            LIMIT 1
-            """
+    _prepare_get_latest_tid_queries = to_prepared_queries(
+        'get_latest_tid',
+        _get_latest_tid_queries)
+
+    _prepare_get_latest_tid_query = query_property('_prepare_get_latest_tid')
+
+    def _prepare_get_latest_tid(self, cursor, restart=False):
+        if restart:
+            return
+        stmt = self._prepare_get_latest_tid_query
         cursor.execute(stmt)
 
     def new_instance(self):
