@@ -1,6 +1,5 @@
 language: python
 sudo: false
-dist: trusty # needed for postgres 9.5
 services:
   - mysql
   - postgresql
@@ -9,6 +8,10 @@ addons:
 # Use postgresql 9.3 to get commit-lock testing
 # Use postgresql 9.4 to get support for BLOB SQL functions for pg8000
 # Use postgresql 9.5 to get support for INSERT ON CONFLICT UPDATE
+# Sadly, as of Jan 2017, 9.5 is only available with 'dist: trusty'
+# (beta) which *doesn't* include mysql for some reason. You can
+# install it manually, but then you have to use 'sudo: required' which
+# slows everything down. So we resort to shenanigans with the matrix.
   postgresql: "9.5"
 python:
   - 3.6
@@ -17,20 +20,24 @@ python:
   - 3.5
 env:
   matrix:
-    - ENV=mysql
-    - ENV=postgres
-    - ENV=pypostgres
-    - ENV=pymysql
-    - ENV=umysqldb
 matrix:
+  include:
+    - env: ENV=mysql
+    - dist: trusty
+      env: ENV=postgres
+    - dist: trusty
+      env: ENV=pypostgres
+    - env: ENV=pymysql
+    - env: ENV=umysqldb
+
   exclude:
     - python: 3.5
       env: ENV=umysqldb
-    - python: 3.6.0rc1
+    - python: 3.6
       env: ENV=umysqldb
-    - python: 3.6.0rc1
+    - python: 3.6
       env: ENV=pypostgres
-    - python: 3.6.0rc1
+    - python: 3.6
       env: ENV=pymysql
     - python: pypy-5.4.1
       env: ENV=pymysql
