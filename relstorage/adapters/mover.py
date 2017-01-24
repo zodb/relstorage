@@ -200,6 +200,8 @@ class AbstractObjectMover(object):
         md5sum = self._compute_md5sum(data)
 
         if command == 'INSERT':
+            # XXX: As of PostgreSQL 9.5, it supports a native UPSERT
+            # (insert or replace), just like MySQL. Rework to use that.
             batcher.delete_from('temp_store', zoid=oid)
         batcher.insert_into(
             "temp_store (zoid, prev_tid, md5, state)",
@@ -266,13 +268,13 @@ class AbstractObjectMover(object):
         """
         SELECT temp_store.zoid, current_object.tid, temp_store.prev_tid
         FROM temp_store
-                JOIN current_object ON (temp_store.zoid = current_object.zoid)
+                JOIN current_object USING (zoid)
         WHERE temp_store.prev_tid != current_object.tid
         """,
         """
         SELECT temp_store.zoid, object_state.tid, temp_store.prev_tid
         FROM temp_store
-                JOIN object_state ON (temp_store.zoid = object_state.zoid)
+                JOIN object_state USING (zoid)
         WHERE temp_store.prev_tid != object_state.tid
         """
     )

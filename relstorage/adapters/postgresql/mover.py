@@ -38,6 +38,16 @@ class PostgreSQLObjectMover(AbstractObjectMover):
 
     _load_current_query = 'EXECUTE load_current(%s)'
 
+    _prepare_detect_conflict_queries = [
+        'PREPARE detect_conflicts AS ' + x
+        for x in AbstractObjectMover._detect_conflict_queries
+    ]
+
+    _prepare_detect_conflict_query = query_property('_prepare_detect_conflict')
+
+    _detect_conflict_query = 'EXECUTE detect_conflicts'
+
+
     @metricmethod_sampled
     def on_store_opened(self, cursor, restart=False):
         """Create the temporary tables for storing objects"""
@@ -78,11 +88,14 @@ class PostgreSQLObjectMover(AbstractObjectMover):
         for stmt in stmts:
             cursor.execute(stmt)
 
+        if not restart:
+            cursor.execute(self._prepare_detect_conflict_query)
         self.on_load_opened(cursor, restart)
 
     def on_load_opened(self, cursor, restart=False):
         if not restart:
             cursor.execute(self._prepare_load_current_query)
+
 
     @metricmethod_sampled
     def store_temp(self, cursor, batcher, oid, prev_tid, data):

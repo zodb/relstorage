@@ -27,8 +27,8 @@ class RowBatcherTests(unittest.TestCase):
         self.assertEqual(cursor.executed, [])
         self.assertEqual(batcher.rows_added, 1)
         self.assertEqual(batcher.size_added, 0)
-        self.assertEqual(batcher.deletes,
-                         {('mytable', ('id',)): set([("2",)])})
+        self.assertEqual(dict(batcher.deletes),
+                         {('mytable', ('id',)): set([(2,)])})
 
     def test_delete_multiple_column(self):
         cursor = MockCursor()
@@ -37,17 +37,24 @@ class RowBatcherTests(unittest.TestCase):
         self.assertEqual(cursor.executed, [])
         self.assertEqual(batcher.rows_added, 1)
         self.assertEqual(batcher.size_added, 0)
-        self.assertEqual(batcher.deletes,
-                         {('mytable', ('id', 'tid')): set([("2", "10")])})
+        self.assertEqual(dict(batcher.deletes),
+                         {('mytable', ('id', 'tid')): set([(2, 10)])})
 
     def test_delete_auto_flush(self):
         cursor = MockCursor()
-        batcher = self.getClass()(cursor)
-        batcher.row_limit = 2
+        batcher = self.getClass()(cursor, 2)
+
+        key = ('mytable', ('id',))
+
+        class SetList(list):
+            def add(self, k):
+                self.append(k)
+
+        batcher.deletes[key] = SetList() # preserve order
         batcher.delete_from("mytable", id=2)
         batcher.delete_from("mytable", id=1)
         self.assertEqual(cursor.executed,
-                         [('DELETE FROM mytable WHERE id IN (1,2)', None)])
+                         [('DELETE FROM mytable WHERE id IN (2,1)', None)])
         self.assertEqual(batcher.rows_added, 0)
         self.assertEqual(batcher.size_added, 0)
         self.assertEqual(batcher.deletes, {})
