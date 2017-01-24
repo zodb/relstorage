@@ -32,6 +32,7 @@ class MySQLdbConnectionManager(AbstractConnectionManager):
         self.close_exceptions = driver.close_exceptions
         self.use_replica_exceptions = driver.use_replica_exceptions
         self._db_connect = driver.connect
+        self._db_driver = driver
         super(MySQLdbConnectionManager, self).__init__(options)
 
     def _alter_params(self, replica):
@@ -64,13 +65,13 @@ class MySQLdbConnectionManager(AbstractConnectionManager):
         while True:
             try:
                 conn = self._db_connect(**params)
-                cursor = conn.cursor()
+                cursor = self._db_driver.cursor(conn)
                 cursor.arraysize = 64
                 if transaction_mode:
-                    conn.autocommit(True)
+                    self._db_driver.set_autocommit(conn, True)
                     cursor.execute(
                         "SET SESSION TRANSACTION %s" % transaction_mode)
-                    conn.autocommit(False)
+                    self._db_driver.set_autocommit(conn, False)
                 # Don't try to decode pickle states as UTF-8 (or
                 # whatever the environment is configured as); See
                 # https://github.com/zodb/relstorage/issues/57
@@ -103,7 +104,7 @@ class MySQLdbConnectionManager(AbstractConnectionManager):
         try:
             # This phase of packing works best with transactions
             # disabled.  It changes no user-facing data.
-            conn.autocommit(True)
+            self._db_driver.set_autocommit(conn, True)
             return conn, cursor
         except:
             self.close(conn, cursor)

@@ -21,6 +21,8 @@
   are in use. Instead, it translates the internal exception to one
   that the higher layers of RelStorage recognize as requiring
   reconnection at consistent times (transaction boundaries).
+- Add initial support for the `MySQL Connector/Python
+  <https://dev.mysql.com/doc/connector-python/en/>`_ driver.
 
 2.0.0 (2016-12-23)
 ==================

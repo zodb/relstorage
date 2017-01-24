@@ -58,7 +58,7 @@ driver
     PyPI distributions `mysqlclient
     <https://pypi.python.org/pypi/mysqlclient>`_ or `MySQL-python
     <https://pypi.python.org/pypi/MySQL-python/>`_), or "PyMySQL", or
-    "umysqldb".
+    "umysqldb" or "mysqlconnector" for the `official client <https://dev.mysql.com/doc/connector-python/en/>`_.
 
 host
     string, host to connect

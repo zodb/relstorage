@@ -31,6 +31,10 @@ class MySQLStats(AbstractStats):
         try:
             cursor.execute("SHOW TABLE STATUS")
             description = [i[0] for i in cursor.description]
+            # The MySQL connector C extension returns these as bytes
+            # on python 3
+            description = [x.decode('ascii') if not isinstance(x, str) else x
+                           for x in description]
             rows = cursor.fetchall()
         finally:
             self.connmanager.close(conn, cursor)

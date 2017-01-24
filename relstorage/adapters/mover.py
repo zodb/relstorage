@@ -78,7 +78,7 @@ class AbstractObjectMover(object):
 
         cursor.execute(stmt, (oid,))
         if cursor.rowcount:
-            assert cursor.rowcount == 1
+            #assert cursor.rowcount == 1, cursor.rowcount
             state, tid = cursor.fetchone()
             state = db_binary_to_bytes(state)
             # If it's None, the object's creation has been

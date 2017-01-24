@@ -48,18 +48,21 @@ performs nearly as well. cx_Oracle is untested on PyPy).
 Here's a table of known working adapters; adapters **in bold** are the recommended
 adapter; adapters in *italic* are also tested:
 
-========   ================      =================     ======
+========   =================     =================     ======
 Platform   MySQL                 PostgreSQL            Oracle
-========   ================      =================     ======
+========   =================     =================     ======
 CPython2   MySQL-python;         **psycopg2**;         **cx_Oracle**
            **mysqlclient**;      psycopg2cffi;
            *PyMySQL*;            *pg8000*
-           umysqldb
+           *umysqldb*;
+           *MySQL Connector*
 CPython3   **mysqlclient**;      **psycopg2**;         **cx_Oracle**
            *PyMySQL*             *pg8000*
-PyPy       **PyMySQL**           **psycopg2cffi**;
+           *MySQL Connector*
+PyPy       **PyMySQL**;          **psycopg2cffi**;
                                  *pg8000*
-========   ================      =================     ======
+           *MySQL Connector*
+========   =================     =================     ======
 
 .. note:: If you use umysql, make sure the server has a
           ``max_allowed_packet`` setting no larger than 16MB. Also
