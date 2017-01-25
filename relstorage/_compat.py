@@ -13,6 +13,7 @@ import sys
 import platform
 
 PY3 = sys.version_info[0] == 3
+PY2 = not PY3
 PYPY = platform.python_implementation() == 'PyPy'
 
 # Dict support
@@ -66,7 +67,10 @@ if PY3:
     # buffer on Py3/Py2, respectively, for bytea columns
     _db_binary_types = (memoryview,)
 else:
-    _db_binary_types = (memoryview, buffer)
+    # MySQL Connector/Python returns bytearray, but only from
+    # the Python implementation; the C implementation returns
+    # bytes.
+    _db_binary_types = (memoryview, buffer, bytearray)
 
 def db_binary_to_bytes(data):
     if isinstance(data, _db_binary_types):

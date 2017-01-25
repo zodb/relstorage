@@ -17,7 +17,9 @@ addons:
 matrix:
   include:
     - python: 2.7
-      env: ENV=mysqlconnector
+      env: ENV=pymysqlconnector
+    - python: 2.7
+      env: ENV=cmysqlconnector
     - python: 3.6
       env: ENV=mysqlconnector
     - python: pypy-5.4.1

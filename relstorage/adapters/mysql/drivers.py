@@ -32,6 +32,7 @@ from ..interfaces import IDBDriver, IDBDriverOptions
 from .._abstract_drivers import _standard_exceptions
 
 from relstorage._compat import intern
+from relstorage._compat import PY2
 
 logger = __import__('logging').getLogger(__name__)
 
@@ -154,9 +155,24 @@ else:
             # It defaults to the (slow) pure-python version
             # NOTE: The C implementation doesn't support the prepared
             # operations.
+            # NOTE: The C implementation returns bytes when the py implementation
+            # returns bytearray under Py2
+            # NOTE: The py implementation can return unicode strings (on OS X only?)
+            # where everything else returns native strings
             if self._have_cext and 'gevent' not in sys.modules:
                 kwargs['use_pure'] = False
-            return self._connect(*args, **kwargs)
+            if PY2:
+                # The docs say that strings are returned as unicode, but this
+                # only seems to happen on OS X (the travis CI runs don't have this;
+                # maybe it got the C extension by default?)
+                # It also seems that only the C connector pays attention to this
+                # argument (despite the documentation); the python version
+                # requires the set_unicode(False) call
+                kwargs['use_unicode'] = False
+            con = self._connect(*args, **kwargs)
+            if PY2:
+                con.set_unicode(False)
+            return con
 
         def set_autocommit(self, conn, value):
             # We use a property instead of a method
@@ -186,6 +202,19 @@ else:
 
     if not preferred_driver_name:
         preferred_driver_name = driver.__name__
+
+    if driver._have_cext:
+        driver_map['c' + driver.__name__] = driver
+
+        class PyMySQLConnectorDriver(MySQLConnectorDriver):
+            __name__ = 'py' + driver.__name__
+            _have_cext = False
+
+        driver = PyMySQLConnectorDriver()
+        driver_map[driver.__name__] = driver
+
+    else:
+        driver_map['py' + driver.__name__] = driver
 
     del driver
 
