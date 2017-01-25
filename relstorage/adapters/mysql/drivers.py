@@ -43,7 +43,8 @@ preferred_driver_name = None
 
 moduleProvides(IDBDriverOptions)
 
-class _AbstractDriver(object):
+class AbstractDriver(object):
+    # Common compatibility shims, overriden as needed.
 
     def set_autocommit(self, conn, value):
         conn.autocommit(value)
@@ -58,7 +59,7 @@ except ImportError:
 else:
 
     @implementer(IDBDriver)
-    class MySQLdbDriver(_AbstractDriver):
+    class MySQLdbDriver(AbstractDriver):
         __name__ = 'MySQLdb'
         disconnected_exceptions, close_exceptions, lock_exceptions = _standard_exceptions(MySQLdb)
         use_replica_exceptions = (MySQLdb.OperationalError,)
@@ -80,7 +81,7 @@ else:  # pragma: no cover
     import pymysql.err
 
     @implementer(IDBDriver)
-    class PyMySQLDriver(_AbstractDriver):
+    class PyMySQLDriver(AbstractDriver):
         __name__ = 'PyMySQL'
 
         disconnected_exceptions, close_exceptions, lock_exceptions = _standard_exceptions(pymysql)
@@ -143,7 +144,7 @@ except ImportError:
 else:
 
     @implementer(IDBDriver)
-    class MySQLConnectorDriver(_AbstractDriver):
+    class MySQLConnectorDriver(AbstractDriver):
         __name__ = "mysqlconnector"
 
         disconnected_exceptions, close_exceptions, lock_exceptions = _standard_exceptions(mysql.connector)
@@ -153,7 +154,7 @@ else:
         _connect = staticmethod(mysql.connector.connect)
 
         def connect(self, *args, **kwargs):
-            # It defaults to the (slow) pure-python version
+            # It defaults to the (slower) pure-python version
             # NOTE: The C implementation doesn't support the prepared
             # operations.
             # NOTE: The C implementation returns bytes when the py implementation
@@ -175,7 +176,7 @@ else:
                 con.set_unicode(False)
 
             return con
-            #return _ConnWrapper(con)
+
 
         def set_autocommit(self, conn, value):
             # We use a property instead of a method
@@ -183,11 +184,11 @@ else:
 
         def cursor(self, conn):
             # By default, the cursor won't buffer, so we don't know
-            # how many rows there are. There are asserts about that
-            # in several places.
-            # The C connection doesn't accept the 'prepared' keyword,
-            # and if you try to use a prepared cursor with it, it doesn't
-            # work correctly.
+            # how many rows there are. That's fine and within the DB-API spec.
+            # The Python implementation is much faster if we don't ask it to.
+            # The C connection doesn't accept the 'prepared' keyword.
+            # You can't have both a buffered and prepared cursor.
+
             cursor = conn.cursor()
             if not hasattr(cursor, 'connection'):
                 # We depend on the reverse mapping in some places.
@@ -195,6 +196,7 @@ else:
                 # _connection, but if we try to access that on the C extension,
                 # we get a AttributeError, so if we then try to access 'connection',
                 # it aborts the process. So we go ahead and make a hard ref.
+                # See mysql_connection().
                 cursor.connection = conn
             return cursor
 

@@ -18,10 +18,6 @@ matrix:
   include:
     - python: 2.7
       env:
-        - ENV=pymysqlconnector
-        - RS_MY_DRIVER=pymysqlconnector
-    - python: 2.7
-      env:
         - ENV=cmysqlconnector
         - RS_MY_DRIVER=cmysqlconnector
     - python: 3.6
@@ -38,8 +34,6 @@ matrix:
     - python: pypy-5.4.1
       env: ENV=mysql
 
-    - python: 3.6
-      env: ENV=pymysql
     - python: 3.5
       env: ENV=pymysql
     - python: 2.7

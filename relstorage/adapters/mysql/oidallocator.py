@@ -36,13 +36,11 @@ class MySQLOIDAllocator(AbstractOIDAllocator):
         """Return a sequence of new, unused OIDs."""
         stmt = "INSERT INTO new_oid VALUES ()"
         cursor.execute(stmt)
-        try:
-            # mysql connector extension
-            n = cursor.lastrowid
-        except AttributeError:
-            # mysqldb/mysqlclient extension.
-            conn = mysql_connection(cursor)
-            n = conn.insert_id()
+        # This is a DB-API extension. Fortunately, all
+        # supported drivers implement it. (In the past we used
+        # cursor.connection.insert_id(), which was specific to MySQLdb)
+        n = cursor.lastrowid
+
         if n % 100 == 0:
             # Clean out previously generated OIDs.
             stmt = "DELETE FROM new_oid WHERE zoid < %s"
