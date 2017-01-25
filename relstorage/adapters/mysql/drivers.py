@@ -151,6 +151,7 @@ else:
         Binary = staticmethod(mysql.connector.Binary)
         _have_cext = mysql.connector.HAVE_CEXT
         _connect = staticmethod(mysql.connector.connect)
+
         def connect(self, *args, **kwargs):
             # It defaults to the (slow) pure-python version
             # NOTE: The C implementation doesn't support the prepared
@@ -172,7 +173,9 @@ else:
             con = self._connect(*args, **kwargs)
             if PY2:
                 con.set_unicode(False)
+
             return con
+            #return _ConnWrapper(con)
 
         def set_autocommit(self, conn, value):
             # We use a property instead of a method
@@ -185,7 +188,7 @@ else:
             # The C connection doesn't accept the 'prepared' keyword,
             # and if you try to use a prepared cursor with it, it doesn't
             # work correctly.
-            cursor = conn.cursor(buffered=True)
+            cursor = conn.cursor()
             if not hasattr(cursor, 'connection'):
                 # We depend on the reverse mapping in some places.
                 # The python implementation keeps a weakref proxy in
