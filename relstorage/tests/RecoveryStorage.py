@@ -166,8 +166,9 @@ class BasicRecoveryStorage(IteratorDeepCompare):
 
     def checkPackWithGCOnDestinationAfterRestore(self):
         raises = self.assertRaises
-        db = DB(self._storage)
-        conn = db.open()
+        closing = self._closing
+        db = closing(DB(self._storage))
+        conn = closing(db.open())
         root = conn.root()
         root.obj = obj1 = MinPO(1)
         txn = transaction.get()
@@ -188,8 +189,8 @@ class BasicRecoveryStorage(IteratorDeepCompare):
         # destination storage.  To trigger a pack, we have to
         # add another transaction to the destination that is
         # not packed.
-        db2 = DB(self._dst)
-        conn2 = db2.open()
+        db2 = closing(DB(self._dst))
+        conn2 = closing(db2.open())
         conn2.root().extra = 0
         txn = transaction.get()
         txn.note(u'root.extra = 0')
@@ -230,8 +231,9 @@ class UndoableRecoveryStorage(BasicRecoveryStorage):
     """These tests require the source storage to be undoable"""
 
     def checkRestoreAcrossPack(self):
-        db = DB(self._storage)
-        c = db.open()
+        closing = self._closing
+        db = closing(DB(self._storage))
+        c = closing(db.open())
         r = c.root()
         r["obj1"] = MinPO(1)
         transaction.commit()
@@ -245,12 +247,12 @@ class UndoableRecoveryStorage(BasicRecoveryStorage):
 
         # copy the final transaction manually.  even though there
         # was a pack, the restore() ought to succeed.
-        it = self._storage.iterator()
+        it = closing(self._storage.iterator())
         # Get the last transaction and its record iterator. Record iterators
         # can't be accessed out-of-order, so we need to do this in a bit
         # complicated way:
         final = None
-        for final  in it:
+        for final in it:
             records = list(final)
 
         self._dst.tpc_begin(final, final.tid, final.status)
@@ -259,6 +261,7 @@ class UndoableRecoveryStorage(BasicRecoveryStorage):
                               final)
         self._dst.tpc_vote(final)
         self._dst.tpc_finish(final)
+
 
     def checkRestoreWithMultipleObjectsInUndoRedo(self):
         # pylint:disable=too-many-statements
@@ -284,9 +287,9 @@ class UndoableRecoveryStorage(BasicRecoveryStorage):
         # and this test does some horrid white-box abuse to test it.
 
         is_filestorage = isinstance(self._storage, FileStorage)
-
-        db = DB(self._storage)
-        c = db.open()
+        closing = self._closing
+        db = closing(DB(self._storage))
+        c = closing(db.open())
         r = c.root()
 
         # Create some objects.
@@ -299,7 +302,8 @@ class UndoableRecoveryStorage(BasicRecoveryStorage):
         r["obj2"].x = 'x2'
         transaction.commit()
 
-        c2 = db.open()
+        c2 = closing(db.open())
+
         r = c2.root()
         self.assertEqual(r["obj1"].x, 'x1')
         self.assertEqual(r["obj2"].x, 'x2')
@@ -321,7 +325,7 @@ class UndoableRecoveryStorage(BasicRecoveryStorage):
         self._storage.tpc_vote(t)
         self._storage.tpc_finish(t)
 
-        r = db.open().root()
+        r = closing(db.open()).root()
         self.assertRaises(AttributeError, getattr, r["obj1"], 'x')
         self.assertRaises(AttributeError, getattr, r["obj2"], 'x')
 
@@ -345,7 +349,7 @@ class UndoableRecoveryStorage(BasicRecoveryStorage):
         self._storage.tpc_vote(t)
         self._storage.tpc_finish(t)
 
-        c3 = db.open()
+        c3 = closing(db.open())
         r = c3.root()
         self.assertEqual(r["obj1"].x, 'x1')
         self.assertEqual(r["obj2"].x, 'x2')
@@ -365,8 +369,3 @@ class UndoableRecoveryStorage(BasicRecoveryStorage):
         # part of the test.
         self._dst.copyTransactionsFrom(self._storage)
         self.compare(self._storage, self._dst)
-
-        c.close()
-        c2.close()
-        c3.close()
-        db.close()

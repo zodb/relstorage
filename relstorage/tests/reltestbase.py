@@ -77,15 +77,32 @@ class RelStorageTestBase(StorageCreatingMixin,
     keep_history = None  # Override
     _storage_created = None
 
+    __to_close = ()
+
     def setUp(self):
-        pass
+        self.__to_close = []
         # Note that we're deliberately NOT calling super's setup.
         # It does stuff on disk, etc, that's not necessary for us
         # and just slows us down by ~10%.
         #super(RelStorageTestBase, self).setUp()
+        # Also note that subclasses might not even call us! If they're going to
+        # use _closing, they have to.
+
+    def _closing(self, o):
+        """
+        Close the object before tearDown (opposite of addCleanup
+        so that exceptions will propagate).
+
+        Returns the given object.
+        """
+        self.__to_close.append(o)
+        return o
 
     def tearDown(self):
         transaction.abort()
+        for x in reversed(self.__to_close):
+            x.close()
+        self.__to_close = ()
         # XXX: This could create one! Do subclasses override self._storage?
         storage = self._storage
         if storage is not None:

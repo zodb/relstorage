@@ -288,14 +288,14 @@ class HistoryFreeToFileStorage(RelStorageTestBase,
     keep_history = False
 
     def setUp(self):
+        super(HistoryFreeToFileStorage, self).setUp()
         self._storage = self.make_storage()
         self._dst = FileStorage("Dest.fs", create=True)
 
     def tearDown(self):
-        self._storage.close()
         self._dst.close()
-        self._storage.cleanup()
         self._dst.cleanup()
+        super(HistoryFreeToFileStorage, self).tearDown()
 
     def new_dest(self):
         return FileStorage('Dest.fs')
@@ -307,14 +307,14 @@ class HistoryFreeFromFileStorage(RelStorageTestBase,
     keep_history = False
 
     def setUp(self):
+        super(HistoryFreeFromFileStorage, self).setUp()
         self._dst = self._storage
         self._storage = FileStorage("Source.fs", create=True)
 
     def tearDown(self):
-        self._storage.close()
         self._dst.close()
-        self._storage.cleanup()
         self._dst.cleanup()
+        super(HistoryFreeFromFileStorage, self).tearDown()
 
     def new_dest(self):
         return self._dst
