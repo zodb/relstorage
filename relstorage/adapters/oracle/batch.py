@@ -37,7 +37,7 @@ class OracleRowBatcher(RowBatcher):
         self.array_ops = {}  # {(operation, row_schema): {rowkey: [row]}}
 
     def _do_inserts(self):
-
+        # pylint:disable=too-many-locals
         def replace_var(match):
             name = match.group(1)
             new_name = '%s_%d' % (name, rownum) # pylint:disable=undefined-loop-variable
@@ -47,7 +47,7 @@ class OracleRowBatcher(RowBatcher):
             return ':%s' % new_name
 
         items = sorted(self.inserts.items())
-        for (_command, header, row_schema), rows in items:
+        for (_command, header, row_schema, _), rows in items:
             stmt_inputsizes = {}
 
             if len(rows) == 1:

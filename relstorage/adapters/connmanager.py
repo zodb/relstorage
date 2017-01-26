@@ -34,9 +34,13 @@ class AbstractConnectionManager(object):
     # when the adapter attempts to close a database connection.
     close_exceptions = ()
 
-    # on_store_opened is either None or a callable that
-    # will be called whenever a store cursor is opened or rolled back.
-    on_store_opened = None
+    # a series of callables (cursor, restart=bool)
+    # for when a store connection is opened.
+    _on_store_opened = ()
+
+    # a series of callables (cursor,) that will be called
+    # when a load connection is opened
+    _on_load_opened = ()
 
     def __init__(self, options):
         # options is a relstorage.options.Options instance
@@ -52,9 +56,24 @@ class AbstractConnectionManager(object):
         else:
             self.ro_replica_selector = self.replica_selector
 
-    def set_on_store_opened(self, f):
-        """Set the on_store_opened hook"""
-        self.on_store_opened = f
+    def add_on_store_opened(self, f):
+        """
+        Add a callable(cursor, restart=bool) for when a store connection
+        is opened.
+
+        .. versionadded:: 2.1a1
+        """
+        self._on_store_opened += (f,)
+
+    set_on_store_opened = add_on_store_opened # BWC
+
+    def add_on_load_opened(self, f):
+        """
+        Add a callable (cursor, restart=bool) for when a load connection is opened.
+
+        .. versionadded:: 2.1a1
+        """
+        self._on_load_opened += (f,)
 
     def open(self, **kwargs):
         """Open a database connection and return (conn, cursor)."""
@@ -62,7 +81,8 @@ class AbstractConnectionManager(object):
 
     @metricmethod
     def close(self, conn, cursor):
-        """Close a connection and cursor, ignoring certain errors.
+        """
+        Close a connection and cursor, ignoring certain errors.
         """
         for obj in (cursor, conn):
             if obj is not None:
@@ -92,14 +112,31 @@ class AbstractConnectionManager(object):
         finally:
             self.close(conn, cursor)
 
-    def open_for_load(self):
+    def _call_hooks(self, hooks, conn, cursor,
+                    *args, **kwargs):
+        try:
+            for hook in hooks:
+                hook(*args, **kwargs)
+        except:
+            self.close(conn, cursor)
+            raise
+
+    def _do_open_for_load(self):
         raise NotImplementedError()
+
+    def open_for_load(self):
+        conn, cursor = self._do_open_for_load()
+        self._call_hooks(self._on_load_opened, conn, cursor,
+                         cursor, restart=False)
+        return conn, cursor
 
     def restart_load(self, conn, cursor):
         """Reinitialize a connection for loading objects."""
         self.check_replica(conn, cursor,
                            replica_selector=self.ro_replica_selector)
         conn.rollback()
+        self._call_hooks(self._on_load_opened, conn, cursor,
+                         cursor, restart=True)
 
     def check_replica(self, conn, cursor, replica_selector=None):
         """Raise an exception if the connection belongs to an old replica"""
@@ -114,26 +151,48 @@ class AbstractConnectionManager(object):
                 raise ReplicaClosedException(
                     "Switched replica from %s to %s" % (conn.replica, current))
 
+    def _do_open_for_store(self):
+        """
+        Subclasses may override.
+
+        Returns (conn, cursor)
+        """
+        return self.open()
+
+    def _after_opened_for_store(self, conn, cursor, restart=False):
+        """
+        Called after a store is opened or restarted but
+        before hooks are called.
+
+        Subclasses may override.
+        """
+        # pylint:disable=unused-argument
+        return
+
     def open_for_store(self):
         """Open and initialize a connection for storing objects.
 
         Returns (conn, cursor).
         """
-        conn, cursor = self.open()
+        conn, cursor = self._do_open_for_store()
         try:
-            if self.on_store_opened is not None:
-                self.on_store_opened(cursor, restart=False)
-            return conn, cursor
+            self._after_opened_for_store(conn, cursor)
         except:
             self.close(conn, cursor)
             raise
+        self._call_hooks(self._on_store_opened, conn, cursor,
+                         cursor, restart=False)
+
+        return conn, cursor
 
     def restart_store(self, conn, cursor):
         """Reuse a store connection."""
         self.check_replica(conn, cursor)
         conn.rollback()
-        if self.on_store_opened is not None:
-            self.on_store_opened(cursor, restart=True)
+        self._after_opened_for_store(conn, cursor)
+        self._call_hooks(self._on_store_opened, conn, cursor,
+                         cursor, restart=True)
+
 
     def open_for_pre_pack(self):
         """Open a connection to be used for the pre-pack phase.

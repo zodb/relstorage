@@ -15,6 +15,7 @@
 from __future__ import absolute_import
 
 from .._abstract_drivers import _select_driver
+from .._util import query_property
 from ..dbiter import HistoryFreeDatabaseIterator
 from ..dbiter import HistoryPreservingDatabaseIterator
 from ..interfaces import IRelStorageAdapter
@@ -26,7 +27,8 @@ from ..scriptrunner import ScriptRunner
 from . import drivers
 from .connmanager import Psycopg2ConnectionManager
 from .locker import PostgreSQLLocker
-from .mover import PostgreSQLObjectMover
+from .mover import PostgreSQLObjectMover, PG8000ObjectMover
+from .mover import to_prepared_queries
 from .oidallocator import PostgreSQLOIDAllocator
 from .schema import PostgreSQLSchemaInstaller
 from .stats import PostgreSQLStats
@@ -77,14 +79,20 @@ class PostgreSQLAdapter(object):
             locker=self.locker,
             keep_history=self.keep_history,
         )
-        self.mover = PostgreSQLObjectMover(
+
+        mover_type = PostgreSQLObjectMover
+        if driver.__name__ == 'pg8000':
+            mover_type = PG8000ObjectMover
+
+        self.mover = mover_type(
             database_type='postgresql',
             options=options,
             runner=self.runner,
             version_detector=self.version_detector,
             Binary=driver.Binary,
         )
-        self.connmanager.set_on_store_opened(self.mover.on_store_opened)
+        self.connmanager.add_on_store_opened(self.mover.on_store_opened)
+        self.connmanager.add_on_load_opened(self.mover.on_load_opened)
         self.oidallocator = PostgreSQLOIDAllocator()
         self.txncontrol = PostgreSQLTransactionControl(
             keep_history=self.keep_history,
@@ -97,6 +105,8 @@ class PostgreSQLAdapter(object):
             runner=self.runner,
             revert_when_stale=options.revert_when_stale,
         )
+        self.connmanager.add_on_load_opened(self._prepare_get_latest_tid)
+        self.connmanager.add_on_store_opened(self._prepare_get_latest_tid)
         # pylint:disable=redefined-variable-type
         if self.keep_history:
             self.packundo = HistoryPreservingPackUndo(
@@ -126,6 +136,33 @@ class PostgreSQLAdapter(object):
         self.stats = PostgreSQLStats(
             connmanager=self.connmanager,
         )
+
+    _get_latest_tid_queries = (
+        """
+        SELECT tid
+        FROM transaction
+        ORDER BY tid DESC
+        LIMIT 1
+        """,
+        """
+        SELECT tid
+        FROM object_state
+        ORDER BY tid DESC
+        LIMIT 1
+        """
+    )
+
+    _prepare_get_latest_tid_queries = to_prepared_queries(
+        'get_latest_tid',
+        _get_latest_tid_queries)
+
+    _prepare_get_latest_tid_query = query_property('_prepare_get_latest_tid')
+
+    def _prepare_get_latest_tid(self, cursor, restart=False):
+        if restart:
+            return
+        stmt = self._prepare_get_latest_tid_query
+        cursor.execute(stmt)
 
     def new_instance(self):
         inst = type(self)(dsn=self._dsn, options=self.options)

@@ -144,6 +144,21 @@ class IConnectionManager(Interface):
         Returns (conn, cursor).
         """
 
+    def add_on_store_opened(f):
+        """
+        Add a callable(cursor, restart=bool) for when a store connection
+        is opened.
+
+        .. versionadded:: 2.1a1
+        """
+
+    def add_on_load_opened(f):
+        """
+        Add a callable (cursor, restart=bool) for when a load connection is opened.
+
+        .. versionadded:: 2.1a1
+        """
+
 
 class IReplicaSelector(Interface):
     """Selects a database replica"""

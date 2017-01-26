@@ -10,7 +10,7 @@ given here cannot be compared to each other outside their own test.
 RelStorage 2.0
 ==============
 
-All RelStorage schemas were history free and used a memcache instance.
+All RelStorage schemas were history free and did not use a memcache instance.
 ZEO was version 5.0.4 and used a FileStorage backend from ZODB 5.1.1
 MySQL was version 5.5.53 and PostgreSQL was version 9.6.1. The
 database drivers were mysqlclient-1.3.9 and psycopg2 2.6.2. All

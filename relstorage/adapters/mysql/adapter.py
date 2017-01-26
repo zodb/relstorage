@@ -50,6 +50,7 @@ load_infile
 from __future__ import print_function, absolute_import
 
 from .._abstract_drivers import _select_driver
+from .._util import query_property
 from ..dbiter import HistoryFreeDatabaseIterator
 from ..dbiter import HistoryPreservingDatabaseIterator
 from ..interfaces import IRelStorageAdapter
@@ -60,6 +61,7 @@ from . import drivers
 from .connmanager import MySQLdbConnectionManager
 from .locker import MySQLLocker
 from .mover import MySQLObjectMover
+from .mover import to_prepared_queries
 from .oidallocator import MySQLOIDAllocator
 from .packundo import MySQLHistoryFreePackUndo
 from .packundo import MySQLHistoryPreservingPackUndo
@@ -112,23 +114,24 @@ class MySQLAdapter(object):
             options=options,
             Binary=driver.Binary,
         )
-        self.connmanager.set_on_store_opened(self.mover.on_store_opened)
+        self.connmanager.add_on_store_opened(self.mover.on_store_opened)
+        self.connmanager.add_on_load_opened(self.mover.on_load_opened)
         self.oidallocator = MySQLOIDAllocator()
         self.txncontrol = MySQLTransactionControl(
             keep_history=self.keep_history,
             Binary=driver.Binary,
         )
 
-        if self.keep_history:
-            poll_query = "SELECT MAX(tid) FROM transaction"
-        else:
-            poll_query = "SELECT MAX(tid) FROM object_state"
         self.poller = Poller(
-            poll_query=poll_query,
+            poll_query='EXECUTE get_latest_tid',
             keep_history=self.keep_history,
             runner=self.runner,
             revert_when_stale=options.revert_when_stale,
         )
+
+        self.connmanager.add_on_load_opened(self._prepare_get_latest_tid)
+        self.connmanager.add_on_store_opened(self._prepare_get_latest_tid)
+
         # pylint:disable=redefined-variable-type
         if self.keep_history:
             self.packundo = MySQLHistoryPreservingPackUndo(
@@ -158,6 +161,23 @@ class MySQLAdapter(object):
         self.stats = MySQLStats(
             connmanager=self.connmanager,
         )
+
+    _get_latest_tid_queries = (
+        "SELECT MAX(tid) FROM transaction",
+        "SELECT MAX(tid) FROM object_state",
+    )
+
+    _prepare_get_latest_tid_queries = to_prepared_queries(
+        'get_latest_tid',
+        _get_latest_tid_queries)
+
+    _prepare_get_latest_tid_query = query_property('_prepare_get_latest_tid')
+
+    def _prepare_get_latest_tid(self, cursor, restart=False):
+        if restart:
+            return
+        stmt = self._prepare_get_latest_tid_query
+        cursor.execute(stmt)
 
     def new_instance(self):
         return MySQLAdapter(options=self.options, **self._params)

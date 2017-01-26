@@ -237,15 +237,15 @@ else:
                 return super(UConnection, self).query(sql, args=args)
             except IOError: # pragma: no cover
                 self.__debug_lock(sql, True)
-                tb = sys.exc_info()[2]
-                six.reraise(InterfaceError, None, tb)
+                six.reraise(InterfaceError, None, sys.exc_info()[2])
             except ProgrammingError as e:
                 if e.args[0] == 'cursor closed':
                     # This has only been seen during aborts and rollbacks; however, if it
-                    # happened at some other time it might lead to inconsistency.
-                    logger.warn("Reconnecting on failed query %s", sql, exc_info=True)
-                    self.__reconnect()
-                    return super(UConnection, self).query(sql, args=args)
+                    # happened at some other time it might lead to inconsistency...
+                    # ...and it turns out it did, once we started using prepared statements.
+                    # So instead, translate to a disconnected exception that the higher levels
+                    # know how to deal with.
+                    six.reraise(IOError, e, sys.exc_info()[2])
                 else: # pragma: no cover
                     raise
             except InternalError as e: # pragma: no cover

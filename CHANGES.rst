@@ -3,11 +3,24 @@
 =========
 
 
-2.0.1 (unreleased)
+2.1a1 (unreleased)
 ==================
 
 - 3.6.0 final release is tested on CI servers.
-
+- Substantial performance improvements for PostgreSQL, both on reading
+  and writing. Reading objects can be 20-40% faster. Writing objects
+  can be 15-25% faster (the most benefit will be seen by history-free
+  databases on PostgreSQL 9.5 and above). MySQL may have a (much)
+  smaller improvement too, especially for small transactions. This was
+  done through the use of prepared statements for the most important
+  queries and the new `'ON CONFLICT UPDATE'
+  <https://wiki.postgresql.org/wiki/What's_new_in_PostgreSQL_9.5#INSERT_..._ON_CONFLICT_DO_NOTHING.2FUPDATE_.28.22UPSERT.22.29>`_
+  syntax.
+- The umysqldb driver no longer attempts to automatically reconnect on
+  a closed cursor exception. That fails now that prepared statements
+  are in use. Instead, it translates the internal exception to one
+  that the higher layers of RelStorage recognize as requiring
+  reconnection at consistent times (transaction boundaries).
 
 2.0.0 (2016-12-23)
 ==================

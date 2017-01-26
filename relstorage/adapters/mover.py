@@ -15,8 +15,9 @@
 """
 
 from perfmetrics import Metric
-from .batch import RowBatcher
+from relstorage.adapters.batch import RowBatcher
 from relstorage.adapters.interfaces import IObjectMover
+from relstorage.adapters._util import query_property as _query_property
 from relstorage.iter import fetchmany
 from zope.interface import implementer
 from hashlib import md5
@@ -32,27 +33,6 @@ def compute_md5sum(data):
 
 
 metricmethod_sampled = Metric(method=True, rate=0.1)
-
-class _Lazy(object):
-
-    def __init__(self, func, name=None):
-        self.func = func
-        self.name = name or func.__name__
-
-    def __get__(self, inst, klazz):
-        if inst is None:
-            return self
-
-        value = self.func(inst)
-        inst.__dict__[self.name] = value
-        return value
-
-def _query_property(base_name):
-    def prop(inst):
-        queries = getattr(inst, base_name + '_queries')
-        return queries[0] if inst.keep_history else queries[1]
-
-    return _Lazy(prop, base_name + '_query')
 
 @implementer(IObjectMover)
 class AbstractObjectMover(object):
@@ -213,13 +193,32 @@ class AbstractObjectMover(object):
                 res[oid] = tid
         return res
 
-    def on_store_opened(self, cursor, restart=False):
-        raise NotImplementedError()
+    #: A sequence of *names* of attributes on this object that are statements to be
+    #: executed by ``on_store_opened`` when ``restart`` is False.
+    on_store_opened_statement_names = ()
 
-    def _generic_store_temp(self, batcher, oid, prev_tid, data, command='INSERT',):
+    def on_store_opened(self, cursor, restart=False):
+        if not restart:
+            for stmt_name in self.on_store_opened_statement_names:
+                cursor.execute(getattr(self, stmt_name))
+
+
+    #: A sequence of *names* of attributes on this object that are statements to be
+    #: executed by ``on_store_opened`` when ``restart`` is False.
+    on_load_opened_statement_names = ()
+
+    def on_load_opened(self, cursor, restart=False):
+        if not restart:
+            for stmt_name in self.on_load_opened_statement_names:
+                cursor.execute(getattr(self, stmt_name))
+
+    def _generic_store_temp(self, batcher, oid, prev_tid, data,
+                            command='INSERT', suffix=''):
         md5sum = self._compute_md5sum(data)
 
-        if command == 'INSERT':
+        if command == 'INSERT' and not suffix:
+            # MySQL uses command=REPLACE for an UPSERT
+            # PostgreSQL 9.5+ uses a suffix='ON CONFLICT UPDATE...' for an UPSERT
             batcher.delete_from('temp_store', zoid=oid)
         batcher.insert_into(
             "temp_store (zoid, prev_tid, md5, state)",
@@ -228,6 +227,7 @@ class AbstractObjectMover(object):
             rowkey=oid,
             size=len(data),
             command=command,
+            suffix=suffix
         )
 
     def store_temp(self, cursor, batcher, oid, prev_tid, data):
@@ -286,13 +286,13 @@ class AbstractObjectMover(object):
         """
         SELECT temp_store.zoid, current_object.tid, temp_store.prev_tid
         FROM temp_store
-                JOIN current_object ON (temp_store.zoid = current_object.zoid)
+                JOIN current_object USING (zoid)
         WHERE temp_store.prev_tid != current_object.tid
         """,
         """
         SELECT temp_store.zoid, object_state.tid, temp_store.prev_tid
         FROM temp_store
-                JOIN object_state ON (temp_store.zoid = object_state.zoid)
+                JOIN object_state USING (zoid)
         WHERE temp_store.prev_tid != object_state.tid
         """
     )

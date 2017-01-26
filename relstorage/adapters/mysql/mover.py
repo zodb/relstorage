@@ -21,10 +21,32 @@ import os
 
 from ..mover import AbstractObjectMover
 from ..mover import metricmethod_sampled
+from .._util import query_property
 
+
+def to_prepared_queries(name, queries, extension=''):
+
+    return [
+        'PREPARE ' + name + ' FROM "' + x.replace('%s', '?') + extension + '"'
+        for x in queries
+    ]
 
 @implementer(IObjectMover)
 class MySQLObjectMover(AbstractObjectMover):
+
+    _prepare_detect_conflict_queries = to_prepared_queries(
+        'detect_conflicts',
+        AbstractObjectMover._detect_conflict_queries,
+        ' LOCK IN SHARE MODE')
+
+    _prepare_detect_conflict_query = query_property('_prepare_detect_conflict')
+
+    _detect_conflict_query = 'EXECUTE detect_conflicts'
+
+    on_load_opened_statement_names = ()
+
+    on_store_opened_statement_names = on_load_opened_statement_names
+    on_store_opened_statement_names += ('_prepare_detect_conflict_query',)
 
     @metricmethod_sampled
     def on_store_opened(self, cursor, restart=False):
@@ -56,6 +78,8 @@ class MySQLObjectMover(AbstractObjectMover):
         """
         cursor.execute(stmt)
 
+        AbstractObjectMover.on_store_opened(self, cursor, restart=restart)
+
     @metricmethod_sampled
     def store_temp(self, cursor, batcher, oid, prev_tid, data):
         self._generic_store_temp(batcher, oid, prev_tid, data, 'REPLACE')
@@ -67,12 +91,6 @@ class MySQLObjectMover(AbstractObjectMover):
         Used for copying transactions into this database.
         """
         self._generic_restore(batcher, oid, tid, data, 'REPLACE')
-
-
-    _detect_conflict_queries = (
-        AbstractObjectMover._detect_conflict_queries[0] + '\nLOCK IN SHARE MODE',
-        AbstractObjectMover._detect_conflict_queries[1] + '\nLOCK IN SHARE MODE'
-    )
 
     def _move_from_temp_object_state(self, cursor, tid):
         stmt = """

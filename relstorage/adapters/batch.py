@@ -14,8 +14,8 @@
 """Batch table row insert/delete support.
 """
 
-from relstorage._compat import iterkeys, iteritems
-
+from relstorage._compat import itervalues, iteritems
+from collections import defaultdict
 
 class RowBatcher(object):
     """
@@ -33,29 +33,29 @@ class RowBatcher(object):
             self.row_limit = row_limit
         self.rows_added = 0
         self.size_added = 0
-        self.deletes = {}  # {(table, columns_tuple): set([(column_value,)])}
-        self.inserts = {}  # {(command, header, row_schema): {rowkey: [row]}}
+        self.deletes = defaultdict(set)   # {(table, columns_tuple): set([(column_value,)])}
+        self.inserts = defaultdict(dict)  # {(command, header, row_schema, suffix): {rowkey: [row]}}
 
     def delete_from(self, table, **kw):
+        """
+        .. caution:: The keyword values must have a valid str representation.
+        """
         if not kw:
             raise AssertionError("Need at least one column value")
-        columns = tuple(sorted(iterkeys(kw)))
+        columns = tuple(sorted(kw))
         key = (table, columns)
-        rows = self.deletes.get(key)
-        if rows is None:
-            self.deletes[key] = rows = set()
-        row = tuple(str(kw[column]) for column in columns)
+        rows = self.deletes[key]
+        # string conversion in done by _do_deletes
+        row = tuple(kw[column] for column in columns)
         rows.add(row)
         self.rows_added += 1
         if self.rows_added >= self.row_limit:
             self.flush()
 
     def insert_into(self, header, row_schema, row, rowkey, size,
-                    command='INSERT'):
-        key = (command, header, row_schema)
-        rows = self.inserts.get(key)
-        if rows is None:
-            self.inserts[key] = rows = {}
+                    command='INSERT', suffix=''):
+        key = (command, header, row_schema, suffix)
+        rows = self.inserts[key]
         rows[rowkey] = row  # note that this may replace a row
         self.rows_added += 1
         self.size_added += size
@@ -75,9 +75,11 @@ class RowBatcher(object):
 
     def _do_deletes(self):
         for (table, columns), rows in sorted(iteritems(self.deletes)):
-            rows = list(sorted(rows))
+            # XXX: Stop doing string conversion manually. Let the
+            # cursor do it. It may have a non-text protocol for integer
+            # objects; it may also have a different representation in text.
             if len(columns) == 1:
-                value_str = ','.join(v for (v,) in rows)
+                value_str = ','.join(str(v) for (v,) in rows)
                 stmt = "DELETE FROM %s WHERE %s IN (%s)" % (
                     table, columns[0], value_str)
             else:
@@ -89,18 +91,24 @@ class RowBatcher(object):
                     lines.append(" AND ".join(line))
                 stmt = "DELETE FROM %s WHERE %s" % (
                     table, " OR ".join(lines))
+
             self.cursor.execute(stmt)
 
     def _do_inserts(self):
         items = sorted(iteritems(self.inserts))
-        for (command, header, row_schema), rows in items:
+        for (command, header, row_schema, suffix), rows in items:
             # Batched inserts
             parts = []
             params = []
             s = "(%s)" % row_schema
-            for row in rows.values():
+            for row in itervalues(rows):
                 parts.append(s)
                 params.extend(row)
 
-            stmt = "%s INTO %s VALUES\n%s" % (command, header, ',\n'.join(parts))
+            stmt = "%s INTO %s VALUES\n%s\n%s" % (
+                command, header, ',\n'.join(parts), suffix)
+            # e.g.,
+            # INSERT INTO table(c1, c2)
+            # VALUES (%s, %s), (%s, %s), (%s, %s)
+            # <suffix>
             self.cursor.execute(stmt, tuple(params))

@@ -24,9 +24,54 @@ import functools
 from relstorage._compat import xrange
 
 from ..mover import metricmethod_sampled
+from .._util import query_property
+
+def to_prepared_queries(name, queries, datatypes=''):
+    # Only handles one param
+    return [
+        'PREPARE ' + name + ' ' + datatypes + ' AS ' + x.replace('%s', '$1')
+        for x in queries
+    ]
 
 @implementer(IObjectMover)
 class PostgreSQLObjectMover(AbstractObjectMover):
+
+    __need_version_check = True
+
+    _prepare_load_current_queries = to_prepared_queries(
+        'load_current',
+        AbstractObjectMover._load_current_queries,
+        '(BIGINT)')
+
+    _prepare_load_current_query = query_property('_prepare_load_current')
+
+    _load_current_query = 'EXECUTE load_current(%s)'
+
+    _prepare_detect_conflict_queries = to_prepared_queries(
+        'detect_conflicts',
+        AbstractObjectMover._detect_conflict_queries)
+
+    _prepare_detect_conflict_query = query_property('_prepare_detect_conflict')
+
+    _detect_conflict_query = 'EXECUTE detect_conflicts'
+
+    on_load_opened_statement_names = ('_prepare_load_current_query',)
+    on_store_opened_statement_names = on_load_opened_statement_names + ('_prepare_detect_conflict_query',)
+
+    # Sadly we can't PREPARE this statement; apparently it holds a
+    # lock on OBJECT_STATE that interferes with taking the commit lock.
+    _move_from_temp_object_state_95_query = """
+        INSERT INTO object_state (zoid, tid, state_size, state)
+        SELECT zoid, %s, COALESCE(LENGTH(state), 0), state
+        FROM temp_store
+        ON CONFLICT (zoid) DO UPDATE SET state_size = COALESCE(LENGTH(excluded.state), 0),
+                              tid = %s,
+                              STATE = excluded.state
+    """
+
+    def _move_from_temp_object_state_95(self, cursor, tid):
+        stmt = self._move_from_temp_object_state_95_query
+        cursor.execute(stmt, (tid, tid))
 
     @metricmethod_sampled
     def on_store_opened(self, cursor, restart=False):
@@ -68,8 +113,26 @@ class PostgreSQLObjectMover(AbstractObjectMover):
         for stmt in stmts:
             cursor.execute(stmt)
 
+        if self.__need_version_check:
+            self.__need_version_check = False
+            supports_conflict = self.version_detector.get_version(cursor) >= (9, 5)
+            if supports_conflict:
+                self._move_from_temp_object_state = self._move_from_temp_object_state_95
+                self.store_temp = self._store_temp_95
+
+        AbstractObjectMover.on_store_opened(self, cursor, restart)
+
+    def _store_temp_95(self, _cursor, batcher, oid, prev_tid, data):
+
+        suffix = """
+        ON CONFLICT (zoid) DO UPDATE SET state = excluded.state,
+                              prev_tid = excluded.prev_tid,
+                              md5 = excluded.md5
+        """
+        self._generic_store_temp(batcher, oid, prev_tid, data, suffix=suffix)
+
     @metricmethod_sampled
-    def store_temp(self, cursor, batcher, oid, prev_tid, data):
+    def store_temp(self, cursor, batcher, oid, prev_tid, data): # pylint:disable=method-hidden
         self._generic_store_temp(batcher, oid, prev_tid, data)
 
     @metricmethod_sampled
@@ -204,3 +267,14 @@ class PostgreSQLObjectMover(AbstractObjectMover):
             f.close()
             if blob is not None and not blob.closed:
                 blob.close()
+
+
+class PG8000ObjectMover(PostgreSQLObjectMover):
+    # pg8000 1.10 can't handle prepared statements that take parameters
+    # but it doesn't need to because it prepares every statement
+    # anyway. https://github.com/mfenniak/pg8000/issues/132
+
+    on_load_opened_statement_names = ()
+    on_store_opened_statement_names = ('_prepare_detect_conflict_query',)
+
+    _load_current_query = AbstractObjectMover._load_current_query

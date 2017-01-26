@@ -108,7 +108,7 @@ class OracleAdapter(object):
             batcher_factory=lambda cursor, row_limit: OracleRowBatcher(cursor, inputsizes, row_limit),
         )
         self.mover.inputsizes = inputsizes
-        self.connmanager.set_on_store_opened(self.mover.on_store_opened)
+        self.connmanager.add_on_store_opened(self.mover.on_store_opened)
         self.oidallocator = OracleOIDAllocator(
             connmanager=self.connmanager,
         )
