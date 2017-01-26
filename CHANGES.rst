@@ -15,14 +15,15 @@
   done through the use of prepared statements for the most important
   queries and the new `'ON CONFLICT UPDATE'
   <https://wiki.postgresql.org/wiki/What's_new_in_PostgreSQL_9.5#INSERT_..._ON_CONFLICT_DO_NOTHING.2FUPDATE_.28.22UPSERT.22.29>`_
-  syntax.
+  syntax. See :pr:`157` and :issue:`156`.
 - The umysqldb driver no longer attempts to automatically reconnect on
   a closed cursor exception. That fails now that prepared statements
   are in use. Instead, it translates the internal exception to one
   that the higher layers of RelStorage recognize as requiring
   reconnection at consistent times (transaction boundaries).
 - Add initial support for the `MySQL Connector/Python
-  <https://dev.mysql.com/doc/connector-python/en/>`_ driver.
+  <https://dev.mysql.com/doc/connector-python/en/>`_ driver. See
+  :issue:`155`.
 
 2.0.0 (2016-12-23)
 ==================
