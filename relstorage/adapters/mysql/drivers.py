@@ -146,7 +146,7 @@ else:
     @implementer(IDBDriver)
     class MySQLConnectorDriver(AbstractDriver):
         # See https://github.com/zodb/relstorage/issues/155
-        __name__ = "mysqlconnector"
+        __name__ = "MySQL Connector/Python"
 
         disconnected_exceptions, close_exceptions, lock_exceptions = _standard_exceptions(mysql.connector)
         use_replica_exceptions = (mysql.connector.OperationalError,)
@@ -197,17 +197,17 @@ else:
         preferred_driver_name = driver.__name__
 
     if driver.have_cext:
-        driver_map['c' + driver.__name__] = driver
+        driver_map['C ' + driver.__name__] = driver
 
         class PyMySQLConnectorDriver(MySQLConnectorDriver):
-            __name__ = 'py' + driver.__name__
+            __name__ = 'Py ' + driver.__name__
             have_cext = False
 
         driver = PyMySQLConnectorDriver()
         driver_map[driver.__name__] = driver
 
     else:
-        driver_map['py' + driver.__name__] = driver
+        driver_map['Py ' + driver.__name__] = driver
 
     del driver
 

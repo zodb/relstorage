@@ -19,7 +19,7 @@ matrix:
     - python: 2.7
       env:
         - ENV=cmysqlconnector
-        - RS_MY_DRIVER=cmysqlconnector
+        - RS_MY_DRIVER="C MySQL Connector/Python"
     - python: 3.6
       env: ENV=mysqlconnector
     - python: pypy-5.4.1

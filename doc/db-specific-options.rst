@@ -30,11 +30,22 @@ PostgreSQL Adapter Options
 The PostgreSQL adapter accepts:
 
 driver
-    Either "psycopg2" or "psycopg2cffi" for the native libpg based
-    drivers. "pg8000" is a pure-python driver suitable for use with
-    gevent.
+    The possible options are:
 
-    .. note:: pg8000 requires PostgreSQL 9.4 or above for BLOB support.
+    psycopg2
+      A C-based driver that requires the PostgreSQL development
+      libraries. Optimal on CPython, but not compatible with gevent.
+
+    psycopg2cffi
+      A C-based driver that requires the PostgreSQL development
+      libraries. Optimal on PyPy and almost indistinguishable from
+      psycopg2 on CPython. Not compatible with gevent.
+
+    pg8000
+     A pure-Python driver suitable for use with gevent. Works on all
+     supported platforms.
+
+     .. note:: pg8000 requires PostgreSQL 9.4 or above for BLOB support.
 
 dsn
     Specifies the data source name for connecting to PostgreSQL.
@@ -54,11 +65,66 @@ The MySQL adapter accepts most parameters supported by the mysqlclient
 library (the maintained version of MySQL-python), including:
 
 driver
-    Either "MySQLdb" (which can be provided by the either of the
-    PyPI distributions `mysqlclient
-    <https://pypi.python.org/pypi/mysqlclient>`_ or `MySQL-python
-    <https://pypi.python.org/pypi/MySQL-python/>`_), or "PyMySQL", or
-    "umysqldb" or "mysqlconnector" for the `official client <https://dev.mysql.com/doc/connector-python/en/>`_.
+    The possible options are:
+
+    MySQLdb
+      A C-based driver that requires the MySQL client development
+      libraries.. This is best provided by the PyPI distribution
+      `mysqlclient <https://pypi.python.org/pypi/mysqlclient>`_. (It
+      can also be provided by the legacy `MySQL-python
+      <https://pypi.python.org/pypi/MySQL-python/>`_ distribution,
+      but only on CPython 2; this distribution is no longer tested.)
+      These drivers are *not* compatible with gevent.
+
+    PyMySQL
+      A pure-Python driver provided by the distribution of the same
+      name. It works with CPython 2 and 3 and PyPy (where it is
+      preferred). It is compatible with gevent.
+
+    umysqldb
+      A C-based driver that builds on PyMySQL. It is compatible with
+      gevent, but only works on CPython 2. It does not require the
+      MySQL client development libraries but uses a project called
+      ``umysql`` to communicate with the server using only sockets.
+
+      .. note:: Make sure the server has a
+          ``max_allowed_packet`` setting no larger than 16MB. Also
+          make sure that RelStorage's ``blob-chunk-size`` is less than
+          16MB as well.
+
+      .. note:: `This fork of umysqldb
+           <https://github.com/NextThought/umysqldb.git>`_ is
+           recommended. The ``full-buffer`` branch of `this ultramysql
+           fork
+           <https://github.com/NextThought/ultramysql/tree/full-buffer>`_
+           is also recommended if you encounter strange MySQL packet
+           errors.
+
+
+    MySQL Connector/Python
+      This is the `official client
+      <https://dev.mysql.com/doc/connector-python/en/>`_ provided by
+      Oracle. It generally cannot be installed from PyPI or by pip if
+      you want the optional C extension. It has an optional C
+      extension that must be built manually. The C extension (which
+      requires the MySQL client development libraries) performs
+      about as well as mysqlclient, but the pure-python version
+      somewhat slower than PyMySQL. However, it supports more advanced
+      options for failover and high availability.
+
+      When using this name, RelStorage will use the C extension if
+      available, otherwise it will use the Python version.
+
+      Binary packages are distributed by Oracle for many platforms
+      and include the necessary native libraries and C extension.
+
+    C MySQL Connector/Python
+      The same as above, but RelStorage will only use the C extension.
+      This is not compatible with gevent.
+
+    Py MySQL Connector/Python
+      Like the above, but RelStorage will use the pure-Python version
+      only. This is compatible with gevent.
 
 host
     string, host to connect

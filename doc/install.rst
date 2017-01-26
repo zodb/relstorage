@@ -38,46 +38,43 @@ database.
 
 
 On CPython2, install psycopg2 2.6.1+, mysqlclient 1.3.7+, or cx_Oracle
-5.2+; PyMySQL 0.7 and umysql are also known to work as is pg8000. For
-CPython3, install psycopg2, mysqlclient 1.3.7+ or cx_Oracle; PyMySQL
-and pg8000 are also known to work. On PyPy, install psycopg2cffi
-2.7.4+ or PyMySQL 0.6.6+ (PyPy will generally work with psycopg2 and
-mysqlclient, but it will be *much* slower; in contrast, pg8000
-performs nearly as well. cx_Oracle is untested on PyPy).
+5.2+; PyMySQL 0.7, MySQL Connector/Python 2.1.5 and umysql are also
+known to work as is pg8000.
 
-Here's a table of known working adapters; adapters **in bold** are the recommended
-adapter; adapters in *italic* are also tested:
+For CPython3, install psycopg2, mysqlclient or cx_Oracle;
+PyMySQL, MySQL Connector/Python  and pg8000 are also known to work.
 
-========   =================     =================     ======
-Platform   MySQL                 PostgreSQL            Oracle
-========   =================     =================     ======
-CPython2   MySQL-python;         **psycopg2**;         **cx_Oracle**
-           **mysqlclient**;      psycopg2cffi;
-           *PyMySQL*;            *pg8000*
-           *umysqldb*;
-           *MySQL Connector*
-CPython3   **mysqlclient**;      **psycopg2**;         **cx_Oracle**
-           *PyMySQL*             *pg8000*
-           *MySQL Connector*
-PyPy       **PyMySQL**;          **psycopg2cffi**;
-                                 *pg8000*
-           *MySQL Connector*
-========   =================     =================     ======
+On PyPy, install psycopg2cffi 2.7.4+ or PyMySQL 0.6.6+ (PyPy will
+generally work with psycopg2 and mysqlclient, but it will be *much*
+slower; in contrast, pg8000 performs nearly as well. cx_Oracle is
+untested on PyPy).
 
-.. note:: If you use umysql, make sure the server has a
-          ``max_allowed_packet`` setting no larger than 16MB. Also
-          make sure that RelStorage's ``blob-chunk-size`` is less than
-          16MB as well.
+Here's a table of known (tested) working adapters; adapters **in
+bold** are the recommended adapter.
 
-.. note:: `This fork of umysqldb
-           <https://github.com/NextThought/umysqldb.git>`_ is
-           recommended. The ``full-buffer`` branch of `this ultramysql
-           fork
-           <https://github.com/NextThought/ultramysql/tree/full-buffer>`_
-           is also recommended if you encounter strange MySQL packet
-           errors.
++----------+---------------------+---------------------+--------------+
+| Platform |  MySQL              |   PostgreSQL        |  Oracle      |
++==========+=====================+=====================+==============+
+| CPython2 |                     |  1. **psycopg2**    | **cx_Oracle**|
+|          | 1. **mysqlclient**  |  2. pg8000          |              |
+|          | 2. PyMySQL          |                     |              |
+|          | 3. umysqldb         |                     |              |
+|          | 4. MySQL Connector  |                     |              |
++----------+---------------------+---------------------+--------------+
+| CPython3 | 1. **mysqlclient**  |  1. **psycopg2**    | **cx_Oracle**|
+|          | 2. PyMySQL          |  2. pg8000          |              |
+|          | 3. MySQL Connector  |                     |              |
++----------+---------------------+---------------------+--------------+
+| PyPy     | 1. **PyMySQL**      | 1. **psycopg2cffi** |              |
+|          | 2. MySQL Connector  | 2.  pg8000          |              |
++----------+---------------------+---------------------+--------------+
 
-mysqlclient, pg8000 and umysql are compatible (cooperative) with gevent.
+
+mysqlclient, MySQL Connector/Python (without its C extension), pg8000
+and umysql are compatible (cooperative) with gevent.
+
+For additional details, see the "driver" section for each database in
+:doc:`db-specific-options`.
 
 Memcache Integration
 ====================
