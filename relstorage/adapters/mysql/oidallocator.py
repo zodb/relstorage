@@ -20,7 +20,7 @@ from __future__ import absolute_import
 from ..oidallocator import AbstractOIDAllocator
 from ..interfaces import IOIDAllocator
 from zope.interface import implementer
-from relstorage._compat import mysql_connection
+
 from perfmetrics import metricmethod
 
 @implementer(IOIDAllocator)
