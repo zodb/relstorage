@@ -27,7 +27,6 @@ import logging
 import time
 
 from relstorage._compat import db_binary_to_bytes
-from relstorage._compat import mysql_connection
 
 log = logging.getLogger(__name__)
 
@@ -142,13 +141,15 @@ class PackUndo(object):
         if batch:
             upload_batch()
 
-    def _pause_pack_until_lock(self, cursor, sleep):
-        """Pause until we can obtain a nowait commit lock."""
+    def _pause_pack_until_lock(self, conn, cursor, sleep):
+        """
+        Pause until we can obtain a nowait commit lock.
+        """
         if sleep is None:
             sleep = time.sleep
         delay = self.options.pack_commit_busy_delay
         while not self.locker.hold_commit_lock(cursor, nowait=True):
-            mysql_connection(cursor).rollback()
+            conn.rollback()
             log.debug('pack: commit lock busy, sleeping %.4g second(s)', delay)
             sleep(delay)
 
@@ -692,7 +693,7 @@ class HistoryPreservingPackUndo(PackUndo):
                 # We'll report on progress in at most .1% step increments
                 reportstep = max(total / 1000, 1)
 
-                self._pause_pack_until_lock(cursor, sleep)
+                self._pause_pack_until_lock(conn, cursor, sleep)
                 for tid, packed, has_removable in tid_rows:
                     self._pack_transaction(
                         cursor, pack_tid, tid, packed, has_removable,
@@ -712,7 +713,7 @@ class HistoryPreservingPackUndo(PackUndo):
                             lastreport = counter / reportstep * reportstep
                         del packed_list[:]
                         self.locker.release_commit_lock(cursor)
-                        self._pause_pack_until_lock(cursor, sleep)
+                        self._pause_pack_until_lock(conn, cursor, sleep)
                         start = time.time()
                 if packed_func is not None:
                     for oid, tid in packed_list:
@@ -806,7 +807,7 @@ class HistoryPreservingPackUndo(PackUndo):
         # We'll do it in batches of 1000 rows.
         log.debug("pack: removing empty packed transactions")
         while True:
-            self._pause_pack_until_lock(cursor, sleep)
+            self._pause_pack_until_lock(conn, cursor, sleep)
             stmt = self._script_delete_empty_transactions_batch
             self.runner.run_script_stmt(cursor, stmt)
             deleted = cursor.rowcount
@@ -1092,7 +1093,7 @@ class HistoryFreePackUndo(PackUndo):
                 # We'll report on progress in at most .1% step increments
                 lastreport, reportstep = 0, max(total / 1000, 1)
 
-                self._pause_pack_until_lock(cursor, sleep)
+                self._pause_pack_until_lock(conn, cursor, sleep)
                 while to_remove:
                     items = to_remove[:100]
                     del to_remove[:100]
@@ -1115,7 +1116,7 @@ class HistoryFreePackUndo(PackUndo):
                                      counter, counter / float(total) * 100)
                             lastreport = counter / reportstep * reportstep
                         self.locker.release_commit_lock(cursor)
-                        self._pause_pack_until_lock(cursor, sleep)
+                        self._pause_pack_until_lock(conn, cursor, sleep)
                         start = time.time()
 
                 if packed_func is not None:

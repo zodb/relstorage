@@ -1,5 +1,5 @@
 import os
-
+import platform
 import unittest
 
 
@@ -37,3 +37,8 @@ if RUNNING_ON_TRAVIS:
             CACHE_MODULE_NAME = 'memcache'
         except ImportError:
             pass
+
+USE_SMALL_BLOBS = ((RUNNING_ON_CI # slow here
+                    or platform.system() == 'Darwin' # interactive testing
+                    or os.environ.get("RS_SMALL_BLOB")) # define
+                   and not os.environ.get('RS_LARGE_BLOB'))

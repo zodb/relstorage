@@ -145,41 +145,36 @@ else:
 
     @implementer(IDBDriver)
     class MySQLConnectorDriver(AbstractDriver):
+        # See https://github.com/zodb/relstorage/issues/155
         __name__ = "mysqlconnector"
 
         disconnected_exceptions, close_exceptions, lock_exceptions = _standard_exceptions(mysql.connector)
         use_replica_exceptions = (mysql.connector.OperationalError,)
         Binary = staticmethod(mysql.connector.Binary)
-        _have_cext = mysql.connector.HAVE_CEXT
+
+        have_cext = mysql.connector.HAVE_CEXT
         _connect = staticmethod(mysql.connector.connect)
 
         def connect(self, *args, **kwargs):
             # It defaults to the (slower) pure-python version
             # NOTE: The C implementation doesn't support the prepared
             # operations.
-            # NOTE: The C implementation returns bytes when the py implementation
+            # NOTE: The C implementation returns bytes when the Py implementation
             # returns bytearray under Py2
-            # NOTE: The py implementation can return unicode strings (on OS X only?)
-            # where everything else returns native strings
-            if self._have_cext and 'gevent' not in sys.modules:
+
+            if self.have_cext:
                 kwargs['use_pure'] = False
             if PY2:
-                # The docs say that strings are returned as unicode, but this
-                # only seems to happen on OS X (the travis CI runs don't have this;
-                # maybe it got the C extension by default?)
-                # It also seems that only the C connector pays attention to this
-                # argument (despite the documentation); the python version
-                # requires the set_unicode(False) call
+                # The docs say that strings are returned as unicode by default
+                # an all platforms, but this is inconsistent. We need str anyway.
                 kwargs['use_unicode'] = False
             con = self._connect(*args, **kwargs)
-            if PY2:
-                con.set_unicode(False)
 
             return con
 
 
         def set_autocommit(self, conn, value):
-            # We use a property instead of a method
+            # This implementation uses a property instead of a method.
             conn.autocommit = value
 
         def cursor(self, conn):
@@ -187,17 +182,10 @@ else:
             # how many rows there are. That's fine and within the DB-API spec.
             # The Python implementation is much faster if we don't ask it to.
             # The C connection doesn't accept the 'prepared' keyword.
-            # You can't have both a buffered and prepared cursor.
+            # You can't have both a buffered and prepared cursor,
+            # but the prepared cursor doesn't gain us anything anyway.
 
             cursor = conn.cursor()
-            if not hasattr(cursor, 'connection'):
-                # We depend on the reverse mapping in some places.
-                # The python implementation keeps a weakref proxy in
-                # _connection, but if we try to access that on the C extension,
-                # we get a AttributeError, so if we then try to access 'connection',
-                # it aborts the process. So we go ahead and make a hard ref.
-                # See mysql_connection().
-                cursor.connection = conn
             return cursor
 
     del mysql.connector
@@ -208,12 +196,12 @@ else:
     if not preferred_driver_name:
         preferred_driver_name = driver.__name__
 
-    if driver._have_cext:
+    if driver.have_cext:
         driver_map['c' + driver.__name__] = driver
 
         class PyMySQLConnectorDriver(MySQLConnectorDriver):
             __name__ = 'py' + driver.__name__
-            _have_cext = False
+            have_cext = False
 
         driver = PyMySQLConnectorDriver()
         driver_map[driver.__name__] = driver
