@@ -1,8 +1,8 @@
 
 RelStorage is a storage implementation for ZODB that stores pickles in
-a relational database. PostgreSQL 9.0 and above, MySQL 5.0.32+ /
-5.1.34+, and Oracle 10g and 11g are currently supported. RelStorage
-replaced the PGStorage project.
+a relational database. PostgreSQL 9.0 and above (performance is best
+with 9.5 and above), MySQL 5.0.32+ / 5.1.34+, and Oracle 10g and 11g
+are currently supported. RelStorage replaced the PGStorage project.
 
 
 ==========

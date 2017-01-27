@@ -27,6 +27,8 @@ driver
 PostgreSQL Adapter Options
 ==========================
 
+RelStorage 2.1 performs best with PostgreSQL 9.5 or above.
+
 The PostgreSQL adapter accepts:
 
 driver
@@ -117,6 +119,8 @@ driver
 
       Binary packages are distributed by Oracle for many platforms
       and include the necessary native libraries and C extension.
+
+      .. versionadded:: 2.1a1
 
     C MySQL Connector/Python
       The same as above, but RelStorage will only use the C extension.
