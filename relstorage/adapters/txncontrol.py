@@ -70,6 +70,7 @@ class GenericTransactionControl(AbstractTransactionControl):
     and history-preserving storages that share a common syntax.
     """
 
+    # XXX: Use the query_property for this
     _GET_TID_HP = "SELECT MAX(tid) FROM transaction"
     _GET_TID_HF = "SELECT MAX(tid) FROM object_state"
 
@@ -86,12 +87,12 @@ class GenericTransactionControl(AbstractTransactionControl):
 
     def get_tid(self, cursor):
         cursor.execute(self._get_tid_stmt)
-        if not cursor.rowcount:
+        row = cursor.fetchone()
+        if not row:
             # nothing has been stored yet
             return 0
 
-        assert cursor.rowcount == 1
-        tid = cursor.fetchone()[0]
+        tid = row[0]
         return tid if tid is not None else 0
 
 

@@ -13,6 +13,7 @@ import sys
 import platform
 
 PY3 = sys.version_info[0] == 3
+PY2 = not PY3
 PYPY = platform.python_implementation() == 'PyPy'
 
 # Dict support
@@ -66,23 +67,15 @@ if PY3:
     # buffer on Py3/Py2, respectively, for bytea columns
     _db_binary_types = (memoryview,)
 else:
-    _db_binary_types = (memoryview, buffer)
+    # MySQL Connector/Python returns bytearray, but only from
+    # the Python implementation; the C implementation returns
+    # bytes.
+    _db_binary_types = (memoryview, buffer, bytearray)
 
 def db_binary_to_bytes(data):
     if isinstance(data, _db_binary_types):
         data = bytes(data)
     return data
-
-
-# mysqlclient, a binary driver that works for Py2, Py3 and
-# PyPy (claimed), uses a connection that is a weakref. MySQLdb
-# and PyMySQL use a hard reference
-from weakref import ref as _wref
-def mysql_connection(cursor):
-    conn = cursor.connection
-    if isinstance(conn, _wref):
-        conn = conn()
-    return conn
 
 
 

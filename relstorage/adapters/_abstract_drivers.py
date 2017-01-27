@@ -68,8 +68,14 @@ class _ConnWrapper(object): # pragma: no cover
             return
         return setattr(self.__conn, name, value)
 
-    def cursor(self):
-        return _ConnWrapper(self.__conn.cursor())
+    def cursor(self, *args, **kwargs):
+        return _ConnWrapper(self.__conn.cursor(*args, **kwargs))
+
+    def execute(self, op, args=None):
+        #print(op, args)
+        self.__conn.connection.handle_unread_result()
+        return self.__conn.execute(op, args)
+
 
     def __iter__(self):
         return self.__conn.__iter__()

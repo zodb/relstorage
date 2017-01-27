@@ -32,6 +32,7 @@ from ..interfaces import IDBDriver, IDBDriverOptions
 from .._abstract_drivers import _standard_exceptions
 
 from relstorage._compat import intern
+from relstorage._compat import PY2
 
 logger = __import__('logging').getLogger(__name__)
 
@@ -42,6 +43,15 @@ preferred_driver_name = None
 
 moduleProvides(IDBDriverOptions)
 
+class AbstractDriver(object):
+    # Common compatibility shims, overriden as needed.
+
+    def set_autocommit(self, conn, value):
+        conn.autocommit(value)
+
+    def cursor(self, conn):
+        return conn.cursor()
+
 try:
     import MySQLdb
 except ImportError:
@@ -49,7 +59,7 @@ except ImportError:
 else:
 
     @implementer(IDBDriver)
-    class MySQLdbDriver(object):
+    class MySQLdbDriver(AbstractDriver):
         __name__ = 'MySQLdb'
         disconnected_exceptions, close_exceptions, lock_exceptions = _standard_exceptions(MySQLdb)
         use_replica_exceptions = (MySQLdb.OperationalError,)
@@ -71,7 +81,7 @@ else:  # pragma: no cover
     import pymysql.err
 
     @implementer(IDBDriver)
-    class PyMySQLDriver(object):
+    class PyMySQLDriver(AbstractDriver):
         __name__ = 'PyMySQL'
 
         disconnected_exceptions, close_exceptions, lock_exceptions = _standard_exceptions(pymysql)
@@ -125,6 +135,80 @@ else:  # pragma: no cover
 
     if hasattr(sys, 'pypy_version_info') or not preferred_driver_name:
         preferred_driver_name = driver.__name__
+    del driver
+
+try:
+    import mysql.connector
+except ImportError:
+    pass
+else:
+
+    @implementer(IDBDriver)
+    class MySQLConnectorDriver(AbstractDriver):
+        # See https://github.com/zodb/relstorage/issues/155
+        __name__ = "MySQL Connector/Python"
+
+        disconnected_exceptions, close_exceptions, lock_exceptions = _standard_exceptions(mysql.connector)
+        use_replica_exceptions = (mysql.connector.OperationalError,)
+        Binary = staticmethod(mysql.connector.Binary)
+
+        have_cext = mysql.connector.HAVE_CEXT
+        _connect = staticmethod(mysql.connector.connect)
+
+        def connect(self, *args, **kwargs):
+            # It defaults to the (slower) pure-python version
+            # NOTE: The C implementation doesn't support the prepared
+            # operations.
+            # NOTE: The C implementation returns bytes when the Py implementation
+            # returns bytearray under Py2
+
+            if self.have_cext:
+                kwargs['use_pure'] = False
+            if PY2:
+                # The docs say that strings are returned as unicode by default
+                # an all platforms, but this is inconsistent. We need str anyway.
+                kwargs['use_unicode'] = False
+            con = self._connect(*args, **kwargs)
+
+            return con
+
+
+        def set_autocommit(self, conn, value):
+            # This implementation uses a property instead of a method.
+            conn.autocommit = value
+
+        def cursor(self, conn):
+            # By default, the cursor won't buffer, so we don't know
+            # how many rows there are. That's fine and within the DB-API spec.
+            # The Python implementation is much faster if we don't ask it to.
+            # The C connection doesn't accept the 'prepared' keyword.
+            # You can't have both a buffered and prepared cursor,
+            # but the prepared cursor doesn't gain us anything anyway.
+
+            cursor = conn.cursor()
+            return cursor
+
+    del mysql.connector
+
+    driver = MySQLConnectorDriver()
+    driver_map[driver.__name__] = driver
+
+    if not preferred_driver_name:
+        preferred_driver_name = driver.__name__
+
+    if driver.have_cext:
+        driver_map['C ' + driver.__name__] = driver
+
+        class PyMySQLConnectorDriver(MySQLConnectorDriver):
+            __name__ = 'Py ' + driver.__name__
+            have_cext = False
+
+        driver = PyMySQLConnectorDriver()
+        driver_map[driver.__name__] = driver
+
+    else:
+        driver_map['Py ' + driver.__name__] = driver
+
     del driver
 
 try:
@@ -304,6 +388,9 @@ else:
 
 if os.environ.get("RS_MY_DRIVER"): # pragma: no cover
     preferred_driver_name = os.environ["RS_MY_DRIVER"]
+    choices = list(driver_map.keys())
     driver_map = {k: v for k, v in driver_map.items()
                   if k == preferred_driver_name}
-    print("Forcing MySQL driver to ", preferred_driver_name)
+    print("Forcing MySQL driver to ", preferred_driver_name,
+          "; choices were ", choices)
+    del choices

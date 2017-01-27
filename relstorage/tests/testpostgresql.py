@@ -174,8 +174,8 @@ def test_suite():
     suite.addTest(unittest.makeSuite(HPPostgreSQLDestZODBConvertTests))
     suite.addTest(unittest.makeSuite(HPPostgreSQLSrcZODBConvertTests))
 
-    from .util import RUNNING_ON_CI
-    if RUNNING_ON_CI or os.environ.get("RS_PG_SMALL_BLOB"):
+    from .util import USE_SMALL_BLOBS
+    if USE_SMALL_BLOBS:
         # Avoid creating 2GB blobs to be friendly to neighbors
         # and to run fast (2GB blobs take about 4 minutes on Travis
         # CI as-of June 2016)

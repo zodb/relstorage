@@ -77,9 +77,13 @@ class AbstractObjectMover(object):
         stmt = self._load_current_query
 
         cursor.execute(stmt, (oid,))
-        if cursor.rowcount:
-            assert cursor.rowcount == 1
-            state, tid = cursor.fetchone()
+        # Note that we cannot rely on cursor.rowcount being
+        # a valid indicator. The DB-API doesn't require it, and
+        # some implementations, like MySQL Connector/Python are
+        # unbuffered by default and can't provide it.
+        row = cursor.fetchone()
+        if row:
+            state, tid = row
             state = db_binary_to_bytes(state)
             # If it's None, the object's creation has been
             # undone.
@@ -102,9 +106,9 @@ class AbstractObjectMover(object):
         """
         stmt = self._load_revision_query
         cursor.execute(stmt, (oid, tid))
-        if cursor.rowcount:
-            assert cursor.rowcount == 1
-            (state,) = cursor.fetchone()
+        row = cursor.fetchone()
+        if row:
+            (state,) = row
             return db_binary_to_bytes(state)
         return None
 
@@ -120,7 +124,8 @@ class AbstractObjectMover(object):
         """Returns a true value if the given object exists."""
         stmt = self._exists_query
         cursor.execute(stmt, (oid,))
-        return cursor.rowcount
+        row = cursor.fetchone()
+        return row
 
     @metricmethod_sampled
     def load_before(self, cursor, oid, tid):
@@ -137,9 +142,9 @@ class AbstractObjectMover(object):
         LIMIT 1
         """
         cursor.execute(stmt, (oid, tid))
-        if cursor.rowcount:
-            assert cursor.rowcount == 1
-            state, tid = cursor.fetchone()
+        row = cursor.fetchone()
+        if row:
+            state, tid = row
             state = db_binary_to_bytes(state)
             # None in state means The object's creation has been undone
             return state, tid
@@ -162,9 +167,9 @@ class AbstractObjectMover(object):
         LIMIT 1
         """
         cursor.execute(stmt, (oid, tid))
-        if cursor.rowcount:
-            assert cursor.rowcount == 1
-            return cursor.fetchone()[0]
+        row = cursor.fetchone()
+        if row:
+            return row[0]
         else:
             return None
 

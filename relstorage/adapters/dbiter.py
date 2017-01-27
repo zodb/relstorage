@@ -53,7 +53,14 @@ class HistoryPreservingDatabaseIterator(DatabaseIterator):
         Each row begins with (tid, username, description, extension)
         and may have other columns.
         """
-        for row in cursor:
+        # Iterating the cursor itself in a generator is not safe if
+        # the cursor doesn't actually buffer all the rows *anyway*. If
+        # we break from the iterating loop before exhausting all the
+        # rows, a subsequent query or close operation can lead to
+        # things like MySQL Connector/Python raising
+        # InternalError(unread results)
+        rows = cursor.fetchall()
+        for row in rows:
             tid, username, description, ext = row[:4]
             # Although the transaction interface for username and description are
             # defined as strings, this layer works with bytes. PY3.
@@ -73,7 +80,6 @@ class HistoryPreservingDatabaseIterator(DatabaseIterator):
 
 
             yield (tid, username, description, ext) + tuple(row[4:])
-
 
     def iter_transactions(self, cursor):
         """Iterate over the transaction log, newest first.

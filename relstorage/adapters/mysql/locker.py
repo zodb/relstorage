@@ -68,6 +68,8 @@ class MySQLLocker(AbstractLocker):
     def release_commit_lock(self, cursor):
         stmt = "SELECT RELEASE_LOCK(CONCAT(DATABASE(), '.commit'))"
         cursor.execute(stmt)
+        row = cursor.fetchone() # stay in sync
+        assert row
 
     def hold_pack_lock(self, cursor):
         """Try to acquire the pack lock.
@@ -84,3 +86,5 @@ class MySQLLocker(AbstractLocker):
         """Release the pack lock."""
         stmt = "SELECT RELEASE_LOCK(CONCAT(DATABASE(), '.pack'))"
         cursor.execute(stmt)
+        row = cursor.fetchone() # stay in sync
+        assert row
