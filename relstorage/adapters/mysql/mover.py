@@ -22,6 +22,7 @@ import os
 from ..mover import AbstractObjectMover
 from ..mover import metricmethod_sampled
 from .._util import query_property
+from .._util import noop_when_history_free
 
 
 def to_prepared_queries(name, queries, extension=''):
@@ -100,18 +101,14 @@ class MySQLObjectMover(AbstractObjectMover):
         """
         cursor.execute(stmt, (tid,))
 
+    @noop_when_history_free
     @metricmethod_sampled
     def update_current(self, cursor, tid):  # pylint:disable=method-hidden
-        """Update the current object pointers.
+        """
+        Update the current object pointers.
 
         tid is the integer tid of the transaction being committed.
         """
-        if not self.keep_history:
-            # nothing needs to be updated
-            # Can elide this check in the future.
-            self.update_current = lambda cursor, tid: None
-            return
-
         cursor.execute("""
         REPLACE INTO current_object (zoid, tid)
         SELECT zoid, tid FROM object_state

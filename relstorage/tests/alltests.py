@@ -30,6 +30,7 @@ def make_suite():
         'relstorage.adapters.tests.test_batch',
         'relstorage.adapters.tests.test_connmanager',
         'relstorage.adapters.tests.test_replica',
+        'relstorage.adapters.tests.test_util',
         'relstorage.cache.tests.test_cache',
         'relstorage.cache.tests.test_cache_stats',
         'relstorage.tests.test_autotemp',

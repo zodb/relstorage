@@ -22,7 +22,8 @@ import abc
 from zope.interface import implementer
 
 from .interfaces import ITransactionControl
-
+from ._util import query_property
+from ._util import noop_when_history_free
 
 @six.add_metaclass(abc.ABCMeta)
 class AbstractTransactionControl(object):
@@ -70,23 +71,19 @@ class GenericTransactionControl(AbstractTransactionControl):
     and history-preserving storages that share a common syntax.
     """
 
-    # XXX: Use the query_property for this
-    _GET_TID_HP = "SELECT MAX(tid) FROM transaction"
-    _GET_TID_HF = "SELECT MAX(tid) FROM object_state"
+
+    _get_tid_queries = (
+        "SELECT MAX(tid) FROM transaction",
+        "SELECT MAX(tid) FROM object_state"
+    )
+    _get_tid_query = query_property('_get_tid')
 
     def __init__(self, keep_history, Binary): # noqa
         self.keep_history = keep_history
         self.Binary = Binary
 
-        if keep_history:
-            self.add_transaction = self._add_transaction_preserve
-            self._get_tid_stmt = self._GET_TID_HP
-        else:
-            self.add_transaction = self._add_transaction_free
-            self._get_tid_stmt = self._GET_TID_HF
-
     def get_tid(self, cursor):
-        cursor.execute(self._get_tid_stmt)
+        cursor.execute(self._get_tid_query)
         row = cursor.fetchone()
         if not row:
             # nothing has been stored yet
@@ -95,14 +92,9 @@ class GenericTransactionControl(AbstractTransactionControl):
         tid = row[0]
         return tid if tid is not None else 0
 
-
-    def _add_transaction_free(self, cursor, tid, username, description, extension,
-                              packed=False):
-        # pylint:disable=unused-argument
-        return
-
-    def _add_transaction_preserve(self, cursor, tid, username, description, extension,
-                                  packed=False):
+    @noop_when_history_free
+    def add_transaction(self, cursor, tid, username, description, extension,
+                        packed=False):
         stmt = """
         INSERT INTO transaction
             (tid, packed, username, description, extension)
@@ -112,5 +104,3 @@ class GenericTransactionControl(AbstractTransactionControl):
         cursor.execute(stmt, (
             tid, packed, binary(username),
             binary(description), binary(extension)))
-
-    add_transaction = lambda *args: None # dynamically replaced

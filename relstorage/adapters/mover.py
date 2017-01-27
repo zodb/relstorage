@@ -18,19 +18,12 @@ from perfmetrics import Metric
 from relstorage.adapters.batch import RowBatcher
 from relstorage.adapters.interfaces import IObjectMover
 from relstorage.adapters._util import query_property as _query_property
+from relstorage.adapters._util import noop_when_history_free
 from relstorage.iter import fetchmany
 from zope.interface import implementer
 from hashlib import md5
 
 from relstorage._compat import db_binary_to_bytes
-
-def compute_md5sum(data):
-    if data is not None:
-        return md5(data).hexdigest()
-    else:
-        # George Bailey object
-        return None
-
 
 metricmethod_sampled = Metric(method=True, rate=0.1)
 
@@ -48,10 +41,11 @@ class AbstractObjectMover(object):
         self.version_detector = version_detector
         self.make_batcher = batcher_factory
 
-        if self.keep_history:
-            self._compute_md5sum = compute_md5sum
-        else:
-            self._compute_md5sum = lambda arg: None
+    @noop_when_history_free
+    def _compute_md5sum(self, data):
+        if data is None:
+            return None
+        return md5(data).hexdigest()
 
     _load_current_queries = (
         """
@@ -415,17 +409,14 @@ class AbstractObjectMover(object):
             ORDER BY zoid)
         """
 
+    @noop_when_history_free
     @metricmethod_sampled
-    def update_current(self, cursor, tid): # pylint:disable=method-hidden
-        """Update the current object pointers.
+    def update_current(self, cursor, tid):
+        """
+        Update the current object pointers.
 
         tid is the integer tid of the transaction being committed.
         """
-        if not self.keep_history:
-            # nothing needs to be updated
-            # Can elide this check in the future.
-            self.update_current = lambda cursor, tid: None
-            return
 
         stmt = self._update_current_insert_query
         cursor.execute(stmt, (tid,))
