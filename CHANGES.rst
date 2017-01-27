@@ -28,6 +28,8 @@
   <https://github.com/zopefoundation/ZODB/pull/140>`_ to older
   versions of ZODB. This improves write performance, especially in
   multi-threaded scenarios, by up to 10%. See :pr:`160`.
+- MySQL temporary tables now use the InnoDB engine instead of MyISAM.
+  See :pr:`162`.
 
 2.0.0 (2016-12-23)
 ==================
