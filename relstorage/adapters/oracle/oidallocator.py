@@ -59,4 +59,4 @@ class OracleOIDAllocator(AbstractOIDAllocator):
         stmt = "SELECT zoid_seq.nextval FROM DUAL"
         cursor.execute(stmt)
         n = cursor.fetchone()[0]
-        return range(n * 16 - 15, n * 16 + 1)
+        return self._oid_range_around(n)

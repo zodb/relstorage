@@ -20,6 +20,8 @@ if not hasattr(Connection, 'new_oid'):
     # storage. This has to be a data descriptor because
     # connection will try to reset this.
     # See https://github.com/zopefoundation/ZODB/issues/139
+    # Merged in https://github.com/zopefoundation/ZODB/pull/140,
+    # expected release in 5.1.2
 
     class NewOid(object):
 

@@ -343,10 +343,17 @@ class IOIDAllocator(Interface):
     """Allocate OIDs and control future allocation"""
 
     def new_oids(cursor):
-        """Return a sequence of new, unused OIDs."""
+        """
+        Return a new ``list`` of new, unused integer OIDs.
+
+        The list should be contiguous and must
+        be in sorted order from highest to lowest.
+        """
 
     def set_min_oid(cursor, oid):
-        """Ensure the next OID is at least the given OID."""
+        """
+        Ensure the next OID is at least the given integer OID.
+        """
 
 
 class IPackUndo(Interface):
