@@ -11,13 +11,20 @@ RUNNING_ON_TRAVIS = os.environ.get('TRAVIS')
 RUNNING_ON_APPVEYOR = os.environ.get('APPVEYOR')
 RUNNING_ON_CI = RUNNING_ON_TRAVIS or RUNNING_ON_APPVEYOR
 
+def _do_not_skip(reason): # pylint:disable=unused-argument
+    def dec(f):
+        return f
+    return dec
+
 if RUNNING_ON_CI:
     skipOnCI = unittest.skip
 else:
-    def skipOnCI(reason): # pylint:disable=unused-argument
-        def dec(f):
-            return f
-        return dec
+    skipOnCI = _do_not_skip
+
+if RUNNING_ON_APPVEYOR:
+    skipOnAppveyor = unittest.skip
+else:
+    skipOnAppveyor = _do_not_skip
 
 CACHE_SERVERS = None
 CACHE_MODULE_NAME = None
