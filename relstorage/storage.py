@@ -187,7 +187,7 @@ class RelStorage(UndoLogCompatible,
     def __init__(self, adapter, name=None, create=None,
                  options=None, cache=None, blobhelper=None,
                  # The top-level storage should use locks because
-                 # new_oid is shared among all connections. But the new_instance
+                 # new_oid is (potentially) shared among all connections. But the new_instance
                  # objects don't need to.
                  _use_locks=True,
                  **kwoptions):
@@ -399,12 +399,12 @@ class RelStorage(UndoLogCompatible,
             else:
                 log.info("Reconnected.")
 
-    def _with_store(self, f, *args, **kw):
-        """Call a function with the store connection and cursor."""
+    def __with_store(self, f):
+        """Call a function with the store cursor."""
         if self._store_cursor is None:
             self._open_store_connection()
         try:
-            return f(self._store_conn, self._store_cursor, *args, **kw)
+            return f(self._store_cursor)
         except self._adapter.connmanager.disconnected_exceptions as e:
             if self._transaction is not None:
                 # If transaction commit is in progress, it's too late
@@ -418,7 +418,7 @@ class RelStorage(UndoLogCompatible,
                 log.exception("Reconnect failed.")
                 raise
             log.info("Reconnected.")
-            return f(self._store_conn, self._store_cursor, *args, **kw)
+            return f(self._store_cursor)
 
     def zap_all(self, **kwargs):
         """Clear all objects and transactions out of the database.
@@ -1090,19 +1090,20 @@ class RelStorage(UndoLogCompatible,
         if self._is_read_only:
             raise ReadOnlyError()
         with self._lock:
-            # This method is actually called on the storage object of
-            # the DB, not the storage object of a connection for some
-            # reason. This means this method is shared among all
-            # connections using a database.
-            if self._preallocated_oids:
-                oid_int = self._preallocated_oids.pop()
-            else:
-                def f(_conn, cursor):
-                    return list(self._adapter.oidallocator.new_oids(cursor))
-                preallocated = self._with_store(f)
-                preallocated.sort(reverse=True)
-                oid_int = preallocated.pop()
+            # See comments in __init__.py. Prior to that patch and
+            # ZODB 5.1.2, this method was actually called on the
+            # storage object of the DB, not the storage object of a
+            # connection for some reason. This meant that this method
+            # (and the oid cache) was shared among all connections
+            # using a database and was called outside of a transaction
+            # (starting its own long-running transaction). The
+            # DB.new_oid() method still exists, so we still need to
+            # support that usage, hence `with_store`.
+            if not self._preallocated_oids:
+                preallocated = self.__with_store(self._adapter.oidallocator.new_oids)
                 self._preallocated_oids = preallocated
+
+            oid_int = self._preallocated_oids.pop()
             self._max_new_oid = max(self._max_new_oid, oid_int)
             return p64(oid_int)
 

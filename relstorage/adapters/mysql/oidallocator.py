@@ -41,8 +41,8 @@ class MySQLOIDAllocator(AbstractOIDAllocator):
         # cursor.connection.insert_id(), which was specific to MySQLdb)
         n = cursor.lastrowid
 
-        if n % 100 == 0:
+        if n % 1000 == 0:
             # Clean out previously generated OIDs.
             stmt = "DELETE FROM new_oid WHERE zoid < %s"
             cursor.execute(stmt, (n,))
-        return range(n * 16 - 15, n * 16 + 1)
+        return self._oid_range_around(n)

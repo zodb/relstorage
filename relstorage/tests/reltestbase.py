@@ -634,6 +634,8 @@ class GenericRelStorageTests(
         finally:
             db.close()
 
+    @util.skipOnAppveyor("Random failures")
+    # https://ci.appveyor.com/project/jamadden/relstorage/build/1.0.19/job/a1vq619n84ss1s9a
     def checkPackWhileReferringObjectChanges(self):
         # Packing should not remove objects referenced by an
         # object that changes during packing.
@@ -794,6 +796,8 @@ class GenericRelStorageTests(
         finally:
             db.close()
 
+    @util.skipOnAppveyor("Random failures")
+    # https://ci.appveyor.com/project/jamadden/relstorage/build/1.0.75/job/32uu4xdp5mubqma8
     def checkBTreesLengthStress(self):
         # BTrees.Length objects are unusual Persistent objects: they
         # set _p_independent and they frequently invoke conflict
