@@ -27,7 +27,7 @@
 - Backport `ZODB #140
   <https://github.com/zopefoundation/ZODB/pull/140>`_ to older
   versions of ZODB. This improves write performance, especially in
-  multi-threaded scenarios, by up to 10%.
+  multi-threaded scenarios, by up to 10%. See :pr:`160`.
 
 2.0.0 (2016-12-23)
 ==================
