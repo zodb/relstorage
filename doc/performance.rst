@@ -27,6 +27,8 @@ transaction, each with a size of 128), running in two concurrent
 processes. We can see substantial gains for PostgreSQL on all tests (30-40%),
 while MySQL shows modest gains for adding and reading objects (10%).
 
+.. zodbshootout -c2
+
 .. image:: perf-rs21v20-c2.png
 
 That test is useful for assessing raw throughput, but it is not very
@@ -40,6 +42,8 @@ This test reflects that, using 6 threads each working on 100 256-byte
 objects. We can again see substantial gains for PostgreSQL on adding
 and updating objects (20% and 60%, respectively), and modest gains for
 MySQL on both those tasks (10% and 7%, respectively).
+
+.. zodbshootout -c6 --threads -n 100 --test-reps 200 -s 256
 
 .. image:: perf-rs21v20-c6-n100-s256.png
 
