@@ -53,31 +53,46 @@ class MySQLObjectMover(AbstractObjectMover):
     def on_store_opened(self, cursor, restart=False):
         """Create the temporary table for storing objects"""
         if restart:
-            stmt = "DROP TEMPORARY TABLE IF EXISTS temp_store"
+            # TRUNCATE is a DDL statement, even against a temporary
+            # table, and as such does an implicit transaction commit.
+            # Normally we want to avoid that, but here its OK since
+            # this method is called between transactions, as it were.
+            # TRUNCATE benchmarks (zodbshoot add) substantially faster
+            # (10157) than a DELETE (75xx) and moderately faster than
+            # a DROP/CREATE (9457). TRUNCATE is in the replication
+            # logs like a DROP/CREATE. (DROP TEMPORARY TABLE is *not*
+            # DDL and not transaction ending).
+            stmt = "TRUNCATE TABLE temp_store"
             cursor.execute(stmt)
-            stmt = "DROP TEMPORARY TABLE IF EXISTS temp_blob_chunk"
+            stmt = "TRUNCATE TABLE temp_blob_chunk"
+            cursor.execute(stmt)
+        else:
+            # InnoDB tables benchmark much faster for concurrency=2
+            # and 6 than MyISAM tables under both MySQL 5.5 and 5.7,
+            # at least on OS X 10.12. The OS X filesystem is single
+            # threaded, though, so the effects of flushing MyISAM tables
+            # to disk on every operation are probably magnified.
+
+            # note that the md5 column is not used if self.keep_history == False.
+            stmt = """
+            CREATE TEMPORARY TABLE temp_store (
+                zoid        BIGINT UNSIGNED NOT NULL PRIMARY KEY,
+                prev_tid    BIGINT UNSIGNED NOT NULL,
+                md5         CHAR(32),
+                state       LONGBLOB
+            ) ENGINE InnoDB
+            """
             cursor.execute(stmt)
 
-        # note that the md5 column is not used if self.keep_history == False.
-        stmt = """
-        CREATE TEMPORARY TABLE temp_store (
-            zoid        BIGINT UNSIGNED NOT NULL PRIMARY KEY,
-            prev_tid    BIGINT UNSIGNED NOT NULL,
-            md5         CHAR(32),
-            state       LONGBLOB
-        ) ENGINE MyISAM
-        """
-        cursor.execute(stmt)
-
-        stmt = """
-        CREATE TEMPORARY TABLE temp_blob_chunk (
-            zoid        BIGINT UNSIGNED NOT NULL,
-            chunk_num   BIGINT UNSIGNED NOT NULL,
-                        PRIMARY KEY (zoid, chunk_num),
-            chunk       LONGBLOB
-        ) ENGINE MyISAM
-        """
-        cursor.execute(stmt)
+            stmt = """
+            CREATE TEMPORARY TABLE temp_blob_chunk (
+                zoid        BIGINT UNSIGNED NOT NULL,
+                chunk_num   BIGINT UNSIGNED NOT NULL,
+                            PRIMARY KEY (zoid, chunk_num),
+                chunk       LONGBLOB
+            ) ENGINE InnoDB
+            """
+            cursor.execute(stmt)
 
         AbstractObjectMover.on_store_opened(self, cursor, restart=restart)
 
