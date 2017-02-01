@@ -6,6 +6,42 @@ This document captures various performance metrics, comparing
 RelStorage to other ZODB storages at given points in time. The numbers
 given here cannot be compared to each other outside their own test.
 
+RelStorage 2.1a1 vs RelStorage 2.0
+==================================
+
+This section compares the performance improvements in RelStorage 2.1a1
+with RelStorage 2.0. (Hot and warm results are omitted because they
+had essentially no change in these tests.)
+
+All RelStorage schemas were history free and did not use memcache.
+ZODB was version 5.1.1, MySQL was version 5.7.17, and PostgreSQL was
+version 9.6.1. All databases and cache settings were at the default.
+The database drivers were mysqlclient-1.3.9 and psycopg2-2.6.2.
+
+
+The test suite was zodbshootout 0.6 running on CPython 2.7.13 on a 2.5Ghz
+Intel Core i7 (MacBookPro11,5) under macOS 10.12.2.
+
+First, the default test scenario for zodbshootout (1000 objects per
+transaction, each with a size of 128), running in two concurrent
+processes. We can see substantial gains for PostgreSQL on all tests (30-40%),
+while MySQL shows modest gains for adding and reading objects (10%).
+
+.. image:: perf-rs21v20-c2.png
+
+That test is useful for assessing raw throughput, but it is not very
+representative of most real-world uses. Studies of some production
+databases show that most transactions consist of 100 or fewer objects
+that are often around 256 bytes in size. (Naturally these numbers can
+vary quite a bit depending on application.) Also, many applications
+use in-process concurrency, whether threads or gevent.
+
+This test reflects that, using 6 threads each working on 100 256-byte
+objects. We can again see substantial gains for PostgreSQL on adding
+and updating objects (20% and 60%, respectively), and modest gains for
+MySQL on both those tasks (10% and 7%, respectively).
+
+.. image:: perf-rs21v20-c6-n100-s256.png
 
 RelStorage 2.0
 ==============
