@@ -3,7 +3,7 @@
 =========
 
 
-2.1a1 (unreleased)
+2.1a1 (2017-02-01)
 ==================
 
 - 3.6.0 final release is tested on CI servers.
