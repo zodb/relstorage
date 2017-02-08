@@ -1073,6 +1073,9 @@ class RelStorage(UndoLogCompatible,
         if self.blobhelper is not None:
             self.blobhelper.abort()
 
+    def afterCompletion(self):
+        self._rollback_load_connection()
+
     def lastTransaction(self):
         with self._lock:
             if self._ltid == z64 and self._prev_polled_tid is None:

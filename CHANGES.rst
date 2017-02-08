@@ -6,7 +6,15 @@
 2.1a2 (unreleased)
 ==================
 
-- Nothing changed yet.
+- Implemented the storage ``afterCompletion`` method, which allows
+  RelStorage storages to be notified of transaction endings for
+  transactions that don't call the two-phase commit API.  This allows
+  resources to be used more efficiently because it prevents RDBMS
+  transactions from being held open.
+
+  Fixes: https://github.com/zodb/relstorage/issues/147
+
+  (At least for ZODB 5.2.)
 
 
 2.1a1 (2017-02-01)
