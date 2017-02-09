@@ -97,6 +97,13 @@ class _DummyLock(object):
     def release(self):
         return
 
+def optional_interfaces():
+    try:
+        from ZODB.interfaces import IMVCCAfterCompletionStorage
+        return (IMVCCAfterCompletionStorage,)
+    except ImportError:
+        return ()
+
 @implementer(ZODB.interfaces.IStorage,
              ZODB.interfaces.IMVCCStorage,
              ZODB.interfaces.IMultiCommitStorage,
@@ -104,7 +111,8 @@ class _DummyLock(object):
              ZODB.interfaces.IStorageIteration,
              ZODB.interfaces.IStorageUndoable,
              ZODB.interfaces.IBlobStorage,
-             ZODB.interfaces.IBlobStorageRestoreable)
+             ZODB.interfaces.IBlobStorageRestoreable,
+             *optional_interfaces())
 class RelStorage(UndoLogCompatible,
                  ConflictResolution.ConflictResolvingStorage):
     """Storage to a relational database, based on invalidation polling"""
@@ -1072,6 +1080,15 @@ class RelStorage(UndoLogCompatible,
             self._adapter.locker.release_commit_lock(self._store_cursor)
         if self.blobhelper is not None:
             self.blobhelper.abort()
+
+    def afterCompletion(self):
+        # Note that this method exists mainly to deal with read-only
+        # transactions that don't go through 2-phase commit (although
+        # it's called for all transactions).  For this reason, we only
+        # have to roll back the load connection.  The store connection
+        # is completed during normal write-transaction commit or
+        # abort.
+        self._rollback_load_connection()
 
     def lastTransaction(self):
         with self._lock:
