@@ -40,9 +40,12 @@ class OracleObjectMover(AbstractObjectMover):
     # This is assigned to by the adapter.
     inputsizes = None
 
-    _move_from_temp_hp_insert_query = format_to_named(AbstractObjectMover._move_from_temp_hp_insert_query)
-    _move_from_temp_hf_insert_query = format_to_named(AbstractObjectMover._move_from_temp_hf_insert_query)
-    _move_from_temp_copy_blob_query = format_to_named(AbstractObjectMover._move_from_temp_copy_blob_query)
+    _move_from_temp_hp_insert_query = format_to_named(
+        AbstractObjectMover._move_from_temp_hp_insert_query)
+    _move_from_temp_hf_insert_query = format_to_named(
+        AbstractObjectMover._move_from_temp_hf_insert_query)
+    _move_from_temp_copy_blob_query = format_to_named(
+        AbstractObjectMover._move_from_temp_copy_blob_query)
 
     _load_current_queries = _to_oracle_ordered(AbstractObjectMover._load_current_queries)
 

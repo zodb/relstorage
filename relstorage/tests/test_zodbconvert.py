@@ -48,14 +48,20 @@ class AbstractZODBConvertBase(unittest.TestCase):
         for i in self._to_close:
             i.close()
         self._to_close = []
-        # XXX: On PyPy with psycopg2cffi, running these two tests will result
-        # in a hang: HPPostgreSQLDestZODBConvertTests.test_clear_empty_dest HPPostgreSQLDestZODBConvertTests.test_clear_full_dest
-        # test_clear_full_dest will hang in the zodbconvert call to zap_all(), in the C code of the
-        # PG driver. Presumably some connection with some lock got left open and was preventing
-        # the TRUNCATE statements from taking out a lock. The same tests do not hang with psycopg2cffi on
-        # C Python. Manually running the gc (twice!) here fixes the issue. Note that this only started when
-        # we wrapped the destination storage in ZlibStorage (which copies methods into its own dict) so there's
-        # something weird going on with the GC. Seen in PyPy 2.5.0 and 5.3.
+        # XXX: On PyPy with psycopg2cffi, running these two tests will
+        # result in a hang:
+        # HPPostgreSQLDestZODBConvertTests.test_clear_empty_dest
+        # HPPostgreSQLDestZODBConvertTests.test_clear_full_dest
+        # test_clear_full_dest will hang in the zodbconvert call to
+        # zap_all(), in the C code of the PG driver. Presumably some
+        # connection with some lock got left open and was preventing
+        # the TRUNCATE statements from taking out a lock. The same
+        # tests do not hang with psycopg2cffi on C Python. Manually
+        # running the gc (twice!) here fixes the issue. Note that this
+        # only started when we wrapped the destination storage in
+        # ZlibStorage (which copies methods into its own dict) so
+        # there's something weird going on with the GC. Seen in PyPy
+        # 2.5.0 and 5.3.
         gc.collect()
         gc.collect()
 
@@ -229,10 +235,14 @@ class ZlibWrappedZODBConvertTests(FSZODBConvertTests):
         return "%import zc.zlibstorage\n"
 
     def _cfg_source(self):
-        return "\n<zlibstorage source>" + super(ZlibWrappedZODBConvertTests, self)._cfg_source() + "</zlibstorage>"
+        return ("\n<zlibstorage source>"
+                + super(ZlibWrappedZODBConvertTests, self)._cfg_source()
+                + "</zlibstorage>")
 
     def _cfg_dest(self):
-        return "\n<zlibstorage destination>" + super(ZlibWrappedZODBConvertTests, self)._cfg_dest() + "</zlibstorage>"
+        return ("\n<zlibstorage destination>"
+                + super(ZlibWrappedZODBConvertTests, self)._cfg_dest()
+                + "</zlibstorage>")
 
     def _create_src_storage(self):
         return ZlibStorage(super(ZlibWrappedZODBConvertTests, self)._create_src_storage())

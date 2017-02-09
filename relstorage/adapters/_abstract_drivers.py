@@ -32,7 +32,8 @@ def _select_driver(options, driver_options):
         raise ImportError("Unable to use the driver '%s' for the database '%s'."
                           " Available drivers are: %s."
                           " Verify the driver name and that the right packages are installed."
-                          % (name, driver_options.database_type, list(driver_options.driver_map.keys())))
+                          % (name, driver_options.database_type,
+                             list(driver_options.driver_map.keys())))
 
 
 _base_disconnected_exceptions = (ReplicaClosedException,)

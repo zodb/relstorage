@@ -217,7 +217,8 @@ def __set_mod_time(new_path, persistent_cache):
 
     if mod_time and mod_time > 0:
         # Older PyPy on Linux raises an OSError/Errno22 if the mod_time is less than 0
-        # and is a float (https://bitbucket.org/pypy/pypy/issues/2408/cpython-difference-osutime-path-11-11)
+        # and is a float
+        # (https://bitbucket.org/pypy/pypy/issues/2408/cpython-difference-osutime-path-11-11)
         logger.debug("Setting date of %r to cache time %s (current time %s)",
                      new_path, mod_time, time.time())
         os.utime(new_path, (mod_time, mod_time))

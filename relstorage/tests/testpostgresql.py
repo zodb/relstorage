@@ -116,10 +116,14 @@ class _PgSQLCfgMixin(object):
                 </postgresql>
         """
 
-class HPPostgreSQLDestZODBConvertTests(UsePostgreSQLAdapter, _PgSQLCfgMixin, AbstractRSDestZodbConvertTests):
+class HPPostgreSQLDestZODBConvertTests(UsePostgreSQLAdapter,
+                                       _PgSQLCfgMixin,
+                                       AbstractRSDestZodbConvertTests):
     pass
 
-class HPPostgreSQLSrcZODBConvertTests(UsePostgreSQLAdapter, _PgSQLCfgMixin, AbstractRSSrcZodbConvertTests):
+class HPPostgreSQLSrcZODBConvertTests(UsePostgreSQLAdapter,
+                                      _PgSQLCfgMixin,
+                                      AbstractRSSrcZodbConvertTests):
     pass
 
 class HPPostgreSQLTests(UsePostgreSQLAdapter, HistoryPreservingRelStorageTests,

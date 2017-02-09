@@ -80,7 +80,8 @@ def main(argv=None):
     parser.add_argument(
         "--clear", dest="clear", action="store_true",
         default=False,
-        help="Clear the contents of the destination storage before copying. Only works if the destination is a RelStorage."
+        help="Clear the contents of the destination storage before copying."
+             " Only works if the destination is a RelStorage."
              " WARNING: use this only if you are certain the destination has no useful data.")
     parser.add_argument(
         "--incremental", dest="incremental", action="store_true",
@@ -110,9 +111,10 @@ def main(argv=None):
     log.info("Storages opened successfully.")
 
     if options.incremental:
-        assert hasattr(destination, 'lastTransaction'), ("Error: no API is known for determining the last committed "
-                                                         "transaction of the destination storage. Aborting "
-                                                         "conversion.")
+        assert hasattr(destination, 'lastTransaction'), (
+            "Error: no API is known for determining the last committed "
+            "transaction of the destination storage. Aborting "
+            "conversion.")
 
         if not storage_has_data(destination):
             log.warning("Destination empty, start conversion from the beginning.")

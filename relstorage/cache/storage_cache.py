@@ -195,7 +195,10 @@ class StorageCache(object):
 
         This is usually memcache connections if they're in use.
         """
-        clients = self.clients_local_first if self.clients_local_first is not _UsedAfterRelease else ()
+        clients = ()
+        if self.clients_local_first is not _UsedAfterRelease:
+            clients = self.clients_local_first
+
         for client in clients:
             client.disconnect_all()
 

@@ -56,7 +56,8 @@ class PostgreSQLObjectMover(AbstractObjectMover):
     _detect_conflict_query = 'EXECUTE detect_conflicts'
 
     on_load_opened_statement_names = ('_prepare_load_current_query',)
-    on_store_opened_statement_names = on_load_opened_statement_names + ('_prepare_detect_conflict_query',)
+    on_store_opened_statement_names = on_load_opened_statement_names + (
+        '_prepare_detect_conflict_query',)
 
     # Sadly we can't PREPARE this statement; apparently it holds a
     # lock on OBJECT_STATE that interferes with taking the commit lock.

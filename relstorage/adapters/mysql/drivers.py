@@ -148,7 +148,8 @@ else:
         # See https://github.com/zodb/relstorage/issues/155
         __name__ = "MySQL Connector/Python"
 
-        disconnected_exceptions, close_exceptions, lock_exceptions = _standard_exceptions(mysql.connector)
+        disconnected_exceptions, close_exceptions, lock_exceptions = _standard_exceptions(
+            mysql.connector)
         use_replica_exceptions = (mysql.connector.OperationalError,)
         Binary = staticmethod(mysql.connector.Binary)
 
@@ -348,8 +349,9 @@ else:
                     # (if the blob chunk size was configured too high), or it can
                     # happen for aggregate queries (the dbiter.iter_objects query is
                     # particularly common cause of this.) Retrying won't help.
-                    raise TransactionTooLargeError('umysql got results bigger than 16MB.'
-                                                   " Reduce the server's max_allowed_packet setting.")
+                    raise TransactionTooLargeError(
+                        "umysql got results bigger than 16MB."
+                        " Reduce the server's max_allowed_packet setting.")
                 raise
             except Exception: # pragma: no cover
                 self.__debug_lock(sql, True)

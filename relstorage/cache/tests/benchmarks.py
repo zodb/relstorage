@@ -261,7 +261,8 @@ class StorageTraceSimulator(object):
         records = []
         with self._open_file(filename) as f:
             for line in f:
-                line = line.decode('ascii') if isinstance(line, bytes) and str is not bytes else line
+                if isinstance(line, bytes) and str is not bytes:
+                    line = line.decode('ascii')
                 fields = [x.strip() for x in line.split(",")]
                 fields[0] = int(fields[0]) # asu
                 try:
@@ -284,10 +285,12 @@ class StorageTraceSimulator(object):
 
     def _report_one(self, stats, f, cache_local_mb, begin_time, end_time):
         stats['time'] = end_time - begin_time
-        print("{:15s} {:>5s} {:>7s} {:>7s} {:>5s}".format("File", "Limit", "Size", "Time", "Hits"))
-        print("{:15s} {:5d} {:7.2f} {:7.2f} {:.3f}".format(os.path.basename(f), cache_local_mb,
-                                                           stats['bytes'] / 1024 / 1024, stats['time'],
-                                                           stats['ratio']))
+        print("{:15s} {:>5s} {:>7s} {:>7s} {:>5s}".format(
+            "File", "Limit", "Size", "Time", "Hits"))
+        print("{:15s} {:5d} {:7.2f} {:7.2f} {:.3f}".format(
+            os.path.basename(f), cache_local_mb,
+            stats['bytes'] / 1024 / 1024, stats['time'],
+            stats['ratio']))
 
     def _simulate_local(self, records, cache_local_mb, f):
         from relstorage.cache.local_client import LocalClient
@@ -415,7 +418,8 @@ class StorageTraceSimulator(object):
 
             # Poll after a certain number of operations, or of we know we would get a
             # conflict.
-            if current_tid_int - cache.bm_current_tid >= TRANSACTION_SIZE or oid_int in cache.bm_changes:
+            if (current_tid_int - cache.bm_current_tid >= TRANSACTION_SIZE
+                    or oid_int in cache.bm_changes):
                 cache.after_poll(None, cache.bm_current_tid, current_tid_int,
                                  cache.bm_changes.items())
                 cache.bm_current_tid = current_tid_int
@@ -467,9 +471,12 @@ class StorageTraceSimulator(object):
                     stats = meth(records, size, f)
                     all_stats.append((f, size, stats))
 
-            print("{:15s} {:>5s} {:>7s} {:>7s} {:>5s}".format("File", "Limit", "Size", "Time", "Hits"))
+            print("{:15s} {:>5s} {:>7s} {:>7s} {:>5s}".format(
+                "File", "Limit", "Size", "Time", "Hits"))
             for f, size, stats in all_stats:
-                print("{:15s} {:5d} {:7.2f} {:7.2f} {:.3f}".format(os.path.basename(f), size, stats['bytes'] / 1024 / 1024, stats['time'], stats['ratio']))
+                print("{:15s} {:5d} {:7.2f} {:7.2f} {:.3f}".format(
+                    os.path.basename(f), size, stats['bytes'] / 1024 / 1024,
+                    stats['time'], stats['ratio']))
 
         else:
             size = int(sys.argv[3])

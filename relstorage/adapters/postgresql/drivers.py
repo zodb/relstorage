@@ -82,7 +82,8 @@ else: # pragma: no cover
     @implementer(IDBDriver)
     class Psycopg2cffiDriver(object):
         __name__ = 'psycopg2cffi'
-        disconnected_exceptions, close_exceptions, lock_exceptions = _standard_exceptions(psycopg2cffi)
+        disconnected_exceptions, close_exceptions, lock_exceptions = _standard_exceptions(
+            psycopg2cffi)
         use_replica_exceptions = (psycopg2cffi.OperationalError,)
         Binary = psycopg2cffi.Binary
         connect = _create_connection(psycopg2cffi)
