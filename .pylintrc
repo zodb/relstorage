@@ -49,7 +49,7 @@ disable=wrong-import-position,
 
 [FORMAT]
 # duplicated from setup.cfg
-max-line-length=160
+max-line-length=100
 
 [MISCELLANEOUS]
 # List of note tags to take in consideration, separated by a comma.

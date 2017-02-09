@@ -338,7 +338,10 @@ class CacheRing(object):
             # Treat it as a simple hit
             return self.on_hit(entry)
 
-        rejected_items = _lru_update_mru(self.cffi_cache, self.ring_home, entry.cffi_ring_node, old_size, new_size)
+        rejected_items = _lru_update_mru(self.cffi_cache,
+                                         self.ring_home,
+                                         entry.cffi_ring_node,
+                                         old_size, new_size)
 
         if not rejected_items.r_next:
             # Nothing rejected.

@@ -66,13 +66,14 @@ del _f
 
 
 def random_file(size, fd):
-    """Create a random data of at least the given size, writing to fd.
+    """
+    Create a random data of at least the given size, writing to fd.
 
-    See http://jessenoller.com/2008/05/30/making-re-creatable-random-data-files-really-fast-in-python/
+    See
+    http://jessenoller.com/2008/05/30/making-re-creatable-random-data-files-really-fast-in-python/
     for the technique used.
 
     Returns the md5 sum of the file contents for easy comparison.
-
     """
     def fdata():
         seed = "1092384956781341341234656953214543219"
