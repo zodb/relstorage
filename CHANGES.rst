@@ -12,7 +12,7 @@
   resources to be used more efficiently because it prevents RDBMS
   transactions from being held open.
 
-  Fixes: https://github.com/zodb/relstorage/issues/147
+  Fixes: :issue:`147`
 
   (At least for ZODB 5.2.)
 
