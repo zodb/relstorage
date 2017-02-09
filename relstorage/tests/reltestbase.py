@@ -852,12 +852,20 @@ class GenericRelStorageTests(
         # outside of 2-phase commit is otherise equivalent to calling
         # tpc_abort.
         self._storage = self.make_storage(revert_when_stale=False)
+
         import mock
         with mock.patch.object(
             self._storage, '_rollback_load_connection') as rb:
             self._storage.afterCompletion()
             rb.assert_called_with()
 
+        try:
+            from ZODB.interfaces import IMVCCAfterCompletionStorage
+        except ImportError:
+            pass
+        else:
+            self.assertTrue(
+                IMVCCAfterCompletionStorage.providedBy(self._storage))
 
 from .test_zodbconvert import FSZODBConvertTests
 
