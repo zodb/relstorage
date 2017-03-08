@@ -18,7 +18,7 @@ to zope.conf and set the 'cache-servers' parameter as well.
 """
 
 import pylibmc
-from pylibmc import Error as MemcachedError
+from pylibmc import Error as MemcachedError # pylint:disable=no-name-in-module
 import logging
 from functools import wraps
 
@@ -47,7 +47,7 @@ class Client(object):
     def __init__(self, servers):
         self._client = pylibmc.Client(servers, binary=True)
         self._client.set_behaviors(self.behaviors)
-        if pylibmc.support_compression:
+        if pylibmc.support_compression: # pylint:disable=no-member
             self.min_compress_len = 1000
 
     @_catching
