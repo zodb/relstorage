@@ -12,10 +12,10 @@
   resources to be used more efficiently because it prevents RDBMS
   transactions from being held open.
 
-  Fixes: :issue:`147`
+  Fixes: :issue:`147` (At least for ZODB 5.2.)
 
-  (At least for ZODB 5.2.)
-
+- Oracle: Fix two queries that got broken due to the performance work
+  in 2.1a1.
 
 2.1a1 (2017-02-01)
 ==================

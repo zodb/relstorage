@@ -281,15 +281,17 @@ class AbstractObjectMover(object):
     def restore(self, cursor, batcher, oid, tid, data):
         raise NotImplementedError()
 
+    # careful with USING clause in a join: Oracle doesn't allow such
+    # columns to have a prefix.
     _detect_conflict_queries = (
         """
-        SELECT temp_store.zoid, current_object.tid, temp_store.prev_tid
+        SELECT zoid, current_object.tid, temp_store.prev_tid
         FROM temp_store
                 JOIN current_object USING (zoid)
         WHERE temp_store.prev_tid != current_object.tid
         """,
         """
-        SELECT temp_store.zoid, object_state.tid, temp_store.prev_tid
+        SELECT zoid, object_state.tid, temp_store.prev_tid
         FROM temp_store
                 JOIN object_state USING (zoid)
         WHERE temp_store.prev_tid != object_state.tid

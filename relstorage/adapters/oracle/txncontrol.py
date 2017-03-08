@@ -16,6 +16,7 @@
 from __future__ import absolute_import
 
 from ..txncontrol import GenericTransactionControl
+from ..txncontrol import noop_when_history_free
 
 
 import logging
@@ -42,8 +43,9 @@ class OracleTransactionControl(GenericTransactionControl):
             conn.prepare()
         return '-'
 
-    def _add_transaction_preserve(self, cursor, tid, username, description, extension,
-                                  packed=False):
+    @noop_when_history_free
+    def add_transaction(self, cursor, tid, username, description, extension,
+                        packed=False):
         stmt = """
         INSERT INTO transaction
             (tid, packed, username, description, extension)

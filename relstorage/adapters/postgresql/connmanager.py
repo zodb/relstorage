@@ -52,6 +52,7 @@ class Psycopg2ConnectionManager(AbstractConnectionManager):
         """Open a database connection and return (conn, cursor)."""
         if isolation is None:
             isolation = self.isolation_read_committed
+
         if replica_selector is None:
             replica_selector = self.replica_selector
 

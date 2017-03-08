@@ -71,7 +71,6 @@ class GenericTransactionControl(AbstractTransactionControl):
     and history-preserving storages that share a common syntax.
     """
 
-
     _get_tid_queries = (
         "SELECT MAX(tid) FROM transaction",
         "SELECT MAX(tid) FROM object_state"
