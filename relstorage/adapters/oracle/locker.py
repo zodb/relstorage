@@ -59,6 +59,8 @@ class OracleLocker(AbstractLocker):
 
         # Alternative:
         #cursor.execute("LOCK TABLE commit_lock IN EXCLUSIVE MODE")
+        # However, this is known to produce slower results. See
+        # https://groups.google.com/d/msg/zodb/IzQoClP5Hgc/8o28J4PkDQAJ
 
         if ensure_current:
             if self.keep_history:

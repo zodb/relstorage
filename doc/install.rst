@@ -38,8 +38,8 @@ database.
 
 
 On CPython2, install psycopg2 2.6.1+, mysqlclient 1.3.7+, or cx_Oracle
-5.2+; PyMySQL 0.7, MySQL Connector/Python 2.1.5 and umysql are also
-known to work as is pg8000.
+5.2+ (but use caution with 5.2.1+); PyMySQL 0.7, MySQL
+Connector/Python 2.1.5 and umysql are also known to work as is pg8000.
 
 For CPython3, install psycopg2, mysqlclient or cx_Oracle;
 PyMySQL, MySQL Connector/Python  and pg8000 are also known to work.
@@ -73,7 +73,7 @@ bold** are the recommended adapter.
 mysqlclient, MySQL Connector/Python (without its C extension), pg8000
 and umysql are compatible (cooperative) with gevent.
 
-For additional details, see the "driver" section for each database in
+For additional details and warnings, see the "driver" section for each database in
 :doc:`db-specific-options`.
 
 Memcache Integration

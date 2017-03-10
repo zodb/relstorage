@@ -37,3 +37,9 @@ Q: Can RelStorage replace ZRS (Zope Replication Services)?
 Q: How do I set up an environment to run the RelStorage tests?
 
     A: See :doc:`developing`.
+
+Q: Why do I get ``DatabaseError: ORA-03115: unsupported network
+datatype or representation`` when using Oracle?
+
+    See the "driver" section of :ref:`oracle-adapter-options` for more
+    information.
