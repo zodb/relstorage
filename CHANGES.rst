@@ -17,6 +17,9 @@
 - Oracle: Fix two queries that got broken due to the performance work
   in 2.1a1.
 
+- MySQL: Workaround a rare issue that could lead to a ``TypeError``
+  when getting new OIDs. See :issue:`173`.
+
 2.1a1 (2017-02-01)
 ==================
 

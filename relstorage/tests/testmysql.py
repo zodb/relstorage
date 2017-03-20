@@ -174,6 +174,18 @@ class HFMySQLToFile(UseMySQLAdapter, HistoryFreeToFileStorage):
 class HFMySQLFromFile(UseMySQLAdapter, HistoryFreeFromFileStorage):
     pass
 
+class TestOIDAllocator(unittest.TestCase):
+
+    def test_bad_rowid(self):
+        from relstorage.adapters.mysql.oidallocator import MySQLOIDAllocator
+        class Cursor(object):
+            def execute(self, s):
+                pass
+            lastrowid = None
+
+        oids = MySQLOIDAllocator(KeyError)
+        self.assertRaises(KeyError, oids.new_oids, Cursor())
+
 db_names = {
     'data': base_dbname,
     '1': base_dbname,
@@ -203,6 +215,7 @@ def test_suite():
 
     suite.addTest(unittest.makeSuite(HPMySQLDestZODBConvertTests))
     suite.addTest(unittest.makeSuite(HPMySQLSrcZODBConvertTests))
+    suite.addTest(unittest.makeSuite(TestOIDAllocator))
 
     from relstorage.tests.blob.testblob import storage_reusable_suite
     from relstorage.tests.util import shared_blob_dir_choices
