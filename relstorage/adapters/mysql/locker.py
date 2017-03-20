@@ -58,6 +58,9 @@ class MySQLLocker(AbstractLocker):
             # This has been observed under certain database drivers and concurrency loads,
             # specifically gevent with umysqldb and high concurrency. It's not clear what the cause
             # is, so lets at least raise a specific message.
+            # It's often TypeError("'NoneType' object has no attribute '__getitem__'",),
+            # meaning that cursor.fetchone() returned nothing. This may be related to
+            # cursor.lastrowid being None in OID allocator sometimes.
             raise CommitLockQueryFailedError("The commit lock query failed: %s" % repr(e))
 
         if nowait and locked in (0, 1):
