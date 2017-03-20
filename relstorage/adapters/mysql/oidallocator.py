@@ -26,6 +26,14 @@ from perfmetrics import metricmethod
 @implementer(IOIDAllocator)
 class MySQLOIDAllocator(AbstractOIDAllocator):
 
+    def __init__(self, disconnected_exception):
+        """
+        :param type disconnected_exception: The exception to raise when
+           we get an invalid value for ``lastrowid``.
+        """
+        AbstractOIDAllocator.__init__(self)
+        self.disconnected_exception = disconnected_exception
+
     def set_min_oid(self, cursor, oid):
         """Ensure the next OID is at least the given OID."""
         n = (oid + 15) // 16
@@ -40,6 +48,11 @@ class MySQLOIDAllocator(AbstractOIDAllocator):
         # supported drivers implement it. (In the past we used
         # cursor.connection.insert_id(), which was specific to MySQLdb)
         n = cursor.lastrowid
+
+        # At least in one setup (gevent/umysqldb/pymysql/mysql 5.5)
+        # we have observed cursor.lastrowid to be None.
+        if n is None:
+            raise self.disconnected_exception("Invalid return for lastrowid")
 
         if n % 1000 == 0:
             # Clean out previously generated OIDs.
