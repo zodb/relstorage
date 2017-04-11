@@ -14,11 +14,11 @@ supported platform (OS X, Windows or "manylinx"), you can get a
 pre-built binary wheel. If you install from source or on a different
 platform, you will need to have a functioning C compiler.
 
-RelStorage requires a modern version of ZODB; it is tested with ZODB
-4.3 and 5.0 but *might* work with ZODB as old as 3.10. If you need to
-use an older version of ZODB, install RelStorage 1.6. Likewise, if
-you need Python 2.6 support, install RelStorage 1.6 (note that 1.6
-*does not* run on Python 3 or PyPy).
+RelStorage requires a modern version of ZODB and ZEO; it is tested
+with ZODB 4.4 and 5.x and ZEO 4.3 and 5.x. If you need to use an older
+version of ZODB/ZEO, install RelStorage 1.6. Likewise, if you need
+Python 2.6 support, install RelStorage 1.6 (note that 1.6 *does not*
+run on Python 3 or PyPy).
 
 Database Adapter
 ================

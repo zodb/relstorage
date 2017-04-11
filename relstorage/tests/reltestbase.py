@@ -256,6 +256,8 @@ class GenericRelStorageTests(
         finally:
             db.close()
 
+    @util.skipOnZODB4("ZODB/tests/StorageTestBase"
+                      "expects different results from handle_all_serials")
     def checkResolveConflictBetweenConnections(self):
         # Verify that conflict resolution works between storage instances
         # bound to connections.

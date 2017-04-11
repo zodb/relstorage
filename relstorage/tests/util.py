@@ -1,7 +1,7 @@
 import os
 import platform
 import unittest
-
+import pkg_resources
 
 # ZODB >= 3.9.  The blob directory can be a private cache.
 shared_blob_dir_choices = (False, True)
@@ -10,6 +10,9 @@ support_blob_cache = True
 RUNNING_ON_TRAVIS = os.environ.get('TRAVIS')
 RUNNING_ON_APPVEYOR = os.environ.get('APPVEYOR')
 RUNNING_ON_CI = RUNNING_ON_TRAVIS or RUNNING_ON_APPVEYOR
+
+# pylint:disable=no-member
+RUNNING_ON_ZODB4 = pkg_resources.get_distribution('ZODB').version[0] == '4'
 
 def _do_not_skip(reason): # pylint:disable=unused-argument
     def dec(f):
@@ -25,6 +28,11 @@ if RUNNING_ON_APPVEYOR:
     skipOnAppveyor = unittest.skip
 else:
     skipOnAppveyor = _do_not_skip
+
+if RUNNING_ON_ZODB4:
+    skipOnZODB4 = unittest.skip
+else:
+    skipOnZODB4 = _do_not_skip
 
 CACHE_SERVERS = None
 CACHE_MODULE_NAME = None
