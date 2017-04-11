@@ -21,11 +21,6 @@ from ..stats import AbstractStats
 
 class PostgreSQLStats(AbstractStats):
 
-    def get_object_count(self):
-        """Returns the number of objects in the database"""
-        # do later
-        return 0
-
     def get_db_size(self):
         """Returns the approximate size of the database in bytes"""
         def callback(_conn, cursor):

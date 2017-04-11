@@ -20,6 +20,10 @@
 - MySQL: Workaround a rare issue that could lead to a ``TypeError``
   when getting new OIDs. See :issue:`173`.
 
+- The ``len`` of a RelStorage instance now correctly reflects the
+  approximate number of objects in the database. Previously it
+  returned a hardcoded 0. See :issue:`178`.
+
 2.1a1 (2017-02-01)
 ==================
 

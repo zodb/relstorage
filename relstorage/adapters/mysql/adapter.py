@@ -160,6 +160,7 @@ class MySQLAdapter(object):
 
         self.stats = MySQLStats(
             connmanager=self.connmanager,
+            keep_history=self.keep_history
         )
 
     _get_latest_tid_queries = (

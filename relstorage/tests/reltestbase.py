@@ -149,6 +149,21 @@ class GenericRelStorageTests(
         ReadOnlyStorage.ReadOnlyStorage,
     ):
 
+    def checkLen(self):
+        # Override the version from BasicStorage because we
+        # actually do guarantee to keep track of the counts.
+
+        # len(storage) reports the number of objects.
+        # check it is zero when empty
+        self.assertEqual(len(self._storage), 0)
+        # check it is correct when the storage contains two object.
+        # len may also be zero, for storages that do not keep track
+        # of this number
+        self._dostore(data=PersistentMapping())
+        self._dostore(data=PersistentMapping())
+        self.assertEqual(len(self._storage), 2)
+
+
     def checkDropAndPrepare(self):
         # Under PyPy, this test either takes a very long time (PyMySQL)
         # or hangs (psycopg2cffi) longer than I want to wait (10+ minutes).
