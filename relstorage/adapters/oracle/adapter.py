@@ -158,6 +158,7 @@ class OracleAdapter(object):
 
         self.stats = OracleStats(
             connmanager=self.connmanager,
+            keep_history=self.keep_history
         )
 
     def new_instance(self):

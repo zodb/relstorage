@@ -17,16 +17,30 @@
 import abc
 import six
 
+from ._util import query_property
+
 @six.add_metaclass(abc.ABCMeta)
 class AbstractStats(object):
 
-    def __init__(self, connmanager):
+    def __init__(self, connmanager, keep_history):
         self.connmanager = connmanager
+        self.keep_history = keep_history
+
+    _get_object_count_queries = (
+        "SELECT COUNT(*) FROM current_object",
+        "SELECT COUNT(*) FROM object_state"
+    )
+
+    _get_object_count_query = query_property('_get_object_count')
 
     def get_object_count(self):
-        """Returns the number of objects in the database"""
-        # do later
-        return 0
+        """Returns the approximate number of objects in the database"""
+        conn, cursor = self.connmanager.open()
+        try:
+            cursor.execute(self._get_object_count_query)
+            return cursor.fetchone()[0]
+        finally:
+            self.connmanager.close(conn, cursor)
 
     @abc.abstractmethod
     def get_db_size(self):

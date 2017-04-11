@@ -135,6 +135,7 @@ class PostgreSQLAdapter(object):
 
         self.stats = PostgreSQLStats(
             connmanager=self.connmanager,
+            keep_history=self.keep_history
         )
 
     _get_latest_tid_queries = (
