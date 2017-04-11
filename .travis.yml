@@ -30,7 +30,10 @@ matrix:
     - python: 3.5
       env: ENV=mysql
     - python: 2.7
-      env: ENV=mysql
+      env:
+        - ENV=mysql
+        - OLDZODB=true
+
     - python: pypy-5.4.1
       env: ENV=mysql
 
@@ -82,6 +85,7 @@ install:
   - if [[ $TRAVIS_PYTHON_VERSION != pypy* ]]; then pip install -U pylibmc cffi; fi
   - pip install -U -e ".[test]"
   - .travis/setup-$ENV.sh
+  - if [[ $OLDZODB == true ]]; then .travis/setup-oldzodb.sh; fi
 
 cache: pip
 
