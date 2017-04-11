@@ -12,7 +12,14 @@ RUNNING_ON_APPVEYOR = os.environ.get('APPVEYOR')
 RUNNING_ON_CI = RUNNING_ON_TRAVIS or RUNNING_ON_APPVEYOR
 
 # pylint:disable=no-member
-RUNNING_ON_ZODB4 = pkg_resources.get_distribution('ZODB').version[0] == '4'
+zodb_dist = pkg_resources.get_distribution('ZODB')
+zodb_dist_version = pkg_resources.parse_version(zodb_dist.version)
+RUNNING_ON_ZODB4 = zodb_dist.version[0] == '4'
+
+# Unfortunately there's no way to detect this short of running the
+# code and getting the runtime warning. So we do version detection
+# instead.
+SUPPORTS_BLOB_PERMS = zodb_dist_version < pkg_resources.parse_version('5.2.2')
 
 def _do_not_skip(reason): # pylint:disable=unused-argument
     def dec(f):
@@ -33,6 +40,7 @@ if RUNNING_ON_ZODB4:
     skipOnZODB4 = unittest.skip
 else:
     skipOnZODB4 = _do_not_skip
+
 
 CACHE_SERVERS = None
 CACHE_MODULE_NAME = None
