@@ -328,6 +328,9 @@ class AbstractObjectMover(object):
         """
         cursor.execute(stmt, (prev_tid, md5sum, self.Binary(data), oid))
 
+    # Subclasses may override any of these queries if there is a
+    # more optimal form.
+
     _move_from_temp_hp_insert_query = """
     INSERT INTO object_state
       (zoid, tid, prev_tid, md5, state_size, state)
@@ -346,6 +349,11 @@ class AbstractObjectMover(object):
     INSERT INTO blob_chunk (zoid, tid, chunk_num, chunk)
     SELECT zoid, %s, chunk_num, chunk
     FROM temp_blob_chunk
+    """
+
+    _move_from_temp_hf_delete_blob_chunk_query = """
+    DELETE FROM blob_chunk
+    WHERE zoid IN (SELECT zoid FROM temp_store)
     """
 
     def _move_from_temp_object_state(self, cursor, tid):
@@ -380,11 +388,7 @@ class AbstractObjectMover(object):
             self._move_from_temp_object_state(cursor, tid)
 
             if txn_has_blobs:
-                stmt = """
-                DELETE FROM blob_chunk
-                WHERE zoid IN (SELECT zoid FROM temp_store)
-                """
-                cursor.execute(stmt)
+                cursor.execute(self._move_from_temp_hf_delete_blob_chunk_query)
 
         if txn_has_blobs:
             stmt = self._move_from_temp_copy_blob_query
