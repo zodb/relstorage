@@ -108,6 +108,16 @@ class MySQLObjectMover(AbstractObjectMover):
         """
         self._generic_restore(batcher, oid, tid, data, 'REPLACE')
 
+    # Override this query from the superclass. The MySQL optimizer, up
+    # through at least 5.7.17 doesn't like actual subqueries in a DELETE
+    # statement. See https://github.com/zodb/relstorage/issues/175
+    _move_from_temp_hf_delete_blob_chunk_query = """
+    DELETE bc
+    FROM blob_chunk bc
+    INNER JOIN (SELECT zoid FROM temp_store) sq
+    ON bc.zoid = sq.zoid
+    """
+
     def _move_from_temp_object_state(self, cursor, tid):
         stmt = """
         REPLACE INTO object_state (zoid, tid, state_size, state)

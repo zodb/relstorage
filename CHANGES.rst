@@ -24,6 +24,12 @@
   approximate number of objects in the database. Previously it
   returned a hardcoded 0. See :issue:`178`.
 
+- MySQL: Writing blobs to the database is much faster and scales much
+  better as more blobs are stored. The query has been rewritten to use
+  existing primary key indexes, whereas before it used a table scan
+  due to deficiencies in the MySQL query optimizer. Thanks to Josh
+  Zuech and enfold-josh. See :issue:`175`.
+
 2.1a1 (2017-02-01)
 ==================
 

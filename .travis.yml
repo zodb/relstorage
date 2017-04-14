@@ -80,7 +80,8 @@ before_install:
 
 install:
   - pip install -U pip setuptools
-  - pip install -U tox coveralls pylint
+  - pip install -U tox coveralls
+  - pip install pylint==1.6.5
   - if [[ $TRAVIS_PYTHON_VERSION == pypy* ]]; then pip install -U python-memcached; fi
   - if [[ $TRAVIS_PYTHON_VERSION != pypy* ]]; then pip install -U pylibmc cffi; fi
   - pip install -U -e ".[test]"
