@@ -3,7 +3,7 @@
 =========
 
 
-2.1a2 (unreleased)
+2.1a2 (2017-04-15)
 ==================
 
 - Implemented the storage ``afterCompletion`` method, which allows
