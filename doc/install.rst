@@ -12,7 +12,9 @@ You can install RelStorage using pip::
 If you use a recent version of pip to install RelStorage on a
 supported platform (OS X, Windows or "manylinx"), you can get a
 pre-built binary wheel. If you install from source or on a different
-platform, you will need to have a functioning C compiler.
+platform, you will need to have a functioning C compiler and the
+ability to compile `CFFI extensions
+<https://cffi.readthedocs.io/en/latest/installation.html>`_.
 
 RelStorage requires a modern version of ZODB and ZEO; it is tested
 with ZODB 4.4 and 5.x and ZEO 4.3 and 5.x. If you need to use an older

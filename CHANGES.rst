@@ -6,7 +6,9 @@
 2.1a3 (unreleased)
 ==================
 
-- Nothing changed yet.
+- Document that installing RelStorage from source requires a working
+  CFFI compilation environment. Fixes :issue:`187`, reported by
+  Johannes Raggam.
 
 
 2.1a2 (2017-04-15)
