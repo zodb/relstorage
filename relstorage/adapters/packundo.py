@@ -926,6 +926,8 @@ class HistoryFreePackUndo(PackUndo):
             else:
                 # No changes since last pass.
                 break
+        if holding_commit:
+            self.locker.release_commit_lock(cursor)            
 
         if holding_commit:
             # The above `conn.commit()` will have released the locks
