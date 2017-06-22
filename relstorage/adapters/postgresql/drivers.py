@@ -17,7 +17,7 @@ PostgreSQL IDBDriver implementations.
 """
 
 from __future__ import print_function, absolute_import
-# pylint:disable=redefined-variable-type
+
 import sys
 import os
 

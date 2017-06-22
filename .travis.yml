@@ -22,7 +22,7 @@ matrix:
         - RS_MY_DRIVER="C MySQL Connector/Python"
     - python: 3.6
       env: ENV=mysqlconnector
-    - python: pypy-5.4.1
+    - python: pypy-5.6.0
       env: ENV=mysqlconnector
 
     - python: 3.6
@@ -34,7 +34,7 @@ matrix:
         - ENV=mysql
         - OLDZODB=true
 
-    - python: pypy-5.4.1
+    - python: pypy-5.6.0
       env: ENV=mysql
 
     - python: 3.5
@@ -50,7 +50,7 @@ matrix:
       python: 2.7
     - dist: trusty
       env: ENV=postgres
-      python: pypy-5.4.1
+      python: pypy-5.6.0
     - dist: trusty
       env: ENV=postgres
       python: 3.6
@@ -81,7 +81,7 @@ before_install:
 install:
   - pip install -U pip setuptools
   - pip install -U tox coveralls
-  - pip install pylint==1.6.5
+  - pip install -U "pylint>=1.7.1"
   - if [[ $TRAVIS_PYTHON_VERSION == pypy* ]]; then pip install -U python-memcached; fi
   - if [[ $TRAVIS_PYTHON_VERSION != pypy* ]]; then pip install -U pylibmc cffi; fi
   - pip install -U -e ".[test]"

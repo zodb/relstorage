@@ -149,8 +149,7 @@ class BlobHelper(object):
         try:
             if blob is None:
                 return open(blob_filename, 'rb')
-            else:
-                return ZODB.blob.BlobFile(blob_filename, 'r', blob)
+            return ZODB.blob.BlobFile(blob_filename, 'r', blob)
         except IOError:
             # The file got removed while we were opening.
             # Fall through and try again with the protection of the lock.
@@ -171,8 +170,7 @@ class BlobHelper(object):
             _accessed(blob_filename)
             if blob is None:
                 return open(blob_filename, 'rb')
-            else:
-                return ZODB.blob.BlobFile(blob_filename, 'r', blob)
+            return ZODB.blob.BlobFile(blob_filename, 'r', blob)
         finally:
             lock.close()
 

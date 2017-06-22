@@ -130,7 +130,6 @@ class OracleAdapter(object):
             revert_when_stale=options.revert_when_stale,
         )
 
-        # pylint:disable=redefined-variable-type
         if self.keep_history:
             self.packundo = OracleHistoryPreservingPackUndo(
                 database_type='oracle',

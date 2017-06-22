@@ -140,6 +140,7 @@ class StorageCache(object):
             self._trace = self._tracer.trace
             self._trace_store_current = self._tracer.trace_store_current
 
+    # XXX: Note that our __bool__ and __len__ are NOT consistent
     def __bool__(self):
         return True
     __nonzero__ = __bool__
@@ -213,7 +214,8 @@ class StorageCache(object):
         """
         Store any persistent client data.
         """
-        if self.options.cache_local_dir and len(self):
+        if self.options.cache_local_dir and len(self): # pylint:disable=len-as-condition
+            # (our __bool__ is not consistent with our len)
             return persistence.save_local_cache(self.options, self.prefix, self)
 
 

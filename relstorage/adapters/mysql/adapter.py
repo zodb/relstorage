@@ -132,7 +132,6 @@ class MySQLAdapter(object):
         self.connmanager.add_on_load_opened(self._prepare_get_latest_tid)
         self.connmanager.add_on_store_opened(self._prepare_get_latest_tid)
 
-        # pylint:disable=redefined-variable-type
         if self.keep_history:
             self.packundo = MySQLHistoryPreservingPackUndo(
                 database_type='mysql',

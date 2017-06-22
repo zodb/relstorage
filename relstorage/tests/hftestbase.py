@@ -12,7 +12,7 @@
 #
 ##############################################################################
 """A foundation for history-free RelStorage tests"""
-
+from __future__ import absolute_import
 from relstorage.tests.RecoveryStorage import BasicRecoveryStorage
 from relstorage.tests.RecoveryStorage import UndoableRecoveryStorage
 from relstorage.tests.reltestbase import GenericRelStorageTests

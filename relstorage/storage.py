@@ -1627,7 +1627,7 @@ class RelStorageTransactionRecord(TransactionRecord):
         self._trans_iter = trans_iter
         self._tid_int = tid_int
         tid = p64(tid_int)
-        status = packed and 'p' or ' '
+        status = 'p' if packed else ' '
         user = user or b''
         description = desc or b''
         if ext:

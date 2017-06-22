@@ -23,7 +23,7 @@ try:
     izip = itertools.izip
 except AttributeError:
     # Python 3
-    izip = zip # pylint:disable=redefined-variable-type
+    izip = zip
 
 from relstorage.cache import _cache_ring
 

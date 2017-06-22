@@ -13,7 +13,7 @@
 ##############################################################################
 """IObjectMover implementation.
 """
-
+from __future__ import absolute_import
 
 from relstorage.adapters.interfaces import IObjectMover
 
@@ -115,8 +115,6 @@ class OracleObjectMover(AbstractObjectMover):
             # with superclass.
             assert len(rows) == 1
             return rows[0][0]
-        else:
-            return None
 
     # no store connection initialization needed for Oracle
     def on_store_opened(self, cursor, restart=False):

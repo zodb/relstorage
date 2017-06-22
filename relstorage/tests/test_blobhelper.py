@@ -43,8 +43,7 @@ class BlobHelperTest(unittest.TestCase):
                 if download_action == 'write':
                     write_file(filename, 'blob here')
                     return 9
-                else:
-                    return 0
+                return 0
 
             def upload_blob(self, cursor, oid_int, tid_int, filename):
                 test.uploaded = (oid_int, tid_int, filename)

@@ -128,11 +128,12 @@ setup(
             'ZODB >= 4.4.3',
             'ZEO >= 4.3.1',
         ],
-        ":python_full_version == '3.6.0rc1'": [
+        ":python_full_version == '3.6.0rc1' or python_full_version == '3.6.2rc1'": [
             # For some reason ZEO isn't getting installed
-            # on 3.6rc1/pip 9.0.1/tox 2.5.1. Looks like the
+            # on 3.6rc1/pip 9.0.1/tox 2.5.1, or 3.6.2rc1. Looks like the
             # version selection <, >= environment markers aren't working.
             # So we give a full version spec, which seems to work.
+            # We see this on Travis especially.
             'ZODB >= 4.4.3',
             'ZEO >= 4.3.1',
         ],

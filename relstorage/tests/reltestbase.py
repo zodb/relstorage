@@ -12,6 +12,7 @@
 #
 ##############################################################################
 """A foundation for RelStorage tests"""
+from __future__ import absolute_import
 # pylint:disable=too-many-ancestors,abstract-method,too-many-public-methods
 from ZODB.DB import DB
 from ZODB.POSException import ReadConflictError

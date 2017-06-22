@@ -30,9 +30,8 @@ class SuffixMultiplier(object):
     def __init__(self, d, default=1):
         self._d = dict(d)
         self._default = default
-        # all keys must be the same size
-        self._keysz = None
 
+        # all keys must be the same size
         def check(a, b):
             if len(a) != len(b):
                 raise ValueError("suffix length mismatch")

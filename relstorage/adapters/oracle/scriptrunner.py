@@ -75,7 +75,7 @@ class OracleScriptRunner(ScriptRunner):
                     params[k] = v
         else:
             stmt = generic_stmt % self.script_vars
-            params = () # pylint:disable=redefined-variable-type
+            params = ()
 
         try:
             cursor.execute(stmt, params)

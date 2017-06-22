@@ -16,7 +16,7 @@
 MySQL IDBDriver implementations.
 """
 from __future__ import print_function, absolute_import
-# pylint:disable=redefined-variable-type
+
 
 import os
 import sys
@@ -364,7 +364,7 @@ else:
             self._umysql_conn = umysql.Connection() # pylint:disable=no-member
             self._connect()  # Potentially this could raise again?
 
-        def connect(self, *_args, **_kwargs): # pragma: no cover
+        def connect(self, *_args, **_kwargs): # pragma: no cover pylint:disable=arguments-differ
             # Redirect the PyMySQL connect method to the umysqldb method, that's
             # already captured the host and port. (XXX: Why do we do this?)
             return self._connect()

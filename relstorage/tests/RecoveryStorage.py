@@ -38,10 +38,10 @@ if not PY3:
 
 class IteratorDeepCompare(object):
 
-    def compare(self, storage1, storage2):
+    def compare(self, src, dest):
         # override this for storages that truncate on restore (because
         # they do not store history).
-        self.compare_exact(storage1, storage2)
+        self.compare_exact(src, dest)
 
     def compare_exact(self, storage1, storage2):
         """Confirm that storage1 and storage2 contain equivalent data"""

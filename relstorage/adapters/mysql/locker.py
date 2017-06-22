@@ -49,7 +49,7 @@ class MySQLLocker(AbstractLocker):
 
     @metricmethod
     def hold_commit_lock(self, cursor, ensure_current=False, nowait=False):
-        timeout = not nowait and self.commit_lock_timeout or 0
+        timeout = self.commit_lock_timeout if not nowait else 0
         stmt = "SELECT GET_LOCK(CONCAT(DATABASE(), '.commit'), %s)"
         cursor.execute(stmt, (timeout,))
         try:
