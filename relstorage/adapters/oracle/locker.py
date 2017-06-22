@@ -37,7 +37,7 @@ class OracleLocker(AbstractLocker):
     def hold_commit_lock(self, cursor, ensure_current=False, nowait=False):
         # Hold commit_lock to prevent concurrent commits
         # (for as short a time as possible).
-        timeout = not nowait and self.commit_lock_timeout or 0
+        timeout = self.commit_lock_timeout if not nowait else 0
         status = cursor.callfunc(
             "DBMS_LOCK.REQUEST",
             self.inputsize_NUMBER, (

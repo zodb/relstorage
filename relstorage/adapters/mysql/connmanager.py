@@ -14,6 +14,8 @@
 """
 MySQL adapter for RelStorage.
 """
+
+
 from __future__ import print_function, absolute_import
 import logging
 
@@ -52,6 +54,7 @@ class MySQLdbConnectionManager(AbstractConnectionManager):
     def open(self, transaction_mode="ISOLATION LEVEL READ COMMITTED",
              replica_selector=None, **kwargs):
         """Open a database connection and return (conn, cursor)."""
+        # pylint:disable=arguments-differ
         if replica_selector is None:
             replica_selector = self.replica_selector
 

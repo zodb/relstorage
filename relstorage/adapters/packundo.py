@@ -13,7 +13,7 @@
 ##############################################################################
 """Pack/Undo implementations.
 """
-
+from __future__ import absolute_import
 # pylint:disable=too-many-lines,unused-argument
 
 from ZODB.POSException import UndoError
@@ -648,7 +648,7 @@ class HistoryPreservingPackUndo(PackUndo):
             res = [tid for (tid,) in cursor]
         finally:
             self.connmanager.close(conn, cursor)
-        return res and res[0] or 0
+        return res[0] if res else 0
 
 
     @metricmethod
@@ -702,8 +702,8 @@ class HistoryPreservingPackUndo(PackUndo):
                     if time.time() >= start + self.options.pack_batch_timeout:
                         conn.commit()
                         if packed_func is not None:
-                            for oid, tid in packed_list:
-                                packed_func(oid, tid)
+                            for poid, ptid in packed_list:
+                                packed_func(poid, ptid)
                         statecounter += len(packed_list)
                         if counter >= lastreport + reportstep:
                             log.info("pack: packed %d (%.1f%%) transaction(s), "

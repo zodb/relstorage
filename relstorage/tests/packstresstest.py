@@ -15,7 +15,7 @@ logging.getLogger().setLevel(logging.DEBUG)
 
 use = 'oracle'
 keep_history = True
-# pylint:disable=redefined-variable-type
+
 if use == 'mysql':
     from relstorage.adapters.mysql import MySQLAdapter
     a = MySQLAdapter(db='packtest',

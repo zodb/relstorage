@@ -7,7 +7,7 @@ Compatibility shims.
 from __future__ import print_function, absolute_import, division
 
 # pylint:disable=unused-import,invalid-name,no-member,undefined-variable
-# pylint:disable=no-name-in-module,redefined-variable-type
+# pylint:disable=no-name-in-module
 
 import sys
 import platform

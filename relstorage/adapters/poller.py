@@ -11,7 +11,7 @@
 # FOR A PARTICULAR PURPOSE.
 #
 ##############################################################################
-
+from __future__ import absolute_import
 from ZODB.POSException import ReadConflictError
 from ZODB.POSException import Unsupported
 from relstorage.adapters.interfaces import IPoller

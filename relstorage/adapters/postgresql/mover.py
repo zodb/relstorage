@@ -13,7 +13,7 @@
 ##############################################################################
 """IObjectMover implementation.
 """
-
+from __future__ import absolute_import
 from ..mover import AbstractObjectMover
 from relstorage.adapters.interfaces import IObjectMover
 

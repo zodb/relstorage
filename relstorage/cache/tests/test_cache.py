@@ -82,7 +82,7 @@ class StorageCacheTests(unittest.TestCase):
         data.clear()
         for inst in self._instances:
             inst.close()
-            assert len(inst) == 0
+            assert len(inst) == 0 # pylint:disable=len-as-condition
             assert bool(inst)
             assert inst.size == 0
             assert inst.limit == 0

@@ -13,7 +13,7 @@
 ##############################################################################
 """IObjectMover implementation.
 """
-
+from __future__ import absolute_import
 from perfmetrics import Metric
 from relstorage.adapters.batch import RowBatcher
 from relstorage.adapters.interfaces import IObjectMover
@@ -82,8 +82,8 @@ class AbstractObjectMover(object):
             # If it's None, the object's creation has been
             # undone.
             return state, tid
-        else:
-            return None, None
+
+        return None, None
 
     _load_revision_query = """
         SELECT state
@@ -142,8 +142,8 @@ class AbstractObjectMover(object):
             state = db_binary_to_bytes(state)
             # None in state means The object's creation has been undone
             return state, tid
-        else:
-            return None, None
+
+        return None, None
 
 
     @metricmethod_sampled
@@ -164,8 +164,6 @@ class AbstractObjectMover(object):
         row = cursor.fetchone()
         if row:
             return row[0]
-        else:
-            return None
 
     # NOTE: These are not database param escapes, they are Python
     # escapes, so they shouldn't be translated to :1, etc.

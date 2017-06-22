@@ -15,7 +15,7 @@ from __future__ import print_function, absolute_import, division
 
 from relstorage.options import Options
 
-# pylint:disable=unused-argument,redefined-variable-type
+# pylint:disable=unused-argument
 
 class MockOptions(Options):
     cache_module_name = ''
@@ -444,9 +444,9 @@ class StorageTraceSimulator(object):
         self._report_one(stats, f, cache_local_mb, now, done)
 
         if hasattr(root_cache.clients_local_first[0], 'operations'):
-            with open(f + '.' + str(options.cache_local_mb) + '.ctrace', 'w') as f:
+            with open(f + '.' + str(options.cache_local_mb) + '.ctrace', 'w') as fp:
                 for o in root_cache.clients_local_first[0].operations:
-                    f.write("%s,%s,%d\n" % o)
+                    fp.write("%s,%s,%d\n" % o)
         return stats
 
     def simulate(self, s_type='local'):

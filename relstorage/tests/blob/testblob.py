@@ -1,4 +1,4 @@
-from __future__ import print_function
+from __future__ import print_function, absolute_import
 ##############################################################################
 #
 # Copyright (c) 2004 Zope Foundation and Contributors.
@@ -634,13 +634,13 @@ def clean(tmp):
 def rmtree(path):
     """Remove a tree without causing Windows file access errors"""
     # copied from setupstack.py
-    for path, dirs, files in os.walk(path, False):
+    for cpath, dirs, files in os.walk(path, False):
         for fname in files:
-            fname = os.path.join(path, fname)
+            fname = os.path.join(cpath, fname)
             os.chmod(fname, stat.S_IWUSR)
             os.remove(fname)
         for dname in dirs:
-            dname = os.path.join(path, dname)
+            dname = os.path.join(cpath, dname)
             os.rmdir(dname)
     os.rmdir(path)
 

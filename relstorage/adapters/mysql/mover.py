@@ -13,7 +13,7 @@
 ##############################################################################
 """IObjectMover implementation.
 """
-from __future__ import print_function
+from __future__ import print_function, absolute_import
 
 from relstorage.adapters.interfaces import IObjectMover
 from zope.interface import implementer

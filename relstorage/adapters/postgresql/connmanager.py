@@ -50,6 +50,7 @@ class Psycopg2ConnectionManager(AbstractConnectionManager):
     @metricmethod
     def open(self, isolation=None, replica_selector=None, **kwargs):
         """Open a database connection and return (conn, cursor)."""
+        # pylint:disable=arguments-differ
         if isolation is None:
             isolation = self.isolation_read_committed
 
