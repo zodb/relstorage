@@ -8,11 +8,8 @@ addons:
 # Use postgresql 9.3 to get commit-lock testing
 # Use postgresql 9.4 to get support for BLOB SQL functions for pg8000
 # Use postgresql 9.5 to get support for INSERT ON CONFLICT UPDATE
-# Sadly, as of Jan 2017, 9.5 is only available with 'dist: trusty'
-# (beta) which *doesn't* include mysql for some reason. You can
-# install it manually, but then you have to use 'sudo: required' which
-# slows everything down. So we resort to shenanigans with the matrix.
-  postgresql: "9.5"
+# Use postgresql 9.6 ... just because
+  postgresql: "9.6"
 
 matrix:
   include:
@@ -22,7 +19,7 @@ matrix:
         - RS_MY_DRIVER="C MySQL Connector/Python"
     - python: 3.6
       env: ENV=mysqlconnector
-    - python: pypy-5.6.0
+    - python: pypy
       env: ENV=mysqlconnector
 
     - python: 3.6
@@ -34,7 +31,7 @@ matrix:
         - ENV=mysql
         - OLDZODB=true
 
-    - python: pypy-5.6.0
+    - python: pypy
       env: ENV=mysql
 
     - python: 3.5
@@ -45,22 +42,17 @@ matrix:
     - python: 2.7
       env: ENV=umysqldb
 
-    - dist: trusty
-      env: ENV=postgres
+    - env: ENV=postgres
       python: 2.7
-    - dist: trusty
-      env: ENV=postgres
-      python: pypy-5.6.0
-    - dist: trusty
-      env: ENV=postgres
+    - env: ENV=postgres
+      python: pypy
+    - env: ENV=postgres
       python: 3.6
 
 
-    - dist: trusty
-      env: ENV=pypostgres
+    - env: ENV=pypostgres
       python: 2.7
-    - dist: trusty
-      env: ENV=pypostgres
+    - env: ENV=pypostgres
       python: 3.5
 
   fast_finish: true
