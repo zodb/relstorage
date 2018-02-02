@@ -44,6 +44,7 @@ disable=wrong-import-position,
     redefined-builtin,
     useless-suppression,
     duplicate-code,
+    inconsistent-return-statements
 #   undefined-all-variable
 
 
@@ -79,7 +80,7 @@ ignored-classes=SectionValue
 # (useful for modules/projects where namespaces are manipulated during runtime
 # and thus existing member attributes cannot be deduced by static analysis. It
 # supports qualified module names, as well as Unix pattern matching.
-#ignored-modules=gevent._corecffi
+ignored-modules=relstorage.cache._cache_ring
 
 [DESIGN]
 max-attributes=12

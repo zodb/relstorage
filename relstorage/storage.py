@@ -981,7 +981,7 @@ class RelStorage(UndoLogCompatible,
 
         if self._prepared_txn is not None:
             # the vote phase has already completed
-            return
+            return None
 
         cursor = self._store_cursor
         assert cursor is not None
