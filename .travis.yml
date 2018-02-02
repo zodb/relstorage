@@ -19,8 +19,11 @@ matrix:
         - RS_MY_DRIVER="C MySQL Connector/Python"
     - python: 3.6
       env: ENV=mysqlconnector
-    - python: pypy
-      env: ENV=mysqlconnector
+
+    # PyPy 5.8.0 is knonwn to be broken. Check again
+    # when Travis updates.
+    #- python: pypy
+    #  env: ENV=mysqlconnector
 
     - python: 3.6
       env: ENV=mysql

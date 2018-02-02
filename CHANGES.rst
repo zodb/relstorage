@@ -10,6 +10,10 @@
   CFFI compilation environment. Fixes :issue:`187`, reported by
   Johannes Raggam.
 
+- Test with MySQL Connector/Python 8.0.6, up from 2.1.5. Note that
+  PyPy 5.8.0 is known to *not* work with MySQL Connector/Python
+  (although PyPy 5.6.0 did).
+
 
 2.1a2 (2017-04-15)
 ==================
