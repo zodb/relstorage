@@ -41,7 +41,7 @@ database.
 
 On CPython2, install psycopg2 2.6.1+, mysqlclient 1.3.7+, or cx_Oracle
 5.2+ (but use caution with 5.2.1+); PyMySQL 0.7, MySQL
-Connector/Python 2.1.5 and umysql are also known to work as is pg8000.
+Connector/Python 8.0.6 and umysql are also known to work as is pg8000.
 
 For CPython3, install psycopg2, mysqlclient or cx_Oracle;
 PyMySQL, MySQL Connector/Python  and pg8000 are also known to work.

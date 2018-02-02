@@ -10,6 +10,8 @@
   CFFI compilation environment. Fixes :issue:`187`, reported by
   Johannes Raggam.
 
+- Test with MySQL Connector/Python 8.0.6, up from 2.1.5.
+
 
 2.1a2 (2017-04-15)
 ==================
