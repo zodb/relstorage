@@ -3,7 +3,7 @@
 =========
 
 
-2.1a3 (unreleased)
+2.1.0 (2018-02-07)
 ==================
 
 - Document that installing RelStorage from source requires a working
