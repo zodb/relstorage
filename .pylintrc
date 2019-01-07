@@ -44,7 +44,8 @@ disable=wrong-import-position,
     redefined-builtin,
     useless-suppression,
     duplicate-code,
-    inconsistent-return-statements
+    inconsistent-return-statements,
+    useless-object-inheritance
 #   undefined-all-variable
 
 

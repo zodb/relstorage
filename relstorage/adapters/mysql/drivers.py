@@ -78,7 +78,7 @@ try:
 except ImportError:
     pass
 else:  # pragma: no cover
-    import pymysql.err
+    from pymysql import err as pymysql_err
 
     @implementer(IDBDriver)
     class PyMySQLDriver(AbstractDriver):
@@ -91,9 +91,9 @@ else:  # pragma: no cover
         # It can also raise a DatabaseError, and sometimes
         # an IOError doesn't get mapped to a type
         close_exceptions += (
-            pymysql.err.Error,
+            pymysql_err.Error,
             IOError,
-            pymysql.err.DatabaseError
+            pymysql_err.DatabaseError
         )
 
         disconnected_exceptions += (
@@ -101,32 +101,32 @@ else:  # pragma: no cover
             # This one has only been seen as its subclass,
             # InternalError, as (0, 'Socket receive buffer full'),
             # which should probably be taken as disconnect
-            pymysql.err.DatabaseError,
+            pymysql_err.DatabaseError,
         )
 
         connect = staticmethod(pymysql.connect)
         Binary = staticmethod(pymysql.Binary)
 
     if getattr(sys, 'pypy_version_info', (9, 9, 9)) < (5, 3, 1):
-        import pymysql.converters
+        from pymysql import converters
         # PyPy up through 5.3.0 has a bug that raises spurious
         # MemoryErrors when run under PyMySQL >= 0.7.
         # (https://bitbucket.org/pypy/pypy/issues/2324/bytearray-replace-a-bc-raises-memoryerror)
         # (This is fixed in 5.3.1)
         # Patch around it.
 
-        if hasattr(pymysql.converters, 'escape_string'):
-            orig_escape_string = pymysql.converters.escape_string
+        if hasattr(converters, 'escape_string'):
+            orig_escape_string = converters.escape_string
 
             def escape_string(value, mapping=None):
                 if isinstance(value, bytearray) and not value:
                     return value
                 return orig_escape_string(value, mapping)
-            pymysql.converters.escape_string = escape_string
+            converters.escape_string = escape_string
 
-        del pymysql.converters
+        del converters
 
-    del pymysql.err
+    del pymysql_err
     del pymysql
 
     driver = PyMySQLDriver()
@@ -138,7 +138,7 @@ else:  # pragma: no cover
     del driver
 
 try:
-    import mysql.connector
+    import mysql.connector as mysql_connector
 except ImportError:
     pass
 else:
@@ -149,12 +149,12 @@ else:
         __name__ = "MySQL Connector/Python"
 
         disconnected_exceptions, close_exceptions, lock_exceptions = _standard_exceptions(
-            mysql.connector)
-        use_replica_exceptions = (mysql.connector.OperationalError,)
-        Binary = staticmethod(mysql.connector.Binary)
+            mysql_connector)
+        use_replica_exceptions = (mysql_connector.OperationalError,)
+        Binary = staticmethod(mysql_connector.Binary)
 
-        have_cext = mysql.connector.HAVE_CEXT
-        _connect = staticmethod(mysql.connector.connect)
+        have_cext = mysql_connector.HAVE_CEXT
+        _connect = staticmethod(mysql_connector.connect)
 
         def connect(self, *args, **kwargs):
             # It defaults to the (slower) pure-python version
@@ -189,7 +189,7 @@ else:
             cursor = conn.cursor()
             return cursor
 
-    del mysql.connector
+    del mysql_connector
 
     driver = MySQLConnectorDriver()
     driver_map[driver.__name__] = driver
