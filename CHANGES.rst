@@ -3,7 +3,7 @@
 =========
 
 
-2.1.1 (unreleased)
+2.1.1 (2019-01-07)
 ==================
 
 - Avoid deleting attributes of DB driver modules we import. Fixes
