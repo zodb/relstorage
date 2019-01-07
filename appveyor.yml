@@ -1,10 +1,12 @@
 environment:
 
   matrix:
+    - python : 37
     - python : 36
     - python : 27
     - python : 34
     - python : 35
+    - python : 37-x64
     - python : 36-x64
     - python : 27-x64
     - python : 34-x64
@@ -21,7 +23,7 @@ install:
   - "SET PGUSER=postgres"
   - echo "C:\Program Files\Microsoft SDKs\Windows\v7.1\Bin\SetEnv.cmd" /x64 > "C:\Program Files (x86)\Microsoft Visual Studio 10.0\VC\bin\amd64\vcvars64.bat"
   # mysqlclient won't compile on windows
-  - pip install -U pip setuptools
+  - python -m pip install -U pip setuptools
   - pip install -U PyMySQL
   - pip install -U wheel
   - pip install -U -e .[test,postgresql]

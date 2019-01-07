@@ -14,7 +14,7 @@ import logging
 from relstorage._compat import iteritems
 
 
-IIunion32 = BTrees.family32.II.union
+IIunion32 = BTrees.family32.II.union # pylint:disable=no-member
 IISet32 = BTrees.family32.II.Set
 IISet64 = BTrees.family64.II.Set
 log = logging.getLogger(__name__)

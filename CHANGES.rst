@@ -6,7 +6,8 @@
 2.1.1 (unreleased)
 ==================
 
-- Nothing changed yet.
+- Avoid deleting attributes of DB driver modules we import. Fixes
+  :issue:`206` reported by Josh Zuech.
 
 
 2.1.0 (2018-02-07)

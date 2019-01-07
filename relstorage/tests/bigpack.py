@@ -1,5 +1,5 @@
 
-from BTrees.OOBTree import OOBTree
+from BTrees.OOBTree import OOBTree # pylint:disable=no-name-in-module
 from ZODB.DB import DB
 from relstorage.adapters.postgresql import PostgreSQLAdapter
 from relstorage.storage import RelStorage
