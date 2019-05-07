@@ -60,8 +60,8 @@ tests_require = [
     'zope.testing',
     'ZODB [test]',
     'zc.zlibstorage',
-    'pylibmc; platform_python_implementation=="CPython"',
-    'python-memcached; platform_python_implementation=="PyPy"',
+    'pylibmc; platform_python_implementation=="CPython" and sys_platform != "win32"',
+    'python-memcached; platform_python_implementation=="PyPy" or sys_platform == "win32"',
 ]
 
 setup(
@@ -94,7 +94,9 @@ setup(
     # If a new-enough CFFI is installed, build the module as part of installation.
     # Otherwise, we'll build it at import time. The wheels we distribute should have
     # cffi installed so we distribute the built binaries.
-    cffi_modules = ['relstorage/cache/_cache_ring_build.py:ffi'],
+    cffi_modules=[
+        'relstorage/cache/_cache_ring_build.py:ffi',
+    ],
     tests_require=tests_require,
     extras_require={
         # We previously used MySQL-python (C impl) on CPython 2.7,
@@ -111,7 +113,7 @@ setup(
             'mysqlclient>=1.3.7',
         ],
         'mysql:platform_python_implementation=="CPython" and python_version >= "3.3"': [
-            'mysqlclient>=1.3.7',
+            'mysqlclient>=1.3.7, < 1.4',
         ],
         'mysql:platform_python_implementation=="PyPy"': [
             'PyMySQL>=0.6.6',
