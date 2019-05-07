@@ -100,7 +100,7 @@ after_test:
   - ps: "ls dist"
 
 artifacts:
-  - path: dist\*
+  - path: dist\RelStorage*
 
 cache:
   - "%TMP%\\py\\"
