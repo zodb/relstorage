@@ -24,6 +24,8 @@ from ZODB import ConflictResolution
 from ZODB.BaseStorage import DataRecord
 from ZODB.BaseStorage import TransactionRecord
 
+from ZODB.mvccadapter import HistoricalStorageAdapter
+
 from ZODB.POSException import ConflictError
 from ZODB.POSException import POSKeyError
 from ZODB.POSException import ReadConflictError
@@ -97,12 +99,6 @@ class _DummyLock(object):
     def release(self):
         return
 
-def optional_interfaces():
-    try:
-        from ZODB.interfaces import IMVCCAfterCompletionStorage
-        return (IMVCCAfterCompletionStorage,)
-    except ImportError:
-        return ()
 
 @implementer(ZODB.interfaces.IStorage,
              ZODB.interfaces.IMVCCStorage,
@@ -112,7 +108,7 @@ def optional_interfaces():
              ZODB.interfaces.IStorageUndoable,
              ZODB.interfaces.IBlobStorage,
              ZODB.interfaces.IBlobStorageRestoreable,
-             *optional_interfaces())
+             ZODB.interfaces.IMVCCAfterCompletionStorage)
 class RelStorage(UndoLogCompatible,
                  ConflictResolution.ConflictResolvingStorage):
     """Storage to a relational database, based on invalidation polling"""
@@ -301,22 +297,16 @@ class RelStorage(UndoLogCompatible,
             other._crs_untransform_record_data = self._crs_untransform_record_data
         return other
 
-    try:
-        from ZODB.mvccadapter import HistoricalStorageAdapter
-    except ImportError:
-        pass # ZODB4
-    else:
-        def before_instance(self, before):
-            # Implement this method of MVCCAdapterInstance
-            # (possibly destined for IMVCCStorage) as a small optimization
-            # in ZODB5 that can eventually simplify ZODB.Connection.Connection
-            # XXX: 5.0a2 doesn't forward the release method, so we leak
-            # open connections.
-            i = self.new_instance()
-            x = self.HistoricalStorageAdapter(i, before)
-            x.release = i.release
-            return x
-
+    def before_instance(self, before):
+        # Implement this method of MVCCAdapterInstance
+        # (possibly destined for IMVCCStorage) as a small optimization
+        # in ZODB5 that can eventually simplify ZODB.Connection.Connection
+        # XXX: 5.0a2 doesn't forward the release method, so we leak
+        # open connections.
+        i = self.new_instance()
+        x = HistoricalStorageAdapter(i, before)
+        x.release = i.release
+        return x
 
     @property
     def fshelper(self):
@@ -804,15 +794,7 @@ class RelStorage(UndoLogCompatible,
 
             user = _to_utf8(transaction.user)
             desc = _to_utf8(transaction.description)
-            try:
-                # Newer transaction package, the documented way to get this
-                # as of 2.0.3 (NOTE: 2.0.2/1/0 had an incompatible spelling.
-                # 2.0.3 makes everything consistent.)
-                # Also the objects that "look like" a transaction, like TransactionRecord
-                ext = transaction.extension
-            except AttributeError:
-                # Older versions, prior to transaction 2.0 and ZODB 5.?
-                ext = transaction._extension
+            ext = transaction.extension
 
             if ext:
                 ext = dumps(ext, 1)

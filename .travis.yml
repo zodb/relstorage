@@ -45,17 +45,13 @@ matrix:
       env: ENV=mysql
     - python: 3.5
       env: ENV=mysql
-
     - python: 2.7
-      env:
-        - ENV=mysql
-        - OLDZODB=true
+      env: ENV=mysql
 
     - python: pypy
       env: ENV=mysql
     - python: pypy3
       env: ENV=mysql
-
 
     - python: 3.7
       env: ENV=pymysql
@@ -99,14 +95,12 @@ before_script:
   - ccache -s
 
 install:
-  - pip install -U pip setuptools
-  - pip install -U tox coveralls
+  - pip install -U pip
+  - pip install -U setuptools wheel coveralls
   - pip install -U "pylint>=1.7.1"
-  - if [[ $TRAVIS_PYTHON_VERSION != pypy* ]]; then pip install -U cffi; fi
+  - pip install -U 'cffi; platform_python_implementation=="CPython"'
   - pip install -U -e ".[test]"
   - .travis/setup-$ENV.sh
-  - if [[ $OLDZODB == true ]]; then .travis/setup-oldzodb.sh; fi
-
 
 cache:
   pip: true

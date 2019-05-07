@@ -3,8 +3,3 @@ setuptools>=23.0.0
 sphinxcontrib-programoutput
 repoze.sphinx.autointerface
 sphinx_rtd_theme
-# RTD runs us on on alder Python 2.7, but
-# ZEO >= 5.0b1 needs at least 2.7.9. So pin
-# *both* ZODB and ZEO to older versions
-ZODB < 5
-ZEO < 5

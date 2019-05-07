@@ -2,7 +2,7 @@
  Installation
 ==============
 
-RelStorage 2.0 is supported on Python 2.7, Python 3.5, 3.6 and 3.7,
+RelStorage 3.0 is supported on Python 2.7.9+, Python 3.5, 3.6 and 3.7,
 and PyPy2 and PyPy 3 7.1 or later.
 
 You can install RelStorage using pip::
@@ -16,11 +16,11 @@ platform, you will need to have a functioning C compiler and the
 ability to compile `CFFI extensions
 <https://cffi.readthedocs.io/en/latest/installation.html>`_.
 
-RelStorage requires a modern version of ZODB and ZEO; it is tested
-with ZODB 4.4 and 5.x and ZEO 4.3 and 5.x. If you need to use an older
-version of ZODB/ZEO, install RelStorage 1.6. Likewise, if you need
-Python 2.6 support, install RelStorage 1.6 (note that 1.6 *does not*
-run on Python 3 or PyPy).
+RelStorage requires ZODB and ZEO 5. To use ZODB and ZEO 4 (which
+supports Python 2.7.8 and earlier), install RelStorage 2.1. If you
+need to use even older versions of ZODB/ZEO, install RelStorage 1.6.
+Likewise, if you need Python 2.6 support, install RelStorage 1.6 (note
+that 1.6 *does not* run on Python 3 or PyPy).
 
 Database Adapter
 ================

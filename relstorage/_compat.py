@@ -19,20 +19,12 @@ PYPY = platform.python_implementation() == 'PyPy'
 # Dict support
 
 if PY3:
-    def list_keys(d):
-        return list(d.keys())
-
-    def list_items(d):
-        return list(d.items())
-
     def list_values(d):
         return list(d.values())
     iteritems = dict.items
     iterkeys = dict.keys
     itervalues = dict.values
 else:
-    list_keys = dict.keys
-    list_items = dict.items
     list_values = dict.values
     iteritems = dict.iteritems
     iterkeys = dict.iterkeys
@@ -90,9 +82,3 @@ from ZODB._compat import dumps, loads
 from ZODB._compat import dump
 from ZODB._compat import HIGHEST_PROTOCOL
 from ZODB._compat import Pickler, Unpickler
-
-import transaction
-# Keys/values in extended_info/_extension and user/description on transaction
-# are *required* to be text (unicode) in transaction 2.0.
-# See https://github.com/zopefoundation/transaction/pull/28
-TRANSACTION_DATA_IS_TEXT = hasattr(transaction.TransactionManager().begin(), 'extended_info')
