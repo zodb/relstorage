@@ -11,35 +11,11 @@
 # FOR A PARTICULAR PURPOSE.
 #
 ##############################################################################
-"""A backend for ZODB that stores pickles in a relational database."""
-
-
-# The choices for the Trove Development Status line:
-# Development Status :: 5 - Production/Stable
-# Development Status :: 4 - Beta
-# Development Status :: 3 - Alpha
-
-classifiers = """\
-Intended Audience :: Developers
-License :: OSI Approved :: Zope Public License
-Programming Language :: Python
-Programming Language :: Python :: 2.7
-Programming Language :: Python :: 3.4
-Programming Language :: Python :: 3.5
-Programming Language :: Python :: 3.6
-Programming Language :: Python :: Implementation :: CPython
-Programming Language :: Python :: Implementation :: PyPy
-Topic :: Database
-Topic :: Software Development :: Libraries :: Python Modules
-Operating System :: Microsoft :: Windows
-Operating System :: Unix
-"""
 
 import os
 from setuptools import setup
 from setuptools import find_packages
 
-doclines = __doc__.split("\n")
 
 def read_file(*path):
     base_dir = os.path.dirname(__file__)
@@ -72,13 +48,32 @@ setup(
     maintainer="Shane Hathaway",
     maintainer_email="shane@willowrise.com",
     url="http://relstorage.readthedocs.io/",
+    project_urls={
+        'Bug Tracker': 'https://github.com/zodb/relstorage/issues',
+        'Source Code': 'https://github.com/zodb/relstorage/',
+        'Documentation': 'http://relstorage.readthedocs.io',
+    },
     keywords="ZODB SQL RDBMS MySQL PostgreSQL Oracle",
     packages=find_packages(),
     include_package_data=True,
     license="ZPL 2.1",
     platforms=["any"],
-    description=doclines[0],
-    classifiers=filter(None, classifiers.split("\n")),
+    description="A backend for ZODB that stores pickles in a relational database.",
+    classifiers=[
+        "Intended Audience :: Developers",
+        "License :: OSI Approved :: Zope Public License",
+        "Programming Language :: Python",
+        "Programming Language :: Python :: 2.7",
+        "Programming Language :: Python :: 3.5",
+        "Programming Language :: Python :: 3.6",
+        "Programming Language :: Python :: 3.7",
+        "Programming Language :: Python :: Implementation :: CPython",
+        "Programming Language :: Python :: Implementation :: PyPy",
+        "Topic :: Database",
+        "Topic :: Software Development :: Libraries :: Python Modules",
+        "Operating System :: Microsoft :: Windows",
+        "Operating System :: Unix",
+    ],
     long_description=read_file("README.rst"),
     zip_safe=False,  # otherwise ZConfig can't see component.xml
     setup_requires=[

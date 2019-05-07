@@ -8,6 +8,7 @@
 
 - Add support for Python 3.7.
 
+- Drop support for Python 3.4.
 
 2.1.1 (2019-01-07)
 ==================
