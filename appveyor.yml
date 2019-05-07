@@ -1,5 +1,6 @@
 environment:
-
+  # TODO: Simplify this, only test each version once. There's no need
+  # to run the tests for all 32 and 64-bit versions. See gevent for an example.
   matrix:
     - python : 37
     - python : 36
@@ -22,11 +23,9 @@ install:
   - "SET PGPASSWORD=Password12!"
   - "SET PGUSER=postgres"
   - echo "C:\Program Files\Microsoft SDKs\Windows\v7.1\Bin\SetEnv.cmd" /x64 > "C:\Program Files (x86)\Microsoft Visual Studio 10.0\VC\bin\amd64\vcvars64.bat"
-  # mysqlclient won't compile on windows
   - python -m pip install -U pip setuptools
-  - pip install -U PyMySQL
-  - pip install -U wheel
-  - pip install -U -e .[test,postgresql]
+  - pip install -U wheel cffi
+  - pip install -U -e .[test,postgresql,mysql]
 
 build: false
 
