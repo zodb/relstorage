@@ -59,7 +59,9 @@ tests_require = [
     'random2',
     'zope.testing',
     'ZODB [test]',
-    'zc.zlibstorage'
+    'zc.zlibstorage',
+    'pylibmc; platform_python_implementation=="CPython"',
+    'python-memcached; platform_python_implementation=="PyPy"',
 ]
 
 setup(
