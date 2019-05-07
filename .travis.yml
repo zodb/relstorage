@@ -1,5 +1,6 @@
 language: python
-sudo: false
+dist: xenial
+group: travis_latest
 services:
   - mysql
   - postgresql
@@ -11,24 +12,40 @@ addons:
 # Use postgresql 9.6 ... just because
   postgresql: "9.6"
 
+env:
+    global:
+        - PYTHONHASHSEED=8675309
+        - CC="ccache gcc"
+        - CCACHE_NOCPP2=true
+        - CCACHE_SLOPPINESS=file_macro,time_macros,include_file_ctime,include_file_mtime
+        - CCACHE_NOHASHDIR=true
+        - CFLAGS="-g -pipe"
+
 matrix:
   include:
     - python: 2.7
       env:
         - ENV=cmysqlconnector
         - RS_MY_DRIVER="C MySQL Connector/Python"
-    - python: 3.6
+    - python: 3.7
       env: ENV=mysqlconnector
 
-    # PyPy 5.8.0 is knonwn to be broken. Check again
-    # when Travis updates.
-    #- python: pypy
-    #  env: ENV=mysqlconnector
+    # This fails under mysql-connector-python 8.0.6 and pyPy 7.1.1
+    # with lots of 'InterfaceError: Use multi=True when executing
+    # multiple statements', even though it works under CPython.
+    # - python: pypy
+    #   env: ENV=mysqlconnector
 
+    # XXX: All Python 3 tests fail here with mysqlclient-1.4.2.post1,
+    # mysql 5.7.25, producing 'LookupError: unknown encoding: binary'.
+    # This worked with mysqlclient-1.3.14, mysql 5.6.33
     - python: 3.6
+      env: ENV=mysql
+    - python: 3.7
       env: ENV=mysql
     - python: 3.5
       env: ENV=mysql
+
     - python: 2.7
       env:
         - ENV=mysql
@@ -36,8 +53,11 @@ matrix:
 
     - python: pypy
       env: ENV=mysql
+    - python: pypy3
+      env: ENV=mysql
 
-    - python: 3.5
+
+    - python: 3.7
       env: ENV=pymysql
     - python: 2.7
       env: ENV=pymysql
@@ -50,13 +70,16 @@ matrix:
     - env: ENV=postgres
       python: pypy
     - env: ENV=postgres
+      python: pypy3
+    - env: ENV=postgres
       python: 3.6
-
+    - env: ENV=postgres
+      python: 3.7
 
     - env: ENV=pypostgres
       python: 2.7
     - env: ENV=pypostgres
-      python: 3.5
+      python: 3.7
 
   fast_finish: true
 script:
@@ -72,18 +95,24 @@ notifications:
 
 before_install:
   - python --version
+before_script:
+  - ccache -s
 
 install:
   - pip install -U pip setuptools
   - pip install -U tox coveralls
   - pip install -U "pylint>=1.7.1"
-  - if [[ $TRAVIS_PYTHON_VERSION == pypy* ]]; then pip install -U python-memcached; fi
-  - if [[ $TRAVIS_PYTHON_VERSION != pypy* ]]; then pip install -U pylibmc cffi; fi
+  - if [[ $TRAVIS_PYTHON_VERSION != pypy* ]]; then pip install -U cffi; fi
   - pip install -U -e ".[test]"
   - .travis/setup-$ENV.sh
   - if [[ $OLDZODB == true ]]; then .travis/setup-oldzodb.sh; fi
 
-cache: pip
+
+cache:
+  pip: true
+  directories:
+    - $HOME/.wheelhouse
+    - $HOME/.ccache
 
 before_cache:
     - rm -f $HOME/.cache/pip/log/debug.log

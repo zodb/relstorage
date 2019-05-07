@@ -2,8 +2,8 @@
  Installation
 ==============
 
-RelStorage 2.0 is supported on Python 2.7, Python 3.4, 3.5 and 3.6,
-and PyPy2 5.4.1 or later.
+RelStorage 2.0 is supported on Python 2.7, Python 3.4, 3.5, 3.6 and 3.7,
+and PyPy2 and PyPy 3 7.1 or later.
 
 You can install RelStorage using pip::
 
@@ -43,7 +43,7 @@ On CPython2, install psycopg2 2.6.1+, mysqlclient 1.3.7+, or cx_Oracle
 5.2+ (but use caution with 5.2.1+); PyMySQL 0.7, MySQL
 Connector/Python 8.0.6 and umysql are also known to work as is pg8000.
 
-For CPython3, install psycopg2, mysqlclient or cx_Oracle;
+For CPython3, install psycopg2, mysqlclient < 1.4, or cx_Oracle;
 PyMySQL, MySQL Connector/Python  and pg8000 are also known to work.
 
 On PyPy, install psycopg2cffi 2.7.4+ or PyMySQL 0.6.6+ (PyPy will
@@ -100,10 +100,11 @@ you'll be using.
 
 .. [#f1] Broken tests `were observed
          <https://travis-ci.org/zodb/relstorage/jobs/336589498#L912>`_
-         for PyPy2 5.8.0 using both Connector 2.1.5 and 8.0.6. `Tests
+         for PyPy2 5.8.0 using both Connector 2.1.5 and 8.0.6, and
+         PyPy 2 7.1.1 and Connector 8.0.6. `Tests
          passed <https://travis-ci.org/zodb/relstorage/builds/245866051>`_
          using PyPy2 5.6.0 and Connector 2.1.5. On the other hand,
          CPython 2.7.14 and CPython 2.7.9 are tested to work with the
-         C extension, and CPython 3.6.0 and 3.6.3 have been tested to
+         C extension, and CPython 3.6 and 3.7 have been tested to
          work with the pure-Python extension (the same extension PyPy
          would use).

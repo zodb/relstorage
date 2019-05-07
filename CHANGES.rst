@@ -3,10 +3,10 @@
 =========
 
 
-2.1.2 (unreleased)
+2.2.0 (unreleased)
 ==================
 
-- Nothing changed yet.
+- Add support for Python 3.7.
 
 
 2.1.1 (2019-01-07)

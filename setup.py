@@ -59,7 +59,9 @@ tests_require = [
     'random2',
     'zope.testing',
     'ZODB [test]',
-    'zc.zlibstorage'
+    'zc.zlibstorage',
+    'pylibmc; platform_python_implementation=="CPython" and sys_platform != "win32"',
+    'python-memcached; platform_python_implementation=="PyPy" or sys_platform == "win32"',
 ]
 
 setup(
@@ -92,7 +94,9 @@ setup(
     # If a new-enough CFFI is installed, build the module as part of installation.
     # Otherwise, we'll build it at import time. The wheels we distribute should have
     # cffi installed so we distribute the built binaries.
-    cffi_modules = ['relstorage/cache/_cache_ring_build.py:ffi'],
+    cffi_modules=[
+        'relstorage/cache/_cache_ring_build.py:ffi',
+    ],
     tests_require=tests_require,
     extras_require={
         # We previously used MySQL-python (C impl) on CPython 2.7,
@@ -104,14 +108,17 @@ setup(
         # PyMySQL and mysqlclient support Python 3, use mysqlclient on
         # Python 3 because it's a binary driver and *probably* faster
         # for CPython; it requires some minor code changes to support,
-        # so be sure to test this configuration.
-        'mysql:platform_python_implementation=="CPython" and python_version == "2.7"': [
+        # so be sure to test this configuration. mysqlclient doesn't compile on
+        # windows, though, so only install the pure-python version.
+        # pylint:disable=line-too-long
+        'mysql:platform_python_implementation=="CPython" and python_version == "2.7" and sys_platform != "win32"': [
             'mysqlclient>=1.3.7',
         ],
-        'mysql:platform_python_implementation=="CPython" and python_version >= "3.3"': [
-            'mysqlclient>=1.3.7',
+        'mysql:platform_python_implementation=="CPython" and python_version >= "3.3" and sys_platform != "win32"': [
+            # https://github.com/zodb/relstorage/issues/213
+            'mysqlclient>=1.3.7, < 1.4',
         ],
-        'mysql:platform_python_implementation=="PyPy"': [
+        'mysql:platform_python_implementation=="PyPy" or sys_platform == "win32"': [
             'PyMySQL>=0.6.6',
         ],
         'postgresql: platform_python_implementation == "CPython"': [
