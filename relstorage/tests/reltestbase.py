@@ -871,8 +871,8 @@ class GenericRelStorageTests(
         self._storage = self.make_storage(revert_when_stale=False)
 
         import mock
-        with mock.patch.object(
-                self._storage, '_rollback_load_connection') as rb:
+        with mock.patch.object(self._storage,
+                               '_rollback_load_connection') as rb:
             self._storage.afterCompletion()
             rb.assert_called_with()
 
