@@ -3,12 +3,16 @@
 =========
 
 
-2.2.0 (unreleased)
+3.0.0 (unreleased)
 ==================
 
 - Add support for Python 3.7.
 
 - Drop support for Python 3.4.
+
+- Drop support for Python 2.7.8 and earlier.
+
+- Drop support for ZODB 4 and ZEO 4.
 
 2.1.1 (2019-01-07)
 ==================

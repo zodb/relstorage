@@ -131,7 +131,7 @@ provoke problems:
     ...     thread.start()
     >>> for thread in threads:
     ...     thread.join(99)
-    ...     if thread.isAlive():
+    ...     if thread.is_alive():
     ...        print( "Can't join thread.")
 
     >>> wait_until("size is reduced", check, 99, onfail)

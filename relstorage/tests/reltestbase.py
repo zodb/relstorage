@@ -272,8 +272,6 @@ class GenericRelStorageTests(
         finally:
             db.close()
 
-    @util.skipOnZODB4("ZODB/tests/StorageTestBase"
-                      "expects different results from handle_all_serials")
     def checkResolveConflictBetweenConnections(self):
         # Verify that conflict resolution works between storage instances
         # bound to connections.
@@ -869,21 +867,17 @@ class GenericRelStorageTests(
         # The after completion method, which can only be called
         # outside of 2-phase commit is otherise equivalent to calling
         # tpc_abort.
+        from ZODB.interfaces import IMVCCAfterCompletionStorage
         self._storage = self.make_storage(revert_when_stale=False)
 
         import mock
         with mock.patch.object(
-            self._storage, '_rollback_load_connection') as rb:
+                self._storage, '_rollback_load_connection') as rb:
             self._storage.afterCompletion()
             rb.assert_called_with()
 
-        try:
-            from ZODB.interfaces import IMVCCAfterCompletionStorage
-        except ImportError:
-            pass
-        else:
-            self.assertTrue(
-                IMVCCAfterCompletionStorage.providedBy(self._storage))
+        self.assertTrue(
+            IMVCCAfterCompletionStorage.providedBy(self._storage))
 
 from .test_zodbconvert import FSZODBConvertTests
 

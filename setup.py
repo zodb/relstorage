@@ -84,7 +84,16 @@ setup(
         'perfmetrics',
         'zope.interface',
         'zc.lockfile',
-        # ZODB and ZEO are handled as environment-markers in extras.
+        # These are the versions we're testing against. ZODB 5.2.2 is
+        # when checkSecure() went away and IMVCCAfterCompletionStorage
+        # was added, and 5.1.2 is when Connection.new_oid was added
+        # (https://github.com/zopefoundation/ZODB/issues/139)
+        'ZODB >= 5.5',
+        'ZEO >= 5.2',
+        # We directly use this, and its a transient dep of ZODB.
+        # version 2.0 is where things became text, and 2.1 partly
+        # relaxed those requirements.
+        'transaction >= 2.4.0',
     ],
     # If a new-enough CFFI is installed, build the module as part of installation.
     # Otherwise, we'll build it at import time. The wheels we distribute should have
@@ -125,25 +134,6 @@ setup(
         ],
         'oracle': [
             'cx_Oracle>=5.0.0'
-        ],
-        ":python_full_version >= '2.7.9'": [
-            'ZODB >= 4.4.3',
-            'ZEO >= 4.3.1',
-        ],
-        ":python_full_version == '3.6.0rc1' or python_full_version == '3.6.2rc1'": [
-            # For some reason ZEO isn't getting installed
-            # on 3.6rc1/pip 9.0.1/tox 2.5.1, or 3.6.2rc1. Looks like the
-            # version selection <, >= environment markers aren't working.
-            # So we give a full version spec, which seems to work.
-            # We see this on Travis especially.
-            'ZODB >= 4.4.3',
-            'ZEO >= 4.3.1',
-        ],
-        ":python_full_version < '2.7.9'": [
-            # We must pin old versions prior to 2.7.9 because ZEO
-            # 5 only runs on versions with good SSL support.
-            'ZODB >= 4.4.3, <5.0',
-            'ZEO >= 4.3.1, <5.0'
         ],
         'test': tests_require,
     },

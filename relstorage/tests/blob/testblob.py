@@ -33,7 +33,7 @@ import unittest
 import ZODB.blob
 import ZODB.interfaces
 from relstorage.tests.RecoveryStorage import IteratorDeepCompare
-from relstorage.tests.util import SUPPORTS_BLOB_PERMS
+
 import ZODB.tests.StorageTestBase
 import ZODB.tests.util
 from zope.testing import renormalizing
@@ -399,80 +399,29 @@ def packing_with_uncommitted_data_undoing():
     >>> blob_storage.close()
     """
 
-if SUPPORTS_BLOB_PERMS:
-    # ZODB < 5.2.2
-    def secure_blob_directory():
-        """
-        This is a test for secure creation and verification of secure settings of
-        blob directories.
+def test_blob_file_permissions():
+    """
+    >>> blob_storage = create_storage()
+    >>> conn = ZODB.connection(blob_storage)
+    >>> conn.root.x = ZODB.blob.Blob(b'test')
+    >>> conn.transaction_manager.commit()
 
-        >>> blob_storage = create_storage(blob_dir='blobs')
+    Blobs have the readability of their parent directories:
 
-        Two directories are created:
+    >>> import stat
+    >>> READABLE = stat.S_IRUSR | stat.S_IRGRP | stat.S_IROTH
+    >>> path = conn.root.x.committed()
+    >>> ((os.stat(path).st_mode & READABLE) ==
+    ...  (os.stat(os.path.dirname(path)).st_mode & READABLE))
+    True
 
-        >>> os.path.isdir('blobs')
-        True
-        >>> tmp_dir = os.path.join('blobs', 'tmp')
-        >>> os.path.isdir(tmp_dir)
-        True
+    The committed file isn't writable:
+    >>> WRITABLE = stat.S_IWUSR | stat.S_IWGRP | stat.S_IWOTH
+    >>> os.stat(path).st_mode & WRITABLE
+    0
 
-        They are only accessible by the owner:
-
-        >>> os.stat('blobs').st_mode
-        16832
-        >>> os.stat(tmp_dir).st_mode
-        16832
-
-        These settings are recognized as secure:
-
-        >>> blob_storage.fshelper.isSecure('blobs')
-        True
-        >>> blob_storage.fshelper.isSecure(tmp_dir)
-        True
-
-        After making the permissions of tmp_dir more liberal, the directory is
-        recognized as insecure:
-
-        >>> os.chmod(tmp_dir, 0o40711)
-        >>> blob_storage.fshelper.isSecure(tmp_dir)
-        False
-
-        Clean up:
-
-        >>> blob_storage.close()
-
-        """
-
-    # On windows, we can't create secure blob directories, at least not
-    # with APIs in the standard library, so there's no point in testing
-    # this.
-    if sys.platform == 'win32':
-        del secure_blob_directory
-
-else:
-    def test_blob_file_permissions():
-        """
-        >>> blob_storage = create_storage()
-        >>> conn = ZODB.connection(blob_storage)
-        >>> conn.root.x = ZODB.blob.Blob(b'test')
-        >>> conn.transaction_manager.commit()
-
-        Blobs have the readability of their parent directories:
-
-        >>> import stat
-        >>> READABLE = stat.S_IRUSR | stat.S_IRGRP | stat.S_IROTH
-        >>> path = conn.root.x.committed()
-        >>> ((os.stat(path).st_mode & READABLE) ==
-        ...  (os.stat(os.path.dirname(path)).st_mode & READABLE))
-        True
-
-        The committed file isn't writable:
-        >>> WRITABLE = stat.S_IWUSR | stat.S_IWGRP | stat.S_IWOTH
-        >>> os.stat(path).st_mode & WRITABLE
-        0
-
-        >>> conn.close()
-        """
+    >>> conn.close()
+    """
 
 
 def loadblob_tmpstore():

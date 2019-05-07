@@ -59,7 +59,6 @@ class BlobHelper(object):
                 fshelper = ZODB.blob.FilesystemHelper(
                     self.blob_dir, layout_name='zeocache')
             fshelper.create()
-            fshelper.checkSecure()
         self.fshelper = fshelper
 
         if cache_checker is None:
