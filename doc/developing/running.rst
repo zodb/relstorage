@@ -48,6 +48,10 @@ to create the databases. (You can also see example scripts that are
 used to set up the continuous integration test environment in the
 `.travis <https://github.com/zodb/relstorage/tree/master/.travis>`_ directory.)
 
+If the environment variable ``RS_SMALL_BLOB`` is set when running
+the tests, certain blob tests will use a much smaller size, making the
+test run much faster.
+
 .. highlight:: sql
 
 PostgreSQL
@@ -72,10 +76,6 @@ them at the bottom, they may be overridden by other parameters)::
 PostgreSQL specific tests can be run by the testposgresql module::
 
   python -m relstorage.tests.testpostgresql
-
-If the environment variable ``RS_PG_SMALL_BLOB`` is set when running
-the tests, certain blob tests will use a much smaller size, making the
-test run much faster.
 
 MySQL
 -----
