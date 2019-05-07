@@ -12,13 +12,10 @@
 #
 ##############################################################################
 
-
-
 import os
 from setuptools import setup
 from setuptools import find_packages
 
-doclines = __doc__.split("\n")
 
 def read_file(*path):
     base_dir = os.path.dirname(__file__)
@@ -51,6 +48,11 @@ setup(
     maintainer="Shane Hathaway",
     maintainer_email="shane@willowrise.com",
     url="http://relstorage.readthedocs.io/",
+    project_urls={
+        'Bug Tracker': 'https://github.com/zodb/relstorage/issues',
+        'Source Code': 'https://github.com/zodb/relstorage/',
+        'Documentation': 'http://relstorage.readthedocs.io',
+    },
     keywords="ZODB SQL RDBMS MySQL PostgreSQL Oracle",
     packages=find_packages(),
     include_package_data=True,
