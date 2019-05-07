@@ -39,3 +39,7 @@ after_test:
 
 artifacts:
   - path: dist\*
+
+cache:
+  - "%TMP%\\py\\"
+  - '%LOCALAPPDATA%\pip\Cache'
