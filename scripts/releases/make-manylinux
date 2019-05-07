@@ -19,9 +19,9 @@ if [ -d /RelStorage -a -d /opt/python ]; then
         git clone /RelStorage RelStorage
         cd RelStorage
         $variant/bin/pip install -U pip
-        $variant/bin/pip install -U cffi setuptools wheel
+        $variant/bin/pip install -U cffi setuptools
         PATH=$variant/bin:$PATH $variant/bin/pip wheel . -w dist
-        auditwheel repair --plat manylinux2010_x86_64 dist/RelStorage*.whl
+        auditwheel repair dist/RelStorage*.whl
         cp wheelhouse/RelStorage*.whl /RelStorage/wheelhouse
         cd /RelStorage
         rm -rf /tmp/build
