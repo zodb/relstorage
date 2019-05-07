@@ -19,20 +19,12 @@ PYPY = platform.python_implementation() == 'PyPy'
 # Dict support
 
 if PY3:
-    def list_keys(d):
-        return list(d.keys())
-
-    def list_items(d):
-        return list(d.items())
-
     def list_values(d):
         return list(d.values())
     iteritems = dict.items
     iterkeys = dict.keys
     itervalues = dict.values
 else:
-    list_keys = dict.keys
-    list_items = dict.items
     list_values = dict.values
     iteritems = dict.iteritems
     iterkeys = dict.iterkeys
