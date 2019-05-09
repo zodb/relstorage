@@ -27,6 +27,8 @@
 #   see https://github.com/PyCQA/pylint/issues/846
 # useless-suppression: the only way to avoid repeating it for specific statements everywhere that we
 #   do Py2/Py3 stuff is to put it here. Sadly this means that we might get better but not realize it.
+# chained-comparison: It wants you to rewrite `x > 2 and x < 3` using something like `2 < x < 3`,
+#   which I don't like, I find that less readable.
 disable=wrong-import-position,
     invalid-name,
     wrong-import-order,
@@ -45,7 +47,8 @@ disable=wrong-import-position,
     useless-suppression,
     duplicate-code,
     inconsistent-return-statements,
-    useless-object-inheritance
+    useless-object-inheritance,
+    chained-comparison
 #   undefined-all-variable
 
 
@@ -85,6 +88,7 @@ ignored-modules=relstorage.cache._cache_ring
 
 [DESIGN]
 max-attributes=12
+max-locals=20
 
 [BASIC]
 bad-functions=input

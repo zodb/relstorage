@@ -69,8 +69,8 @@ class IteratorDeepCompare(object):
             # compare the objects in the transaction, but disregard
             # the order of the objects and any duplicated records
             # since those are not important.
-            recs1 = dict([(r.oid, r) for r in txn1])
-            recs2 = dict([(r.oid, r) for r in txn2])
+            recs1 = {r.oid: r for r in txn1}
+            recs2 = {r.oid: r for r in txn1}
             eq(len(recs1), len(recs2))
             recs1 = sorted(iteritems(recs1))
             recs2 = sorted(iteritems(recs2))

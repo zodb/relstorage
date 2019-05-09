@@ -69,7 +69,7 @@ class _DefaultStartStorageIteration(object):
         return getattr(self._source, name)
 
 def main(argv=None):
-    # pylint:disable=too-many-branches
+    # pylint:disable=too-many-branches,too-many-statements
     if argv is None:
         argv = sys.argv
     parser = argparse.ArgumentParser(description=__doc__)

@@ -180,6 +180,10 @@ class RelStorage(UndoLogCompatible,
 
     # _stale_error is None most of the time.  It's a ReadConflictError
     # when the database connection is stale (due to async replication).
+    # (pylint likes to complain about raising None even if we have a 'not None'
+    # check).
+    #
+    # pylint:disable=raising-bad-type
     _stale_error = None
 
     # OIDs resolved by undo()
@@ -565,16 +569,16 @@ class RelStorage(UndoLogCompatible,
             cursor = self._load_cursor
             state, tid_int = cache.load(cursor, oid_int)
 
-        if tid_int is not None:
-            if not state:
-                # This can happen if something attempts to load
-                # an object whose creation has been undone.
-                self._log_keyerror(oid_int, "creation has been undone")
-                raise POSKeyError(oid)
-            return state, p64(tid_int)
-        else:
+        if tid_int is None:
             self._log_keyerror(oid_int, "no tid found")
             raise POSKeyError(oid)
+
+        if not state:
+            # This can happen if something attempts to load
+            # an object whose creation has been undone.
+            self._log_keyerror(oid_int, "creation has been undone")
+            raise POSKeyError(oid)
+        return state, p64(tid_int)
 
     def getTid(self, oid):
         if self._stale_error is not None:
@@ -604,13 +608,13 @@ class RelStorage(UndoLogCompatible,
                 state = self._adapter.mover.load_revision(
                     self._store_cursor, oid_int, tid_int)
 
-        if state is not None:
-            assert isinstance(state, bytes) # XXX PY3 used to do str(state)
-            if not state:
-                raise POSKeyError(oid)
-            return state
-        else:
+        if state is None:
             raise POSKeyError(oid)
+
+        assert isinstance(state, bytes) # XXX PY3 used to do str(state)
+        if not state:
+            raise POSKeyError(oid)
+        return state
 
     @Metric(method=True, rate=0.1)
     def loadBefore(self, oid, tid):
@@ -634,24 +638,24 @@ class RelStorage(UndoLogCompatible,
             state, start_tid = self._adapter.mover.load_before(
                 cursor, oid_int, u64(tid))
 
-            if start_tid is not None:
-                if state is None:
-                    # This can happen if something attempts to load
-                    # an object whose creation has been undone, see load()
-                    # This change fixes the test in
-                    # TransactionalUndoStorage.checkUndoCreationBranch1
-                    # self._log_keyerror doesn't work here, only in certain states.
-                    raise POSKeyError(oid)
-                end_int = self._adapter.mover.get_object_tid_after(
-                    cursor, oid_int, start_tid)
-                if end_int is not None:
-                    end = p64(end_int)
-                else:
-                    end = None
-                assert isinstance(state, bytes), type(state) # XXX Py3 port: state = str(state)
-                return state, p64(start_tid), end
-            else:
+            if start_tid is None:
                 return None
+
+            if state is None:
+                # This can happen if something attempts to load
+                # an object whose creation has been undone, see load()
+                # This change fixes the test in
+                # TransactionalUndoStorage.checkUndoCreationBranch1
+                # self._log_keyerror doesn't work here, only in certain states.
+                raise POSKeyError(oid)
+            end_int = self._adapter.mover.get_object_tid_after(
+                cursor, oid_int, start_tid)
+            if end_int is not None:
+                end = p64(end_int)
+            else:
+                end = None
+            assert isinstance(state, bytes), type(state) # XXX Py3 port: state = str(state)
+            return state, p64(start_tid), end
 
     @Metric(method=True, rate=0.1)
     def store(self, oid, serial, data, version, transaction):
@@ -911,13 +915,13 @@ class RelStorage(UndoLogCompatible,
                 # unresolvable; kill the whole transaction
                 raise ConflictError(
                     oid=oid, serials=(prev_tid, serial), data=data)
-            else:
-                # resolved
-                data = rdata
-                self._adapter.mover.replace_temp(
-                    cursor, oid_int, prev_tid_int, data)
-                resolved.add(oid)
-                cache.store_temp(oid_int, data)
+
+            # resolved
+            data = rdata
+            self._adapter.mover.replace_temp(
+                cursor, oid_int, prev_tid_int, data)
+            resolved.add(oid)
+            cache.store_temp(oid_int, data)
 
         # Move the new states into the permanent table
         tid_int = u64(self._tid)
@@ -1469,7 +1473,6 @@ class RelStorage(UndoLogCompatible,
             cursor = self._store_cursor
             self.blobhelper.storeBlob(cursor, self.store,
                                       oid, serial, data, blobfilename, version, txn)
-        return None
 
     def restoreBlob(self, oid, serial, data, blobfilename, prev_txn, txn):
         """Write blob data already committed in a separate database
