@@ -2,7 +2,6 @@
  Changes
 =========
 
-
 3.0.0 (unreleased)
 ==================
 
@@ -13,6 +12,9 @@
 - Drop support for Python 2.7.8 and earlier.
 
 - Drop support for ZODB 4 and ZEO 4.
+
+- Drop the ``poll_interval`` parameter. It has been deprecated with a
+  warning and ignored since 2.0.0b2. See :issue:`222`.
 
 2.1.1 (2019-01-07)
 ==================

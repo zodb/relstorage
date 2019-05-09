@@ -485,11 +485,7 @@ class GenericRelStorageTests(
             db.close()
 
     def checkCachePolling(self):
-        # NOTE: This test still sets poll_interval, a deprecated
-        # option that does nothing. We keep it around to verify that
-        # this scenario still works either way.
-        self._storage = self.make_storage(
-            poll_interval=3600, share_local_cache=False)
+        self._storage = self.make_storage(share_local_cache=False)
 
         db = DB(self._storage)
         try:
