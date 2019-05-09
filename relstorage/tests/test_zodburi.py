@@ -103,6 +103,7 @@ class AbstractURIResolverTestBase(unittest.TestCase):
                                 'connection_cache_size': '1',
                                 'database_name': 'dbname'})
 
+
 class TestPostgreSQLURIResolver(AbstractURIResolverTestBase):
     adapter_name = 'relstorage.adapters.postgresql.PostgreSQLAdapter'
     prefix = 'postgres'
@@ -144,30 +145,40 @@ class TestMySQLURIResolver(AbstractURIResolverTestBase):
         del args['self']
         return args
 
+del AbstractURIResolverTestBase # So it doesn't get discovered as a test
+
 class TestEntryPoints(unittest.TestCase):
-    def test_it(self):
+
+    def _check_entry_point(self, name, cls, helper_cls):
         from pkg_resources import load_entry_point
-        from relstorage.zodburi_resolver import (
-            PostgreSQLAdapterHelper,
-            MySQLAdapterHelper,
-            OracleAdapterHelper
+
+        try:
+            target = load_entry_point('relstorage', 'zodburi.resolvers', name)
+        except DistributionNotFound as e:
+            if e.args[0] == 'relstorage':
+                # Yikes, the main distribution. Not good.
+                raise
+
+            raise unittest.SkipTest(
+                '%s not found, skipping the zodburi test for %s (%s)' %
+                (e.args[0], name, e)
             )
+        else:
+            self.assertIsInstance(target, cls)
+            self.assertIsInstance(target.adapter_helper, helper_cls)
 
-        expected = [
-            ('postgres', RelStorageURIResolver, PostgreSQLAdapterHelper),
-            ('mysql', RelStorageURIResolver, MySQLAdapterHelper),
-            ('oracle', RelStorageURIResolver, OracleAdapterHelper)
-        ]
+    def test_postgres(self):
+        from relstorage.zodburi_resolver import PostgreSQLAdapterHelper
+        self._check_entry_point('postgres', RelStorageURIResolver, PostgreSQLAdapterHelper)
 
-        for name, cls, helper_cls in expected:
-            try:
-                target = load_entry_point('relstorage', 'zodburi.resolvers', name)
-                self.assertTrue(isinstance(target, cls))
-                self.assertTrue(isinstance(target.adapter_helper, helper_cls))
-            except DistributionNotFound as e:
-                import warnings
-                warnings.warn('%s not found, skipping the zodburi test for %s'%
-                              (e.args[0], name))
+    def test_mysql(self):
+        from relstorage.zodburi_resolver import MySQLAdapterHelper
+        self._check_entry_point('mysql', RelStorageURIResolver, MySQLAdapterHelper)
+
+    def test_oracle(self):
+        from relstorage.zodburi_resolver import OracleAdapterHelper
+        self._check_entry_point('oracle', RelStorageURIResolver, OracleAdapterHelper)
+
 
 class TestSuffixMultiplier(unittest.TestCase):
 
@@ -186,12 +197,7 @@ class TestSuffixMultiplier(unittest.TestCase):
         self.assertRaises(ValueError, SuffixMultiplier, {'ab': 1, 'def': 3})
 
 def test_suite():
-    suite = unittest.TestSuite()
-    suite.addTest(unittest.makeSuite(TestPostgreSQLURIResolver))
-    suite.addTest(unittest.makeSuite(TestMySQLURIResolver))
-    suite.addTest(unittest.makeSuite(TestEntryPoints))
-    suite.addTest(unittest.makeSuite(TestSuffixMultiplier))
-    return suite
+    return unittest.defaultTestLoader.loadTestsFromName(__name__)
 
 if __name__ == '__main__':
     unittest.main(defaultTest='test_suite')
