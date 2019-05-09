@@ -319,7 +319,7 @@ class StorageTraceSimulator(object):
         return stats
 
     def _simulate_storage(self, records, cache_local_mb, f):
-        # pylint:disable=too-many-locals
+        # pylint:disable=too-many-locals,too-many-statements
         from relstorage.cache.storage_cache import StorageCache
         from relstorage.cache.tests.test_cache import MockAdapter
         from ZODB.utils import p64

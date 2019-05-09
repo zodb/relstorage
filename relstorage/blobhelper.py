@@ -82,11 +82,11 @@ class BlobHelper(object):
     def download_blob(self, cursor, oid, serial, filename):
         """Download a blob into a file"""
         tmp_fn = filename + ".tmp"
-        bytes = self.adapter.mover.download_blob(
+        bytecount = self.adapter.mover.download_blob(
             cursor, u64(oid), u64(serial), tmp_fn)
         if os.path.exists(tmp_fn):
             os.rename(tmp_fn, filename)
-        self.cache_checker.loaded(bytes)
+        self.cache_checker.loaded(bytecount)
 
     def upload_blob(self, cursor, oid, serial, filename):
         """Upload a blob from a file.
@@ -100,35 +100,36 @@ class BlobHelper(object):
         self.adapter.mover.upload_blob(cursor, u64(oid), tid_int, filename)
 
     def loadBlob(self, cursor, oid, serial):
-        # Load a blob.  If it isn't present and we have a shared blob
+        # Load a blob. If it isn't present and we have a shared blob
         # directory, then assume that it doesn't exist on the server
         # and return None.
+        # Note that the thread that cleans the blob cache up when it reaches
+        # a maximum size could remove the blob file by the time the caller
+        # gets the filename, so it could be gone.
 
         blob_filename = self.fshelper.getBlobFilename(oid, serial)
-        if self.shared_blob_dir:
-            if os.path.exists(blob_filename):
-                return blob_filename
-            else:
-                # All the blobs are in a shared directory.  If the
-                # file isn't here, it's not anywhere.
-                raise POSException.POSKeyError("No blob file", oid, serial)
 
         if os.path.exists(blob_filename):
             return _accessed(blob_filename)
 
+        if self.shared_blob_dir:
+            # All the blobs are in a shared directory. If the file
+            # isn't here, it's not anywhere.
+            raise POSException.POSKeyError("No blob file", oid, serial)
+
         # First, we'll create the directory for this oid, if it doesn't exist.
         self.fshelper.getPathForOID(oid, create=True)
 
-        # OK, it's not here and we (or someone) needs to get it.  We
-        # want to avoid getting it multiple times.  We want to avoid
+        # OK, it's not here and we (or someone) needs to get it. We
+        # want to avoid getting it multiple times. We want to avoid
         # getting it multiple times even accross separate client
         # processes on the same machine. We'll use file locking.
 
         lock = _lock_blob(blob_filename)
         try:
-            # We got the lock, so it's our job to download it.  First,
-            # we'll double check that someone didn't download it while we
-            # were getting the lock:
+            # We got the lock, so it's our job to download it. First,
+            # we'll double check that someone didn't download it while
+            # we were getting the lock:
 
             if os.path.exists(blob_filename):
                 return _accessed(blob_filename)
@@ -159,7 +160,7 @@ class BlobHelper(object):
             blob_filename = self.fshelper.getBlobFilename(oid, serial)
             if not os.path.exists(blob_filename):
                 if self.shared_blob_dir:
-                    # All the blobs are in a shared directory.  If the
+                    # All the blobs are in a shared directory. If the
                     # file isn't here, it's not anywhere.
                     raise POSException.POSKeyError("No blob file", oid, serial)
                 self.download_blob(cursor, oid, serial, blob_filename)
@@ -189,8 +190,8 @@ class BlobHelper(object):
         fd, target = self.fshelper.blob_mkstemp(oid, serial)
         os.close(fd)
 
-        # It's a bit odd (and impossible on windows) to rename over
-        # an existing file.  We'll use the temporary file name as a base.
+        # It's a bit odd (and impossible on windows) to rename over an
+        # existing file. We'll use the temporary file name as a base.
         target += '-'
         ZODB.blob.rename_or_copy_blob(blobfilename, target)
         os.remove(target[:-1])

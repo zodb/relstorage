@@ -1146,6 +1146,7 @@ class LocalClientTests(unittest.TestCase):
         self.assertIn('k0', c._bucket0)
 
     def test_load_and_save(self, _make_dir=True):
+        # pylint:disable=too-many-statements
         import tempfile
         import shutil
         import os

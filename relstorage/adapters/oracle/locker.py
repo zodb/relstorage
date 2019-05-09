@@ -92,4 +92,3 @@ class OracleLocker(AbstractLocker):
     def release_pack_lock(self, cursor):
         """Release the pack lock."""
         # No action needed
-        pass

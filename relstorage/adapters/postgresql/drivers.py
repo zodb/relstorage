@@ -39,7 +39,6 @@ def _create_connection(mod):
     class Psycopg2Connection(mod.extensions.connection):
         # The replica attribute holds the name of the replica this
         # connection is bound to.
-        # pylint:disable=slots-on-old-class
         __slots__ = ('replica',)
 
     return Psycopg2Connection
