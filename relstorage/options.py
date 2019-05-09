@@ -14,7 +14,6 @@
 
 from __future__ import absolute_import
 
-import warnings
 from relstorage._compat import PYPY
 
 class Options(object):
@@ -28,8 +27,11 @@ class Options(object):
     Alternatively, the RelStorage constructor accepts an options
     parameter, which should be an Options instance.
 
+    .. versionchanged:: 3.0
+       No longer accepts the ``poll_interval`` option.
+
     .. versionchanged:: 2.0b2
-       The `poll_interval` option is now ignored and raises a warning. It is always
+       The ``poll_interval`` option is now ignored and raises a warning. It is always
        effectively 0.
 
     .. versionchanged:: 2.0b7
@@ -109,12 +111,6 @@ class Options(object):
     share_local_cache = True
 
     def __init__(self, **kwoptions):
-        poll_interval = kwoptions.pop('poll_interval', self)
-        if poll_interval is not self:
-            # Would like to use a DeprecationWarning, but they're ignored
-            # by default.
-            warnings.warn("poll_interval is ignored", stacklevel=3)
-
         for key, value in kwoptions.items():
             if not hasattr(self, key):
                 raise TypeError("Unknown parameter: %s" % key)
@@ -135,9 +131,8 @@ class Options(object):
 
     @classmethod
     def valid_option_names(cls):
-        # Still include poll_interval so we can warn
-        return ['poll_interval'] + [x for x in vars(cls)
-                                    if not callable(getattr(cls, x)) and not x.startswith('_')]
+        return [x for x in vars(cls)
+                if not callable(getattr(cls, x)) and not x.startswith('_')]
 
     def __repr__(self):
         return 'relstorage.options.Options(**' + repr(self.__dict__) + ')'

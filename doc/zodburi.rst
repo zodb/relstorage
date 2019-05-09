@@ -38,7 +38,7 @@ RelStorage-constructor related
 These arguments generally inform the RelStorage constructor about
 values of the same names :
 
-poll_interval, cache_local_mb, commit_lock_timeout, commit_lock_id,
+cache_local_mb, commit_lock_timeout, commit_lock_id,
 read_only, shared_blob_dir, keep_history, pack_gc, pack_dry_run,
 strict_tpc, create, blob_cache_size, blob_cache_size_check,
 blob_cache_chunk_size, replica_timeout, pack_batch_timeout,

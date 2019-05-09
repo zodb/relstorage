@@ -158,7 +158,7 @@ class OracleAdapterHelper(Resolver):
 # The relstorage support is inspired by django-zodb.
 
 class RelStorageURIResolver(Resolver):
-    _int_args = ('poll_interval', 'cache_local_mb', 'commit_lock_timeout',
+    _int_args = ('cache_local_mb', 'commit_lock_timeout',
                  'commit_lock_id', 'read_only', 'shared_blob_dir',
                  'keep_history', 'pack_gc', 'pack_dry_run',
                  'create', 'demostorage',)
