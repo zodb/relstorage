@@ -1,4 +1,4 @@
-include MANIFEST.in *.txt *.py setup.cfg
+include MANIFEST.in *.txt *.py *.yml setup.cfg
 include .coveragerc
 include buildout*.cfg
 include tox.ini
@@ -9,12 +9,10 @@ include CHANGES.rst
 include .landscape.yml
 recursive-include .travis *
 
-recursive-include notes *.ods *.py *.sql *.txt
+recursive-include src *.py *.xml *.txt *.test *.conf *.rst *.c *.h
 
-recursive-include relstorage *.py *.xml *.txt *.test *.conf *.rst *.c *.h
-
-recursive-include doc *.py *.rst *.png Makefile
-recursive-exclude doc relstorage.*.rst _build
+recursive-include docs *.py *.rst *.png Makefile
+recursive-exclude docs relstorage.*.rst _build
 
 recursive-include repltest *.cfg *.conf *.in *.patch *.sql
 recursive-include scripts *.sh make-manylinux

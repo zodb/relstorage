@@ -54,7 +54,8 @@ setup(
         'Documentation': 'http://relstorage.readthedocs.io',
     },
     keywords="ZODB SQL RDBMS MySQL PostgreSQL Oracle",
-    packages=find_packages(),
+    packages=find_packages('src'),
+    package_dir={'': 'src'},
     include_package_data=True,
     license="ZPL 2.1",
     platforms=["any"],
@@ -99,7 +100,7 @@ setup(
     # Otherwise, we'll build it at import time. The wheels we distribute should have
     # cffi installed so we distribute the built binaries.
     cffi_modules=[
-        'relstorage/cache/_cache_ring_build.py:ffi',
+        'src/relstorage/cache/_cache_ring_build.py:ffi',
     ],
     tests_require=tests_require,
     extras_require={
@@ -136,6 +137,11 @@ setup(
             'cx_Oracle>=5.0.0'
         ],
         'test': tests_require,
+        'docs': [
+            'sphinxcontrib-programoutput',
+            'repoze.sphinx.autointerface',
+            'sphinx_rtd_theme',
+        ],
     },
     entry_points={
         'console_scripts': [
