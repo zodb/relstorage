@@ -67,6 +67,39 @@ class IDBDriver(Interface):
     Binary = Attribute("A callable.")
 
 
+class DriverNotAvailableError(Exception):
+    """
+    Raised when a requested driver isn't available.
+    """
+
+    #: The name of the requested driver
+    driver_name = None
+
+    #: The `IDBDriverOptions` that was asked for the driver.
+    driver_options = None
+
+    def __init__(self, driver_name, driver_options=None):
+        # TODO: Make the repr/str of this try to list all the drivers that *are* available.
+        super(DriverNotAvailableError, self).__init__(driver_name)
+        self.driver_name = driver_name
+        self.driver_options = driver_options
+
+
+class UnknownDriverError(DriverNotAvailableError):
+    """
+    Raised when a driver that isn't registered at all is requested.
+    """
+
+
+class NoDriversAvailableError(DriverNotAvailableError):
+    """
+    Raised when there are no drivers available.
+    """
+
+    def __init__(self):
+        super(NoDriversAvailableError, self).__init__('auto')
+
+
 class IDBDriverOptions(Interface):
     """
     Implemented by a module to provide alternative drivers.
@@ -74,12 +107,25 @@ class IDBDriverOptions(Interface):
 
     database_type = Attribute("A string naming the type of database.")
 
-    driver_map = Attribute("A map of driver names to IDBDriver instances. "
-                           "If the map is empty, no drivers for the specified "
-                           "database are available.")
+    available_drivers = Attribute("A map of driver names to IDBDriver factories (implementers). "
+                                  "If the map is empty, no drivers for the specified "
+                                  "database are available.")
 
     preferred_driver_name = Attribute("The name of the best driver in driver_map "
-                                      "to use. None if no drivers are available.")
+                                      "to use; used if 'auto' is given to 'select_driver'. "
+                                      "None if no drivers are available.")
+
+    def select_driver(driver_name=None):
+        """
+        Choose and return an IDBDriver
+        """
+
+    def known_driver_names():
+        """
+        Return an iterable of the potential driver names.
+
+        The drivers may or may not be available.
+        """
 
     def connect(*args, **kwargs):
         """

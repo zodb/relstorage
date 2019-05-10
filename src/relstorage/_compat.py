@@ -39,6 +39,12 @@ else:
     string_types = (basestring,)
     unicode = unicode
 
+try:
+    from abc import ABC
+except ImportError:
+    import abc
+    ABC = abc.ABCMeta('ABC', (object,), {})
+    del abc
 
 # Functions
 if PY3:

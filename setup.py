@@ -148,6 +148,18 @@ setup(
             'repoze.sphinx.autointerface',
             'sphinx_rtd_theme',
         ],
+        'all_tested_drivers': [
+            # Install all the supported drivers for the platform.
+            # first, mysql
+            'PyMySQL >= 0.6.6',
+            'mysqlclient>=1.3.7;platform_python_implementation=="CPython" and python_version == "2.7" and sys_platform != "win32"',
+            'mysqlclient>=1.3.7, < 1.4;platform_python_implementation=="CPython" and python_version >= "3.3" and sys_platform != "win32"',
+
+            # postgresql
+            'pg8000 >= 1.11.0', # pure-python
+            'psycopg2cffi >= 2.7.4', # CFFI, runs on all implementations.
+            'psycopg2 >= 2.6.1; platform_python_implementation == "CPython"',
+        ],
     },
     entry_points={
         'console_scripts': [

@@ -17,23 +17,40 @@ Helpers for drivers
 
 from __future__ import print_function
 
-from .interfaces import ReplicaClosedException
 import sys
 import traceback
+import abc
+
+from .._compat import ABC
+from .interfaces import ReplicaClosedException
+from .interfaces import DriverNotAvailableError
+from .interfaces import UnknownDriverError
+from .interfaces import NoDriversAvailableError
 
 def _select_driver(options, driver_options):
-    name = options.driver or 'auto'
-    if name == 'auto':
-        name = driver_options.preferred_driver_name
+    return _select_driver_by_name(options.driver, driver_options)
+
+def _select_driver_by_name(driver_name, driver_options):
+    driver_name = driver_name or 'auto'
+    if driver_name == 'auto':
+        # XXX: For testing, we'd like to be able to prohibit the use of auto.
+        for driver in driver_options.driver_order:
+            try:
+                return driver()
+            except DriverNotAvailableError:
+                pass
+        raise NoDriversAvailableError
 
     try:
-        return driver_options.driver_map[name]
+        factory = driver_options.driver_map[driver_name]
     except KeyError:
-        raise ImportError("Unable to use the driver '%s' for the database '%s'."
-                          " Available drivers are: %s."
-                          " Verify the driver name and that the right packages are installed."
-                          % (name, driver_options.database_type,
-                             list(driver_options.driver_map.keys())))
+        raise UnknownDriverError(driver_name, driver_options)
+    else:
+        try:
+            return factory()
+        except DriverNotAvailableError as e:
+            e.driver_options = driver_options
+            raise e
 
 
 _base_disconnected_exceptions = (ReplicaClosedException,)
@@ -42,16 +59,42 @@ def _standard_exceptions(mod):
     # Returns disconnected_exceptions, close_exceptions
     # and lock_exceptions
     # for a standard driver
-    disconnected_exceptions = (getattr(mod, 'OperationalError'),
-                               getattr(mod, 'InterfaceError'))
+    disconnected_exceptions = (mod.OperationalError,
+                               mod.InterfaceError)
     disconnected_exceptions += _base_disconnected_exceptions
 
-    close_exceptions = disconnected_exceptions + (getattr(mod, 'ProgrammingError'),)
+    close_exceptions = disconnected_exceptions + (mod.ProgrammingError,)
 
-    lock_exceptions = (getattr(mod, 'DatabaseError'),)
+    lock_exceptions = (mod.DatabaseError,)
     return disconnected_exceptions, close_exceptions, lock_exceptions
 
 
+class AbstractModuleDriver(ABC):
+    """
+    Base implementation of a driver, based on a module, as used in DBAPI.
+
+    Subclasses must provide:
+
+    - ``__name__`` property
+    - Implementation of ``get_driver_module``; this should import the
+      module at runtime.
+    """
+
+    def __init__(self):
+        try:
+            self.driver_module = mod = self.get_driver_module()
+        except ImportError:
+            raise DriverNotAvailableError(self.__name__)
+
+        ex = _standard_exceptions(mod)
+        self.disconnected_exceptions, self.close_exceptions, self.lock_exceptions = ex
+        self.use_replica_exceptions = (mod.OperationalError,)
+        self.Binary = mod.Binary
+
+
+    @abc.abstractmethod
+    def get_driver_module(self):
+        """Import and return the driver module."""
 
 
 class _ConnWrapper(object): # pragma: no cover

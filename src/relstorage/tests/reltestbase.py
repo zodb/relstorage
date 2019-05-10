@@ -42,6 +42,7 @@ from relstorage.storage import RelStorage
 class StorageCreatingMixin(object):
 
     keep_history = None # Override
+    driver_name = None # Override.
 
     def make_adapter(self, options):
         # abstract method
@@ -59,7 +60,8 @@ class StorageCreatingMixin(object):
                 kw['cache_module_name'] = util.CACHE_MODULE_NAME
                 kw['cache_prefix'] = type(self).__name__ + self._testMethodName
 
-        options = Options(keep_history=self.keep_history, **kw)
+        assert self.driver_name
+        options = Options(keep_history=self.keep_history, driver=self.driver_name, **kw)
         adapter = self.make_adapter(options)
         storage = RelStorage(adapter, options=options)
         storage._batcher_row_limit = 1

@@ -13,18 +13,24 @@
 ##############################################################################
 """Tests of relstorage.adapters.postgresql"""
 from __future__ import absolute_import
-from relstorage.options import Options
-from relstorage.tests.hftestbase import HistoryFreeFromFileStorage
-from relstorage.tests.hftestbase import HistoryFreeRelStorageTests
-from relstorage.tests.hftestbase import HistoryFreeToFileStorage
-from relstorage.tests.hptestbase import HistoryPreservingFromFileStorage
-from relstorage.tests.hptestbase import HistoryPreservingRelStorageTests
-from relstorage.tests.hptestbase import HistoryPreservingToFileStorage
-from .reltestbase import AbstractRSDestZodbConvertTests
-from .reltestbase import AbstractRSSrcZodbConvertTests
+
 import logging
 import os
 import unittest
+
+from relstorage.storage import RelStorage
+from relstorage.options import Options
+from relstorage.adapters.postgresql import PostgreSQLAdapter
+
+from .hftestbase import HistoryFreeFromFileStorage
+from .hftestbase import HistoryFreeRelStorageTests
+from .hftestbase import HistoryFreeToFileStorage
+from .hptestbase import HistoryPreservingFromFileStorage
+from .hptestbase import HistoryPreservingRelStorageTests
+from .hptestbase import HistoryPreservingToFileStorage
+from .reltestbase import AbstractRSDestZodbConvertTests
+from .reltestbase import AbstractRSSrcZodbConvertTests
+
 
 # pylint:disable=no-member,too-many-ancestors
 
@@ -35,7 +41,6 @@ base_dbname = os.environ.get('RELSTORAGETEST_DBNAME', 'relstoragetest')
 class UsePostgreSQLAdapter(object):
 
     def make_adapter(self, options):
-        from relstorage.adapters.postgresql import PostgreSQLAdapter
         if self.keep_history:
             db = base_dbname
         else:
@@ -47,6 +52,8 @@ class UsePostgreSQLAdapter(object):
 
 
 class ZConfigTests(object):
+
+    driver_name = None # Override
 
     def checkConfigureViaZConfig(self):
         replica_conf = os.path.join(os.path.dirname(__file__), 'replicas.conf')
@@ -67,16 +74,17 @@ class ZConfigTests(object):
             replica-conf %s
             blob-chunk-size 10MB
             <postgresql>
-                driver auto
+                driver %s
                 dsn %s
             </postgresql>
             </relstorage>
         </zodb>
         """ % (
-            self.keep_history and 'true' or 'false',
+            'true' if self.keep_history else 'false',
             replica_conf,
+            self.driver_name,
             dsn,
-            )
+        )
 
         schema_xml = u"""
         <schema>
@@ -92,10 +100,9 @@ class ZConfigTests(object):
         db = config.database.open()
         try:
             storage = db.storage
-            self.assertEqual(storage.isReadOnly(), False)
+            self.assertFalse(storage.isReadOnly())
             self.assertEqual(storage.getName(), "xyz")
             adapter = storage._adapter
-            from relstorage.adapters.postgresql import PostgreSQLAdapter
             self.assertIsInstance(adapter, PostgreSQLAdapter)
             self.assertEqual(adapter._dsn, dsn)
             self.assertEqual(adapter.keep_history, self.keep_history)
@@ -111,10 +118,11 @@ class _PgSQLCfgMixin(object):
 
     def _relstorage_contents(self):
         return """
-                <postgresql>
-                   dsn dbname='relstoragetest' user='relstoragetest' password='relstoragetest'
-                </postgresql>
-        """
+        <postgresql>
+            driver %s
+            dsn dbname='relstoragetest' user='relstoragetest' password='relstoragetest'
+        </postgresql>
+        """ % (self.driver_name,)
 
 class HPPostgreSQLDestZODBConvertTests(UsePostgreSQLAdapter,
                                        _PgSQLCfgMixin,
@@ -156,15 +164,30 @@ db_names = {
 
 def test_suite():
     # pylint:disable=too-many-locals
-    import relstorage.adapters.postgresql as _adapter
-    try:
-        _adapter.select_driver()
-    except ImportError:
-        import warnings
-        warnings.warn("No PostgreSQL driver is available, so PostgreSQL tests disabled")
-        return unittest.TestSuite()
+    from relstorage.adapters.postgresql import drivers
+    from relstorage.adapters.interfaces import DriverNotAvailableError
 
     suite = unittest.TestSuite()
+    for driver_name in drivers.known_driver_names():
+        try:
+            drivers.select_driver(driver_name)
+        except DriverNotAvailableError:
+            available = False
+        else:
+            available = True
+        add_driver_to_suite(driver_name, suite, available)
+    return suite
+
+def new_class_for_driver(driver_name, base, is_available):
+    klass = type(
+        base.__name__ + '_' + driver_name,
+        (base,),
+        {'driver_name': driver_name}
+    )
+    klass = unittest.skipUnless(is_available, "Driver %s is not installed" % (driver_name,))(klass)
+    return klass
+
+def add_driver_to_suite(driver_name, suite, is_available):
     for klass in [
             HPPostgreSQLTests,
             HPPostgreSQLToFile,
@@ -173,10 +196,17 @@ def test_suite():
             HFPostgreSQLToFile,
             HFPostgreSQLFromFile,
     ]:
+        klass = new_class_for_driver(driver_name, klass, is_available)
         suite.addTest(unittest.makeSuite(klass, "check"))
 
-    suite.addTest(unittest.makeSuite(HPPostgreSQLDestZODBConvertTests))
-    suite.addTest(unittest.makeSuite(HPPostgreSQLSrcZODBConvertTests))
+    suite.addTest(unittest.makeSuite(
+        new_class_for_driver(driver_name,
+                             HPPostgreSQLDestZODBConvertTests,
+                             is_available)))
+    suite.addTest(unittest.makeSuite(
+        new_class_for_driver(driver_name,
+                             HPPostgreSQLSrcZODBConvertTests,
+                             is_available)))
 
     from .util import USE_SMALL_BLOBS
     if USE_SMALL_BLOBS:
@@ -198,8 +228,10 @@ def test_suite():
             def create_storage(name, blob_dir,
                                shared_blob_dir=shared_blob_dir,
                                keep_history=keep_history, **kw):
-                from relstorage.storage import RelStorage
-                from relstorage.adapters.postgresql import PostgreSQLAdapter
+                if not is_available:
+                    raise unittest.SkipTest("Driver %s is not installed" % (driver_name,))
+                assert driver_name not in kw
+                kw['driver'] = driver_name
                 db = db_names[name]
                 if not keep_history:
                     db += '_hf'
@@ -215,9 +247,10 @@ def test_suite():
                 storage.zap_all(slow=True)
                 return storage
 
-            prefix = 'PostgreSQL%s%s' % (
-                (shared_blob_dir and 'Shared' or 'Unshared'),
-                (keep_history and 'WithHistory' or 'NoHistory'),
+            prefix = 'PostgreSQL%s%s_%s' % (
+                'Shared' if shared_blob_dir else 'Unshared',
+                'WithHistory' if keep_history else 'NoHistory',
+                driver_name,
             )
 
             # If the blob directory is a cache, don't test packing,
@@ -238,6 +271,7 @@ def test_suite():
                 test_blob_cache=(not shared_blob_dir),
                 # PostgreSQL blob chunks are max 2GB in size
                 large_blob_size=(not shared_blob_dir) and (large_blob_size) + 100,
+                storage_is_available=is_available
             ))
 
     return suite

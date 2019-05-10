@@ -1279,9 +1279,6 @@ class CacheTests(unittest.TestCase):
             cache.generations[0].on_hit()
 
         msg = "Generation 0 has no attribute 'on_hit'"
-        if hasattr(ex.exception, 'message'):
-            # py2
-            self.assertEqual(ex.exception.message, msg)
         self.assertEqual(ex.exception.args[0], msg)
 
     def test_free_reuse(self):

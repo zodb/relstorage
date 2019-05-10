@@ -16,6 +16,8 @@
 - Drop the ``poll_interval`` parameter. It has been deprecated with a
   warning and ignored since 2.0.0b2. See :issue:`222`.
 
+- Drop support for pg8000 older than 1.11.0.
+
 2.1.1 (2019-01-07)
 ==================
 

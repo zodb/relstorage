@@ -151,7 +151,7 @@ def test_suite():
     import relstorage.adapters.oracle as _adapter
     try:
         _adapter.select_driver()
-    except ImportError:
+    except AttributeError: # XXX Temporary.
         import warnings
         warnings.warn("cx_Oracle is not importable, so Oracle tests disabled")
         return unittest.TestSuite()

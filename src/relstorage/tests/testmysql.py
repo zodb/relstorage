@@ -197,7 +197,7 @@ def test_suite():
     import relstorage.adapters.mysql as _adapter
     try:
         _adapter.select_driver()
-    except ImportError:
+    except AttributeError: # XXX: Temporary.
         import warnings
         warnings.warn("No MySQL driver is available, so MySQL tests disabled")
         return unittest.TestSuite()
