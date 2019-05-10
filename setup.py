@@ -26,6 +26,11 @@ def read_file(*path):
 
 VERSION = read_file('version.txt').strip()
 
+memcache_require = [
+    'pylibmc; platform_python_implementation=="CPython" and sys_platform != "win32"',
+    'python-memcached; platform_python_implementation=="PyPy" or sys_platform == "win32"',
+]
+
 tests_require = [
     'mock',
     # random2 is a forward port of python 2's random to
@@ -36,9 +41,9 @@ tests_require = [
     'zope.testing',
     'ZODB [test]',
     'zc.zlibstorage',
-    'pylibmc; platform_python_implementation=="CPython" and sys_platform != "win32"',
-    'python-memcached; platform_python_implementation=="PyPy" or sys_platform == "win32"',
-]
+    'zope.testrunner',
+] + memcache_require
+
 
 setup(
     name="RelStorage",
@@ -136,6 +141,7 @@ setup(
         'oracle': [
             'cx_Oracle>=5.0.0'
         ],
+        'memcache': memcache_require,
         'test': tests_require,
         'docs': [
             'sphinxcontrib-programoutput',
@@ -153,6 +159,6 @@ setup(
              'relstorage.zodburi_resolver:postgresql_resolver [postgresql]'),
             'mysql = relstorage.zodburi_resolver:mysql_resolver [mysql]',
             'oracle = relstorage.zodburi_resolver:oracle_resolver [oracle]'
-        ]},
-    test_suite='relstorage.tests.alltests.make_suite',
+        ]
+    },
 )

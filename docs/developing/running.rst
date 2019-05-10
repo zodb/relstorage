@@ -9,14 +9,16 @@ local checkout using tox::
 
 There are environments for each database and each Python version.
 
-You can also run tests manually. Most test file contain a ``__main__``
-block that can be used with Python's ``-m``::
+You can also run tests manually (be sure to have installed
+relstorage's test dependencies; for example, ``pip install -e
+.[test]``). Most test files contain a ``__main__`` block that can be
+used with Python's ``-m``::
 
   python -m relstorage.tests.test_zodbconvert
 
-There is one file that will run all tests::
+Running all tests can be done with zope.testrunner::
 
-  python -m relstorage.tests.alltests
+  zope-testrunner --test-path=src
 
 If not database drivers are installed, it will only run the unit
 tests. Otherwise, tests for all installed drivers will be attempted;
@@ -36,7 +38,7 @@ be skipped.
 For example, to get started testing RelStorage against MySQL in a
 virtual environment you could write::
 
-  pip install -e ".[mysql]"
+  pip install -e ".[test,mysql]"
 
 from the root of the checkout. This sets up an editable installation
 of relstorage complete with the correct MySQL driver.
