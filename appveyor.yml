@@ -87,13 +87,16 @@ install:
 
 build_script:
   # Build the compiled extension
-  # pip 19.1 (exactly) won't work; but 19.1.1 should with --no-use-pep517
+  # pip 19.1 (exactly) won't work; but 19.1.1 should with
+  # --no-use-pep517
+  # Here, we only want to install one driver; we only support the best
+  # driver on Windows.
   - "%CMD_IN_ENV% %PYEXE% -m pip install -U -e .[test,postgresql,mysql]"
 
 test_script:
   - if not "%GWHEEL_ONLY%"=="true" cmd /c .travis\mysql.cmd
   - if not "%GWHEEL_ONLY%"=="true" cmd /c .travis\postgres.cmd
-  - if not "%GWHEEL_ONLY%"=="true" %PYEXE% -m zope.testrunner --test-path=src --auto-color --auto-progress
+  - if not "%GWHEEL_ONLY%"=="true" %PYEXE% -m zope.testrunner --test-path=src --auto-color
 
 after_test:
   - "%CMD_IN_ENV% %PYEXE% setup.py bdist_wheel -d dist"

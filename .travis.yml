@@ -101,7 +101,7 @@ install:
   - pip install -U setuptools wheel coveralls
   - pip install -U "pylint>=1.7.1"
   - pip install -U 'cffi; platform_python_implementation=="CPython"'
-  - pip install -U -e ".[test,all_supported_drivers]"
+  - pip install -U -e ".[test,all_tested_drivers]"
   - .travis/postgres.sh
   - .travis/mysql.sh
 
