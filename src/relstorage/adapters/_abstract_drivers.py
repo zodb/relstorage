@@ -22,6 +22,7 @@ import traceback
 import abc
 
 from .._compat import ABC
+from .._compat import PYPY
 from .interfaces import ReplicaClosedException
 from .interfaces import DriverNotAvailableError
 from .interfaces import UnknownDriverError
@@ -80,7 +81,11 @@ class AbstractModuleDriver(ABC):
       module at runtime.
     """
 
+    AVAILABLE_ON_PYPY = True
+
     def __init__(self):
+        if PYPY and not self.AVAILABLE_ON_PYPY:
+            raise DriverNotAvailableError(self.__name__)
         try:
             self.driver_module = mod = self.get_driver_module()
         except ImportError:
@@ -90,12 +95,19 @@ class AbstractModuleDriver(ABC):
         self.disconnected_exceptions, self.close_exceptions, self.lock_exceptions = ex
         self.use_replica_exceptions = (mod.OperationalError,)
         self.Binary = mod.Binary
-
+        self.connect = mod.connect
 
     @abc.abstractmethod
     def get_driver_module(self):
         """Import and return the driver module."""
 
+    # Common compatibility shims, overriden as needed.
+
+    def set_autocommit(self, conn, value):
+        conn.autocommit(value)
+
+    def cursor(self, conn):
+        return conn.cursor()
 
 class _ConnWrapper(object): # pragma: no cover
     def __init__(self, conn):

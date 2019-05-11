@@ -18,6 +18,13 @@
 
 - Drop support for pg8000 older than 1.11.0.
 
+- Drop support for PyPy older than 5.3.1.
+
+- Drop support for the "MySQL Connector/Python" driver name since it
+  wasn't possible to know if it would use the C extension or the
+  Python implementation. Instead, explicitly use the 'Py' or 'C'
+  prefixed name.
+
 2.1.1 (2019-01-07)
 ==================
 

@@ -160,10 +160,9 @@ db_names = {
     '1': base_dbname,
     '2': base_dbname + '2',
     'dest': base_dbname + '2',
-    }
+}
 
 def test_suite():
-    # pylint:disable=too-many-locals
     from relstorage.adapters.postgresql import drivers
     from relstorage.adapters.interfaces import DriverNotAvailableError
 

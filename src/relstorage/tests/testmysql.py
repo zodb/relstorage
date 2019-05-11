@@ -13,7 +13,15 @@
 ##############################################################################
 """Tests of relstorage.adapters.mysql"""
 from __future__ import absolute_import
+
+import logging
+import os
+import unittest
+
 from relstorage.options import Options
+from relstorage.storage import RelStorage
+from relstorage.adapters.mysql import MySQLAdapter
+
 from relstorage.tests.hftestbase import HistoryFreeFromFileStorage
 from relstorage.tests.hftestbase import HistoryFreeRelStorageTests
 from relstorage.tests.hftestbase import HistoryFreeToFileStorage
@@ -23,9 +31,6 @@ from relstorage.tests.hptestbase import HistoryPreservingToFileStorage
 from .util import skipOnCI
 from .reltestbase import AbstractRSDestZodbConvertTests
 from .reltestbase import AbstractRSSrcZodbConvertTests
-import logging
-import os
-import unittest
 
 # pylint:disable=no-member,too-many-ancestors
 
@@ -35,7 +40,6 @@ base_dbname = os.environ.get('RELSTORAGETEST_DBNAME', 'relstoragetest')
 class UseMySQLAdapter(object):
 
     def make_adapter(self, options):
-        from relstorage.adapters.mysql import MySQLAdapter
         if self.keep_history:
             db = base_dbname
         else:
@@ -49,6 +53,8 @@ class UseMySQLAdapter(object):
 
 
 class ZConfigTests(object):
+
+    driver_name = None # Override
 
     def checkConfigureViaZConfig(self):
         replica_conf = os.path.join(os.path.dirname(__file__), 'replicas.conf')
@@ -68,7 +74,7 @@ class ZConfigTests(object):
             cache-local-dir-read-count 12
             cache-local-dir-write-max-size 10MB
             <mysql>
-                driver auto
+                driver %s
                 db %s
                 user relstoragetest
                 passwd relstoragetest
@@ -76,10 +82,11 @@ class ZConfigTests(object):
             </relstorage>
         </zodb>
         """ % (
-            self.keep_history and 'true' or 'false',
+            'true' if self.keep_history else 'false',
             replica_conf,
+            self.driver_name,
             dbname,
-            )
+        )
 
         schema_xml = u"""
         <schema>
@@ -98,7 +105,6 @@ class ZConfigTests(object):
             self.assertEqual(storage.isReadOnly(), False)
             self.assertEqual(storage.getName(), "xyz")
             adapter = storage._adapter
-            from relstorage.adapters.mysql import MySQLAdapter
             self.assertIsInstance(adapter, MySQLAdapter)
             self.assertEqual(adapter._params, {
                 'passwd': 'relstoragetest',
@@ -117,12 +123,13 @@ class _MySQLCfgMixin(object):
 
     def _relstorage_contents(self):
         return """
-                <mysql>
-                   db relstoragetest
-                   user relstoragetest
-                   passwd relstoragetest
-                </mysql>
-        """
+        <mysql>
+            driver %s
+            db relstoragetest
+            user relstoragetest
+            passwd relstoragetest
+        </mysql>
+        """ % (self.driver_name,)
 
 class HPMySQLDestZODBConvertTests(UseMySQLAdapter, _MySQLCfgMixin, AbstractRSDestZodbConvertTests):
     pass
@@ -191,18 +198,36 @@ db_names = {
     '1': base_dbname,
     '2': base_dbname + '2',
     'dest': base_dbname + '2',
-    }
+}
 
 def test_suite():
-    import relstorage.adapters.mysql as _adapter
-    try:
-        _adapter.select_driver()
-    except AttributeError: # XXX: Temporary.
-        import warnings
-        warnings.warn("No MySQL driver is available, so MySQL tests disabled")
-        return unittest.TestSuite()
+    from relstorage.adapters.mysql import drivers
+    from relstorage.adapters.interfaces import DriverNotAvailableError
 
     suite = unittest.TestSuite()
+    for driver_name in drivers.known_driver_names():
+        try:
+            drivers.select_driver(driver_name)
+        except DriverNotAvailableError:
+            available = False
+        else:
+            available = True
+        add_driver_to_suite(driver_name, suite, available)
+
+    suite.addTest(unittest.makeSuite(TestOIDAllocator))
+    return suite
+
+def new_class_for_driver(driver_name, base, is_available):
+    klass = type(
+        base.__name__ + '_' + driver_name,
+        (base,),
+        {'driver_name': driver_name}
+    )
+    klass = unittest.skipUnless(is_available, "Driver %s is not installed" % (driver_name,))(klass)
+    return klass
+
+
+def add_driver_to_suite(driver_name, suite, is_available):
     for klass in [
             HPMySQLTests,
             HPMySQLToFile,
@@ -211,11 +236,18 @@ def test_suite():
             HFMySQLToFile,
             HFMySQLFromFile,
     ]:
+        klass = new_class_for_driver(driver_name, klass, is_available)
         suite.addTest(unittest.makeSuite(klass, "check"))
 
-    suite.addTest(unittest.makeSuite(HPMySQLDestZODBConvertTests))
-    suite.addTest(unittest.makeSuite(HPMySQLSrcZODBConvertTests))
-    suite.addTest(unittest.makeSuite(TestOIDAllocator))
+    suite.addTest(unittest.makeSuite(
+        new_class_for_driver(driver_name,
+                             HPMySQLDestZODBConvertTests,
+                             is_available)))
+    suite.addTest(unittest.makeSuite(
+        new_class_for_driver(driver_name,
+                             HPMySQLSrcZODBConvertTests,
+                             is_available)))
+
 
     from relstorage.tests.blob.testblob import storage_reusable_suite
     from relstorage.tests.util import shared_blob_dir_choices
@@ -224,8 +256,11 @@ def test_suite():
             def create_storage(name, blob_dir,
                                shared_blob_dir=shared_blob_dir,
                                keep_history=keep_history, **kw):
-                from relstorage.storage import RelStorage
-                from relstorage.adapters.mysql import MySQLAdapter
+                if not is_available:
+                    raise unittest.SkipTest("Driver %s is not installed" % (driver_name,))
+                assert driver_name not in kw
+                kw['driver'] = driver_name
+
                 db = db_names[name]
                 if not keep_history:
                     db += '_hf'
@@ -244,9 +279,10 @@ def test_suite():
                 storage.zap_all()
                 return storage
 
-            prefix = 'MySQL%s%s' % (
-                (shared_blob_dir and 'Shared' or 'Unshared'),
-                (keep_history and 'WithHistory' or 'NoHistory'),
+            prefix = 'MySQL%s%s_%s' % (
+                'Shared' if shared_blob_dir else 'Unshared',
+                'WithHistory' if keep_history else 'NoHistory',
+                driver_name,
             )
 
             # If the blob directory is a cache, don't test packing,
@@ -272,7 +308,8 @@ def test_suite():
                 test_undo=keep_history,
                 pack_test_name=pack_test_name,
                 test_blob_cache=(not shared_blob_dir),
-                large_blob_size=(not shared_blob_dir) and blob_size + 100
+                large_blob_size=(not shared_blob_dir) and blob_size + 100,
+                storage_is_available=is_available,
             ))
 
     return suite
