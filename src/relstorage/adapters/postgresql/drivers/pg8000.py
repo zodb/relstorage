@@ -133,6 +133,7 @@ class PG8000Driver(AbstractModuleDriver):
         # XXX: Testing. Can we remove?
         self.disconnected_exceptions += (AttributeError,)
         self._connect = self.driver_module.connect
+        del self.connect
 
     def get_driver_module(self):
         import pg8000
@@ -141,7 +142,7 @@ class PG8000Driver(AbstractModuleDriver):
     # For debugging
     _wrap = False
 
-    def connect(self, dsn):
+    def connect(self, dsn): # pylint:disable=method-hidden
         # Parse the DSN into parts to pass as keywords.
         # We don't do this psycopg2 because a real DSN supports more options than
         # we do and we don't want to limit it.
