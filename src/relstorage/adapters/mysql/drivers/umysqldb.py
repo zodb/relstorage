@@ -203,3 +203,7 @@ class umysqldbDriver(PyMySQLDriver):
         # umysql has a tendency to crash when given a bytearray (which
         # is what pymysql.Binary would produce), at least on OS X.
         self.Binary = bytes
+
+    def get_driver_module(self):
+        import umysqldb
+        return umysqldb
