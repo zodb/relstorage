@@ -19,6 +19,7 @@ from __future__ import absolute_import
 
 from ..stats import AbstractStats
 
+
 class PostgreSQLStats(AbstractStats):
 
     def get_db_size(self):

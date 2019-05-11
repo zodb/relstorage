@@ -15,17 +15,19 @@
 """
 MySQLdb IDBDriver implementations.
 """
-from __future__ import print_function, absolute_import
+from __future__ import absolute_import
+from __future__ import print_function
 
 from zope.interface import implementer
 
-from relstorage.adapters.interfaces import IDBDriver
 from relstorage.adapters._abstract_drivers import AbstractModuleDriver
+from relstorage.adapters.interfaces import IDBDriver
+
 
 @implementer(IDBDriver)
 class MySQLdbDriver(AbstractModuleDriver):
     __name__ = 'MySQLdb'
 
     def get_driver_module(self):
-        import MySQLdb
+        import MySQLdb # pylint:disable=import-error
         return MySQLdb

@@ -15,17 +15,20 @@
 """
 Segmented LRU implementations.
 """
-from __future__ import absolute_import, print_function, division
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
 
 import functools
 import itertools
+
+from . import _cache_ring
+
 try:
     izip = itertools.izip
 except AttributeError:
     # Python 3
     izip = zip
-
-from relstorage.cache import _cache_ring
 
 ffi = _cache_ring.ffi # pylint:disable=no-member
 _FFI_RING = _cache_ring.lib # pylint:disable=no-member

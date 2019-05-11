@@ -15,12 +15,12 @@
 """
 
 import abc
-import six
 
+from .._compat import ABC
 from ._util import query_property
 
-@six.add_metaclass(abc.ABCMeta)
-class AbstractStats(object):
+
+class AbstractStats(ABC):
 
     def __init__(self, connmanager, keep_history):
         self.connmanager = connmanager

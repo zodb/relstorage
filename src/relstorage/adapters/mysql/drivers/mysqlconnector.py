@@ -15,14 +15,14 @@
 """
 MySQL Connector/Python IDBDriver implementations.
 """
-from __future__ import print_function, absolute_import
+from __future__ import absolute_import
+from __future__ import print_function
 
 from zope.interface import implementer
 
 from relstorage._compat import PY2
-from relstorage.adapters.interfaces import IDBDriver
 from relstorage.adapters._abstract_drivers import AbstractModuleDriver
-
+from relstorage.adapters.interfaces import IDBDriver
 
 _base_name = 'MySQL Connector/Python'
 

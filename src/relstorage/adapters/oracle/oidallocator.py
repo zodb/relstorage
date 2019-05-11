@@ -17,10 +17,12 @@ IOIDAllocator implementations.
 
 from __future__ import absolute_import
 
-from ..oidallocator import AbstractOIDAllocator
 from perfmetrics import metricmethod
-from relstorage.adapters.interfaces import IOIDAllocator
 from zope.interface import implementer
+
+from ..interfaces import IOIDAllocator
+from ..oidallocator import AbstractOIDAllocator
+
 
 @implementer(IOIDAllocator)
 class OracleOIDAllocator(AbstractOIDAllocator):

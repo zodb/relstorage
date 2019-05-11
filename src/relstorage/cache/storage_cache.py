@@ -11,31 +11,28 @@
 # FOR A PARTICULAR PURPOSE.
 #
 ##############################################################################
-from __future__ import absolute_import, print_function, division
-
-from relstorage.autotemp import AutoTemporaryFile
-from ZODB.utils import p64
-from ZODB.utils import u64
-
-from ZODB.POSException import ReadConflictError
-from persistent.timestamp import TimeStamp
-
-import BTrees
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
 
 import importlib
 import logging
 import os
-
 import threading
 
+import BTrees
+from persistent.timestamp import TimeStamp
+from ZODB.POSException import ReadConflictError
+from ZODB.utils import p64
+from ZODB.utils import u64
 from zope import interface
 
-from relstorage._compat import string_types
-from relstorage._compat import iteritems
 from relstorage._compat import PYPY
-
-from relstorage.cache.interfaces import IPersistentCache
+from relstorage._compat import iteritems
+from relstorage._compat import string_types
+from relstorage.autotemp import AutoTemporaryFile
 from relstorage.cache import persistence
+from relstorage.cache.interfaces import IPersistentCache
 from relstorage.cache.local_client import LocalClient
 from relstorage.cache.trace import ZEOTracer
 

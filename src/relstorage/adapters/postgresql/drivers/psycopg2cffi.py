@@ -16,7 +16,8 @@
 psycopg2cffi IDBDriver implementations.
 """
 
-from __future__ import print_function, absolute_import
+from __future__ import absolute_import
+from __future__ import print_function
 
 from .psycopg2 import Psycopg2Driver
 

@@ -18,9 +18,9 @@ import logging
 import os
 import unittest
 
-from relstorage.storage import RelStorage
-from relstorage.options import Options
 from relstorage.adapters.postgresql import PostgreSQLAdapter
+from relstorage.options import Options
+from relstorage.storage import RelStorage
 
 from .hftestbase import HistoryFreeFromFileStorage
 from .hftestbase import HistoryFreeRelStorageTests
@@ -30,7 +30,6 @@ from .hptestbase import HistoryPreservingRelStorageTests
 from .hptestbase import HistoryPreservingToFileStorage
 from .reltestbase import AbstractRSDestZodbConvertTests
 from .reltestbase import AbstractRSSrcZodbConvertTests
-
 
 # pylint:disable=no-member,too-many-ancestors
 

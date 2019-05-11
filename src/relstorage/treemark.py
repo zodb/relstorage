@@ -7,12 +7,14 @@ room in RAM.
 """
 
 from __future__ import absolute_import
-import BTrees
+
 import collections
 import gc
 import logging
-from relstorage._compat import iteritems
 
+import BTrees
+
+from relstorage._compat import iteritems
 
 IIunion32 = BTrees.family32.II.union # pylint:disable=no-member
 IISet32 = BTrees.family32.II.Set

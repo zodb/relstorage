@@ -16,10 +16,12 @@ Database schema installers
 """
 from __future__ import absolute_import
 
+import re
+
+from zope.interface import implementer
+
 from ..interfaces import ISchemaInstaller
 from ..schema import AbstractSchemaInstaller
-from zope.interface import implementer
-import re
 
 # Versions of the installed stored procedures. Change these when
 # the corresponding code changes.

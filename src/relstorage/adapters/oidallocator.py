@@ -17,11 +17,12 @@ IOIDAllocator implementations.
 
 from __future__ import absolute_import
 
-import six
 import abc
 
-@six.add_metaclass(abc.ABCMeta)
-class AbstractOIDAllocator(object):
+from .._compat import ABC
+
+
+class AbstractOIDAllocator(ABC):
 
     @abc.abstractmethod
     def set_min_oid(self, cursor, oid):

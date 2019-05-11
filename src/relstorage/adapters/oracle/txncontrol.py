@@ -15,11 +15,10 @@
 
 from __future__ import absolute_import
 
+import logging
+
 from ..txncontrol import GenericTransactionControl
 from ..txncontrol import noop_when_history_free
-
-
-import logging
 
 log = logging.getLogger(__name__)
 

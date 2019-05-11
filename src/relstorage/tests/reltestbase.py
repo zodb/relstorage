@@ -13,7 +13,15 @@
 ##############################################################################
 """A foundation for RelStorage tests"""
 from __future__ import absolute_import
+
 # pylint:disable=too-many-ancestors,abstract-method,too-many-public-methods
+import random
+import time
+
+import transaction
+from persistent import Persistent
+from persistent.mapping import PersistentMapping
+from zc.zlibstorage import ZlibStorage
 from ZODB.DB import DB
 from ZODB.POSException import ReadConflictError
 from ZODB.serialize import referencesf
@@ -27,17 +35,14 @@ from ZODB.tests import StorageTestBase
 from ZODB.tests import Synchronization
 from ZODB.tests.StorageTestBase import zodb_pickle
 from ZODB.tests.StorageTestBase import zodb_unpickle
-from zc.zlibstorage import ZlibStorage
-from persistent import Persistent
-from persistent.mapping import PersistentMapping
-from relstorage.tests import fakecache
-import random
-import time
-import transaction
 
-from . import util
 from relstorage.options import Options
 from relstorage.storage import RelStorage
+
+from . import fakecache
+from . import util
+from .test_zodbconvert import FSZODBConvertTests
+
 
 class StorageCreatingMixin(object):
 
@@ -877,7 +882,7 @@ class GenericRelStorageTests(
         self.assertTrue(
             IMVCCAfterCompletionStorage.providedBy(self._storage))
 
-from .test_zodbconvert import FSZODBConvertTests
+
 
 class AbstractRSZodbConvertTests(StorageCreatingMixin,
                                  FSZODBConvertTests):

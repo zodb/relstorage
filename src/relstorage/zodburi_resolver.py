@@ -1,5 +1,10 @@
-from __future__ import print_function, absolute_import
+from __future__ import absolute_import
+from __future__ import print_function
 
+from ZODB.DemoStorage import DemoStorage
+
+from relstorage.options import Options
+from relstorage.storage import RelStorage
 
 try:
     from urllib import parse as urlparse
@@ -9,10 +14,7 @@ except ImportError:
     # Py2
     import urlparse
     from urlparse import parse_qsl
-from ZODB.DemoStorage import DemoStorage
 
-from relstorage.options import Options
-from relstorage.storage import RelStorage
 
 
 #################################################

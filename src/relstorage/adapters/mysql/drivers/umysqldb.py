@@ -15,14 +15,14 @@
 """
 umysqldb IDBDriver implementations.
 """
-from __future__ import print_function, absolute_import
+from __future__ import absolute_import
+from __future__ import print_function
 
-import sys
-import re
 import operator
+import re
+import sys
 
 import six
-
 from ZODB.POSException import TransactionTooLargeError
 
 from relstorage._compat import intern
@@ -205,5 +205,5 @@ class umysqldbDriver(PyMySQLDriver):
         self.Binary = bytes
 
     def get_driver_module(self):
-        import umysqldb
+        import umysqldb # pylint:disable=import-error
         return umysqldb

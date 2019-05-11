@@ -12,12 +12,11 @@
 #
 ##############################################################################
 """A foundation for history-preserving RelStorage tests"""
+import time
+import unittest
 
+import transaction
 from persistent.mapping import PersistentMapping
-from relstorage.tests.RecoveryStorage import UndoableRecoveryStorage
-from relstorage.tests.reltestbase import GenericRelStorageTests
-from relstorage.tests.reltestbase import RelStorageTestBase
-
 from ZODB.DB import DB
 from ZODB.FileStorage import FileStorage
 from ZODB.serialize import referencesf
@@ -29,9 +28,10 @@ from ZODB.tests import TransactionalUndoStorage
 from ZODB.tests.MinPO import MinPO
 from ZODB.tests.StorageTestBase import zodb_pickle
 from ZODB.utils import p64
-import time
-import transaction
-import unittest
+
+from relstorage.tests.RecoveryStorage import UndoableRecoveryStorage
+from relstorage.tests.reltestbase import GenericRelStorageTests
+from relstorage.tests.reltestbase import RelStorageTestBase
 
 
 class HistoryPreservingRelStorageTests(GenericRelStorageTests,

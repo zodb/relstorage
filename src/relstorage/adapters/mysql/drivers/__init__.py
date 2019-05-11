@@ -15,21 +15,19 @@
 """
 MySQL IDBDriver implementations.
 """
-from __future__ import print_function, absolute_import
+from __future__ import absolute_import
+from __future__ import print_function
 
 import sys
-
 
 from zope.interface import moduleProvides
 
 from ...interfaces import IDBDriverOptions
-
+from .mysqlconnector import CMySQLConnectorDriver
+from .mysqlconnector import PyMySQLConnectorDriver
 from .mysqldb import MySQLdbDriver
 from .pymysql import PyMySQLDriver
-from .mysqlconnector import PyMySQLConnectorDriver
-from .mysqlconnector import CMySQLConnectorDriver
 from .umysqldb import umysqldbDriver
-
 
 database_type = 'mysql'
 

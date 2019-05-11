@@ -12,12 +12,15 @@
 #
 ##############################################################################
 from __future__ import absolute_import
+
+import logging
+
 from ZODB.POSException import ReadConflictError
 from ZODB.POSException import Unsupported
-from relstorage.adapters.interfaces import IPoller
-from relstorage.adapters._util import formatted_query_property
 from zope.interface import implementer
-import logging
+
+from ._util import formatted_query_property
+from .interfaces import IPoller
 
 log = logging.getLogger(__name__)
 

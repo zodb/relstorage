@@ -1,14 +1,15 @@
 from __future__ import print_function
 
 import logging
+import os
+import random
 
-from ZODB.DB import DB
-from relstorage.storage import RelStorage
-from relstorage.options import Options
 import transaction
 from persistent.mapping import PersistentMapping
-import random
-import os
+from ZODB.DB import DB
+
+from relstorage.options import Options
+from relstorage.storage import RelStorage
 
 logging.basicConfig()
 logging.getLogger().setLevel(logging.DEBUG)

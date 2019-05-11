@@ -17,7 +17,8 @@ from functools import partial
 from functools import update_wrapper
 from functools import wraps
 
-from relstorage._compat import intern
+from .._compat import intern
+
 
 class Lazy(object):
     "Property-like descriptor that calls func only once per instance."

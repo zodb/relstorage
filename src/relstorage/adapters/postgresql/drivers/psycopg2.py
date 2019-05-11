@@ -16,12 +16,13 @@
 psycopg2 IDBDriver implementations.
 """
 
-from __future__ import print_function, absolute_import
+from __future__ import absolute_import
+from __future__ import print_function
 
 from zope.interface import implementer
 
-from ...interfaces import IDBDriver
 from ..._abstract_drivers import AbstractModuleDriver
+from ...interfaces import IDBDriver
 
 __all__ = [
     'Psycopg2Driver',

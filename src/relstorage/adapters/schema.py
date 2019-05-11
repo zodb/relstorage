@@ -15,17 +15,16 @@
 Database schema installers
 """
 import abc
-import six
-
 import logging
 
 from ZODB.POSException import StorageError
 
+from .._compat import ABC
+
 log = logging.getLogger("relstorage")
 
 
-@six.add_metaclass(abc.ABCMeta)
-class AbstractSchemaInstaller(object):
+class AbstractSchemaInstaller(ABC):
 
     # Keep this list in the same order as the schema scripts
     all_tables = (

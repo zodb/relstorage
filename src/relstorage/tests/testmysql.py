@@ -18,19 +18,19 @@ import logging
 import os
 import unittest
 
+from relstorage.adapters.mysql import MySQLAdapter
 from relstorage.options import Options
 from relstorage.storage import RelStorage
-from relstorage.adapters.mysql import MySQLAdapter
-
 from relstorage.tests.hftestbase import HistoryFreeFromFileStorage
 from relstorage.tests.hftestbase import HistoryFreeRelStorageTests
 from relstorage.tests.hftestbase import HistoryFreeToFileStorage
 from relstorage.tests.hptestbase import HistoryPreservingFromFileStorage
 from relstorage.tests.hptestbase import HistoryPreservingRelStorageTests
 from relstorage.tests.hptestbase import HistoryPreservingToFileStorage
-from .util import skipOnCI
+
 from .reltestbase import AbstractRSDestZodbConvertTests
 from .reltestbase import AbstractRSSrcZodbConvertTests
+from .util import skipOnCI
 
 # pylint:disable=no-member,too-many-ancestors
 

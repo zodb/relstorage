@@ -15,18 +15,17 @@
 """
 from __future__ import absolute_import
 
-from relstorage.adapters.interfaces import IObjectMover
-
-from zope.interface import implementer
 import os
 import sys
 
-from relstorage._compat import xrange
+from zope.interface import implementer
 
-from ..mover import metricmethod_sampled
-
-from .scriptrunner import format_to_named
+from ..._compat import xrange
+from ..interfaces import IObjectMover
 from ..mover import AbstractObjectMover
+from ..mover import metricmethod_sampled
+from .scriptrunner import format_to_named
+
 
 def _to_oracle_ordered(query_tuple):
     # Replace %s with :1, :2, etc

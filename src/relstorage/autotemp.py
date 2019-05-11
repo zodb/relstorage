@@ -14,6 +14,7 @@
 
 from tempfile import SpooledTemporaryFile
 
+
 class AutoTemporaryFile(SpooledTemporaryFile):
     # Exists for BWC and to preserve the default threshold
 

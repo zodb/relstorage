@@ -1,10 +1,14 @@
-from __future__ import print_function, absolute_import
+from __future__ import absolute_import
+from __future__ import print_function
+
+import unittest
 
 import mock
-import unittest
 from pkg_resources import DistributionNotFound
+
 from relstorage.zodburi_resolver import RelStorageURIResolver
 from relstorage.zodburi_resolver import SuffixMultiplier
+
 
 class AbstractURIResolverTestBase(unittest.TestCase):
 

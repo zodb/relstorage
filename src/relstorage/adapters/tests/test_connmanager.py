@@ -14,6 +14,7 @@
 
 import unittest
 
+
 class AbstractConnectionManagerTests(unittest.TestCase):
 
     def test_without_replica_conf(self):

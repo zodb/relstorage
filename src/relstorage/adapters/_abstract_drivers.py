@@ -17,16 +17,17 @@ Helpers for drivers
 
 from __future__ import print_function
 
+import abc
 import sys
 import traceback
-import abc
 
 from .._compat import ABC
 from .._compat import PYPY
-from .interfaces import ReplicaClosedException
 from .interfaces import DriverNotAvailableError
-from .interfaces import UnknownDriverError
 from .interfaces import NoDriversAvailableError
+from .interfaces import ReplicaClosedException
+from .interfaces import UnknownDriverError
+
 
 def _select_driver(options, driver_options):
     return _select_driver_by_name(options.driver, driver_options)

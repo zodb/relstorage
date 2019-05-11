@@ -11,30 +11,36 @@
 # FOR A PARTICULAR PURPOSE.
 #
 ##############################################################################
-from __future__ import print_function, absolute_import, division
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+
 # pylint:disable=too-many-lines,abstract-method,too-many-public-methods,attribute-defined-outside-init
 import unittest
-
-from relstorage.tests.util import skipOnCI
 from functools import partial
 
 from ZODB.utils import p64
 
 from relstorage.cache.cache_ring import Cache as _BaseCache
+from relstorage.cache.local_client import LocalClient as _BaseLocalClient
+from relstorage.cache.mapping import SizedLRUMapping as _BaseSizedLRUMapping
+from relstorage.options import Options
+from relstorage.tests.util import skipOnCI
+
+
 class Cache(_BaseCache):
     # Tweak the generation sizes to match what we developed the tests with
     _gen_protected_pct = 0.8
     _gen_eden_pct = 0.1
 
-from relstorage.cache.mapping import SizedLRUMapping as _BaseSizedLRUMapping
 
 class SizedLRUMapping(_BaseSizedLRUMapping):
     _cache_type = Cache
 
-from relstorage.cache.local_client import LocalClient as _BaseLocalClient
 
 class LocalClient(_BaseLocalClient):
     _bucket_type = SizedLRUMapping
+
 
 def _check_load_and_store_multiple_files_hit_limit(self, mapping, wrapping_storage=None):
     from relstorage.cache import persistence
@@ -1415,9 +1421,6 @@ class CacheTests(unittest.TestCase):
         self.assertEqual(3, len(added_entries))
 
 
-
-from relstorage.options import Options
-
 class MockOptions(Options):
     cache_module_name = '' # disable
     cache_servers = ''
@@ -1447,13 +1450,7 @@ class MockPoller(object):
                 if tid > after_tid and tid <= last_tid)
 
 def test_suite():
-    suite = unittest.TestSuite()
-    suite.addTest(unittest.makeSuite(StorageCacheTests))
-    suite.addTest(unittest.makeSuite(SizedLRUMappingTests))
-    suite.addTest(unittest.makeSuite(LocalClientTests))
-    suite.addTest(unittest.makeSuite(CacheRingTests))
-    suite.addTest(unittest.makeSuite(CacheTests))
-    return suite
+    return unittest.defaultTestLoader.loadTestsFromName(__name__)
 
 if __name__ == '__main__':
     unittest.main(defaultTest='test_suite')

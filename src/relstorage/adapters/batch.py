@@ -13,9 +13,11 @@
 ##############################################################################
 """Batch table row insert/delete support.
 """
-
-from relstorage._compat import itervalues, iteritems
 from collections import defaultdict
+
+from relstorage._compat import iteritems
+from relstorage._compat import itervalues
+
 
 class RowBatcher(object):
     """

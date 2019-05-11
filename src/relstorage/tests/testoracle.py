@@ -12,6 +12,10 @@
 #
 ##############################################################################
 """Tests of relstorage.adapters.oracle"""
+import logging
+import os
+import sys
+import unittest
 
 from relstorage.options import Options
 from relstorage.tests.hftestbase import HistoryFreeFromFileStorage
@@ -20,10 +24,6 @@ from relstorage.tests.hftestbase import HistoryFreeToFileStorage
 from relstorage.tests.hptestbase import HistoryPreservingFromFileStorage
 from relstorage.tests.hptestbase import HistoryPreservingRelStorageTests
 from relstorage.tests.hptestbase import HistoryPreservingToFileStorage
-import logging
-import os
-import sys
-import unittest
 
 # pylint:disable=no-member,too-many-ancestors
 

@@ -17,22 +17,24 @@
 PostgreSQL IDBDriverOptions implementation.
 
 """
-from __future__ import absolute_import, division, print_function
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
 
 import sys
 
 from zope.interface import moduleProvides
 
 from ...interfaces import IDBDriverOptions
+from .pg8000 import PG8000Driver
+from .psycopg2 import Psycopg2Driver
+from .psycopg2cffi import Psycopg2cffiDriver
 
 database_type = 'postgresql'
 driver_map = {}
 
 moduleProvides(IDBDriverOptions)
 
-from .pg8000 import PG8000Driver
-from .psycopg2 import Psycopg2Driver
-from .psycopg2cffi import Psycopg2cffiDriver
 
 driver_map = {
     cls.__name__: cls

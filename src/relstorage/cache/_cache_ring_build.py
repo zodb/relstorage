@@ -12,9 +12,12 @@
 # FOR A PARTICULAR PURPOSE.
 #
 ##############################################################################
-from __future__ import absolute_import, print_function, division
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
 
 import os
+
 from cffi import FFI
 
 this_dir = os.path.dirname(os.path.abspath(__file__))

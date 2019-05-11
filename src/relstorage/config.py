@@ -14,9 +14,9 @@
 """ZConfig directive implementations for binding RelStorage to Zope"""
 from __future__ import absolute_import
 
-
 from relstorage.options import Options
 from relstorage.storage import RelStorage
+
 
 class BaseConfig(object):
 

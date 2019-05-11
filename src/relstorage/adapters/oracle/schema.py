@@ -15,11 +15,12 @@
 """
 from __future__ import absolute_import
 
-from ..interfaces import ISchemaInstaller
-from ..schema import AbstractSchemaInstaller
+import re
 
 from zope.interface import implementer
-import re
+
+from ..interfaces import ISchemaInstaller
+from ..schema import AbstractSchemaInstaller
 
 # Versions of the installed stored procedures. Change these when
 # the corresponding code changes.

@@ -15,44 +15,9 @@
 
 Stores pickles in the database.
 """
-from __future__ import absolute_import, print_function
+from __future__ import absolute_import
+from __future__ import print_function
 
-# pylint:disable=too-many-lines
-
-from ZODB import ConflictResolution
-
-from ZODB.BaseStorage import DataRecord
-from ZODB.BaseStorage import TransactionRecord
-
-from ZODB.mvccadapter import HistoricalStorageAdapter
-
-from ZODB.POSException import ConflictError
-from ZODB.POSException import POSKeyError
-from ZODB.POSException import ReadConflictError
-from ZODB.POSException import ReadOnlyError
-from ZODB.POSException import StorageError
-from ZODB.POSException import StorageTransactionError
-from ZODB.POSException import Unsupported
-
-from ZODB.UndoLogCompatible import UndoLogCompatible
-from ZODB.blob import is_blob_record
-from ZODB.interfaces import StorageStopIteration
-from ZODB.utils import p64
-from ZODB.utils import u64
-
-from perfmetrics import Metric
-from perfmetrics import metricmethod
-
-from persistent.TimeStamp import TimeStamp # pylint:disable=import-error
-from relstorage.blobhelper import BlobHelper
-
-from relstorage.cache import StorageCache
-from relstorage.options import Options
-
-from zope.interface import implementer
-from zope import interface
-
-import ZODB.interfaces
 import logging
 import os
 import tempfile
@@ -60,10 +25,52 @@ import threading
 import time
 import weakref
 
-from relstorage._compat import iterkeys, iteritems
-from relstorage._compat import dumps, loads
-from relstorage._compat import base64_encodebytes
+import ZODB.interfaces
+from perfmetrics import Metric
+from perfmetrics import metricmethod
+from persistent.timestamp import TimeStamp
+from ZODB import ConflictResolution
+from ZODB.BaseStorage import DataRecord
+from ZODB.BaseStorage import TransactionRecord
+from ZODB.blob import is_blob_record
+from ZODB.interfaces import StorageStopIteration
+from ZODB.mvccadapter import HistoricalStorageAdapter
+from ZODB.POSException import ConflictError
+from ZODB.POSException import POSKeyError
+from ZODB.POSException import ReadConflictError
+from ZODB.POSException import ReadOnlyError
+from ZODB.POSException import StorageError
+from ZODB.POSException import StorageTransactionError
+from ZODB.POSException import Unsupported
+from ZODB.UndoLogCompatible import UndoLogCompatible
+from ZODB.utils import p64
+from ZODB.utils import u64
+from zope import interface
+from zope.interface import implementer
+
 from relstorage._compat import base64_decodebytes
+from relstorage._compat import base64_encodebytes
+from relstorage._compat import dumps
+from relstorage._compat import iteritems
+from relstorage._compat import iterkeys
+from relstorage._compat import loads
+from relstorage.blobhelper import BlobHelper
+from relstorage.cache import StorageCache
+from relstorage.options import Options
+
+# pylint:disable=too-many-lines
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 log = logging.getLogger("relstorage")

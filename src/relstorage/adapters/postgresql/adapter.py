@@ -14,6 +14,12 @@
 """PostgreSQL adapter for RelStorage."""
 from __future__ import absolute_import
 
+import logging
+import re
+
+from zope.interface import implementer
+
+from ...options import Options
 from .._abstract_drivers import _select_driver
 from .._util import query_property
 from ..dbiter import HistoryFreeDatabaseIterator
@@ -23,22 +29,16 @@ from ..packundo import HistoryFreePackUndo
 from ..packundo import HistoryPreservingPackUndo
 from ..poller import Poller
 from ..scriptrunner import ScriptRunner
-
 from . import drivers
 from .connmanager import Psycopg2ConnectionManager
 from .locker import PostgreSQLLocker
-from .mover import PostgreSQLObjectMover, PG8000ObjectMover
+from .mover import PG8000ObjectMover
+from .mover import PostgreSQLObjectMover
 from .mover import to_prepared_queries
 from .oidallocator import PostgreSQLOIDAllocator
 from .schema import PostgreSQLSchemaInstaller
 from .stats import PostgreSQLStats
 from .txncontrol import PostgreSQLTransactionControl
-
-
-from relstorage.options import Options
-from zope.interface import implementer
-import logging
-import re
 
 log = logging.getLogger(__name__)
 

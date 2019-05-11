@@ -1,4 +1,32 @@
-from __future__ import print_function, absolute_import
+from __future__ import absolute_import
+from __future__ import print_function
+
+import atexit
+import collections
+import datetime
+import doctest
+import os
+import random
+import re
+import stat
+import struct
+import sys
+import tempfile
+import time
+import unittest
+from hashlib import md5
+
+import transaction
+import ZODB.blob
+import ZODB.interfaces
+import ZODB.tests.StorageTestBase
+import ZODB.tests.util
+from ZODB.blob import Blob
+from ZODB.DB import DB
+from zope.testing import renormalizing
+
+from relstorage.tests.RecoveryStorage import IteratorDeepCompare
+
 ##############################################################################
 #
 # Copyright (c) 2004 Zope Foundation and Contributors.
@@ -13,33 +41,10 @@ from __future__ import print_function, absolute_import
 #
 ##############################################################################
 
-import doctest
-import atexit
-import collections
-import datetime
-import os
-import random
-import re
-import stat
-import struct
-import sys
-import tempfile
-import time
-import unittest
-from hashlib import md5
 
-import transaction
 
-from ZODB.blob import Blob
-from ZODB.DB import DB
 
-import ZODB.blob
-import ZODB.interfaces
-import ZODB.tests.StorageTestBase
-import ZODB.tests.util
-from zope.testing import renormalizing
 
-from relstorage.tests.RecoveryStorage import IteratorDeepCompare
 
 def new_time():
     """Create a _new_ time stamp.
