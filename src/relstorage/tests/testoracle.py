@@ -17,29 +17,21 @@ import os
 import sys
 import unittest
 
-from relstorage.options import Options
-from relstorage.tests.hftestbase import HistoryFreeFromFileStorage
-from relstorage.tests.hftestbase import HistoryFreeRelStorageTests
-from relstorage.tests.hftestbase import HistoryFreeToFileStorage
-from relstorage.tests.hptestbase import HistoryPreservingFromFileStorage
-from relstorage.tests.hptestbase import HistoryPreservingRelStorageTests
-from relstorage.tests.hptestbase import HistoryPreservingToFileStorage
-
-# pylint:disable=no-member,too-many-ancestors
-
-
-base_dbname = os.environ.get('RELSTORAGETEST_DBNAME', 'relstoragetest')
-
+from .util import AbstractTestSuiteBuilder
 
 class UseOracleAdapter(object):
 
-    def make_adapter(self, options):
+    keep_history = False
+    base_dbname = None
+
+    def make_adapter(self, options, db=None):
         from relstorage.adapters.oracle import OracleAdapter
         dsn = os.environ.get('ORACLE_TEST_DSN', 'XE')
-        if self.keep_history:
-            db = base_dbname
-        else:
-            db = base_dbname + '_hf'
+        if db is None:
+            if self.keep_history:
+                db = self.base_dbname
+            else:
+                db = self.base_dbname + '_hf'
         return OracleAdapter(
             user=db,
             password='relstoragetest',
@@ -49,6 +41,9 @@ class UseOracleAdapter(object):
 
 
 class ZConfigTests(object):
+    # pylint:disable=no-member
+    driver_name = None # Override
+    base_dbname = None
 
     def checkConfigureViaZConfig(self):
         # pylint:disable=too-many-locals
@@ -59,9 +54,9 @@ class ZConfigTests(object):
         os.close(fd)
         try:
             if self.keep_history:
-                dbname = base_dbname
+                dbname = self.base_dbname
             else:
-                dbname = base_dbname + '_hf'
+                dbname = self.base_dbname + '_hf'
             conf = u"""
             %%import relstorage
             <zodb main>
@@ -72,6 +67,7 @@ class ZConfigTests(object):
                 replica-conf %s
                 blob-chunk-size 10MB
                 <oracle>
+                  driver %s
                   user %s
                   password relstoragetest
                   dsn %s
@@ -79,11 +75,12 @@ class ZConfigTests(object):
               </relstorage>
             </zodb>
             """ % (
-                self.keep_history and 'true' or 'false',
+                'true' if self.keep_history else 'false',
                 replica_conf,
+                self.driver_name,
                 dbname,
                 dsn,
-                )
+            )
 
             schema_xml = u"""
             <schema>
@@ -119,123 +116,35 @@ class ZConfigTests(object):
             os.remove(replica_conf)
 
 
-class HPOracleTests(UseOracleAdapter, HistoryPreservingRelStorageTests,
-                    ZConfigTests):
-    pass
 
-class HPOracleToFile(UseOracleAdapter, HistoryPreservingToFileStorage):
-    pass
+class OracleTestSuiteBuilder(AbstractTestSuiteBuilder):
 
-class HPOracleFromFile(UseOracleAdapter, HistoryPreservingFromFileStorage):
-    pass
+    __name__ = 'Oracle'
 
-class HFOracleTests(UseOracleAdapter, HistoryFreeRelStorageTests,
-                    ZConfigTests):
-    pass
+    def __init__(self):
+        from relstorage.adapters.oracle import drivers
+        super(OracleTestSuiteBuilder, self).__init__(
+            drivers,
+            UseOracleAdapter,
+            None,
+        )
 
-class HFOracleToFile(UseOracleAdapter, HistoryFreeToFileStorage):
-    pass
+    def _compute_large_blob_size(self, use_small_blobs):
+        if use_small_blobs:
+            # cx_Oracle blob support can only address up to sys.maxint on
+            # 32-bit systems, 4GB otherwise. This takes a great deal of time, however,
+            # so allow tuning it down.
+            from relstorage.adapters.oracle.mover import OracleObjectMover as ObjectMover
+            assert hasattr(ObjectMover, 'oracle_blob_chunk_maxsize')
+            ObjectMover.oracle_blob_chunk_maxsize = 1024 * 1024 * 10
+            large_blob_size = ObjectMover.oracle_blob_chunk_maxsize * 2
+        else:
+            large_blob_size = min(sys.maxsize, 1<<32)
+        return large_blob_size
 
-class HFOracleFromFile(UseOracleAdapter, HistoryFreeFromFileStorage):
-    pass
-
-db_names = {
-    'data': base_dbname,
-    '1': base_dbname,
-    '2': base_dbname + '2',
-    'dest': base_dbname + '2',
-    }
 
 def test_suite():
-    # pylint:disable=too-many-locals
-    import relstorage.adapters.oracle as _adapter
-    try:
-        _adapter.select_driver()
-    except AttributeError: # XXX Temporary.
-        import warnings
-        warnings.warn("cx_Oracle is not importable, so Oracle tests disabled")
-        return unittest.TestSuite()
-
-    suite = unittest.TestSuite()
-    for klass in [
-            HPOracleTests,
-            HPOracleToFile,
-            HPOracleFromFile,
-            HFOracleTests,
-            HFOracleToFile,
-            HFOracleFromFile,
-    ]:
-        suite.addTest(unittest.makeSuite(klass, "check"))
-
-
-    from .util import RUNNING_ON_CI
-    if RUNNING_ON_CI or os.environ.get("RS_ORCL_SMALL_BLOB"):
-        # cx_Oracle blob support can only address up to sys.maxint on
-        # 32-bit systems, 4GB otherwise. This takes a great deal of time, however,
-        # so allow tuning it down.
-        from relstorage.adapters.oracle.mover import OracleObjectMover as ObjectMover
-        assert hasattr(ObjectMover, 'oracle_blob_chunk_maxsize')
-        ObjectMover.oracle_blob_chunk_maxsize = 1024 * 1024 * 10
-        large_blob_size = ObjectMover.oracle_blob_chunk_maxsize * 2
-    else:
-        large_blob_size = min(sys.maxsize, 1<<32)
-
-
-    from relstorage.tests.blob.testblob import storage_reusable_suite
-    dsn = os.environ.get('ORACLE_TEST_DSN', 'XE')
-    from relstorage.tests.util import shared_blob_dir_choices
-    for shared_blob_dir in shared_blob_dir_choices:
-        for keep_history in (False, True):
-            def create_storage(name, blob_dir,
-                               shared_blob_dir=shared_blob_dir,
-                               keep_history=keep_history, **kw):
-                from relstorage.storage import RelStorage
-                from relstorage.adapters.oracle import OracleAdapter
-                db = db_names[name]
-                if not keep_history:
-                    db += '_hf'
-                options = Options(
-                    keep_history=keep_history,
-                    shared_blob_dir=shared_blob_dir,
-                    blob_dir=os.path.abspath(blob_dir),
-                    **kw)
-                adapter = OracleAdapter(
-                    user=db,
-                    password='relstoragetest',
-                    dsn=dsn,
-                    options=options,
-                )
-                storage = RelStorage(adapter, name=name, options=options)
-                storage.zap_all()
-                return storage
-
-            prefix = 'Oracle%s%s' % (
-                (shared_blob_dir and 'Shared' or 'Unshared'),
-                (keep_history and 'WithHistory' or 'NoHistory'),
-            )
-
-            # If the blob directory is a cache, don't test packing,
-            # since packing can not remove blobs from all caches.
-            test_packing = shared_blob_dir
-
-            if keep_history:
-                pack_test_name = 'blob_packing.txt'
-            else:
-                pack_test_name = 'blob_packing_history_free.txt'
-
-            blob_size = large_blob_size
-
-            suite.addTest(storage_reusable_suite(
-                prefix, create_storage,
-                test_blob_storage_recovery=True,
-                test_packing=test_packing,
-                test_undo=keep_history,
-                pack_test_name=pack_test_name,
-                test_blob_cache=(not shared_blob_dir),
-                large_blob_size=(not shared_blob_dir) and blob_size + 100,
-            ))
-
-    return suite
+    return OracleTestSuiteBuilder().test_suite()
 
 if __name__ == '__main__':
     logging.basicConfig()

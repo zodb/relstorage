@@ -19,50 +19,67 @@ Oracle IDBDriver implementations.
 from __future__ import absolute_import
 from __future__ import print_function
 
+import sys
+
 from zope.interface import implementer
 from zope.interface import moduleProvides
 
-from .._abstract_drivers import _standard_exceptions
+from .._abstract_drivers import AbstractModuleDriver
 from ..interfaces import IDBDriver
 from ..interfaces import IDBDriverOptions
 
 database_type = 'oracle'
-suggested_drivers = []
 driver_map = {}
-preferred_driver_name = None
 
 moduleProvides(IDBDriverOptions)
 
-try:
-    import cx_Oracle
-except ImportError:
-    pass
-else:  # pragma: no cover
+@implementer(IDBDriver)
+class cx_OracleDriver(AbstractModuleDriver):
+    __name__ = 'cx_Oracle'
 
-    @implementer(IDBDriver)
-    class cx_OracleDriver(object): # noqa
-        __name__ = 'cx_Oracle'
-        disconnected_exceptions, close_exceptions, lock_exceptions = _standard_exceptions(cx_Oracle)
-        disconnected_exceptions += (cx_Oracle.DatabaseError,)
-        close_exceptions += (cx_Oracle.DatabaseError,)
+    def __init__(self):
+        super(cx_OracleDriver, self).__init__()
 
-        use_replica_exceptions = (cx_Oracle.OperationalError,)
-        Binary = staticmethod(cx_Oracle.Binary)
-        connect = staticmethod(cx_Oracle.connect)
+        cx_Oracle = self.driver_module
+
+        self.disconnected_exceptions += (cx_Oracle.DatabaseError,)
+        self.close_exceptions += (cx_Oracle.DatabaseError,)
 
         # Extensions
-        DatabaseError = cx_Oracle.DatabaseError
-        NUMBER = cx_Oracle.NUMBER
-        BLOB = cx_Oracle.BLOB
-        LOB = cx_Oracle.LOB
-        LONG_BINARY = cx_Oracle.LONG_BINARY
-        BINARY = cx_Oracle.BINARY
-        STRING = cx_Oracle.STRING
-        version = cx_Oracle.version
+        self.DatabaseError = cx_Oracle.DatabaseError
+        self.NUMBER = cx_Oracle.NUMBER
+        self.BLOB = cx_Oracle.BLOB
+        self.LOB = cx_Oracle.LOB
+        self.LONG_BINARY = cx_Oracle.LONG_BINARY
+        self.BINARY = cx_Oracle.BINARY
+        self.STRING = cx_Oracle.STRING
+        self.version = cx_Oracle.version
 
-    driver = cx_OracleDriver()
-    driver_map[driver.__name__] = driver
+    def get_driver_module(self):
+        import cx_Oracle # pylint:disable=import-error
+        return cx_Oracle
 
-    preferred_driver_name = driver.__name__
-    del driver
-    del cx_Oracle
+
+
+driver_map = {
+    cls.__name__: cls
+    for cls in (cx_OracleDriver,)
+}
+
+driver_order = [cx_OracleDriver,]
+
+
+def select_driver(driver_name=None):
+    """
+    Choose and return an IDBDriver
+    """
+    from .._abstract_drivers import _select_driver_by_name
+    return _select_driver_by_name(driver_name, sys.modules[__name__])
+
+def known_driver_names():
+    """
+    Return an iterable of the potential driver names.
+
+    The drivers may or may not be available.
+    """
+    return driver_map
