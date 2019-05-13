@@ -24,6 +24,11 @@ from relstorage._compat import PY2
 from relstorage.adapters._abstract_drivers import AbstractModuleDriver
 from relstorage.adapters.interfaces import IDBDriver
 
+__all__ = [
+    'PyMySQLConnectorDriver',
+    'CMySQLConnectorDriver',
+]
+
 _base_name = 'MySQL Connector/Python'
 
 @implementer(IDBDriver)
@@ -31,16 +36,16 @@ class PyMySQLConnectorDriver(AbstractModuleDriver):
     # See https://github.com/zodb/relstorage/issues/155
     __name__ = 'Py ' + _base_name
 
+    MODULE_NAME = 'mysql.connector'
+    PRIORITY = 4
+    PRIORITY_PYPY = 2
+
     USE_PURE = True
+
 
     def __init__(self):
         super(PyMySQLConnectorDriver, self).__init__()
         del self.connect
-
-    def get_driver_module(self):
-        # pylint:disable=import-error
-        import mysql.connector as mysql_connector
-        return mysql_connector
 
     def connect(self, *args, **kwargs): # pylint:disable=method-hidden
         # It defaults to the (slower) pure-python version
@@ -77,6 +82,9 @@ class CMySQLConnectorDriver(PyMySQLConnectorDriver):
     __name__ = 'C ' + _base_name
 
     AVAILABLE_ON_PYPY = False
+    PRIORITY = 3
+    PRIORITY_PYPY = 4
+
     USE_PURE = False
 
     def get_driver_module(self):

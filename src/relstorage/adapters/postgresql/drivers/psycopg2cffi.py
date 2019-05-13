@@ -27,7 +27,6 @@ __all__ = [
 
 class Psycopg2cffiDriver(Psycopg2Driver):
     __name__ = 'psycopg2cffi'
-
-    def get_driver_module(self):
-        import psycopg2cffi
-        return psycopg2cffi
+    MODULE_NAME = __name__
+    PRIORITY = 2
+    PRIORITY_PYPY = 1

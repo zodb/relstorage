@@ -19,23 +19,24 @@ Oracle IDBDriver implementations.
 from __future__ import absolute_import
 from __future__ import print_function
 
-import sys
 
 from zope.interface import implementer
-from zope.interface import moduleProvides
+
 
 from .._abstract_drivers import AbstractModuleDriver
+from .._abstract_drivers import implement_db_driver_options
 from ..interfaces import IDBDriver
-from ..interfaces import IDBDriverOptions
 
 database_type = 'oracle'
-driver_map = {}
 
-moduleProvides(IDBDriverOptions)
+__all__ = [
+    'cx_OracleDriver',
+]
 
 @implementer(IDBDriver)
 class cx_OracleDriver(AbstractModuleDriver):
     __name__ = 'cx_Oracle'
+    MODULE_NAME = __name__
 
     def __init__(self):
         super(cx_OracleDriver, self).__init__()
@@ -55,31 +56,8 @@ class cx_OracleDriver(AbstractModuleDriver):
         self.STRING = cx_Oracle.STRING
         self.version = cx_Oracle.version
 
-    def get_driver_module(self):
-        import cx_Oracle # pylint:disable=import-error
-        return cx_Oracle
 
-
-
-driver_map = {
-    cls.__name__: cls
-    for cls in (cx_OracleDriver,)
-}
-
-driver_order = [cx_OracleDriver,]
-
-
-def select_driver(driver_name=None):
-    """
-    Choose and return an IDBDriver
-    """
-    from .._abstract_drivers import _select_driver_by_name
-    return _select_driver_by_name(driver_name, sys.modules[__name__])
-
-def known_driver_names():
-    """
-    Return an iterable of the potential driver names.
-
-    The drivers may or may not be available.
-    """
-    return driver_map
+implement_db_driver_options(
+    __name__,
+    '.drivers'
+)

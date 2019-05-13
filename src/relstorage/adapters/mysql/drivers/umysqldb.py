@@ -29,6 +29,10 @@ from relstorage._compat import intern
 
 from .pymysql import PyMySQLDriver
 
+__all__ = [
+    'umysqldbDriver',
+]
+
 logger = __import__('logging').getLogger(__name__)
 
 param_match = re.compile(r'%\(.*?\)s')
@@ -195,6 +199,8 @@ class umysqldbDriver(PyMySQLDriver):
     __name__ = 'umysqldb'
 
     AVAILABLE_ON_PYPY = False
+    MODULE_NAME = __name__
+    PRIORITY = PRIORITY_PYPY = 100 # Last of the list.
 
     def __init__(self):
         super(umysqldbDriver, self).__init__()
@@ -203,7 +209,3 @@ class umysqldbDriver(PyMySQLDriver):
         # umysql has a tendency to crash when given a bytearray (which
         # is what pymysql.Binary would produce), at least on OS X.
         self.Binary = bytes
-
-    def get_driver_module(self):
-        import umysqldb # pylint:disable=import-error
-        return umysqldb

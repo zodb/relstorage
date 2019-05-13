@@ -17,12 +17,16 @@ Helpers for drivers
 
 from __future__ import print_function
 
-import abc
+import importlib
 import sys
 import traceback
 
+from zope.interface import directlyProvides
+
 from .._compat import ABC
 from .._compat import PYPY
+from .interfaces import IDBDriver
+from .interfaces import IDBDriverOptions
 from .interfaces import DriverNotAvailableError
 from .interfaces import NoDriversAvailableError
 from .interfaces import ReplicaClosedException
@@ -55,34 +59,31 @@ def _select_driver_by_name(driver_name, driver_options):
             raise e
 
 
-_base_disconnected_exceptions = (ReplicaClosedException,)
-
-def _standard_exceptions(mod):
-    # Returns disconnected_exceptions, close_exceptions
-    # and lock_exceptions
-    # for a standard driver
-    disconnected_exceptions = (mod.OperationalError,
-                               mod.InterfaceError)
-    disconnected_exceptions += _base_disconnected_exceptions
-
-    close_exceptions = disconnected_exceptions + (mod.ProgrammingError,)
-
-    lock_exceptions = (mod.DatabaseError,)
-    return disconnected_exceptions, close_exceptions, lock_exceptions
-
-
 class AbstractModuleDriver(ABC):
     """
     Base implementation of a driver, based on a module, as used in DBAPI.
 
     Subclasses must provide:
 
+    - ``MODULE_NAME`` property.
     - ``__name__`` property
     - Implementation of ``get_driver_module``; this should import the
       module at runtime.
     """
 
+    #: The name of the DB-API module to import.
+    MODULE_NAME = None
+
+    #: Can this module be used on PyPy?
     AVAILABLE_ON_PYPY = True
+
+    #: Priority of this driver, when available. Lower is better.
+    #: (That is, first choice should have value 1, and second choice value
+    #: 2, and so on.)
+    PRIORITY = 100
+
+    #: Priority of this driver when running on PyPy. Lower is better.
+    PRIORITY_PYPY = 100
 
     def __init__(self):
         if PYPY and not self.AVAILABLE_ON_PYPY:
@@ -92,15 +93,19 @@ class AbstractModuleDriver(ABC):
         except ImportError:
             raise DriverNotAvailableError(self.__name__)
 
-        ex = _standard_exceptions(mod)
-        self.disconnected_exceptions, self.close_exceptions, self.lock_exceptions = ex
+
+        self.disconnected_exceptions = (mod.OperationalError,
+                                        mod.InterfaceError,
+                                        ReplicaClosedException)
+        self.close_exceptions = self.disconnected_exceptions + (mod.ProgrammingError,)
+        self.lock_exceptions = (mod.DatabaseError,)
         self.use_replica_exceptions = (mod.OperationalError,)
         self.Binary = mod.Binary
         self.connect = mod.connect
 
-    @abc.abstractmethod
     def get_driver_module(self):
         """Import and return the driver module."""
+        return importlib.import_module(self.MODULE_NAME)
 
     # Common compatibility shims, overriden as needed.
 
@@ -109,6 +114,46 @@ class AbstractModuleDriver(ABC):
 
     def cursor(self, conn):
         return conn.cursor()
+
+def implement_db_driver_options(name, *driver_modules):
+    """
+    Helper function to be called at a module scope to
+    make it implement ``IDBDriverOptions``.
+
+    :param str name: The value of ``__name__``.
+    :param driver_modules: Each of these names a module that has
+        one or more implementations of ``IDBDriver`` in it,
+        as named in their ``__all__`` attribute.
+
+    """
+
+    module = sys.modules[name]
+
+    driver_factories = set()
+    for driver_module in driver_modules:
+        driver_module = importlib.import_module('.' + driver_module,
+                                                name)
+        for factory in driver_module.__all__:
+            factory = getattr(driver_module, factory)
+            if IDBDriver.implementedBy(factory):
+                driver_factories.add(factory)
+
+    driver_map = module.driver_map = {
+        factory.__name__: factory
+        for factory in driver_factories
+    }
+
+    module.driver_order = sorted(
+        driver_factories,
+        key=lambda factory: factory.PRIORITY if not PYPY else factory.PRIORITY_PYPY,
+    )
+
+    directlyProvides(module, IDBDriverOptions)
+
+    module.select_driver = lambda driver_name=None: _select_driver_by_name(driver_name,
+                                                                           sys.modules[name])
+
+    module.known_driver_names = lambda: driver_map
 
 class _ConnWrapper(object): # pragma: no cover
     def __init__(self, conn):

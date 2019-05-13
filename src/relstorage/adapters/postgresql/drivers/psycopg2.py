@@ -40,6 +40,10 @@ def _create_connection(mod):
 @implementer(IDBDriver)
 class Psycopg2Driver(AbstractModuleDriver):
     __name__ = 'psycopg2'
+    MODULE_NAME = __name__
+
+    PRIORITY = 1
+    PRIORITY_PYPY = 2
 
     def __init__(self):
         super(Psycopg2Driver, self).__init__()
@@ -59,7 +63,3 @@ class Psycopg2Driver(AbstractModuleDriver):
         conn = self.connect(*args, **kwargs)
         conn.set_isolation_level(isolation)
         return conn, conn.cursor()
-
-    def get_driver_module(self):
-        import psycopg2
-        return psycopg2

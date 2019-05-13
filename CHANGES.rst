@@ -25,6 +25,11 @@
   Python implementation. Instead, explicitly use the 'Py' or 'C'
   prefixed name.
 
+- Drop the internal and undocumented environment variables that could be
+  used to force configurations that did not specify a database driver
+  to use a specific driver. Instead, list the driver in the database
+  configuration.
+
 2.1.1 (2019-01-07)
 ==================
 

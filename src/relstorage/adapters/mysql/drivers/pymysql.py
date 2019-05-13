@@ -23,15 +23,22 @@ from zope.interface import implementer
 from relstorage.adapters._abstract_drivers import AbstractModuleDriver
 from relstorage.adapters.interfaces import IDBDriver
 
+__all__ = [
+    'PyMySQLDriver',
+]
 
 @implementer(IDBDriver)
 class PyMySQLDriver(AbstractModuleDriver):
     __name__ = 'PyMySQL'
+    MODULE_NAME = 'pymysql'
+    PRIORITY = 2
+    PRIORITY_PYPY = 1
+
 
     def __init__(self):
         super(PyMySQLDriver, self).__init__()
 
-        from pymysql import err as pymysql_err
+        pymysql_err = self.driver_module
 
         # Under PyMySql through at least 0.6.6, closing an already closed
         # connection raises a plain pymysql.err.Error.
@@ -50,7 +57,3 @@ class PyMySQLDriver(AbstractModuleDriver):
             # which should probably be taken as disconnect
             pymysql_err.DatabaseError,
         )
-
-    def get_driver_module(self):
-        import pymysql
-        return pymysql

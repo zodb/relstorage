@@ -125,6 +125,10 @@ def _make_lobject_method_for_connection(self, binary):
 @implementer(IDBDriver)
 class PG8000Driver(AbstractModuleDriver):
     __name__ = 'pg8000'
+    MODULE_NAME = __name__
+
+    PRIORITY = 3
+    PRIORITY_PYPY = 2
 
     def __init__(self):
         super(PG8000Driver, self).__init__()
@@ -135,10 +139,6 @@ class PG8000Driver(AbstractModuleDriver):
         self.disconnected_exceptions += (AttributeError,)
         self._connect = self.driver_module.connect
         del self.connect
-
-    def get_driver_module(self):
-        import pg8000
-        return pg8000
 
     # For debugging
     _wrap = False
