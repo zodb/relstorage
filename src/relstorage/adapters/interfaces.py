@@ -80,10 +80,29 @@ class DriverNotAvailableError(Exception):
     driver_options = None
 
     def __init__(self, driver_name, driver_options=None):
-        # TODO: Make the repr/str of this try to list all the drivers that *are* available.
         super(DriverNotAvailableError, self).__init__(driver_name)
         self.driver_name = driver_name
         self.driver_options = driver_options
+
+    def _format_drivers(self):
+        driver_map = getattr(self.driver_options, 'driver_map', {})
+        return ' '.join(
+            '%r (Module: %r; Available: %s)' % (
+                name,
+                # These two attributes aren't in the interface,
+                # they're extensions from AbstractModuleDriver
+                factory.MODULE_NAME,
+                factory.check_availability()
+            )
+            for name, factory in driver_map.items()
+        )
+
+    def __str__(self):
+        return '%s: Driver %r is not available. Options: %s.' % (
+            type(self).__name__, self.driver_name, self._format_drivers()
+        )
+
+    __repr__ = __str__
 
 
 class UnknownDriverError(DriverNotAvailableError):
@@ -97,8 +116,8 @@ class NoDriversAvailableError(DriverNotAvailableError):
     Raised when there are no drivers available.
     """
 
-    def __init__(self):
-        super(NoDriversAvailableError, self).__init__('auto')
+    def __init__(self, driver_name='auto', driver_options=None):
+        super(NoDriversAvailableError, self).__init__(driver_name, driver_options)
 
 
 class IDBDriverOptions(Interface):

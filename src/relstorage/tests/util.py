@@ -263,7 +263,7 @@ class AbstractTestSuiteBuilder(ABC):
                     self.__name__,
                     'Shared' if shared_blob_dir else 'Unshared',
                     'WithHistory' if keep_history else 'NoHistory',
-                    driver_name,
+                    driver_name.replace(' ', '').replace('/', '_'),
                 )
 
                 # If the blob directory is a cache, don't test packing,

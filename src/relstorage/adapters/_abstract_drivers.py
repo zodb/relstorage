@@ -45,7 +45,7 @@ def _select_driver_by_name(driver_name, driver_options):
                 return driver()
             except DriverNotAvailableError:
                 pass
-        raise NoDriversAvailableError
+        raise NoDriversAvailableError(driver_name, driver_options)
 
     try:
         factory = driver_options.driver_map[driver_name]
@@ -107,6 +107,14 @@ class AbstractModuleDriver(ABC):
         """Import and return the driver module."""
         return importlib.import_module(self.MODULE_NAME)
 
+    @classmethod
+    def check_availability(cls):
+        try:
+            cls()
+        except DriverNotAvailableError:
+            return False
+        return True
+
     # Common compatibility shims, overriden as needed.
 
     def set_autocommit(self, conn, value):
@@ -139,7 +147,8 @@ def implement_db_driver_options(name, *driver_modules):
                 driver_factories.add(factory)
 
     driver_map = module.driver_map = {
-        factory.__name__: factory
+        # Getting the name is tricky, the class wants to shadow it.
+        factory.__dict__['__name__']: factory
         for factory in driver_factories
     }
 
