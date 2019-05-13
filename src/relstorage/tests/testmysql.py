@@ -15,7 +15,6 @@
 from __future__ import absolute_import
 
 import logging
-import os
 import unittest
 
 from relstorage.adapters.mysql import MySQLAdapter
@@ -25,11 +24,8 @@ from relstorage.options import Options
 from .util import skipOnCI
 from .util import AbstractTestSuiteBuilder
 
-# pylint:disable=no-member
 
-
-
-class UseMySQLAdapter(object):
+class MySQLAdapterMixin(object):
 
     def make_adapter(self, options, db=None):
         if db is None:
@@ -44,85 +40,37 @@ class UseMySQLAdapter(object):
             passwd='relstoragetest',
         )
 
+    def get_adapter_class(self):
+        return MySQLAdapter
 
-class ZConfigTests(object):
-
-    driver_name = None # Override
-
-    def checkConfigureViaZConfig(self):
-        replica_conf = os.path.join(os.path.dirname(__file__), 'replicas.conf')
+    def get_adapter_zconfig(self):
         if self.keep_history:
             dbname = self.base_dbname
         else:
             dbname = self.base_dbname + '_hf'
-        conf = u"""
-        %%import relstorage
-        <zodb main>
-            <relstorage>
-            name xyz
-            read-only false
-            keep-history %s
-            replica-conf %s
-            blob-chunk-size 10MB
-            cache-local-dir-read-count 12
-            cache-local-dir-write-max-size 10MB
-            <mysql>
-                driver %s
-                db %s
-                user relstoragetest
-                passwd relstoragetest
-            </mysql>
-            </relstorage>
-        </zodb>
+        return u"""
+        <mysql>
+            driver %s
+            db %s
+            user relstoragetest
+            passwd relstoragetest
+        </mysql>
         """ % (
-            'true' if self.keep_history else 'false',
-            replica_conf,
             self.driver_name,
             dbname,
         )
 
-        schema_xml = u"""
-        <schema>
-        <import package="ZODB"/>
-        <section type="ZODB.database" name="main" attribute="database"/>
-        </schema>
-        """
-        import ZConfig
-        from io import StringIO
-        schema = ZConfig.loadSchemaFile(StringIO(schema_xml))
-        config, _ = ZConfig.loadConfigFile(schema, StringIO(conf))
+    def verify_adapter_from_zconfig(self, adapter):
+        if self.keep_history:
+            dbname = self.base_dbname
+        else:
+            dbname = self.base_dbname + '_hf'
 
-        db = config.database.open()
-        try:
-            storage = db.storage
-            self.assertEqual(storage.isReadOnly(), False)
-            self.assertEqual(storage.getName(), "xyz")
-            adapter = storage._adapter
-            self.assertIsInstance(adapter, MySQLAdapter)
-            self.assertEqual(adapter._params, {
-                'passwd': 'relstoragetest',
-                'db': dbname,
-                'user': 'relstoragetest',
-                })
-            self.assertEqual(adapter.keep_history, self.keep_history)
-            self.assertEqual(
-                adapter.connmanager.replica_selector.replica_conf,
-                replica_conf)
-            self.assertEqual(storage._options.blob_chunk_size, 10485760)
-        finally:
-            db.close()
-
-class _MySQLCfgMixin(object):
-
-    def _relstorage_contents(self):
-        return """
-        <mysql>
-            driver %s
-            db relstoragetest
-            user relstoragetest
-            passwd relstoragetest
-        </mysql>
-        """ % (self.driver_name,)
+        self.assertEqual(adapter._params, {
+            'passwd': 'relstoragetest',
+            'db': dbname,
+            'user': 'relstoragetest',
+        })
 
 
 class TestOIDAllocator(unittest.TestCase):
@@ -146,8 +94,7 @@ class MySQLTestSuiteBuilder(AbstractTestSuiteBuilder):
         from relstorage.adapters.mysql import drivers
         super(MySQLTestSuiteBuilder, self).__init__(
             drivers,
-            UseMySQLAdapter,
-            _MySQLCfgMixin,
+            MySQLAdapterMixin
         )
 
     def _compute_large_blob_size(self, use_small_blobs):
@@ -159,9 +106,8 @@ class MySQLTestSuiteBuilder(AbstractTestSuiteBuilder):
         return Options().blob_chunk_size
 
     def _make_check_class_HistoryFreeRelStorageTests(self, base, _):
-        class Tests(UseMySQLAdapter,
-                    base,
-                    ZConfigTests):
+        class Tests(MySQLAdapterMixin,
+                    base):
             @skipOnCI("Travis MySQL goes away error 2006")
             def check16MObject(self):
                 # NOTE: If your mySQL goes away, check the server's value for

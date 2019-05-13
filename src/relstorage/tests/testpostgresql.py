@@ -15,20 +15,14 @@
 from __future__ import absolute_import
 
 import logging
-import os
 import unittest
 
 from relstorage.adapters.postgresql import PostgreSQLAdapter
 
 from .util import AbstractTestSuiteBuilder
 
-# pylint:disable=no-member
 
-
-base_dbname = os.environ.get('RELSTORAGETEST_DBNAME', 'relstoragetest')
-
-
-class UsePostgreSQLAdapter(object):
+class PostgreSQLAdapterMixin(object):
 
     def make_adapter(self, options, db=None):
         if db is None:
@@ -41,81 +35,39 @@ class UsePostgreSQLAdapter(object):
             options=options,
         )
 
+    def get_adapter_class(self):
+        return PostgreSQLAdapter
 
-class ZConfigTests(object):
-
-    driver_name = None # Override
-    base_dbname = None
-
-    def checkConfigureViaZConfig(self):
-        replica_conf = os.path.join(os.path.dirname(__file__), 'replicas.conf')
+    def __get_adapter_zconfig_dsn(self):
         if self.keep_history:
             dbname = self.base_dbname
         else:
             dbname = self.base_dbname + '_hf'
         dsn = (
             "dbname='%s' user='relstoragetest' password='relstoragetest'"
-            % dbname)
-        conf = u"""
-        %%import relstorage
-        <zodb main>
-            <relstorage>
-            name xyz
-            read-only false
-            keep-history %s
-            replica-conf %s
-            blob-chunk-size 10MB
-            <postgresql>
-                driver %s
-                dsn %s
-            </postgresql>
-            </relstorage>
-        </zodb>
-        """ % (
-            'true' if self.keep_history else 'false',
-            replica_conf,
-            self.driver_name,
-            dsn,
+            % dbname
         )
+        return dsn
 
-        schema_xml = u"""
-        <schema>
-        <import package="ZODB"/>
-        <section type="ZODB.database" name="main" attribute="database"/>
-        </schema>
-        """
-        import ZConfig
-        from io import StringIO
-        schema = ZConfig.loadSchemaFile(StringIO(schema_xml))
-        config, _ = ZConfig.loadConfigFile(schema, StringIO(conf))
-
-        db = config.database.open()
-        try:
-            storage = db.storage
-            self.assertFalse(storage.isReadOnly())
-            self.assertEqual(storage.getName(), "xyz")
-            adapter = storage._adapter
-            self.assertIsInstance(adapter, PostgreSQLAdapter)
-            self.assertEqual(adapter._dsn, dsn)
-            self.assertEqual(adapter.keep_history, self.keep_history)
-            self.assertEqual(
-                adapter.connmanager.replica_selector.replica_conf,
-                replica_conf)
-            self.assertEqual(storage._options.blob_chunk_size, 10485760)
-        finally:
-            db.close()
-
-
-class _PgSQLCfgMixin(object):
-
-    def _relstorage_contents(self):
-        return """
+    def get_adapter_zconfig(self):
+        return u"""
         <postgresql>
             driver %s
-            dsn dbname='relstoragetest' user='relstoragetest' password='relstoragetest'
+            dsn %s
         </postgresql>
-        """ % (self.driver_name,)
+        """ % (
+            self.driver_name,
+            self.__get_adapter_zconfig_dsn()
+        )
 
+    def verify_adapter_from_zconfig(self, adapter):
+        self.assertEqual(adapter._dsn, self.__get_adapter_zconfig_dsn())
+
+# Timing shows that we spend 6.9s opening database connections to a
+# local PostgreSQL 11 server when using Python 3.7 and psycopg2 2.8
+# during a total test run of 2:27. I had thought that maybe connection
+# pooling would speed the test run up, but that doesn't seem to be the
+# case.
 
 class PostgreSQLTestSuiteBuilder(AbstractTestSuiteBuilder):
 
@@ -125,8 +77,7 @@ class PostgreSQLTestSuiteBuilder(AbstractTestSuiteBuilder):
         from relstorage.adapters.postgresql import drivers
         super(PostgreSQLTestSuiteBuilder, self).__init__(
             drivers,
-            UsePostgreSQLAdapter,
-            _PgSQLCfgMixin,
+            PostgreSQLAdapterMixin,
         )
 
     def _compute_large_blob_size(self, use_small_blobs):

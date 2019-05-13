@@ -78,10 +78,11 @@ class AbstractTestSuiteBuilder(ABC):
 
     __name__ = None # PostgreSQL, MySQL, Oracle
 
-    def __init__(self, driver_options, use_adapter, cfg_mixin):
+    def __init__(self, driver_options, use_adapter):
         """
         :param driver_options: The ``IDBDriverOptions``
-        :param cfg_mixin: Optional; for zodbconvert tests.
+        :param use_adapter: A mixin class implementing the abstract methods
+            defined by ``StorageCreatingMixin``.
         """
 
         self.drivers = driver_options
@@ -95,7 +96,6 @@ class AbstractTestSuiteBuilder(ABC):
 
         self.use_adapter = use_adapter
         use_adapter.base_dbname = self.base_dbname
-        self.cfg_mixin = cfg_mixin
         self.large_blob_size = self._compute_large_blob_size(USE_SMALL_BLOBS)
 
     def _compute_large_blob_size(self, use_small_blobs):
@@ -162,9 +162,6 @@ class AbstractTestSuiteBuilder(ABC):
         return classes
 
     def _make_zodbconvert_classes(self):
-        if self.cfg_mixin is None:
-            return []
-
         from .reltestbase import AbstractRSDestZodbConvertTests
         from .reltestbase import AbstractRSSrcZodbConvertTests
 
@@ -172,7 +169,7 @@ class AbstractTestSuiteBuilder(ABC):
         for base in (AbstractRSSrcZodbConvertTests, AbstractRSDestZodbConvertTests):
             klass = type(
                 self.__name__ + base.__name__[8:],
-                (self.use_adapter, self.cfg_mixin, base),
+                (self.use_adapter, base),
                 {}
             )
             klass.__module__ = self.__module__

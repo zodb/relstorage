@@ -14,9 +14,11 @@
 """A foundation for RelStorage tests"""
 from __future__ import absolute_import
 
-# pylint:disable=too-many-ancestors,abstract-method,too-many-public-methods
+# pylint:disable=too-many-ancestors,abstract-method,too-many-public-methods,too-many-lines
 import random
 import time
+import os
+import abc
 
 import transaction
 from persistent import Persistent
@@ -38,20 +40,48 @@ from ZODB.tests.StorageTestBase import zodb_unpickle
 
 from relstorage.options import Options
 from relstorage.storage import RelStorage
+from relstorage._compat import ABC
 
 from . import fakecache
 from . import util
 from .test_zodbconvert import FSZODBConvertTests
 
 
-class StorageCreatingMixin(object):
+class StorageCreatingMixin(ABC):
 
     keep_history = None # Override
     driver_name = None # Override.
 
+    @abc.abstractmethod
     def make_adapter(self, options):
         # abstract method
-        raise NotImplementedError()
+        raise NotImplementedError
+
+    @abc.abstractmethod
+    def get_adapter_class(self):
+        raise NotImplementedError
+
+    @abc.abstractmethod
+    def get_adapter_zconfig(self):
+        """
+        Return the part of the ZConfig string that makes the adapter.
+
+        That is, return the <postgresql>, <mysql> or <oracle> section.
+
+        Return text (unicode).
+        """
+        raise NotImplementedError
+
+    def get_adapter_zconfig_replica_conf(self):
+        return os.path.join(os.path.dirname(__file__), 'replicas.conf')
+
+    @abc.abstractmethod
+    def verify_adapter_from_zconfig(self, adapter):
+        """
+        Assert that the adapter configured from get_adapter_zconfig
+        is properly configured.
+        """
+        raise NotImplementedError
 
     def _wrap_storage(self, storage):
         return storage
@@ -71,10 +101,11 @@ class StorageCreatingMixin(object):
         storage = RelStorage(adapter, options=options)
         storage._batcher_row_limit = 1
         if zap:
-            # XXX: Some ZODB tests, possibly check4ExtStorageThread and
-            # check7StorageThreads don't close storages when done with them?
-            # This leads to connections remaining open with locks on PyPy, so on PostgreSQL
-            # we can't TRUNCATE tables and have to go the slow route.
+            # XXX: Some ZODB tests, possibly check4ExtStorageThread
+            # and check7StorageThreads don't close storages when done
+            # with them? This leads to connections remaining open with
+            # locks on PyPy, so on PostgreSQL we can't TRUNCATE tables
+            # and have to go the slow route.
             storage.zap_all(slow=True)
         return self._wrap_storage(storage)
 
@@ -82,6 +113,7 @@ class StorageCreatingMixin(object):
 class RelStorageTestBase(StorageCreatingMixin,
                          StorageTestBase.StorageTestBase):
 
+    base_dbname = None # Override
     keep_history = None  # Override
     _storage_created = None
 
@@ -718,7 +750,6 @@ class GenericRelStorageTests(
         # raise a ReadConflictError.
         self._storage = self.make_storage(revert_when_stale=False)
 
-        import os
         import shutil
         import tempfile
         from ZODB.FileStorage import FileStorage
@@ -767,7 +798,6 @@ class GenericRelStorageTests(
         # invalidate all objects that have changed in the interval.
         self._storage = self.make_storage(revert_when_stale=True)
 
-        import os
         import shutil
         import tempfile
         from ZODB.FileStorage import FileStorage
@@ -882,6 +912,55 @@ class GenericRelStorageTests(
         self.assertTrue(
             IMVCCAfterCompletionStorage.providedBy(self._storage))
 
+    def checkConfigureViaZConfig(self):
+        replica_conf = self.get_adapter_zconfig_replica_conf()
+
+        conf = u"""
+        %%import relstorage
+        <zodb main>
+            <relstorage>
+            name xyz
+            read-only false
+            keep-history %s
+            replica-conf %s
+            blob-chunk-size 10MB
+            cache-local-dir-read-count 12
+            cache-local-dir-write-max-size 10MB
+            %s
+            </relstorage>
+        </zodb>
+        """ % (
+            'true' if self.keep_history else 'false',
+            replica_conf,
+            self.get_adapter_zconfig()
+        )
+
+        schema_xml = u"""
+        <schema>
+        <import package="ZODB"/>
+        <section type="ZODB.database" name="main" attribute="database"/>
+        </schema>
+        """
+        import ZConfig
+        from io import StringIO
+        schema = ZConfig.loadSchemaFile(StringIO(schema_xml))
+        config, _ = ZConfig.loadConfigFile(schema, StringIO(conf))
+
+        db = config.database.open()
+        try:
+            storage = db.storage
+            self.assertEqual(storage.isReadOnly(), False)
+            self.assertEqual(storage.getName(), "xyz")
+            adapter = storage._adapter
+            self.assertIsInstance(adapter, self.get_adapter_class())
+            self.verify_adapter_from_zconfig(adapter)
+            self.assertEqual(adapter.keep_history, self.keep_history)
+            self.assertEqual(
+                adapter.connmanager.replica_selector.replica_conf,
+                replica_conf)
+            self.assertEqual(storage._options.blob_chunk_size, 10485760)
+        finally:
+            db.close()
 
 
 class AbstractRSZodbConvertTests(StorageCreatingMixin,
@@ -890,9 +969,6 @@ class AbstractRSZodbConvertTests(StorageCreatingMixin,
     filestorage_name = 'source'
     relstorage_name = 'destination'
     filestorage_file = None
-
-    def _relstorage_contents(self):
-        raise NotImplementedError()
 
     def setUp(self):
         super(AbstractRSZodbConvertTests, self).setUp()
@@ -909,8 +985,12 @@ class AbstractRSZodbConvertTests(StorageCreatingMixin,
             %s
         </relstorage>
         </zlibstorage>
-        """ % (self.filestorage_name, self.filestorage_file,
-               self.relstorage_name, self._relstorage_contents())
+        """ % (
+            self.filestorage_name,
+            self.filestorage_file,
+            self.relstorage_name,
+            self.get_adapter_zconfig(),
+        )
         self._write_cfg(cfg)
 
         self.make_storage(zap=True).close()

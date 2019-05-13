@@ -17,15 +17,17 @@ import os
 import sys
 import unittest
 
+from relstorage.adapters.oracle import OracleAdapter
+
 from .util import AbstractTestSuiteBuilder
 
-class UseOracleAdapter(object):
+class OracleAdapterMixin(object):
 
     keep_history = False
     base_dbname = None
+    driver_name = None
 
     def make_adapter(self, options, db=None):
-        from relstorage.adapters.oracle import OracleAdapter
         dsn = os.environ.get('ORACLE_TEST_DSN', 'XE')
         if db is None:
             if self.keep_history:
@@ -39,82 +41,50 @@ class UseOracleAdapter(object):
             options=options,
         )
 
+    def get_adapter_class(self):
+        return OracleAdapter
 
-class ZConfigTests(object):
-    # pylint:disable=no-member
-    driver_name = None # Override
-    base_dbname = None
-
-    def checkConfigureViaZConfig(self):
-        # pylint:disable=too-many-locals
-        import tempfile
+    def __get_adapter_zconfig_dsn(self):
         dsn = os.environ.get('ORACLE_TEST_DSN', 'XE')
-        fd, replica_conf = tempfile.mkstemp()
+        return dsn
+
+    def get_adapter_zconfig(self):
+        if self.keep_history:
+            dbname = self.base_dbname
+        else:
+            dbname = self.base_dbname + '_hf'
+        return u"""
+        <oracle>
+            driver %s
+            user %s
+            password relstoragetest
+            dsn %s
+        </oracle>
+        """ % (
+            self.driver_name,
+            dbname,
+            self.__get_adapter_zconfig_dsn()
+        )
+
+    def verify_adapter_from_zconfig(self, adapter):
+        if self.keep_history:
+            dbname = self.base_dbname
+        else:
+            dbname = self.base_dbname + '_hf'
+
+        self.assertEqual(adapter._user, dbname)
+        self.assertEqual(adapter._password, 'relstoragetest')
+        self.assertEqual(adapter._dsn, self.__get_adapter_zconfig_dsn())
+        self.assertEqual(adapter._twophase, False)
+
+    def get_adapter_zconfig_replica_conf(self):
+        import tempfile
+        dsn = self.__get_adapter_zconfig_dsn()
+        fd, replica_conf = tempfile.mkstemp('.conf', 'rstest_oracle_replica')
+        self.addCleanup(os.remove, replica_conf)
         os.write(fd, dsn.encode("ascii"))
         os.close(fd)
-        try:
-            if self.keep_history:
-                dbname = self.base_dbname
-            else:
-                dbname = self.base_dbname + '_hf'
-            conf = u"""
-            %%import relstorage
-            <zodb main>
-              <relstorage>
-                name xyz
-                read-only false
-                keep-history %s
-                replica-conf %s
-                blob-chunk-size 10MB
-                <oracle>
-                  driver %s
-                  user %s
-                  password relstoragetest
-                  dsn %s
-                </oracle>
-              </relstorage>
-            </zodb>
-            """ % (
-                'true' if self.keep_history else 'false',
-                replica_conf,
-                self.driver_name,
-                dbname,
-                dsn,
-            )
-
-            schema_xml = u"""
-            <schema>
-            <import package="ZODB"/>
-            <section type="ZODB.database" name="main" attribute="database"/>
-            </schema>
-            """
-            import ZConfig
-            from io import StringIO
-            schema = ZConfig.loadSchemaFile(StringIO(schema_xml))
-            config, _handler = ZConfig.loadConfigFile(schema, StringIO(conf))
-
-            db = config.database.open()
-            try:
-                storage = db.storage
-                self.assertEqual(storage.isReadOnly(), False)
-                self.assertEqual(storage.getName(), "xyz")
-                adapter = storage._adapter
-                from relstorage.adapters.oracle import OracleAdapter
-                self.assertIsInstance(adapter, OracleAdapter)
-                self.assertEqual(adapter._user, dbname)
-                self.assertEqual(adapter._password, 'relstoragetest')
-                self.assertEqual(adapter._dsn, dsn)
-                self.assertEqual(adapter._twophase, False)
-                self.assertEqual(adapter.keep_history, self.keep_history)
-                self.assertEqual(
-                    adapter.connmanager.replica_selector.replica_conf,
-                    replica_conf)
-                self.assertEqual(storage._options.blob_chunk_size, 10485760)
-            finally:
-                db.close()
-        finally:
-            os.remove(replica_conf)
-
+        return replica_conf
 
 
 class OracleTestSuiteBuilder(AbstractTestSuiteBuilder):
@@ -125,8 +95,7 @@ class OracleTestSuiteBuilder(AbstractTestSuiteBuilder):
         from relstorage.adapters.oracle import drivers
         super(OracleTestSuiteBuilder, self).__init__(
             drivers,
-            UseOracleAdapter,
-            None,
+            OracleAdapterMixin,
         )
 
     def _compute_large_blob_size(self, use_small_blobs):
