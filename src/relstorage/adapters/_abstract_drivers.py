@@ -143,7 +143,7 @@ def implement_db_driver_options(name, *driver_modules):
                                                 name)
         for factory in driver_module.__all__:
             factory = getattr(driver_module, factory)
-            if IDBDriver.implementedBy(factory):
+            if IDBDriver.implementedBy(factory): # pylint:disable=no-value-for-parameter
                 driver_factories.add(factory)
 
     driver_map = module.driver_map = {
