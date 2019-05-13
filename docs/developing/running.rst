@@ -20,10 +20,12 @@ Running all tests can be done with zope.testrunner::
 
   zope-testrunner --test-path=src
 
-If not database drivers are installed, it will only run the unit
-tests. Otherwise, tests for all installed drivers will be attempted;
-this can be bypassed with ``--no-db`` or limited to particular
-databases with ``--only-[mysql|pgsql|oracle]``.
+
+For each database driver installed, tests will be run. Use the
+``--unit`` argument to only run the (small) subset of tests that do
+not require access to an operational database. Use ``--layer
+<driver>`` to run tests for a particular database driver; for example,
+``--layer PG8000``.
 
 .. _test-databases:
 

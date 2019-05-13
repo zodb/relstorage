@@ -53,6 +53,27 @@ USE_SMALL_BLOBS = ((RUNNING_ON_CI # slow here
                    and not os.environ.get('RS_LARGE_BLOB'))
 
 
+class MinimalTestLayer(object):
+
+    __bases__ = ()
+    __module__ = ''
+
+    def __init__(self, name):
+        self.__name__ = name
+
+    def setUp(self):
+        pass
+
+    def tearDown(self):
+        pass
+
+    def testSetUp(self):
+        pass
+
+    def testTearDown(self):
+        pass
+
+
 class AbstractTestSuiteBuilder(ABC):
 
     __name__ = None # PostgreSQL, MySQL, Oracle
@@ -85,13 +106,20 @@ class AbstractTestSuiteBuilder(ABC):
 
         suite = unittest.TestSuite()
         for driver_name in self.drivers.known_driver_names():
+            # We put the various drivers into a zope.testrunner layer
+            # for ease of selection by name, e.g.,
+            # zope-testrunner --layer PG8000Driver
+            driver_suite = unittest.TestSuite()
+            driver_suite.layer = MinimalTestLayer(self.__name__ + '_' + driver_name)
+            driver_suite.layer.__module__ = self.__module__
             try:
                 self.drivers.select_driver(driver_name)
             except DriverNotAvailableError:
                 available = False
             else:
                 available = True
-            self._add_driver_to_suite(driver_name, suite, available)
+            self._add_driver_to_suite(driver_name, driver_suite, available)
+            suite.addTest(driver_suite)
         return suite
 
     def _default_make_check_class(self, base, name):
