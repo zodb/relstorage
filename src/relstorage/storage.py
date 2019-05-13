@@ -60,19 +60,6 @@ from relstorage.options import Options
 
 # pylint:disable=too-many-lines
 
-
-
-
-
-
-
-
-
-
-
-
-
-
 log = logging.getLogger("relstorage")
 
 # Set the RELSTORAGE_ABORT_EARLY environment variable when debugging
