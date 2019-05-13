@@ -13,12 +13,14 @@
 ##############################################################################
 
 from __future__ import absolute_import
-from ..scriptrunner import ScriptRunner
 
 import logging
 import re
-from relstorage._compat import iteritems
+
 from relstorage._compat import intern
+from relstorage._compat import iteritems
+
+from ..scriptrunner import ScriptRunner
 
 log = logging.getLogger(__name__)
 

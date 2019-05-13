@@ -16,12 +16,13 @@ Database schema installers
 """
 from __future__ import absolute_import
 
-from ..interfaces import ISchemaInstaller
-from ..schema import AbstractSchemaInstaller
-from relstorage._compat import db_binary_to_bytes
-
 from ZODB.POSException import StorageError
 from zope.interface import implementer
+
+from relstorage._compat import db_binary_to_bytes
+
+from ..interfaces import ISchemaInstaller
+from ..schema import AbstractSchemaInstaller
 
 
 @implementer(ISchemaInstaller)

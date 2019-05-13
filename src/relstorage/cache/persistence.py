@@ -11,19 +11,21 @@
 # FOR A PARTICULAR PURPOSE.
 #
 ##############################################################################
-from __future__ import absolute_import, print_function, division
-
-import logging
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
 
 import glob
 import gzip
 import io
+import logging
 import os
 import os.path
 import tempfile
 import time
 
 from relstorage._compat import PY3
+
 if PY3:
     # On Py3, use the built-in pickle, so that we can get
     # protocol 4 when available. It is *much* faster at writing out

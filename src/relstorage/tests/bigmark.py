@@ -4,12 +4,12 @@
 Run like this: bin/py -m cProfile -- -s tottime relstorage/tests/bigmark.py
 """
 
+import logging
 from random import randint
 from random import random
-from relstorage.treemark import TreeMarker
-import logging
 
 from relstorage._compat import xrange
+from relstorage.treemark import TreeMarker
 
 log = logging.getLogger('bigmark')
 

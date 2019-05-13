@@ -15,7 +15,9 @@
 import unittest
 
 from relstorage.adapters._util import noop_when_history_free
+
 from ..mover import metricmethod_sampled
+
 
 class TestNoOp(unittest.TestCase):
 

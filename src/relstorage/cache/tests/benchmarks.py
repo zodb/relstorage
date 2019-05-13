@@ -11,22 +11,21 @@
 # FOR A PARTICULAR PURPOSE.
 #
 ##############################################################################
-from __future__ import print_function, absolute_import, division
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+
+# pylint:disable=unused-argument
+import os
+import os.path
+import random
+import statistics  # pylint:disable=import-error
+import time
+import timeit
+from collections import namedtuple
 
 from relstorage.options import Options
 
-# pylint:disable=unused-argument
-
-class MockOptions(Options):
-    cache_module_name = ''
-    cache_servers = ''
-    cache_local_object_max = 16384
-    cache_local_compression = 'none'
-    cache_local_dir_count = 1
-
-
-import timeit
-import statistics # pylint:disable=import-error
 try:
     import sys
     import cProfile
@@ -48,6 +47,16 @@ except ImportError:
                 return self
             def print_stats(self, *args):
                 pass
+
+
+class MockOptions(Options):
+    cache_module_name = ''
+    cache_servers = ''
+    cache_local_object_max = 16384
+    cache_local_compression = 'none'
+    cache_local_dir_count = 1
+
+
 
 NUMBER = 3
 REPEAT_COUNT = 4
@@ -206,11 +215,6 @@ def local_benchmark():
     do_times()
 
 
-import os
-import os.path
-import time
-import random
-from collections import namedtuple
 StorageRecord = namedtuple('Record', ['asu', 'lba', 'size', 'opcode', 'ts'])
 
 class StorageTraceSimulator(object):

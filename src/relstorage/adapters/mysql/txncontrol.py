@@ -17,5 +17,6 @@ from __future__ import absolute_import
 
 from ..txncontrol import GenericTransactionControl
 
+
 class MySQLTransactionControl(GenericTransactionControl):
     pass

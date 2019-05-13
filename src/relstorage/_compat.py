@@ -1,16 +1,29 @@
 # -*- coding: utf-8 -*-
 """
 Compatibility shims.
-
 """
 
-from __future__ import print_function, absolute_import, division
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
 
 # pylint:disable=unused-import,invalid-name,no-member,undefined-variable
 # pylint:disable=no-name-in-module
 
-import sys
 import platform
+import sys
+
+# XXX: This is a private module in ZODB, but it has a lot
+# of knowledge about how to choose the right implementation
+# based on Python version and implementation. We at least
+# centralize the import from here.
+from ZODB._compat import HIGHEST_PROTOCOL
+from ZODB._compat import Pickler
+from ZODB._compat import Unpickler
+from ZODB._compat import dump
+from ZODB._compat import dumps
+from ZODB._compat import loads
+
 
 PY3 = sys.version_info[0] == 3
 PY2 = not PY3
@@ -39,6 +52,12 @@ else:
     string_types = (basestring,)
     unicode = unicode
 
+try:
+    from abc import ABC
+except ImportError:
+    import abc
+    ABC = abc.ABCMeta('ABC', (object,), {})
+    del abc
 
 # Functions
 if PY3:
@@ -68,17 +87,3 @@ def db_binary_to_bytes(data):
     if isinstance(data, _db_binary_types):
         data = bytes(data)
     return data
-
-
-
-from ZODB._compat import BytesIO
-StringIO = BytesIO
-
-# XXX: This is a private module in ZODB, but it has a lot
-# of knowledge about how to choose the right implementation
-# based on Python version and implementation. We at least
-# centralize the import from here.
-from ZODB._compat import dumps, loads
-from ZODB._compat import dump
-from ZODB._compat import HIGHEST_PROTOCOL
-from ZODB._compat import Pickler, Unpickler

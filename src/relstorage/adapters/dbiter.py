@@ -11,10 +11,14 @@
 # FOR A PARTICULAR PURPOSE.
 #
 ##############################################################################
-from __future__ import print_function, absolute_import
-from relstorage.adapters.interfaces import IDatabaseIterator
+from __future__ import absolute_import
+from __future__ import print_function
+
 from zope.interface import implementer
-from relstorage._compat import db_binary_to_bytes
+
+from .._compat import db_binary_to_bytes
+from .interfaces import IDatabaseIterator
+
 
 class DatabaseIterator(object):
     """Abstract base class for database iteration.

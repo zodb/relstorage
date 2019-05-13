@@ -13,16 +13,19 @@
 ##############################################################################
 """IObjectMover implementation.
 """
-from __future__ import print_function, absolute_import
+from __future__ import absolute_import
+from __future__ import print_function
 
-from relstorage.adapters.interfaces import IObjectMover
-from zope.interface import implementer
 import os
 
+from zope.interface import implementer
+
+from relstorage.adapters.interfaces import IObjectMover
+
+from .._util import noop_when_history_free
+from .._util import query_property
 from ..mover import AbstractObjectMover
 from ..mover import metricmethod_sampled
-from .._util import query_property
-from .._util import noop_when_history_free
 
 
 def to_prepared_queries(name, queries, extension=''):

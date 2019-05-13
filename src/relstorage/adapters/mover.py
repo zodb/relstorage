@@ -14,16 +14,18 @@
 """IObjectMover implementation.
 """
 from __future__ import absolute_import
-from perfmetrics import Metric
-from relstorage.adapters.batch import RowBatcher
-from relstorage.adapters.interfaces import IObjectMover
-from relstorage.adapters._util import query_property as _query_property
-from relstorage.adapters._util import noop_when_history_free
-from relstorage.iter import fetchmany
-from zope.interface import implementer
+
 from hashlib import md5
 
-from relstorage._compat import db_binary_to_bytes
+from perfmetrics import Metric
+from zope.interface import implementer
+
+from .._compat import db_binary_to_bytes
+from ..iter import fetchmany
+from ._util import noop_when_history_free
+from ._util import query_property as _query_property
+from .batch import RowBatcher
+from .interfaces import IObjectMover
 
 metricmethod_sampled = Metric(method=True, rate=0.1)
 

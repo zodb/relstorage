@@ -13,6 +13,7 @@
 ##############################################################################
 """Interfaces provided by RelStorage database adapters"""
 from __future__ import absolute_import
+
 from ZODB.POSException import StorageError
 from zope.interface import Attribute
 from zope.interface import Interface
@@ -67,6 +68,58 @@ class IDBDriver(Interface):
     Binary = Attribute("A callable.")
 
 
+class DriverNotAvailableError(Exception):
+    """
+    Raised when a requested driver isn't available.
+    """
+
+    #: The name of the requested driver
+    driver_name = None
+
+    #: The `IDBDriverOptions` that was asked for the driver.
+    driver_options = None
+
+    def __init__(self, driver_name, driver_options=None):
+        super(DriverNotAvailableError, self).__init__(driver_name)
+        self.driver_name = driver_name
+        self.driver_options = driver_options
+
+    def _format_drivers(self):
+        driver_map = getattr(self.driver_options, 'driver_map', {})
+        return ' '.join(
+            '%r (Module: %r; Available: %s)' % (
+                name,
+                # These two attributes aren't in the interface,
+                # they're extensions from AbstractModuleDriver
+                factory.MODULE_NAME,
+                factory.check_availability()
+            )
+            for name, factory in driver_map.items()
+        )
+
+    def __str__(self):
+        return '%s: Driver %r is not available. Options: %s.' % (
+            type(self).__name__, self.driver_name, self._format_drivers()
+        )
+
+    __repr__ = __str__
+
+
+class UnknownDriverError(DriverNotAvailableError):
+    """
+    Raised when a driver that isn't registered at all is requested.
+    """
+
+
+class NoDriversAvailableError(DriverNotAvailableError):
+    """
+    Raised when there are no drivers available.
+    """
+
+    def __init__(self, driver_name='auto', driver_options=None):
+        super(NoDriversAvailableError, self).__init__(driver_name, driver_options)
+
+
 class IDBDriverOptions(Interface):
     """
     Implemented by a module to provide alternative drivers.
@@ -74,17 +127,22 @@ class IDBDriverOptions(Interface):
 
     database_type = Attribute("A string naming the type of database.")
 
-    driver_map = Attribute("A map of driver names to IDBDriver instances. "
+    driver_map = Attribute("A map of driver names to IDBDriver factories (implementers). "
                            "If the map is empty, no drivers for the specified "
                            "database are available.")
 
-    preferred_driver_name = Attribute("The name of the best driver in driver_map "
-                                      "to use. None if no drivers are available.")
+    def select_driver(driver_name=None):
+        """
+        Choose and return an IDBDriver.
+        """
 
-    def connect(*args, **kwargs):
+    def known_driver_names():
         """
-        Return a new database connection.
+        Return an iterable of the potential driver names.
+
+        The drivers may or may not be available.
         """
+
 
 class IConnectionManager(Interface):
     """Open and close database connections"""

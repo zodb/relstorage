@@ -16,6 +16,7 @@ from __future__ import absolute_import
 
 from relstorage._compat import PYPY
 
+
 class Options(object):
     """Options for configuring and tuning RelStorage.
 

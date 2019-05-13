@@ -18,6 +18,7 @@ Batch table row insert/delete support.
 from __future__ import absolute_import
 
 import re
+
 from relstorage._compat import list_values
 
 from ..batch import RowBatcher

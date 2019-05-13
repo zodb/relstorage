@@ -14,10 +14,11 @@
 """PostgreSQL adapter for RelStorage."""
 from __future__ import absolute_import
 
-from perfmetrics import metricmethod
-from ..connmanager import AbstractConnectionManager
-
 import logging
+
+from perfmetrics import metricmethod
+
+from ..connmanager import AbstractConnectionManager
 
 log = logging.getLogger(__name__)
 

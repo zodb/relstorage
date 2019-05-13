@@ -29,9 +29,8 @@
 #   do Py2/Py3 stuff is to put it here. Sadly this means that we might get better but not realize it.
 # chained-comparison: It wants you to rewrite `x > 2 and x < 3` using something like `2 < x < 3`,
 #   which I don't like, I find that less readable.
-disable=wrong-import-position,
+disable=
     invalid-name,
-    wrong-import-order,
     missing-docstring,
     ungrouped-imports,
     protected-access,

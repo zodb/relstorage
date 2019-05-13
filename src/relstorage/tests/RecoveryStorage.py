@@ -17,18 +17,18 @@
 # history-free storages.
 # pylint:disable=no-member,too-many-locals
 
-from ZODB.blob import is_blob_record
+import itertools
+import time
+
+import transaction
+import ZODB.POSException
 from transaction import Transaction
 from ZODB import DB
+from ZODB.blob import is_blob_record
 from ZODB.serialize import referencesf
 from ZODB.tests.StorageTestBase import MinPO
 from ZODB.tests.StorageTestBase import snooze
 from ZODB.tests.StorageTestBase import zodb_pickle
-
-import itertools
-import time
-import transaction
-import ZODB.POSException
 
 from relstorage._compat import PY3
 from relstorage._compat import iteritems

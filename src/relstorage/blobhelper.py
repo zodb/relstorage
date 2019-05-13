@@ -15,19 +15,22 @@
 
 Most of this code is lifted from ZODB/ZEO.
 """
-
 from __future__ import absolute_import
-from ZODB import POSException
-from ZODB.utils import p64
-from ZODB.utils import u64
+
 import os
 import threading
 import time
+
 import zc.lockfile
+import ZODB.blob
+from ZEO.ClientStorage import BlobCacheLayout
+from ZEO.ClientStorage import _check_blob_cache_size
+from ZODB import POSException
+from ZODB.utils import p64
+from ZODB.utils import u64
+
 from relstorage._compat import iteritems
 
-import ZODB.blob
-from ZEO.ClientStorage import BlobCacheLayout, _check_blob_cache_size
 
 class BlobHelper(object):
     """Blob support for RelStorage.

@@ -17,11 +17,12 @@ Locker implementations.
 
 from __future__ import absolute_import
 
-import six
 import abc
 
-@six.add_metaclass(abc.ABCMeta)
-class AbstractLocker(object):
+from relstorage._compat import ABC
+
+
+class AbstractLocker(ABC):
 
     def __init__(self, options, lock_exceptions):
         self.keep_history = options.keep_history

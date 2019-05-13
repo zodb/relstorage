@@ -103,7 +103,7 @@ driver
            errors.
 
 
-    MySQL Connector/Python
+    Py MySQL Connector/Python
       This is the `official client
       <https://dev.mysql.com/doc/connector-python/en/>`_ provided by
       Oracle. It generally cannot be installed from PyPI or by pip if
@@ -114,8 +114,8 @@ driver
       somewhat slower than PyMySQL. However, it supports more advanced
       options for failover and high availability.
 
-      When using this name, RelStorage will use the C extension if
-      available, otherwise it will use the Python version.
+      RelStorage will only use the pure-Python implementation when
+      using this name; this is compatible with gevent.
 
       Binary packages are distributed by Oracle for many platforms
       and include the necessary native libraries and C extension.
@@ -125,10 +125,6 @@ driver
     C MySQL Connector/Python
       The same as above, but RelStorage will only use the C extension.
       This is not compatible with gevent.
-
-    Py MySQL Connector/Python
-      Like the above, but RelStorage will use the pure-Python version
-      only. This is compatible with gevent.
 
 host
     string, host to connect

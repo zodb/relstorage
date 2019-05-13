@@ -14,6 +14,7 @@
 
 import unittest
 
+
 class AutoTemporaryFileTests(unittest.TestCase):
 
     def getClass(self):

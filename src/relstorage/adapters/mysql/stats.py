@@ -18,6 +18,7 @@ from __future__ import absolute_import
 
 from ..stats import AbstractStats
 
+
 class MySQLStats(AbstractStats):
 
     def get_db_size(self):

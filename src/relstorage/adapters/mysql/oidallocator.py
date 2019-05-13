@@ -17,11 +17,12 @@ IOIDAllocator implementations.
 
 from __future__ import absolute_import
 
-from ..oidallocator import AbstractOIDAllocator
-from ..interfaces import IOIDAllocator
+from perfmetrics import metricmethod
 from zope.interface import implementer
 
-from perfmetrics import metricmethod
+from ..interfaces import IOIDAllocator
+from ..oidallocator import AbstractOIDAllocator
+
 
 @implementer(IOIDAllocator)
 class MySQLOIDAllocator(AbstractOIDAllocator):

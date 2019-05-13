@@ -14,13 +14,16 @@
 """Oracle adapter for RelStorage."""
 from __future__ import absolute_import
 
+import logging
 
+from zope.interface import implementer
+
+from ...options import Options
 from .._abstract_drivers import _select_driver
 from ..dbiter import HistoryFreeDatabaseIterator
 from ..dbiter import HistoryPreservingDatabaseIterator
 from ..interfaces import IRelStorageAdapter
 from ..poller import Poller
-
 from . import drivers
 from .batch import OracleRowBatcher
 from .connmanager import CXOracleConnectionManager
@@ -33,11 +36,6 @@ from .schema import OracleSchemaInstaller
 from .scriptrunner import CXOracleScriptRunner
 from .stats import OracleStats
 from .txncontrol import OracleTransactionControl
-
-from relstorage.options import Options
-from zope.interface import implementer
-
-import logging
 
 log = logging.getLogger(__name__)
 

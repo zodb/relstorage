@@ -14,6 +14,7 @@
 
 import unittest
 
+
 class RowBatcherTests(unittest.TestCase):
 
     def getClass(self):

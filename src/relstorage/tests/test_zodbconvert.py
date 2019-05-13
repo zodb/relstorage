@@ -11,21 +11,23 @@
 # FOR A PARTICULAR PURPOSE.
 #
 ##############################################################################
-from __future__ import print_function, absolute_import
+from __future__ import absolute_import
+from __future__ import print_function
 
-from contextlib import contextmanager
-import os
-import tempfile
-import transaction
-import unittest
 import functools
 import gc
+import os
+import tempfile
+import unittest
+from contextlib import contextmanager
 
-from ZODB.FileStorage import FileStorage
-from ZODB.DB import DB
+import transaction
 from zc.zlibstorage import ZlibStorage
+from ZODB.DB import DB
+from ZODB.FileStorage import FileStorage
 
 from relstorage.zodbconvert import main
+
 
 def skipIfZapNotSupportedByDest(func):
     @functools.wraps(func)

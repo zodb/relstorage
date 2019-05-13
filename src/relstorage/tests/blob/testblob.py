@@ -1,4 +1,32 @@
-from __future__ import print_function, absolute_import
+from __future__ import absolute_import
+from __future__ import print_function
+
+import atexit
+import collections
+import datetime
+import doctest
+import os
+import random
+import re
+import stat
+import struct
+import sys
+import tempfile
+import time
+import unittest
+from hashlib import md5
+
+import transaction
+import ZODB.blob
+import ZODB.interfaces
+import ZODB.tests.StorageTestBase
+import ZODB.tests.util
+from ZODB.blob import Blob
+from ZODB.DB import DB
+from zope.testing import renormalizing
+
+from relstorage.tests.RecoveryStorage import IteratorDeepCompare
+
 ##############################################################################
 #
 # Copyright (c) 2004 Zope Foundation and Contributors.
@@ -13,33 +41,9 @@ from __future__ import print_function, absolute_import
 #
 ##############################################################################
 
-from ZODB.blob import Blob
-from ZODB.DB import DB
-import doctest
-
-import atexit
-import collections
-import datetime
-import os
-import random
-import re
-import stat
-import struct
-import sys
-import tempfile
-import time
-import transaction
-import unittest
-import ZODB.blob
-import ZODB.interfaces
-from relstorage.tests.RecoveryStorage import IteratorDeepCompare
-
-import ZODB.tests.StorageTestBase
-import ZODB.tests.util
-from zope.testing import renormalizing
 
 
-from hashlib import md5
+
 
 
 def new_time():
@@ -628,7 +632,8 @@ def storage_reusable_suite(prefix, factory,
                            keep_history=True,
                            pack_test_name='blob_packing.txt',
                            test_blob_cache=False,
-                           large_blob_size=None):
+                           large_blob_size=None,
+                           storage_is_available=True):
     """Return a test suite for a generic IBlobStorage.
 
     Pass a factory taking a name and a blob directory name.
@@ -651,30 +656,33 @@ def storage_reusable_suite(prefix, factory,
         # But it seems to be due to ZODB's blob helper, not us
         # https://ci.appveyor.com/project/jamadden/relstorage/build/1.0.16/job/4cji13ml2sargblw#L199
         tests.append('blob_transaction.txt')
-    suite.addTest(
-        doctest.DocFileSuite(
-            *tests,
-            setUp=setup, tearDown=tearDown,
-            optionflags=doctest.ELLIPSIS,
-            checker=checker
+
+    if storage_is_available:
+        # Doctests don't do well when something raises unittest.SkipTest
+        suite.addTest(
+            doctest.DocFileSuite(
+                *tests,
+                setUp=setup, tearDown=tearDown,
+                optionflags=doctest.ELLIPSIS,
+                checker=checker
+            )
         )
-    )
-    if test_packing:
-        suite.addTest(doctest.DocFileSuite(
-            pack_test_name,
+        if test_packing:
+            suite.addTest(doctest.DocFileSuite(
+                pack_test_name,
+                setUp=setup, tearDown=tearDown,
+                checker=checker,
+                ))
+        if test_blob_cache:
+            suite.addTest(doctest.DocFileSuite(
+                "blob_cache.test",
+                setUp=setup, tearDown=tearDown,
+                checker=checker,
+            ))
+        suite.addTest(doctest.DocTestSuite(
             setUp=setup, tearDown=tearDown,
             checker=checker,
             ))
-    if test_blob_cache:
-        suite.addTest(doctest.DocFileSuite(
-            "blob_cache.test",
-            setUp=setup, tearDown=tearDown,
-            checker=checker,
-        ))
-    suite.addTest(doctest.DocTestSuite(
-        setUp=setup, tearDown=tearDown,
-        checker=checker,
-        ))
 
     def create_storage(self, name='data', blob_dir=None, **kw):
         if blob_dir is None:
@@ -684,9 +692,10 @@ def storage_reusable_suite(prefix, factory,
     def add_test_based_on_test_class(class_, **attr):
         attr.update(create_storage=create_storage)
         new_class = class_.__class__(
-            prefix+class_.__name__, (class_, ),
+            prefix + class_.__name__, (class_, ),
             attr,
             )
+        new_class = unittest.skipUnless(storage_is_available, "Storage not available")(new_class)
         suite.addTest(unittest.makeSuite(new_class))
 
     if test_blob_storage_recovery:
@@ -696,6 +705,6 @@ def storage_reusable_suite(prefix, factory,
     if large_blob_size:
         add_test_based_on_test_class(LargeBlobTest, testsize=large_blob_size)
 
-    suite.layer = MinimalTestLayer(prefix+'BlobTests')
+    suite.layer = MinimalTestLayer(prefix + 'BlobTests')
 
     return suite

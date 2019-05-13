@@ -14,11 +14,12 @@
 """Oracle adapter for RelStorage."""
 from __future__ import absolute_import
 
+import logging
+
 from perfmetrics import metricmethod
+
 from ..connmanager import AbstractConnectionManager
 from ..interfaces import ReplicaClosedException
-
-import logging
 
 log = logging.getLogger(__name__)
 

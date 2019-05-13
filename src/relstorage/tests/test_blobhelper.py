@@ -1,12 +1,14 @@
 """Tests of relstorage.blobhelper"""
 # pylint:disable=too-many-public-methods,unused-argument
-from relstorage.tests.util import support_blob_cache
-import os
-import unittest
-import tempfile
-from ZODB.blob import remove_committed_dir
-from relstorage._compat import PY3
 
+import os
+import tempfile
+import unittest
+
+from ZODB.blob import remove_committed_dir
+
+from relstorage._compat import PY3
+from relstorage.tests.util import support_blob_cache
 
 test_oid = b'\0' * 7 + b'\x01'
 test_tid = b'\0' * 7 + b'\x02'
@@ -403,13 +405,7 @@ def read_file(fn):
 
 
 def test_suite():
-    suite = unittest.TestSuite()
-    for klass in [
-            BlobHelperTest,
-        ]:
-        suite.addTest(unittest.makeSuite(klass, "test"))
-
-    return suite
+    return unittest.defaultTestLoader.loadTestsFromName(__name__)
 
 if __name__ == '__main__':
     unittest.main(defaultTest='test_suite')

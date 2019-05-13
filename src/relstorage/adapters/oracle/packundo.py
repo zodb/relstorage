@@ -15,8 +15,9 @@
 """
 from __future__ import absolute_import
 
-from ..packundo import HistoryPreservingPackUndo
 from ..packundo import HistoryFreePackUndo
+from ..packundo import HistoryPreservingPackUndo
+
 
 def _oracle_fetchmany(self, cursor): # pylint:disable=unused-argument
     # We can't safely fetch many rows at once without

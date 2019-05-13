@@ -16,11 +16,11 @@
 One way to use this is to add 'cache-module-name relstorage.pylibmc_wrapper'
 to zope.conf and set the 'cache-servers' parameter as well.
 """
-
-import pylibmc # pylint:disable=import-error
-from pylibmc import Error as MemcachedError # pylint:disable=no-name-in-module,import-error
 import logging
 from functools import wraps
+
+import pylibmc  # pylint:disable=import-error
+from pylibmc import Error as MemcachedError  # pylint:disable=no-name-in-module,import-error
 
 log = logging.getLogger(__name__)
 

@@ -11,7 +11,9 @@
 # FOR A PARTICULAR PURPOSE.
 #
 ##############################################################################
-from __future__ import absolute_import, print_function, division
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
 
 import logging
 import operator
@@ -19,10 +21,10 @@ import time
 
 from zope import interface
 
-from relstorage.cache.interfaces import IPersistentCache
-from relstorage.cache.persistence import Unpickler
-from relstorage.cache.persistence import Pickler
 from relstorage.cache.cache_ring import Cache
+from relstorage.cache.interfaces import IPersistentCache
+from relstorage.cache.persistence import Pickler
+from relstorage.cache.persistence import Unpickler
 
 log = logging.getLogger(__name__)
 

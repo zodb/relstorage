@@ -14,17 +14,18 @@
 """IObjectMover implementation.
 """
 from __future__ import absolute_import
-from ..mover import AbstractObjectMover
-from relstorage.adapters.interfaces import IObjectMover
+
+import functools
+import os
 
 from zope.interface import implementer
-import os
-import functools
 
-from relstorage._compat import xrange
-
-from ..mover import metricmethod_sampled
+from ..._compat import xrange
 from .._util import query_property
+from ..interfaces import IObjectMover
+from ..mover import AbstractObjectMover
+from ..mover import metricmethod_sampled
+
 
 def to_prepared_queries(name, queries, datatypes=''):
     # Only handles one param

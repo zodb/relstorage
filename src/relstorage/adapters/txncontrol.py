@@ -15,18 +15,17 @@
 
 from __future__ import absolute_import
 
-import six
 import abc
-
 
 from zope.interface import implementer
 
-from .interfaces import ITransactionControl
-from ._util import query_property
+from .._compat import ABC
 from ._util import noop_when_history_free
+from ._util import query_property
+from .interfaces import ITransactionControl
 
-@six.add_metaclass(abc.ABCMeta)
-class AbstractTransactionControl(object):
+
+class AbstractTransactionControl(ABC):
     """Abstract base class"""
 
     # pylint:disable=unused-argument

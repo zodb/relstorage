@@ -12,11 +12,14 @@
 #
 ##############################################################################
 from __future__ import absolute_import
-from perfmetrics import metricmethod
-from relstorage.adapters.interfaces import IReplicaSelector
-from zope.interface import implementer
+
 import os
 import time
+
+from perfmetrics import metricmethod
+from zope.interface import implementer
+
+from .interfaces import IReplicaSelector
 
 
 @implementer(IReplicaSelector)

@@ -11,17 +11,17 @@
 # FOR A PARTICULAR PURPOSE.
 #
 ##############################################################################
-from __future__ import absolute_import, print_function, division
-
-
-from ZODB.utils import p64
-from ZODB.utils import z64
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
 
 import logging
 import struct
 import threading
 import time
 
+from ZODB.utils import p64
+from ZODB.utils import z64
 
 log = logging.getLogger(__name__)
 

@@ -26,6 +26,11 @@ def read_file(*path):
 
 VERSION = read_file('version.txt').strip()
 
+memcache_require = [
+    'pylibmc; platform_python_implementation=="CPython" and sys_platform != "win32"',
+    'python-memcached; platform_python_implementation=="PyPy" or sys_platform == "win32"',
+]
+
 tests_require = [
     'mock',
     # random2 is a forward port of python 2's random to
@@ -36,9 +41,10 @@ tests_require = [
     'zope.testing',
     'ZODB [test]',
     'zc.zlibstorage',
-    'pylibmc; platform_python_implementation=="CPython" and sys_platform != "win32"',
-    'python-memcached; platform_python_implementation=="PyPy" or sys_platform == "win32"',
-]
+    'zope.testrunner',
+    'nti.testing',
+] + memcache_require
+
 
 setup(
     name="RelStorage",
@@ -136,11 +142,28 @@ setup(
         'oracle': [
             'cx_Oracle>=5.0.0'
         ],
+        'memcache': memcache_require,
         'test': tests_require,
         'docs': [
             'sphinxcontrib-programoutput',
             'repoze.sphinx.autointerface',
             'sphinx_rtd_theme',
+        ],
+        'all_tested_drivers': [
+            # Install all the supported drivers for the platform.
+            # first, mysql
+            'PyMySQL >= 0.6.6',
+            'mysqlclient>=1.3.7;platform_python_implementation=="CPython" and python_version == "2.7" and sys_platform != "win32"',
+            # Version pin because of https://github.com/zodb/relstorage/issues/213
+            'mysqlclient>=1.3.7, < 1.4;platform_python_implementation=="CPython" and python_version >= "3.3" and sys_platform != "win32"',
+            # The Python version is currently broken.
+            # See https://github.com/zodb/relstorage/issues/228
+            #'mysql-connector-python >= 8.0.16',
+
+            # postgresql
+            'pg8000 >= 1.11.0', # pure-python
+            'psycopg2cffi >= 2.7.4', # CFFI, runs on all implementations.
+            'psycopg2 >= 2.6.1; platform_python_implementation == "CPython"',
         ],
     },
     entry_points={
@@ -153,6 +176,6 @@ setup(
              'relstorage.zodburi_resolver:postgresql_resolver [postgresql]'),
             'mysql = relstorage.zodburi_resolver:mysql_resolver [mysql]',
             'oracle = relstorage.zodburi_resolver:oracle_resolver [oracle]'
-        ]},
-    test_suite='relstorage.tests.alltests.make_suite',
+        ]
+    },
 )

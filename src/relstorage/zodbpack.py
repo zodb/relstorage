@@ -16,11 +16,12 @@
 ZODB storage packing utility.
 """
 
-from io import StringIO
-import logging
 import argparse
+import logging
 import sys
 import time
+from io import StringIO
+
 import ZConfig
 import ZODB.serialize
 

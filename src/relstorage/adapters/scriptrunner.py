@@ -14,9 +14,11 @@
 
 from __future__ import absolute_import
 
-from relstorage.adapters.interfaces import IScriptRunner
-from zope.interface import implementer
 import logging
+
+from zope.interface import implementer
+
+from .interfaces import IScriptRunner
 
 log = logging.getLogger(__name__)
 

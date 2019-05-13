@@ -17,13 +17,16 @@ ZODB storage conversion utility.
 """
 from __future__ import print_function
 
-import logging
 import argparse
-from persistent.TimeStamp import TimeStamp # pylint:disable=import-error
-from io import StringIO
+import logging
 import sys
+from io import StringIO
+
 import ZConfig
-from ZODB.utils import p64, u64, readable_tid_repr
+from persistent.timestamp import TimeStamp
+from ZODB.utils import p64
+from ZODB.utils import readable_tid_repr
+from ZODB.utils import u64
 
 schema_xml = u"""
 <schema>

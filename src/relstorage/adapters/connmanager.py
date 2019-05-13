@@ -12,11 +12,13 @@
 #
 ##############################################################################
 from __future__ import absolute_import
+
 from perfmetrics import metricmethod
-from relstorage.adapters.interfaces import IConnectionManager
-from relstorage.adapters.interfaces import ReplicaClosedException
-from relstorage.adapters.replica import ReplicaSelector
 from zope.interface import implementer
+
+from .interfaces import IConnectionManager
+from .interfaces import ReplicaClosedException
+from .replica import ReplicaSelector
 
 
 @implementer(IConnectionManager)

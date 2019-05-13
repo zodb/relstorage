@@ -1,12 +1,13 @@
-
-from BTrees.OOBTree import OOBTree # pylint:disable=no-name-in-module
-from ZODB.DB import DB
-from relstorage.adapters.postgresql import PostgreSQLAdapter
-from relstorage.storage import RelStorage
 import logging
 import sys
 import time
+
 import transaction
+from BTrees.OOBTree import OOBTree  # pylint:disable=no-name-in-module
+from ZODB.DB import DB
+
+from relstorage.adapters.postgresql import PostgreSQLAdapter
+from relstorage.storage import RelStorage
 
 log = logging.getLogger('bigpack')
 

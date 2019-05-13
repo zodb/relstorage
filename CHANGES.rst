@@ -16,6 +16,20 @@
 - Drop the ``poll_interval`` parameter. It has been deprecated with a
   warning and ignored since 2.0.0b2. See :issue:`222`.
 
+- Drop support for pg8000 older than 1.11.0.
+
+- Drop support for PyPy older than 5.3.1.
+
+- Drop support for the "MySQL Connector/Python" driver name since it
+  wasn't possible to know if it would use the C extension or the
+  Python implementation. Instead, explicitly use the 'Py' or 'C'
+  prefixed name.
+
+- Drop the internal and undocumented environment variables that could be
+  used to force configurations that did not specify a database driver
+  to use a specific driver. Instead, list the driver in the database
+  configuration.
+
 2.1.1 (2019-01-07)
 ==================
 

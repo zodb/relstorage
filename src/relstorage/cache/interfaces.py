@@ -11,10 +11,12 @@
 # FOR A PARTICULAR PURPOSE.
 #
 ##############################################################################
-from __future__ import absolute_import, print_function, division
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
 
-from zope.interface import Interface
 from zope.interface import Attribute
+from zope.interface import Interface
 
 #pylint: disable=inherit-non-class,no-method-argument,no-self-argument
 

@@ -18,11 +18,13 @@ Locker implementations.
 from __future__ import absolute_import
 
 from perfmetrics import metricmethod
-from ..locker import AbstractLocker
+from zope.interface import implementer
+
 from ..interfaces import ILocker
 from ..interfaces import UnableToAcquireCommitLockError
 from ..interfaces import UnableToAcquirePackUndoLockError
-from zope.interface import implementer
+from ..locker import AbstractLocker
+
 
 class CommitLockQueryFailedError(UnableToAcquireCommitLockError):
     pass

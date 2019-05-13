@@ -16,8 +16,9 @@
 
 from __future__ import absolute_import
 
-from ..packundo import HistoryPreservingPackUndo
 from ..packundo import HistoryFreePackUndo
+from ..packundo import HistoryPreservingPackUndo
+
 
 class MySQLHistoryPreservingPackUndo(HistoryPreservingPackUndo):
 
