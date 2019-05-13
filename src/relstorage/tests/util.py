@@ -52,6 +52,10 @@ USE_SMALL_BLOBS = ((RUNNING_ON_CI # slow here
                     or os.environ.get("RS_SMALL_BLOB")) # define
                    and not os.environ.get('RS_LARGE_BLOB'))
 
+TEST_UNAVAILABLE_DRIVERS = not bool(os.environ.get('RS_SKIP_UNAVAILABLE_DRIVERS'))
+if RUNNING_ON_CI:
+    TEST_UNAVAILABLE_DRIVERS = False
+
 
 class MinimalTestLayer(object):
 
@@ -106,20 +110,26 @@ class AbstractTestSuiteBuilder(ABC):
 
         suite = unittest.TestSuite()
         for driver_name in self.drivers.known_driver_names():
-            # We put the various drivers into a zope.testrunner layer
-            # for ease of selection by name, e.g.,
-            # zope-testrunner --layer PG8000Driver
-            driver_suite = unittest.TestSuite()
-            driver_suite.layer = MinimalTestLayer(self.__name__ + '_' + driver_name)
-            driver_suite.layer.__module__ = self.__module__
+
             try:
                 self.drivers.select_driver(driver_name)
             except DriverNotAvailableError:
                 available = False
             else:
                 available = True
-            self._add_driver_to_suite(driver_name, driver_suite, available)
-            suite.addTest(driver_suite)
+
+            # On CI, we don't even add tests for unavailable drivers to the
+            # list of tests; this makes the output much shorter and easier to read,
+            # but it does make zope-testrunner's discovery options less useful.
+            if available or TEST_UNAVAILABLE_DRIVERS:
+                # We put the various drivers into a zope.testrunner layer
+                # for ease of selection by name, e.g.,
+                # zope-testrunner --layer PG8000Driver
+                driver_suite = unittest.TestSuite()
+                driver_suite.layer = MinimalTestLayer(self.__name__ + '_' + driver_name)
+                driver_suite.layer.__module__ = self.__module__
+                self._add_driver_to_suite(driver_name, driver_suite, available)
+                suite.addTest(driver_suite)
         return suite
 
     def _default_make_check_class(self, base, name):

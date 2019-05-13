@@ -154,6 +154,7 @@ setup(
             'PyMySQL >= 0.6.6',
             'mysqlclient>=1.3.7;platform_python_implementation=="CPython" and python_version == "2.7" and sys_platform != "win32"',
             'mysqlclient>=1.3.7, < 1.4;platform_python_implementation=="CPython" and python_version >= "3.3" and sys_platform != "win32"',
+            'mysql-connector-python',
 
             # postgresql
             'pg8000 >= 1.11.0', # pure-python
