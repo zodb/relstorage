@@ -15,10 +15,11 @@
 from __future__ import absolute_import
 
 # pylint:disable=too-many-ancestors,abstract-method,too-many-public-methods,too-many-lines
+import abc
+import os
 import random
 import time
-import os
-import abc
+import unittest
 
 import transaction
 from persistent import Persistent
@@ -943,6 +944,9 @@ class GenericRelStorageTests(
         """
         import ZConfig
         from io import StringIO
+        from relstorage.adapters.interfaces import IRelStorageAdapter
+        from hamcrest import assert_that
+        from nti.testing.matchers import verifiably_provides
         schema = ZConfig.loadSchemaFile(StringIO(schema_xml))
         config, _ = ZConfig.loadConfigFile(schema, StringIO(conf))
 
@@ -953,6 +957,7 @@ class GenericRelStorageTests(
             self.assertEqual(storage.getName(), "xyz")
             adapter = storage._adapter
             self.assertIsInstance(adapter, self.get_adapter_class())
+            assert_that(adapter, verifiably_provides(IRelStorageAdapter))
             self.verify_adapter_from_zconfig(adapter)
             self.assertEqual(adapter.keep_history, self.keep_history)
             self.assertEqual(
@@ -1038,6 +1043,32 @@ class AbstractRSSrcZodbConvertTests(AbstractRSZodbConvertTests):
 
     def _create_src_storage(self):
         return self._closing(self.make_storage(zap=False))
+
+class AbstractIDBOptionsTest(unittest.TestCase):
+
+    db_options = None
+
+    def test_db_options_compliance(self):
+        from hamcrest import assert_that
+        from nti.testing.matchers import verifiably_provides
+
+        from relstorage.adapters.interfaces import IDBDriverOptions
+        __traceback_info__ = self.db_options
+        assert_that(self.db_options, verifiably_provides(IDBDriverOptions))
+
+
+class AbstractIDBDriverTest(unittest.TestCase):
+
+    driver = None
+
+    def test_db_driver_compliance(self):
+        from hamcrest import assert_that
+        from nti.testing.matchers import verifiably_provides
+
+        from relstorage.adapters.interfaces import IDBDriver
+        __traceback_info__ = self.driver
+        assert_that(self.driver, verifiably_provides(IDBDriver))
+
 
 class DoubleCommitter(Persistent):
     """A crazy persistent class that changes self in __getstate__"""

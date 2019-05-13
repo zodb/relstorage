@@ -107,21 +107,39 @@ class AbstractTestSuiteBuilder(ABC):
 
     def test_suite(self):
         from relstorage.adapters.interfaces import DriverNotAvailableError
-
+        from .reltestbase import AbstractIDBDriverTest
+        from .reltestbase import AbstractIDBOptionsTest
         suite = unittest.TestSuite()
+        suite.addTest(unittest.makeSuite(type(
+            self.__name__ + 'DBOptionsTest',
+            (AbstractIDBOptionsTest,),
+            {'db_options': self.drivers}
+        )))
         for driver_name in self.drivers.known_driver_names():
 
             try:
-                self.drivers.select_driver(driver_name)
+                driver = self.drivers.select_driver(driver_name)
             except DriverNotAvailableError:
-                available = False
-            else:
-                available = True
+                driver = None
+
+            available = driver is not None
 
             # On CI, we don't even add tests for unavailable drivers to the
             # list of tests; this makes the output much shorter and easier to read,
             # but it does make zope-testrunner's discovery options less useful.
             if available or TEST_UNAVAILABLE_DRIVERS:
+                # Checking the driver is just a unit test, it doesn't connect or
+                # need a layer
+                suite.addTest(unittest.makeSuite(
+                    self.__skipping_if_not_available(
+                        type(
+                            self.__name__ + 'DBDriverTest_' + driver_name,
+                            (AbstractIDBDriverTest,),
+                            {'driver': driver}
+                        ),
+                        driver_name,
+                        available)))
+
                 # We put the various drivers into a zope.testrunner layer
                 # for ease of selection by name, e.g.,
                 # zope-testrunner --layer PG8000Driver
@@ -186,17 +204,20 @@ class AbstractTestSuiteBuilder(ABC):
             classes.append(klass)
         return classes
 
+    def __skipping_if_not_available(self, klass, driver_name, is_available):
+        klass.__module__ = self.__module__
+        klass = unittest.skipUnless(
+            is_available,
+            "Driver %s is not installed" % (driver_name,))(klass)
+        return klass
+
     def _new_class_for_driver(self, driver_name, base, is_available):
         klass = type(
             base.__name__ + '_' + driver_name,
             (base,),
             {'driver_name': driver_name}
         )
-        klass.__module__ = self.__module__
-        klass = unittest.skipUnless(
-            is_available,
-            "Driver %s is not installed" % (driver_name,))(klass)
-        return klass
+        return self.__skipping_if_not_available(klass, driver_name, is_available)
 
     def _add_driver_to_suite(self, driver_name, suite, is_available):
         for klass in self._make_check_classes():

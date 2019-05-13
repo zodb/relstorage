@@ -108,17 +108,13 @@ class IDBDriverOptions(Interface):
 
     database_type = Attribute("A string naming the type of database.")
 
-    available_drivers = Attribute("A map of driver names to IDBDriver factories (implementers). "
-                                  "If the map is empty, no drivers for the specified "
-                                  "database are available.")
-
-    preferred_driver_name = Attribute("The name of the best driver in driver_map "
-                                      "to use; used if 'auto' is given to 'select_driver'. "
-                                      "None if no drivers are available.")
+    driver_map = Attribute("A map of driver names to IDBDriver factories (implementers). "
+                           "If the map is empty, no drivers for the specified "
+                           "database are available.")
 
     def select_driver(driver_name=None):
         """
-        Choose and return an IDBDriver
+        Choose and return an IDBDriver.
         """
 
     def known_driver_names():
@@ -128,10 +124,6 @@ class IDBDriverOptions(Interface):
         The drivers may or may not be available.
         """
 
-    def connect(*args, **kwargs):
-        """
-        Return a new database connection.
-        """
 
 class IConnectionManager(Interface):
     """Open and close database connections"""
