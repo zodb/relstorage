@@ -134,6 +134,7 @@ class BlobUndoTests(BlobTestBase):
 
         database.undo(database.undoLog(0, 1)[0]['id'])
         transaction.commit()
+        transaction.manager.manager.free(transaction.get())
 
         # the blob footprint object should exist no longer
         self.assertRaises(KeyError, root.__getitem__, 'blob')

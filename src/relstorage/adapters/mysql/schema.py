@@ -19,8 +19,6 @@ from __future__ import absolute_import
 from ZODB.POSException import StorageError
 from zope.interface import implementer
 
-from relstorage._compat import db_binary_to_bytes
-
 from ..interfaces import ISchemaInstaller
 from ..schema import AbstractSchemaInstaller
 
@@ -31,15 +29,6 @@ class MySQLSchemaInstaller(AbstractSchemaInstaller):
     database_type = 'mysql'
 
     def _to_native_str(self, value):
-        # Almost all drivers return CHAR/VARCHAR as
-        # bytes or possibly str. mysql connector/python, though,
-        # will return them as unicode on Py2 if not properly configured.
-        # If properly configured, it will return them as bytearray.
-        # This doesn't seem configurable.
-        # sigh.
-        value = db_binary_to_bytes(value)
-        if not isinstance(value, str):
-            return value.decode('ascii')
         return value
 
     def get_database_name(self, cursor):

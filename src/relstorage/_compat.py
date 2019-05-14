@@ -71,19 +71,45 @@ else:
     from base64 import encodestring as base64_encodebytes
     from base64 import decodestring as base64_decodebytes
 
-# Database types
+## Database types
 
-if PY3:
-    # psycopg2 is smart enough to return memoryview or
-    # buffer on Py3/Py2, respectively, for bytea columns
-    _db_binary_types = (memoryview,)
-else:
-    # MySQL Connector/Python returns bytearray, but only from
-    # the Python implementation; the C implementation returns
-    # bytes.
-    _db_binary_types = (memoryview, buffer, bytearray)
+# Things that can be recognized as a pickled state,
+# passed to an io.BytesIO reader, and unpickled.
 
-def db_binary_to_bytes(data):
-    if isinstance(data, _db_binary_types):
-        data = bytes(data)
-    return data
+# psycopg2 is smart enough to return memoryview or
+# buffer on Py3/Py2, respectively, for bytea columns.
+# memoryview can't be passed to bytes() on Py2 or Py3,
+# but it can be passed to cStringIO.StringIO() or io.BytesIO().
+
+
+# Py MySQL Connector/Python returns a bytearray, whereas
+# C MySQL Connector/Python returns bytes.
+
+# Keep these ordered with the most common at the front;
+# Python does a linear traversal of type checks.
+state_types = (bytes, bytearray, memoryview)
+
+if PY2:
+    state_types += (buffer,)
+
+def binary_column_as_state_type(data):
+    if isinstance(data, state_types) or data is None:
+        return data
+    # Nothing we know about. cx_Oracle likes to give us an object
+    # with .read(), look for that.
+    return binary_column_as_state_type(data.read())
+
+def binary_column_as_bytes(data):
+    # Take the same inputs as `as_state_type`, but turn them into
+    # actual bytes. This includes None and empty bytes, which becomes
+    # the literal b'';
+    if data is None or not data:
+        return b''
+    if isinstance(data, bytes):
+        return data
+    if isinstance(data, memoryview):
+        return data.tobytes()
+    # Everything left we convert with the bytes() construtor.
+    # That would be buffer and bytearray
+    __traceback_info__ = data, type(data)
+    return bytes(data)

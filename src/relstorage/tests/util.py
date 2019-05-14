@@ -144,11 +144,18 @@ class AbstractTestSuiteBuilder(ABC):
                 # for ease of selection by name, e.g.,
                 # zope-testrunner --layer PG8000Driver
                 driver_suite = unittest.TestSuite()
-                driver_suite.layer = MinimalTestLayer(self.__name__ + '_' + driver_name)
+                layer_name = '%s%s' % (
+                    self.__name__,
+                    self.__escape_driver_name(driver_name),
+                )
+                driver_suite.layer = MinimalTestLayer(layer_name)
                 driver_suite.layer.__module__ = self.__module__
-                self._add_driver_to_suite(driver_name, driver_suite, available)
+                self._add_driver_to_suite(driver_name, driver_suite, layer_name, available)
                 suite.addTest(driver_suite)
         return suite
+
+    def __escape_driver_name(self, driver_name):
+        return driver_name.replace(' ', '').replace('/', '_')
 
     def _default_make_check_class(self, base, name):
         klass = type(
@@ -213,13 +220,13 @@ class AbstractTestSuiteBuilder(ABC):
 
     def _new_class_for_driver(self, driver_name, base, is_available):
         klass = type(
-            base.__name__ + '_' + driver_name,
+            base.__name__ + '_' + self.__escape_driver_name(driver_name),
             (base,),
             {'driver_name': driver_name}
         )
         return self.__skipping_if_not_available(klass, driver_name, is_available)
 
-    def _add_driver_to_suite(self, driver_name, suite, is_available):
+    def _add_driver_to_suite(self, driver_name, suite, layer_prefix, is_available):
         for klass in self._make_check_classes():
             klass = self._new_class_for_driver(driver_name, klass, is_available)
             suite.addTest(unittest.makeSuite(klass, "check"))
@@ -259,11 +266,10 @@ class AbstractTestSuiteBuilder(ABC):
                     storage.zap_all(slow=True)
                     return storage
 
-                prefix = '%s%s%s_%s' % (
-                    self.__name__,
+                prefix = '%s_%s%s' % (
+                    layer_prefix,
                     'Shared' if shared_blob_dir else 'Unshared',
                     'WithHistory' if keep_history else 'NoHistory',
-                    driver_name.replace(' ', '').replace('/', '_'),
                 )
 
                 # If the blob directory is a cache, don't test packing,

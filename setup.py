@@ -156,9 +156,7 @@ setup(
             'mysqlclient>=1.3.7;platform_python_implementation=="CPython" and python_version == "2.7" and sys_platform != "win32"',
             # Version pin because of https://github.com/zodb/relstorage/issues/213
             'mysqlclient>=1.3.7, < 1.4;platform_python_implementation=="CPython" and python_version >= "3.3" and sys_platform != "win32"',
-            # The Python version is currently broken.
-            # See https://github.com/zodb/relstorage/issues/228
-            #'mysql-connector-python >= 8.0.16',
+            'mysql-connector-python >= 8.0.16',
 
             # postgresql
             'pg8000 >= 1.11.0', # pure-python

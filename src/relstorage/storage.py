@@ -54,6 +54,7 @@ from relstorage._compat import dumps
 from relstorage._compat import iteritems
 from relstorage._compat import iterkeys
 from relstorage._compat import loads
+from relstorage._compat import state_types
 from relstorage.blobhelper import BlobHelper
 from relstorage.cache import StorageCache
 from relstorage.options import Options
@@ -605,7 +606,7 @@ class RelStorage(UndoLogCompatible,
         if state is None:
             raise POSKeyError(oid)
 
-        assert isinstance(state, bytes) # XXX PY3 used to do str(state)
+        assert isinstance(state, state_types), type(state)
         if not state:
             raise POSKeyError(oid)
         return state
@@ -648,7 +649,7 @@ class RelStorage(UndoLogCompatible,
                 end = p64(end_int)
             else:
                 end = None
-            assert isinstance(state, bytes), type(state) # XXX Py3 port: state = str(state)
+            assert isinstance(state, state_types), type(state)
             return state, p64(start_tid), end
 
     @Metric(method=True, rate=0.1)
@@ -1273,7 +1274,7 @@ class RelStorage(UndoLogCompatible,
             if not state:
                 return ()
 
-            assert isinstance(state, bytes), type(state) # XXX PY3: str(state)
+            assert isinstance(state, state_types), type(state)
             return {u64(oid) for oid in referencesf(state)}
 
         # Use a private connection (lock_conn and lock_cursor) to
@@ -1657,7 +1658,7 @@ class Record(DataRecord):
     def __init__(self, tid, oid_int, data):
         # XXX PY3: Used to to str(data) on Py2
         if data is not None:
-            assert isinstance(data, bytes)
+            assert isinstance(data, state_types), type(data)
         DataRecord.__init__(self, p64(oid_int), tid, data, None)
 
 def _zlibstorage_new_instance(self):

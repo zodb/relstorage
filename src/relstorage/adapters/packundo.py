@@ -23,7 +23,8 @@ from ZODB.POSException import UndoError
 from ZODB.utils import u64
 from zope.interface import implementer
 
-from .._compat import db_binary_to_bytes
+from .._compat import binary_column_as_state_type
+from .._compat import state_types
 from ..iter import fetchmany
 from ..treemark import TreeMarker
 from .interfaces import IPackUndo
@@ -431,12 +432,9 @@ class HistoryPreservingPackUndo(PackUndo):
 
         add_rows = []  # [(from_oid, tid, to_oid)]
         for from_oid, state in self._fetchmany(cursor):
-            state = db_binary_to_bytes(state)
-            if hasattr(state, 'read'):
-                # Oracle
-                state = state.read() # pylint:disable=no-member
+            state = binary_column_as_state_type(state)
             if state:
-                assert isinstance(state, bytes), type(state) # PY3: used to be str(state)
+                assert isinstance(state, state_types), type(state)
                 from_count += 1
                 try:
                     to_oids = get_references(state)
@@ -956,13 +954,10 @@ class HistoryFreePackUndo(PackUndo):
         add_refs = []
 
         for from_oid, tid, state in self._fetchmany(cursor):
-            state = db_binary_to_bytes(state)
-            if hasattr(state, 'read'):
-                # Oracle
-                state = state.read() # pylint:disable=no-member
+            state = binary_column_as_state_type(state)
             add_objects.append((from_oid, tid))
             if state:
-                assert isinstance(state, bytes), type(state)
+                assert isinstance(state, state_types), type(state)
                 # XXX PY3 state = str(state)
                 try:
                     to_oids = get_references(state)

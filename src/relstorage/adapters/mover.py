@@ -20,7 +20,7 @@ from hashlib import md5
 from perfmetrics import Metric
 from zope.interface import implementer
 
-from .._compat import db_binary_to_bytes
+from .._compat import binary_column_as_state_type
 from ..iter import fetchmany
 from ._util import noop_when_history_free
 from ._util import query_property as _query_property
@@ -80,7 +80,7 @@ class AbstractObjectMover(object):
         row = cursor.fetchone()
         if row:
             state, tid = row
-            state = db_binary_to_bytes(state)
+            state = binary_column_as_state_type(state)
             # If it's None, the object's creation has been
             # undone.
             return state, tid
@@ -105,7 +105,7 @@ class AbstractObjectMover(object):
         row = cursor.fetchone()
         if row:
             (state,) = row
-            return db_binary_to_bytes(state)
+            return binary_column_as_state_type(state)
         return None
 
     _exists_queries = (
@@ -141,7 +141,7 @@ class AbstractObjectMover(object):
         row = cursor.fetchone()
         if row:
             state, tid = row
-            state = db_binary_to_bytes(state)
+            state = binary_column_as_state_type(state)
             # None in state means The object's creation has been undone
             return state, tid
 

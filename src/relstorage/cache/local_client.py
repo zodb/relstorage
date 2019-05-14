@@ -22,6 +22,7 @@ import zlib
 from zope import interface
 
 from relstorage._compat import iteritems
+from relstorage._compat import state_types
 from relstorage.cache import persistence as _Loader
 from relstorage.cache.interfaces import IPersistentCache
 from relstorage.cache.mapping import SizedLRUMapping as LocalClientBucket
@@ -160,7 +161,7 @@ class LocalClient(object):
             # This used to allow non-byte values, but that's confusing
             # on Py3 and wasn't used outside of tests, so we enforce it.
             assert isinstance(key, str), (type(key), key)
-            assert isinstance(value, bytes)
+            assert isinstance(value, state_types)
 
             cvalue = compress(value) if compress else value # pylint:disable=not-callable
 
