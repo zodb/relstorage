@@ -67,7 +67,7 @@ class IDBDriver(Interface):
 
     Binary = Attribute("A callable.")
 
-    def binary_column_as_state_type(self, db_column_data):
+    def binary_column_as_state_type(db_column_data):
         """
         Turn *db_column_data* into something that's a valid pickle
         state.
@@ -80,7 +80,7 @@ class IDBDriver(Interface):
         or Oracle).
         """
 
-    def binary_column_as_bytes(self, db_column_data):
+    def binary_column_as_bytes(db_column_data):
         """
         Turn *db_column_data* into a `bytes` object.
 
