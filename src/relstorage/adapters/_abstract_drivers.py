@@ -25,7 +25,7 @@ from zope.interface import directlyProvides
 
 from .._compat import ABC
 from .._compat import PYPY
-from .._compat import PY2
+
 from .interfaces import IDBDriver
 from .interfaces import IDBDriverOptions
 from .interfaces import DriverNotAvailableError
