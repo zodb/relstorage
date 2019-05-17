@@ -246,7 +246,7 @@ class SizedLRUMapping(object):
 
             for e in added_entries:
                 assert e.key not in data
-                assert e.cffi_entry.r_parent != 0, e.key
+                assert e.cffi_entry.r_parent, e.key
                 data[e.key] = e
                 stored += 1
             return stored

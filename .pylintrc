@@ -1,3 +1,6 @@
+#[MASTER]
+# These need examined and fixed on a case-by-case basis.
+#load-plugins=pylint.extensions.bad_builtin,pylint.extensions.check_elif,pylint.extensions.comparetozero,pylint.extensions.emptystring
 
 [MESSAGES CONTROL]
 
@@ -51,6 +54,13 @@ disable=
 #   undefined-all-variable
 
 
+[IMPORTS]
+# It's common to have ZODB installed in the virtual environment
+# with us. That causes it to be recognized as first party, meaning
+# that it is suddenly sorted incorrectly compared to other third party
+# imports such as zope.
+known-third-party=ZODB
+
 [FORMAT]
 # duplicated from setup.cfg
 max-line-length=100
@@ -90,7 +100,6 @@ max-attributes=12
 max-locals=20
 
 [BASIC]
-bad-functions=input
 # Prospector turns on unsafe-load-any-extension by default, but
 # pylint leaves it off. This is the proximal cause of the
 # undefined-all-variable crash.

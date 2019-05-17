@@ -29,6 +29,8 @@ class MySQLSchemaInstaller(AbstractSchemaInstaller):
     database_type = 'mysql'
 
     def _to_native_str(self, value):
+        if not isinstance(value, str):
+            value = value.decode('ascii')
         return value
 
     def get_database_name(self, cursor):

@@ -16,8 +16,6 @@ from __future__ import print_function
 
 from zope.interface import implementer
 
-from .._compat import binary_column_as_state_type
-from .._compat import binary_column_as_bytes
 from .interfaces import IDatabaseIterator
 
 
@@ -25,9 +23,9 @@ class DatabaseIterator(object):
     """Abstract base class for database iteration.
     """
 
-    def __init__(self, database_type, runner):
+    def __init__(self, database_driver, runner):
         self.runner = runner
-        self.database_type = database_type
+        self.driver = database_driver
 
     def iter_objects(self, cursor, tid):
         """Iterate over object states in a transaction.
@@ -42,10 +40,7 @@ class DatabaseIterator(object):
             """
         self.runner.run_script_stmt(cursor, stmt, {'tid': tid})
         for oid, state in cursor:
-            if hasattr(state, 'read'):
-                # Oracle
-                state = state.read()
-            state = binary_column_as_state_type(state)
+            state = self.driver.binary_column_as_state_type(state)
             yield oid, state
 
 
@@ -69,9 +64,9 @@ class HistoryPreservingDatabaseIterator(DatabaseIterator):
             tid, username, description, ext = row[:4]
             # Although the transaction interface for username and description are
             # defined as strings, this layer works with bytes. PY3.
-            username = binary_column_as_bytes(username)
-            description = binary_column_as_bytes(description)
-            ext = binary_column_as_bytes(ext)
+            username = self.driver.binary_column_as_bytes(username)
+            description = self.driver.binary_column_as_bytes(description)
+            ext = self.driver.binary_column_as_bytes(ext)
 
             yield (tid, username, description, ext) + tuple(row[4:])
 

@@ -67,6 +67,28 @@ class IDBDriver(Interface):
 
     Binary = Attribute("A callable.")
 
+    def binary_column_as_state_type(self, db_column_data):
+        """
+        Turn *db_column_data* into something that's a valid pickle
+        state.
+
+        Valid pickle states should be acceptable to
+        `io.BytesIO` and `pickle.UnPickler`.
+
+        *db_column_dat* came from a column of data declared to be of the
+        type that we store state information in (e.g., a BLOB on MySQL
+        or Oracle).
+        """
+
+    def binary_column_as_bytes(self, db_column_data):
+        """
+        Turn *db_column_data* into a `bytes` object.
+
+        Use this when the specific type must be known,
+        for example to prefix or suffix additional byte values
+        like that produced by `p64`.
+        """
+
 
 class DriverNotAvailableError(Exception):
     """
@@ -133,7 +155,7 @@ class IDBDriverOptions(Interface):
 
     def select_driver(driver_name=None):
         """
-        Choose and return an IDBDriver.
+        Choose and return an `IDBDriver`.
         """
 
     def known_driver_names():

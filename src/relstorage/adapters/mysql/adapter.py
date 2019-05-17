@@ -112,9 +112,8 @@ class MySQLAdapter(object):
             keep_history=self.keep_history,
         )
         self.mover = MySQLObjectMover(
-            database_type='mysql',
+            driver,
             options=options,
-            Binary=driver.Binary,
         )
         self.connmanager.add_on_store_opened(self.mover.on_store_opened)
         self.connmanager.add_on_load_opened(self.mover.on_load_opened)
@@ -136,26 +135,26 @@ class MySQLAdapter(object):
 
         if self.keep_history:
             self.packundo = MySQLHistoryPreservingPackUndo(
-                database_type='mysql',
+                driver,
                 connmanager=self.connmanager,
                 runner=self.runner,
                 locker=self.locker,
                 options=options,
             )
             self.dbiter = HistoryPreservingDatabaseIterator(
-                database_type='mysql',
+                driver,
                 runner=self.runner,
             )
         else:
             self.packundo = MySQLHistoryFreePackUndo(
-                database_type='mysql',
+                driver,
                 connmanager=self.connmanager,
                 runner=self.runner,
                 locker=self.locker,
                 options=options,
             )
             self.dbiter = HistoryFreeDatabaseIterator(
-                database_type='mysql',
+                driver,
                 runner=self.runner,
             )
 

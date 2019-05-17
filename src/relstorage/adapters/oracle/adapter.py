@@ -99,10 +99,9 @@ class OracleAdapter(object):
             'md5sum': driver.STRING,
         }
         self.mover = OracleObjectMover(
-            database_type='oracle',
+            driver,
             options=options,
             runner=self.runner,
-            Binary=driver.Binary,
             batcher_factory=lambda cursor, row_limit: OracleRowBatcher(
                 cursor, inputsizes, row_limit),
         )
@@ -130,26 +129,26 @@ class OracleAdapter(object):
 
         if self.keep_history:
             self.packundo = OracleHistoryPreservingPackUndo(
-                database_type='oracle',
+                driver,
                 connmanager=self.connmanager,
                 runner=self.runner,
                 locker=self.locker,
                 options=options,
             )
             self.dbiter = HistoryPreservingDatabaseIterator(
-                database_type='oracle',
+                driver,
                 runner=self.runner,
             )
         else:
             self.packundo = OracleHistoryFreePackUndo(
-                database_type='oracle',
+                driver,
                 connmanager=self.connmanager,
                 runner=self.runner,
                 locker=self.locker,
                 options=options,
             )
             self.dbiter = HistoryFreeDatabaseIterator(
-                database_type='oracle',
+                driver,
                 runner=self.runner,
             )
 

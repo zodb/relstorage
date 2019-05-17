@@ -85,11 +85,10 @@ class PostgreSQLAdapter(object):
             mover_type = PG8000ObjectMover
 
         self.mover = mover_type(
-            database_type='postgresql',
+            driver,
             options=options,
             runner=self.runner,
             version_detector=self.version_detector,
-            Binary=driver.Binary,
         )
         self.connmanager.add_on_store_opened(self.mover.on_store_opened)
         self.connmanager.add_on_load_opened(self.mover.on_load_opened)
@@ -110,26 +109,26 @@ class PostgreSQLAdapter(object):
 
         if self.keep_history:
             self.packundo = HistoryPreservingPackUndo(
-                database_type='postgresql',
+                driver,
                 connmanager=self.connmanager,
                 runner=self.runner,
                 locker=self.locker,
                 options=options,
             )
             self.dbiter = HistoryPreservingDatabaseIterator(
-                database_type='postgresql',
+                driver,
                 runner=self.runner,
             )
         else:
             self.packundo = HistoryFreePackUndo(
-                database_type='postgresql',
+                driver,
                 connmanager=self.connmanager,
                 runner=self.runner,
                 locker=self.locker,
                 options=options,
             )
             self.dbiter = HistoryFreeDatabaseIterator(
-                database_type='postgresql',
+                driver,
                 runner=self.runner,
             )
 
