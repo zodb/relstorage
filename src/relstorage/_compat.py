@@ -70,20 +70,3 @@ else:
     intern = intern
     from base64 import encodestring as base64_encodebytes
     from base64 import decodestring as base64_decodebytes
-
-# Database types
-
-if PY3:
-    # psycopg2 is smart enough to return memoryview or
-    # buffer on Py3/Py2, respectively, for bytea columns
-    _db_binary_types = (memoryview,)
-else:
-    # MySQL Connector/Python returns bytearray, but only from
-    # the Python implementation; the C implementation returns
-    # bytes.
-    _db_binary_types = (memoryview, buffer, bytearray)
-
-def db_binary_to_bytes(data):
-    if isinstance(data, _db_binary_types):
-        data = bytes(data)
-    return data

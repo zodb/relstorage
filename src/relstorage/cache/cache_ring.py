@@ -105,6 +105,11 @@ class Cache(object):
     # limits, the rounding will also make them overcommit).
 
     # Should we allocate some nodes in a contiguous block on startup?
+    # NOTE: For large cache sizes, this can be slow. It actually makes
+    # the zodbshootout 'cold' tests look bad (for small object counts
+    # especially, or large cache sizes) because when zodbshootout clears caches,
+    # our implementation throws this object all away, and then allocates again.
+    # Meanwhile, all the old objects have to be GC'd.
     _preallocate_entries = True
     # If so, how many? Try to get enough to fill the cache assuming objects are
     # this size on average

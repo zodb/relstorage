@@ -21,8 +21,10 @@ from __future__ import print_function
 
 from zope.interface import implementer
 
+from relstorage._compat import PY3
 from ..._abstract_drivers import AbstractModuleDriver
 from ...interfaces import IDBDriver
+
 
 __all__ = [
     'Psycopg2Driver',
@@ -63,3 +65,26 @@ class Psycopg2Driver(AbstractModuleDriver):
         conn = self.connect(*args, **kwargs)
         conn.set_isolation_level(isolation)
         return conn, conn.cursor()
+
+    # psycopg2 is smart enough to return memoryview or buffer on
+    # Py3/Py2, respectively, for bytea columns. memoryview can't be
+    # passed to bytes() on Py2 or Py3, but it can be passed to
+    # cStringIO.StringIO() or io.BytesIO() --- unfortunately,
+    # memoryviews, at least, don't like going to io.BytesIO() on
+    # Python 3, and that's how we unpickle states. So while ideally
+    # we'd like to keep it that way, to save a copy, we are forced to
+    # make the copy. Plus there are tests that like to directly
+    # compare bytes.
+
+    if PY3:
+        def binary_column_as_state_type(self, data):
+            if data:
+                # Calling 'bytes()' on a memoryview in Python 3 does
+                # nothing useful.
+                data = data.tobytes()
+            return data
+    else:
+        def binary_column_as_state_type(self, data):
+            if data:
+                data = bytes(data)
+            return data

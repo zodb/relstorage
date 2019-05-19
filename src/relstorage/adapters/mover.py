@@ -20,7 +20,6 @@ from hashlib import md5
 from perfmetrics import Metric
 from zope.interface import implementer
 
-from .._compat import db_binary_to_bytes
 from ..iter import fetchmany
 from ._util import noop_when_history_free
 from ._util import query_property as _query_property
@@ -32,14 +31,17 @@ metricmethod_sampled = Metric(method=True, rate=0.1)
 @implementer(IObjectMover)
 class AbstractObjectMover(object):
 
-    def __init__(self, database_type, options, runner=None,
-                 Binary=None, version_detector=None,
+    def __init__(self, database_driver, options, runner=None,
+                 version_detector=None,
                  batcher_factory=RowBatcher):
-        self.database_type = database_type
+        """
+        :param database_driver: The `IDBDriver` in use.
+        """
+        self.driver = database_driver
         self.keep_history = options.keep_history
         self.blob_chunk_size = options.blob_chunk_size
         self.runner = runner
-        self.Binary = Binary
+
         self.version_detector = version_detector
         self.make_batcher = batcher_factory
 
@@ -80,7 +82,7 @@ class AbstractObjectMover(object):
         row = cursor.fetchone()
         if row:
             state, tid = row
-            state = db_binary_to_bytes(state)
+            state = self.driver.binary_column_as_state_type(state)
             # If it's None, the object's creation has been
             # undone.
             return state, tid
@@ -105,7 +107,7 @@ class AbstractObjectMover(object):
         row = cursor.fetchone()
         if row:
             (state,) = row
-            return db_binary_to_bytes(state)
+            return self.driver.binary_column_as_state_type(state)
         return None
 
     _exists_queries = (
@@ -141,7 +143,7 @@ class AbstractObjectMover(object):
         row = cursor.fetchone()
         if row:
             state, tid = row
-            state = db_binary_to_bytes(state)
+            state = self.driver.binary_column_as_state_type(state)
             # None in state means The object's creation has been undone
             return state, tid
 
@@ -222,7 +224,7 @@ class AbstractObjectMover(object):
         batcher.insert_into(
             "temp_store (zoid, prev_tid, md5, state)",
             "%s, %s, %s, %s",
-            (oid, prev_tid, md5sum, self.Binary(data)),
+            (oid, prev_tid, md5sum, self.driver.Binary(data)),
             rowkey=oid,
             size=len(data),
             command=command,
@@ -241,7 +243,7 @@ class AbstractObjectMover(object):
         md5sum = self._compute_md5sum(data)
 
         if data is not None:
-            encoded = self.Binary(data)
+            encoded = self.driver.Binary(data)
             size = len(data)
         else:
             encoded = None
@@ -263,20 +265,19 @@ class AbstractObjectMover(object):
                 size=size,
                 command=command,
             )
-        else:
-            if data:
-                if command == 'INSERT':
-                    batcher.delete_from('object_state', zoid=oid)
-                batcher.insert_into(
-                    "object_state (zoid, tid, state_size, state)",
-                    "%s, %s, %s, %s",
-                    (oid, tid, size, encoded),
-                    rowkey=oid,
-                    size=size,
-                    command=command,
-                )
-            else:
+        elif data:
+            if command == 'INSERT':
                 batcher.delete_from('object_state', zoid=oid)
+            batcher.insert_into(
+                "object_state (zoid, tid, state_size, state)",
+                "%s, %s, %s, %s",
+                (oid, tid, size, encoded),
+                rowkey=oid,
+                size=size,
+                command=command,
+            )
+        else:
+            batcher.delete_from('object_state', zoid=oid)
 
     def restore(self, cursor, batcher, oid, tid, data):
         raise NotImplementedError()
@@ -326,7 +327,7 @@ class AbstractObjectMover(object):
             state = %s
         WHERE zoid = %s
         """
-        cursor.execute(stmt, (prev_tid, md5sum, self.Binary(data), oid))
+        cursor.execute(stmt, (prev_tid, md5sum, self.driver.Binary(data), oid))
 
     # Subclasses may override any of these queries if there is a
     # more optimal form.

@@ -25,6 +25,7 @@ from zope.interface import directlyProvides
 
 from .._compat import ABC
 from .._compat import PYPY
+
 from .interfaces import IDBDriver
 from .interfaces import IDBDriverOptions
 from .interfaces import DriverNotAvailableError
@@ -122,6 +123,43 @@ class AbstractModuleDriver(ABC):
 
     def cursor(self, conn):
         return conn.cursor()
+
+    # Things that can be recognized as a pickled state,
+    # passed to an io.BytesIO reader, and unpickled.
+
+    # Py MySQL Connector/Python returns a bytearray, whereas
+    # C MySQL Connector/Python returns bytes.
+
+    # Keep these ordered with the most common at the front;
+    # Python does a linear traversal of type checks.
+    state_types = (bytes, bytearray)
+
+    def binary_column_as_state_type(self, data):
+        if isinstance(data, self.state_types) or data is None:
+            return data
+        # Nothing we know about. cx_Oracle likes to give us an object
+        # with .read(), look for that.
+        # XXX: TODO: Move this to the oracle driver.
+        return self.binary_column_as_state_type(data.read())
+
+    def binary_column_as_bytes(self, data):
+        # Take the same inputs as `as_state_type`, but turn them into
+        # actual bytes. This includes None and empty bytes, which becomes
+        # the literal b'';
+        # XXX: TODO: We don't need all these checks up here. Just the common ones,
+        # move everything else to specific drivers.
+        if data is None or not data:
+            return b''
+        if isinstance(data, bytes):
+            return data
+        if isinstance(data, memoryview):
+            return data.tobytes()
+        # Everything left we convert with the bytes() construtor.
+        # That would be buffer and bytearray
+        __traceback_info__ = data, type(data)
+        return bytes(data)
+
+
 
 def implement_db_driver_options(name, *driver_modules):
     """

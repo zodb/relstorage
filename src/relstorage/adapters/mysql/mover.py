@@ -171,6 +171,7 @@ class MySQLObjectMover(AbstractObjectMover):
 
                 if f is None:
                     f = open(filename, 'wb')
+
                 f.write(chunk)
                 bytecount += len(chunk)
                 chunk_num += 1

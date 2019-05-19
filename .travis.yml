@@ -33,7 +33,8 @@ script:
 # coverage slows PyPy down from 2minutes to 12+.
 # But don't run the pymysql/pypy tests twice.
   - if [[ $TRAVIS_PYTHON_VERSION == 3.7 ]]; then pylint --rcfile=.pylintrc relstorage -f parseable -r n; fi
-  - if [[ $TRAVIS_PYTHON_VERSION == pypy* ]]; then python -m zope.testrunner --test-path=src --auto-color --auto-progress; fi
+  # Disable inlining right now. See https://github.com/zodb/relstorage/issues/228#issuecomment-492423284
+  - if [[ $TRAVIS_PYTHON_VERSION == pypy* ]]; then python --jit inlining=0 -m zope.testrunner --test-path=src --auto-color --auto-progress; fi
   - if [[ $TRAVIS_PYTHON_VERSION != pypy* ]]; then coverage run -m  zope.testrunner --test-path=src --auto-color --auto-progress; fi
 after_success:
   - coveralls

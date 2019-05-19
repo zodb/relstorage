@@ -150,6 +150,7 @@ class LocalClient(object):
         self.set_multi({key: value})
 
     def set_multi(self, d):
+
         if not self.limit:
             # don't bother
             return

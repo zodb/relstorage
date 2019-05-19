@@ -242,7 +242,7 @@ class OracleObjectMover(AbstractObjectMover):
         """
         cursor.setinputsizes(blobdata=self.inputsizes['blobdata']) # pylint:disable=unsubscriptable-object
         cursor.execute(stmt, oid=oid, prev_tid=prev_tid,
-                       md5sum=md5sum, blobdata=self.Binary(data))
+                       md5sum=md5sum, blobdata=self.driver.Binary(data))
 
 
 

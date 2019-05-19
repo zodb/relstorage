@@ -30,7 +30,9 @@ class RelStorageFactory(BaseConfig):
         config = self.config
         # Hoist the driver setting to the section we really want it.
         config.driver = config.adapter.config.driver
-        config.adapter.config.driver = None
+        # But don't remove it or otherwise mutate the config object;
+        # that would prevent us from being correctly opened again.
+        #config.adapter.config.driver = None
         options = Options.copy_valid_options(config)
         adapter = config.adapter.create(options)
         return RelStorage(adapter, name=config.name, options=options)
@@ -60,6 +62,8 @@ class MySQLAdapterFactory(BaseConfig):
         from .adapters.mysql import MySQLAdapter
         params = {}
         for key in self.config.getSectionAttributes():
+            if key == 'driver':
+                continue
             value = getattr(self.config, key)
             if value is not None:
                 params[key] = value
