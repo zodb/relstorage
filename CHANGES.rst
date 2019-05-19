@@ -18,7 +18,10 @@
 
 - Drop support for pg8000 older than 1.11.0.
 
-- Drop support for MySQL Connector/Python older than 8.0.16.
+- Drop support for MySQL Connector/Python older than 8.0.16. Newer
+  versions were broken. See :issue:`228`.
+
+- Test support for MySQL Connector/Python on PyPy.
 
 - Drop support for PyPy older than 5.3.1.
 
