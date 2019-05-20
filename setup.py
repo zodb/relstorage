@@ -122,12 +122,8 @@ setup(
         # so be sure to test this configuration. mysqlclient doesn't compile on
         # windows, though, so only install the pure-python version.
         # pylint:disable=line-too-long
-        'mysql:platform_python_implementation=="CPython" and python_version == "2.7" and sys_platform != "win32"': [
-            'mysqlclient>=1.3.7',
-        ],
-        'mysql:platform_python_implementation=="CPython" and python_version >= "3.3" and sys_platform != "win32"': [
-            # https://github.com/zodb/relstorage/issues/213
-            'mysqlclient>=1.3.7, < 1.4',
+        'mysql:platform_python_implementation=="CPython" and sys_platform != "win32"': [
+            'mysqlclient >= 1.4',
         ],
         'mysql:platform_python_implementation=="PyPy" or sys_platform == "win32"': [
             'PyMySQL>=0.6.6',
@@ -153,9 +149,7 @@ setup(
             # Install all the supported drivers for the platform.
             # first, mysql
             'PyMySQL >= 0.6.6',
-            'mysqlclient>=1.3.7;platform_python_implementation=="CPython" and python_version == "2.7" and sys_platform != "win32"',
-            # Version pin because of https://github.com/zodb/relstorage/issues/213
-            'mysqlclient>=1.3.7, < 1.4;platform_python_implementation=="CPython" and python_version >= "3.3" and sys_platform != "win32"',
+            'mysqlclient >= 1.4;platform_python_implementation=="CPython" and sys_platform != "win32"',
             'mysql-connector-python >= 8.0.16',
 
             # postgresql

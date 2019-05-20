@@ -73,7 +73,7 @@ class Psycopg2ConnectionManager(AbstractConnectionManager):
                 return conn, cursor
             except self.use_replica_exceptions as e:
                 if replica is not None:
-                    next_replica = next(replica_selector)
+                    next_replica = replica_selector.next()
                     if next_replica is not None:
                         log.warning("Unable to connect to replica %s: %s, "
                                     "now trying %s", replica, e, next_replica)

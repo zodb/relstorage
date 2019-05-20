@@ -68,6 +68,7 @@ class MySQLdbConnectionManager(AbstractConnectionManager):
             params = self._params
 
         while True:
+            __traceback_info__ = params
             try:
                 conn = self._db_connect(**params)
                 cursor = self._db_driver.cursor(conn)
@@ -77,10 +78,6 @@ class MySQLdbConnectionManager(AbstractConnectionManager):
                     cursor.execute(
                         "SET SESSION TRANSACTION %s" % transaction_mode)
                     self._db_driver.set_autocommit(conn, False)
-                # Don't try to decode pickle states as UTF-8 (or
-                # whatever the environment is configured as); See
-                # https://github.com/zodb/relstorage/issues/57
-                cursor.execute("SET NAMES binary")
                 conn.replica = replica
                 return conn, cursor
             except self.use_replica_exceptions as e:

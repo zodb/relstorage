@@ -20,15 +20,16 @@ from __future__ import print_function
 
 from zope.interface import implementer
 
-from relstorage.adapters._abstract_drivers import AbstractModuleDriver
 from relstorage.adapters.interfaces import IDBDriver
+
+from . import AbstractMySQLDriver
 
 __all__ = [
     'PyMySQLDriver',
 ]
 
 @implementer(IDBDriver)
-class PyMySQLDriver(AbstractModuleDriver):
+class PyMySQLDriver(AbstractMySQLDriver):
     __name__ = 'PyMySQL'
     MODULE_NAME = 'pymysql'
     PRIORITY = 2

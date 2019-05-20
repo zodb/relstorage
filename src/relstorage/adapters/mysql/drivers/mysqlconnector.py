@@ -21,8 +21,9 @@ from __future__ import print_function
 from zope.interface import implementer
 
 from relstorage._compat import PY2
-from relstorage.adapters._abstract_drivers import AbstractModuleDriver
 from relstorage.adapters.interfaces import IDBDriver
+
+from . import AbstractMySQLDriver
 
 __all__ = [
     'PyMySQLConnectorDriver',
@@ -32,7 +33,7 @@ __all__ = [
 _base_name = 'MySQL Connector/Python'
 
 @implementer(IDBDriver)
-class PyMySQLConnectorDriver(AbstractModuleDriver):
+class PyMySQLConnectorDriver(AbstractMySQLDriver):
     # See https://github.com/zodb/relstorage/issues/155
     __name__ = 'Py ' + _base_name
 
@@ -124,22 +125,18 @@ class PyMySQLConnectorDriver(AbstractModuleDriver):
 
         con = self.driver_module.connect(*args, **kwargs)
 
+        # By default, cursors won't buffer, so we don't know
+        # how many rows there are. That's fine and within the DB-API spec.
+        # The Python implementation is much faster if we don't ask it to.
+        # The C connection doesn't accept the 'prepared' keyword.
+        # You can't have both a buffered and prepared cursor,
+        # but the prepared cursor doesn't gain us anything anyway.
         return con
 
     def set_autocommit(self, conn, value):
         # This implementation uses a property instead of a method.
         conn.autocommit = value
 
-    def cursor(self, conn):
-        # By default, the cursor won't buffer, so we don't know
-        # how many rows there are. That's fine and within the DB-API spec.
-        # The Python implementation is much faster if we don't ask it to.
-        # The C connection doesn't accept the 'prepared' keyword.
-        # You can't have both a buffered and prepared cursor,
-        # but the prepared cursor doesn't gain us anything anyway.
-
-        cursor = conn.cursor()
-        return cursor
 
 class CMySQLConnectorDriver(PyMySQLConnectorDriver):
     __name__ = 'C ' + _base_name

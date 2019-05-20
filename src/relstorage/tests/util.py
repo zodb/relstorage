@@ -160,7 +160,7 @@ class AbstractTestSuiteBuilder(ABC):
     def _default_make_check_class(self, base, name):
         klass = type(
             name,
-            (self.use_adapter, base, ), # XXX: TODO: ZConfigTests need to go somewhere
+            (self.use_adapter, base, ),
             {}
         )
 

@@ -27,50 +27,58 @@ from .util import AbstractTestSuiteBuilder
 
 class MySQLAdapterMixin(object):
 
+    def __get_db_name(self):
+        if self.keep_history:
+            db = self.base_dbname
+        else:
+            db = self.base_dbname + '_hf'
+        return db
+
+    def __get_adapter_options(self, dbname=None):
+        dbname = dbname or self.__get_db_name()
+        assert isinstance(dbname, str), (dbname, type(dbname))
+        return {
+            'db': dbname,
+            'user': 'relstoragetest',
+            'passwd': 'relstoragetest',
+            # mysqlclient (aka MySQLdb) and possibly other things that
+            # use libmysqlclient.so will try to connect over the
+            # default Unix socket that was established when that
+            # library was compiled if no host is given. But that
+            # server may not be running, or may not be the one we want
+            # to use for testing, so explicitly ask it to use TCP
+            # socket by giving an IP address (using 'localhost' will
+            # still try to use the socket.) (The TCP port can be bound
+            # by non-root, but the default Unix socket often requires
+            # root permissions to open.)
+            'host': '127.0.0.1',
+        }
+
     def make_adapter(self, options, db=None):
-        if db is None:
-            if self.keep_history:
-                db = self.base_dbname
-            else:
-                db = self.base_dbname + '_hf'
         return MySQLAdapter(
             options=options,
-            db=db,
-            user='relstoragetest',
-            passwd='relstoragetest',
+            **self.__get_adapter_options(db)
         )
 
     def get_adapter_class(self):
         return MySQLAdapter
 
     def get_adapter_zconfig(self):
-        if self.keep_history:
-            dbname = self.base_dbname
-        else:
-            dbname = self.base_dbname + '_hf'
-        return u"""
-        <mysql>
-            driver %s
-            db %s
-            user relstoragetest
-            passwd relstoragetest
-        </mysql>
-        """ % (
-            self.driver_name,
-            dbname,
+        options = self.__get_adapter_options()
+        options['driver'] = self.driver_name
+        formatted_options = '\n'.join(
+            '     %s %s' % (k, v)
+            for k, v in options.items()
         )
 
-    def verify_adapter_from_zconfig(self, adapter):
-        if self.keep_history:
-            dbname = self.base_dbname
-        else:
-            dbname = self.base_dbname + '_hf'
+        return u"""
+        <mysql>
+            %s
+        </mysql>
+        """ % (formatted_options)
 
-        self.assertEqual(adapter._params, {
-            'passwd': 'relstoragetest',
-            'db': dbname,
-            'user': 'relstoragetest',
-        })
+    def verify_adapter_from_zconfig(self, adapter):
+        self.assertEqual(adapter._params, self.__get_adapter_options())
 
 
 class TestOIDAllocator(unittest.TestCase):
