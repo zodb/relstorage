@@ -51,7 +51,7 @@ class PyMySQLConnectorDriver(AbstractModuleDriver):
     @classmethod
     def _get_converter_class(cls):
         if cls._CONVERTER_CLASS is None:
-            import mysql.connector.conversion
+            import mysql.connector.conversion # pylint:disable=import-error
 
             # The results of things like 'SHOW TABLES' come in
             # and use _STRING_to_python (or _VAR_STRING_to_python).
@@ -94,12 +94,12 @@ class PyMySQLConnectorDriver(AbstractModuleDriver):
                     # can't be sent to pickle.loads(), etc, so it's
                     # best to return them as bytes. We don't have that
                     # issue on Python 3.
-                    def _BLOB_to_python(self, value, dsc=None):
+                    def _BLOB_to_python(self, value, dsc=None): # pylint:disable=unused-argument
                         if value and isinstance(value, bytearray):
                             return bytes(value)
                         return value
                 else:
-                    def _BLOB_to_python(self, value, dsc=None):
+                    def _BLOB_to_python(self, value, dsc=None): # pylint:disable=unused-argument
                         return value or b''
 
                 _LONG_BLOB_to_python = _BLOB_to_python
@@ -169,7 +169,7 @@ class CMySQLConnectorDriver(PyMySQLConnectorDriver):
         # We workaround that here.
 
         if cls._C_CONVERTER_CLASS is None:
-            from mysql.connector.conversion import FieldType
+            from mysql.connector.conversion import FieldType # pylint:disable=import-error
             # pylint:disable=inherit-non-class
             class Converter(PyMySQLConnectorDriver._get_converter_class()):
                 def to_python(self, vtype, value):

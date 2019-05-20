@@ -35,6 +35,11 @@
   to use a specific driver. Instead, list the driver in the database
   configuration.
 
+- Opening a RelStorage configuration object read from ZConfig more
+  than once would lose the database driver setting, reverting to
+  'auto'. It now retains the setting. See :issue:`231`.
+
+
 2.1.1 (2019-01-07)
 ==================
 

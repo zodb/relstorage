@@ -137,3 +137,9 @@ class Options(object):
 
     def __repr__(self):
         return 'relstorage.options.Options(**' + repr(self.__dict__) + ')'
+
+    def __eq__(self, other):
+        if not isinstance(other, Options):
+            return NotImplemented
+        return all(getattr(self, key) == getattr(other, key)
+                   for key in self.valid_option_names())
