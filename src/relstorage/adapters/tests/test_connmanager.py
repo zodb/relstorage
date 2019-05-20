@@ -42,7 +42,7 @@ class AbstractConnectionManagerTests(unittest.TestCase):
         cm = AbstractConnectionManager(options)
 
         conn = MockConnection()
-        conn.replica = 'localhost'
+        conn.replica = '127.0.0.1'
         cm.restart_load(conn, MockCursor())
         self.assertTrue(conn.rolled_back)
         conn.replica = 'other'
@@ -50,7 +50,7 @@ class AbstractConnectionManagerTests(unittest.TestCase):
                           cm.restart_load, conn, MockCursor())
 
         conn = MockConnection()
-        conn.replica = 'localhost'
+        conn.replica = '127.0.0.1'
         cm.restart_store(conn, MockCursor())
         self.assertTrue(conn.rolled_back)
         conn.replica = 'other'
