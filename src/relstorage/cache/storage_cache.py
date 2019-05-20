@@ -89,8 +89,9 @@ class StorageCache(object):
         self.prefix = prefix or ''
 
         # checkpoints_key holds the current checkpoints.
-        self.checkpoints_key = '%s:checkpoints' % self.prefix
-        assert isinstance(self.checkpoints_key, str) # no unicode on Py2
+        self.checkpoints_key = ck = '%s:checkpoints' % self.prefix
+        # no unicode on Py2
+        assert isinstance(ck, str), (ck, type(ck))
 
         # delta_after0 contains {oid: tid} after checkpoint 0
         # and before or at self.current_tid.

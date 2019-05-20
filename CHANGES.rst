@@ -39,6 +39,10 @@
   than once would lose the database driver setting, reverting to
   'auto'. It now retains the setting. See :issue:`231`.
 
+- Fix Python 3 with mysqlclient 1.4. See :issue:`213`.
+
+- Drop support for mysqlclient < 1.4.
+
 
 2.1.1 (2019-01-07)
 ==================

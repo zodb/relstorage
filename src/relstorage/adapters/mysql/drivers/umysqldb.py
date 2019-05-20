@@ -195,6 +195,7 @@ def _make_connection_class():
     UConnection = Connection
     return UConnection
 
+
 class umysqldbDriver(PyMySQLDriver):
     __name__ = 'umysqldb'
 

@@ -39,14 +39,14 @@ database.
     pip install "RelStorage[oracle]"
 
 
-On CPython2, install psycopg2 2.6.1+, mysqlclient 1.3.7+, or cx_Oracle
+On CPython2, install psycopg2 2.6.1+, mysqlclient 1.4+, or cx_Oracle
 5.2+ (but use caution with 5.2.1+); PyMySQL 0.7, MySQL
 Connector/Python 8.0.16 and umysql are also tested to work as is
 pg8000.
 
 .. note:: umysql support is deprecated and will be removed.
 
-For CPython3, install psycopg2, mysqlclient < 1.4, or cx_Oracle;
+For CPython3, install psycopg2, mysqlclient 1.4+, or cx_Oracle;
 PyMySQL, MySQL Connector/Python  and pg8000 are also known to work.
 
 On PyPy, install psycopg2cffi 2.7.4+ or PyMySQL 0.6.6+ (PyPy will
