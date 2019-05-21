@@ -564,7 +564,10 @@ class MinimalTestLayer(object):
 
     def setUp(self):
         self.here = os.getcwd()
-        self.tmp = tempfile.mkdtemp(self.__name__, dir=os.getcwd())
+        # In the past, this used dir=os.getcwd(), meaning we
+        # could pollute our source directory if cleanup failed.
+        # Why?
+        self.tmp = tempfile.mkdtemp(self.__name__)
         os.chdir(self.tmp)
 
         # sigh. tearDown isn't called when a layer is run in a sub-process.

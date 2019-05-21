@@ -18,6 +18,8 @@ from __future__ import absolute_import
 import abc
 import os
 import random
+import shutil
+import tempfile
 import time
 import unittest
 
@@ -25,7 +27,9 @@ import transaction
 from persistent import Persistent
 from persistent.mapping import PersistentMapping
 from zc.zlibstorage import ZlibStorage
+
 from ZODB.DB import DB
+from ZODB.FileStorage import FileStorage
 from ZODB.POSException import ReadConflictError
 from ZODB.serialize import referencesf
 from ZODB.tests import BasicStorage
@@ -751,9 +755,6 @@ class GenericRelStorageTests(
         # raise a ReadConflictError.
         self._storage = self.make_storage(revert_when_stale=False)
 
-        import shutil
-        import tempfile
-        from ZODB.FileStorage import FileStorage
         db = DB(self._storage)
         try:
             c = db.open()
@@ -799,9 +800,6 @@ class GenericRelStorageTests(
         # invalidate all objects that have changed in the interval.
         self._storage = self.make_storage(revert_when_stale=True)
 
-        import shutil
-        import tempfile
-        from ZODB.FileStorage import FileStorage
         db = DB(self._storage)
         try:
             transaction.begin()
@@ -1076,3 +1074,66 @@ class DoubleCommitter(Persistent):
         if not hasattr(self, 'new_attribute'):
             self.new_attribute = 1 # pylint:disable=attribute-defined-outside-init
         return Persistent.__getstate__(self)
+
+
+class _TempDirMixin(object):
+
+    __temp_dir = None
+
+    def getTempDir(self):
+        if not self.__temp_dir:
+            self.__temp_dir = tempfile.mkdtemp('.rstest')
+        return self.__temp_dir
+
+    def clearTempDir(self):
+        if self.__temp_dir:
+            shutil.rmtree(self.__temp_dir)
+            self.__temp_dir = None
+
+
+class AbstractToFileStorage(_TempDirMixin,
+                            RelStorageTestBase):
+    # Subclass this and set:
+    # - keep_history = True; and
+    # - A base class of UndoableRecoveryStorage
+    #
+    # or
+    # - keep_history = False; and
+    # A base class of BasicRecoveryStorage
+
+    def setUp(self):
+        super(AbstractToFileStorage, self).setUp()
+        self._storage = self.make_storage()
+        self._dst_path = os.path.join(self.getTempDir(), 'Dest.fs')
+        self._dst = FileStorage(self._dst_path, create=True)
+
+    def tearDown(self):
+        self._dst.close()
+        self._dst.cleanup()
+        self._dst = None
+        super(AbstractToFileStorage, self).tearDown()
+        self.clearTempDir()
+
+    def new_dest(self):
+        return self._closing(FileStorage(self._dst_path))
+
+
+class AbstractFromFileStorage(_TempDirMixin,
+                              RelStorageTestBase):
+    # As for AbstractToFileStorage
+
+    def setUp(self):
+        super(AbstractFromFileStorage, self).setUp()
+        self._dst = self._storage
+        self._src_path = os.path.join(self.getTempDir(), 'Source.fs')
+        self._storage = FileStorage(self._src_path, create=True)
+
+    def tearDown(self):
+        self._dst.close()
+        self._dst.cleanup()
+        self._dst = None
+        super(AbstractFromFileStorage, self).tearDown()
+        self.clearTempDir()
+
+    def new_dest(self):
+        return self._dst
