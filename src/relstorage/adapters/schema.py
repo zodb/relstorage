@@ -83,15 +83,35 @@ class AbstractSchemaInstaller(ABC):
         """
         raise NotImplementedError()
 
-    @abc.abstractmethod
+    #: The type of the column used to hold binary strings
+    COLTYPE_BINARY_STRING = 'BYTEA'
+    #: The suffix needed (after the closing ')') to make sure a
+    #: table behaves in a transactional manner.
+    TRANSACTIONAL_TABLE_SUFFIX = ''
+
+    CREATE_TRANSACTION_STMT_TMPL = """
+    CREATE TABLE transaction (
+        tid         BIGINT NOT NULL PRIMARY KEY,
+        packed      BOOLEAN NOT NULL DEFAULT FALSE,
+        is_empty    BOOLEAN NOT NULL DEFAULT FALSE,
+        username    {binary_string_type} NOT NULL,
+        description {binary_string_type} NOT NULL,
+        extension   {binary_string_type}
+    ) {transactional_suffix};
+    """
+
     def _create_transaction(self, cursor):
         """
         The transaction table lists all the transactions in the database.
 
         This table is only used for history-preserving databases.
         """
-        raise NotImplementedError()
-
+        if self.keep_history:
+            stmt = self.CREATE_TRANSACTION_STMT_TMPL.format(
+                binary_string_type=self.COLTYPE_BINARY_STRING,
+                transactional_suffix=self.TRANSACTIONAL_TABLE_SUFFIX,
+            )
+            self.runner.run_script(cursor, stmt)
 
     @abc.abstractmethod
     def _create_new_oid(self, cursor):

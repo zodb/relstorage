@@ -232,13 +232,13 @@ class HistoryPreservingPackUndo(PackUndo):
         WHERE tid IN (
             SELECT tid
             FROM transaction
-            WHERE empty = %(TRUE)s
+            WHERE is_empty = %(TRUE)s
             );
         DELETE FROM object_ref
         WHERE tid IN (
             SELECT tid
             FROM transaction
-            WHERE empty = %(TRUE)s
+            WHERE is_empty = %(TRUE)s
             )
         """
 
@@ -249,7 +249,7 @@ class HistoryPreservingPackUndo(PackUndo):
         WHERE tid = any(array(
             SELECT tid FROM transaction
             WHERE packed = %(TRUE)s
-              AND empty = %(TRUE)s
+              AND is_empty = %(TRUE)s
             LIMIT 1000
         ))
         """
@@ -775,10 +775,10 @@ class HistoryPreservingPackUndo(PackUndo):
 
         # mark the transaction packed and possibly empty
         if empty:
-            clause = 'empty = %(TRUE)s'
+            clause = 'is_empty = %(TRUE)s'
             state = 'empty'
         else:
-            clause = 'empty = %(FALSE)s'
+            clause = 'is_empty = %(FALSE)s'
             state = 'not empty'
         stmt = "UPDATE transaction SET packed = %(TRUE)s, " + clause
         stmt += " WHERE tid = %(tid)s"

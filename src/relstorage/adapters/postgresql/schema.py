@@ -204,20 +204,6 @@ class PostgreSQLSchemaInstaller(AbstractSchemaInstaller):
     def _create_pack_lock(self, cursor):
         return
 
-    def _create_transaction(self, cursor):
-        if self.keep_history:
-            stmt = """
-            CREATE TABLE transaction (
-                tid         BIGINT NOT NULL PRIMARY KEY,
-                packed      BOOLEAN NOT NULL DEFAULT FALSE,
-                empty       BOOLEAN NOT NULL DEFAULT FALSE,
-                username    BYTEA NOT NULL,
-                description BYTEA NOT NULL,
-                extension   BYTEA
-            );
-            """
-            self.runner.run_script(cursor, stmt)
-
     def _create_new_oid(self, cursor):
         stmt = """
         CREATE SEQUENCE zoid_seq;

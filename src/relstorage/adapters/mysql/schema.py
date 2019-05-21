@@ -48,14 +48,15 @@ class MySQLSchemaInstaller(AbstractSchemaInstaller):
 
     def check_compatibility(self, cursor, tables):
         super(MySQLSchemaInstaller, self).check_compatibility(cursor, tables)
+        # TODO: Check more tables, like `transaction`
         stmt = "SHOW TABLE STATUS LIKE 'object_state'"
         cursor.execute(stmt)
         for row in cursor:
             for col_index, col in enumerate(cursor.description):
-                if col[0].lower() == 'engine':
+                name = self._to_native_str(col[0])
+                if name.lower() == 'engine':
                     engine = row[col_index]
-                    if not isinstance(engine, str):
-                        engine = engine.decode('ascii')
+                    engine = self._to_native_str(engine)
                     if engine.lower() != 'innodb':
                         raise StorageError(
                             "The object_state table must use the InnoDB "
@@ -67,20 +68,8 @@ class MySQLSchemaInstaller(AbstractSchemaInstaller):
     def _create_pack_lock(self, cursor):
         return
 
-
-    def _create_transaction(self, cursor):
-        if self.keep_history:
-            stmt = """
-            CREATE TABLE transaction (
-                tid         BIGINT NOT NULL PRIMARY KEY,
-                packed      BOOLEAN NOT NULL DEFAULT FALSE,
-                empty       BOOLEAN NOT NULL DEFAULT FALSE,
-                username    BLOB NOT NULL,
-                description BLOB NOT NULL,
-                extension   BLOB
-            ) ENGINE = InnoDB;
-            """
-            self.runner.run_script(cursor, stmt)
+    COLTYPE_BINARY_STRING = 'BLOB'
+    TRANSACTIONAL_TABLE_SUFFIX = 'ENGINE = InnoDB'
 
     def _create_new_oid(self, cursor):
         stmt = """
