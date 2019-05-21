@@ -1110,11 +1110,12 @@ class AbstractToFileStorage(_TempDirMixin,
     def tearDown(self):
         self._dst.close()
         self._dst.cleanup()
-        self.clearTempDir()
+        self._dst = None
         super(AbstractToFileStorage, self).tearDown()
+        self.clearTempDir()
 
     def new_dest(self):
-        return FileStorage(self._dst_path)
+        return self._closing(FileStorage(self._dst_path))
 
 
 class AbstractFromFileStorage(_TempDirMixin,
@@ -1130,8 +1131,9 @@ class AbstractFromFileStorage(_TempDirMixin,
     def tearDown(self):
         self._dst.close()
         self._dst.cleanup()
-        self.clearTempDir()
+        self._dst = None
         super(AbstractFromFileStorage, self).tearDown()
+        self.clearTempDir()
 
     def new_dest(self):
         return self._dst
