@@ -16,7 +16,6 @@ from __future__ import absolute_import
 
 import time
 
-from ZODB.FileStorage import FileStorage
 from ZODB.serialize import referencesf
 from ZODB.tests.ConflictResolution import PCounter
 from ZODB.tests.PackableStorage import ZERO
@@ -29,7 +28,8 @@ from ZODB.tests.StorageTestBase import zodb_unpickle
 from relstorage.tests.RecoveryStorage import BasicRecoveryStorage
 from relstorage.tests.RecoveryStorage import UndoableRecoveryStorage
 from relstorage.tests.reltestbase import GenericRelStorageTests
-from relstorage.tests.reltestbase import RelStorageTestBase
+from relstorage.tests.reltestbase import AbstractFromFileStorage
+from relstorage.tests.reltestbase import AbstractToFileStorage
 
 
 class HistoryFreeRelStorageTests(GenericRelStorageTests):
@@ -283,42 +283,18 @@ class HistoryFreeRelStorageTests(GenericRelStorageTests):
             db.close()
 
 
-class HistoryFreeToFileStorage(RelStorageTestBase,
+
+
+class HistoryFreeToFileStorage(AbstractToFileStorage,
                                BasicRecoveryStorage):
     # pylint:disable=abstract-method,too-many-ancestors
     keep_history = False
 
-    def setUp(self):
-        super(HistoryFreeToFileStorage, self).setUp()
-        self._storage = self.make_storage()
-        self._dst = FileStorage("Dest.fs", create=True)
 
-    def tearDown(self):
-        self._dst.close()
-        self._dst.cleanup()
-        super(HistoryFreeToFileStorage, self).tearDown()
-
-    def new_dest(self):
-        return FileStorage('Dest.fs')
-
-
-class HistoryFreeFromFileStorage(RelStorageTestBase,
+class HistoryFreeFromFileStorage(AbstractFromFileStorage,
                                  UndoableRecoveryStorage):
     # pylint:disable=abstract-method,too-many-ancestors
     keep_history = False
-
-    def setUp(self):
-        super(HistoryFreeFromFileStorage, self).setUp()
-        self._dst = self._storage
-        self._storage = FileStorage("Source.fs", create=True)
-
-    def tearDown(self):
-        self._dst.close()
-        self._dst.cleanup()
-        super(HistoryFreeFromFileStorage, self).tearDown()
-
-    def new_dest(self):
-        return self._dst
 
     def compare(self, src, dest):
         # The dest storage has a truncated copy of dest, so

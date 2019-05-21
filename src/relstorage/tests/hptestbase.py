@@ -17,8 +17,8 @@ import unittest
 
 import transaction
 from persistent.mapping import PersistentMapping
+
 from ZODB.DB import DB
-from ZODB.FileStorage import FileStorage
 from ZODB.serialize import referencesf
 from ZODB.tests import HistoryStorage
 from ZODB.tests import IteratorStorage
@@ -31,7 +31,8 @@ from ZODB.utils import p64
 
 from relstorage.tests.RecoveryStorage import UndoableRecoveryStorage
 from relstorage.tests.reltestbase import GenericRelStorageTests
-from relstorage.tests.reltestbase import RelStorageTestBase
+from relstorage.tests.reltestbase import AbstractFromFileStorage
+from relstorage.tests.reltestbase import AbstractToFileStorage
 
 
 class HistoryPreservingRelStorageTests(GenericRelStorageTests,
@@ -301,39 +302,14 @@ class HistoryPreservingRelStorageTests(GenericRelStorageTests,
         self.assertFalse(ZODB.interfaces.IExternalGC.providedBy(self._storage))
         self.assertRaises(AttributeError, self._storage.deleteObject)
 
-class HistoryPreservingToFileStorage(RelStorageTestBase,
+
+class HistoryPreservingToFileStorage(AbstractToFileStorage,
                                      UndoableRecoveryStorage):
     # pylint:disable=too-many-ancestors,abstract-method,too-many-locals
     keep_history = True
 
-    def setUp(self):
-        super(HistoryPreservingToFileStorage, self).setUp()
-        self._storage = self.make_storage()
-        self._dst = FileStorage("Dest.fs", create=True)
 
-    def tearDown(self):
-        self._dst.close()
-        self._dst.cleanup()
-        super(HistoryPreservingToFileStorage, self).tearDown()
-
-    def new_dest(self):
-        return FileStorage('Dest.fs')
-
-
-class HistoryPreservingFromFileStorage(RelStorageTestBase,
+class HistoryPreservingFromFileStorage(AbstractFromFileStorage,
                                        UndoableRecoveryStorage):
     # pylint:disable=too-many-ancestors,abstract-method,too-many-locals
     keep_history = True
-
-    def setUp(self):
-        super(HistoryPreservingFromFileStorage, self).setUp()
-        self._dst = self.make_storage()
-        self._storage = FileStorage("Source.fs", create=True)
-
-    def tearDown(self):
-        self._dst.close()
-        self._dst.cleanup()
-        super(HistoryPreservingFromFileStorage, self).tearDown()
-
-    def new_dest(self):
-        return self._dst
