@@ -1051,9 +1051,12 @@ class AbstractIDBOptionsTest(unittest.TestCase):
         from nti.testing.matchers import verifiably_provides
 
         from relstorage.adapters.interfaces import IDBDriverOptions
+        from relstorage.adapters.interfaces import IDBDriverFactory
         __traceback_info__ = self.db_options
         assert_that(self.db_options, verifiably_provides(IDBDriverOptions))
 
+        for factory in self.db_options.known_driver_factories():
+            assert_that(factory, verifiably_provides(IDBDriverFactory))
 
 class AbstractIDBDriverTest(unittest.TestCase):
 

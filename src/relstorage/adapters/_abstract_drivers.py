@@ -22,11 +22,14 @@ import sys
 import traceback
 
 from zope.interface import directlyProvides
+from zope.interface import implementer
 
 from .._compat import ABC
 from .._compat import PYPY
+from .._compat import casefold
 
 from .interfaces import IDBDriver
+from .interfaces import IDBDriverFactory
 from .interfaces import IDBDriverOptions
 from .interfaces import DriverNotAvailableError
 from .interfaces import NoDriversAvailableError
@@ -39,25 +42,24 @@ def _select_driver(options, driver_options):
 
 def _select_driver_by_name(driver_name, driver_options):
     driver_name = driver_name or 'auto'
-    if driver_name == 'auto':
-        # XXX: For testing, we'd like to be able to prohibit the use of auto.
-        for driver in driver_options.driver_order:
+    driver_name = casefold(driver_name)
+    accept_any_driver = driver_name == 'auto'
+    # XXX: For testing, we'd like to be able to prohibit the use of auto.
+    for factory in driver_options.known_driver_factories():
+        exact_match = casefold(factory.driver_name) == driver_name
+        if accept_any_driver or exact_match:
             try:
-                return driver()
-            except DriverNotAvailableError:
-                pass
-        raise NoDriversAvailableError(driver_name, driver_options)
+                return factory()
+            except DriverNotAvailableError as e:
+                if not accept_any_driver:
+                    e.driver_options = driver_options
+                    raise
 
-    try:
-        factory = driver_options.driver_map[driver_name]
-    except KeyError:
-        raise UnknownDriverError(driver_name, driver_options)
-    else:
-        try:
-            return factory()
-        except DriverNotAvailableError as e:
-            e.driver_options = driver_options
-            raise e
+    # Well snap, no driver. Either we would take any driver,
+    # and none were available, or we needed an exact driver that
+    # wasn't found
+    error = NoDriversAvailableError if accept_any_driver else UnknownDriverError
+    raise error(driver_name, driver_options)
 
 
 class AbstractModuleDriver(ABC):
@@ -108,14 +110,6 @@ class AbstractModuleDriver(ABC):
         """Import and return the driver module."""
         return importlib.import_module(self.MODULE_NAME)
 
-    @classmethod
-    def check_availability(cls):
-        try:
-            cls()
-        except DriverNotAvailableError:
-            return False
-        return True
-
     # Common compatibility shims, overriden as needed.
 
     def set_autocommit(self, conn, value):
@@ -160,6 +154,34 @@ class AbstractModuleDriver(ABC):
         return bytes(data)
 
 
+@implementer(IDBDriverFactory)
+class _ClassDriverFactory(object):
+
+    def __init__(self, driver_type):
+        self.driver_type = driver_type
+        # Getting the name is tricky, the class wants to shadow it.
+        self.driver_name = driver_type.__dict__.get('__name__') or driver_type.__name__
+
+    def check_availability(self):
+        try:
+            self.driver_type()
+        except DriverNotAvailableError:
+            return False
+        return True
+
+    def __call__(self):
+        return self.driver_type()
+
+    def __eq__(self, other):
+        return (casefold(self.driver_name), self.driver_type) == (
+            casefold(other.driver_name), other.driver_type)
+
+    def __hash__(self):
+        return hash((casefold(self.driver_name), self.driver_type))
+
+    def __getattr__(self, name):
+        return getattr(self.driver_type, name)
+
 
 def implement_db_driver_options(name, *driver_modules):
     """
@@ -182,15 +204,9 @@ def implement_db_driver_options(name, *driver_modules):
         for factory in driver_module.__all__:
             factory = getattr(driver_module, factory)
             if IDBDriver.implementedBy(factory): # pylint:disable=no-value-for-parameter
-                driver_factories.add(factory)
+                driver_factories.add(_ClassDriverFactory(factory))
 
-    driver_map = module.driver_map = {
-        # Getting the name is tricky, the class wants to shadow it.
-        factory.__dict__['__name__']: factory
-        for factory in driver_factories
-    }
-
-    module.driver_order = sorted(
+    module.known_driver_factories = lambda: sorted(
         driver_factories,
         key=lambda factory: factory.PRIORITY if not PYPY else factory.PRIORITY_PYPY,
     )
@@ -200,7 +216,6 @@ def implement_db_driver_options(name, *driver_modules):
     module.select_driver = lambda driver_name=None: _select_driver_by_name(driver_name,
                                                                            sys.modules[name])
 
-    module.known_driver_names = lambda: driver_map
 
 class _ConnWrapper(object): # pragma: no cover
     def __init__(self, conn):

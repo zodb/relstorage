@@ -65,8 +65,10 @@ if PY3:
     intern = sys.intern
     from base64 import encodebytes as base64_encodebytes
     from base64 import decodebytes as base64_decodebytes
+    casefold = str.casefold
 else:
     xrange = xrange
     intern = intern
     from base64 import encodestring as base64_encodebytes
     from base64 import decodestring as base64_decodebytes
+    casefold = str.lower
