@@ -43,6 +43,9 @@
 
 - Drop support for mysqlclient < 1.4.
 
+- Make driver names in RelStorage configurations case-insensitive
+  (e.g., 'MySQLdb' and 'mysqldb' are both valid). See :issue:`227`.
+
 
 2.1.1 (2019-01-07)
 ==================

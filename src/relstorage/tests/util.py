@@ -115,8 +115,8 @@ class AbstractTestSuiteBuilder(ABC):
             (AbstractIDBOptionsTest,),
             {'db_options': self.drivers}
         )))
-        for driver_name in self.drivers.known_driver_names():
-
+        for factory in self.drivers.known_driver_factories():
+            driver_name = factory.driver_name
             try:
                 driver = self.drivers.select_driver(driver_name)
             except DriverNotAvailableError:

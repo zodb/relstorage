@@ -46,6 +46,7 @@ class IRelStorageAdapter(Interface):
     def __str__():
         """Return a short description of the adapter"""
 
+
 class IDBDriver(Interface):
     """
     An abstraction over the information needed for RelStorage to work
@@ -89,6 +90,27 @@ class IDBDriver(Interface):
         like that produced by `p64`.
         """
 
+class IDBDriverFactory(Interface):
+    """
+    Information about, and a way to get, an `IDBDriver`
+    implementation.
+    """
+
+    driver_name = Attribute("The name of this driver produced by this factory.")
+
+    def check_availability():
+        """
+        Return a boolean indicating whether a call to this factory
+        will return a driver (True) or will raise an error (False).
+        """
+
+    def __call__(): # pylint:disable=signature-differs
+        """
+        Return a new `IDBDriver` as represented by this factory.
+
+        If it is not possible to do this, for example because the
+        module cannot be imported, raise an `DriverNotAvailableError`.
+        """
 
 class DriverNotAvailableError(Exception):
     """
@@ -107,16 +129,18 @@ class DriverNotAvailableError(Exception):
         self.driver_options = driver_options
 
     def _format_drivers(self):
-        driver_map = getattr(self.driver_options, 'driver_map', {})
+        driver_factories = getattr(self.driver_options,
+                                   'known_driver_factories',
+                                   lambda: ())()
         return ' '.join(
             '%r (Module: %r; Available: %s)' % (
-                name,
-                # These two attributes aren't in the interface,
-                # they're extensions from AbstractModuleDriver
-                factory.MODULE_NAME,
+                factory.driver_name,
+                # This attribute isn't in the interface,
+                # it's an extension from AbstractModuleDriver
+                getattr(factory, 'MODULE_NAME', '<unknown>'),
                 factory.check_availability()
             )
-            for name, factory in driver_map.items()
+            for factory in driver_factories
         )
 
     def __str__(self):
@@ -147,22 +171,25 @@ class IDBDriverOptions(Interface):
     Implemented by a module to provide alternative drivers.
     """
 
-    database_type = Attribute("A string naming the type of database.")
-
-    driver_map = Attribute("A map of driver names to IDBDriver factories (implementers). "
-                           "If the map is empty, no drivers for the specified "
-                           "database are available.")
+    database_type = Attribute("A string naming the type of database. Informational only.")
 
     def select_driver(driver_name=None):
         """
         Choose and return an `IDBDriver`.
+
+        The *driver_name* of "auto" is equivalent to a *driver_name* of
+        `None` and means to choose the highest priority available driver.
         """
 
-    def known_driver_names():
+    def known_driver_factories():
         """
-        Return an iterable of the potential driver names.
+        Return an iterable of the potential `IDBDriverFactory`
+        objects that can be used by `select_driver`.
 
-        The drivers may or may not be available.
+        Each driver factory may or may not be available.
+
+        The driver factories are returned in priority order, with the highest priority
+        driver being first.
         """
 
 
