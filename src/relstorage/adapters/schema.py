@@ -82,12 +82,14 @@ class AbstractSchemaInstaller(ABC):
         return value
 
     def _column_descriptions(self, cursor):
-
+        __traceback_info__ = cursor.description
         return [ResultDescription(self._metadata_to_native_str(r[0]),
                                   # Not all drivers return lists or tuples
                                   # or things that can be sliced; psycopg2/cffi returns
                                   # an arbitrary sequence.
-                                  *list(r)[1:])
+                                  # MySqlConnector-Python has been observed to provide
+                                  # extra attributes.
+                                  *list(r)[1:7])
                 for r in cursor.description]
 
     def _rows_as_dicts(self, cursor):
