@@ -28,19 +28,14 @@ class MySQLSchemaInstaller(AbstractSchemaInstaller):
 
     database_type = 'mysql'
 
-    def _to_native_str(self, value):
-        if not isinstance(value, str):
-            value = value.decode('ascii')
-        return value
-
     def get_database_name(self, cursor):
         cursor.execute("SELECT DATABASE()")
         for (name,) in cursor:
-            return self._to_native_str(name)
+            return self._metadata_to_native_str(name)
 
     def list_tables(self, cursor):
         cursor.execute("SHOW TABLES")
-        return [self._to_native_str(name)
+        return [self._metadata_to_native_str(name)
                 for (name,) in cursor.fetchall()]
 
     def list_sequences(self, cursor):
@@ -51,16 +46,12 @@ class MySQLSchemaInstaller(AbstractSchemaInstaller):
         # TODO: Check more tables, like `transaction`
         stmt = "SHOW TABLE STATUS LIKE 'object_state'"
         cursor.execute(stmt)
-        for row in cursor:
-            for col_index, col in enumerate(cursor.description):
-                name = self._to_native_str(col[0])
-                if name.lower() == 'engine':
-                    engine = row[col_index]
-                    engine = self._to_native_str(engine)
-                    if engine.lower() != 'innodb':
-                        raise StorageError(
-                            "The object_state table must use the InnoDB "
-                            "engine, but it is using the %s engine." % engine)
+        for row in self._rows_as_dicts(cursor):
+            engine = self._metadata_to_native_str(row['engine'])
+            if engine.lower() != 'innodb':
+                raise StorageError(
+                    "The object_state table must use the InnoDB "
+                    "engine, but it is using the %s engine." % engine)
 
     def _create_commit_lock(self, cursor):
         return
@@ -70,6 +61,13 @@ class MySQLSchemaInstaller(AbstractSchemaInstaller):
 
     COLTYPE_BINARY_STRING = 'BLOB'
     TRANSACTIONAL_TABLE_SUFFIX = 'ENGINE = InnoDB'
+
+    # As usual, MySQL has an annoying implementation of this and we
+    # have to re-specify *everything* about the column.
+    _rename_transaction_empty_stmt = """
+        ALTER TABLE transaction CHANGE empty is_empty
+        BOOLEAN NOT NULL DEFAULT FALSE
+    """
 
     def _create_new_oid(self, cursor):
         stmt = """

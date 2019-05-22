@@ -46,6 +46,12 @@
 - Make driver names in RelStorage configurations case-insensitive
   (e.g., 'MySQLdb' and 'mysqldb' are both valid). See :issue:`227`.
 
+- Rename the column ``transaction.empty`` to ``transaction.is_empty``
+  for compatibility with MySQL 8.0, where ``empty`` is now a reserved
+  word. The migration will happen automatically when a storage is
+  first opened, unless it is configured not to create the schema.
+
+  .. note:: This migration has not been tested for Oracle.
 
 2.1.1 (2019-01-07)
 ==================

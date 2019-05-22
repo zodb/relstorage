@@ -302,6 +302,29 @@ class HistoryPreservingRelStorageTests(GenericRelStorageTests,
         self.assertFalse(ZODB.interfaces.IExternalGC.providedBy(self._storage))
         self.assertRaises(AttributeError, self._storage.deleteObject)
 
+    def checkMigrateTransactionEmpty(self):
+        # The transaction.empty column gets renamed in 'prepare'
+        adapter = self._storage._adapter
+        schema = adapter.schema
+        test_conn, test_cursor = adapter.connmanager.open()
+        self.addCleanup(adapter.connmanager.close, test_conn, test_cursor)
+
+        # First, we have to flip it back to the old name, since we installed
+        # with the name we want.
+        stmt = schema._rename_transaction_empty_stmt
+        # ALTER TABLE transaction RENAME empty TO is_empty
+        # or
+        # ALTER TABLE transaction CHANGE empty is_empty
+        stmt = stmt.replace('is_empty', 'FOOBAR')
+        stmt = stmt.replace('empty', 'is_empty')
+        stmt = stmt.replace("FOOBAR", 'empty')
+
+        test_cursor.execute(stmt)
+        self.assertTrue(schema._needs_transaction_empty_update(test_cursor))
+
+        schema.update_schema(test_cursor, None)
+        self.assertFalse(schema._needs_transaction_empty_update(test_cursor))
+
 
 class HistoryPreservingToFileStorage(AbstractToFileStorage,
                                      UndoableRecoveryStorage):
