@@ -63,9 +63,8 @@ class MySQLSchemaInstaller(AbstractSchemaInstaller):
     TRANSACTIONAL_TABLE_SUFFIX = 'ENGINE = InnoDB'
 
     # As usual, MySQL has an annoying implementation of this and we
-    # have to re-specify *everything* about the column.
-    # Careful: Some database versions and driver combos (MySQL 8 with PyMySQL)
-    # are very sensitive to newlines and will fail if they are included in this statement.
+    # have to re-specify *everything* about the column. MySQL 8 supports the
+    # simple 'RENAME ... TO ... syntax that everyone else does.
     _rename_transaction_empty_stmt = (
         "ALTER TABLE transaction CHANGE empty is_empty "
         "BOOLEAN NOT NULL DEFAULT FALSE"

@@ -53,6 +53,12 @@
 
   .. note:: This migration has not been tested for Oracle.
 
+  .. note:: You must run this migration *before* attempting to upgrade
+            a MySQL 5 database to MySQL 8. If you cannot run the
+            upgrade through opening the storage, the statement is
+            ``ALTER TABLE transaction CHANGE empty is_empty BOOLEAN
+            NOT NULL DEFAULT FALSE``.
+
 - Stop getting a warning about invalid optimizer syntax when packing a
   MySQL database (especially with the PyMySQL driver). See
   :issue:`163`.
