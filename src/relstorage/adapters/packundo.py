@@ -66,6 +66,22 @@ class PackUndo(object):
         finally:
             self.connmanager.close(conn, cursor)
 
+    # Subclasses (notably Oracle) can define this to provide hints
+    # that affect graph traversal.
+    #
+    # We cannot include the hints Oracle wants as standard; /*+ ... */
+    # is also the syntax for a MySQL 5.7 optimizer hint, but FULL(...)
+    # isn't valid syntax, so it produces a warning (and some
+    # frameworks/drivers want to treat warnings as errors, or print
+    # them).
+    #
+    # The alternate comment syntax for Oracle hints, --+ ..., isn't a
+    # valid MySQL comment (it requires whitespace after --) and raises
+    # a syntax error.
+    #
+    # PostgreSQL doesn't have hints, so this is a no-op there.
+    _traverse_graph_optimizer_hint = ''
+
     def _traverse_graph(self, cursor):
         """Visit the entire object graph to find out what should be kept.
 
@@ -77,22 +93,14 @@ class PackUndo(object):
 
         # Download the list of object references into the TreeMarker.
 
-        # Note the Oracle optimizer hints in the following statement; MySQL
-        # and PostgreSQL ignore these (MySQL 5.7, though, emits a warning).
-        # Oracle fails to notice that pack_object
-        # is now filled and chooses the wrong execution plan, completely
-        # killing this query on large RelStorage databases, unless these hints
-        # are included.
         stmt = """
-        SELECT
-            /*+ FULL(object_ref) */
-            /*+ FULL(pack_object) */
+        SELECT {}
             object_ref.zoid, object_ref.to_zoid
         FROM object_ref
             JOIN pack_object ON (object_ref.zoid = pack_object.zoid)
         WHERE object_ref.tid >= pack_object.keep_tid
         ORDER BY object_ref.zoid, object_ref.to_zoid
-        """
+        """.format(self._traverse_graph_optimizer_hint)
         self.runner.run_script_stmt(cursor, stmt)
         while True:
             rows = cursor.fetchmany(10000)
@@ -232,13 +240,13 @@ class HistoryPreservingPackUndo(PackUndo):
         WHERE tid IN (
             SELECT tid
             FROM transaction
-            WHERE empty = %(TRUE)s
+            WHERE is_empty = %(TRUE)s
             );
         DELETE FROM object_ref
         WHERE tid IN (
             SELECT tid
             FROM transaction
-            WHERE empty = %(TRUE)s
+            WHERE is_empty = %(TRUE)s
             )
         """
 
@@ -249,7 +257,7 @@ class HistoryPreservingPackUndo(PackUndo):
         WHERE tid = any(array(
             SELECT tid FROM transaction
             WHERE packed = %(TRUE)s
-              AND empty = %(TRUE)s
+              AND is_empty = %(TRUE)s
             LIMIT 1000
         ))
         """
@@ -775,10 +783,10 @@ class HistoryPreservingPackUndo(PackUndo):
 
         # mark the transaction packed and possibly empty
         if empty:
-            clause = 'empty = %(TRUE)s'
+            clause = 'is_empty = %(TRUE)s'
             state = 'empty'
         else:
-            clause = 'empty = %(FALSE)s'
+            clause = 'is_empty = %(FALSE)s'
             state = 'not empty'
         stmt = "UPDATE transaction SET packed = %(TRUE)s, " + clause
         stmt += " WHERE tid = %(tid)s"

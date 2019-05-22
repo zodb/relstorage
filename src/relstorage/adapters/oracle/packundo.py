@@ -25,6 +25,14 @@ def _oracle_fetchmany(self, cursor): # pylint:disable=unused-argument
     # See https://github.com/zodb/relstorage/issues/30
     return cursor
 
+
+
+# Oracle fails to notice that pack_object is now filled and chooses
+# the wrong execution plan, completely killing this query on large
+# RelStorage databases, unless these hints are included.
+_oracle_traverse_graph_optimizer_hint = "/*+ FULL(object_ref) FULL(pack_object) */"
+
+
 class OracleHistoryPreservingPackUndo(HistoryPreservingPackUndo):
 
     _script_choose_pack_transaction = """
@@ -62,6 +70,8 @@ class OracleHistoryPreservingPackUndo(HistoryPreservingPackUndo):
     # tests don't fail without it.
     _fetchmany = _oracle_fetchmany
 
+    _traverse_graph_optimizer_hint = _oracle_traverse_graph_optimizer_hint
+
 
 class OracleHistoryFreePackUndo(HistoryFreePackUndo):
 
@@ -75,3 +85,4 @@ class OracleHistoryFreePackUndo(HistoryFreePackUndo):
     _script_create_temp_pack_visit = None
 
     _fetchmany = _oracle_fetchmany
+    _traverse_graph_optimizer_hint = _oracle_traverse_graph_optimizer_hint

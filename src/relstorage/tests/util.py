@@ -52,6 +52,20 @@ USE_SMALL_BLOBS = ((RUNNING_ON_CI # slow here
                     or os.environ.get("RS_SMALL_BLOB")) # define
                    and not os.environ.get('RS_LARGE_BLOB'))
 
+# mysqlclient (aka MySQLdb) and possibly other things that
+# use libmysqlclient.so will try to connect over the
+# default Unix socket that was established when that
+# library was compiled if no host is given. But that
+# server may not be running, or may not be the one we want
+# to use for testing, so explicitly ask it to use TCP
+# socket by giving an IP address (using 'localhost' will
+# still try to use the socket.) (The TCP port can be bound
+# by non-root, but the default Unix socket often requires
+# root permissions to open.)
+DEFAULT_DATABASE_SERVER_HOST = os.environ.get('RS_DB_HOST',
+                                              '127.0.0.1')
+
+
 TEST_UNAVAILABLE_DRIVERS = not bool(os.environ.get('RS_SKIP_UNAVAILABLE_DRIVERS'))
 if RUNNING_ON_CI:
     TEST_UNAVAILABLE_DRIVERS = False

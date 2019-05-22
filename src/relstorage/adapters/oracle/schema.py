@@ -227,7 +227,7 @@ class OracleSchemaInstaller(AbstractSchemaInstaller):
             CREATE TABLE transaction (
                 tid         NUMBER(20) NOT NULL PRIMARY KEY,
                 packed      CHAR DEFAULT 'N' CHECK (packed IN ('N', 'Y')),
-                empty       CHAR DEFAULT 'N' CHECK (empty IN ('N', 'Y')),
+                is_empty    CHAR DEFAULT 'N' CHECK (empty IN ('N', 'Y')),
                 username    RAW(500),
                 description RAW(2000),
                 extension   RAW(2000)

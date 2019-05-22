@@ -126,6 +126,15 @@ driver
       The same as above, but RelStorage will only use the C extension.
       This is not compatible with gevent.
 
+      .. note::
+
+         At least through version 8.0.16, this is not compatible with
+         `CPython 3.7's development mode
+         <https://docs.python.org/3/using/cmdline.html#envvar-PYTHONDEVMODE>`_;
+         trying to use it with development mode enabled will crash the
+         interpreter with "Fatal Python error: Python memory allocator
+         called without holding the GIL."
+
 host
     string, host to connect
 

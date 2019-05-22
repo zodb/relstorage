@@ -53,12 +53,12 @@ class MySQLHistoryPreservingPackUndo(HistoryPreservingPackUndo):
         DELETE FROM object_refs_added
         USING object_refs_added
             JOIN transaction USING (tid)
-        WHERE transaction.empty = true;
+        WHERE transaction.is_empty = true;
 
         DELETE FROM object_ref
         USING object_ref
             JOIN transaction USING (tid)
-        WHERE transaction.empty = true
+        WHERE transaction.is_empty = true
         """
 
     _script_create_temp_undo = """
@@ -72,7 +72,7 @@ class MySQLHistoryPreservingPackUndo(HistoryPreservingPackUndo):
     _script_delete_empty_transactions_batch = """
         DELETE FROM transaction
         WHERE packed = %(TRUE)s
-          AND empty = %(TRUE)s
+          AND is_empty = %(TRUE)s
         LIMIT 1000
         """
 

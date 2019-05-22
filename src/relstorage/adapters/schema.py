@@ -16,6 +16,7 @@ Database schema installers
 """
 import abc
 import logging
+from collections import namedtuple
 
 from ZODB.POSException import StorageError
 
@@ -23,6 +24,13 @@ from .._compat import ABC
 
 log = logging.getLogger("relstorage")
 
+ResultDescription = namedtuple(
+    'ResultDescription',
+    # First two are mandatory, remaining five may be None
+    # Example:
+    # ('Name', 253, 17, 192, 192, 0, 0),
+    ('name', 'type_code', 'display_size',
+     'internal_size', 'precision', 'scale', 'null_ok'))
 
 class AbstractSchemaInstaller(ABC):
 
@@ -65,6 +73,43 @@ class AbstractSchemaInstaller(ABC):
     def get_database_name(self, cursor):
         raise NotImplementedError()
 
+    def _metadata_to_native_str(self, value):
+        # Some drivers, in some configurations, notably older versions
+        # of MySQLdb (mysqlclient) on Python 3 in 'NAMES binary' mode,
+        # can return column names and the like as bytes when we want str.
+        if not isinstance(value, str):
+            value = value.decode('ascii')
+        return value
+
+    def _column_descriptions(self, cursor):
+        __traceback_info__ = cursor.description
+        return [ResultDescription(self._metadata_to_native_str(r[0]),
+                                  # Not all drivers return lists or tuples
+                                  # or things that can be sliced; psycopg2/cffi returns
+                                  # an arbitrary sequence.
+                                  # MySqlConnector-Python has been observed to provide
+                                  # extra attributes.
+                                  *list(r)[1:7])
+                for r in cursor.description]
+
+    def _rows_as_dicts(self, cursor):
+        """
+        An iterator of the rows as dictionaries, named by the
+        lower-case column name.
+
+        Some drivers offer the ability to do this directly when
+        the statement is executed or the cursor is created;
+        this is a lowest-common denominator way to do it utilizing
+        DB-API 2.0 attributes.
+        """
+        column_descrs = self._column_descriptions(cursor)
+        for row in cursor:
+            result = {
+                column_descr.name.lower(): column_value
+                for column_descr, column_value in zip(column_descrs, row)
+            }
+            yield result
+
     @abc.abstractmethod
     def _create_commit_lock(self, cursor):
         """
@@ -83,15 +128,35 @@ class AbstractSchemaInstaller(ABC):
         """
         raise NotImplementedError()
 
-    @abc.abstractmethod
+    #: The type of the column used to hold binary strings
+    COLTYPE_BINARY_STRING = 'BYTEA'
+    #: The suffix needed (after the closing ')') to make sure a
+    #: table behaves in a transactional manner.
+    TRANSACTIONAL_TABLE_SUFFIX = ''
+
+    CREATE_TRANSACTION_STMT_TMPL = """
+    CREATE TABLE transaction (
+        tid         BIGINT NOT NULL PRIMARY KEY,
+        packed      BOOLEAN NOT NULL DEFAULT FALSE,
+        is_empty    BOOLEAN NOT NULL DEFAULT FALSE,
+        username    {binary_string_type} NOT NULL,
+        description {binary_string_type} NOT NULL,
+        extension   {binary_string_type}
+    ) {transactional_suffix};
+    """
+
     def _create_transaction(self, cursor):
         """
         The transaction table lists all the transactions in the database.
 
         This table is only used for history-preserving databases.
         """
-        raise NotImplementedError()
-
+        if self.keep_history:
+            stmt = self.CREATE_TRANSACTION_STMT_TMPL.format(
+                binary_string_type=self.COLTYPE_BINARY_STRING,
+                transactional_suffix=self.TRANSACTIONAL_TABLE_SUFFIX,
+            )
+            self.runner.run_script(cursor, stmt)
 
     @abc.abstractmethod
     def _create_new_oid(self, cursor):
@@ -274,8 +339,44 @@ class AbstractSchemaInstaller(ABC):
                 "See migration instructions for RelStorage 1.5."
             )
 
-    def update_schema(self, cursor, tables):
-        pass
+    def update_schema(self, cursor, tables): # pylint:disable=unused-argument
+        """
+        Perform any migration steps that are needed to make a schema
+        that has already been created some time in the past match
+        what would currently be installed.
+
+        Subclasses may override.
+        """
+
+        # Currently we only take care of renaming the `transaction.empty`
+        # column (from RelStorage 2.x and earlier) to `transaction.is_empty`
+        # as used in RelStorage 3.x.
+        if self._needs_transaction_empty_update(cursor):
+            cursor.execute(self._rename_transaction_empty_stmt)
+
+    def _needs_transaction_empty_update(self, cursor):
+        # Get a description of the table, but don't actually return
+        # any rows.
+        if not self.keep_history:
+            return False
+
+        cursor.execute('SELECT * FROM transaction WHERE tid < 0')
+
+        columns = self._column_descriptions(cursor)
+        # Make sure to read the (empty) result, some drivers (CMySQLConnector)
+        # are picky about that and won't let you close a cursore without reading
+        # everything.
+        cursor.fetchall()
+        for column_descr in columns:
+            if column_descr.name.lower() == 'is_empty':
+                # Yay, nothing to do.
+                return False
+
+        # If we get here, the is_empty column isn't present.
+        # Must rename it.
+        return True
+
+    _rename_transaction_empty_stmt = 'ALTER TABLE transaction RENAME COLUMN empty TO is_empty'
 
     _zap_all_tbl_stmt = 'DELETE FROM %s'
 

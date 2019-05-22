@@ -1,14 +1,6 @@
 language: python
 dist: xenial
 group: travis_latest
-python:
-  - 2.7
-  - 3.5
-  - 3.6
-  - 3.7
-  - pypy
-  - pypy3
-
 services:
   - mysql
   - postgresql
@@ -19,7 +11,24 @@ addons:
 # Use postgresql 9.5 to get support for INSERT ON CONFLICT UPDATE
 # Use postgresql 9.6 ... just because
   postgresql: "9.6"
+# The default mysql is 5.7; we have a specific test for 8.0.
 
+matrix:
+  include:
+    - python: 2.7
+    - python: 3.5
+    - python: 3.6
+    - python: pypy
+    - python: pypy3
+    - python: 3.7
+      services:
+        - docker
+        - postgresql
+        - memcached
+      before_install:
+        - docker pull mysql:8.0
+        - docker run -d --publish 3306:3306 --rm --name mysqld -e MYSQL_ALLOW_EMPTY_PASSWORD=yes mysql:8.0
+        - cp .travis/docker.cnf ~/.my.cnf
 env:
     global:
         - PYTHONHASHSEED=8675309
@@ -45,6 +54,7 @@ before_install:
   - python --version
 before_script:
   - ccache -s
+  - mysql -uroot -e 'select version()'
 
 install:
   - pip install -U pip
