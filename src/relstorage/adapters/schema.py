@@ -363,6 +363,10 @@ class AbstractSchemaInstaller(ABC):
         cursor.execute('SELECT * FROM transaction WHERE tid < 0')
 
         columns = self._column_descriptions(cursor)
+        # Make sure to read the (empty) result, some drivers (CMySQLConnector)
+        # are picky about that and won't let you close a cursore without reading
+        # everything.
+        cursor.fetchall()
         for column_descr in columns:
             if column_descr.name.lower() == 'is_empty':
                 # Yay, nothing to do.
