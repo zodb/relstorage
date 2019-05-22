@@ -109,7 +109,6 @@ class MySQLTestSuiteBuilder(AbstractTestSuiteBuilder):
                     base):
             @skipOnCI("Travis MySQL goes away error 2006")
             def check16MObject(self):
-                raise unittest.SkipTest("XXX")
                 # NOTE: If your mySQL goes away, check the server's value for
                 # `max_allowed_packet`, you probably need to increase it.
                 # JAM uses 64M.
