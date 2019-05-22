@@ -64,10 +64,13 @@ class MySQLSchemaInstaller(AbstractSchemaInstaller):
 
     # As usual, MySQL has an annoying implementation of this and we
     # have to re-specify *everything* about the column.
-    _rename_transaction_empty_stmt = """
-        ALTER TABLE transaction CHANGE empty is_empty
-        BOOLEAN NOT NULL DEFAULT FALSE
-    """
+    # Careful: Some database versions and driver combos (MySQL 8 with PyMySQL)
+    # are very sensitive to newlines and will fail if they are included in this statement.
+    _rename_transaction_empty_stmt = (
+        "ALTER TABLE transaction CHANGE empty is_empty "
+        "BOOLEAN NOT NULL DEFAULT FALSE"
+    )
+
 
     def _create_new_oid(self, cursor):
         stmt = """
