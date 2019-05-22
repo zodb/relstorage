@@ -53,6 +53,10 @@
 
   .. note:: This migration has not been tested for Oracle.
 
+- Stop getting a warning about invalid optimizer syntax when packing a
+  MySQL database (especially with the PyMySQL driver). See
+  :issue:`163`.
+
 2.1.1 (2019-01-07)
 ==================
 
