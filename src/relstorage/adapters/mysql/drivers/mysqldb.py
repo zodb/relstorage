@@ -92,4 +92,5 @@ class GeventMySQLdbDriver(MySQLdbDriver):
         # Prior to mysqlclient 1.4, there was a 'waiter' Connection
         # argument that could be used to do this, but it was removed.
         # So we implement it ourself.
-        return self._get_connection_class()(*args, **kwargs)
+        klass = self._get_connection_class()
+        return klass(*args, **kwargs) # pylint:disable=not-callable
