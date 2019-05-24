@@ -44,10 +44,8 @@ class PyMySQLConnectorDriver(AbstractMySQLDriver):
     USE_PURE = True
 
     _CONVERTER_CLASS = None
-
-    def __init__(self):
-        super(PyMySQLConnectorDriver, self).__init__()
-        del self.connect
+    _GEVENT_CAPABLE = True
+    _GEVENT_NEEDS_SOCKET_PATCH = True
 
     @classmethod
     def _get_converter_class(cls):
@@ -112,7 +110,7 @@ class PyMySQLConnectorDriver(AbstractMySQLDriver):
 
         return cls._CONVERTER_CLASS
 
-    def connect(self, *args, **kwargs): # pylint:disable=method-hidden
+    def connect(self, *args, **kwargs):
         # It defaults to the (slower) pure-python version prior to 8.0.11.
         # NOTE: The C implementation doesn't support the prepared
         # operations.
@@ -146,6 +144,7 @@ class CMySQLConnectorDriver(PyMySQLConnectorDriver):
     PRIORITY_PYPY = 4
 
     USE_PURE = False
+    _GEVENT_CAPABLE = False
 
     def get_driver_module(self):
         mod = super(CMySQLConnectorDriver, self).get_driver_module()

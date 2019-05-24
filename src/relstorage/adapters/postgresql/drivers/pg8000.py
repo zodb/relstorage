@@ -126,9 +126,11 @@ def _make_lobject_method_for_connection(self, binary):
 class PG8000Driver(AbstractModuleDriver):
     __name__ = 'pg8000'
     MODULE_NAME = __name__
-
     PRIORITY = 3
     PRIORITY_PYPY = 2
+
+    _GEVENT_CAPABLE = True
+    _GEVENT_NEEDS_SOCKET_PATCH = True
 
     def __init__(self):
         super(PG8000Driver, self).__init__()
@@ -138,12 +140,11 @@ class PG8000Driver(AbstractModuleDriver):
         # XXX: Testing. Can we remove?
         self.disconnected_exceptions += (AttributeError,)
         self._connect = self.driver_module.connect
-        del self.connect
 
     # For debugging
     _wrap = False
 
-    def connect(self, dsn): # pylint:disable=method-hidden
+    def connect(self, dsn): # pylint:disable=arguments-differ
         # Parse the DSN into parts to pass as keywords.
         # We don't do this psycopg2 because a real DSN supports more options than
         # we do and we don't want to limit it.

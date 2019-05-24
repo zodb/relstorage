@@ -23,6 +23,7 @@ from zope.interface import Interface
 class IRelStorageAdapter(Interface):
     """A database adapter for RelStorage"""
 
+    driver = Attribute("The IDBDriver being used")
     connmanager = Attribute("An IConnectionManager")
     dbiter = Attribute("An IDatabaseIterator")
     keep_history = Attribute("True if this adapter supports undo")

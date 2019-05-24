@@ -93,7 +93,7 @@ class MySQLAdapter(object):
         self.keep_history = options.keep_history
         self._params = params
 
-        driver = select_driver(options)
+        self.driver = driver = select_driver(options)
         log.debug("Using driver %r", driver)
 
         self.connmanager = MySQLdbConnectionManager(

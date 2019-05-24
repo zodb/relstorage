@@ -34,7 +34,8 @@ class PyMySQLDriver(AbstractMySQLDriver):
     MODULE_NAME = 'pymysql'
     PRIORITY = 2
     PRIORITY_PYPY = 1
-
+    _GEVENT_CAPABLE = True
+    _GEVENT_NEEDS_SOCKET_PATCH = True
 
     def __init__(self):
         super(PyMySQLDriver, self).__init__()
