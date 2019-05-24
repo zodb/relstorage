@@ -57,31 +57,39 @@ class GeventMySQLdbDriver(MySQLdbDriver):
     _wait_write = None
 
     def get_driver_module(self):
-        # pylint:disable=no-member
-        from gevent import socket
-        self._wait_read = socket.wait_read
-        self._wait_write = socket.wait_write
+        __import__('gevent')
         return super(GeventMySQLdbDriver, self).get_driver_module()
 
+    _Connection = None
+
+    @classmethod
+    def _get_connection_class(cls):
+        if cls._Connection is None:
+            # pylint:disable=import-error,no-name-in-module
+            from MySQLdb.connections import Connection as Base
+
+            from gevent import socket
+            wait_read = socket.wait_read # pylint:disable=no-member
+            wait_write = socket.wait_write # pylint:disable=no-member
+
+            class Connection(Base):
+                def query(self, query):
+                    # From the mysqlclient implementation:
+                    # "Since _mysql releases the GIL while querying, we need immutable buffer"
+                    if isinstance(query, bytearray):
+                        query = bytes(query)
+
+                    fileno = self.fileno()
+                    wait_write(fileno)
+                    self.send_query(query)
+                    wait_read(fileno)
+                    self.read_query_result()
+
+            cls._Connection = Connection
+        return cls._Connection
+
     def connect(self, *args, **kwargs):
-        # Prior to mysqlclient 1.4, there was a 'waiter' option
-        # that could be used to do this, but it was removed. So we
-        # implement it ourself.
-        conn = super(GeventMySQLdbDriver, self).connect(*args, **kwargs)
-
-        def query(query):
-            # From the mysqlclient implementation:
-            # "Since _mysql releases the GIL while querying, we need immutable buffer"
-            if isinstance(query, bytearray):
-                query = bytes(query)
-            __traceback_info__ = query
-
-            fileno = conn.fileno()
-            self._wait_write(fileno)
-            conn.send_query(query)
-            self._wait_read(fileno)
-            conn.read_query_result()
-
-        conn.query = query
-
-        return conn
+        # Prior to mysqlclient 1.4, there was a 'waiter' Connection
+        # argument that could be used to do this, but it was removed.
+        # So we implement it ourself.
+        return self._get_connection_class()(*args, **kwargs)
