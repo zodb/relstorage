@@ -965,6 +965,17 @@ class GenericRelStorageTests(
         finally:
             db.close()
 
+    def checkGeventSwitchesOnOpen(self):
+        # We make some queries when we open; if the driver is gevent
+        # capable, that should switch.
+        driver = self._storage._adapter.driver
+        if not driver.gevent_cooperative():
+            raise unittest.SkipTest("Driver %s not gevent capable" % (driver,))
+
+        from gevent.util import assert_switches
+        with assert_switches():
+            self.open()
+
 
 class AbstractRSZodbConvertTests(StorageCreatingMixin,
                                  FSZODBConvertTests):

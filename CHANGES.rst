@@ -63,6 +63,10 @@
   MySQL database (especially with the PyMySQL driver). See
   :issue:`163`.
 
+- Add ``gevent MySQLdb``, a new driver that cooperates with gevent
+  while still using the C extensions of ``mysqlclient`` to communicate
+  with MySQL. This is now recommended over ``umysqldb``.
+
 2.1.1 (2019-01-07)
 ==================
 

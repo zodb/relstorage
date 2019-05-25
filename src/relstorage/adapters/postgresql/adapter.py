@@ -59,7 +59,7 @@ class PostgreSQLAdapter(object):
         self.keep_history = options.keep_history
         self.version_detector = PostgreSQLVersionDetector()
 
-        driver = select_driver(options)
+        self.driver = driver = select_driver(options)
         log.debug("Using driver %r", driver)
 
         self.connmanager = Psycopg2ConnectionManager(

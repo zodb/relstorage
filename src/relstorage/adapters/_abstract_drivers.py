@@ -88,6 +88,12 @@ class AbstractModuleDriver(ABC):
     #: Priority of this driver when running on PyPy. Lower is better.
     PRIORITY_PYPY = 100
 
+    # Can this driver work with gevent?
+    _GEVENT_CAPABLE = False
+    # Does this driver need the socket module patched?
+    # Only checked if _GEVENT_CAPABLE is set to True.
+    _GEVENT_NEEDS_SOCKET_PATCH = True
+
     def __init__(self):
         if PYPY and not self.AVAILABLE_ON_PYPY:
             raise DriverNotAvailableError(self.__name__)
@@ -104,11 +110,34 @@ class AbstractModuleDriver(ABC):
         self.lock_exceptions = (mod.DatabaseError,)
         self.use_replica_exceptions = (mod.OperationalError,)
         self.Binary = mod.Binary
-        self.connect = mod.connect
+        self._connect = mod.connect
+
+    def connect(self, *args, **kwargs):
+        return self._connect(*args, **kwargs)
 
     def get_driver_module(self):
         """Import and return the driver module."""
         return importlib.import_module(self.MODULE_NAME)
+
+    def gevent_cooperative(self):
+        # Return whether this driver is cooperative with gevent.
+        # This takes into account whether the system is
+        # and/or needs to be monkey-patched
+        if not self._GEVENT_CAPABLE:
+            return False
+        if self._GEVENT_NEEDS_SOCKET_PATCH:
+            return self._sockets_gevent_monkey_patched()
+        return True
+
+    def _sockets_gevent_monkey_patched(self):
+        # Return whether the socket module has been monkey-patched
+        # by gevent
+        try:
+            from gevent import monkey
+        except ImportError: # pragma: no cover
+            return False
+        else:
+            return monkey.is_module_patched('socket')
 
     # Common compatibility shims, overriden as needed.
 

@@ -80,8 +80,10 @@ bold** are the recommended adapter.
    +----------+---------------------+---------------------+--------------+
 
 
-mysqlclient, MySQL Connector/Python (without its C extension), pg8000
-and umysql are compatible (cooperative) with gevent without any extra effort.
+mysqlclient can be used with gevent by explicitly choosing a
+gevent-aware driver. PyMySQL, MySQL Connector/Python (without its C
+extension), pg8000 and umysql are compatible (cooperative) with gevent
+when the system is monkey-patched.
 
 For additional details and warnings, see the "driver" section for each database in
 :doc:`db-specific-options`.

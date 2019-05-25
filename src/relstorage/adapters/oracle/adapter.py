@@ -67,7 +67,7 @@ class OracleAdapter(object):
         self.options = options
         self.keep_history = options.keep_history
 
-        driver = select_driver(options)
+        self.driver = driver = select_driver(options)
         log.debug("Using driver %s", driver)
 
         self.connmanager = CXOracleConnectionManager(

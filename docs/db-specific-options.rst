@@ -72,22 +72,32 @@ driver
     MySQLdb
       A C-based driver that requires the MySQL client development
       libraries.. This is best provided by the PyPI distribution
-      `mysqlclient <https://pypi.python.org/pypi/mysqlclient>`_. (It
-      can also be provided by the legacy `MySQL-python
-      <https://pypi.python.org/pypi/MySQL-python/>`_ distribution,
-      but only on CPython 2; this distribution is no longer tested.)
-      These drivers are *not* compatible with gevent.
+      `mysqlclient <https://pypi.python.org/pypi/mysqlclient>`_.
+      This driver is *not* compatible with gevent.
+
+    gevent MySQLdb
+      Like ``MySQLdb``, but explicitly uses's gevent's event loop to
+      avoid blocking on the socket as much as possible when
+      communicating with MySQL.
+
+      Note that this is fairly coarse-grained: When sending a query,
+      we can only yield until the socket is ready to write, and then
+      we must write the entire query (because that portion is
+      implemented in C). Likewise, we can only yield until results are
+      ready to be read, and then we must read the entire query.
 
     PyMySQL
       A pure-Python driver provided by the distribution of the same
       name. It works with CPython 2 and 3 and PyPy (where it is
-      preferred). It is compatible with gevent.
+      preferred). It is compatible with gevent if gevent's
+      monkey-patching is used.
 
     umysqldb
       A C-based driver that builds on PyMySQL. It is compatible with
-      gevent, but only works on CPython 2. It does not require the
-      MySQL client development libraries but uses a project called
-      ``umysql`` to communicate with the server using only sockets.
+      gevent if monkey-patching is used, but only works on CPython 2.
+      It does not require the MySQL client development libraries but
+      uses a project called ``umysql`` to communicate with the server
+      using only sockets.
 
       .. note:: Make sure the server has a
           ``max_allowed_packet`` setting no larger than 16MB. Also
