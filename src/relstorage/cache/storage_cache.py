@@ -36,7 +36,7 @@ from relstorage.cache.interfaces import IPersistentCache
 from relstorage.cache.local_client import LocalClient
 from relstorage.cache.trace import ZEOTracer
 
-log = logging.getLogger(__name__)
+logger = log = logging.getLogger(__name__)
 
 class _UsedAfterRelease(object):
     pass
@@ -186,6 +186,14 @@ class StorageCache(object):
         cache = type(self)(self.adapter, self.options, self.prefix,
                            local_client,
                            _tracer=self._tracer or False)
+        # XXX: Actually probably want to get these out of the global cache?
+        # Some of these just get more and more stale the longer time goes on.
+        # Maybe we want to scan for the max TID to be the current TID each time
+        # we make one?
+        cache.checkpoints = self.checkpoints
+        cache.delta_after0 = self._delta_map_type(self.delta_after0)
+        cache.delta_after1 = self._delta_map_type(self.delta_after1)
+        cache.current_tid = self.current_tid
         return cache
 
     def release(self):
@@ -216,8 +224,9 @@ class StorageCache(object):
             # (our __bool__ is not consistent with our len)
             return persistence.save_local_cache(self.options, self.prefix, self)
 
-
     def write_to_stream(self, stream):
+        # XXX: This is now wrong. We do write. Update the comments about how this works.
+
         # We currently don't write anything to the stream, delegating instead
         # just to the local client.
 
@@ -235,9 +244,32 @@ class StorageCache(object):
         # need to either wrap them in a dict or dump them pairwise; We
         # can't dump a BTree larger than about 25000 without getting
         # into recursion problems.
-        self.local_client.write_to_stream(stream)
 
-    def get_cache_modification_time_for_stream(self):
+        max_tid = self._find_max_tid()
+        max_tid_bytes = str(max_tid).encode('ascii')
+        # print("Writing max tid", max_tid, "from", the_key, "as",
+        #       max_tid_bytes, "to", stream)
+        # if 'state:3349' in the_key:
+        #     print("This is weird-----", self.local_client.get(the_key))
+        #     print(list(self.local_client))
+        #     raise Exception
+        stream.write(max_tid_bytes + b'\n')
+
+        newest_tids = self._find_newest_tids_for_oid()
+        newest_keys = {self._as_state_key(tid, oid) for oid, tid in newest_tids.items()}
+        def key_transform(key, value):
+            # Reject anything that's not the most current key we have
+            if key not in newest_keys:
+                return
+            # Transform other keys to their exact match.
+            # When we read in, we'll put these into the 'delta_after1' map.
+            actual_tid_int = u64(value[:8])
+            _, oid = self._from_state_key(key)
+            return self._as_state_key(actual_tid_int, oid)
+
+        return self.local_client.write_to_stream(stream, key_transform)
+
+    def _find_max_tid(self):
         max_tid = 0
         for key in self.local_client:
             parts = key.split(':')
@@ -245,7 +277,32 @@ class StorageCache(object):
                 continue
             tid = int(parts[2])
             max_tid = max(tid, max_tid)
+        return max_tid
 
+    def _as_state_key(self, tid_int, oid_int):
+        cachekey = '%s:state:%d:%d' % (self.prefix, tid_int, oid_int)
+        return cachekey
+
+    def _from_state_key(self, key):
+        parts = key.split(':')
+        if len(parts) != 4:
+            return 0, 0
+        tid = int(parts[2])
+        oid = int(parts[3])
+        return tid, oid
+
+    def _find_newest_tids_for_oid(self):
+        # All of these, by definition, will be less than or equal to, the
+        # value of the max_tid.
+        oid_to_tid = self._delta_map_type()
+        for key in self.local_client:
+            tid, oid = self._from_state_key(key)
+            if tid and oid:
+                oid_to_tid[oid] = max(tid, 0)
+        return oid_to_tid
+
+    def get_cache_modification_time_for_stream(self):
+        max_tid = self._find_max_tid()
         if max_tid:
             tid_str = p64(max_tid)
             ts = TimeStamp(tid_str)
@@ -257,7 +314,30 @@ class StorageCache(object):
             persistence.load_local_cache(options, self.prefix, self)
 
     def read_from_stream(self, stream):
-        return self.local_client.read_from_stream(stream)
+        # As we try to store entries, parse tids out of the keys;
+        # only store the newest entry for each item
+
+        max_tid_bytes = stream.readline().strip()
+        max_tid_int = int(max_tid_bytes.decode('ascii'))
+        if not self.checkpoints:
+            self.checkpoints = (max_tid_int, 0)
+            self.current_tid = max_tid_int
+        logger.debug("Incoming tid %s from %s; bytes: %s", max_tid_int, stream, max_tid_bytes)
+        if max_tid_int > self.checkpoints[0]:
+            logger.error("Cache files out of order")
+            return (-1, 0)
+
+        max_tid_int = self.checkpoints[0]
+        def key_transform(key):
+            # We have a key that exactly describes the state data.
+            # If we don't already have something newer, take it
+            tid_int, oid_int = self._from_state_key(key)
+            if self.delta_after1.get(oid_int, 0) < tid_int:
+                self.delta_after1[oid_int] = tid_int
+                return key
+            # Otherwise, just drop it.
+
+        return self.local_client.read_from_stream(stream, key_transform)
 
     def close(self):
         """
@@ -411,7 +491,7 @@ class StorageCache(object):
         tid_int = self.delta_after0.get(oid_int)
         if tid_int:
             # This object changed after checkpoint0, so
-            # there is only one place to look for its state.
+            # there is only one place to look for its state: the exact key.
             cachekey = '%s:state:%d:%d' % (prefix, tid_int, oid_int)
             for client in self.clients_local_first:
                 cache_data = client.get(cachekey)
@@ -607,6 +687,8 @@ class StorageCache(object):
         parameter will be ignored.  new_tid_int can not be None.
         """
         # pylint:disable=too-many-statements,too-many-branches,too-many-locals
+        #print("After poll. Previous:", prev_tid_int, "New", new_tid_int,
+        #      "My current:", self.current_tid, "CPs", self.checkpoints)
         new_checkpoints = None
         for client in self.clients_global_first:
             s = client.get(self.checkpoints_key)
@@ -761,12 +843,12 @@ class StorageCache(object):
             # Shift the checkpoints.
             # Although this is a race with other instances, the race
             # should not matter.
-            log.debug("Shifting checkpoints to: %s. len(delta_after0) == %d.",
-                      change_to, len(self.delta_after0))
+            log.info("Shifting checkpoints to: %s. len(delta_after0) == %d.",
+                     change_to, len(self.delta_after0))
             for client in self.clients_global_first:
                 client.set(self.checkpoints_key, change_to)
             # The poll code will later see the new checkpoints
             # and update self.checkpoints and self.delta_after(0|1).
         else:
-            log.debug("Checkpoints already shifted to %s. "
-                      "len(delta_after0) == %d.", old_value, len(self.delta_after0))
+            log.info("Checkpoints already shifted to %s. "
+                     "len(delta_after0) == %d.", old_value, len(self.delta_after0))

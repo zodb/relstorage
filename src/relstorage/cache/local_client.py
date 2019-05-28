@@ -100,19 +100,24 @@ class LocalClient(object):
         if options.cache_local_dir and self.__bucket.size:
             _Loader.save_local_cache(options, self.prefix, self)
 
-    def write_to_stream(self, stream):
+    def write_to_stream(self, stream, key_transform=lambda k, v: k):
+        # At the lower level, this could be compressed
+        def _tx(k, v, d=self._decompress):
+            return key_transform(k, d(v))
         with self._lock:
             options = self.options
-            return self.__bucket.write_to_stream(stream, options.cache_local_dir_write_max_size)
+            return self.__bucket.write_to_stream(stream,
+                                                 options.cache_local_dir_write_max_size,
+                                                 _tx)
 
     def restore(self):
         options = self.options
         if options.cache_local_dir:
             _Loader.load_local_cache(options, self.prefix, self)
 
-    def read_from_stream(self, stream):
+    def read_from_stream(self, stream, key_transform=lambda k: k):
         with self._lock:
-            return self.__bucket.read_from_stream(stream)
+            return self.__bucket.read_from_stream(stream, key_transform)
 
     @property
     def _bucket0(self):

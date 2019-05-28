@@ -257,6 +257,11 @@ class RelStorage(UndoLogCompatible,
                 prefix = prefix.replace(' ', '_')
             self._cache = StorageCache(adapter, options, prefix)
 
+        # Creating the storage cache may have loaded cache files, and if so,
+        # we have a previous tid state.
+        if self._cache.current_tid:
+            self._prev_polled_tid = self._cache.current_tid
+
         if blobhelper is not None:
             self.blobhelper = blobhelper
         elif options.blob_dir:

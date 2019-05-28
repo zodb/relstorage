@@ -157,7 +157,6 @@ class SizedLRUMapping(object):
         # check.
         #assert isinstance(key, str)
         #assert isinstance(value, bytes)
-
         dct = self._dict
 
         if key in dct:
@@ -214,9 +213,9 @@ class SizedLRUMapping(object):
 
     # See micro_benchmark_results.rst for a discussion about the approach.
 
-    _FILE_VERSION = 4
+    _FILE_VERSION = 5
 
-    def read_from_stream(self, cache_file):
+    def read_from_stream(self, cache_file, key_transform=lambda k: k):
         now = time.time()
         # Unlike write_to_stream, using the raw stream
         # is fine for both Py 2 and 3.
@@ -233,7 +232,10 @@ class SizedLRUMapping(object):
         entries_oldest_first_append = entries_oldest_first.append
         try:
             while 1:
-                entries_oldest_first_append(load())
+                k, v = load()
+                k = key_transform(k)
+                if k:
+                    entries_oldest_first_append((k, v))
         except EOFError:
             pass
         count = len(entries_oldest_first)
@@ -260,8 +262,10 @@ class SizedLRUMapping(object):
             # Loading more data into an existing bucket.
             # Load only the *new* keys, trying to get the newest ones
             # because LRU is going to get messed up anyway.
-            new_entries_newest_first = [t for t in entries_oldest_first
-                                        if t[0] not in self._dict]
+            new_entries_newest_first = [
+                t for t in entries_oldest_first
+                if t[0] not in self._dict
+            ]
             new_entries_newest_first.reverse()
             stored = _insert_entries(new_entries_newest_first)
 
@@ -270,7 +274,7 @@ class SizedLRUMapping(object):
                  count, stored, cache_file, then - now)
         return count, stored
 
-    def write_to_stream(self, cache_file, byte_limit=None):
+    def write_to_stream(self, cache_file, byte_limit=None, key_transform=lambda k, v: k):
         now = time.time()
         # pickling the items is about 3x faster than marshal
 
@@ -341,7 +345,9 @@ class SizedLRUMapping(object):
             # the most frequent items! So first we begin by taking out
             # everything until we fit.
             entries_to_write = []
-            for entry in reversed(entries):
+            for entry in reversed([entry for entry
+                                   in entries
+                                   if key_transform(entry.key, entry.value)]):
                 bytes_written += entry.len
                 if bytes_written > byte_limit:
                     bytes_written -= entry.len
@@ -359,7 +365,9 @@ class SizedLRUMapping(object):
                 bytes_written -= entry.len
                 break
 
-            dump((entry.key, entry.value))
+            key = key_transform(entry.key, entry.value)
+            if key:
+                dump((key, entry.value))
 
         then = time.time()
         stats = self.stats()

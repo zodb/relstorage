@@ -199,6 +199,7 @@ def __write_temp_cache_file(options, prefix, parent_dir, persistent_cache):
     suffix = _gzip_ext(options) + '.T'
     fd, path = tempfile.mkstemp(prefix=prefix, suffix=suffix, dir=parent_dir)
     try:
+        log.info("Writing cache file %s", path)
         with _open(options, fd, 'wb') as f:
             with _gzip_file(options, filename=path, fileobj=f, mode='wb', compresslevel=5) as fz:
                 persistent_cache.write_to_stream(fz)
@@ -223,7 +224,12 @@ def __set_mod_time(new_path, persistent_cache):
         # (https://bitbucket.org/pypy/pypy/issues/2408/cpython-difference-osutime-path-11-11)
         logger.debug("Setting date of %r to cache time %s (current time %s)",
                      new_path, mod_time, time.time())
-        os.utime(new_path, (mod_time, mod_time))
+        try:
+            os.utime(new_path, (mod_time, mod_time))
+        except:
+            # Under some concurrent scenarios, we've seen this
+            # raise FileNotFound.
+            __quiet_remove(new_path)
 
 def __quiet_remove(path):
     try:
