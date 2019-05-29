@@ -138,6 +138,11 @@ class LocalClient(object):
         return self.get_multi([key]).get(key)
 
     def get_multi(self, keys):
+        """
+        The only time this is called with multiple keys should be when
+        those keys conceptually are simply alternate names for the
+        same stored data. See mapping.py.
+        """
         res = {}
         decompress = self._decompress
         get = self.__bucket.get_and_bubble_all
@@ -155,7 +160,6 @@ class LocalClient(object):
         self.set_multi({key: value})
 
     def set_multi(self, d):
-
         if not self.limit:
             # don't bother
             return

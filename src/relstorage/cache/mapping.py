@@ -186,17 +186,26 @@ class SizedLRUMapping(object):
         self._gens[entry.cffi_entry.r_parent].remove(entry)
 
     def get_and_bubble_all(self, keys):
+        # *Only* call this when all the values in *keys* refer to the same
+        # conceptual object.
         dct = self._dict
         gens = self._gens
         res = {}
         for key in keys:
             entry = dct.get(key)
             if entry is not None:
-                self._hits += 1
                 gens[entry.cffi_entry.r_parent].on_hit(entry)
                 res[key] = entry.value
-            else:
-                self._misses += 1
+        # The storage cache sometimes calls us with 2+ slightly different keys,
+        # for the same object (in the event of needing to check delta_after1).
+        # If we hit on one of them, count that as a hit overall, otherwise
+        # count that as a miss. This makes the cache stats make more sense:
+        # a trip to the cache didn't have both a hit and a loss, it actually did
+        # find data, even though we checked multiple keys.
+        if res:
+            self._hits += 1
+        else:
+            self._misses += 1
         return res
 
     def get(self, key):
@@ -254,6 +263,7 @@ class SizedLRUMapping(object):
             return stored
 
         stored = 0
+        overlap = 0
         if not self._dict:
             # Empty, so quickly take everything they give us,
             # oldest first so that the result is actually LRU
@@ -266,13 +276,19 @@ class SizedLRUMapping(object):
                 t for t in entries_oldest_first
                 if t[0] not in self._dict
             ]
+            overlap = count - len(new_entries_newest_first)
             new_entries_newest_first.reverse()
             stored = _insert_entries(new_entries_newest_first)
 
         then = time.time()
-        log.info("Examined %d and stored %d items from %s in %s",
-                 count, stored, cache_file, then - now)
-        return count, stored
+
+        log.debug(
+            "Examined %d and stored %d items (%d overlap) from %s in %s",
+            count, stored, overlap, cache_file.name, then - now
+        )
+        # We're very picky about our keys now, we may need to look at
+        # many files.
+        return count, stored + overlap
 
     def write_to_stream(self, cache_file, byte_limit=None, key_transform=lambda k, v: k):
         now = time.time()
@@ -371,6 +387,9 @@ class SizedLRUMapping(object):
 
         then = time.time()
         stats = self.stats()
-        log.info("Wrote %d items (%d bytes) to %s in %s. Total hits %s; misses %s; ratio %s",
-                 count_written, bytes_written, cache_file, then - now,
-                 stats['hits'], stats['misses'], stats['ratio'])
+        log.info(
+            "Wrote %d items (%d bytes) to %s in %s. Total hits %s; misses %s; ratio %s; "
+            "sets %s",
+            count_written, bytes_written, cache_file, then - now,
+            stats['hits'], stats['misses'], stats['ratio'], stats['sets']
+        )

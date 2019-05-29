@@ -156,8 +156,16 @@ def _stat_cache_files(options, prefix):
             # file must be gone, probably we're cleaning things out
             pass
 
-    # Newest and biggest first; tie breaker of the filename
-    stats.sort(key=lambda s: (s[0].st_mtime, s[0].st_size, s[1]), reverse=True)
+    # Newest and biggest first; tie breaker of the filename.
+    #
+    # Note that the mtime comes from what the cache tells us about the
+    # data, and if the database is not changing (especially likely in
+    # synthetic benchmarks), multiple cache files could have that same
+    # mtime, so the second candidate is the newness of the file itself
+    # (the newer the file, the more likely it is to have a bigger collection of
+    # data). We might need to move some knowledge about cache contents (number of keys,
+    # etc) down to this level to fully exploit that.
+    stats.sort(key=lambda s: (s[0].st_mtime, s[0].st_ctime, s[0].st_size, s[1]), reverse=True)
     return [s[1] for s in stats]
 
 
@@ -174,7 +182,7 @@ def load_local_cache(options, prefix, local_client_bucket):
 
     max_load = options.cache_local_dir_read_count or len(stats)
     loaded_count = 0
-
+    log.debug("Possible cache files: %s", stats)
     for cache_path in stats:
         if loaded_count >= max_load:
             break
@@ -198,12 +206,13 @@ def __write_temp_cache_file(options, prefix, parent_dir, persistent_cache):
     prefix = 'relstorage-cache-' + prefix + '.'
     suffix = _gzip_ext(options) + '.T'
     fd, path = tempfile.mkstemp(prefix=prefix, suffix=suffix, dir=parent_dir)
+    os.close(fd)
+    # Re-open by the path to get a readable filename.
     try:
-        log.info("Writing cache file %s", path)
-        with _open(options, fd, 'wb') as f:
+        log.debug("Writing cache file %s", path)
+        with _open(options, path, 'wb') as f:
             with _gzip_file(options, filename=path, fileobj=f, mode='wb', compresslevel=5) as fz:
                 persistent_cache.write_to_stream(fz)
-        # fd is now closed (by the fileobj)
     except:
         __quiet_remove(path)
         raise
@@ -226,7 +235,7 @@ def __set_mod_time(new_path, persistent_cache):
                      new_path, mod_time, time.time())
         try:
             os.utime(new_path, (mod_time, mod_time))
-        except:
+        except IOError:
             # Under some concurrent scenarios, we've seen this
             # raise FileNotFound.
             __quiet_remove(new_path)
@@ -261,40 +270,55 @@ def save_local_cache(options, prefix, persistent_cache):
         return
 
     # Ok, now pick a place to put it, dropping the oldest file,
-    # if necessary.
+    # if necessary. Do this with a lock, because apparently there have
+    # been some race conditions
 
     # Now assign our permanent name by stripping the tmp suffix and renaming
     assert path.endswith(".T")
     new_path = path[:-2]
+    __set_mod_time(path, persistent_cache)
 
     try:
         os.rename(path, new_path)
     except os.error: # pragma: no cover
-        log.exception("Failed to rename %r to %r", path, new_path)
+        log.exception("Failed to rename %r to %r; not doing maintenance", path, new_path)
         __quiet_remove(path)
         raise
 
+    grace_period = time.time() - 30
+
     del path
+    from zc.lockfile import LockFile
+    from zc.lockfile import LockError
+    from contextlib import closing
+    try:
+        lock = LockFile(os.path.join(parent_dir, '%s.cleanlock' % (prefix,)))
+    except LockError:
+        log.debug("Not doing maintenance, couldn't lock")
+        return new_path
+    with closing(lock):
+        __set_mod_time(new_path, persistent_cache)
 
-    __set_mod_time(new_path, persistent_cache)
-
-
-    # Now remove any extra (old, small) files if we have too many
-    # If there are multiple storages shutting down, they will race
-    # each other to do this.
-    stats = _stat_cache_files(options, prefix)
-    while len(stats) > options.cache_local_dir_count and len(stats) > 1:
-        oldest_file = stats[-1]
-        # It's possible but unlikely for two processes to write to disk within the limit
-        # of filesystem modification time tracking. If one of those processes
-        # was us, then we still have to pick a loser.
-
-        if not __quiet_remove(oldest_file):
-            # One process will succeed, all the others will fail
-            log.info("Failed to prune file %r; stopping", oldest_file)
-            break
-
+        # Now remove any extra (old, small) files if we have too many
+        # If there are multiple storages shutting down, they will race
+        # each other to do this.
         stats = _stat_cache_files(options, prefix)
+        while len(stats) > options.cache_local_dir_count and len(stats) > 1:
+            oldest_file = stats[-1]
+            if os.stat(oldest_file).st_ctime > grace_period:
+                # If the oldest file is only a few minutes old,
+                # we're cycling too fast. Let it be.
+                break
 
+            # It's possible but unlikely for two processes to write to disk within the limit
+            # of filesystem modification time tracking. If one of those processes
+            # was us, then we still have to pick a loser.
+            log.debug("Removing expired cache file %s", oldest_file)
+            if not __quiet_remove(oldest_file):
+                # One process will succeed, all the others will fail
+                log.info("Failed to prune file %r; stopping", oldest_file)
+                break
+
+            stats = _stat_cache_files(options, prefix)
 
     return new_path

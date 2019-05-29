@@ -82,23 +82,24 @@ class Poller(object):
         """
         Polls for new transactions.
 
-        conn and cursor must have been created previously by open_for_load().
-        prev_polled_tid is the tid returned at the last poll, or None
-        if this is the first poll.  If ignore_tid is not None, changes
-        committed in that transaction will not be included in the list
-        of changed OIDs.
+        conn and cursor must have been created previously by
+        open_for_load(). prev_polled_tid is the tid returned at the
+        last poll, or None if this is the first poll. If ignore_tid is
+        not None, changes committed in that transaction will not be
+        included in the list of changed OIDs.
 
-        Returns (changes, new_polled_tid), where changes is either
-        a list of (oid, tid) that have changed, or None to indicate
-        that the changes are too complex to list.  new_polled_tid can be
-        0 if there is no data in the database.
+        Returns (changes, new_polled_tid), where changes is either a
+        list of (oid, tid) that have changed, or None to indicate that
+        the changes are too complex to list --- this must cause local
+        storage caches to be invalidated.. new_polled_tid can be 0 if
+        there is no data in the database.
         """
         # pylint:disable=unused-argument
         # find out the tid of the most recent transaction.
         cursor.execute(self.poll_query)
         rows = list(cursor)
         if not rows or not rows[0][0]:
-            # No data.
+            # No data, must be fresh database.
             return None, 0
         new_polled_tid = rows[0][0]
 

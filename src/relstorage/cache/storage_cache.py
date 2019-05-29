@@ -186,14 +186,14 @@ class StorageCache(object):
         cache = type(self)(self.adapter, self.options, self.prefix,
                            local_client,
                            _tracer=self._tracer or False)
-        # XXX: Actually probably want to get these out of the global cache?
-        # Some of these just get more and more stale the longer time goes on.
-        # Maybe we want to scan for the max TID to be the current TID each time
-        # we make one?
-        cache.checkpoints = self.checkpoints
+
+        # The delta maps get more and more stale the longer time goes on.
+        # Maybe we want to try to re-create them based on the local max tids?
+        current_max_cached_tid = self._find_max_tid()
+        cache.checkpoints = (current_max_cached_tid, current_max_cached_tid)
         cache.delta_after0 = self._delta_map_type(self.delta_after0)
         cache.delta_after1 = self._delta_map_type(self.delta_after1)
-        cache.current_tid = self.current_tid
+        cache.current_tid = current_max_cached_tid
         return cache
 
     def release(self):
@@ -222,7 +222,13 @@ class StorageCache(object):
         """
         if self.options.cache_local_dir and len(self): # pylint:disable=len-as-condition
             # (our __bool__ is not consistent with our len)
-            return persistence.save_local_cache(self.options, self.prefix, self)
+            stats = self.local_client.stats()
+            if stats['hits'] and stats['sets']:
+                # Only write this out if (1) it proved useful and (2)
+                # we've made modifications. Otherwise, we're writing a consolidated
+                # file for no good reason.
+                return persistence.save_local_cache(self.options, self.prefix, self)
+            logger.debug("Cannot justify writing cache file: %s", stats)
 
     def write_to_stream(self, stream):
         # XXX: This is now wrong. We do write. Update the comments about how this works.
@@ -265,6 +271,7 @@ class StorageCache(object):
             # When we read in, we'll put these into the 'delta_after1' map.
             actual_tid_int = u64(value[:8])
             _, oid = self._from_state_key(key)
+            # TODO: Maybe write the ints, and parse back into strings on read?
             return self._as_state_key(actual_tid_int, oid)
 
         return self.local_client.write_to_stream(stream, key_transform)
@@ -286,7 +293,7 @@ class StorageCache(object):
     def _from_state_key(self, key):
         parts = key.split(':')
         if len(parts) != 4:
-            return 0, 0
+            return None, None
         tid = int(parts[2])
         oid = int(parts[3])
         return tid, oid
@@ -297,7 +304,10 @@ class StorageCache(object):
         oid_to_tid = self._delta_map_type()
         for key in self.local_client:
             tid, oid = self._from_state_key(key)
-            if tid and oid:
+            # 0 is a valid value for both; 0 is the root oid,
+            # which likely rarely changes, so its helpful to have
+            # it in the cache.
+            if tid is not None and oid is not None:
                 oid_to_tid[oid] = max(tid, 0)
         return oid_to_tid
 
@@ -315,29 +325,64 @@ class StorageCache(object):
 
     def read_from_stream(self, stream):
         # As we try to store entries, parse tids out of the keys;
-        # only store the newest entry for each item
+        # only store the newest entry for each item.
 
-        max_tid_bytes = stream.readline().strip()
-        max_tid_int = int(max_tid_bytes.decode('ascii'))
+        # TODO: Make the mapping layer smarter and don't store strings
+        # as keys, use the actual integers; use a wrapping layer in
+        # the memcache layer to make that emulate the better API.
+
+        # Storing them in delta_after0 gets us better hit ratios, and
+        # we don't have to move things to our preferred (cp0) key as
+        # often, but seems to lead to conflicts? TODO: Test this
+        # rigorously.
+
+        file_max_tid_bytes = stream.readline().strip()
+        # The cache file has the *actual* max TID it contains.
+        # Everything we see will be <= to that.
+        file_max_tid_int = int(file_max_tid_bytes.decode('ascii'))
+        logger.debug(
+            "Incoming tid %s (%s) from %s; MTime: %s",
+            file_max_tid_int, TimeStamp(p64(file_max_tid_int)).timeTime(),
+            stream.name, os.stat(stream.name).st_mtime
+        )
+        file_cp0 = file_max_tid_int
         if not self.checkpoints:
-            self.checkpoints = (max_tid_int, 0)
-            self.current_tid = max_tid_int
-        logger.debug("Incoming tid %s from %s; bytes: %s", max_tid_int, stream, max_tid_bytes)
-        if max_tid_int > self.checkpoints[0]:
-            logger.error("Cache files out of order")
-            return (-1, 0)
+            self.checkpoints = (file_cp0, file_cp0)
+            self.current_tid = file_cp0
+        elif file_cp0 > self.checkpoints[0]:
+            logger.error(
+                "Cache files out of order; file %s has TID %s (%s) > %s (%s). MTime: %s",
+                stream.name, file_max_tid_int, TimeStamp(p64(file_max_tid_int)).timeTime(),
+                self.checkpoints[0], TimeStamp(p64(self.checkpoints[0])).timeTime(),
+                os.stat(stream.name).st_mtime
+            )
+            # If we return 0 for the second component, they stop trying to load
+            # files.
+            return (-1, -1)
 
-        max_tid_int = self.checkpoints[0]
-        def key_transform(key):
+        def key_transform(key, deltas=self.delta_after1, as_ints=self._from_state_key):
             # We have a key that exactly describes the state data.
             # If we don't already have something newer, take it
-            tid_int, oid_int = self._from_state_key(key)
-            if self.delta_after1.get(oid_int, 0) < tid_int:
-                self.delta_after1[oid_int] = tid_int
+            if 'checkpoints' in key:
+                # Never read the old checkpoints, there's no telling where
+                # they came from.
+                return
+            tid_int, oid_int = as_ints(key)
+            if deltas.get(oid_int, 0) < tid_int:
+                deltas[oid_int] = tid_int
                 return key
             # Otherwise, just drop it.
 
-        return self.local_client.read_from_stream(stream, key_transform)
+        examined, stored = self.local_client.read_from_stream(stream, key_transform)
+        # If we aren't sure to store this, it's probably going to get
+        # overwritten on the first poll.
+        checkpoint_data = '%d %d' % self.checkpoints
+        checkpoint_data = checkpoint_data.encode('ascii')
+        self.local_client.set(self.checkpoints_key, checkpoint_data)
+        # However, we don't want that to count as a "set", because it's artificial
+        # and won't get written out later.
+        self.local_client.reset_stats()
+        return examined, stored
 
     def close(self):
         """
@@ -463,7 +508,7 @@ class StorageCache(object):
         """
         # pylint:disable=too-many-statements,too-many-branches,too-many-locals
         if not self.checkpoints:
-            # No poll has occurred yet.  For safety, don't use the cache.
+            # No poll has occurred yet. For safety, don't use the cache.
             self._trace(0x20, oid_int)
             return self.adapter.mover.load_current(cursor, oid_int)
 
@@ -534,7 +579,7 @@ class StorageCache(object):
             # Query the cache. Query multiple keys simultaneously to
             # minimize latency.
             response = client.get_multi(cachekeys)
-            if response:
+            if response: # We have a hit!
                 cache_data = response.get(cp0_key)
                 if cache_data and len(cache_data) >= 8:
                     # Cache hit on the preferred cache key.
@@ -552,10 +597,11 @@ class StorageCache(object):
                 if cache_data and len(cache_data) >= 8:
                     # Cache hit, but copy the state to
                     # the currently preferred key.
-                    self._trace(0x22, oid_int, u64(cache_data[:8]), dlen=len(cache_data) - 8)
+                    actual_tid_int = u64(cache_data[:8])
+                    self._trace(0x22, oid_int, actual_tid_int, dlen=len(cache_data) - 8)
                     for client_to_set in self.clients_local_first:
                         client_to_set.set(cp0_key, cache_data)
-                    return cache_data[8:], u64(cache_data[:8])
+                    return cache_data[8:], actual_tid_int
 
         # Cache miss.
         self._trace(0x20, oid_int)
@@ -761,7 +807,14 @@ class StorageCache(object):
         else:
             # We have to replace the checkpoints.
             cp0, cp1 = new_checkpoints
-            log.debug("Using new checkpoints: %d %d", cp0, cp1)
+            log.debug(
+                "Using new checkpoints: %d %d. Current cp: %s. "
+                "Too many changes? %s. prev_tid_int: %s. current_tid: %s. "
+                "new_tid_int: %s",
+                cp0, cp1, self.checkpoints,
+                changes is None, prev_tid_int, self.current_tid,
+                new_tid_int
+            )
             # Use the checkpoints specified by the cache.
             # Rebuild delta_after0 and delta_after1.
             new_delta_after0 = self._delta_map_type()
@@ -824,7 +877,15 @@ class StorageCache(object):
         becomes checkpoint0.
         """
         cp0, _cp1 = self.checkpoints
-        assert tid_int > cp0
+        if tid_int <= cp0:
+            # This used to assert this couldn't happen, but with better caching,
+            # it sometimes can.
+            logger.debug(
+                "Not shifting checkpoints; tid_int (%s) = cp0 (%s)",
+                tid_int, cp0
+            )
+            return
+
         expect = '%d %d' % self.checkpoints
         if oversize:
             # start new checkpoints
@@ -843,12 +904,12 @@ class StorageCache(object):
             # Shift the checkpoints.
             # Although this is a race with other instances, the race
             # should not matter.
-            log.info("Shifting checkpoints to: %s. len(delta_after0) == %d.",
-                     change_to, len(self.delta_after0))
+            log.debug("Shifting checkpoints to: %s. len(delta_after0) == %d.",
+                      change_to, len(self.delta_after0))
             for client in self.clients_global_first:
                 client.set(self.checkpoints_key, change_to)
             # The poll code will later see the new checkpoints
             # and update self.checkpoints and self.delta_after(0|1).
         else:
-            log.info("Checkpoints already shifted to %s. "
-                     "len(delta_after0) == %d.", old_value, len(self.delta_after0))
+            log.debug("Checkpoints already shifted to %s. "
+                      "len(delta_after0) == %d.", old_value, len(self.delta_after0))
