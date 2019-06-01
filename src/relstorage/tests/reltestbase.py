@@ -412,7 +412,7 @@ class GenericRelStorageTests(
         try:
             c1 = db.open()
             self.assertEqual(
-                c1._storage._cache.clients_global_first[0].servers,
+                c1._storage._cache.clients_global_first[0].client.servers,
                 ['x:1', 'y:2'])
             r1 = c1.root()
             # The root state and checkpoints should now be cached.

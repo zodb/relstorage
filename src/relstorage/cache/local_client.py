@@ -18,7 +18,6 @@ from __future__ import print_function
 import bz2
 import threading
 import zlib
-import operator
 
 from zope import interface
 
@@ -173,12 +172,13 @@ class LocalClient(object):
 
         # This used to allow non-byte values, but that's confusing
         # on Py3 and wasn't used outside of tests, so we enforce it.
+        # A state of 'None' happens for undone transactions.
         state_bytes, tid = state_bytes_tid
-        assert isinstance(state_bytes, bytes), type(state_bytes)
+        assert isinstance(state_bytes, bytes) or state_bytes is None, type(state_bytes)
         compress = self._compress
         cvalue = compress(state_bytes) if compress else state_bytes # pylint:disable=not-callable
 
-        if len(cvalue) >= self._value_limit:
+        if cvalue and len(cvalue) >= self._value_limit:
             # This value is too big, so don't cache it.
             return
 
