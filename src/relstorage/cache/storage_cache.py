@@ -19,6 +19,7 @@ import importlib
 import logging
 import os
 import threading
+import time
 
 import BTrees
 from persistent.timestamp import TimeStamp
@@ -321,7 +322,10 @@ class StorageCache(object):
     def restore(self):
         options = self.options
         if options.cache_local_dir:
-            persistence.load_local_cache(options, self.prefix, self)
+            begin = time.time()
+            loaded_file_count = persistence.load_local_cache(options, self.prefix, self)
+            end = time.time()
+            logger.info("Loaded %s cache files in %s", loaded_file_count, end - begin)
 
     def read_from_stream(self, stream):
         # As we try to store entries, parse tids out of the keys;

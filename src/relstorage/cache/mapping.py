@@ -286,9 +286,7 @@ class SizedLRUMapping(object):
             "Examined %d and stored %d items (%d overlap) from %s in %s",
             count, stored, overlap, cache_file.name, then - now
         )
-        # We're very picky about our keys now, we may need to look at
-        # many files.
-        return count, stored + overlap
+        return count, stored
 
     def write_to_stream(self, cache_file, byte_limit=None, key_transform=lambda k, v: k):
         now = time.time()
