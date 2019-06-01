@@ -19,9 +19,7 @@ from __future__ import print_function
 import os
 import os.path
 import random
-import statistics  # pylint:disable=import-error
 import time
-import timeit
 from collections import namedtuple
 
 from relstorage.options import Options
@@ -57,32 +55,12 @@ class MockOptions(Options):
     cache_local_dir_count = 1
 
 
-
-NUMBER = 3
-REPEAT_COUNT = 4
-
-def run_func(func, number=NUMBER, repeat_count=REPEAT_COUNT):
-    print("Timing func", func)
-    pop_timer = timeit.Timer(func)
-    pr = cProfile.Profile()
-    pr.enable()
-    pop_times = pop_timer.repeat(number=number, repeat=repeat_count)
-    pr.disable()
-    ps = pstats.Stats(pr).sort_stats('cumulative')
-    ps.print_stats(.4)
-
-    return pop_times
-
-def run_and_report_funcs(named_funcs, **kwargs):
-    times = {}
+def run_and_report_funcs(runner, named_funcs):
     for name, func in named_funcs:
-        times[name] = run_func(func, **kwargs)
-
-    for name, _time in sorted(times.items()):
-        print(name, "average", statistics.mean(_time), "stddev", statistics.stdev(_time))
+        runner.bench_func(name, func)
 
 
-def local_benchmark():
+def local_benchmark(runner):
     from relstorage.cache.local_client import LocalClient
     options = MockOptions()
     options.cache_local_mb = 100
@@ -207,7 +185,8 @@ def local_benchmark():
 
             print("Hit ratio", client.stats()['ratio'])
 
-        run_and_report_funcs((('pop ', populate),
+        run_and_report_funcs(runner,
+                             (('pop ', populate),
                               ('epop', populate_empty),
                               ('read', read),
                               ('mix ', mixed),))
@@ -494,7 +473,7 @@ class StorageTraceSimulator(object):
             ps.print_stats(.4)
 
 
-def save_load_benchmark():
+def save_load_benchmark(runner):
     # pylint:disable=too-many-locals
     from relstorage.cache.mapping import SizedLRUMapping as LocalClientBucket
     from relstorage.cache import persistence as _Loader
@@ -529,37 +508,64 @@ def save_load_benchmark():
 
     cache_pfx = "pfx"
     cache_options = MockOptions()
-    cache_options.cache_local_dir = '/tmp'
+    cache_options.cache_local_dir = runner.args.temp #'/tmp'
     cache_options.cache_local_dir_compress = False
 
-    fnames = set()
-
     def write():
-        fname = _Loader.save_local_cache(cache_options, cache_pfx, bucket)
-        fnames.add(fname)
-
+        _Loader.save_local_cache(cache_options, cache_pfx, bucket)
 
     def load():
         b2 = LocalClientBucket(bucket.limit)
         _Loader.load_local_cache(cache_options, cache_pfx, b2)
 
-    run_and_report_funcs((('write', write),
+    run_and_report_funcs(runner,
+                         (('write', write),
                           ('read ', load)))
-    for fname in fnames:
-        os.remove(fname)
 
-if __name__ == '__main__':
-    import sys
-    if '--localbench' in sys.argv:
-        local_benchmark()
-    elif '--iobench' in sys.argv:
+
+def main():
+    import pyperf
+    import tempfile
+
+    temp = None
+
+    def args_hook(cmd, args):
+        cmd.extend(('--type', args.type))
+        cmd.extend(('--temp', temp))
+    runner = pyperf.Runner(add_cmdline_args=args_hook)
+    runner.argparser.add_argument(
+        '--type',
+        default='io',
+        choices=['local', 'io', 'simlocal', 'simstorage']
+    )
+    runner.argparser.add_argument(
+        '--temp'
+    )
+    runner.parse_args()
+    kind = runner.args.type
+    temp = runner.args.temp
+    if not temp:
+        temp = tempfile.mkdtemp('.rsbench')
+
+    if kind == 'local':
+        local_benchmark(runner)
+    elif kind == 'io':
         import logging
         logging.basicConfig(level=logging.DEBUG)
-        save_load_benchmark()
-    elif '--simulatelocal' in sys.argv:
+        save_load_benchmark(runner)
+    elif kind == 'simlocal':
         StorageTraceSimulator().simulate('local')
-    elif '--simulatestorage' in sys.argv:
+    else:
+        assert kind == 'simstorage'
         #import logging
         #logging.basicConfig(level=logging.DEBUG)
 
         StorageTraceSimulator().simulate('storage')
+
+    if not runner.args.worker:
+        # Master process cleanup
+        import shutil
+        shutil.rmtree(temp)
+
+if __name__ == '__main__':
+    main()
