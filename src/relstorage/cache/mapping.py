@@ -21,6 +21,8 @@ import time
 
 from zope import interface
 
+from relstorage._compat import iteritems
+from relstorage._compat import itervalues
 from relstorage.cache.cache_ring import Cache
 from relstorage.cache.interfaces import IPersistentCache
 from relstorage.cache.persistence import Pickler
@@ -106,6 +108,14 @@ class SizedLRUMapping(object):
 
     def __iter__(self):
         return iter(self._dict)
+
+    def values(self):
+        for entry in itervalues(self._dict):
+            yield entry.value
+
+    def items(self):
+        for k, entry in iteritems(self._dict):
+            yield k, entry.value
 
     def _age(self):
         # Age only when we're full and would thus need to evict; this
@@ -284,7 +294,7 @@ class SizedLRUMapping(object):
 
         log.debug(
             "Examined %d and stored %d items (%d overlap) from %s in %s",
-            count, stored, overlap, cache_file.name, then - now
+            count, stored, overlap, getattr(cache_file, 'name', cache_file), then - now
         )
         return count, stored
 

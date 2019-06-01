@@ -18,18 +18,20 @@ from __future__ import print_function
 import bz2
 import threading
 import zlib
+import operator
 
 from zope import interface
 
 from relstorage._compat import iteritems
 from relstorage.cache import persistence as _Loader
 from relstorage.cache.interfaces import IPersistentCache
+from relstorage.cache.interfaces import IStateCache
 from relstorage.cache.mapping import SizedLRUMapping as LocalClientBucket
 
 
-@interface.implementer(IPersistentCache)
+@interface.implementer(IStateCache,
+                       IPersistentCache)
 class LocalClient(object):
-    """A memcache-like object that stores in Python dictionaries."""
 
     # Use the same markers as zc.zlibstorage (well, one marker)
     # to automatically avoid double-compression
@@ -48,6 +50,7 @@ class LocalClient(object):
     def __init__(self, options, prefix=None):
         self._lock = threading.Lock()
         self.options = options
+        self.checkpoints = None
         self.prefix = prefix or ''
         # XXX: The calc for limit is substantially smaller
         # The real MB value is 1024 * 1024 = 1048576
@@ -127,6 +130,7 @@ class LocalClient(object):
     def flush_all(self):
         with self._lock:
             self.__bucket = self._bucket_type(self.limit)
+            self.checkpoints = None
 
     def reset_stats(self):
         self.__bucket.reset_stats()
@@ -134,66 +138,69 @@ class LocalClient(object):
     def stats(self):
         return self.__bucket.stats()
 
-    def get(self, key):
-        return self.get_multi([key]).get(key)
+    def __getitem__(self, oid_tid):
+        return self(*oid_tid)
 
-    def get_multi(self, keys):
-        """
-        The only time this is called with multiple keys should be when
-        those keys conceptually are simply alternate names for the
-        same stored data. See mapping.py.
-        """
-        res = {}
+    def __call__(self, oid, tid1, tid2=None):
         decompress = self._decompress
         get = self.__bucket.get_and_bubble_all
+        if tid2 is not None:
+            keys = ((oid, tid1), (oid, tid2))
+        else:
+            keys = ((oid, tid1),)
 
         with self._lock:
             res = get(keys)
+            if tid2 is not None and keys[0] not in res and keys[1] in res:
+                # A hit on the backup data. Move it to the
+                # preferred location.
+                data = res[keys[1]]
+                self.__bucket[keys[0]] = data
+                res[keys[0]] = data
 
         # Finally, while not holding the lock, decompress if needed
-        res = {k: decompress(v)
-               for k, v in iteritems(res)}
+        try:
+            state, tid = res[keys[0]]
+        except KeyError:
+            return None
 
-        return res
+        return decompress(state), tid
 
-    def set(self, key, value):
-        self.set_multi({key: value})
-
-    def set_multi(self, d):
+    def __setitem__(self, oid_tid, state_bytes_tid):
         if not self.limit:
             # don't bother
             return
 
+        # This used to allow non-byte values, but that's confusing
+        # on Py3 and wasn't used outside of tests, so we enforce it.
+        state_bytes, tid = state_bytes_tid
+        assert isinstance(state_bytes, bytes), type(state_bytes)
         compress = self._compress
-        items = [] # [(key, value)]
-        for key, value in iteritems(d):
-            # This used to allow non-byte values, but that's confusing
-            # on Py3 and wasn't used outside of tests, so we enforce it.
-            assert isinstance(key, str), (type(key), key)
-            assert isinstance(value, bytes)
+        cvalue = compress(state_bytes) if compress else state_bytes # pylint:disable=not-callable
 
-            cvalue = compress(value) if compress else value # pylint:disable=not-callable
-
-            if len(cvalue) >= self._value_limit:
-                # This value is too big, so don't cache it.
-                continue
-            items.append((key, cvalue))
-
-        bucket0 = self.__bucket
-        set_key = bucket0.__setitem__
+        if len(cvalue) >= self._value_limit:
+            # This value is too big, so don't cache it.
+            return
 
         with self._lock:
-            for key, cvalue in items:
-                set_key(key, cvalue)
+            self.__bucket[oid_tid] = (cvalue, tid)
 
-    def add(self, key, value):
-        # We don't use this method. We used to implement it by adding
-        # an extra parameter to set_multi and checking for each key
-        # before we set it if the param was true, but that was an
-        # extra boolean check we don't need to make because we don't use
-        # this method.
-        raise NotImplementedError()
+    def set_multi(self, keys_and_values):
+        for k, v in iteritems(keys_and_values):
+            self[k] = v
 
-    def disconnect_all(self):
-        # Compatibility with memcache.
+    def store_checkpoints(self, cp0, cp1):
+        # No lock, the assignment should be atomic
+        self.checkpoints = cp0, cp1
+
+    def get_checkpoints(self):
+        return self.checkpoints
+
+    def close(self):
         pass
+
+    def items(self):
+        return self.__bucket.items()
+
+    def values(self):
+        return self.__bucket.values()

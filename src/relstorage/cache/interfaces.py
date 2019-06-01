@@ -18,7 +18,78 @@ from __future__ import print_function
 from zope.interface import Attribute
 from zope.interface import Interface
 
-#pylint: disable=inherit-non-class,no-method-argument,no-self-argument
+# pylint: disable=inherit-non-class,no-method-argument,no-self-argument
+# pylint:disable=unexpected-special-method-signature
+# pylint:disable=signature-differs
+
+
+class IStateCache(Interface):
+    """
+    The methods we use to store state information.
+
+    This interface is defined in terms of OID and TID *integers*;
+    implementations (such as memcache) that only support string
+    keys will need to convert.
+
+    All return values for states return (state_bytes, tid_int).
+
+    We use special methods where possible because those are slightly
+    faster to invoke.
+    """
+
+    def __getitem__(oid_tid):
+        """
+        Given an (oid, tid) pair, return the cache data (state_bytes,
+        tid_int) for that object.
+
+        The returned *tid_int* must match the tid in the key.
+
+        If the (oid, tid) pair isn't in the cache, return None.
+        """
+
+    def __call__(oid, tid1, tid2):
+        """
+        The same as invoking `__getitem__((oid, tid1))` followed by
+        `__getitem__((oid, tid2))` if no result was found for the first one.
+
+        If no result is found for *tid1*, but a result is found for *tid2*,
+        then this method should cache the result at (oid, tid1) before returning.
+        """
+
+    def __setitem__(oid_tid, state_bytes_tid):
+        """
+        Store the *state_bytes* for the (oid, tid) pair.
+
+        Note that it does not necessarily mean that the key tid
+        matches the value tid.
+        """
+
+    def set_multi(keys_and_values):
+        """
+        Given a mapping from keys to values, set them all.
+        """
+
+    def store_checkpoints(cp0_tid, cp1_tid):
+        """
+        Store the suggested pair of checkpoints.
+        """
+
+    def get_checkpoints():
+        """
+        Return the current checkpoints as (cp0_tid, cp1_tid).
+
+        If not found, return None.
+        """
+
+    def close():
+        """
+        Release external resources held by this object.
+        """
+
+    def flush_all():
+        """
+        Clear cached data.
+        """
 
 class IPersistentCache(Interface):
     """

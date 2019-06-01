@@ -86,20 +86,16 @@ class PyMySQLConnectorDriver(AbstractMySQLDriver):
 
                     _VAR_STRING_to_python = _STRING_to_python
 
-                    # There are a few places we get into trouble on
-                    # Python 2 with bytearrays comping back: they
-                    # can't be hashed for the local_client compression
-                    # functions or sent to zlib.decompress(), they
-                    # can't be sent to pickle.loads(), etc, so it's
-                    # best to return them as bytes. We don't have that
-                    # issue on Python 3.
-                    def _BLOB_to_python(self, value, dsc=None): # pylint:disable=unused-argument
-                        if value and isinstance(value, bytearray):
-                            return bytes(value)
-                        return value
-                else:
-                    def _BLOB_to_python(self, value, dsc=None): # pylint:disable=unused-argument
-                        return value or b''
+                # There are a few places we get into trouble on
+                # Python 2/3 with bytearrays comping back: they
+                # can't be hashed for the local_client compression
+                # functions or sent to zlib.decompress(), they
+                # can't be sent to pickle.loads(), etc, so it's
+                # best to return them as bytes.
+                def _BLOB_to_python(self, value, dsc=None): # pylint:disable=unused-argument
+                    if isinstance(value, bytearray):
+                        return bytes(value)
+                    return value or b''
 
                 _LONG_BLOB_to_python = _BLOB_to_python
                 _MEDIUM_BLOB_to_python = _BLOB_to_python

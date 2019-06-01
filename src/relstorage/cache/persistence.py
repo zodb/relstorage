@@ -194,7 +194,7 @@ def load_local_cache(options, prefix, local_client_bucket):
                     loaded_count += 1
                     if not stored or local_client_bucket.size >= local_client_bucket.limit:
                         break # pragma: no cover
-        except (NameError, AttributeError): # pragma: no cover
+        except (NameError, AttributeError, TypeError, ValueError): # pragma: no cover
             # Programming errors, need to be caught in testing
             raise
         except Exception: # pylint:disable=broad-except
@@ -262,7 +262,7 @@ def save_local_cache(options, prefix, persistent_cache):
 
     try:
         path = __write_temp_cache_file(options, prefix, parent_dir, persistent_cache)
-    except (NameError, AttributeError): # pragma: no cover
+    except (NameError, AttributeError, TypeError, ValueError): # pragma: no cover
         # programming errors that should be caught in testing
         raise
     except Exception: # pylint:disable=broad-except
@@ -288,37 +288,32 @@ def save_local_cache(options, prefix, persistent_cache):
     grace_period = time.time() - 30
 
     del path
-    from zc.lockfile import LockFile
-    from zc.lockfile import LockError
-    from contextlib import closing
-    try:
-        lock = LockFile(os.path.join(parent_dir, '%s.cleanlock' % (prefix,)))
-    except LockError:
-        log.debug("Not doing maintenance, couldn't lock")
-        return new_path
-    with closing(lock):
-        __set_mod_time(new_path, persistent_cache)
+    # No lock
+    __set_mod_time(new_path, persistent_cache)
 
-        # Now remove any extra (old, small) files if we have too many
-        # If there are multiple storages shutting down, they will race
-        # each other to do this.
-        stats = _stat_cache_files(options, prefix)
-        while len(stats) > options.cache_local_dir_count and len(stats) > 1:
-            oldest_file = stats[-1]
+    # Now remove any extra (old, small) files if we have too many
+    # If there are multiple storages shutting down, they will race
+    # each other to do this.
+    stats = _stat_cache_files(options, prefix)
+    while len(stats) > options.cache_local_dir_count and len(stats) > 1:
+        oldest_file = stats[-1]
+        try:
             if os.stat(oldest_file).st_ctime > grace_period:
                 # If the oldest file is only a few minutes old,
                 # we're cycling too fast. Let it be.
                 break
+        except IOError:
+            break
 
-            # It's possible but unlikely for two processes to write to disk within the limit
-            # of filesystem modification time tracking. If one of those processes
-            # was us, then we still have to pick a loser.
-            log.debug("Removing expired cache file %s", oldest_file)
-            if not __quiet_remove(oldest_file):
-                # One process will succeed, all the others will fail
-                log.info("Failed to prune file %r; stopping", oldest_file)
-                break
+        # It's possible but unlikely for two processes to write to disk within the limit
+        # of filesystem modification time tracking. If one of those processes
+        # was us, then we still have to pick a loser.
+        log.debug("Removing expired cache file %s", oldest_file)
+        if not __quiet_remove(oldest_file):
+            # One process will succeed, all the others will fail
+            log.info("Failed to prune file %r; stopping", oldest_file)
+            break
 
-            stats = _stat_cache_files(options, prefix)
+        stats = _stat_cache_files(options, prefix)
 
     return new_path
