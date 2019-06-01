@@ -234,8 +234,19 @@ class SizedLRUMapping(object):
 
     _FILE_VERSION = 5
 
-    def read_from_stream(self, cache_file, key_transform=lambda k: k):
-        now = time.time()
+    def read_from_sqlite(self, connection):
+        cur = connection.execute('SELECT zoid, tid, state FROM object_state')
+        def data():
+            for row in cur:
+                oid = row[0]
+                tid = row[1]
+                state = row[2]
+                yield ((oid, tid), (state, tid))
+        rows = (d for d in data())
+        self._insert_entries(rows, connection)
+
+
+    def read_from_stream(self, cache_file):
         # Unlike write_to_stream, using the raw stream
         # is fine for both Py 2 and 3.
         unpick = Unpickler(cache_file)
@@ -247,18 +258,17 @@ class SizedLRUMapping(object):
         if version != self._FILE_VERSION: # pragma: no cover
             raise ValueError("Incorrect version of cache_file")
 
-        entries_oldest_first = list()
-        entries_oldest_first_append = entries_oldest_first.append
-        try:
-            while 1:
-                k, v = load()
-                k = key_transform(k)
-                if k:
-                    entries_oldest_first_append((k, v))
-        except EOFError:
-            pass
-        count = len(entries_oldest_first)
+        def data():
+            try:
+                yield load()
+            except EOFError:
+                pass
+        return self._insert_entries((d for d in data()), cache_file)
 
+    def _insert_entries(self, keys_and_values, source):
+        now = time.time()
+        keys_and_values = list(keys_and_values)
+        count = len(keys_and_values)
         def _insert_entries(entries):
             stored = 0
             # local optimizations
@@ -273,32 +283,65 @@ class SizedLRUMapping(object):
             return stored
 
         stored = 0
-        overlap = 0
         if not self._dict:
             # Empty, so quickly take everything they give us,
             # oldest first so that the result is actually LRU
-            stored = _insert_entries(entries_oldest_first)
+            stored = _insert_entries(keys_and_values)
         else:
             # Loading more data into an existing bucket.
             # Load only the *new* keys, trying to get the newest ones
             # because LRU is going to get messed up anyway.
-            new_entries_newest_first = [
-                t for t in entries_oldest_first
-                if t[0] not in self._dict
-            ]
-            overlap = count - len(new_entries_newest_first)
+            new_entries_newest_first = [t for t in keys_and_values
+                                        if t[0] not in self._dict]
             new_entries_newest_first.reverse()
-            stored = _insert_entries(new_entries_newest_first)
+            stored = _insert_entries(keys_and_values)
 
         then = time.time()
-
-        log.debug(
-            "Examined %d and stored %d items (%d overlap) from %s in %s",
-            count, stored, overlap, getattr(cache_file, 'name', cache_file), then - now
-        )
+        log.info("Examined %d and stored %d items from %s in %s",
+                 count, stored, source, then - now)
         return count, stored
 
-    def write_to_stream(self, cache_file, byte_limit=None, key_transform=lambda k, v: k):
+    def _get_entries_to_write(self, byte_limit=None):
+        entries = list(self._probation)
+        entries.extend(self._protected)
+        entries.extend(self._eden)
+
+        if len(entries) != len(self._dict): # pragma: no cover
+            log.warning("Cache consistency problem. There are %d ring entries and %d dict entries. "
+                        "Refusing to write.",
+                        len(entries), len(self._dict))
+            return
+
+        # Adding key as a tie-breaker makes no sense, and is slow.
+        # We use an attrgetter directly on the node for speed
+
+        entries.sort(key=operator.attrgetter('cffi_entry.frequency'))
+
+        # Write up to the byte limit
+        bytes_written = 0
+        if not byte_limit:
+            byte_limit = self.limit
+        else:
+            # They provided us a byte limit. Our normal approach of
+            # writing LRU won't work, because we'd wind up chopping of
+            # the most frequent items! So first we begin by taking out
+            # everything until we fit.
+            entries_to_write = []
+            for entry in reversed(entries):
+                bytes_written += entry.len
+                if bytes_written > byte_limit:
+                    bytes_written -= entry.len
+                    break
+                entries_to_write.append(entry)
+            # Now we can write in reverse popularity order
+            entries_to_write.reverse()
+            entries = entries_to_write
+            bytes_written = 0
+            del entries_to_write
+
+        return entries, byte_limit
+
+    def write_to_stream(self, cache_file, byte_limit=None):
         now = time.time()
         # pickling the items is about 3x faster than marshal
 
@@ -340,48 +383,8 @@ class SizedLRUMapping(object):
 
         # We get the entries from our MRU lists (in careful order) rather than from the dict
         # so that we have stable iteration order regardless of PYTHONHASHSEED or insertion order.
-
-        entries = list(self._probation)
-        entries.extend(self._protected)
-        entries.extend(self._eden)
-
-        if len(entries) != len(self._dict): # pragma: no cover
-            log.warning("Cache consistency problem. There are %d ring entries and %d dict entries. "
-                        "Refusing to write.",
-                        len(entries), len(self._dict))
-            return
-
-        # Adding key as a tie-breaker makes no sense, and is slow.
-        # We use an attrgetter directly on the node for speed
-
-        entries.sort(key=operator.attrgetter('cffi_entry.frequency'))
-
-
-
-        # Write up to the byte limit
-        count_written = 0
+        entries = self._get_entries_to_write(byte_limit)
         bytes_written = 0
-        if not byte_limit:
-            byte_limit = self.limit
-        else:
-            # They provided us a byte limit. Our normal approach of
-            # writing LRU won't work, because we'd wind up chopping of
-            # the most frequent items! So first we begin by taking out
-            # everything until we fit.
-            entries_to_write = []
-            for entry in reversed([entry for entry
-                                   in entries
-                                   if key_transform(entry.key, entry.value)]):
-                bytes_written += entry.len
-                if bytes_written > byte_limit:
-                    bytes_written -= entry.len
-                    break
-                entries_to_write.append(entry)
-            # Now we can write in reverse popularity order
-            entries_to_write.reverse()
-            entries = entries_to_write
-            bytes_written = 0
-            del entries_to_write
         for entry in entries:
             bytes_written += entry.len
             count_written += 1
@@ -389,15 +392,76 @@ class SizedLRUMapping(object):
                 bytes_written -= entry.len
                 break
 
-            key = key_transform(entry.key, entry.value)
-            if key:
-                dump((key, entry.value))
+            dump((entry.key, entry.value))
 
         then = time.time()
         stats = self.stats()
+        log.info("Wrote %d items (%d bytes) to %s in %s. Total hits %s; misses %s; ratio %s",
+                 count_written, bytes_written, cache_file, then - now,
+                 stats['hits'], stats['misses'], stats['ratio'])
+
+    def write_to_sqlite(self, connection, byte_limit=None):
+        # Create the table, if needed
+
+        create_stmt = """
+            CREATE TABLE IF NOT EXISTS object_state (
+                zoid INTEGER PRIMARY KEY, tid INTEGER, state BLOB
+            )"""
+        connection.execute(create_stmt)
+
+        tcreate_stmt = create_stmt.replace("CREATE TABLE IF NOT EXISTS",
+                                           'CREATE TEMPORARY TABLE')
+        tcreate_stmt = tcreate_stmt.replace("object_state", 'temp_state')
+        connection.execute(tcreate_stmt)
+
+        now = time.time()
+
+        entries, byte_limit = self._get_entries_to_write(byte_limit)
+        bytes_written = 0
+        count_written = 0
+
+        from relstorage.adapters.batch import RowBatcher
+        cur = connection.cursor()
+        batch = RowBatcher(cur, row_limit=300)
+        # The batch size depends on how many params a stored proc can
+        # have; if we go too big we get OperationalError: too many SQL
+        # variables. Note that the multiple-value syntax was added in
+        # 3.7.11, 2012-03-20
+
+        cur.execute('BEGIN')
+        row = (1, )
+        for entry in entries:
+            bytes_written += entry.len
+            count_written += 1
+            if bytes_written > byte_limit:
+                bytes_written -= entry.len
+                break
+            row = (entry.key[0], entry.value[1], entry.value[0])
+
+            batch.insert_into(
+                'temp_state(zoid, tid, state)',
+                '?, ?, ?',
+                row,
+                row[0],
+                0
+            )
+
+
+        batch.flush()
+        batch_time = time.time()
+
+        cur.execute("""
+        INSERT INTO object_state (zoid, tid, state)
+        SELECT zoid, tid, state
+        FROM temp_state
+        WHERE true
+        ON CONFLICT DO NOTHING
+        """)
+        connection.commit()
+        then = time.time()
+        stats = self.stats()
         log.info(
-            "Wrote %d items (%d bytes) to %s in %s. Total hits %s; misses %s; ratio %s; "
-            "sets %s",
-            count_written, bytes_written, cache_file, then - now,
-            stats['hits'], stats['misses'], stats['ratio'], stats['sets']
-        )
+            "Wrote %d items (%d bytes) to %s in %s (%s to insert batch). "
+            "Total hits %s; misses %s; ratio %s",
+            count_written, bytes_written, connection, then - now, batch_time - now,
+            stats['hits'], stats['misses'], stats['ratio'])

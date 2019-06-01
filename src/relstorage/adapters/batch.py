@@ -14,9 +14,9 @@
 """Batch table row insert/delete support.
 """
 from collections import defaultdict
+import itertools
 
 from relstorage._compat import iteritems
-from relstorage._compat import itervalues
 
 
 class RowBatcher(object):
@@ -97,20 +97,25 @@ class RowBatcher(object):
             self.cursor.execute(stmt)
 
     def _do_inserts(self):
-        items = sorted(iteritems(self.inserts))
+        # In the case that we have only a single table we're inserting into,
+        # and thus common key values, we don't need to sort or iterate.
+        # If we have multiple tables, we never want to sort by the rows too,
+        # that doesn't make any sense.
+        if len(self.inserts) == 1:
+            items = [self.inserts.popitem()]
+        else:
+            items = sorted(iteritems(self.inserts), key=lambda i: i[0])
         for (command, header, row_schema, suffix), rows in items:
             # Batched inserts
-            parts = []
-            params = []
-            s = "(%s)" % row_schema
-            for row in itervalues(rows):
-                parts.append(s)
-                params.extend(row)
+            rows = list(rows.values())
+            value_template = "(%s)" % row_schema
+            values_template = [value_template] * len(rows)
+            params = list(itertools.chain.from_iterable(rows))
 
             stmt = "%s INTO %s VALUES\n%s\n%s" % (
-                command, header, ',\n'.join(parts), suffix)
+                command, header, ',\n'.join(values_template), suffix)
             # e.g.,
             # INSERT INTO table(c1, c2)
             # VALUES (%s, %s), (%s, %s), (%s, %s)
             # <suffix>
-            self.cursor.execute(stmt, tuple(params))
+            self.cursor.execute(stmt, params)

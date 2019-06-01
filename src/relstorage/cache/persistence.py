@@ -172,8 +172,40 @@ def _stat_cache_files(options, prefix):
 def count_cache_files(options, prefix):
     return len(_list_cache_files(options, prefix))
 
+def _connect(options, prefix, force=False):
+    # Dump the file.
+    parent_dir = _normalize_path(options)
+    try:
+        # make it if needed. try to avoid a time-of-use/check
+        # race (not that it matters here)
+        os.makedirs(parent_dir)
+    except os.error:
+        pass
+
+    fname = os.path.join(parent_dir, 'relstorage-cache-' + prefix + '.sqlite3')
+    if force:
+        __quiet_remove(fname)
+
+    import sqlite3
+    connection = sqlite3.connect(
+        fname,
+        isolation_level=None)
+
+    # WAL mode can actually be a bit slower at commit time,
+    # but buys us better concurrency.
+    cur = connection.execute('PRAGMA journal_mode = WAL')
+    mode = cur.fetchall()[0][0]
+    if mode != 'wal':
+        raise ValueError("Couldn't set WAL mode")
+
+    connection.execute("PRAGMA synchronous = OFF")
+    return connection
 
 def load_local_cache(options, prefix, local_client_bucket):
+    connection = _connect(options, prefix)
+    local_client_bucket.read_from_sqlite(connection)
+    return 1
+
     # Given an options that points to a local cache dir,
     # choose a file from that directory and load it.
     stats = _stat_cache_files(options, prefix)
@@ -249,16 +281,12 @@ def __quiet_remove(path):
     else:
         return True
 
-def save_local_cache(options, prefix, persistent_cache):
-    # Dump the file.
-    parent_dir = _normalize_path(options)
-    try:
-        # make it if needed. try to avoid a time-of-use/check
-        # race (not that it matters here)
-        os.makedirs(parent_dir)
-    except os.error:
-        pass
+def save_local_cache(options, prefix, persistent_cache, force=False):
+    connection = _connect(options, prefix, force=force)
 
+    persistent_cache.write_to_sqlite(connection)
+    connection.execute('PRAGMA optimize')
+    return
 
     try:
         path = __write_temp_cache_file(options, prefix, parent_dir, persistent_cache)

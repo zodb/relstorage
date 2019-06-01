@@ -122,6 +122,30 @@ the original numbers::
   read  average 6.409313925498282 stddev 0.18588680639842908
   write average 5.651123669245862 stddev 0.023198867394568865
 
+With commit d844311078079a3e203883b5e1e0dbac4e385b81 on Python 3.7.3:
+
+write: Mean +- std dev: 2.09 sec +- 0.06 sec
+read : Mean +- std dev: 3.83 sec +- 0.11 sec
+
+When the code is modified to use (oid_int, tid_int) tuples for keys
+and (state_bytes, tid_int) tuples for values, we get times that are
+surprisingly somewhat worse:
+
+write: Mean +- std dev: 2.30 sec +- 0.05 sec
+read: Mean +- std dev: 4.22 sec +- 0.12 sec
+
+Switching to sqlite3 gives us
+
+write: Mean +- std dev: 7.43 sec +- 0.22 sec
+read: Mean +- std dev: 4.67 sec +- 0.30 sec
+
+This is slower, but enables a much better caching experience. The file
+size on disk is 732,467,200 to store 524,287,908 bytes in memory.
+That's a supremely large cache. A more reasonable 50mb cache gets us:
+
+write: Mean +- std dev: 1.10 sec +- 0.02 sec
+read: Mean +- std dev: 516 ms +- 19 ms
+
 Simulations
 ===========
 

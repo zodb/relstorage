@@ -481,29 +481,31 @@ def save_load_benchmark(runner):
     import itertools
 
     sys.setrecursionlimit(500000)
-    bucket = LocalClientBucket(500*1024*1024)
+    bucket = LocalClientBucket(500 * 1024 * 1024)
     print("Testing", type(bucket._dict))
 
 
-    size_dists = [100] * 800 + [300] * 500 + [1024] * 300 + [2048] * 200 + [4096] * 150
+    if runner.args.worker:
+        # Only need to populate in the workers
+        size_dists = [100] * 800 + [300] * 500 + [1024] * 300 + [2048] * 200 + [4096] * 150
 
-    with open('/dev/urandom', 'rb') as rnd:
-        data = [rnd.read(x) for x in size_dists]
-    data_iter = itertools.cycle(data)
+        with open('/dev/urandom', 'rb') as rnd:
+            data = [rnd.read(x) for x in size_dists]
+        data_iter = itertools.cycle(data)
 
-    for j, datum in enumerate(data_iter):
-        if len(datum) > bucket.limit or bucket.size + len(datum) > bucket.limit:
-            break
-        # To ensure the pickle memo cache doesn't just write out "use object X",
-        # but distinct copies of the strings, we need to copy them
-        bucket[str(j)] = datum[:-1] + b'x'
-        # We need to get the item so its frequency goes up enough to be written
-        # (this is while we're doing an aging at write time, which may go away).
-        # Using an assert statement causes us to write nothing if -O is used.
-        if bucket[str(j)] is datum:
-            raise AssertionError()
+        for j, datum in enumerate(data_iter):
+            if len(datum) > bucket.limit or bucket.size + len(datum) > bucket.limit:
+                break
+            # To ensure the pickle memo cache doesn't just write out "use object X",
+            # but distinct copies of the strings, we need to copy them
+            bucket[(j, j)] = (datum[:-1] + b'x', j)
+            # We need to get the item so its frequency goes up enough to be written
+            # (this is while we're doing an aging at write time, which may go away).
+            # Using an assert statement causes us to write nothing if -O is used.
+            if bucket[(j, j)] is datum:
+                raise AssertionError()
 
-    print("Len", len(bucket), "size", bucket.size)
+        print("Len", len(bucket), "size", bucket.size)
 
 
     cache_pfx = "pfx"
@@ -512,7 +514,13 @@ def save_load_benchmark(runner):
     cache_options.cache_local_dir_compress = False
 
     def write():
-        _Loader.save_local_cache(cache_options, cache_pfx, bucket)
+        import tempfile
+        import vmprof
+        handle, path = prof_file = tempfile.mkstemp('.vmprof', dir=runner.args.temp)
+        vmprof.enable(handle, lines=True)
+        _Loader.save_local_cache(cache_options, cache_pfx, bucket, force=True)
+        vmprof.disable()
+        os.close(handle)
 
     def load():
         b2 = LocalClientBucket(bucket.limit)
@@ -520,7 +528,7 @@ def save_load_benchmark(runner):
 
     run_and_report_funcs(runner,
                          (('write', write),
-                          ('read ', load)))
+                          ('read ', load),))
 
 
 def main():
@@ -544,8 +552,10 @@ def main():
     runner.parse_args()
     kind = runner.args.type
     temp = runner.args.temp
+    need_cleanup = False
     if not temp:
         temp = tempfile.mkdtemp('.rsbench')
+        need_cleanup = True
 
     if kind == 'local':
         local_benchmark(runner)
@@ -562,7 +572,7 @@ def main():
 
         StorageTraceSimulator().simulate('storage')
 
-    if not runner.args.worker:
+    if not runner.args.worker and need_cleanup:
         # Master process cleanup
         import shutil
         shutil.rmtree(temp)

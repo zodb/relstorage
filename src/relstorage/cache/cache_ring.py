@@ -158,7 +158,7 @@ class Cache(object):
             needed_entries = self._byte_limit // self._preallocate_avg_size
             entry_count = min(self._preallocate_max_count, needed_entries)
 
-            keys_and_values = itertools.repeat(('', b''), entry_count)
+            keys_and_values = itertools.repeat(('', (b'', 0)), entry_count)
             _, nodes = self.eden._preallocate_entries(keys_and_values, entry_count)
             node_free_list.extend(nodes)
         return node_free_list
@@ -193,15 +193,19 @@ class CacheRingNode(object):
         entry = self.cffi_entry = node.u.entry
         entry.frequency = 1
         # We denormalize len to avoid accessing through CFFI (but it is needed
-        # by the C code)
-        self.len = entry.weight = len(key) + len(value)
+        # by the C code).
+
+        # Values are two-tuples: (state_bytes, tid_int)
+        # TODO: Get rid of our reliance on that. Let users give a custom
+        # weighting function.
+        self.len = entry.weight = len(key) + len(value[0])
 
     def reset(self, key='', value=b''):
         self.key = key
         self.value = value
         entry = self.cffi_entry
         entry.frequency = 1
-        self.len = entry.weight = len(key) + len(value)
+        self.len = entry.weight = len(key) + len(value[0])
 
     def reset_for_free_list(self):
         """
@@ -220,7 +224,7 @@ class CacheRingNode(object):
         if value == self.value:
             return
         self.value = value
-        self.len = self.cffi_entry.weight = len(self.key) + len(value)
+        self.len = self.cffi_entry.weight = len(self.key) + len(value[0])
 
     # We don't implement __len__---we want people to access .len
     # directly to avoid the function call as it showed up in benchmarks
