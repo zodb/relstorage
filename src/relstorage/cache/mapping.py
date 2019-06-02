@@ -246,7 +246,7 @@ class SizedLRUMapping(object):
         self._insert_entries(rows, connection)
 
 
-    def read_from_stream(self, cache_file):
+    def read_from_stream(self, cache_file, key_transform=lambda k: k):
         # Unlike write_to_stream, using the raw stream
         # is fine for both Py 2 and 3.
         unpick = Unpickler(cache_file)
@@ -260,7 +260,10 @@ class SizedLRUMapping(object):
 
         def data():
             try:
-                yield load()
+                k, v = load()
+                k = key_transform(k)
+                if k:
+                    yield k, v
             except EOFError:
                 pass
         return self._insert_entries((d for d in data()), cache_file)
@@ -301,7 +304,7 @@ class SizedLRUMapping(object):
                  count, stored, source, then - now)
         return count, stored
 
-    def _get_entries_to_write(self, byte_limit=None):
+    def _get_entries_to_write(self, byte_limit=None, key_transform=lambda k, v: k):
         entries = list(self._probation)
         entries.extend(self._protected)
         entries.extend(self._eden)
@@ -339,9 +342,14 @@ class SizedLRUMapping(object):
             bytes_written = 0
             del entries_to_write
 
+        entries = [
+            entry
+            for entry in entries
+            if key_transform(entry.key, entry.value)
+        ]
         return entries, byte_limit
 
-    def write_to_stream(self, cache_file, byte_limit=None):
+    def write_to_stream(self, cache_file, byte_limit=None, key_transform=lambda k, v: k):
         now = time.time()
         # pickling the items is about 3x faster than marshal
 
@@ -383,7 +391,7 @@ class SizedLRUMapping(object):
 
         # We get the entries from our MRU lists (in careful order) rather than from the dict
         # so that we have stable iteration order regardless of PYTHONHASHSEED or insertion order.
-        entries = self._get_entries_to_write(byte_limit)
+        entries = self._get_entries_to_write(byte_limit, key_transform)
         bytes_written = 0
         for entry in entries:
             bytes_written += entry.len
