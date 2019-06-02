@@ -44,9 +44,6 @@ def _normalize_path(options):
     path = os.path.abspath(path)
     return path
 
-
-
-
 def trace_file(options, prefix):
     # Return an open file for tracing to, if that is set up.
     # Otherwise, return nothing.
@@ -102,6 +99,16 @@ def sqlite_connect(options, prefix, overwrite=False):
         # We'll manage transactions, thank you.
         isolation_level=None,
         timeout=10)
+
+    if str is bytes:
+        # We don't use the TEXT type, but even so
+        # sqlite complains:
+        #
+        # ProgrammingError: You must not use 8-bit bytestrings unless
+        # you use a text_factory that can interpret 8-bit bytestrings
+        # (like text_factory = str). It is highly recommended that you
+        # instead just switch your application to Unicode strings.
+        connection.text_factory = str
 
     # WAL mode can actually be a bit slower at commit time,
     # but buys us better concurrency.

@@ -93,7 +93,6 @@ class StorageCacheTests(unittest.TestCase):
         self.assertIsInstance(inst.stats(), dict)
 
     def test_save(self):
-        from persistent.timestamp import TimeStamp
         c = self._makeOne()
         c.checkpoints = (0, 0)
         c.tpc_begin()
@@ -110,7 +109,11 @@ class StorageCacheTests(unittest.TestCase):
         c.options.cache_local_dir = tempfile.mkdtemp()
         try:
             c.save()
-            self.assertEqual(1, len(os.listdir(c.options.cache_local_dir)))
+            files = os.listdir(c.options.cache_local_dir)
+            __traceback_info__ = files
+            # Older versions of sqlite may leave -shm and -wal
+            # files around.
+            self.assertGreaterEqual(len(files), 1)
 
             # Creating one in the same place automatically loads it.
             c2 = self._makeOne(cache_local_dir=c.options.cache_local_dir)
@@ -808,7 +811,8 @@ class SizedLRUMappingTests(unittest.TestCase):
 
 @unittest.skip('Needs work')
 class LocalClientTests(unittest.TestCase):
-
+    # Lots and lots of these right now.
+    # pylint:disable=no-member
     def getClass(self):
         return LocalClient
 

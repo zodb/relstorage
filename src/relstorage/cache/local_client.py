@@ -258,7 +258,7 @@ class LocalClient(object):
         FROM object_state
         ORDER BY tid desc
         """)
-        rows_ac = [0]
+
         def data():
             bytes_read = 0
             for row in cur:
@@ -276,7 +276,7 @@ class LocalClient(object):
                     # Old generation, no delta.
                     # Even though this is old, it could be good to have it,
                     # it might be something that doesn't change much.
-                    # TODO: Trace the frequency in the database.
+                    # TODO: Track the frequency in the database.
                     key = (oid, cp0)
 
                 yield (key, (state, tid))
@@ -322,6 +322,9 @@ class LocalClient(object):
     def write_to_sqlite(self, connection):
         import time
         from relstorage.adapters.batch import RowBatcher
+
+        supports_upsert = sqlite3.sqlite_version_info >= (3, 28)
+
         # Create the table, if needed
 
         create_stmt = """
@@ -386,22 +389,47 @@ class LocalClient(object):
         # Take out locks now; if we don't, we can get 'OperationalError: database is locked'
         # But beginning immediate lets us stand in line.
         cur.execute('BEGIN IMMEDIATE')
-        cur.execute("""
-            INSERT INTO object_state (zoid, tid, state)
-            SELECT zoid, tid, state
-            FROM temp_state
-            WHERE true
-            ON CONFLICT(zoid) DO UPDATE SET tid = excluded.tid, state = excluded.state
-            WHERE excluded.tid > tid
+        if supports_upsert:
+            cur.execute("""
+                INSERT INTO object_state (zoid, tid, state)
+                SELECT zoid, tid, state
+                FROM temp_state
+                WHERE true
+                ON CONFLICT(zoid) DO UPDATE SET tid = excluded.tid, state = excluded.state
+                WHERE excluded.tid > tid
+                """)
+        else:
+            cur.execute("""
+            DELETE FROM object_state
+            WHERE zoid IN (SELECT zoid FROM temp_state)
+            """)
+            cur.execute("""
+                INSERT INTO object_state (zoid, tid, state)
+                SELECT zoid, tid, state
+                FROM temp_state
             """)
 
         if self.checkpoints:
-            cur.execute("""
-            INSERT INTO checkpoints (id, cp0, cp1)
-            VALUES (0, ?, ?)
-            ON CONFLICT(id) DO UPDATE SET cp0 = excluded.cp0, cp1 = excluded.cp1
-            WHERE excluded.cp0 > cp0
-            """, (self.checkpoints[0], self.checkpoints[1]))
+            if supports_upsert:
+                cur.execute("""
+                INSERT INTO checkpoints (id, cp0, cp1)
+                VALUES (0, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET cp0 = excluded.cp0, cp1 = excluded.cp1
+                WHERE excluded.cp0 > cp0
+                """, (self.checkpoints[0], self.checkpoints[1]))
+            else:
+                cur.execute("SELECT cp0, cp1 FROM checkpoints")
+                row = cur.fetchone()
+                if not row:
+                    # First time in.
+                    cur.execute("""
+                    INSERT INTO checkpoints (id, cp0, cp1)
+                    VALUES (0, ?, ?)
+                    """, (self.checkpoints[0], self.checkpoints[1]))
+                elif row[0] < self.checkpoints[0]:
+                    cur.execute("""
+                    UPDATE checkpoints SET cp0 = ?, cp1 = ?
+                    """, (self.checkpoints[0], self.checkpoints[1]))
 
         cur.execute('COMMIT')
         then = time.time()
