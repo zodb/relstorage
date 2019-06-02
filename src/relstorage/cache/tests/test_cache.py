@@ -25,7 +25,6 @@ from relstorage.cache.cache_ring import Cache as _BaseCache
 from relstorage.cache.local_client import LocalClient as _BaseLocalClient
 from relstorage.cache.mapping import SizedLRUMapping as _BaseSizedLRUMapping
 from relstorage.options import Options
-from relstorage.tests.util import skipOnCI
 
 
 class Cache(_BaseCache):
@@ -41,40 +40,6 @@ class SizedLRUMapping(_BaseSizedLRUMapping):
 class LocalClient(_BaseLocalClient):
     _bucket_type = SizedLRUMapping
 
-
-def _check_load_and_store_multiple_files_hit_limit(self, mapping, wrapping_storage=None):
-    from relstorage.cache import persistence
-    import tempfile
-
-    options = MockOptions()
-    options.cache_local_dir_count = 5
-    options.cache_local_dir_read_count = 2
-    options.cache_local_dir = tempfile.mkdtemp()
-
-    dump_object = mapping if wrapping_storage is None else wrapping_storage
-
-    for i in range(5):
-        # They all have to have unique keys so something gets loaded
-        # from each one
-        if i > 0:
-            del mapping[(i - 1, i - 1)]
-        mapping[(i, i)] = (b'abc', i)
-        _ = mapping[(i, i)] # Increment so it gets saved
-
-        persistence.save_local_cache(options, 'test', dump_object)
-        self.assertEqual(persistence.count_cache_files(options, 'test'),
-                         i + 1)
-
-    # make sure it's not in the dict so that even if we find the most recent
-    # cache file first, we still have something to load. If we don't we can sometimes
-    # find that file and fail to store anything and prematurely break out of the loop
-    del mapping[(i, i)] # pylint:disable=undefined-loop-variable
-    files_loaded = persistence.load_local_cache(options, 'test', dump_object)
-
-    self.assertEqual(files_loaded, 2)
-
-    import shutil
-    shutil.rmtree(options.cache_local_dir)
 
 class StorageCacheTests(unittest.TestCase):
 
@@ -112,7 +77,7 @@ class StorageCacheTests(unittest.TestCase):
         c = self._makeOne()
         self.assertEqual(len(c.clients_local_first), 2)
         self.assertEqual(len(c.clients_global_first), 2)
-        self.assertIsInstance(c.clients_global_first[0],_MemcacheStateCache)
+        self.assertIsInstance(c.clients_global_first[0], _MemcacheStateCache)
         self.assertIsInstance(c.clients_global_first[0].client, Client)
         self.assertEqual(c.clients_global_first[0].client.servers, ['host:9999'])
         self.assertEqual(c.prefix, 'myprefix')
@@ -138,23 +103,14 @@ class StorageCacheTests(unittest.TestCase):
         c.after_tpc_finish(p64(268595726030645777))
 
         key = list(iter(c.local_client))[0]
-        self.assertEqual((tid, 2), key)
-
-        mod_time = TimeStamp(p64(tid)).timeTime()
+        self.assertEqual((2, tid), key)
 
         import tempfile
         import os
         c.options.cache_local_dir = tempfile.mkdtemp()
         try:
-            new_path = c.save()
+            c.save()
             self.assertEqual(1, len(os.listdir(c.options.cache_local_dir)))
-            self.assertEqual(os.path.basename(new_path), os.listdir(c.options.cache_local_dir)[0])
-
-            s = os.stat(new_path)
-            self.assertEqual(s.st_atime, s.st_mtime)
-            # Some platforms throw away fractional parts, notable OS X on HFS
-            self.assertEqual(int(mod_time), int(s.st_mtime))
-
 
             # Creating one in the same place automatically loads it.
             c2 = self._makeOne(cache_local_dir=c.options.cache_local_dir)
@@ -162,12 +118,6 @@ class StorageCacheTests(unittest.TestCase):
         finally:
             import shutil
             shutil.rmtree(c.options.cache_local_dir, True)
-
-    @skipOnCI("Sometimes the files_loaded is just 1 on Travis.")
-    def test_load_from_multiple_files_hit_limit(self):
-        cache = self._makeOne(cache_local_mb=0.01)
-        _check_load_and_store_multiple_files_hit_limit(self, cache.local_client._bucket0, cache)
-
 
     def test_clear(self):
         from relstorage.tests.fakecache import data
@@ -327,8 +277,8 @@ class StorageCacheTests(unittest.TestCase):
         tid = p64(55)
         c.send_queue(tid)
         self.assertEqual(data, {
-            'myprefix:state:55:2': tid + b'abc',
-            'myprefix:state:55:3': tid + b'def',
+            'myprefix:state:2:55': tid + b'abc',
+            'myprefix:state:3:55': tid + b'def',
             })
         self.assertEqual(len(c), 2)
 
@@ -342,8 +292,8 @@ class StorageCacheTests(unittest.TestCase):
         tid = p64(55)
         c.send_queue(tid)
         self.assertEqual(data, {
-            'myprefix:state:55:2': tid + b'abc',
-            'myprefix:state:55:3': tid + (b'def' * 100),
+            'myprefix:state:2:55': tid + b'abc',
+            'myprefix:state:3:55': tid + (b'def' * 100),
             })
 
     def test_send_queue_none(self):
@@ -702,24 +652,17 @@ class SizedLRUMappingTests(unittest.TestCase):
 
         self.assertNone(b.get('0'))
 
-    def _load(self, bio, bucket, options):
-        from relstorage.cache import persistence as _Loader
+    def _load(self, bio, bucket):
         bio.seek(0)
-        reader = _Loader._gzip_file(options, None, bio, mode='rb')
-        return bucket.read_from_stream(reader)
+        return bucket.read_from_stream(bio)
 
     def _save(self, bio, bucket, options, byte_limit=None):
-        from relstorage.cache import persistence as _Loader
         bio.seek(0)
-        if options.cache_local_dir_compress:
-            self.assertEqual(".rscache.gz", _Loader._gzip_ext(options))
-        writer = _Loader._gzip_file(options, None, bio, mode='wb')
-        bucket.write_to_stream(writer, byte_limit or options.cache_local_dir_write_max_size)
+        writer = bio
+        count = bucket.write_to_stream(writer, byte_limit or options.cache_local_dir_write_max_size)
         writer.flush()
-        if writer is not bio:
-            writer.close()
         bio.seek(0)
-        return bio
+        return count
 
     def test_load_and_store(self, options=None):
         # pylint:disable=too-many-statements
@@ -734,12 +677,12 @@ class SizedLRUMappingTests(unittest.TestCase):
         self._save(bio, client1, options)
         # Regardless of its read frequency, it's still written
         client2 = self.getClass()(100)
-        count, stored = self._load(bio, client2, options)
+        count, stored = self._load(bio, client2)
         self.assertEqual(count, stored)
         self.assertEqual(count, 1)
 
         client2 = self.getClass()(100)
-        count, stored = self._load(bio, client2, options)
+        count, stored = self._load(bio, client2)
         self.assertEqual(count, stored)
         self.assertEqual(count, 1)
 
@@ -752,18 +695,21 @@ class SizedLRUMappingTests(unittest.TestCase):
         _ = client1['def']
         self.assertEqual(2, len(client1))
         client1_max_size = client1.size
-        self._save(bio, client1, options)
+        bio = BytesIO()
+        count_written = self._save(bio, client1, options)
+        self.assertEqual(2, len(client1))
+        self.assertEqual(count_written, len(client1))
 
         # This time there's too much data, so an arbitrary
         # entry gets dropped
         client2 = self.getClass()(7)
-        count, stored = self._load(bio, client2, options)
+        count, stored = self._load(bio, client2)
         self.assertEqual(0, len(client2))
         self.assertEqual(count, 2)
         self.assertEqual(stored, 0)
 
         client2 = self.getClass()(8)
-        count, stored = self._load(bio, client2, options)
+        count, stored = self._load(bio, client2)
         self.assertEqual(2, len(client2))
         self.assertEqual(count, 2)
         self.assertEqual(stored, 2)
@@ -773,7 +719,7 @@ class SizedLRUMappingTests(unittest.TestCase):
         # Note that we do this in client1, because if we do it in client2,
         # the first key (abc) will push out the existing 'def' and get
         # inserted, and then 'def' will push out 'abc'
-        count, stored = self._load(bio, client1, options)
+        count, stored = self._load(bio, client1)
         self.assertEqual(count, 2)
         self.assertEqual(stored, 0)
         self.assertEqual(2, len(client1))
@@ -784,7 +730,7 @@ class SizedLRUMappingTests(unittest.TestCase):
         del client1['abc']
         self.assertEqual(1, len(client1))
 
-        count, stored = self._load(bio, client1, options)
+        count, stored = self._load(bio, client1)
         self.assertEqual(client1['def'], b'123')
         self.assertEqual(client1['abc'], b'xyz')
         self.assertEqual(count, 2)
@@ -806,7 +752,7 @@ class SizedLRUMappingTests(unittest.TestCase):
 
 
         client1 = self.getClass()(100)
-        count, stored = self._load(bio, client1, options)
+        count, stored = self._load(bio, client1)
         self.assertEqual(count, 2)
         self.assertEqual(stored, 2)
         self.assertEqual(client1.size, client1_max_size)
@@ -822,7 +768,7 @@ class SizedLRUMappingTests(unittest.TestCase):
         self._save(bio, client1, options, 1)
 
         client2 = self.getClass()(3)
-        count, stored = self._load(bio, client2, options)
+        count, stored = self._load(bio, client2)
         self.assertEqual(count, 0)
         self.assertEqual(stored, 0)
 
@@ -848,7 +794,7 @@ class SizedLRUMappingTests(unittest.TestCase):
         self._save(bio, client1, options, 2)
 
         client2 = self.getClass()(100)
-        count, stored = self._load(bio, client2, options)
+        count, stored = self._load(bio, client2)
         self.assertEqual(count, 1)
         self.assertEqual(stored, 1)
         self.assertEqual(list_lrukeys_(client2, 'eden'), ['a'])
@@ -859,10 +805,6 @@ class SizedLRUMappingTests(unittest.TestCase):
         options.cache_local_dir_compress = True
         self.test_load_and_store(options)
 
-    @skipOnCI("Sometimes the files_loaded is just 1 on Travis.")
-    def test_load_from_multiple_files_hit_limit(self):
-        mapping = self.getClass()(100)
-        _check_load_and_store_multiple_files_hit_limit(self, mapping)
 
 @unittest.skip('Needs work')
 class LocalClientTests(unittest.TestCase):
@@ -1265,7 +1207,7 @@ class CacheRingTests(unittest.TestCase):
 
     def test_add_MRUs_empty(self):
         from relstorage.cache.cache_ring import EdenRing
-        lru = EdenRing(100)
+        lru = EdenRing(100, len, len)
         self.assertEqual((), lru.add_MRUs([]))
 
     def test_bool(self):

@@ -281,6 +281,7 @@ class MockCursor(object):
     def setinputsizes(self, **kw):
         self.inputsizes.update(kw)
     def execute(self, stmt, params=None):
+        params = tuple(params) if isinstance(params, list) else params
         self.executed.append((stmt, params))
 
 def test_suite():

@@ -102,7 +102,6 @@ class Poller(object):
             # No data, must be fresh database.
             return None, 0
         new_polled_tid = rows[0][0]
-
         if prev_polled_tid is None:
             # This is the first time the connection has polled.
             return None, new_polled_tid

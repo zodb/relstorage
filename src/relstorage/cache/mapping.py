@@ -19,24 +19,26 @@ import logging
 import operator
 import time
 
-from zope import interface
-
 from relstorage._compat import iteritems
 from relstorage._compat import itervalues
 from relstorage.cache.cache_ring import Cache
-from relstorage.cache.interfaces import IPersistentCache
 from relstorage.cache.persistence import Pickler
 from relstorage.cache.persistence import Unpickler
+from relstorage.cache.interfaces import CacheCorruptedError
 
 log = logging.getLogger(__name__)
 
 
-@interface.implementer(IPersistentCache)
 class SizedLRUMapping(object):
     """
-    A map that keeps a record of its approx. size.
+    A map that keeps a record of its approx. size, ejecting low-priority items
+    when that size is exceeded.
 
-    keys must be `str`` and values must be byte strings.
+    Keys and values can be arbitrary, but should be of homogeneous types.
+    In order for this class to properly handle ejecting values when it
+    gets too big, it must be able to determine the size of the keys and values.
+    If `len` is not appropriate for this, supply your own *key_weight* and *value_weight*
+    functions.
 
     This class is not threadsafe, accesses to __setitem__ and get_and_bubble_all
     must be protected by a lock.
@@ -51,7 +53,7 @@ class SizedLRUMapping(object):
 
     _cache_type = Cache
 
-    def __init__(self, limit):
+    def __init__(self, limit, key_weight=len, value_weight=len):
         # We experimented with using OOBTree and LOBTree
         # for the type of self._dict. The OOBTree has a similar
         # but slightly slower performance profile (as would be expected
@@ -63,7 +65,7 @@ class SizedLRUMapping(object):
         # large BTrees, but since that's not the case, we abandoned the idea.
 
         # This holds all the ring entries, no matter which ring they are in.
-        cache = self._cache = self._cache_type(limit)
+        cache = self._cache = self._cache_type(limit, key_weight, value_weight)
         self._dict = cache.data
 
 
@@ -163,10 +165,6 @@ class SizedLRUMapping(object):
         (because this is called in the event of a cache miss, when
         we needed the item).
         """
-        # These types are gated by LocalClient, we don't need to double
-        # check.
-        #assert isinstance(key, str)
-        #assert isinstance(value, bytes)
         dct = self._dict
 
         if key in dct:
@@ -234,19 +232,7 @@ class SizedLRUMapping(object):
 
     _FILE_VERSION = 5
 
-    def read_from_sqlite(self, connection):
-        cur = connection.execute('SELECT zoid, tid, state FROM object_state')
-        def data():
-            for row in cur:
-                oid = row[0]
-                tid = row[1]
-                state = row[2]
-                yield ((oid, tid), (state, tid))
-        rows = (d for d in data())
-        self._insert_entries(rows, connection)
-
-
-    def read_from_stream(self, cache_file, key_transform=lambda k: k):
+    def read_from_stream(self, cache_file):
         # Unlike write_to_stream, using the raw stream
         # is fine for both Py 2 and 3.
         unpick = Unpickler(cache_file)
@@ -258,25 +244,37 @@ class SizedLRUMapping(object):
         if version != self._FILE_VERSION: # pragma: no cover
             raise ValueError("Incorrect version of cache_file")
 
-        def data():
-            try:
-                k, v = load()
-                k = key_transform(k)
-                if k:
-                    yield k, v
-            except EOFError:
-                pass
-        return self._insert_entries((d for d in data()), cache_file)
+        keys_and_values = []
+        try:
+            while 1:
+                k_v = load()
+                keys_and_values.append(k_v)
+        except EOFError:
+            pass
 
-    def _insert_entries(self, keys_and_values, source):
+        return self.bulk_update(keys_and_values, cache_file)
+
+    def bulk_update(self, keys_and_values, source='<unknown>', total_count=None):
+        """
+        Insert all the ``(key, value)`` pairs found in *keys_and_values*.
+
+        This will permute the most-recently-used status of any existing entries.
+        Entries in the *keys_and_values* iterable should be returned from
+        least recent to most recent, as the items at the end will be considered to be
+        the most recent.
+        """
         now = time.time()
-        keys_and_values = list(keys_and_values)
-        count = len(keys_and_values)
+        #keys_and_values = list(keys_and_values)
+
+        try:
+            count = len(keys_and_values)
+        except TypeError:
+            count = total_count
         def _insert_entries(entries):
             stored = 0
             # local optimizations
             data = self._dict
-            added_entries = self._eden.add_MRUs(entries)
+            added_entries = self._eden.add_MRUs(entries, total_count=total_count)
 
             for e in added_entries:
                 assert e.key not in data
@@ -297,23 +295,29 @@ class SizedLRUMapping(object):
             new_entries_newest_first = [t for t in keys_and_values
                                         if t[0] not in self._dict]
             new_entries_newest_first.reverse()
-            stored = _insert_entries(keys_and_values)
+            stored = _insert_entries(new_entries_newest_first)
 
         then = time.time()
         log.info("Examined %d and stored %d items from %s in %s",
-                 count, stored, source, then - now)
+                  count, stored, source, then - now)
         return count, stored
 
-    def _get_entries_to_write(self, byte_limit=None, key_transform=lambda k, v: k):
+    def items_to_write(self, byte_limit=None, key_transform=lambda k, v: k):
+        """
+        Return an iterable of ``(key, value, size)`` pairs.
+
+        The items are returned in **reverse** priority order, the most
+        important to save being last in the list.
+        """
         entries = list(self._probation)
         entries.extend(self._protected)
         entries.extend(self._eden)
 
         if len(entries) != len(self._dict): # pragma: no cover
-            log.warning("Cache consistency problem. There are %d ring entries and %d dict entries. "
-                        "Refusing to write.",
-                        len(entries), len(self._dict))
-            return
+            raise CacheCorruptedError(
+                "Cache consistency problem. There are %d ring entries and %d dict entries. "
+                "Refusing to write." % (
+                    len(entries), len(self._dict)))
 
         # Adding key as a tie-breaker makes no sense, and is slow.
         # We use an attrgetter directly on the node for speed
@@ -321,14 +325,12 @@ class SizedLRUMapping(object):
         entries.sort(key=operator.attrgetter('cffi_entry.frequency'))
 
         # Write up to the byte limit
-        bytes_written = 0
-        if not byte_limit:
-            byte_limit = self.limit
-        else:
+        if byte_limit:
             # They provided us a byte limit. Our normal approach of
-            # writing LRU won't work, because we'd wind up chopping of
+            # writing LRU won't work, because we'd wind up chopping off
             # the most frequent items! So first we begin by taking out
             # everything until we fit.
+            bytes_written = 0
             entries_to_write = []
             for entry in reversed(entries):
                 bytes_written += entry.len
@@ -343,11 +345,11 @@ class SizedLRUMapping(object):
             del entries_to_write
 
         entries = [
-            entry
+            (entry.key, entry.value, entry.len)
             for entry in entries
             if key_transform(entry.key, entry.value)
         ]
-        return entries, byte_limit
+        return entries
 
     def write_to_stream(self, cache_file, byte_limit=None, key_transform=lambda k, v: k):
         now = time.time()
@@ -391,16 +393,13 @@ class SizedLRUMapping(object):
 
         # We get the entries from our MRU lists (in careful order) rather than from the dict
         # so that we have stable iteration order regardless of PYTHONHASHSEED or insertion order.
-        entries = self._get_entries_to_write(byte_limit, key_transform)
+        entries = self.items_to_write(byte_limit, key_transform)
         bytes_written = 0
-        for entry in entries:
-            bytes_written += entry.len
+        count_written = 0
+        for k, v, size in entries:
+            bytes_written += size
             count_written += 1
-            if bytes_written > byte_limit:
-                bytes_written -= entry.len
-                break
-
-            dump((entry.key, entry.value))
+            dump((k, v))
 
         then = time.time()
         stats = self.stats()
@@ -408,68 +407,4 @@ class SizedLRUMapping(object):
                  count_written, bytes_written, cache_file, then - now,
                  stats['hits'], stats['misses'], stats['ratio'])
 
-    def write_to_sqlite(self, connection, byte_limit=None):
-        # Create the table, if needed
-
-        create_stmt = """
-            CREATE TABLE IF NOT EXISTS object_state (
-                zoid INTEGER PRIMARY KEY, tid INTEGER, state BLOB
-            )"""
-        connection.execute(create_stmt)
-
-        tcreate_stmt = create_stmt.replace("CREATE TABLE IF NOT EXISTS",
-                                           'CREATE TEMPORARY TABLE')
-        tcreate_stmt = tcreate_stmt.replace("object_state", 'temp_state')
-        connection.execute(tcreate_stmt)
-
-        now = time.time()
-
-        entries, byte_limit = self._get_entries_to_write(byte_limit)
-        bytes_written = 0
-        count_written = 0
-
-        from relstorage.adapters.batch import RowBatcher
-        cur = connection.cursor()
-        batch = RowBatcher(cur, row_limit=300)
-        # The batch size depends on how many params a stored proc can
-        # have; if we go too big we get OperationalError: too many SQL
-        # variables. Note that the multiple-value syntax was added in
-        # 3.7.11, 2012-03-20
-
-        cur.execute('BEGIN')
-        row = (1, )
-        for entry in entries:
-            bytes_written += entry.len
-            count_written += 1
-            if bytes_written > byte_limit:
-                bytes_written -= entry.len
-                break
-            row = (entry.key[0], entry.value[1], entry.value[0])
-
-            batch.insert_into(
-                'temp_state(zoid, tid, state)',
-                '?, ?, ?',
-                row,
-                row[0],
-                0
-            )
-
-
-        batch.flush()
-        batch_time = time.time()
-
-        cur.execute("""
-        INSERT INTO object_state (zoid, tid, state)
-        SELECT zoid, tid, state
-        FROM temp_state
-        WHERE true
-        ON CONFLICT DO NOTHING
-        """)
-        connection.commit()
-        then = time.time()
-        stats = self.stats()
-        log.info(
-            "Wrote %d items (%d bytes) to %s in %s (%s to insert batch). "
-            "Total hits %s; misses %s; ratio %s",
-            count_written, bytes_written, connection, then - now, batch_time - now,
-            stats['hits'], stats['misses'], stats['ratio'])
+        return count_written

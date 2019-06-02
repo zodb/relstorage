@@ -124,14 +124,17 @@ class Cache(object):
     #: indexing variable on Py2.)
     generations = tuple((_NoSuchGeneration(i) for i in range(4)))
 
-    def __init__(self, byte_limit):
+    def __init__(self, byte_limit, key_weight=len, value_weight=len):
         self._byte_limit = byte_limit
         # This must hold all the ring entries, no matter which ring they are in.
         self.data = {}
 
-        self.protected = ProtectedRing(int(byte_limit * self._gen_protected_pct))
-        self.probation = ProbationRing(int(byte_limit * self._gen_probation_pct))
-        self.eden = EdenRing(int(byte_limit * self._gen_eden_pct))
+        self.protected = ProtectedRing(int(byte_limit * self._gen_protected_pct),
+                                       key_weight, value_weight)
+        self.probation = ProbationRing(int(byte_limit * self._gen_probation_pct),
+                                       key_weight, value_weight)
+        self.eden = EdenRing(int(byte_limit * self._gen_eden_pct),
+                             key_weight, value_weight)
 
         self.cffi_cache = ffi_new("RSCache*",
                                   {'eden': self.eden.ring_home,
@@ -178,7 +181,7 @@ class CacheRingNode(object):
         '_cffi_owning_node'
     )
 
-    def __init__(self, key, value, node=None):
+    def __init__(self, key, value, weight, node=None):
         self.key = key
         self.value = value
         self._cffi_owning_node = None
@@ -194,18 +197,14 @@ class CacheRingNode(object):
         entry.frequency = 1
         # We denormalize len to avoid accessing through CFFI (but it is needed
         # by the C code).
+        self.len = entry.weight = weight
 
-        # Values are two-tuples: (state_bytes, tid_int)
-        # TODO: Get rid of our reliance on that. Let users give a custom
-        # weighting function.
-        self.len = entry.weight = len(key) + len(value[0])
-
-    def reset(self, key='', value=b''):
+    def reset(self, key, value, weight):
         self.key = key
         self.value = value
         entry = self.cffi_entry
         entry.frequency = 1
-        self.len = entry.weight = len(key) + len(value[0])
+        self.len = entry.weight = weight
 
     def reset_for_free_list(self):
         """
@@ -220,11 +219,11 @@ class CacheRingNode(object):
     frequency = property(lambda self: self.cffi_entry.frequency,
                          lambda self, nv: setattr(self.cffi_entry, 'frequency', nv))
 
-    def set_value(self, value):
+    def set_value(self, value, weight):
         if value == self.value:
             return
         self.value = value
-        self.len = self.cffi_entry.weight = len(self.key) + len(value[0])
+        self.len = self.cffi_entry.weight = weight
 
     # We don't implement __len__---we want people to access .len
     # directly to avoid the function call as it showed up in benchmarks
@@ -242,7 +241,7 @@ def _mutates_free_list(func):
             self._mutated_free_list = True
             # Now replace ourself with a "bound function" on the instance
             # so our overhead somewhat goes away
-            setattr(self, func.__name__, lambda *args: func(self, *args))
+            setattr(self, func.__name__, lambda *args, **kwargs: func(self, *args, **kwargs))
 
     return mutates
 
@@ -268,8 +267,10 @@ class CacheRing(object):
 
     PARENT_CONST = 0
 
-    def __init__(self, limit):
+    def __init__(self, limit, key_weight=len, value_weight=len):
         self.limit = limit
+        self.key_weight = key_weight
+        self.value_weight = value_weight
         node = self.ring_home = ffi.new("RSRing")
         node.r_next = node
         node.r_prev = node
@@ -290,9 +291,12 @@ class CacheRing(object):
         count = len(ordered_keys_and_values) if count is None else count
         nodes = ffi.new('RSRingNode[]', count)
         entries = []
+        key_weight = self.key_weight
+        value_weight = self.value_weight
         for i, (k, v) in enumerate(ordered_keys_and_values):
             node = nodes + i # pointer arithmetic gets RSRingNode*; nodes[i] returns the struct
-            entry = CacheRingNode(k, v, node)
+            weight = key_weight(k) + value_weight(v)
+            entry = CacheRingNode(k, v, weight, node)
             entry._cffi_owning_node = nodes
             entries.append(entry)
         return nodes, entries
@@ -324,11 +328,12 @@ class CacheRing(object):
     @_mutates_free_list
     def add_MRU(self, key, value):
         node_free_list = self.node_free_list
+        weight = self.key_weight(key) + self.value_weight(value)
         if node_free_list:
             new_entry = node_free_list.pop()
-            new_entry.reset(key, value)
+            new_entry.reset(key, value, weight)
         else:
-            new_entry = CacheRingNode(key, value)
+            new_entry = CacheRingNode(key, value, weight)
 
         _ring_add(self.ring_home, new_entry.cffi_ring_node)
         return new_entry
@@ -344,8 +349,9 @@ class CacheRing(object):
     @_mutates_free_list
     def update_MRU(self, entry, value):
         old_size = entry.len
-        entry.set_value(value)
-        new_size = entry.len
+        new_size = self.key_weight(entry.key) + self.value_weight(value)
+        entry.set_value(value, new_size)
+
         if old_size == new_size:
             # Treat it as a simple hit
             return self.on_hit(entry)
@@ -392,9 +398,14 @@ class EdenRing(CacheRing):
     PARENT_CONST = 1
 
     @_mutates_free_list
-    def add_MRUs(self, ordered_keys_and_values):
-        number_nodes = len(ordered_keys_and_values)
-        if not number_nodes:
+    def add_MRUs(self, ordered_keys_and_values, total_count=None):
+        # ordered_keys_and_values may be a generator!
+        # Set preallocate to false if you're sure you're going to have more data
+        # than can fit.
+        if total_count is None:
+            total_count = len(ordered_keys_and_values)
+
+        if not total_count:
             return ()
         # Start by using existing entries *if* we haven't mutated the free list
         # (Because the C code needs contiguous data)
@@ -402,28 +413,35 @@ class EdenRing(CacheRing):
             self._mutated_free_list = True
             # Take the number of entries out of the free list and
             # pair them up with keys/values
-            entries = self.node_free_list[:number_nodes]
+            entries = self.node_free_list[:total_count]
             nodes = entries[0]._cffi_owning_node
-            del self.node_free_list[:number_nodes]
-            for entry, (k, v) in izip(entries, ordered_keys_and_values):
-                entry.reset(k, v)
+            del self.node_free_list[:total_count]
+            key_weight = self.key_weight
+            value_weight = self.value_weight
+
+            ordered_keys_and_values_iter = iter(ordered_keys_and_values)
+            for entry, (k, v) in izip(entries, ordered_keys_and_values_iter):
+                weight = key_weight(k) + value_weight(v)
+                entry.reset(k, v, weight)
 
             # Move the freelist nodes into the ring. Anything that
             # doesn't fit is moved back onto the freelist
             added_entries = self.__add_MRUs(nodes, entries)
+            if len(added_entries) < len(entries):
+                # We had no room, stop looking at the data,
+                # which could be a generator.
+                return added_entries
 
-            # Did we have any more incoming key/values than we had freelist nodes?
-            remaining_keys_and_values = ordered_keys_and_values[len(entries):]
-            # If we did have mare, and we successfully added all the entries from the freelist,
-            # then go ahead and add as many of the leftovers as we can
-            if remaining_keys_and_values and (len(added_entries) == len(entries)):
-                added_entries.extend(self.add_MRUs(remaining_keys_and_values))
+
+            # Anything left over couldn't fit on the freelist. But we did
+            # fit in the cache, so keep trying.
+            added_entries.extend(self.add_MRUs(ordered_keys_and_values_iter,
+                                               total_count=total_count - len(added_entries)))
 
             return added_entries
 
-        nodes, entries = self._preallocate_entries(ordered_keys_and_values, number_nodes)
+        nodes, entries = self._preallocate_entries(ordered_keys_and_values, total_count)
         return self.__add_MRUs(nodes, entries)
-
 
 
     def __add_MRUs(self, nodes, entries):
@@ -463,11 +481,12 @@ class EdenRing(CacheRing):
     @_mutates_free_list
     def add_MRU(self, key, value):
         node_free_list = self.node_free_list
+        weight = self.key_weight(key) + self.value_weight(value)
         if node_free_list:
             new_entry = node_free_list.pop()
-            new_entry.reset(key, value)
+            new_entry.reset(key, value, weight)
         else:
-            new_entry = CacheRingNode(key, value)
+            new_entry = CacheRingNode(key, value, weight)
         rejected_items = _eden_add(self.cffi_cache,
                                    new_entry.cffi_ring_node)
 

@@ -16,17 +16,22 @@ from __future__ import division
 from __future__ import print_function
 
 import bz2
+import sqlite3
 import threading
 import zlib
 
 from zope import interface
 
 from relstorage._compat import iteritems
-from relstorage.cache import persistence as _Loader
-from relstorage.cache.interfaces import IPersistentCache
+from relstorage.cache.persistence import sqlite_connect
 from relstorage.cache.interfaces import IStateCache
+from relstorage.cache.interfaces import IPersistentCache
+from relstorage.cache.interfaces import OID_OBJECT_MAP_TYPE
+from relstorage.cache.interfaces import OID_TID_MAP_TYPE
+from relstorage.cache.interfaces import CacheCorruptedError
 from relstorage.cache.mapping import SizedLRUMapping as LocalClientBucket
 
+logger = __import__('logging').getLogger(__name__)
 
 @interface.implementer(IStateCache,
                        IPersistentCache)
@@ -97,29 +102,34 @@ class LocalClient(object):
                 return compressed
         return data
 
-    def save(self):
+    def save(self, overwrite=False):
         options = self.options
         if options.cache_local_dir and self.__bucket.size:
-            _Loader.save_local_cache(options, self.prefix, self)
-
-    def write_to_stream(self, stream, key_transform=lambda k, v: k):
-        # At the lower level, this could be compressed
-        def _tx(k, v, d=self._decompress):
-            return key_transform(k, d(v))
-        with self._lock:
-            options = self.options
-            return self.__bucket.write_to_stream(stream,
-                                                 options.cache_local_dir_write_max_size,
-                                                 _tx)
+            conn, _ = sqlite_connect(options, self.prefix, overwrite=overwrite)
+            with conn:
+                try:
+                    self.write_to_sqlite(conn)
+                except CacheCorruptedError:
+                    # The cache_trace_analysis.rst test fills
+                    # us with junk data and triggers this.
+                    logger.exception("Failed to save cache")
+                conn.execute('PRAGMA optimize')
 
     def restore(self):
+        """
+        Return ``(max_tids, delta_map)``.
+
+        *max_tids* is a list of the three biggest tids that we just loaded.
+
+        *delta_map* is a map from OID to the exact TID we have for it.
+
+        If no data could be loaded, returns ``None``.
+        """
         options = self.options
         if options.cache_local_dir:
-            _Loader.load_local_cache(options, self.prefix, self)
-
-    def read_from_stream(self, stream, key_transform=lambda k: k):
-        with self._lock:
-            return self.__bucket.read_from_stream(stream, key_transform)
+            conn, fname = sqlite_connect(options, self.prefix)
+            with conn:
+                return self.read_from_sqlite(conn, fname)
 
     @property
     def _bucket0(self):
@@ -128,7 +138,15 @@ class LocalClient(object):
 
     def flush_all(self):
         with self._lock:
-            self.__bucket = self._bucket_type(self.limit)
+            self.__bucket = self._bucket_type(
+                self.limit,
+                # All keys are equally weighted: the size of two 64-bit
+                # integers
+                key_weight=lambda k: 32,
+                # Values are the (state, actual_tid) pair, and their
+                # weight is the size of the state plus one 64-bit integer
+                value_weight=lambda v: len(v[0] if v[0] else b'') + 16
+            )
             self.checkpoints = None
 
     def reset_stats(self):
@@ -204,3 +222,192 @@ class LocalClient(object):
 
     def values(self):
         return self.__bucket.values()
+
+    def read_from_sqlite(self, connection, storage=None):
+        try:
+            cur = connection.execute("SELECT cp0, cp1 FROM checkpoints")
+        except sqlite3.OperationalError:
+            # No table, we must not have saved here before.
+            return
+
+        checkpoints = cur.fetchone()
+        if checkpoints:
+            cp0, cp1 = checkpoints
+            self.store_checkpoints(cp0, cp1)
+        else:
+            cp0, cp1 = (0, 0)
+
+        delta_after0 = OID_TID_MAP_TYPE()
+        delta_after1 = OID_TID_MAP_TYPE()
+        # TODO: Read these in priority order. We don't have that
+        # stored yet. So as a proxy that looks good in benchmarks,
+        # we read them in descending TID order to get the most recently
+        # updated items in the cache.
+        cur = connection.execute('SELECT COUNT(zoid) FROM object_state')
+        total_count = cur.fetchone()[0]
+
+        # XXX: The cache_ring is going to consume all the
+        # items we give it, even if it doesn't actually add them to the
+        # cache. It also creates a very large preallocated array for all
+        # the extra items. We don't want to read more rows than necessary,
+        # to keep the delta maps small and to avoid the overhead.
+        # Currently we're hardcoding a limit, but that needs to change.
+        # We could stop iterating when we've read
+        cur = connection.execute("""
+        SELECT zoid, tid, state
+        FROM object_state
+        ORDER BY tid desc
+        """)
+        rows_ac = [0]
+        def data():
+            bytes_read = 0
+            for row in cur:
+                oid = row[0]
+                tid = row[1]
+                state = row[2]
+
+                if tid >= cp0:
+                    key = (oid, tid)
+                    delta_after0[oid] = tid
+                elif tid >= cp1:
+                    key = (oid, tid)
+                    delta_after1[oid] = tid
+                else:
+                    # Old generation, no delta.
+                    # Even though this is old, it could be good to have it,
+                    # it might be something that doesn't change much.
+                    # TODO: Trace the frequency in the database.
+                    key = (oid, cp0)
+
+                yield (key, (state, tid))
+                bytes_read += len(state) + 32 + 16
+                if bytes_read > self.limit:
+                    break
+        # Do not eagerly evaluate this, avoid doing the DB fetch
+        # until necessary.
+        rows = (d for d in data())
+        self.__bucket.bulk_update(rows, storage or connection, total_count)
+
+        return delta_after0, delta_after1
+
+    def _items_to_write(self):
+        base_entries = self.__bucket.items_to_write()
+        # Only write the newest entry for each OID.
+
+        # {oid -> (oid, actual_tid, state)}
+        newest_entries = OID_OBJECT_MAP_TYPE()
+        for k, v, _ in base_entries:
+            oid, _ = k
+            state, actual_tid = v
+
+            entry_for_oid = newest_entries.get(oid)
+            stored_tid = entry_for_oid[1] if entry_for_oid else -1
+            if stored_tid < actual_tid:
+                newest_entries[oid] = (oid, actual_tid, state)
+            elif stored_tid == actual_tid and state != newest_entries[oid][2]:
+                other_entries = [
+                    (k, v) for k, v, _ in base_entries
+                    if k[0] == oid
+                ]
+                raise CacheCorruptedError(
+                    "Cache corrupted; OID %s has two different states for tid %s:\n%r\n%r\n"
+                    "All entries:\n%r"
+                    % (k, actual_tid, state, newest_entries[oid][2], other_entries)
+                )
+
+
+        del base_entries
+        return newest_entries.values()
+
+    def write_to_sqlite(self, connection):
+        import time
+        from relstorage.adapters.batch import RowBatcher
+        # Create the table, if needed
+
+        create_stmt = """
+            CREATE TABLE IF NOT EXISTS object_state (
+                zoid INTEGER PRIMARY KEY, tid INTEGER, state BLOB
+            )"""
+        connection.execute(create_stmt)
+
+        tcreate_stmt = create_stmt.replace("CREATE TABLE IF NOT EXISTS",
+                                           'CREATE TEMPORARY TABLE')
+        tcreate_stmt = tcreate_stmt.replace("object_state", 'temp_state')
+        connection.execute(tcreate_stmt)
+
+        create_stmt = """
+            CREATE TABLE IF NOT EXISTS checkpoints (
+                id INTEGER PRIMARY KEY, cp0 INTEGER, cp1 INTEGER
+            )"""
+        connection.execute(create_stmt)
+
+        now = time.time()
+
+        bytes_written = 0
+        count_written = 0
+
+        cur = connection.cursor()
+        batch = RowBatcher(cur, row_limit=300)
+        # The batch size depends on how many params a stored proc can
+        # have; if we go too big we get OperationalError: too many SQL
+        # variables. Note that the multiple-value syntax was added in
+        # 3.7.11, 2012-03-20
+
+        # TODO: Tracking of frequency data and aging old
+        # data out of the cache.
+        cur.execute('BEGIN')
+        # No need to even put these into the database if we're
+        # not going to use it
+        # TODO: How does this interact with aging out?
+        cur.execute('SELECT zoid, tid FROM object_state')
+        stored_oid_tid = OID_TID_MAP_TYPE(list(cur))
+
+        row = (1, )
+        for row in self._items_to_write():
+            if stored_oid_tid.get(row[0], 0) >= row[1]:
+                continue
+
+            size = len(row[2])
+            bytes_written += size
+            count_written += 1
+
+            batch.insert_into(
+                'temp_state(zoid, tid, state)',
+                '?, ?, ?',
+                row,
+                row[0],
+                size
+            )
+
+        batch.flush()
+        cur.execute("COMMIT")
+        batch_time = time.time()
+
+        # Take out locks now; if we don't, we can get 'OperationalError: database is locked'
+        # But beginning immediate lets us stand in line.
+        cur.execute('BEGIN IMMEDIATE')
+        cur.execute("""
+            INSERT INTO object_state (zoid, tid, state)
+            SELECT zoid, tid, state
+            FROM temp_state
+            WHERE true
+            ON CONFLICT(zoid) DO UPDATE SET tid = excluded.tid, state = excluded.state
+            WHERE excluded.tid > tid
+            """)
+
+        if self.checkpoints:
+            cur.execute("""
+            INSERT INTO checkpoints (id, cp0, cp1)
+            VALUES (0, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET cp0 = excluded.cp0, cp1 = excluded.cp1
+            WHERE excluded.cp0 > cp0
+            """, (self.checkpoints[0], self.checkpoints[1]))
+
+        cur.execute('COMMIT')
+        then = time.time()
+        stats = self.stats()
+        logger.info(
+            "Wrote %d items (%d bytes) to %s in %s (%s to insert batch). "
+            "Total hits %s; misses %s; ratio %s",
+            count_written, bytes_written, connection, then - now, batch_time - now,
+            stats['hits'], stats['misses'], stats['ratio'])

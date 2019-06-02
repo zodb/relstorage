@@ -19,21 +19,22 @@ import importlib
 import logging
 import os
 import threading
-import time
 
-import BTrees
+
 from persistent.timestamp import TimeStamp
 from ZODB.POSException import ReadConflictError
 from ZODB.utils import p64
 from ZODB.utils import u64
 from zope import interface
 
-from relstorage._compat import PYPY
 from relstorage._compat import iteritems
 from relstorage._compat import string_types
+
 from relstorage.autotemp import AutoTemporaryFile
 from relstorage.cache import persistence
 from relstorage.cache.interfaces import IPersistentCache
+from relstorage.cache.interfaces import IStateCache
+from relstorage.cache.interfaces import OID_TID_MAP_TYPE
 from relstorage.cache.local_client import LocalClient
 from relstorage.cache.trace import ZEOTracer
 
@@ -43,7 +44,7 @@ class _UsedAfterRelease(object):
     pass
 _UsedAfterRelease = _UsedAfterRelease()
 
-@interface.implementer(IPersistentCache)
+@interface.implementer(IStateCache)
 class _MemcacheStateCache(object):
 
     def __init__(self, client, prefix):
@@ -152,10 +153,7 @@ class StorageCache(object):
 
     _tracer = None
 
-    # An LLBTree uses much less memory than a dict, and is still plenty fast on CPython;
-    # it's just as big and slower on PyPy, though.
-    _delta_map_type = BTrees.family64.II.BTree if not PYPY else dict
-
+    _delta_map_type = OID_TID_MAP_TYPE
 
     def __init__(self, adapter, options, prefix, local_client=None,
                  _tracer=None):
@@ -307,124 +305,38 @@ class StorageCache(object):
                 # Only write this out if (1) it proved useful or (2)
                 # we've made modifications. Otherwise, we're writing a consolidated
                 # file for no good reason.
-                return persistence.save_local_cache(self.options, self.prefix, self)
+                # TODO: Consider that now that we have the sql db.
+                return self.local_client.save()
             logger.debug("Cannot justify writing cache file: %s", stats)
 
-    def write_to_stream(self, stream):
-        # XXX: This is now wrong. Update the comments about how this works.
-
-        # We currently don't write anything to the stream, delegating instead
-        # just to the local client.
-
-        # We experimented with trying to save and load chcekpoints and
-        # the delta maps, but this turned out to be complex (because
-        # the `new_instance`s that have the actual data are released
-        # before we are, so their data gets lost, and we have to
-        # implement a parent/child relationship to fix that) and no
-        # more effective than relying on the default checkpoints we
-        # get from polling, if there have been no changes---at least
-        # in the case of zodbshootout benchmark (in fact, it was
-        # somewhat *slower*, for reasons that aren't fully clear).
-
-        # Note that if we did want to dump the delta maps, we would
-        # need to either wrap them in a dict or dump them pairwise; We
-        # can't dump a BTree larger than about 25000 without getting
-        # into recursion problems.
-
-        # oid -> tid
-        newest_tids = self._find_newest_tids_for_oid()
-        def key_transform(key, value):
-            # Reject anything that's not the most current key we have
-            oid, _ = key
-            _, actual_tid = value
-            if newest_tids[oid] != actual_tid:
-                return
-            # Transform other keys to their exact match.
-            # When we read in, we'll put these into the 'delta_after1' map.
-            return (oid, actual_tid)
-
-        return self.local_client.write_to_stream(stream, key_transform)
-
-    def _find_max_tids(self):
-        tids = {v[1] for v in self.local_client.values()}
-        return sorted(tids, reverse=True)[:3]
-
-    def _find_newest_tids_for_oid(self):
-        # All of these, by definition, will be less than or equal to, the
-        # value of the max_tid.
-        oid_to_tid = self._delta_map_type()
-        for k, v in self.local_client.items():
-            oid, _ = k
-            _, tid = v
-            # 0 is a valid value for both; 0 is the root oid,
-            # which likely rarely changes, so its helpful to have
-            # it in the cache.
-            if tid is not None and oid is not None:
-                oid_to_tid[oid] = max(tid, 0)
-        return oid_to_tid
-
-    def get_cache_modification_time_for_stream(self):
-        max_tids = self._find_max_tids()
-        if max_tids:
-            tid_str = p64(max_tids[0])
-            ts = TimeStamp(tid_str)
-            return ts.timeTime()
-
     def restore(self):
-        options = self.options
-        if options.cache_local_dir:
-            begin = time.time()
-            loaded_file_count = persistence.load_local_cache(options, self.prefix, self)
-            end = time.time()
-            logger.debug("Loaded %s cache files in %s", loaded_file_count, end - begin)
+        # We must only restore into an empty cache.
+        assert not len(self.local_client) # pylint:disable=len-as-condition
+        assert not self.checkpoints
 
-    def read_from_stream(self, stream):
-        # As we try to store entries, parse tids out of the keys;
-        # only store the newest entry for each item.
+        # Note that there may have been data in the file that we
+        # didn't get to actually store but that still comes back in
+        # the delta_map; that's ok.
+        result = self.local_client.restore()
+        if not result:
+            return
 
-        # Storing them in delta_after0 gets us better hit ratios, and
-        # we don't have to move things to our preferred (cp0) key as
-        # often, but seems to lead to conflicts? TODO: Test this
-        # rigorously.
+        # TODO: The delta computation and use of checkpoints should
+        # really be at this level.
+        delta_after0, delta_after1 = result
+        self.checkpoints = self.local_client.get_checkpoints()
+        if self.checkpoints:
+            # No point keeping the delta maps otherwise,
+            # we have to poll
+            self.current_tid = self.checkpoints[0]
+            self.delta_after0 = delta_after0
+            self.delta_after1 = delta_after1
 
-        observed_tids = set()
-        def key_transform(key, deltas=self.delta_after0):
-            # We have a key that exactly describes the state data.
-            # If we don't already have something newer, take it
-            oid_int, tid_int = key
-            observed_tids.add(tid_int)
-            if deltas.get(oid_int, 0) < tid_int:
-                deltas[oid_int] = tid_int
-                return key
-            # Otherwise, just drop it.
-
-        examined, stored = self.local_client.read_from_stream(stream, key_transform)
-        max_tid = max(observed_tids)
-
-        if not self.checkpoints:
-            big_tids = sorted(observed_tids, reverse=True)[:3]
-            if len(big_tids) > 1:
-                # Use the second biggest tid as our current tid,
-                # because we just put everything in delta after 0.
-                # This keeps everything nice and consistent.
-                # Excellent.
-                tid = big_tids[1]
-                self.checkpoints = (tid, tid)
-                self.current_tid = max_tid
-            else:
-                # A small cache file with only one transaction. Hmm.
-                # Put things into delta_after1, since we don't have a good tid in the past.
-                tid = big_tids[0]
-                self.checkpoints = (tid, tid)
-                self.current_tid = tid
-                self.delta_after1 = self.delta_after0
-                self.delta_after0 = self._delta_map_type()
-
-        # If we aren't sure to store this, it's probably going to get
-        # overwritten on the first poll.
-        self.local_client.store_checkpoints(*self.checkpoints)
-
-        return examined, stored
+        logger.debug(
+            "Restored with current_tid %s and checkpoints %s and deltas %s %s",
+            self.current_tid, self.checkpoints,
+            len(self.delta_after0), len(self.delta_after1)
+        )
 
     def close(self):
         """
@@ -579,8 +491,9 @@ class StorageCache(object):
         if tid_int:
             # This object changed after checkpoint0, so
             # there is only one place to look for its state: the exact key.
+            key = (oid_int, tid_int)
             for client in self.clients_local_first:
-                cache_data = client[(oid_int, tid_int)]
+                cache_data = client[key]
                 if cache_data:
                     # Cache hit.
                     assert cache_data[1] == tid_int
@@ -598,7 +511,7 @@ class StorageCache(object):
 
             # At this point we know that tid_int == actual_tid_int
             for client in self.clients_local_first:
-                client[(oid_int, tid_int)] = (state, actual_tid_int)
+                client[key] = (state, actual_tid_int)
             return state, tid_int
 
         # Make a list of cache keys to query. The list will have either
@@ -612,6 +525,8 @@ class StorageCache(object):
         elif cp1 != cp0:
             tid2 = cp1
 
+        preferred_key = (oid_int, tid1)
+
         for client in self.clients_local_first:
             # Query the cache. Query multiple keys simultaneously to
             # minimize latency.
@@ -622,7 +537,7 @@ class StorageCache(object):
                 if client is not local_client:
                     # Copy to the local client
                     # at the preferred key
-                    local_client[(oid_int, tid1)] = response
+                    local_client[preferred_key] = response
                 # Cache hit
                 self._trace(0x22, oid_int, actual_tid, dlen=len(state))
                 return state, actual_tid
@@ -635,7 +550,7 @@ class StorageCache(object):
             # Record this as a store into the cache, ZEO does.
             self._trace(0x52, oid_int, tid_int, dlen=len(state) if state else 0)
             for client in self.clients_local_first:
-                client[(oid_int, tid1)] = (state, tid_int)
+                client[preferred_key] = (state, tid_int)
         return state, tid_int
 
 
@@ -694,7 +609,7 @@ class StorageCache(object):
         self._trace_store_current(tid_int, items)
         for startpos, endpos, oid_int in items:
             state, length = self._read_temp_state(startpos, endpos)
-            cachekey = (tid_int, oid_int)
+            cachekey = (oid_int, tid_int)
             item_size = length + len(cachekey)
             if send_size and send_size + item_size >= self.send_limit:
                 for client in self.clients_local_first:
@@ -755,8 +670,6 @@ class StorageCache(object):
         parameter will be ignored.  new_tid_int can not be None.
         """
         # pylint:disable=too-many-statements,too-many-branches,too-many-locals
-        #print("After poll. Previous:", prev_tid_int, "New", new_tid_int,
-        #      "My current:", self.current_tid, "CPs", self.checkpoints)
         new_checkpoints = None
         for client in self.clients_global_first:
             s = client.get_checkpoints()
@@ -791,8 +704,8 @@ class StorageCache(object):
 
         allow_shift = True
         if new_checkpoints[0] > new_tid_int:
-            # checkpoint0 is in a future that this instance can't
-            # yet see.  Ignore the checkpoint change for now.
+            # checkpoint0 is in a future that this instance can't yet
+            # see. Ignore the checkpoint change for now.
             new_checkpoints = self.checkpoints
             if not new_checkpoints:
                 new_checkpoints = (new_tid_int, new_tid_int)
