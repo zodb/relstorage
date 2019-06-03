@@ -73,6 +73,19 @@ else:
     from base64 import decodestring as base64_decodebytes
     casefold = str.lower
 
+def spawn(func, args=()):
+    """Execute func in a different (real) thread"""
+    import threading
+    submit = lambda func, args: threading.Thread(target=func, args=args).start()
+    try:
+        import gevent.monkey
+        import gevent
+    except ImportError:
+        pass
+    else:
+        if gevent.monkey.is_module_patched('threading'):
+            submit = lambda func, args: gevent.get_hub().threadpool.spawn(func, *args)
+    submit(func, args)
 
 def get_this_psutil_process():
     # Returns a freshly queried object each time.

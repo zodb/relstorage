@@ -18,7 +18,10 @@ from __future__ import print_function
 import bz2
 import sqlite3
 import threading
+import time
 import zlib
+
+from contextlib import closing
 
 from zope import interface
 
@@ -107,15 +110,16 @@ class LocalClient(object):
         options = self.options
         if options.cache_local_dir and self.__bucket.size:
             conn, pathname = sqlite_connect(options, self.prefix, overwrite=overwrite)
-            with conn:
+            with closing(conn):
                 try:
                     self.write_to_sqlite(conn)
                 except CacheCorruptedError:
                     # The cache_trace_analysis.rst test fills
                     # us with junk data and triggers this.
                     logger.exception("Failed to save cache")
-                conn.execute('PRAGMA optimize')
-            # Testing: Return a signal when we tried to write something.
+
+            # Testing: Return a signal when we tried to write
+            # something.
             return pathname
 
     def restore(self):
@@ -131,7 +135,7 @@ class LocalClient(object):
         options = self.options
         if options.cache_local_dir:
             conn, fname = sqlite_connect(options, self.prefix)
-            with conn:
+            with closing(conn):
                 return self.read_from_sqlite(conn, fname)
 
     @property
@@ -342,7 +346,6 @@ class LocalClient(object):
         return newest_entries.values()
 
     def write_to_sqlite(self, connection):
-        import time
         from relstorage.adapters.batch import RowBatcher
 
         supports_upsert = sqlite3.sqlite_version_info >= (3, 28)
@@ -462,3 +465,5 @@ class LocalClient(object):
             "Total hits %s; misses %s; ratio %s",
             count_written, bytes_written, connection, then - now, batch_time - now,
             stats['hits'], stats['misses'], stats['ratio'])
+
+        return count_written

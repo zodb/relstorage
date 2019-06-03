@@ -91,6 +91,14 @@ class StorageCacheTests(unittest.TestCase):
         self.assertIsInstance(inst.stats(), dict)
 
     def test_save(self):
+        import threading
+        import tempfile
+        import os
+        import shutil
+        import time
+
+        active_threads = threading.active_count()
+
         c = self._makeOne()
         c.checkpoints = (0, 0)
         c.tpc_begin()
@@ -102,23 +110,23 @@ class StorageCacheTests(unittest.TestCase):
         key = list(iter(c.local_client))[0]
         self.assertEqual((2, tid), key)
 
-        import tempfile
-        import os
         c.options.cache_local_dir = tempfile.mkdtemp()
-        try:
-            c.save()
-            files = os.listdir(c.options.cache_local_dir)
-            __traceback_info__ = files
-            # Older versions of sqlite may leave -shm and -wal
-            # files around.
-            self.assertGreaterEqual(len(files), 1)
+        self.addCleanup(shutil.rmtree, c.options.cache_local_dir, True)
 
-            # Creating one in the same place automatically loads it.
-            c2 = self._makeOne(cache_local_dir=c.options.cache_local_dir)
-            self.assertEqual(1, len(c2))
-        finally:
-            import shutil
-            shutil.rmtree(c.options.cache_local_dir, True)
+        c.save()
+        files = os.listdir(c.options.cache_local_dir)
+        __traceback_info__ = files
+        # Older versions of sqlite may leave -shm and -wal
+        # files around.
+        self.assertGreaterEqual(len(files), 1)
+
+        # Creating one in the same place automatically loads it.
+        c2 = self._makeOne(cache_local_dir=c.options.cache_local_dir)
+        self.assertEqual(1, len(c2))
+
+        # Avoid warnings from testrunner
+        while threading.active_count() > active_threads:
+            time.sleep(0.01)
 
     def test_clear(self):
         from relstorage.tests.fakecache import data
@@ -1098,22 +1106,34 @@ class LocalClientStrKeysValuesTests(unittest.TestCase):
         self.assertEqual(list_lrukeys('probation'), ['k6'])
         self.assertEqual(list_lrukeys('protected'), ['k1'])
 
-    def test_load_and_save(self, _make_dir=True):
-        # pylint:disable=too-many-statements
+    def test_load_and_save(self):
+        # pylint:disable=too-many-statements,too-many-locals
         import tempfile
         import shutil
         import os
+        import threading
+        import time
 
-        root_temp_dir = temp_dir = tempfile.mkdtemp(".rstest_cache")
-        self.addCleanup(shutil.rmtree, root_temp_dir)
-        if not _make_dir:
-            temp_dir = os.path.join(temp_dir, 'child1', 'child2')
-        __traceback_info__ = temp_dir, _make_dir
+        active_threads = threading.active_count()
+
+        root_temp_dir = tempfile.mkdtemp(".rstest_cache")
+        self.addCleanup(shutil.rmtree, root_temp_dir, True)
+        # Intermediate directories will be auto-created
+        temp_dir = os.path.join(root_temp_dir, 'child1', 'child2')
 
         c = self._makeOne(cache_local_dir=temp_dir)
         # Doing the restore created the database.
-        self.assertEqual(1, len(os.listdir(temp_dir) if _make_dir else ['']))
-        self.assertEqual(1, len(os.listdir(root_temp_dir)))
+        files = os.listdir(temp_dir)
+        __traceback_info__ = files
+        # There may be up to 3 files here, including the -wal and -shm
+        # files, depending on how the database is closed and how the database
+        # was configured. It also depends os when we look: some of the wal cleanup
+        # we push to a background thread.
+        def get_cache_files():
+            return [x for x in os.listdir(temp_dir) if x.endswith('sqlite3')]
+        cache_files = get_cache_files()
+        len_initial_cache_files = len(cache_files)
+        self.assertEqual(len_initial_cache_files, 1)
         # Saving an empty bucket does nothing
         self.assertFalse(c.save())
 
@@ -1125,15 +1145,15 @@ class LocalClientStrKeysValuesTests(unittest.TestCase):
         c[key] = val
         c.__getitem__(key) # Increment the count so it gets saved
         self.assertTrue(c.save())
-        cache_files = os.listdir(temp_dir)
-        self.assertEqual(1, len(cache_files))
+        cache_files = get_cache_files()
+        self.assertEqual(len(cache_files), len_initial_cache_files)
         self.assertTrue(cache_files[0].startswith('relstorage-cache-'), cache_files)
 
         # Loading it works
         c2 = self._makeOne(cache_local_dir=temp_dir)
         self.assertEqual(c2[key], val)
-        cache_files = os.listdir(temp_dir)
-        self.assertEqual(1, len(cache_files))
+        cache_files = get_cache_files()
+        self.assertEqual(len_initial_cache_files, len(cache_files))
 
         # Add a new key and saving updates the existing file.
         key2 = (1, 1)
@@ -1142,14 +1162,14 @@ class LocalClientStrKeysValuesTests(unittest.TestCase):
         c2.__getitem__(key2) # increment
 
         c2.save()
-        new_cache_files = os.listdir(temp_dir)
+        new_cache_files = get_cache_files()
         # Same file still
         self.assertEqual(cache_files, new_cache_files)
 
         # And again
         cache_files = new_cache_files
         c2.save()
-        new_cache_files = os.listdir(temp_dir)
+        new_cache_files = get_cache_files()
         self.assertEqual(cache_files, new_cache_files)
 
         # Notice, though, that we normalized the tid value
@@ -1160,17 +1180,18 @@ class LocalClientStrKeysValuesTests(unittest.TestCase):
         self.assertEqual(c3[(1, 0)], val2)
 
         # If we corrupt the file, it is silently ignored and removed
-        with open(os.path.join(temp_dir, new_cache_files[0]), 'wb') as f:
-            f.write(b'Nope!')
+        for f in new_cache_files:
+            with open(os.path.join(temp_dir, f), 'wb') as f:
+                f.write(b'Nope!')
 
         c3 = self._makeOne(cache_local_dir=temp_dir)
         self.assertEqual(c3[key], None)
-        cache_files = os.listdir(temp_dir)
-        self.assertEqual(1, len(cache_files))
+        cache_files = get_cache_files()
+        self.assertEqual(len_initial_cache_files, len(cache_files))
 
-    def test_load_and_save_new_dir(self):
-        # automatically create directories as needed
-        self.test_load_and_save(False)
+        # Avoid warnings from the testrunner about our background thread(s)
+        while threading.active_count() > active_threads:
+            time.sleep(0.01)
 
 class CacheRingTests(unittest.TestCase):
 

@@ -16,8 +16,10 @@ from __future__ import division
 from __future__ import print_function
 
 import logging
+import time
 import os
 import os.path
+import sqlite3
 
 from relstorage._compat import PY3
 
@@ -78,27 +80,43 @@ def trace_file(options, prefix):
         log.info("opened tracefile %r", fname)
     return tf
 
+class Connection(sqlite3.Connection):
 
-def sqlite_connect(options, prefix, overwrite=False):
-    # Dump the file.
-    parent_dir = _normalize_path(options)
-    try:
-        # make it if needed. try to avoid a time-of-use/check
-        # race (not that it matters here)
-        os.makedirs(parent_dir)
-    except os.error:
-        pass
+    def close(self):
+        # If we're the only connection open to this database,
+        # and SQLITE_FCNTL_PERSIST_WAL is true (by default
+        # *most* places, but apparently not in the sqlite3
+        # 3.24 shipped with Apple in macOS 10.14.5), then when
+        # we close the database the wal file that was built up
+        # by any of the writes that have been done will be automatically
+        # combined with the database file, as if with
+        # "PRAGMA wal_checkpoint(RESTART)".
+        #
+        # This can be slow, and it releases the GIL, so do that in another thread
+        from relstorage._compat import spawn
+        def c():
+            # Recommended best practice is to OPTIMIZE the database for
+            # each closed connection. OPTIMIZE needs to run in each connection
+            # so it can see what tables and indexes were used. It's usually fast,
+            # but has the potential to be slow, so let it happen in the background.
+            try:
+                self.execute("PRAGMA optimize")
+            except sqlite3.DatabaseError:
+                # It's possible the file was removed.
+                logger.exception("Failed to optimize database; was it removed?")
 
-    fname = os.path.join(parent_dir, 'relstorage-cache-' + prefix + '.sqlite3')
-    if overwrite:
-        logger.info("Replacing any existing cache at %s", fname)
-        __quiet_remove(fname)
+            super(Connection, self).close()
+        spawn(c)
 
-    import sqlite3
+
+def _connect_to_file(fname, factory=Connection):
+
     connection = sqlite3.connect(
         fname,
         # We'll manage transactions, thank you.
         isolation_level=None,
+        factory=factory,
+        check_same_thread=False,
         timeout=10)
 
     if str is bytes:
@@ -111,6 +129,31 @@ def sqlite_connect(options, prefix, overwrite=False):
         # instead just switch your application to Unicode strings.
         connection.text_factory = str
 
+    return connection
+
+def sqlite_connect(options, prefix, overwrite=False, max_wal=10*1024*1024):
+    """
+    Return a DB-API Connection object.
+
+    .. caution:: Using the connection as a context manager does **not**
+       result in the connection being closed, only committed or rolled back.
+    """
+    parent_dir = _normalize_path(options)
+    try:
+        # make it if needed. try to avoid a time-of-use/check
+        # race (not that it matters here)
+        os.makedirs(parent_dir)
+    except os.error:
+        pass
+
+    fname = os.path.join(parent_dir, 'relstorage-cache-' + prefix + '.sqlite3')
+    wal_fname = fname + '-wal'
+    if overwrite:
+        logger.info("Replacing any existing cache at %s", fname)
+        __quiet_remove(fname)
+        __quiet_remove(wal_fname)
+
+    connection = _connect_to_file(fname)
     # WAL mode can actually be a bit slower at commit time,
     # but buys us better concurrency.
     try:
@@ -127,6 +170,38 @@ def sqlite_connect(options, prefix, overwrite=False):
         raise ValueError("Couldn't set WAL mode")
 
     cur.execute("PRAGMA synchronous = OFF")
+    # Disable auto-checkpoint so that commits have
+    # reliable duration; after commit, if it's a good time,
+    # we can run 'PRAGMA wal_checkpoint'. (In most cases, the last
+    # database connection that's open will essentially do that
+    # automatically.)
+    cur.execute("PRAGMA wal_autocheckpoint = 0")
+    # In fact, now might be a good time to checkpoint. If we're opening the
+    # DB, we could be around for awhile. Doing the checkpoint will
+    # release the GIL, so it's good to do in another thread.
+    # (If we're monkey-patched by gevent, do so in a gevent worker)
+    if (not overwrite
+            and os.path.exists(wal_fname)
+            and os.stat(wal_fname).st_size >= max_wal):
+        # TODO: Explicit test for this condition.
+        def checkpoint():
+            conn = _connect_to_file(fname, factory=sqlite3.Connection)
+            begin = time.time()
+            cur = conn.execute("PRAGMA wal_checkpoint(RESTART)")
+            ok, modified_pages, number_moved_to_db = cur.fetchone()
+            cur.execute("PRAGMA optimize")
+            end = time.time()
+            logger.info(
+                "Checkpointed WAL database %s in %s. "
+                "Busy? %s Modified pages: %d, moved pages: %d",
+                fname, end - begin, ok == 0, modified_pages, number_moved_to_db
+            )
+            conn.close()
+
+        from relstorage._compat import spawn
+        spawn(checkpoint)
+
+
     cur.close()
     return connection, fname
 

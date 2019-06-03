@@ -24,6 +24,8 @@ from collections import namedtuple
 
 from relstorage.options import Options
 
+logger = __import__('logging').getLogger(__name__)
+
 try:
     import sys
     import cProfile
@@ -471,7 +473,7 @@ class StorageTraceSimulator(object):
 
 
 def save_load_benchmark(runner):
-    # pylint:disable=too-many-locals
+    # pylint:disable=too-many-locals,too-many-statements
     import io
     from relstorage.cache.mapping import SizedLRUMapping as LocalClientBucket
     from relstorage.cache import persistence as _Loader
@@ -487,7 +489,7 @@ def save_load_benchmark(runner):
     cache_options.cache_local_dir = runner.args.temp #'/tmp'
     cache_options.cache_local_dir_compress = False
     cache_options.cache_local_mb = 525
-    client = LocalClient(cache_options)
+    client = LocalClient(cache_options, cache_pfx)
     # Monkey with the internals so we don't have to
     # populate multiple times.
     bucket = client._LocalClient__bucket
@@ -524,6 +526,7 @@ def save_load_benchmark(runner):
 
     def _open(fd, mode):
         return io.open(fd, mode, buffering=16384)
+
 
     def write_mapping():
         import tempfile
