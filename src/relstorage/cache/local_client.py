@@ -388,6 +388,8 @@ class LocalClient(object):
         from relstorage.adapters.batch import RowBatcher
 
         supports_upsert = sqlite3.sqlite_version_info >= (3, 28)
+        supports_paren_update = sqlite3.sqlite_version_info >= (3, 15)
+        __traceback_info__ = sqlite3.sqlite_version_info
         cur = connection.cursor()
         # Create the table, if needed
 
@@ -478,19 +480,37 @@ class LocalClient(object):
             # snapshot where we put temp objects in, so we can't rely on
             # just assuming that's the truth anymore.
             # The parenthesized update is from sqlite 3.15.0 (2016-10-14)
-            cur.execute("""
-            WITH newer_values AS (SELECT temp_state.*
-                FROM temp_state
-                INNER JOIN object_state on temp_state.zoid = object_state.zoid
-                WHERE object_state.tid < temp_state.tid
-            )
-            UPDATE object_state
-            SET (tid, frequency, state) = (SELECT newer_values.tid,
-                                            newer_values.frequency + object_state.frequency,
-                                            newer_values.state
-                                           FROM newer_values WHERE newer_values.zoid = zoid)
-            WHERE zoid IN (SELECT zoid FROM newer_values)
-            """)
+            if supports_paren_update:
+                cur.execute("""
+                WITH newer_values AS (SELECT temp_state.*
+                    FROM temp_state
+                    INNER JOIN object_state on temp_state.zoid = object_state.zoid
+                    WHERE object_state.tid < temp_state.tid
+                )
+                UPDATE object_state
+                SET (tid, frequency, state) = (SELECT newer_values.tid,
+                                                newer_values.frequency + object_state.frequency,
+                                                newer_values.state
+                                               FROM newer_values WHERE newer_values.zoid = zoid)
+                WHERE zoid IN (SELECT zoid FROM newer_values)
+                """)
+            else:
+                cur.execute("""
+                WITH newer_values AS (SELECT temp_state.*
+                    FROM temp_state
+                    INNER JOIN object_state on temp_state.zoid = object_state.zoid
+                    WHERE object_state.tid < temp_state.tid
+                )
+                UPDATE object_state
+                SET tid = (SELECT newer_values.tid,
+                           FROM newer_values WHERE newer_values.zoid = zoid),
+                frequency = (SELECT  newer_values.frequency + object_state.frequency,
+                             FROM newer_values WHERE newer_values.zoid = zoid),
+                    state = (SELECT newer_values.state,
+                             FROM newer_values WHERE newer_values.zoid = zoid)
+                WHERE zoid IN (SELECT zoid FROM newer_values)
+                """)
+
 
             cur.execute("""
                 INSERT INTO object_state (zoid, tid, state, frequency)
