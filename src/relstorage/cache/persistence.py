@@ -113,7 +113,15 @@ def sqlite_connect(options, prefix, overwrite=False):
 
     # WAL mode can actually be a bit slower at commit time,
     # but buys us better concurrency.
-    cur = connection.execute('PRAGMA journal_mode = WAL')
+    try:
+        cur = connection.execute('PRAGMA journal_mode = WAL')
+    except sqlite3.DatabaseError:
+        if overwrite:
+            raise
+        logger.info("Corrupt cache database at %s; replacing", fname)
+        connection.close()
+        return sqlite_connect(options, prefix, True)
+
     mode = cur.fetchall()[0][0]
     if mode != 'wal':
         raise ValueError("Couldn't set WAL mode")

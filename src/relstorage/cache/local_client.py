@@ -106,7 +106,7 @@ class LocalClient(object):
     def save(self, overwrite=False):
         options = self.options
         if options.cache_local_dir and self.__bucket.size:
-            conn, _ = sqlite_connect(options, self.prefix, overwrite=overwrite)
+            conn, pathname = sqlite_connect(options, self.prefix, overwrite=overwrite)
             with conn:
                 try:
                     self.write_to_sqlite(conn)
@@ -115,6 +115,8 @@ class LocalClient(object):
                     # us with junk data and triggers this.
                     logger.exception("Failed to save cache")
                 conn.execute('PRAGMA optimize')
+            # Testing: Return a signal when we tried to write something.
+            return pathname
 
     def restore(self):
         """
@@ -167,13 +169,16 @@ class LocalClient(object):
     def __getitem__(self, oid_tid):
         return self(*oid_tid)
 
-    def __call__(self, oid, tid1, tid2=None):
+    def __call__(self, oid, tid1, tid2=None, _keys=None):
+        # _keys is a hook for testing.
         decompress = self._decompress
         get = self.__bucket.get_and_bubble_all
-        if tid2 is not None:
-            keys = ((oid, tid1), (oid, tid2))
-        else:
-            keys = ((oid, tid1),)
+        keys = _keys
+        if keys is None:
+            if tid2 is not None:
+                keys = ((oid, tid1), (oid, tid2))
+            else:
+                keys = ((oid, tid1),)
 
         with self._lock:
             res = get(keys)
@@ -334,8 +339,6 @@ class LocalClient(object):
                     "All entries:\n%r"
                     % (k, actual_tid, state, newest_entries[oid][2], other_entries)
                 )
-
-        del base_entries
         return newest_entries.values()
 
     def write_to_sqlite(self, connection):
@@ -343,32 +346,31 @@ class LocalClient(object):
         from relstorage.adapters.batch import RowBatcher
 
         supports_upsert = sqlite3.sqlite_version_info >= (3, 28)
-
+        cur = connection.cursor()
         # Create the table, if needed
 
         create_stmt = """
             CREATE TABLE IF NOT EXISTS object_state (
                 zoid INTEGER PRIMARY KEY, tid INTEGER, state BLOB
             )"""
-        connection.execute(create_stmt)
+        cur.execute(create_stmt)
 
         tcreate_stmt = create_stmt.replace("CREATE TABLE IF NOT EXISTS",
                                            'CREATE TEMPORARY TABLE')
         tcreate_stmt = tcreate_stmt.replace("object_state", 'temp_state')
-        connection.execute(tcreate_stmt)
+        cur.execute(tcreate_stmt)
 
         create_stmt = """
             CREATE TABLE IF NOT EXISTS checkpoints (
                 id INTEGER PRIMARY KEY, cp0 INTEGER, cp1 INTEGER
             )"""
-        connection.execute(create_stmt)
+        cur.execute(create_stmt)
 
         now = time.time()
 
         bytes_written = 0
         count_written = 0
 
-        cur = connection.cursor()
         batch = RowBatcher(cur, row_limit=300)
         # The batch size depends on how many params a stored proc can
         # have; if we go too big we get OperationalError: too many SQL
@@ -386,7 +388,7 @@ class LocalClient(object):
 
         row = (1, )
         for row in self._items_to_write():
-            if stored_oid_tid.get(row[0], 0) >= row[1]:
+            if stored_oid_tid.get(row[0], -1) >= row[1]:
                 continue
 
             size = len(row[2])
@@ -403,6 +405,7 @@ class LocalClient(object):
 
         batch.flush()
         cur.execute("COMMIT")
+
         batch_time = time.time()
 
         # Take out locks now; if we don't, we can get 'OperationalError: database is locked'
@@ -451,6 +454,7 @@ class LocalClient(object):
                     """, (self.checkpoints[0], self.checkpoints[1]))
 
         cur.execute('COMMIT')
+        cur.close()
         then = time.time()
         stats = self.stats()
         logger.info(

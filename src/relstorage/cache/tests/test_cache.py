@@ -63,9 +63,7 @@ class StorageCacheTests(unittest.TestCase):
         return StorageCache
 
     def _makeOne(self, **kwargs):
-        options = MockOptionsWithFakeCache()
-        for k, v in kwargs.items():
-            setattr(options, k, v)
+        options = MockOptionsWithFakeCache.from_args(**kwargs)
         inst = self.getClass()(MockAdapter(), options,
                                'myprefix')
         self._instances.append(inst)
@@ -280,8 +278,8 @@ class StorageCacheTests(unittest.TestCase):
         tid = p64(55)
         c.send_queue(tid)
         self.assertEqual(data, {
-            'myprefix:state:2:55': tid + b'abc',
-            'myprefix:state:3:55': tid + b'def',
+            'myprefix:state:55:2': tid + b'abc',
+            'myprefix:state:55:3': tid + b'def',
             })
         self.assertEqual(len(c), 2)
 
@@ -295,8 +293,8 @@ class StorageCacheTests(unittest.TestCase):
         tid = p64(55)
         c.send_queue(tid)
         self.assertEqual(data, {
-            'myprefix:state:2:55': tid + b'abc',
-            'myprefix:state:3:55': tid + (b'def' * 100),
+            'myprefix:state:55:2': tid + b'abc',
+            'myprefix:state:55:3': tid + (b'def' * 100),
             })
 
     def test_send_queue_none(self):
@@ -808,18 +806,31 @@ class SizedLRUMappingTests(unittest.TestCase):
         options.cache_local_dir_compress = True
         self.test_load_and_store(options)
 
+class LocalClientStrKeysValues(LocalClient):
+    # Make the cache accept and return str keys and values,
+    # for ease of dealing with size limits (and compatibility with old tests)
 
-@unittest.skip('Needs work')
-class LocalClientTests(unittest.TestCase):
-    # Lots and lots of these right now.
-    # pylint:disable=no-member
+    key_weight = len
+
+    def value_weight(self, value):
+        return len(value[0] if value[0] else b'')
+
+    def __setitem__(self, key, val):
+        super(LocalClientStrKeysValues, self).__setitem__(key, (val, 0))
+
+    def __getitem__(self, key):
+        v = self(None, None, None, (key,))
+        if v is not None:
+            v = v[0]
+        return v
+
+class LocalClientStrKeysValuesTests(unittest.TestCase):
     def getClass(self):
-        return LocalClient
+        return LocalClientStrKeysValues
 
     def _makeOne(self, **kw):
-        options = MockOptions()
-        vars(options).update(kw)
-        inst = self.getClass()(options)
+        options = MockOptions.from_args(**kw)
+        inst = self.getClass()(options, 'pfx')
         inst.restore()
         return inst
 
@@ -838,20 +849,20 @@ class LocalClientTests(unittest.TestCase):
 
     def test_set_and_get_string_compressed(self):
         c = self._makeOne(cache_local_compression='zlib')
-        c.set('abc', b'def')
-        self.assertEqual(c.get('abc'), b'def')
-        self.assertEqual(c.get('xyz'), None)
+        c['abc'] = b'def'
+        self.assertEqual(c['abc'], b'def')
+        self.assertEqual(c['xyz'], None)
 
     def test_set_and_get_string_uncompressed(self):
         c = self._makeOne(cache_local_compression='none')
-        c.set('abc', b'def')
-        self.assertEqual(c.get('abc'), b'def')
-        self.assertEqual(c.get('xyz'), None)
+        c['abc'] = b'def'
+        self.assertEqual(c['abc'], b'def')
+        self.assertEqual(c['xyz'], None)
 
     def test_set_and_get_object_too_large(self):
         c = self._makeOne(cache_local_compression='none')
-        c.set('abc', b'abcdefgh' * 10000)
-        self.assertEqual(c.get('abc'), None)
+        c['abc'] = b'abcdefgh' * 10000
+        self.assertEqual(c['abc'], None)
 
     def test_set_with_zero_space(self):
         options = MockOptions()
@@ -859,17 +870,10 @@ class LocalClientTests(unittest.TestCase):
         c = self.getClass()(options)
         self.assertEqual(c.limit, 0)
         self.assertEqual(c._value_limit, 16384)
-        c.set('abc', 1)
-        c.set('def', b'')
-        self.assertEqual(c.get('abc'), None)
-        self.assertEqual(c.get('def'), None)
-
-    def test_set_multi_and_get_multi(self):
-        c = self._makeOne()
-        c.set_multi({'k0': b'abc', 'k1': b'def'})
-        self.assertEqual(c.get_multi(['k0', 'k1']), {'k0': b'abc', 'k1': b'def'})
-        self.assertEqual(c.get_multi(['k0', 'k2']), {'k0': b'abc'})
-        self.assertEqual(c.get_multi(['k2', 'k3']), {})
+        c['abc'] = 1
+        c['def'] = b''
+        self.assertEqual(c['abc'], None)
+        self.assertEqual(c['def'], None)
 
     def test_bucket_sizes_without_compression(self):
         # pylint:disable=too-many-statements
@@ -892,7 +896,7 @@ class LocalClientTests(unittest.TestCase):
             k = 'k%d' % i
             # This will go to eden, replacing any value that was there
             # into probation.
-            c.set(k, b'01234567')
+            c[k] = b'01234567'
 
 
         # While we have the room, we initially put items into the protected
@@ -902,7 +906,7 @@ class LocalClientTests(unittest.TestCase):
         self.assertEqual(list_lrukeys('protected'), ['k0', 'k1', 'k2', 'k3'])
         self.assertEqual(c._bucket0.size, 50)
 
-        c.set('k5', b'01234567')
+        c['k5'] = b'01234567'
 
         # Right now, we're one entry over size, because we put k5
         # in eden, which dropped k4 to probation; since probation was empty, we
@@ -912,11 +916,11 @@ class LocalClientTests(unittest.TestCase):
         self.assertEqual(list_lrukeys('protected'), ['k0', 'k1', 'k2', 'k3'])
         self.assertEqual(c._bucket0.size, 60)
 
-        v = c.get('k2')
+        v = c['k2']
         self.assertEqual(v, b'01234567')
         self.assertEqual(c._bucket0.size, 60)
 
-        c.set('k1', b'b')
+        c['k1'] = b'b'
         self.assertEqual(list_lrukeys('eden'), ['k5'])
         self.assertEqual(list_lrukeys('probation'), ['k4'])
         self.assertEqual(list_lrukeys('protected'), ['k0', 'k3', 'k2', 'k1'])
@@ -925,7 +929,7 @@ class LocalClientTests(unittest.TestCase):
 
         for i in range(4):
             # add 10 bytes (2 for the key, 8 for the value)
-            c.set('x%d' % i, b'01234567')
+            c['x%d' % i] = b'01234567'
             # Notice that we're not promoting these through the layers. So
             # when we're done, we'll wind up with one key each in
             # eden and probation, and all the K keys in protected (since
@@ -942,11 +946,11 @@ class LocalClientTests(unittest.TestCase):
         self.assertEqual(c._bucket0.size, 53)
 
         #pprint.pprint(c._bucket0.stats())
-        self.assertEqual(c.get('x0'), None)
-        self.assertEqual(c.get('x1'), None)
-        self.assertEqual(c.get('x2'), b'01234567')
-        self.assertEqual(c.get('x3'), b'01234567')
-        self.assertEqual(c.get('k2'), b'01234567')
+        self.assertEqual(c['x0'], None)
+        self.assertEqual(c['x1'], None)
+        self.assertEqual(c['x2'], b'01234567')
+        self.assertEqual(c['x3'], b'01234567')
+        self.assertEqual(c['k2'], b'01234567')
         self.assertEqual(c._bucket0.size, 53)
 
         # Note that this last set of checks perturbed protected and probation;
@@ -957,13 +961,13 @@ class LocalClientTests(unittest.TestCase):
         self.assertEqual(list_lrukeys('protected'), ['k3', 'k1', 'x2', 'k2'])
         self.assertEqual(c._bucket0.size, 53)
 
-        self.assertEqual(c.get('k0'), b'01234567')
-        self.assertEqual(c.get('k0'), b'01234567') # One more to increase its freq count
-        self.assertEqual(c.get('k1'), b'b')
-        self.assertEqual(c.get('k2'), b'01234567')
-        self.assertEqual(c.get('k3'), b'01234567')
-        self.assertEqual(c.get('k4'), None)
-        self.assertEqual(c.get('k5'), None)
+        self.assertEqual(c['k0'], b'01234567')
+        self.assertEqual(c['k0'], b'01234567') # One more to increase its freq count
+        self.assertEqual(c['k1'], b'b')
+        self.assertEqual(c['k2'], b'01234567')
+        self.assertEqual(c['k3'], b'01234567')
+        self.assertEqual(c['k4'], None)
+        self.assertEqual(c['k5'], None)
 
         # Let's promote from probation, causing places to switch.
         # First, verify our current state after those gets.
@@ -971,7 +975,7 @@ class LocalClientTests(unittest.TestCase):
         self.assertEqual(list_lrukeys('probation'), ['x2'])
         self.assertEqual(list_lrukeys('protected'), ['k0', 'k1', 'k2', 'k3'])
         # Now get and switch
-        c.get('x2')
+        c.__getitem__('x2')
         self.assertEqual(list_lrukeys('eden'), ['x3'])
         self.assertEqual(list_lrukeys('probation'), ['k0'])
         self.assertEqual(list_lrukeys('protected'), ['k1', 'k2', 'k3', 'x2'])
@@ -983,7 +987,7 @@ class LocalClientTests(unittest.TestCase):
         self.assertEqual(list_lrufreq('protected'), [3, 4, 2, 3])
         # A brand new key is in eden, shifting eden to probation
 
-        c.set('z0', b'01234567')
+        c['z0'] = b'01234567'
 
         # Now, because we had accessed k0 (probation) more than we'd
         # accessed the last key from eden (x3), that's the one we keep
@@ -997,7 +1001,7 @@ class LocalClientTests(unittest.TestCase):
 
         self.assertEqual(c._bucket0.size, 53)
 
-        self.assertEqual(c.get('x3'), None)
+        self.assertEqual(c['x3'], None)
         self.assertEqual(list_lrukeys('probation'), ['k0'])
 
 
@@ -1009,7 +1013,7 @@ class LocalClientTests(unittest.TestCase):
         list_lrukeys = partial(list_lrukeys_, c._bucket0)
 
         k0_data = b'01234567' * 15
-        c.set('k0', k0_data)
+        c['k0'] = k0_data
         self.assertEqual(c._bucket0.size, 23) # One entry in eden
         self.assertEqual(list_lrukeys('eden'), ['k0'])
         self.assertEqual(list_lrukeys('probation'), [])
@@ -1017,7 +1021,7 @@ class LocalClientTests(unittest.TestCase):
 
         k1_data = b'76543210' * 15
 
-        c.set('k1', k1_data)
+        c['k1'] = k1_data
         self.assertEqual(len(c._bucket0), 2)
 
         self.assertEqual(c._bucket0.size, 23 * 2)
@@ -1028,7 +1032,7 @@ class LocalClientTests(unittest.TestCase):
         self.assertEqual(list_lrukeys('protected'), ['k0'])
 
         k2_data = b'abcdefgh' * 15
-        c.set('k2', k2_data)
+        c['k2'] = k2_data
 
         # New key is in eden, old eden goes to probation because
         # protected is full. Note we're slightly oversize
@@ -1038,14 +1042,14 @@ class LocalClientTests(unittest.TestCase):
 
         self.assertEqual(c._bucket0.size, 23 * 3)
 
-        v = c.get('k0')
+        v = c['k0']
         self.assertEqual(v, k0_data)
         self.assertEqual(list_lrukeys('eden'), ['k2'])
         self.assertEqual(list_lrukeys('probation'), ['k1'])
         self.assertEqual(list_lrukeys('protected'), ['k0'])
 
 
-        v = c.get('k1')
+        v = c['k1']
         self.assertEqual(v, k1_data)
         self.assertEqual(c._bucket0.size, 23 * 3)
         self.assertEqual(list_lrukeys('eden'), ['k2'])
@@ -1053,132 +1057,116 @@ class LocalClientTests(unittest.TestCase):
         self.assertEqual(list_lrukeys('protected'), ['k1'])
 
 
-        v = c.get('k2')
+        v = c['k2']
         self.assertEqual(v, k2_data)
         self.assertEqual(c._bucket0.size, 23 * 3)
         self.assertEqual(list_lrukeys('eden'), ['k2'])
         self.assertEqual(list_lrukeys('probation'), ['k0'])
         self.assertEqual(list_lrukeys('protected'), ['k1'])
 
-        c.set('k3', b'1')
+        c['k3'] = b'1'
         self.assertEqual(list_lrukeys('eden'), ['k3'])
         self.assertEqual(list_lrukeys('probation'), ['k2'])
         self.assertEqual(list_lrukeys('protected'), ['k1'])
 
-        c.set('k4', b'1')
+        c['k4'] = b'1'
         self.assertEqual(list_lrukeys('eden'), ['k4'])
         self.assertEqual(list_lrukeys('probation'), ['k2'])
         self.assertEqual(list_lrukeys('protected'), ['k1'])
 
-        c.set('k5', b'')
+        c['k5'] = b''
         self.assertEqual(list_lrukeys('eden'), ['k5'])
         self.assertEqual(list_lrukeys('probation'), ['k2'])
         self.assertEqual(list_lrukeys('protected'), ['k1'])
 
-        c.set('k6', b'')
+        c['k6'] = b''
         self.assertEqual(list_lrukeys('eden'), ['k5', 'k6'])
         self.assertEqual(list_lrukeys('probation'), ['k2'])
         self.assertEqual(list_lrukeys('protected'), ['k1'])
 
 
-        c.get('k6')
-        c.get('k6')
-        c.get('k6')
-        c.set('k7', b'')
+        c.__getitem__('k6')
+        c.__getitem__('k6')
+        c.__getitem__('k6')
+        c['k7'] = b''
         self.assertEqual(list_lrukeys('eden'), ['k6', 'k7'])
         self.assertEqual(list_lrukeys('probation'), ['k2'])
         self.assertEqual(list_lrukeys('protected'), ['k1'])
 
-        c.set('k8', b'')
+        c['k8'] = b''
         self.assertEqual(list_lrukeys('eden'), ['k7', 'k8'])
         self.assertEqual(list_lrukeys('probation'), ['k6'])
         self.assertEqual(list_lrukeys('protected'), ['k1'])
-
-    def test_add(self):
-        c = self._makeOne()
-        c.set('k0', b'abc')
-        self.assertEqual(c.get('k0'), b'abc')
-        self.assertRaises(NotImplementedError,
-                          c.add, 'k0', b'def')
-        self.assertIn('k0', c._bucket0)
 
     def test_load_and_save(self, _make_dir=True):
         # pylint:disable=too-many-statements
         import tempfile
         import shutil
         import os
-        import time
-        temp_dir = tempfile.mkdtemp(".rstest_cache")
-        root_temp_dir = temp_dir
+
+        root_temp_dir = temp_dir = tempfile.mkdtemp(".rstest_cache")
+        self.addCleanup(shutil.rmtree, root_temp_dir)
         if not _make_dir:
             temp_dir = os.path.join(temp_dir, 'child1', 'child2')
-        try:
-            c = self._makeOne(cache_local_dir=temp_dir)
-            # No files yet.
-            self.assertEqual([], os.listdir(temp_dir) if _make_dir else [])
-            self.assertEqual([], os.listdir(root_temp_dir))
-            # Saving an empty bucket does nothing
-            c.save()
-            self.assertEqual([], os.listdir(temp_dir) if _make_dir else [])
-            self.assertEqual([], os.listdir(root_temp_dir))
+        __traceback_info__ = temp_dir, _make_dir
 
-            c.set('k0', b'abc')
-            c.get('k0') # Increment the count so it gets saved
-            c.save()
-            cache_files = os.listdir(temp_dir)
-            self.assertEqual(1, len(cache_files))
-            self.assertTrue(cache_files[0].startswith('relstorage-cache-'), cache_files)
+        c = self._makeOne(cache_local_dir=temp_dir)
+        # Doing the restore created the database.
+        self.assertEqual(1, len(os.listdir(temp_dir) if _make_dir else ['']))
+        self.assertEqual(1, len(os.listdir(root_temp_dir)))
+        # Saving an empty bucket does nothing
+        self.assertFalse(c.save())
 
-            # Loading it works
-            c2 = self._makeOne(cache_local_dir=temp_dir)
-            self.assertEqual(c2.get('k0'), b'abc')
+        # Watch the tids here: The LocalClientStrKeysValues layer
+        # puts a tid of 0 in the value portion, and then later
+        # we normalize all those on read.
+        key = (0, 0)
+        val = b'abc'
+        c[key] = val
+        c.__getitem__(key) # Increment the count so it gets saved
+        self.assertTrue(c.save())
+        cache_files = os.listdir(temp_dir)
+        self.assertEqual(1, len(cache_files))
+        self.assertTrue(cache_files[0].startswith('relstorage-cache-'), cache_files)
 
-            # Change and save and we replace the
-            # existing file.
-            c2.set('k1', b'def')
-            c2.get('k1') # increment
+        # Loading it works
+        c2 = self._makeOne(cache_local_dir=temp_dir)
+        self.assertEqual(c2[key], val)
+        cache_files = os.listdir(temp_dir)
+        self.assertEqual(1, len(cache_files))
 
-            c2.save()
-            new_cache_files = os.listdir(temp_dir)
-            self.assertEqual(len(cache_files), len(new_cache_files))
-            # No files in common
-            self.assertTrue(set(new_cache_files).isdisjoint(set(cache_files)))
+        # Add a new key and saving updates the existing file.
+        key2 = (1, 1)
+        val2 = b'def'
+        c2[key2] = val2
+        c2.__getitem__(key2) # increment
 
-            # And again
-            cache_files = new_cache_files
-            c2.get_cache_modification_time_for_stream = lambda: time.time() + 2000
-            c2.save()
-            new_cache_files = os.listdir(temp_dir)
-            self.assertEqual(len(cache_files), len(new_cache_files))
-            # No files in common
-            self.assertTrue(set(new_cache_files).isdisjoint(set(cache_files)),
-                            (cache_files, new_cache_files))
+        c2.save()
+        new_cache_files = os.listdir(temp_dir)
+        # Same file still
+        self.assertEqual(cache_files, new_cache_files)
 
+        # And again
+        cache_files = new_cache_files
+        c2.save()
+        new_cache_files = os.listdir(temp_dir)
+        self.assertEqual(cache_files, new_cache_files)
 
-            c3 = self._makeOne(cache_local_dir=temp_dir)
-            self.assertEqual(c3.get('k0'), b'abc')
-            self.assertEqual(c3.get('k1'), b'def')
+        # Notice, though, that we normalized the tid value
+        # on reading.
+        c3 = self._makeOne(cache_local_dir=temp_dir)
+        self.assertEqual(c3[key], val)
+        self.assertIsNone(c3[key2])
+        self.assertEqual(c3[(1, 0)], val2)
 
-            # If we corrupt the file, it is silently ignored and removed
-            with open(os.path.join(temp_dir, new_cache_files[0]), 'wb') as f:
-                f.write(b'Nope!')
+        # If we corrupt the file, it is silently ignored and removed
+        with open(os.path.join(temp_dir, new_cache_files[0]), 'wb') as f:
+            f.write(b'Nope!')
 
-            c3 = self._makeOne(cache_local_dir=temp_dir)
-            self.assertEqual(c3.get('k0'), None)
-            cache_files = os.listdir(temp_dir)
-            self.assertEqual(0, len(cache_files))
-
-            # Now lets break saving
-            def badwrite(*_args):
-                raise OSError("Nope")
-            c2._bucket0.write_to_stream = badwrite
-
-            c2.save()
-            cache_files = os.listdir(temp_dir)
-            self.assertEqual(0, len(cache_files))
-
-        finally:
-            shutil.rmtree(root_temp_dir)
+        c3 = self._makeOne(cache_local_dir=temp_dir)
+        self.assertEqual(c3[key], None)
+        cache_files = os.listdir(temp_dir)
+        self.assertEqual(1, len(cache_files))
 
     def test_load_and_save_new_dir(self):
         # automatically create directories as needed
@@ -1221,6 +1209,57 @@ class CacheRingTests(unittest.TestCase):
         self.assertTrue(lru)
         lru.remove(entrya)
         self.assertFalse(lru)
+
+class LocalClientOIDTests(unittest.TestCase):
+    # Uses true oid/int keys and state/tid values.
+
+    def getClass(self):
+        return LocalClient
+
+    def _makeOne(self, **kw):
+        options = MockOptions.from_args(**kw)
+        inst = self.getClass()(options)
+        return inst
+
+    def test_set_multi_and_get_multi(self):
+        c = self._makeOne()
+
+        c.set_multi({(0, 0): (b'abc', 0),
+                     (0, 1): (b'def', 1),
+                     (1, 0): (b'ghi', 0)})
+        # Hits on primary key
+        self.assertEqual(c(0, 0),
+                         (b'abc', 0))
+        self.assertEqual(c(1, 0),
+                         (b'ghi', 0))
+        # Hits on secondary key
+        self.assertEqual(c(0, -1, 1),
+                         (b'def', 1))
+        self.assertEqual(c(1, -1, 0),
+                         (b'ghi', 0))
+
+        # And those actually copied the data to the primary key, which
+        # is now a hit.
+        self.assertEqual(c(0, -1),
+                         (b'def', 1))
+        self.assertEqual(c(1, -1),
+                         (b'ghi', 0))
+
+class MemcacheClientOIDTests(LocalClientOIDTests):
+
+    def setUp(self):
+        from relstorage.tests.fakecache import data
+        data.clear()
+
+    tearDown = setUp
+
+    def getClass(self):
+        from relstorage.cache.storage_cache import _MemcacheStateCache
+        class _StateCache(_MemcacheStateCache):
+            def __init__(self, _):
+                from relstorage.tests.fakecache import Client
+                super(_StateCache, self).__init__(Client(''), 'pfx')
+        return _StateCache
 
 class CacheTests(unittest.TestCase):
 
@@ -1377,6 +1416,18 @@ class MockOptions(Options):
     cache_servers = ''
     cache_local_mb = 1
     cache_local_dir_count = 1 # shrink
+
+    @classmethod
+    def from_args(cls, **kwargs):
+        inst = cls()
+        for k, v in kwargs.items():
+            setattr(inst, k, v)
+        return inst
+
+    def __setattr__(self, name, value):
+        if name not in Options.valid_option_names():
+            raise AttributeError("Invalid option", name)
+        object.__setattr__(self, name, value)
 
 class MockOptionsWithFakeCache(MockOptions):
     cache_module_name = 'relstorage.tests.fakecache'

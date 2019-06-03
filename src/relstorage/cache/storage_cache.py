@@ -89,7 +89,7 @@ class _MemcacheStateCache(object):
     def set_multi(self, keys_and_values):
         formatted = {
             '%s:state:%d:%d' % (self.prefix, tid, oid): (p64(actual_tid) + (state or b''))
-            for (tid, oid), (state, actual_tid) in iteritems(keys_and_values)
+            for (oid, tid), (state, actual_tid) in iteritems(keys_and_values)
         }
         self.client.set_multi(formatted)
 
@@ -496,6 +496,8 @@ class StorageCache(object):
                 cache_data = client[key]
                 if cache_data:
                     # Cache hit.
+                    # TODO: If this wasn't the local client, copy it to the local client,
+                    # as we do for the other keys?
                     assert cache_data[1] == tid_int
                     # Note that we trace all cache hits, not just the local cache hit.
                     # This makes the simulation less useful, but the stats might still have
@@ -529,7 +531,8 @@ class StorageCache(object):
 
         for client in self.clients_local_first:
             # Query the cache. Query multiple keys simultaneously to
-            # minimize latency.
+            # minimize latency. The client is responsible for moving
+            # the data to the preferred key if it wasn't found there.
             response = client(oid_int, tid1, tid2)
             if response: # We have a hit!
                 state, actual_tid = response

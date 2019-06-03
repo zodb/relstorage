@@ -130,7 +130,7 @@ def local_benchmark(runner):
         def populate_empty():
             c = LocalClient(options)
             for k, v in ALL_DATA:
-                c.set(k, v)
+                c[k] = v
 
         def read():
             # This is basically the worst-case scenario for a basic
@@ -163,7 +163,7 @@ def local_benchmark(runner):
             i = 0
             for k, v in ALL_DATA:
                 i += 1
-                client.set(k, v)
+                client[k] = v
                 if i == len(hot_keys):
                     client.get_multi(hot_keys)
                     i = 0
@@ -287,13 +287,13 @@ class StorageTraceSimulator(object):
             key = record.lba
 
             if record.opcode == 'r':
-                data = client.get(key)
+                data = client[key]
                 if data is None:
                     # Fill it in from the backend
-                    client.set(key, b'r' * record.size)
+                    client[key] = b'r' * record.size
             else:
                 assert record.opcode == 'w'
-                client.set(key, b'x' * record.size)
+                client[key] = b'x' * record.size
 
         done = time.time()
         stats = client.stats()
@@ -360,7 +360,7 @@ class StorageTraceSimulator(object):
 
                 def set(self, k, v):
                     self.operations.append(('w', k, len(v)))
-                    return self._cache.set(k, v)
+                    self._cache[k] = v
 
                 def get(self, k):
                     self.operations.append(('r', k, -1))
@@ -489,7 +489,7 @@ def save_load_benchmark(runner):
     cache_options = MockOptions()
     cache_options.cache_local_dir = runner.args.temp #'/tmp'
     cache_options.cache_local_dir_compress = False
-    cache_options.cache_local_mb = 50 #525
+    cache_options.cache_local_mb = 525
     client = LocalClient(cache_options)
     # Monkey with the internals so we don't have to
     # populate multiple times.
