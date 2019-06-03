@@ -23,6 +23,7 @@ import zlib
 from zope import interface
 
 from relstorage._compat import iteritems
+from relstorage._compat import get_memory_usage
 from relstorage.cache.persistence import sqlite_connect
 from relstorage.cache.interfaces import IStateCache
 from relstorage.cache.interfaces import IPersistentCache
@@ -136,16 +137,24 @@ class LocalClient(object):
         # For testing only.
         return self.__bucket
 
+    @staticmethod
+    def key_weight(_):
+        # All keys are equally weighted: the size of two 64-bit
+        # integers
+        return 32
+
+    @staticmethod
+    def value_weight(value):
+        # Values are the (state, actual_tid) pair, and their
+        # weight is the size of the state plus one 64-bit integer
+        return len(value[0] if value[0] else b'') + 16
+
     def flush_all(self):
         with self._lock:
             self.__bucket = self._bucket_type(
                 self.limit,
-                # All keys are equally weighted: the size of two 64-bit
-                # integers
-                key_weight=lambda k: 32,
-                # Values are the (state, actual_tid) pair, and their
-                # weight is the size of the state plus one 64-bit integer
-                value_weight=lambda v: len(v[0] if v[0] else b'') + 16
+                key_weight=self.key_weight,
+                value_weight=self.value_weight,
             )
             self.checkpoints = None
 
@@ -224,6 +233,7 @@ class LocalClient(object):
         return self.__bucket.values()
 
     def read_from_sqlite(self, connection, storage=None):
+        mem_before = get_memory_usage()
         try:
             cur = connection.execute("SELECT cp0, cp1 FROM checkpoints")
         except sqlite3.OperationalError:
@@ -243,23 +253,30 @@ class LocalClient(object):
         # stored yet. So as a proxy that looks good in benchmarks,
         # we read them in descending TID order to get the most recently
         # updated items in the cache.
-        cur = connection.execute('SELECT COUNT(zoid) FROM object_state')
+        cur.execute('SELECT COUNT(zoid) FROM object_state')
         total_count = cur.fetchone()[0]
 
-        # XXX: The cache_ring is going to consume all the
-        # items we give it, even if it doesn't actually add them to the
-        # cache. It also creates a very large preallocated array for all
-        # the extra items. We don't want to read more rows than necessary,
-        # to keep the delta maps small and to avoid the overhead.
-        # Currently we're hardcoding a limit, but that needs to change.
-        # We could stop iterating when we've read
-        cur = connection.execute("""
+        # XXX: The cache_ring is going to consume all the items we
+        # give it, even if it doesn't actually add them to the cache.
+        # It also creates a very large preallocated array for all to
+        # hold the `total_count` of items. We don't want to read more
+        # rows than necessary, to keep the delta maps small and to
+        # avoid the overhead; we could pass the COUNT(zoid) to
+        # `bulk_update`, and have our row iterable be a generator that
+        # reads a row and breaks when it reaches the limit, but then
+        # we have that whole preallocated array hanging around, which
+        # is probably much bigger than we need. So we need to give an
+        # accurate count, and the easiest way to do that is to materialize
+        # the list of rows.
+        # XXX: TODO: Index on tid.
+        cur.execute("""
         SELECT zoid, tid, state
         FROM object_state
         ORDER BY tid desc
         """)
 
         def data():
+            rows = []
             bytes_read = 0
             for row in cur:
                 oid = row[0]
@@ -279,14 +296,17 @@ class LocalClient(object):
                     # TODO: Track the frequency in the database.
                     key = (oid, cp0)
 
-                yield (key, (state, tid))
+                rows.append((key, (state, tid)))
                 bytes_read += len(state) + 32 + 16
                 if bytes_read > self.limit:
                     break
-        # Do not eagerly evaluate this, avoid doing the DB fetch
-        # until necessary.
-        rows = (d for d in data())
-        self.__bucket.bulk_update(rows, storage or connection, total_count)
+            cur.close()
+            return rows
+
+        self.__bucket.bulk_update(data(),
+                                  source=storage or connection,
+                                  log_count=total_count,
+                                  mem_usage_before=mem_before)
 
         return delta_after0, delta_after1
 
@@ -314,7 +334,6 @@ class LocalClient(object):
                     "All entries:\n%r"
                     % (k, actual_tid, state, newest_entries[oid][2], other_entries)
                 )
-
 
         del base_entries
         return newest_entries.values()

@@ -91,6 +91,7 @@ def sqlite_connect(options, prefix, overwrite=False):
 
     fname = os.path.join(parent_dir, 'relstorage-cache-' + prefix + '.sqlite3')
     if overwrite:
+        logger.info("Replacing any existing cache at %s", fname)
         __quiet_remove(fname)
 
     import sqlite3
@@ -117,7 +118,8 @@ def sqlite_connect(options, prefix, overwrite=False):
     if mode != 'wal':
         raise ValueError("Couldn't set WAL mode")
 
-    connection.execute("PRAGMA synchronous = OFF")
+    cur.execute("PRAGMA synchronous = OFF")
+    cur.close()
     return connection, fname
 
 def __quiet_remove(path):

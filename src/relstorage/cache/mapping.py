@@ -21,6 +21,7 @@ import time
 
 from relstorage._compat import iteritems
 from relstorage._compat import itervalues
+from relstorage._compat import get_memory_usage
 from relstorage.cache.cache_ring import Cache
 from relstorage.cache.persistence import Pickler
 from relstorage.cache.persistence import Unpickler
@@ -110,6 +111,12 @@ class SizedLRUMapping(object):
 
     def __iter__(self):
         return iter(self._dict)
+
+    def __repr__(self):
+        return "<%s at %x size=%d limit=%d len=%d hit_ratio=%d>" % (
+            self.__class__.__name__, id(self),
+            self.size, self.limit, len(self), self.stats()['hits']
+        )
 
     def values(self):
         for entry in itervalues(self._dict):
@@ -235,6 +242,7 @@ class SizedLRUMapping(object):
     def read_from_stream(self, cache_file):
         # Unlike write_to_stream, using the raw stream
         # is fine for both Py 2 and 3.
+        mem_usage_before = get_memory_usage()
         unpick = Unpickler(cache_file)
 
         # Local optimizations
@@ -252,9 +260,16 @@ class SizedLRUMapping(object):
         except EOFError:
             pass
 
-        return self.bulk_update(keys_and_values, cache_file)
+        # Reclaim memory
+        del load
+        del unpick
 
-    def bulk_update(self, keys_and_values, source='<unknown>', total_count=None):
+        return self.bulk_update(keys_and_values, cache_file, mem_usage_before=mem_usage_before)
+
+    def bulk_update(self, keys_and_values,
+                    source='<unknown>',
+                    log_count=None,
+                    mem_usage_before=None):
         """
         Insert all the ``(key, value)`` pairs found in *keys_and_values*.
 
@@ -264,20 +279,17 @@ class SizedLRUMapping(object):
         the most recent.
         """
         now = time.time()
-        #keys_and_values = list(keys_and_values)
+        mem_usage_before = mem_usage_before if mem_usage_before is not None else get_memory_usage()
 
-        try:
-            count = len(keys_and_values)
-        except TypeError:
-            count = total_count
+        log_count = log_count or len(keys_and_values)
+
         def _insert_entries(entries):
             stored = 0
             # local optimizations
             data = self._dict
-            added_entries = self._eden.add_MRUs(entries, total_count=total_count)
-
+            added_entries = self._eden.add_MRUs(entries)
             for e in added_entries:
-                assert e.key not in data
+                assert e.key not in data, (e.key, e)
                 assert e.cffi_entry.r_parent, e.key
                 data[e.key] = e
                 stored += 1
@@ -298,11 +310,15 @@ class SizedLRUMapping(object):
             stored = _insert_entries(new_entries_newest_first)
 
         then = time.time()
-        log.info("Examined %d and stored %d items from %s in %s",
-                  count, stored, source, then - now)
-        return count, stored
+        del keys_and_values # For memory reporting.
+        mem_usage_after = get_memory_usage()
+        log.info(
+            "Examined %d and stored %d items from %s in %s using %s bytes.",
+            log_count, stored, getattr(source, 'name', source),
+            then - now, mem_usage_after - mem_usage_before)
+        return log_count, stored
 
-    def items_to_write(self, byte_limit=None, key_transform=lambda k, v: k):
+    def items_to_write(self, byte_limit=None):
         """
         Return an iterable of ``(key, value, size)`` pairs.
 
@@ -347,11 +363,11 @@ class SizedLRUMapping(object):
         entries = [
             (entry.key, entry.value, entry.len)
             for entry in entries
-            if key_transform(entry.key, entry.value)
         ]
         return entries
 
-    def write_to_stream(self, cache_file, byte_limit=None, key_transform=lambda k, v: k):
+    def write_to_stream(self, cache_file, byte_limit=None, pickle_fast=False):
+        # give *pickle_fast* as True if you know you don't need the pickle memo.
         now = time.time()
         # pickling the items is about 3x faster than marshal
 
@@ -366,6 +382,8 @@ class SizedLRUMapping(object):
         # down to about 7s. However, since we switched to writing many
         # smaller objects, that need goes away.
         pickler = Pickler(cache_file, -1) # Highest protocol
+        if pickle_fast:
+            pickler.fast = True
         dump = pickler.dump
 
         dump(self._FILE_VERSION) # Version marker
@@ -393,7 +411,7 @@ class SizedLRUMapping(object):
 
         # We get the entries from our MRU lists (in careful order) rather than from the dict
         # so that we have stable iteration order regardless of PYTHONHASHSEED or insertion order.
-        entries = self.items_to_write(byte_limit, key_transform)
+        entries = self.items_to_write(byte_limit)
         bytes_written = 0
         count_written = 0
         for k, v, size in entries:
@@ -404,7 +422,8 @@ class SizedLRUMapping(object):
         then = time.time()
         stats = self.stats()
         log.info("Wrote %d items (%d bytes) to %s in %s. Total hits %s; misses %s; ratio %s",
-                 count_written, bytes_written, cache_file, then - now,
+                 count_written, bytes_written, getattr(cache_file, 'name', cache_file),
+                 then - now,
                  stats['hits'], stats['misses'], stats['ratio'])
 
         return count_written

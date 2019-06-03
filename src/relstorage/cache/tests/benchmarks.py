@@ -475,24 +475,37 @@ class StorageTraceSimulator(object):
 
 def save_load_benchmark(runner):
     # pylint:disable=too-many-locals
+    import io
     from relstorage.cache.mapping import SizedLRUMapping as LocalClientBucket
     from relstorage.cache import persistence as _Loader
+    from relstorage.cache.local_client import LocalClient
 
     import itertools
 
     sys.setrecursionlimit(500000)
-    bucket = LocalClientBucket(500 * 1024 * 1024)
+
+
+    cache_pfx = "pfx"
+    cache_options = MockOptions()
+    cache_options.cache_local_dir = runner.args.temp #'/tmp'
+    cache_options.cache_local_dir_compress = False
+    cache_options.cache_local_mb = 50 #525
+    client = LocalClient(cache_options)
+    # Monkey with the internals so we don't have to
+    # populate multiple times.
+    bucket = client._LocalClient__bucket
     print("Testing", type(bucket._dict))
 
-
+    # Note use of worker task number: This is fragile and directly relates to
+    # the order in which we pass functions to run_and_report_funcs
     if runner.args.worker:
-        # Only need to populate in the workers
+        # Only need to populate in the workers.
         size_dists = [100] * 800 + [300] * 500 + [1024] * 300 + [2048] * 200 + [4096] * 150
 
         with open('/dev/urandom', 'rb') as rnd:
             data = [rnd.read(x) for x in size_dists]
         data_iter = itertools.cycle(data)
-
+        j = 0
         for j, datum in enumerate(data_iter):
             if len(datum) > bucket.limit or bucket.size + len(datum) > bucket.limit:
                 break
@@ -505,30 +518,60 @@ def save_load_benchmark(runner):
             if bucket[(j, j)] is datum:
                 raise AssertionError()
 
-        print("Len", len(bucket), "size", bucket.size)
+
+        client.store_checkpoints(j, j)
+        assert len(bucket) > 0 # pylint:disable=len-as-condition
+        assert len(bucket) == len(client)
+        print("Len", len(bucket), "size", bucket.size, "checkpoints", client.get_checkpoints())
 
 
-    cache_pfx = "pfx"
-    cache_options = MockOptions()
-    cache_options.cache_local_dir = runner.args.temp #'/tmp'
-    cache_options.cache_local_dir_compress = False
+    def _open(fd, mode):
+        return io.open(fd, mode, buffering=16384)
 
-    def write():
+    def write_mapping():
         import tempfile
-        import vmprof
-        handle, path = prof_file = tempfile.mkstemp('.vmprof', dir=runner.args.temp)
-        vmprof.enable(handle, lines=True)
-        _Loader.save_local_cache(cache_options, cache_pfx, bucket, force=True)
-        vmprof.disable()
-        os.close(handle)
+        #import vmprof
+        #handle, path = tempfile.mkstemp('.vmprof', dir=runner.args.temp)
+        #vmprof.enable(handle, lines=True)
+        try:
+            os.makedirs(runner.args.temp)
+        except OSError:
+            pass
+        prefix = 'relstorage-cache-' + cache_pfx + '.'
+        suffix = '.T'
+        fd, path = tempfile.mkstemp(prefix=prefix, suffix=suffix, dir=runner.args.temp)
+        with _open(fd, 'wb') as f:
+            bucket.write_to_stream(f, pickle_fast=True)
 
-    def load():
+        #vmprof.disable()
+        #os.close(handle)
+        return path
+
+    if runner.args.worker_task == 1:
+        load_from_file = write_mapping()
+
+    def load_mapping():
         b2 = LocalClientBucket(bucket.limit)
-        _Loader.load_local_cache(cache_options, cache_pfx, b2)
+        with _open(load_from_file, 'rb') as f:
+            b2.read_from_stream(f)
 
-    run_and_report_funcs(runner,
-                         (('write', write),
-                          ('read ', load),))
+    def write_client():
+        client.save(overwrite=True)
+
+    def write_client_dups():
+        client.save(overwrite=False)
+
+    def read_client():
+        c2 = LocalClient(cache_options)
+        c2.restore()
+
+    run_and_report_funcs(runner, (
+        ('write stream', write_mapping),
+        ('read stream ', load_mapping),
+        ('write client fresh', write_client),
+        ('write client dups', write_client_dups),
+        ('read client', read_client),
+    ))
 
 
 def main():
