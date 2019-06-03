@@ -34,6 +34,7 @@ class RowBatcher(object):
         if row_limit is not None:
             self.row_limit = row_limit
         self.rows_added = 0
+        self.rows_deleted = 0
         self.size_added = 0
         self.deletes = defaultdict(set)   # {(table, columns_tuple): set([(column_value,)])}
         self.inserts = defaultdict(dict)  # {(command, header, row_schema, suffix): {rowkey: [row]}}
@@ -51,6 +52,7 @@ class RowBatcher(object):
         row = tuple(kw[column] for column in columns)
         rows.add(row)
         self.rows_added += 1
+        self.rows_deleted += 1
         if self.rows_added >= self.row_limit:
             self.flush()
 

@@ -176,8 +176,10 @@ class SizedLRUMapping(object):
 
         if key in dct:
             entry = dct[key]
+            # This bumps its frequency.
             self._gens[entry.cffi_entry.r_parent].update_MRU(entry, value)
         else:
+            # New values have a frequency of 1
             lru = self._eden
             entry = lru.add_MRU(key, value)
             dct[key] = entry
@@ -203,6 +205,8 @@ class SizedLRUMapping(object):
     def get_and_bubble_all(self, keys):
         # *Only* call this when all the values in *keys* refer to the same
         # conceptual object.
+        # XXX: We now have guaranteed this at the higher layers.
+        # Now optimize this functionality for that case.
         dct = self._dict
         gens = self._gens
         res = {}
@@ -276,7 +280,8 @@ class SizedLRUMapping(object):
         This will permute the most-recently-used status of any existing entries.
         Entries in the *keys_and_values* iterable should be returned from
         least recent to most recent, as the items at the end will be considered to be
-        the most recent.
+        the most recent. (Alternately, you can think of them as needing to be in order
+        from lowest priority to highest priority.)
         """
         now = time.time()
         mem_usage_before = mem_usage_before if mem_usage_before is not None else get_memory_usage()
@@ -318,18 +323,18 @@ class SizedLRUMapping(object):
             then - now, mem_usage_after - mem_usage_before)
         return log_count, stored
 
-    def items_to_write(self, byte_limit=None):
+    def items_to_write(self, byte_limit=None, generations=('eden', 'protected', 'probation')):
         """
-        Return an iterable of ``(key, value, size)`` pairs.
+        Return an sequence of ``(key, value, total_weight, frequency)`` pairs.
 
-        The items are returned in **reverse** priority order, the most
-        important to save being last in the list.
+        The items are returned in **reverse** frequency order, the ones
+        with the highest frequency (most used) being last in the list.
         """
-        entries = list(self._probation)
-        entries.extend(self._protected)
-        entries.extend(self._eden)
+        entries = list(self._probation if 'probation' in generations else [])
+        entries.extend(self._protected if 'protected' in generations else [])
+        entries.extend(self._eden if 'eden' in generations else [])
 
-        if len(entries) != len(self._dict): # pragma: no cover
+        if len(generations) == 3 and len(entries) != len(self._dict): # pragma: no cover
             raise CacheCorruptedError(
                 "Cache consistency problem. There are %d ring entries and %d dict entries. "
                 "Refusing to write." % (
@@ -337,8 +342,8 @@ class SizedLRUMapping(object):
 
         # Adding key as a tie-breaker makes no sense, and is slow.
         # We use an attrgetter directly on the node for speed
-
-        entries.sort(key=operator.attrgetter('cffi_entry.frequency'))
+        frequency_getter = operator.attrgetter('cffi_entry.frequency')
+        entries.sort(key=frequency_getter)
 
         # Write up to the byte limit
         if byte_limit:
@@ -360,8 +365,9 @@ class SizedLRUMapping(object):
             bytes_written = 0
             del entries_to_write
 
+        entry_to_tuple = operator.attrgetter('key', 'value', 'len', 'cffi_entry.frequency')
         entries = [
-            (entry.key, entry.value, entry.len)
+            entry_to_tuple(entry)
             for entry in entries
         ]
         return entries
@@ -414,8 +420,8 @@ class SizedLRUMapping(object):
         entries = self.items_to_write(byte_limit)
         bytes_written = 0
         count_written = 0
-        for k, v, size in entries:
-            bytes_written += size
+        for k, v, weight, _ in entries:
+            bytes_written += weight
             count_written += 1
             dump((k, v))
 

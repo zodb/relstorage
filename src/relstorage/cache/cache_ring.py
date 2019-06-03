@@ -399,9 +399,11 @@ class EdenRing(CacheRing):
 
     @_mutates_free_list
     def add_MRUs(self, ordered_keys_and_values, total_count=None):
-        # ordered_keys_and_values may be a generator!
-        # Set preallocate to false if you're sure you're going to have more data
-        # than can fit.
+        # ordered_keys_and_values may be a generator, in which case you
+        # must provide total_count. Beware, though: if you provide many, many
+        # more values than can fit, you can find up allocating a large
+        # ring array that's mostly unused.
+        # TODO: Stop pre-allocating at creation time, only do so now.
         if total_count is None:
             total_count = len(ordered_keys_and_values)
 

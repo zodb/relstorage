@@ -242,6 +242,8 @@ class LocalClient(object):
         return self.__bucket.values()
 
     def read_from_sqlite(self, connection, storage=None):
+        import gc
+        gc.collect() # Free memory, we're about to make big allocations.
         mem_before = get_memory_usage()
         try:
             cur = connection.execute("SELECT cp0, cp1 FROM checkpoints")
@@ -258,10 +260,7 @@ class LocalClient(object):
 
         delta_after0 = OID_TID_MAP_TYPE()
         delta_after1 = OID_TID_MAP_TYPE()
-        # TODO: Read these in priority order. We don't have that
-        # stored yet. So as a proxy that looks good in benchmarks,
-        # we read them in descending TID order to get the most recently
-        # updated items in the cache.
+
         cur.execute('SELECT COUNT(zoid) FROM object_state')
         total_count = cur.fetchone()[0]
 
@@ -277,11 +276,16 @@ class LocalClient(object):
         # is probably much bigger than we need. So we need to give an
         # accurate count, and the easiest way to do that is to materialize
         # the list of rows.
-        # XXX: TODO: Index on tid.
+        # XXX: TODO: Index on frequency, tid
+
+        # Read these in priority order; as a tie-breaker, choose newer transactions
+        # over older transactions.
+        # We could probably use a window function over SUM(LENGTH(state)) to only select
+        # the rows that will actually fit.
         cur.execute("""
         SELECT zoid, tid, state
         FROM object_state
-        ORDER BY tid desc
+        ORDER BY frequency, tid DESC
         """)
 
         def data():
@@ -310,6 +314,9 @@ class LocalClient(object):
                 if bytes_read > self.limit:
                     break
             cur.close()
+            # Look at them from most to least recent,
+            # but insert them the other way
+            rows.reverse()
             return rows
 
         self.__bucket.bulk_update(data(),
@@ -320,32 +327,64 @@ class LocalClient(object):
         return delta_after0, delta_after1
 
     def _items_to_write(self):
-        base_entries = self.__bucket.items_to_write()
+        import itertools
+        eden_entries = self.__bucket.items_to_write(generations=('eden',))
+        protected_entries = self.__bucket.items_to_write(generations=('protected'))
+        probation_entries = self.__bucket.items_to_write(generations=('probation'))
+
         # Only write the newest entry for each OID.
+        # Track frequency information for the OID, not the (oid, tid)
 
-        # {oid -> (oid, actual_tid, state)}
+        frequencies = OID_TID_MAP_TYPE()
+        for entry in itertools.chain(eden_entries, protected_entries, probation_entries):
+            oid = entry[0][0]
+            try:
+                frequencies[oid] += entry[3]
+            except KeyError:
+                frequencies[oid] = entry[3]
+
+        # {oid -> (oid, actual_tid, state, frequency)}
         newest_entries = OID_OBJECT_MAP_TYPE()
-        for k, v, _ in base_entries:
-            oid, _ = k
-            state, actual_tid = v
 
-            entry_for_oid = newest_entries.get(oid)
-            stored_tid = entry_for_oid[1] if entry_for_oid else -1
-            if stored_tid < actual_tid:
-                newest_entries[oid] = (oid, actual_tid, state)
-            elif stored_tid == actual_tid and state != newest_entries[oid][2]:
-                other_entries = [
-                    (k, v) for k, v, _ in base_entries
-                    if k[0] == oid
-                ]
-                raise CacheCorruptedError(
-                    "Cache corrupted; OID %s has two different states for tid %s:\n%r\n%r\n"
-                    "All entries:\n%r"
-                    % (k, actual_tid, state, newest_entries[oid][2], other_entries)
-                )
+        # Newly added items have a frequency of 1. They *may* be
+        # useless stuff we picked up from an old cache file and
+        # haven't touched again, or they may be something that
+        # really is new and we have no track history for (that
+        # would be in eden generation).
+        # Ideally we want to do something here that's similar to what the
+        # SegmentedLRU does: if we would reject an item from eden, then only
+        # keep it if it's better than the least popular thing in probation.
+        # TODO: Finish tuning these.
+        for entries, frequency_threshold in ((eden_entries, 0),
+                                             (protected_entries, 1),
+                                             (probation_entries, 0)):
+            # Go through these from most to least popular.
+            logger.debug("Checking %s entries with threshold %s", len(entries), frequency_threshold)
+            for k, v, _, _ in reversed(entries):
+                oid, _ = k
+                state, actual_tid = v
+                frequency = frequencies[oid]
+                entry_for_oid = newest_entries.get(oid)
+                if entry_for_oid is None:
+                    if frequency > frequency_threshold:
+                        # First time here, all good
+                        newest_entries[oid] = [oid, actual_tid, state, frequency]
+                else:
+                    stored_tid = entry_for_oid[1]
+                    if stored_tid < actual_tid:
+                        # Something newer than we've seen.
+                        entry_for_oid[2] = state
+                        #else:
+                        #    print("Rejected", oid, frequency, frequency_threshold)
+                    elif stored_tid == actual_tid and state != entry_for_oid[2]:
+                        raise CacheCorruptedError(
+                            "Cache corrupted; OID %s has two different states for tid %s:\n%r\n%r\n"
+                            % (k, actual_tid, state, newest_entries[oid][2])
+                        )
         return newest_entries.values()
 
     def write_to_sqlite(self, connection):
+        # pylint:disable=too-many-locals, too-many-statements,too-many-branches
         from relstorage.adapters.batch import RowBatcher
 
         supports_upsert = sqlite3.sqlite_version_info >= (3, 28)
@@ -354,7 +393,10 @@ class LocalClient(object):
 
         create_stmt = """
             CREATE TABLE IF NOT EXISTS object_state (
-                zoid INTEGER PRIMARY KEY, tid INTEGER, state BLOB
+                zoid INTEGER PRIMARY KEY,
+                tid INTEGER NOT NULL ,
+                frequency INTEGER NOT NULL,
+                state BLOB
             )"""
         cur.execute(create_stmt)
 
@@ -374,14 +416,13 @@ class LocalClient(object):
         bytes_written = 0
         count_written = 0
 
-        batch = RowBatcher(cur, row_limit=300)
+        batch = RowBatcher(cur, row_limit=999 // 4)
         # The batch size depends on how many params a stored proc can
         # have; if we go too big we get OperationalError: too many SQL
-        # variables. Note that the multiple-value syntax was added in
-        # 3.7.11, 2012-03-20
+        # variables. The default is 999.
+        # Note that the multiple-value syntax was added in
+        # 3.7.11, 2012-03-20.
 
-        # TODO: Tracking of frequency data and aging old
-        # data out of the cache.
         cur.execute('BEGIN')
         # No need to even put these into the database if we're
         # not going to use it
@@ -391,7 +432,10 @@ class LocalClient(object):
 
         row = (1, )
         for row in self._items_to_write():
-            if stored_oid_tid.get(row[0], -1) >= row[1]:
+            # Drop things that we know are older than what's in the
+            # database.
+            # Drop things that didn't pass the frequency check
+            if stored_oid_tid.get(row[0], -1) >= row[1] or row[2] is None:
                 continue
 
             size = len(row[2])
@@ -399,8 +443,8 @@ class LocalClient(object):
             count_written += 1
 
             batch.insert_into(
-                'temp_state(zoid, tid, state)',
-                '?, ?, ?',
+                'temp_state(zoid, tid, state, frequency)',
+                '?, ?, ?, ?',
                 row,
                 row[0],
                 size
@@ -414,24 +458,45 @@ class LocalClient(object):
         # Take out locks now; if we don't, we can get 'OperationalError: database is locked'
         # But beginning immediate lets us stand in line.
         cur.execute('BEGIN IMMEDIATE')
+        # During the time it took for us to commit, and the time that we
+        # got the lock, it's possible that someone else committed and
+        # changed the data in object_state.
         if supports_upsert:
             cur.execute("""
-                INSERT INTO object_state (zoid, tid, state)
-                SELECT zoid, tid, state
+                INSERT INTO object_state (zoid, tid, frequency, state)
+                SELECT zoid, tid, frequency, state
                 FROM temp_state
                 WHERE true
-                ON CONFLICT(zoid) DO UPDATE SET tid = excluded.tid, state = excluded.state
+                ON CONFLICT(zoid) DO UPDATE
+                SET tid = excluded.tid,
+                    state = excluded.state,
+                    frequency = excluded.frequency + object_state.frequency
                 WHERE excluded.tid > tid
                 """)
         else:
+            # Things might have changed in the database since our
+            # snapshot where we put temp objects in, so we can't rely on
+            # just assuming that's the truth anymore.
+            # The parenthesized update is from sqlite 3.15.0 (2016-10-14)
             cur.execute("""
-            DELETE FROM object_state
-            WHERE zoid IN (SELECT zoid FROM temp_state)
-            """)
-            cur.execute("""
-                INSERT INTO object_state (zoid, tid, state)
-                SELECT zoid, tid, state
+            WITH newer_values AS (SELECT temp_state.*
                 FROM temp_state
+                INNER JOIN object_state on temp_state.zoid = object_state.zoid
+                WHERE object_state.tid < temp_state.tid
+            )
+            UPDATE object_state
+            SET (tid, frequency, state) = (SELECT newer_values.tid,
+                                            newer_values.frequency + object_state.frequency,
+                                            newer_values.state
+                                           FROM newer_values WHERE newer_values.zoid = zoid)
+            WHERE zoid IN (SELECT zoid FROM newer_values)
+            """)
+
+            cur.execute("""
+                INSERT INTO object_state (zoid, tid, state, frequency)
+                SELECT zoid, tid, state, frequency
+                FROM temp_state
+                WHERE zoid NOT IN (SELECT zoid FROM object_state)
             """)
 
         if self.checkpoints:
@@ -457,13 +522,66 @@ class LocalClient(object):
                     """, (self.checkpoints[0], self.checkpoints[1]))
 
         cur.execute('COMMIT')
+
+        begin_trim = time.time()
+        cur.execute("SELECT SUM(LENGTH(state)) FROM object_state")
+        byte_count = cur.fetchone()[0]
+        if byte_count > self.limit:
+            # TODO: Write tests for this
+            # Take out the lock and check again.
+            cur.execute('BEGIN IMMEDIATE')
+            cur.execute("SELECT SUM(LENGTH(state)) FROM object_state")
+            byte_count = cur.fetchone()[0]
+
+            really_big = byte_count > self.limit * 2
+
+            target = self.limit
+            if byte_count > target:
+                logger.info(
+                    "State too large; need to trim %d to reach %d",
+                    byte_count - target,
+                    target,
+                )
+
+                # Sigh, we've got to trim.
+                # Try to get the oldest, least used objects we can.
+                # We could probably use a window function over SUM(LENGTH(state))
+                # to limit the select to just the rows we want.
+                cur.execute("""
+                SELECT zoid, LENGTH(state)
+                FROM object_state
+                ORDER BY frequency ASC, tid ASC, zoid ASC
+                """)
+                batch_cur = connection.cursor()
+                batch = RowBatcher(batch_cur, row_limit=999 // 1)
+                for row in cur:
+                    zoid, size = row
+                    byte_count -= size
+                    batch.delete_from('object_state', zoid=zoid)
+                    if byte_count <= target:
+                        break
+                batch.flush()
+                batch_cur.close()
+                cur.execute('COMMIT')
+                # Rewrite the file? If we were way over our target, that probably
+                # matters. And sometimes we might want to do it just to do it and
+                # optimize the tables.
+                if really_big:
+                    cur.execute('VACUUM')
+                logger.info(
+                    "Trimmed %d rows (desired: %d actual: %d)",
+                    batch.rows_deleted, target, byte_count
+                )
+
+
         cur.close()
         then = time.time()
         stats = self.stats()
         logger.info(
-            "Wrote %d items (%d bytes) to %s in %s (%s to insert batch). "
+            "Wrote %d items (%d bytes) to %s in %s (%s to insert batch, %s to trim). "
             "Total hits %s; misses %s; ratio %s",
             count_written, bytes_written, connection, then - now, batch_time - now,
+            then - begin_trim,
             stats['hits'], stats['misses'], stats['ratio'])
 
         return count_written
