@@ -82,6 +82,15 @@ def trace_file(options, prefix):
 
 class Connection(sqlite3.Connection):
 
+    rs_db_filename = None
+
+    def __repr__(self):
+        if not self.rs_db_filename:
+            return super(Connection, self).__repr__()
+        return '<Connection at %x to %r>' % (
+            id(self), self.rs_db_filename
+        )
+
     def close(self):
         # If we're the only connection open to this database,
         # and SQLITE_FCNTL_PERSIST_WAL is true (by default
@@ -116,8 +125,11 @@ def _connect_to_file(fname, factory=Connection):
         # We'll manage transactions, thank you.
         isolation_level=None,
         factory=factory,
+        # We explicitly push closing off to a new thread.
         check_same_thread=False,
         timeout=10)
+    if issubclass(factory, Connection):
+        connection.rs_db_filename = fname
 
     if str is bytes:
         # We don't use the TEXT type, but even so
