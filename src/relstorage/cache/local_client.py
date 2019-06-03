@@ -260,7 +260,7 @@ class LocalClient(object):
 
         delta_after0 = OID_TID_MAP_TYPE()
         delta_after1 = OID_TID_MAP_TYPE()
-
+        #cur = _ExplainCursor(cur)
         cur.execute('SELECT COUNT(zoid) FROM object_state')
         total_count = cur.fetchone()[0]
 
@@ -391,6 +391,7 @@ class LocalClient(object):
         supports_paren_update = sqlite3.sqlite_version_info >= (3, 15)
         __traceback_info__ = sqlite3.sqlite_version_info
         cur = connection.cursor()
+        #cur = _ExplainCursor(cur)
         # Create the table, if needed
 
         create_stmt = """
@@ -502,11 +503,11 @@ class LocalClient(object):
                     WHERE object_state.tid < temp_state.tid
                 )
                 UPDATE object_state
-                SET tid = (SELECT newer_values.tid,
+                SET tid = (SELECT newer_values.tid
                            FROM newer_values WHERE newer_values.zoid = zoid),
-                frequency = (SELECT  newer_values.frequency + object_state.frequency,
+                frequency = (SELECT  newer_values.frequency + object_state.frequency
                              FROM newer_values WHERE newer_values.zoid = zoid),
-                    state = (SELECT newer_values.state,
+                    state = (SELECT newer_values.state
                              FROM newer_values WHERE newer_values.zoid = zoid)
                 WHERE zoid IN (SELECT zoid FROM newer_values)
                 """)
@@ -605,3 +606,22 @@ class LocalClient(object):
             stats['hits'], stats['misses'], stats['ratio'])
 
         return count_written
+
+class _ExplainCursor(object):
+    def __init__(self, cur):
+        self.cur = cur
+
+    def __getattr__(self, name):
+        return getattr(self.cur, name)
+
+    def __iter__(self):
+        return iter(self.cur)
+
+    def execute(self, sql, *args):
+        if sql.strip().startswith(('INSERT', 'SELECT', 'DELETE')):
+            exp = 'EXPLAIN QUERY PLAN ' + sql.lstrip()
+            print(sql)
+            self.cur.execute(exp, *args)
+            for row in self.cur:
+                print(*row)
+        return self.cur.execute(sql, *args)
