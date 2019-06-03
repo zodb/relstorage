@@ -89,9 +89,9 @@ def local_benchmark(runner):
         random_data = f.read(DATA_SIZE)
 
     key_groups = []
-    key_groups.append([str(i) for i in range(KEY_GROUP_SIZE)])
+    key_groups.append([(i, -1) for i in range(KEY_GROUP_SIZE)])
     for i in range(1, KEY_GROUP_SIZE):
-        keys = [str(i) + str(j) for j in range(KEY_GROUP_SIZE)]
+        keys = [(i, j) for j in range(KEY_GROUP_SIZE)]
         assert len(set(keys)) == len(keys)
         key_groups.append(keys)
 
@@ -111,87 +111,84 @@ def local_benchmark(runner):
     ALL_DATA = {}
     for group in key_groups:
         for key in group:
-            ALL_DATA[key] = random_data
-    assert all(isinstance(k, str) for k in ALL_DATA)
+            ALL_DATA[key] = (random_data, key[1])
     ALL_DATA = list(ALL_DATA.items())
     ALL_DATA.sort(key=lambda x: hash(x[0]))
-    print(len(ALL_DATA), sum((len(v[1]) for v in ALL_DATA))/1024/1024)
+    #print(len(ALL_DATA), sum((len(v[1][0]) for v in ALL_DATA))/1024/1024)
 
 
-    def do_times(client_type=LocalClient):
-        client = client_type(options)
-        print("Testing", type(client._bucket0._dict))
+    client = LocalClient(options)
 
-        def populate():
-            for k, v in ALL_DATA:
-                client.set(k, v)
+    def populate():
+        for k, v in ALL_DATA:
+            client[k] = v
 
+    populate()
 
-        def populate_empty():
-            c = LocalClient(options)
-            for k, v in ALL_DATA:
-                c[k] = v
+    def populate_empty():
+        c = LocalClient(options)
+        for k, v in ALL_DATA:
+            c[k] = v
 
-        def read():
-            # This is basically the worst-case scenario for a basic
-            # segmented LRU: A repeating sequential scan, where no new
-            # keys are added and all existing keys fit in the two parts of the
-            # cache. Thus, entries just keep bouncing back and forth between
-            # probation and protected. It so happens that this is our slowest
-            # case.
-            miss_count = 0
-            for keys in key_groups:
-                res = client.get_multi(keys)
+    def read():
+        # This is basically the worst-case scenario for a basic
+        # segmented LRU: A repeating sequential scan, where no new
+        # keys are added and all existing keys fit in the two parts of the
+        # cache. Thus, entries just keep bouncing back and forth between
+        # probation and protected. It so happens that this is our slowest
+        # case.
+        for keys in key_groups:
+            for k in keys:
+                res = client[k]
                 #assert len(res) == len(keys)
                 if not res:
-                    miss_count += 1
                     continue
-                assert res.popitem()[1] == random_data
+                assert res[0] == random_data
 
-            if miss_count:
-                print("Failed to get any keys in %d of %d groups"
-                      % (miss_count, len(key_groups)))
+        print("Hit ratio: ", client.stats()['ratio'])
 
-            # import pprint
-            # pprint.pprint(client._bucket0.stats())
-            # print("Probation promotes", client._bucket0._probation.promote_count)
-            # print("Probation demotes", client._bucket0._probation.demote_count)
-            # print("Probation removes", client._bucket0._probation.remove_count)
+        # import pprint
+        # pprint.pprint(client._bucket0.stats())
+        # print("Probation promotes", client._bucket0._probation.promote_count)
+        # print("Probation demotes", client._bucket0._probation.demote_count)
+        # print("Probation removes", client._bucket0._probation.remove_count)
 
-        def mixed():
-            hot_keys = key_groups[0]
-            i = 0
-            for k, v in ALL_DATA:
-                i += 1
-                client[k] = v
-                if i == len(hot_keys):
-                    client.get_multi(hot_keys)
-                    i = 0
+    def mixed():
+        hot_keys = key_groups[0]
+        i = 0
+        miss_count = 0
+        for k, v in ALL_DATA:
+            i += 1
+            client[k] = v
+            if i == len(hot_keys):
+                for hot_key in hot_keys:
+                    res = client[hot_key]
+                    if not res:
+                        miss_count += 1
+                i = 0
 
-        def mixed_for_stats():
-            # This is a trivial function that simulates the way
-            # new keys can come in over time as we reset our checkpoints.
-            # (Actually, it mostly shows our superiority over the plain LRU;
-            # that one scored a 0.0 hit ratio, where our segmented LRU scores 1.0)
-            client.reset_stats()
-            hot_keys = key_groups[0]
-            i = 0
-            for _k, v in ALL_DATA:
-                i += 1
-                client._bucket0[str(i)] = v
+    # def mixed_for_stats():
+    #     # This is a trivial function that simulates the way
+    #     # new keys can come in over time as we reset our checkpoints.
+    #     # (Actually, it mostly shows our superiority over the plain LRU;
+    #     # that one scored a 0.0 hit ratio, where our segmented LRU scores 1.0)
+    #     client.reset_stats()
+    #     hot_keys = key_groups[0]
+    #     i = 0
+    #     for _k, v in ALL_DATA:
+    #         i += 1
+    #         client._bucket0[str(i)] = v
 
 
-            client.get_multi(hot_keys)
+    #     client.get_multi(hot_keys)
 
-            print("Hit ratio", client.stats()['ratio'])
+    #     print("Hit ratio", client.stats()['ratio'])
 
-        run_and_report_funcs(runner,
-                             (('pop ', populate),
-                              ('epop', populate_empty),
-                              ('read', read),
-                              ('mix ', mixed),))
-        mixed_for_stats()
-    do_times()
+    run_and_report_funcs(runner,
+                         (('pop ', populate),
+                          ('epop', populate_empty),
+                          ('read', read),
+                          ('mix ', mixed),))
 
 
 StorageRecord = namedtuple('Record', ['asu', 'lba', 'size', 'opcode', 'ts'])
