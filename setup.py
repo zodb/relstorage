@@ -44,6 +44,8 @@ tests_require = [
     'zope.testrunner',
     'nti.testing',
     'gevent >= 1.5a1',
+    'pyperf',
+    'psutil',
 ] + memcache_require
 
 
