@@ -57,7 +57,7 @@ Check to make sure the cache analysis scripts work.
     ...                 new_cache.store_temp(oid, data)
     ...                 new_cache.send_queue(p64(serial))
     ...                 cache.adapter.mover.data[oid] = (data, serial)
-    ...     cache.close()
+    ...     cache.close(close_async=False)
 
     >>> cache_run('cache', 2)
 

@@ -17,6 +17,7 @@ from __future__ import print_function
 import doctest
 import re
 import unittest
+import shutil
 
 import ZODB.tests.util
 import zope.testing.renormalizing
@@ -33,6 +34,9 @@ import relstorage.cache.tests.test_cache  # pylint:disable=unused-import
 
 def test_suite():
     suite = unittest.TestSuite()
+    # setupstack doesn't ignore problems when files can't be
+    # found
+    zope.testing.setupstack.rmtree = lambda p: shutil.rmtree(p, True)
     suite.addTest(
         doctest.DocFileSuite(
             'cache_trace_analysis.rst',

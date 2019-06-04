@@ -83,6 +83,7 @@ def trace_file(options, prefix):
 class Connection(sqlite3.Connection):
 
     rs_db_filename = None
+    rs_close_async = True
 
     def __repr__(self):
         if not self.rs_db_filename:
@@ -115,10 +116,14 @@ class Connection(sqlite3.Connection):
                 logger.exception("Failed to optimize database; was it removed?")
 
             super(Connection, self).close()
-        spawn(c)
+        if self.rs_close_async:
+            spawn(c)
+        else:
+            c()
 
 
-def _connect_to_file(fname, factory=Connection):
+
+def _connect_to_file(fname, factory=Connection, close_async=True):
 
     connection = sqlite3.connect(
         fname,
@@ -130,6 +135,7 @@ def _connect_to_file(fname, factory=Connection):
         timeout=10)
     if issubclass(factory, Connection):
         connection.rs_db_filename = fname
+        connection.rs_close_async = close_async
 
     if str is bytes:
         # We don't use the TEXT type, but even so
@@ -143,7 +149,7 @@ def _connect_to_file(fname, factory=Connection):
 
     return connection
 
-def sqlite_connect(options, prefix, overwrite=False, max_wal=10*1024*1024):
+def sqlite_connect(options, prefix, overwrite=False, max_wal=10*1024*1024, close_async=True):
     """
     Return a DB-API Connection object.
 
@@ -165,7 +171,7 @@ def sqlite_connect(options, prefix, overwrite=False, max_wal=10*1024*1024):
         __quiet_remove(fname)
         __quiet_remove(wal_fname)
 
-    connection = _connect_to_file(fname)
+    connection = _connect_to_file(fname, close_async=close_async)
     # WAL mode can actually be a bit slower at commit time,
     # but buys us better concurrency.
     try:
@@ -174,6 +180,7 @@ def sqlite_connect(options, prefix, overwrite=False, max_wal=10*1024*1024):
         if overwrite:
             raise
         logger.info("Corrupt cache database at %s; replacing", fname)
+        connection.rs_close_async = False
         connection.close()
         return sqlite_connect(options, prefix, True)
 

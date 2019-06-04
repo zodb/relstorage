@@ -106,10 +106,11 @@ class LocalClient(object):
                 return compressed
         return data
 
-    def save(self, overwrite=False):
+    def save(self, overwrite=False, close_async=True):
         options = self.options
         if options.cache_local_dir and self.__bucket.size:
-            conn, pathname = sqlite_connect(options, self.prefix, overwrite=overwrite)
+            conn, pathname = sqlite_connect(options, self.prefix,
+                                            overwrite=overwrite, close_async=close_async)
             with closing(conn):
                 try:
                     self.write_to_sqlite(conn)
@@ -134,7 +135,7 @@ class LocalClient(object):
         """
         options = self.options
         if options.cache_local_dir:
-            conn, fname = sqlite_connect(options, self.prefix)
+            conn, fname = sqlite_connect(options, self.prefix, close_async=False)
             with closing(conn):
                 return self.read_from_sqlite(conn, fname)
 
@@ -276,7 +277,6 @@ class LocalClient(object):
         # is probably much bigger than we need. So we need to give an
         # accurate count, and the easiest way to do that is to materialize
         # the list of rows.
-        # XXX: TODO: Index on frequency, tid
 
         # Read these in priority order; as a tie-breaker, choose newer transactions
         # over older transactions.
@@ -285,7 +285,7 @@ class LocalClient(object):
         cur.execute("""
         SELECT zoid, tid, state
         FROM object_state
-        ORDER BY frequency, tid DESC
+        ORDER BY frequency DESC, tid DESC
         """)
 
         def data():
@@ -413,13 +413,18 @@ class LocalClient(object):
                 id INTEGER PRIMARY KEY, cp0 INTEGER, cp1 INTEGER
             )"""
         cur.execute(create_stmt)
+        # Exactly match the order we need to grab rows in read_from_sqlite
+        cur.execute("""
+        CREATE INDEX IF NOT EXISTS IX_object_state_f_tid
+        ON object_state (frequency DESC, tid DESC)
+        """)
 
         now = time.time()
 
         bytes_written = 0
         count_written = 0
 
-        batch = RowBatcher(cur, row_limit=999 // 4)
+        batch = RowBatcher(connection.cursor(), row_limit=999 // 4)
         # The batch size depends on how many params a stored proc can
         # have; if we go too big we get OperationalError: too many SQL
         # variables. The default is 999.

@@ -294,7 +294,7 @@ class StorageCache(object):
         self.clients_local_first = _UsedAfterRelease
         self.clients_global_first = _UsedAfterRelease
 
-    def save(self):
+    def save(self, **save_args):
         """
         Store any persistent client data.
         """
@@ -306,7 +306,7 @@ class StorageCache(object):
                 # we've made modifications. Otherwise, we're writing a consolidated
                 # file for no good reason.
                 # TODO: Consider that now that we have the sql db.
-                return self.local_client.save()
+                return self.local_client.save(**save_args)
             logger.debug("Cannot justify writing cache file: %s", stats)
 
     def restore(self):
@@ -338,12 +338,12 @@ class StorageCache(object):
             len(self.delta_after0), len(self.delta_after1)
         )
 
-    def close(self):
+    def close(self, **save_args):
         """
         Release resources held by this instance, and
         save any persistent data necessary.
         """
-        self.save()
+        self.save(**save_args)
         self.release()
 
         if self._tracer:

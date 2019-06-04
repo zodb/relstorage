@@ -1111,10 +1111,6 @@ class LocalClientStrKeysValuesTests(unittest.TestCase):
         import tempfile
         import shutil
         import os
-        import threading
-        import time
-
-        active_threads = threading.active_count()
 
         root_temp_dir = tempfile.mkdtemp(".rstest_cache")
         self.addCleanup(shutil.rmtree, root_temp_dir, True)
@@ -1135,7 +1131,7 @@ class LocalClientStrKeysValuesTests(unittest.TestCase):
         len_initial_cache_files = len(cache_files)
         self.assertEqual(len_initial_cache_files, 1)
         # Saving an empty bucket does nothing
-        self.assertFalse(c.save())
+        self.assertFalse(c.save(close_async=False))
 
         # Watch the tids here: The LocalClientStrKeysValues layer
         # puts a tid of 0 in the value portion, and then later
@@ -1144,7 +1140,7 @@ class LocalClientStrKeysValuesTests(unittest.TestCase):
         val = b'abc'
         c[key] = val
         c.__getitem__(key) # Increment the count so it gets saved
-        self.assertTrue(c.save())
+        self.assertTrue(c.save(close_async=False))
         cache_files = get_cache_files()
         self.assertEqual(len(cache_files), len_initial_cache_files)
         self.assertTrue(cache_files[0].startswith('relstorage-cache-'), cache_files)
@@ -1161,14 +1157,14 @@ class LocalClientStrKeysValuesTests(unittest.TestCase):
         c2[key2] = val2
         c2.__getitem__(key2) # increment
 
-        c2.save()
+        c2.save(close_async=False)
         new_cache_files = get_cache_files()
         # Same file still
         self.assertEqual(cache_files, new_cache_files)
 
         # And again
         cache_files = new_cache_files
-        c2.save()
+        c2.save(close_async=False)
         new_cache_files = get_cache_files()
         self.assertEqual(cache_files, new_cache_files)
 
@@ -1189,9 +1185,6 @@ class LocalClientStrKeysValuesTests(unittest.TestCase):
         cache_files = get_cache_files()
         self.assertEqual(len_initial_cache_files, len(cache_files))
 
-        # Avoid warnings from the testrunner about our background thread(s)
-        while threading.active_count() > active_threads:
-            time.sleep(0.01)
 
 class CacheRingTests(unittest.TestCase):
 
