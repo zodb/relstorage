@@ -57,7 +57,7 @@ class MockOptions(Options):
     cache_local_dir_count = 1
 
 def profiled(func, name, runner):
-    import vmprof
+    import vmprof # pylint:disable=import-error
     import tempfile
 
 
@@ -70,12 +70,44 @@ def profiled(func, name, runner):
 
     return f
 
+def _combine_benchmark_results(options, group_name, benchmark_group, cache_options):
+    # Do this in the master only, after running all the benchmarks
+    # for a database.
+    if options.worker:
+        return
+
+    if options.output:
+        from pyperf import Benchmark
+        from pyperf import BenchmarkSuite
+
+        # Create a file for the entire suite, using names that can
+        # be compared across different database configurations.
+        dir_name = os.path.splitext(options.output)[0] + '.d'
+        if not os.path.exists(dir_name):
+            os.makedirs(dir_name)
+        # We're going to update the metadata, so we need to make
+        # a copy.
+        # Use the short name so that even runs across different object
+        # counts are comparable.
+        for name, benchmark in list(benchmark_group.items()):
+            benchmark = Benchmark(benchmark.get_runs())
+            benchmark.update_metadata({'name': name})
+            benchmark_group[name] = benchmark
+        suite = BenchmarkSuite(benchmark_group.values())
+
+        fname = os.path.join(dir_name,
+                             group_name + '_' + str(cache_options.cache_local_mb) + '.json')
+        suite.dump(fname, replace=True)
+
 
 def run_and_report_funcs(runner, named_funcs, profile=False):
+    benchmarks = {}
     for name, func in named_funcs:
         if profile:
             func = profiled(func, name, runner)
-        runner.bench_func(name, func)
+        benchmark = runner.bench_func(name, func)
+        benchmarks[name] = benchmark
+    return benchmarks
 
 
 def local_benchmark(runner):
@@ -504,12 +536,12 @@ def save_load_benchmark(runner):
     cache_options = MockOptions()
     cache_options.cache_local_dir = runner.args.temp #'/tmp'
     cache_options.cache_local_dir_compress = False
-    cache_options.cache_local_mb = 525
+    cache_options.cache_local_mb = 10
     client = LocalClient(cache_options, cache_pfx)
     # Monkey with the internals so we don't have to
     # populate multiple times.
     bucket = client._LocalClient__bucket
-    print("Testing", type(bucket._dict))
+    #print("Testing", type(bucket._dict))
 
     # Note use of worker task number: This is fragile and directly relates to
     # the order in which we pass functions to run_and_report_funcs
@@ -537,7 +569,7 @@ def save_load_benchmark(runner):
         client.store_checkpoints(j, j)
         assert len(bucket) > 0 # pylint:disable=len-as-condition
         assert len(bucket) == len(client)
-        print("Len", len(bucket), "size", bucket.size, "checkpoints", client.get_checkpoints())
+        #print("Len", len(bucket), "size", bucket.size, "checkpoints", client.get_checkpoints())
 
 
     def _open(fd, mode):
@@ -566,22 +598,33 @@ def save_load_benchmark(runner):
             b2.read_from_stream(f)
 
     def write_client():
-        client.save(overwrite=True)
+        client.save(overwrite=True, close_async=False)
 
     def write_client_dups():
-        client.save(overwrite=False)
+        client.save(overwrite=False, close_async=False)
 
     def read_client():
         c2 = LocalClient(cache_options, cache_pfx)
         c2.restore()
 
-    run_and_report_funcs(runner, (
+    benchmarks = run_and_report_funcs(runner, (
         ('write stream', write_mapping),
-        ('read stream ', load_mapping),
+        ('read stream', load_mapping),
         ('write client fresh', write_client),
         ('write client dups', write_client_dups),
         ('read client', read_client),
     ))
+
+    if not runner.args.worker:
+        stream = {'write': benchmarks['write stream'],
+                  'read': benchmarks['read stream']}
+        db = {'write': benchmarks['write client fresh'],
+              'read': benchmarks['read client']}
+        db_dups = {'write': benchmarks['write client dups'],
+                   'read': benchmarks['read client']}
+        _combine_benchmark_results(runner.args, 'stream', stream, cache_options)
+        _combine_benchmark_results(runner.args, 'db', db, cache_options)
+        _combine_benchmark_results(runner.args, 'db_dup', db_dups, cache_options)
 
 
 def main():
@@ -613,8 +656,8 @@ def main():
     if kind == 'local':
         local_benchmark(runner)
     elif kind == 'io':
-        import logging
-        logging.basicConfig(level=logging.DEBUG)
+        #import logging
+        #logging.basicConfig(level=logging.DEBUG)
         save_load_benchmark(runner)
     elif kind == 'simlocal':
         StorageTraceSimulator().simulate('local')
