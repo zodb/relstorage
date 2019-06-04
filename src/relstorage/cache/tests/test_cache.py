@@ -827,7 +827,7 @@ class LocalClientStrKeysValues(LocalClient):
         super(LocalClientStrKeysValues, self).__setitem__(key, (val, 0))
 
     def __getitem__(self, key):
-        v = self(None, None, None, (key,))
+        v = self(None, None, None, (key, None))
         if v is not None:
             v = v[0]
         return v

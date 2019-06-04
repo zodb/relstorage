@@ -33,9 +33,16 @@ class RowBatcher(object):
         self.cursor = cursor
         if row_limit is not None:
             self.row_limit = row_limit
+
+        # These are cumulative
+        self.total_rows_inserted = 0
+        self.total_size_inserted = 0
+        self.total_rows_deleted = 0
+
+        # These all get reset at each flush()
         self.rows_added = 0
-        self.rows_deleted = 0
         self.size_added = 0
+
         self.deletes = defaultdict(set)   # {(table, columns_tuple): set([(column_value,)])}
         self.inserts = defaultdict(dict)  # {(command, header, row_schema, suffix): {rowkey: [row]}}
 
@@ -52,7 +59,6 @@ class RowBatcher(object):
         row = tuple(kw[column] for column in columns)
         rows.add(row)
         self.rows_added += 1
-        self.rows_deleted += 1
         if self.rows_added >= self.row_limit:
             self.flush()
 
@@ -63,22 +69,26 @@ class RowBatcher(object):
         rows[rowkey] = row  # note that this may replace a row
         self.rows_added += 1
         self.size_added += size
+
         if (self.rows_added >= self.row_limit
                 or self.size_added >= self.size_limit):
             self.flush()
 
     def flush(self):
         if self.deletes:
-            self._do_deletes()
+            self.total_rows_deleted += self._do_deletes()
             self.deletes.clear()
         if self.inserts:
-            self._do_inserts()
+            self.total_rows_inserted += self._do_inserts()
             self.inserts.clear()
+        self.total_size_inserted += self.size_added
         self.rows_added = 0
         self.size_added = 0
 
     def _do_deletes(self):
+        count = 0
         for (table, columns), rows in sorted(iteritems(self.deletes)):
+            count += len(rows)
             # XXX: Stop doing string conversion manually. Let the
             # cursor do it. It may have a non-text protocol for integer
             # objects; it may also have a different representation in text.
@@ -97,8 +107,10 @@ class RowBatcher(object):
                     table, " OR ".join(lines))
 
             self.cursor.execute(stmt)
+        return count
 
     def _do_inserts(self):
+        count = 0
         # In the case that we have only a single table we're inserting into,
         # and thus common key values, we don't need to sort or iterate.
         # If we have multiple tables, we never want to sort by the rows too,
@@ -110,6 +122,7 @@ class RowBatcher(object):
         for (command, header, row_schema, suffix), rows in items:
             # Batched inserts
             rows = list(rows.values())
+            count += len(rows)
             value_template = "(%s)" % row_schema
             values_template = [value_template] * len(rows)
             params = list(itertools.chain.from_iterable(rows))
@@ -121,3 +134,4 @@ class RowBatcher(object):
             # VALUES (%s, %s), (%s, %s), (%s, %s)
             # <suffix>
             self.cursor.execute(stmt, params)
+        return count

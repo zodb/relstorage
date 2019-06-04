@@ -21,6 +21,7 @@ import time
 
 from relstorage._compat import iteritems
 from relstorage._compat import itervalues
+from relstorage._compat import iterkeys
 from relstorage._compat import get_memory_usage
 from relstorage.cache.cache_ring import Cache
 from relstorage.cache.persistence import Pickler
@@ -32,17 +33,26 @@ log = logging.getLogger(__name__)
 
 class SizedLRUMapping(object):
     """
-    A map that keeps a record of its approx. size, ejecting low-priority items
-    when that size is exceeded.
+    A map that keeps a record of its approx. weight (size), evicting
+    the least useful items when that size is exceeded.
 
-    Keys and values can be arbitrary, but should be of homogeneous types.
-    In order for this class to properly handle ejecting values when it
-    gets too big, it must be able to determine the size of the keys and values.
-    If `len` is not appropriate for this, supply your own *key_weight* and *value_weight*
-    functions.
+    Keys and values can be arbitrary, but should be of homogeneous
+    types that cannot be self-referential; immutable objects like
+    tuples, ints, and strings are best.
 
-    This class is not threadsafe, accesses to __setitem__ and get_and_bubble_all
-    must be protected by a lock.
+    In order for this class to properly handle evicting values when it
+    gets too big, it must be able to determine the size of the keys
+    and values. If :func:`len` is not appropriate for this, supply
+    your own *key_weight* and *value_weight* functions.
+
+    When items are evicted as a result of exceeding this object's
+    configured *weight_limit*, the method :meth:`handle_evicted_items`
+    method is called. This method can be replaced on an instance with
+    an attribute to handle the evicted items; by default we do
+    nothing. Methods that can evict objects are documented as such.
+
+    This class is not threadsafe, accesses to :meth:`__setitem__` and
+    :meth:`get_and_bubble_all` must be protected by a lock.
     """
 
     # What multiplier of the number of items in the cache do we apply
@@ -54,7 +64,7 @@ class SizedLRUMapping(object):
 
     _cache_type = Cache
 
-    def __init__(self, limit, key_weight=len, value_weight=len):
+    def __init__(self, weight_limit, key_weight=len, value_weight=len):
         # We experimented with using OOBTree and LOBTree
         # for the type of self._dict. The OOBTree has a similar
         # but slightly slower performance profile (as would be expected
@@ -66,9 +76,8 @@ class SizedLRUMapping(object):
         # large BTrees, but since that's not the case, we abandoned the idea.
 
         # This holds all the ring entries, no matter which ring they are in.
-        cache = self._cache = self._cache_type(limit, key_weight, value_weight)
+        cache = self._cache = self._cache_type(weight_limit, key_weight, value_weight)
         self._dict = cache.data
-
 
         self._protected = cache.protected
         self._probation = cache.probation
@@ -78,7 +87,7 @@ class SizedLRUMapping(object):
         self._hits = 0
         self._misses = 0
         self._sets = 0
-        self.limit = limit
+        self.limit = weight_limit
         self._next_age_at = 1000
 
     @property
@@ -126,6 +135,9 @@ class SizedLRUMapping(object):
         for k, entry in iteritems(self._dict):
             yield k, entry.value
 
+    def keys(self):
+        return iterkeys(self._dict)
+
     def _age(self):
         # Age only when we're full and would thus need to evict; this
         # makes initial population faster. It's cheaper to calculate this
@@ -171,20 +183,28 @@ class SizedLRUMapping(object):
         The item is considered to be the most-recently-used item
         (because this is called in the event of a cache miss, when
         we needed the item).
+
+        This operation may evict existing items. If it does, they are
+        passed to the :meth:`handle_evicted_items` method.
         """
         dct = self._dict
 
         if key in dct:
             entry = dct[key]
-            # This bumps its frequency.
-            self._gens[entry.cffi_entry.r_parent].update_MRU(entry, value)
+            # This bumps its frequency, and potentially ejects other items.
+            evicted_items = self._gens[entry.cffi_entry.r_parent].update_MRU(entry, value)
         else:
-            # New values have a frequency of 1
+            # New values have a frequency of 1 and might evict other
+            # items.
             lru = self._eden
-            entry = lru.add_MRU(key, value)
+            entry, evicted_items = lru.add_MRU(key, value)
             dct[key] = entry
 
+        if evicted_items:
+            self.handle_evicted_items(evicted_items)
         self._sets += 1
+
+        # TODO: Notifications about evicted keys
 
         # Do we need to move this up above the eviction choices?
         # Inline some of the logic about whether to age or not; avoiding the
@@ -193,6 +213,9 @@ class SizedLRUMapping(object):
             self._age()
 
         return True
+
+    def handle_evicted_items(self, items):
+        """Does nothing."""
 
     def __contains__(self, key):
         return key in self._dict
@@ -203,10 +226,8 @@ class SizedLRUMapping(object):
         self._gens[entry.cffi_entry.r_parent].remove(entry)
 
     def get_and_bubble_all(self, keys):
-        # *Only* call this when all the values in *keys* refer to the same
-        # conceptual object.
-        # XXX: We now have guaranteed this at the higher layers.
-        # Now optimize this functionality for that case.
+        # This is only used in testing now, the higher levels
+        # use `get_from_key_or_backup_key`
         dct = self._dict
         gens = self._gens
         res = {}
@@ -215,17 +236,42 @@ class SizedLRUMapping(object):
             if entry is not None:
                 gens[entry.cffi_entry.r_parent].on_hit(entry)
                 res[key] = entry.value
-        # The storage cache sometimes calls us with 2+ slightly different keys,
-        # for the same object (in the event of needing to check delta_after1).
-        # If we hit on one of them, count that as a hit overall, otherwise
-        # count that as a miss. This makes the cache stats make more sense:
-        # a trip to the cache didn't have both a hit and a loss, it actually did
-        # find data, even though we checked multiple keys.
-        if res:
-            self._hits += 1
-        else:
-            self._misses += 1
+
+        self._hits += len(res)
+        self._misses += len(keys) - len(res)
         return res
+
+    def get_from_key_or_backup_key(self, pref_key, backup_key):
+        dct = self._dict
+
+        entry = dct.get(pref_key)
+        at_backup = False
+        if entry is None and backup_key is not None:
+            at_backup = True
+            entry = dct.get(backup_key)
+
+        if entry is None:
+            self._misses += 1
+            return
+
+        # TODO: Tests specifically for this.
+        self._hits += 1
+        result = entry.value
+        if not at_backup:
+            self._gens[entry.cffi_entry.r_parent].on_hit(entry)
+        else:
+            # Move the backup key to the current key.
+            # Compensate for what we're about to do,
+            # we don't want this to show up as a set in our
+            # stats, and it shouldn't cause anything to be evicted
+            self._sets -= 1
+            # TODO: We could probably more directly use this entry
+            # object. As it is, it goes back on the freelist
+            del entry
+            del self[backup_key]
+            self[pref_key] = result
+        return result
+
 
     def get(self, key):
         # Testing only. Does not bubble or increment.
@@ -282,59 +328,61 @@ class SizedLRUMapping(object):
         least recent to most recent, as the items at the end will be considered to be
         the most recent. (Alternately, you can think of them as needing to be in order
         from lowest priority to highest priority.)
+
+        This will never evict existing entries from the cache.
         """
         now = time.time()
         mem_usage_before = mem_usage_before if mem_usage_before is not None else get_memory_usage()
 
         log_count = log_count or len(keys_and_values)
 
-        def _insert_entries(entries):
-            stored = 0
-            # local optimizations
-            data = self._dict
-            added_entries = self._eden.add_MRUs(entries)
-            for e in added_entries:
-                assert e.key not in data, (e.key, e)
-                assert e.cffi_entry.r_parent, e.key
-                data[e.key] = e
-                stored += 1
-            return stored
+        data = self._dict
 
-        stored = 0
-        if not self._dict:
-            # Empty, so quickly take everything they give us,
-            # oldest first so that the result is actually LRU
-            stored = _insert_entries(keys_and_values)
-        else:
+        if data:
             # Loading more data into an existing bucket.
             # Load only the *new* keys, trying to get the newest ones
             # because LRU is going to get messed up anyway.
+            #
+            # If we were empty, then take what they give us, LRU
+            # first, so that as we iterate the last item in the list
+            # becomes the MRU item.
             new_entries_newest_first = [t for t in keys_and_values
                                         if t[0] not in self._dict]
             new_entries_newest_first.reverse()
-            stored = _insert_entries(new_entries_newest_first)
+            keys_and_values = new_entries_newest_first
+
+        added_entries = self._eden.add_MRUs(keys_and_values)
+        stored = len(added_entries)
+        for e in added_entries:
+            # XXX: Why doesn't eden.add_MRUs do this? It has access
+            # to the data dictionary.
+            assert e.key not in data, (e.key, e)
+            assert e.cffi_entry.r_parent, e.key
+            data[e.key] = e
 
         then = time.time()
         del keys_and_values # For memory reporting.
+        del added_entries
         mem_usage_after = get_memory_usage()
-        log.info(
+        log.debug(
             "Examined %d and stored %d items from %s in %s using %s bytes.",
             log_count, stored, getattr(source, 'name', source),
             then - now, mem_usage_after - mem_usage_before)
         return log_count, stored
 
-    def items_to_write(self, byte_limit=None, generations=('eden', 'protected', 'probation')):
+    def items_to_write(self, byte_limit=None, sort=True):
         """
-        Return an sequence of ``(key, value, total_weight, frequency)`` pairs.
+        Return an sequence of ``(key, value, total_weight, frequency, generation)`` pairs.
 
         The items are returned in **reverse** frequency order, the ones
-        with the highest frequency (most used) being last in the list.
+        with the highest frequency (most used) being last in the list. (Unless you specify *sort*
+        to be false, in which case the order is not specified.)
         """
-        entries = list(self._probation if 'probation' in generations else [])
-        entries.extend(self._protected if 'protected' in generations else [])
-        entries.extend(self._eden if 'eden' in generations else [])
+        entries = list(self._probation)
+        entries.extend(self._protected)
+        entries.extend(self._eden)
 
-        if len(generations) == 3 and len(entries) != len(self._dict): # pragma: no cover
+        if len(entries) != len(self._dict): # pragma: no cover
             raise CacheCorruptedError(
                 "Cache consistency problem. There are %d ring entries and %d dict entries. "
                 "Refusing to write." % (
@@ -342,8 +390,9 @@ class SizedLRUMapping(object):
 
         # Adding key as a tie-breaker makes no sense, and is slow.
         # We use an attrgetter directly on the node for speed
-        frequency_getter = operator.attrgetter('cffi_entry.frequency')
-        entries.sort(key=frequency_getter)
+        if sort:
+            frequency_getter = operator.attrgetter('cffi_entry.frequency')
+            entries.sort(key=frequency_getter)
 
         # Write up to the byte limit
         if byte_limit:
@@ -365,11 +414,6 @@ class SizedLRUMapping(object):
             bytes_written = 0
             del entries_to_write
 
-        entry_to_tuple = operator.attrgetter('key', 'value', 'len', 'cffi_entry.frequency')
-        entries = [
-            entry_to_tuple(entry)
-            for entry in entries
-        ]
         return entries
 
     def write_to_stream(self, cache_file, byte_limit=None, pickle_fast=False):
@@ -420,16 +464,19 @@ class SizedLRUMapping(object):
         entries = self.items_to_write(byte_limit)
         bytes_written = 0
         count_written = 0
-        for k, v, weight, _ in entries:
+        for entry in entries:
+            k = entry.key
+            v = entry.value
+            weight = entry.len
             bytes_written += weight
             count_written += 1
             dump((k, v))
 
         then = time.time()
         stats = self.stats()
-        log.info("Wrote %d items (%d bytes) to %s in %s. Total hits %s; misses %s; ratio %s",
-                 count_written, bytes_written, getattr(cache_file, 'name', cache_file),
-                 then - now,
-                 stats['hits'], stats['misses'], stats['ratio'])
+        log.debug("Wrote %d items (%d bytes) to %s in %s. Total hits %s; misses %s; ratio %s",
+                  count_written, bytes_written, getattr(cache_file, 'name', cache_file),
+                  then - now,
+                  stats['hits'], stats['misses'], stats['ratio'])
 
         return count_written

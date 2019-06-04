@@ -81,9 +81,22 @@ def trace_file(options, prefix):
     return tf
 
 class Connection(sqlite3.Connection):
+    # pylint:disable=assigning-non-slot
+    # Something about inheriting from an extension
+    # class seems to get pylint confused.
 
-    rs_db_filename = None
-    rs_close_async = True
+    __slots__ = (
+        'rs_db_filename',
+        'rs_close_async',
+        '_rs_has_closed',
+    )
+
+    def __init__(self, *args, **kwargs):
+        super(Connection, self).__init__(*args, **kwargs)
+
+        self.rs_db_filename = None
+        self.rs_close_async = True
+        self._rs_has_closed = False
 
     def __repr__(self):
         if not self.rs_db_filename:
@@ -103,6 +116,9 @@ class Connection(sqlite3.Connection):
         # "PRAGMA wal_checkpoint(RESTART)".
         #
         # This can be slow, and it releases the GIL, so do that in another thread
+        if self._rs_has_closed:
+            return
+        self._rs_has_closed = True
         from relstorage._compat import spawn
         def c():
             # Recommended best practice is to OPTIMIZE the database for
@@ -133,7 +149,7 @@ def _connect_to_file(fname, factory=Connection, close_async=True):
         # We explicitly push closing off to a new thread.
         check_same_thread=False,
         timeout=10)
-    if issubclass(factory, Connection):
+    if isinstance(connection, Connection):
         connection.rs_db_filename = fname
         connection.rs_close_async = close_async
 

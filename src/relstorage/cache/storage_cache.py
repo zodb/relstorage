@@ -302,12 +302,13 @@ class StorageCache(object):
             # (our __bool__ is not consistent with our len)
             stats = self.local_client.stats()
             if stats['hits'] or stats['sets']:
-                # Only write this out if (1) it proved useful or (2)
+                # Only write this out if (1) it proved useful ON (2)
                 # we've made modifications. Otherwise, we're writing a consolidated
                 # file for no good reason.
-                # TODO: Consider that now that we have the sql db.
+                # TODO: Consider the correctness here, now that we have a
+                # more accurate cache.
                 return self.local_client.save(**save_args)
-            logger.debug("Cannot justify writing cache file: %s", stats)
+            logger.debug("Cannot justify writing cache file, no hits or misses")
 
     def restore(self):
         # We must only restore into an empty cache.

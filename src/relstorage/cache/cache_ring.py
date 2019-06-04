@@ -59,6 +59,8 @@ class _NoSuchGeneration(object):
         self.__gen_num = generation_number
 
     def __getattr__(self, name):
+        if name == '__name__':
+            return 'NoSuchGeneration'
         msg = "Generation %s has no attribute %r" % (self.__gen_num, name)
         raise AttributeError(msg)
 
@@ -219,6 +221,17 @@ class CacheRingNode(object):
     frequency = property(lambda self: self.cffi_entry.frequency,
                          lambda self, nv: setattr(self.cffi_entry, 'frequency', nv))
 
+    @property
+    def ring_name(self):
+        parent = self.cffi_entry.r_parent
+        if parent == 0:
+            return 'NoSuchGeneration'
+        if parent == 1:
+            return 'eden'
+        if parent == '2':
+            return 'protected'
+        return 'probation'
+
     def set_value(self, value, weight):
         if value == self.value:
             return
@@ -363,17 +376,21 @@ class CacheRing(object):
 
         if not rejected_items.r_next:
             # Nothing rejected.
-            return
+            return ()
 
         dct = self.data
         node = rejected_items.r_next
+        evicted_items = []
         node_free_list = self.node_free_list
         while node:
-            old_entry = dct.pop(ffi_from_handle(node.user_data).key)
+            key = ffi_from_handle(node.user_data).key
+            old_entry = dct.pop(key)
+            evicted_items.append((key, old_entry.value))
             old_entry.reset_for_free_list()
             node_free_list.append(old_entry)
 
             node = node.r_next
+        return evicted_items
 
     def on_hit(self, entry):
         _lru_on_hit(self.ring_home, entry.cffi_ring_node)
@@ -394,7 +411,7 @@ class CacheRing(object):
 
 
 class EdenRing(CacheRing):
-
+    __name__ = 'eden'
     PARENT_CONST = 1
 
     @_mutates_free_list
@@ -449,6 +466,7 @@ class EdenRing(CacheRing):
     def __add_MRUs(self, nodes, entries):
         number_nodes = len(entries)
         # Only return the objects we added, allowing the rest to become garbage.
+        # Bulk addition like this will never evict existing items.
 
         added_count = _eden_add_many(self.cffi_cache,
                                      nodes,
@@ -489,30 +507,34 @@ class EdenRing(CacheRing):
             new_entry.reset(key, value, weight)
         else:
             new_entry = CacheRingNode(key, value, weight)
-        rejected_items = _eden_add(self.cffi_cache,
-                                   new_entry.cffi_ring_node)
+        evicted_items = _eden_add(self.cffi_cache,
+                                  new_entry.cffi_ring_node)
 
-        if not rejected_items.r_next:
+        if not evicted_items.r_next:
             # Nothing rejected.
-            return new_entry
+            return new_entry, ()
 
         dct = self.data
-        node = rejected_items.r_next
+        node = evicted_items.r_next
+        evicted_items = []
         while node:
-            old_entry = dct.pop(ffi_from_handle(node.user_data).key)
+            key = ffi_from_handle(node.user_data).key
+            old_entry = dct.pop(key)
+            evicted_items.append((key, old_entry.value))
             # TODO: Should we avoid this if _cffi_owning_node is set?
             # To allow that big array to get GC'd sooner
             old_entry.reset_for_free_list()
             node_free_list.append(old_entry)
             node = node.r_next
-        return new_entry
+        return new_entry, evicted_items
 
 class ProtectedRing(CacheRing):
+    __name__ = 'protected'
     PARENT_CONST = 2
 
 
 class ProbationRing(CacheRing):
-
+    __name__ = 'probation'
     PARENT_CONST = 3
 
     def on_hit(self, entry):

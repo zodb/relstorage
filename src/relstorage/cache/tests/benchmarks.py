@@ -56,9 +56,25 @@ class MockOptions(Options):
     cache_local_compression = 'none'
     cache_local_dir_count = 1
 
+def profiled(func, name, runner):
+    import vmprof
+    import tempfile
 
-def run_and_report_funcs(runner, named_funcs):
+
+    def f():
+        handle, _ = tempfile.mkstemp('.vmprof', prefix=name, dir=runner.args.temp)
+        vmprof.enable(handle, lines=True)
+        func()
+        vmprof.disable()
+        os.close(handle)
+
+    return f
+
+
+def run_and_report_funcs(runner, named_funcs, profile=False):
     for name, func in named_funcs:
+        if profile:
+            func = profiled(func, name, runner)
         runner.bench_func(name, func)
 
 
@@ -530,9 +546,6 @@ def save_load_benchmark(runner):
 
     def write_mapping():
         import tempfile
-        #import vmprof
-        #handle, path = tempfile.mkstemp('.vmprof', dir=runner.args.temp)
-        #vmprof.enable(handle, lines=True)
         try:
             os.makedirs(runner.args.temp)
         except OSError:
@@ -542,9 +555,6 @@ def save_load_benchmark(runner):
         fd, path = tempfile.mkstemp(prefix=prefix, suffix=suffix, dir=runner.args.temp)
         with _open(fd, 'wb') as f:
             bucket.write_to_stream(f, pickle_fast=True)
-
-        #vmprof.disable()
-        #os.close(handle)
         return path
 
     if runner.args.worker_task == 1:
@@ -562,7 +572,7 @@ def save_load_benchmark(runner):
         client.save(overwrite=False)
 
     def read_client():
-        c2 = LocalClient(cache_options)
+        c2 = LocalClient(cache_options, cache_pfx)
         c2.restore()
 
     run_and_report_funcs(runner, (

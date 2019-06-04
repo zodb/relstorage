@@ -30,6 +30,7 @@ from relstorage._compat import PYPY
 # it's just as big and slower on PyPy, though.
 OID_TID_MAP_TYPE = BTrees.family64.II.BTree if not PYPY else dict
 OID_OBJECT_MAP_TYPE = BTrees.family64.IO.BTree if not PYPY else dict
+MAX_TID = BTrees.family64.maxint
 
 class IStateCache(Interface):
     """
