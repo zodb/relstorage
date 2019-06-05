@@ -15,11 +15,9 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-import importlib
 import logging
 import os
 import threading
-
 
 from persistent.timestamp import TimeStamp
 from ZODB.POSException import ReadConflictError
@@ -28,14 +26,13 @@ from ZODB.utils import u64
 from zope import interface
 
 from relstorage._compat import iteritems
-from relstorage._compat import string_types
 
 from relstorage.autotemp import AutoTemporaryFile
 from relstorage.cache import persistence
 from relstorage.cache.interfaces import IPersistentCache
-from relstorage.cache.interfaces import IStateCache
 from relstorage.cache.interfaces import OID_TID_MAP_TYPE
 from relstorage.cache.local_client import LocalClient
+from relstorage.cache.memcache_client import MemcacheStateCache
 from relstorage.cache.trace import ZEOTracer
 
 logger = log = logging.getLogger(__name__)
@@ -43,80 +40,6 @@ logger = log = logging.getLogger(__name__)
 class _UsedAfterRelease(object):
     pass
 _UsedAfterRelease = _UsedAfterRelease()
-
-@interface.implementer(IStateCache)
-class _MemcacheStateCache(object):
-
-    def __init__(self, client, prefix):
-        self.prefix = prefix
-        self.client = client
-        # checkpoints_key holds the current checkpoints.
-        self.checkpoints_key = ck = '%s:checkpoints' % self.prefix
-        # no unicode on Py2
-        assert isinstance(ck, str), (ck, type(ck))
-
-    def __getitem__(self, oid_tid):
-        return self(*oid_tid)
-
-    def __call__(self, oid, tid1, tid2=None):
-        cachekeys = []
-        cachekeys.append('%s:state:%d:%d' % (self.prefix, tid1, oid))
-        if tid2 is not None:
-            cachekeys.append('%s:state:%d:%d' % (self.prefix, tid2, oid))
-        response = self.client.get_multi(cachekeys)
-        preferred_data = response.get(cachekeys[0])
-        if preferred_data and len(preferred_data) >= 8:
-            actual_tid_int = u64(preferred_data[:8])
-            return preferred_data[8:], actual_tid_int
-
-        backup_data = response.get(cachekeys[1]) if tid2 is not None else None
-        if backup_data and len(backup_data) >= 8:
-            # Hooray, at least it was there. Go ahead and move it to
-            # the preferred position
-            actual_tid_int = u64(backup_data[:8])
-            state_bytes = backup_data[8:]
-            self[(oid, tid1)] = (state_bytes, actual_tid_int)
-
-            return state_bytes, actual_tid_int
-
-    def __setitem__(self, oid_tid, state_bytes_tid):
-        oid, tid = oid_tid
-        key = '%s:state:%d:%d' % (self.prefix, tid, oid)
-        state_bytes, actual_tid = state_bytes_tid
-        cache_data = p64(actual_tid) + (state_bytes or b'')
-        self.client.set(key, cache_data)
-
-    def set_multi(self, keys_and_values):
-        formatted = {
-            '%s:state:%d:%d' % (self.prefix, tid, oid): (p64(actual_tid) + (state or b''))
-            for (oid, tid), (state, actual_tid) in iteritems(keys_and_values)
-        }
-        self.client.set_multi(formatted)
-
-    def store_checkpoints(self, cp0_tid, cp1_tid):
-        checkpoint_data = '%d %d' % (cp0_tid, cp1_tid)
-        checkpoint_data = checkpoint_data.encode('ascii')
-        self.client.set(self.checkpoints_key, checkpoint_data)
-
-    def get_checkpoints(self):
-        s = self.client.get(self.checkpoints_key)
-        if s:
-            try:
-                c0, c1 = s.split()
-                c0 = int(c0)
-                c1 = int(c1)
-            except ValueError:
-                # Invalid checkpoint cache value; ignore it.
-                pass
-            else:
-                return c0, c1
-
-    def close(self):
-        self.client.disconnect_all()
-        self.client = None
-
-    def flush_all(self):
-        self.client.flush_all()
 
 
 @interface.implementer(IPersistentCache)
@@ -145,10 +68,15 @@ class StorageCache(object):
     # greater than or equal to checkpoint1.
     checkpoints = None
 
-    # current_tid contains the last polled transaction ID.  Invariant:
+    # current_tid contains the last polled transaction ID. Invariant:
     # when self.checkpoints is not None, self.delta_after0 has info
     # from all transactions in the range:
+    #
     #   self.checkpoints[0] < tid <= self.current_tid
+    #
+    # We assign to this *only* after executing a poll, or
+    # when reading data from the persistent cache (which happens at
+    # startup, and usually also when someone calls clear())
     current_tid = 0
 
     _tracer = None
@@ -180,18 +108,9 @@ class StorageCache(object):
         else:
             self.clients_local_first.append(local_client)
 
-        if options.cache_servers:
-            module_name = options.cache_module_name
-            module = importlib.import_module(module_name)
-            servers = options.cache_servers
-            if isinstance(servers, string_types):
-                servers = servers.split()
-            self.clients_local_first.append(
-                _MemcacheStateCache(
-                    module.Client(servers),
-                    prefix
-                )
-            )
+        shared_cache = MemcacheStateCache.from_options(options, self.prefix)
+        if shared_cache is not None:
+            self.clients_local_first.append(shared_cache)
 
         # self.clients_local_first is in order from local to global caches,
         # while self.clients_global_first is in order from global to local.
@@ -255,10 +174,6 @@ class StorageCache(object):
     def new_instance(self):
         """
         Return a copy of this instance sharing the same local client.
-
-        *set_checkpoints* is for testing; usually we do want to set
-        the checkpoints to the current values we can find from
-        our local cache data.
         """
         local_client = self.local_client if self.options.share_local_cache else None
 
@@ -268,6 +183,9 @@ class StorageCache(object):
 
         # The delta maps get more and more stale the longer time goes on.
         # Maybe we want to try to re-create them based on the local max tids?
+        # Also, if there have been enough changes that someone has shifted the
+        # checkpoints, cache.checkpoints won't match the global checkpoints
+        # and they will wind up discarding the delta maps on the first poll.
         cache.checkpoints = self.checkpoints
         cache.delta_after0 = self._delta_map_type(self.delta_after0)
         cache.delta_after1 = self._delta_map_type(self.delta_after1)
@@ -371,9 +289,15 @@ class StorageCache(object):
             client.flush_all()
 
         self.checkpoints = None
+        # After this our current_tid is probably out of sync with the
+        # storage's current_tid. Whether or not we load data from
+        # persistent caches, it's probably in the past of what the
+        # storage thinks.
+        # XXX: Ideally, we should be able to populate that information
+        # back up so that we get the right polls.
+        self.current_tid = 0
         self.delta_after0 = self._delta_map_type()
         self.delta_after1 = self._delta_map_type()
-        self.current_tid = 0
 
         if load_persistent:
             self.restore()
@@ -557,7 +481,6 @@ class StorageCache(object):
                 client[preferred_key] = (state, tid_int)
         return state, tid_int
 
-
     def tpc_begin(self):
         """Prepare temp space for objects to cache."""
         # start with a fresh in-memory buffer instead of reusing one that might
@@ -658,146 +581,173 @@ class StorageCache(object):
             self.queue.close()
             self.queue = None
 
-
     def after_poll(self, cursor, prev_tid_int, new_tid_int, changes):
-        """Update checkpoint data after a database poll.
-
-        cursor is connected to a load connection.
-
-        changes lists all [(oid_int, tid_int)] changed after
-        prev_tid_int, up to and including new_tid_int, excluding the
-        changes last committed by the associated storage instance.
-        changes can be None to indicate too many objects changed
-        to list them all.
-
-        prev_tid_int can be None, in which case the changes
-        parameter will be ignored.  new_tid_int can not be None.
         """
-        # pylint:disable=too-many-statements,too-many-branches,too-many-locals
-        new_checkpoints = None
+        Update checkpoint data after a database poll.
+
+        *cursor* is connected to a load connection.
+
+        *prev_tid_int* is the tid that was last polled (that is, it
+        was the *new_tid_int* the last time this was called).
+
+        *changes* lists all [(oid_int, tid_int)] changed after
+        *prev_tid_int*, up to and including *new_tid_int*, excluding
+        the changes last committed by the associated storage instance.
+
+        *changes* can be None to indicate that the cache is definitely
+        in an inconsistent state: too much changed to be specific,
+        there is no data at all (in which case *new_tid_int* should be
+        0), or the database connection is stale.
+
+        *prev_tid_int* can be None, in which case the changes
+        parameter will be ignored. new_tid_int can not be None.
+        """
+        my_prev_tid_int = self.current_tid
+        self.current_tid = new_tid_int
+
+        global_checkpoints = None
         for client in self.clients_global_first:
             s = client.get_checkpoints()
-            if s:
-                c0, c1 = s
-                if c0 >= c1:
-                    new_checkpoints = (c0, c1)
-                    break
+            if s and s[0] >= s[1]:
+                global_checkpoints = s
+                break
 
-        if not new_checkpoints:
-            new_checkpoints = (new_tid_int, new_tid_int)
-            if not self.checkpoints:
-                # Initialize the checkpoints.
-                cache_checkpoints = new_checkpoints
-                log.debug("Initializing checkpoints: %s", cache_checkpoints)
-            else:
-                # Suggest reinstatement of the former checkpoints, but
-                # use new checkpoints for this instance. Using new
-                # checkpoints ensures that we don't build up
-                # self.delta_after0 in case the cache is offline.
-                cache_checkpoints = self.checkpoints
-                log.debug("Reinstating checkpoints: %s", cache_checkpoints)
-
-            for client in self.clients_global_first:
-                client.store_checkpoints(*cache_checkpoints)
-
-            self.checkpoints = new_checkpoints
-            self.delta_after0 = self._delta_map_type()
-            self.delta_after1 = self._delta_map_type()
-            self.current_tid = new_tid_int
+        if not global_checkpoints:
+            # No other instance has established an opinion yet,
+            # so I get to.
+            self.__poll_establish_global_checkpoints(new_tid_int)
             return
 
-        allow_shift = True
-        if new_checkpoints[0] > new_tid_int:
+        global_checkpoints_in_future = global_checkpoints[0] > new_tid_int
+        if global_checkpoints_in_future:
             # checkpoint0 is in a future that this instance can't yet
-            # see. Ignore the checkpoint change for now.
-            new_checkpoints = self.checkpoints
-            if not new_checkpoints:
-                new_checkpoints = (new_tid_int, new_tid_int)
-            allow_shift = False
+            # see. Ignore the checkpoint change for now, continue
+            # with our own.
+            global_checkpoints = self.checkpoints
+            if not self.checkpoints:
+                # How nice, this was our first poll, but
+                # yet somehow we are still behind the global
+                # checkpoints. The global checkpoints are probably
+                # wrong (maybe there's a replica involved and the global
+                # cache is now stale).
+                global_checkpoints = (new_tid_int, new_tid_int)
 
         # We want to keep the current checkpoints for speed, but we
         # have to replace them (to avoid consistency violations)
-        # if certain conditions happen (like emptying the ZODB cache).
-        if (new_checkpoints == self.checkpoints
+        # if certain conditions happen (like emptying the ZODB Connection cache
+        # which happens when `changes` is None).
+        if (global_checkpoints == self.checkpoints # In sync with the world
+                # Poller didn't give up, and there was data in the database
                 and changes is not None
+                # The storage had polled before and gotten a response
+                # other than 0, meaning no data in the database.
                 and prev_tid_int
-                and prev_tid_int <= self.current_tid
-                and new_tid_int >= self.current_tid):
-            # All the conditions for keeping the checkpoints were met,
-            # so just update self.delta_after0 and self.current_tid.
-            m = self.delta_after0
-            m_get = m.get
-            for oid_int, tid_int in changes:
-                my_tid_int = m_get(oid_int)
-                if my_tid_int is None or tid_int > my_tid_int:
-                    m[oid_int] = tid_int
-                    # 0x1E = invalidate (hit, saving non-current)
-                    self._trace(0x1C, oid_int, tid_int)
-            self.current_tid = new_tid_int
+                # And what we think is the last time we polled
+                # is at *least* as new as the last time the storage
+                # thinks it polled.
+                # Since we only assign to current_tid here (and when we read
+                # persistent cache data, which also ultimately came from here)
+                # it's not clear how we could get ahead.
+                and my_prev_tid_int >= prev_tid_int
+                # And the transaction that was just polled is
+                # current or in the future. If we went backwards,
+                # it's because the underlying data went backwards
+                # (possibly we switched to a replica that's out of date)
+                # and the user configured `revert-when-stale` to be on.
+                # In that case, `changes` should also be None and we really shouldn't
+                # get here.
+                and new_tid_int >= my_prev_tid_int):
+            if changes:
+                # All the conditions for keeping the checkpoints were met,
+                # so just update self.delta_after0 and self.current_tid.
+                self.__poll_update_delta0_from_changes(changes)
         else:
-            # We have to replace the checkpoints.
-            cp0, cp1 = new_checkpoints
-            log.info(
-                "Using new checkpoints: %d %d. Current cp: %s. "
-                "Too many changes? %s. prev_tid_int: %s. current_tid: %s. "
+            log.debug(
+                "Using new checkpoints: %s. Current cp: %s. "
+                "Too many changes? %s. prev_tid_int: %s. my_prev_tid_int: %s. "
                 "new_tid_int: %s",
-                cp0, cp1, self.checkpoints,
-                changes is None, prev_tid_int, self.current_tid,
+                global_checkpoints, self.checkpoints,
+                changes is None, prev_tid_int, my_prev_tid_int,
                 new_tid_int
             )
-            # Use the checkpoints specified by the cache.
-            # Rebuild delta_after0 and delta_after1.
-            new_delta_after0 = self._delta_map_type()
-            new_delta_after1 = self._delta_map_type()
-            if cp1 < new_tid_int:
-                # poller.list_changes provides an iterator of
-                # (oid, tid) where tid > after_tid and tid <= last_tid.
-                change_list = self.adapter.poller.list_changes(
-                    cursor, cp1, new_tid_int)
+            self.__poll_replace_checkpoints(cursor, global_checkpoints, new_tid_int)
 
-                # Make a dictionary that contains, for each oid, the most
-                # recent tid listed in changes. This works because sorting the
-                # (oid, tid) pairs puts the newest tid at the back, and constructing
-                # the dictionary from that sorted list preserves order, keeping the
-                # last key that it saw.
-                try:
-                    change_dict = self._delta_map_type(sorted(change_list))
-                except TypeError:
-                    # pg8000 returns a list of lists, not a list of tuples. The
-                    # BTree constructor is very particular about that. Normally one
-                    # would use pg8000 on PyPy, where we don't use BTrees, so this shouldn't
-                    # actually come up in practice.
-                    change_dict = self._delta_map_type()
-                    for oid_int, tid_int in sorted(change_list):
-                        change_dict[oid_int] = tid_int
+        if not global_checkpoints_in_future and len(self.delta_after0) >= self.delta_size_limit:
+            return self._suggest_shifted_checkpoints()
 
+    def __poll_establish_global_checkpoints(self, new_tid_int):
+        # Because we *always* have checkpoints in our
+        # local_client, once we've set them, this also means that
+        # it was our first poll.
+        assert not self.checkpoints
 
-                # Put the changes in new_delta_after*.
-                for oid_int, tid_int in change_dict.items():
-                    # 0x1E = invalidate (hit, saving non-current)
-                    self._trace(0x1C, oid_int, tid_int)
-                    if tid_int > cp0:
-                        new_delta_after0[oid_int] = tid_int
-                    elif tid_int > cp1:
-                        new_delta_after1[oid_int] = tid_int
+        new_checkpoints = (new_tid_int, new_tid_int)
+        # Initialize the checkpoints; we've never polled before.
+        cache_checkpoints = new_checkpoints
+        log.debug("Initializing checkpoints: %s", cache_checkpoints)
 
-            self.checkpoints = new_checkpoints
-            self.delta_after0 = new_delta_after0
-            self.delta_after1 = new_delta_after1
-            self.current_tid = new_tid_int
+        for client in self.clients_global_first:
+            client.store_checkpoints(*cache_checkpoints)
 
-        if allow_shift and len(self.delta_after0) >= self.delta_size_limit:
-            # delta_after0 has reached its limit.  The way to
-            # shrink it is to shift the checkpoints.  Suggest
-            # shifted checkpoints for future polls.
-            # If delta_after0 is far over the limit (caused by a large
-            # transaction), suggest starting new checkpoints instead of
-            # shifting.
-            oversize = (len(self.delta_after0) >= self.delta_size_limit * 2)
-            self._suggest_shifted_checkpoints(new_tid_int, oversize)
+        self.checkpoints = new_checkpoints
 
+    def __poll_update_delta0_from_changes(self, changes):
+        m = self.delta_after0
+        m_get = m.get
+        trace = self._trace
+        for oid_int, tid_int in changes:
+            my_tid_int = m_get(oid_int)
+            if my_tid_int is None or tid_int > my_tid_int:
+                m[oid_int] = tid_int
+                # 0x1C = invalidate (hit, saving non-current)
+                trace(0x1C, oid_int, tid_int)
 
-    def _suggest_shifted_checkpoints(self, tid_int, oversize):
+    def __poll_replace_checkpoints(self, cursor, new_checkpoints, new_tid_int):
+        # We have to replace the checkpoints.
+        cp0, cp1 = new_checkpoints
+
+        # Use the checkpoints specified by the cache.
+        # Rebuild delta_after0 and delta_after1.
+        new_delta_after0 = self._delta_map_type()
+        new_delta_after1 = self._delta_map_type()
+        if cp1 < new_tid_int:
+            # poller.list_changes(after_tid, last_tid) provides an iterator of
+            # (oid, tid) where tid > after_tid and tid <= last_tid.
+            change_list = self.adapter.poller.list_changes(
+                cursor, cp1, new_tid_int)
+
+            # Make a dictionary that contains, for each oid, the most
+            # recent tid listed in changes. This works because sorting the
+            # (oid, tid) pairs puts the newest tid at the back, and constructing
+            # the dictionary from that sorted list preserves order, keeping the
+            # last key that it saw.
+            change_list = sorted(change_list) # Note this materializes the iterator
+            try:
+                change_dict = self._delta_map_type(change_list)
+            except TypeError:
+                # pg8000 returns a list of lists, not a list of tuples. The
+                # BTree constructor is very particular about that. Normally one
+                # would use pg8000 on PyPy, where we don't use BTrees, so this shouldn't
+                # actually come up in practice.
+                change_dict = self._delta_map_type()
+                for oid_int, tid_int in change_list:
+                    change_dict[oid_int] = tid_int
+            del change_list
+
+            # Put the changes in new_delta_after*.
+            for oid_int, tid_int in change_dict.items():
+                # 0x1C = invalidate (hit, saving non-current)
+                self._trace(0x1C, oid_int, tid_int)
+                if tid_int > cp0:
+                    new_delta_after0[oid_int] = tid_int
+                elif tid_int > cp1:
+                    new_delta_after1[oid_int] = tid_int
+
+        self.checkpoints = new_checkpoints
+        self.delta_after0 = new_delta_after0
+        self.delta_after1 = new_delta_after1
+
+    def _suggest_shifted_checkpoints(self):
         """Suggest that future polls use a new pair of checkpoints.
 
         This does nothing if another instance has already shifted
@@ -807,16 +757,18 @@ class StorageCache(object):
         becomes checkpoint0.
         """
         cp0, _cp1 = self.checkpoints
-        if tid_int <= cp0:
-            # This used to assert this couldn't happen, but with better caching,
-            # it sometimes can.
-            logger.debug(
-                "Not shifting checkpoints; tid_int (%s) = cp0 (%s)",
-                tid_int, cp0
-            )
-            return
+        tid_int = self.current_tid # transaction we just committed.
+        assert tid_int >= cp0
 
-        if oversize:
+        # delta_after0 has reached its limit. The way to shrink it
+        # is to shift the checkpoints. Suggest shifted checkpoints
+        # for future polls. If delta_after0 is far over the limit
+        # (caused by a large transaction), suggest starting new
+        # checkpoints instead of shifting.
+        delta_size = len(self.delta_after0)
+        huge = (delta_size >= self.delta_size_limit * 2)
+
+        if huge:
             # start new checkpoints
             change_to = (tid_int, tid_int)
         else:
@@ -824,20 +776,29 @@ class StorageCache(object):
             change_to = (tid_int, cp0)
         expect = self.checkpoints
 
+        logger.debug(
+            "Broadcasting shift of checkpoints to %s."
+            "len(delta_after0) == %d.",
+            change_to,
+            delta_size
+        )
+
         for client in self.clients_global_first:
             old_value = client.get_checkpoints()
             if old_value:
                 break
-        if not old_value or old_value == expect:
-            # Shift the checkpoints.
-            # Although this is a race with other instances, the race
-            # should not matter.
-            log.debug("Shifting checkpoints to: %s. len(delta_after0) == %d.",
-                      change_to, len(self.delta_after0))
-            for client in self.clients_global_first:
-                client.store_checkpoints(*change_to)
-            # The poll code will later see the new checkpoints
-            # and update self.checkpoints and self.delta_after(0|1).
-        else:
-            log.debug("Checkpoints already shifted to %s. "
-                      "len(delta_after0) == %d.", old_value, len(self.delta_after0))
+        if old_value and old_value != expect:
+            log.debug(
+                "Checkpoints already shifted to %s, not broadcasting.",
+                old_value)
+            return None
+
+        # Shift the checkpoints.
+        # Although this is a race with other instances, the race
+        # should not matter.
+        for client in self.clients_global_first:
+            client.store_checkpoints(*change_to)
+        # The poll code will later see the new checkpoints
+        # and update self.checkpoints and self.delta_after(0|1).
+
+        return change_to

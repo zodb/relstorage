@@ -99,18 +99,23 @@ class Poller(object):
         cursor.execute(self.poll_query)
         rows = list(cursor)
         if not rows or not rows[0][0]:
-            # No data, must be fresh database.
+            # No data, must be fresh database, without even
+            # the root object.
+            # Anything we had cached is now definitely invalid.
             return None, 0
         new_polled_tid = rows[0][0]
         if prev_polled_tid is None:
             # This is the first time the connection has polled.
+            # We'd have to list the entire database for the changes,
+            # which is clearly no good. So we have no information
+            # about the state of anything we have cached.
             return None, new_polled_tid
 
         if new_polled_tid == prev_polled_tid:
             # No transactions have been committed since prev_polled_tid.
             return (), new_polled_tid
 
-        if new_polled_tid <= prev_polled_tid:
+        if new_polled_tid < prev_polled_tid:
             # The database connection is stale. This can happen after
             # reading an asynchronous slave that is not fully up to date.
             # (It may also suggest that transaction IDs are not being created

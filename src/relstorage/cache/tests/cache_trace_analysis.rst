@@ -37,7 +37,7 @@ Check to make sure the cache analysis scripts work.
     ...     # We can interleave between instances
     ...     cache = relstorage.cache.StorageCache(MockAdapter(), options, name)
     ...     new_cache = cache.new_instance()
-    ...     cache.checkpoints = new_cache.checkpoints = (0, 0)
+    ...     cache.checkpoints = new_cache.checkpoints = cache.local_client.store_checkpoints(0, 0)
     ...     new_cache.tpc_begin()
     ...     cache.tpc_begin()
     ...     data_tot = 0
@@ -76,7 +76,7 @@ Check to make sure the cache analysis scripts work.
                        loads    hits  inv(h)  writes hitrate
     Jul 11 12:11-11       0       0       0       0     n/a
     Jul 11 12:11:41 ==================== Restart ====================
-    Jul 11 12:11-14     180       0      16     198    0.0%
+    Jul 11 12:11-14     180       0      17     198    0.0%
     Jul 11 12:15-29     818       5      82     895    0.6%
     Jul 11 12:30-44     818      28      82     872    3.4%
     Jul 11 12:45-59     818      72      82     828    8.8%
@@ -91,7 +91,7 @@ Check to make sure the cache analysis scripts work.
     Jul 11 15:00-14     818     434      82     466   53.1%
     Jul 11 15:15-15       2       2       0       0  100.0%
     <BLANKLINE>
-    Read 19,380 trace records (658,912 bytes) in 0.0 seconds
+    Read 19,381 trace records (658,946 bytes) in 0.0 seconds
     Versions:   0 records used a version
     First time: Sun Jul 11 12:11:41 2010
     Last time:  Sun Jul 11 15:15:01 2010
@@ -101,7 +101,7 @@ Check to make sure the cache analysis scripts work.
     <BLANKLINE>
             Count Code Function (action)
                 1  00  _setup_trace (initialization)
-              998  1c  invalidate (hit, saving non-current)
+              999  1c  invalidate (hit, saving non-current)
             7,381  20  load (miss)
             2,619  22  load (hit)
             8,381  52  store (current, non-version)
@@ -156,7 +156,7 @@ Check to make sure the cache analysis scripts work.
                        loads    hits  inv(h)  writes hitrate
     Jul 11 12:11-11       0       0       0       0     n/a
     Jul 11 12:11:41 ==================== Restart ====================
-    Jul 11 12:11-14     180       0      16     198    0.0%
+    Jul 11 12:11-14     180       0      17     198    0.0%
     Jul 11 12:15-29     818       5      82     895    0.6%
     Jul 11 12:30-44     818      28      82     872    3.4%
     Jul 11 12:45-59     818      72      82     828    8.8%
@@ -171,7 +171,7 @@ Check to make sure the cache analysis scripts work.
     Jul 11 15:00-14     818     434      82     466   53.1%
     Jul 11 15:15-15       2       2       0       0  100.0%
     <BLANKLINE>
-    Read 19,380 trace records (658,912 bytes) in 0.0 seconds
+    Read 19,381 trace records (658,946 bytes) in 0.0 seconds
     Versions:   0 records used a version
     First time: Sun Jul 11 12:11:41 2010
     Last time:  Sun Jul 11 15:15:01 2010
@@ -181,7 +181,7 @@ Check to make sure the cache analysis scripts work.
     <BLANKLINE>
             Count Code Function (action)
                 1  00  _setup_trace (initialization)
-              998  1c  invalidate (hit, saving non-current)
+              999  1c  invalidate (hit, saving non-current)
             7,381  20  load (miss)
             2,619  22  load (hit)
             8,381  52  store (current, non-version)
@@ -212,7 +212,7 @@ Check to make sure the cache analysis scripts work.
                        loads    hits  inv(h)  writes hitrate
     Jul 11 12:11-11       0       0       0       0     n/a
     Jul 11 12:11:41 ==================== Restart ====================
-    Jul 11 12:11-14     180       0      16     198    0.0%
+    Jul 11 12:11-14     180       0      17     198    0.0%
     Jul 11 12:15-29     818       5      82     895    0.6%
     Jul 11 12:30-44     818      28      82     872    3.4%
     Jul 11 12:45-59     818      72      82     828    8.8%
@@ -227,7 +227,7 @@ Check to make sure the cache analysis scripts work.
     Jul 11 15:00-14     818     434      82     466   53.1%
     Jul 11 15:15-15       2       2       0       0  100.0%
     <BLANKLINE>
-    Read 19,380 trace records (658,912 bytes) in 0.0 seconds
+    Read 19,381 trace records (658,946 bytes) in 0.0 seconds
     Versions:   0 records used a version
     First time: Sun Jul 11 12:11:41 2010
     Last time:  Sun Jul 11 15:15:01 2010
@@ -237,7 +237,7 @@ Check to make sure the cache analysis scripts work.
     <BLANKLINE>
             Count Code Function (action)
                 1  00  _setup_trace (initialization)
-              998  1c  invalidate (hit, saving non-current)
+              999  1c  invalidate (hit, saving non-current)
             7,381  20  load (miss)
             2,619  22  load (hit)
             8,381  52  store (current, non-version)

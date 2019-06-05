@@ -1382,6 +1382,7 @@ class RelStorage(UndoLogCompatible,
         except ReadConflictError as e:
             # The database connection is stale, but postpone this
             # error until the application tries to read or write something.
+            # XXX: We probably need to drop our pickle cache?
             self._stale_error = e
             return (), prev
 

@@ -260,7 +260,8 @@ class LocalClient(object):
 
     def store_checkpoints(self, cp0, cp1):
         # No lock, the assignment should be atomic
-        self.checkpoints = cp0, cp1
+        cp = self.checkpoints = cp0, cp1
+        return cp
 
     def get_checkpoints(self):
         return self.checkpoints

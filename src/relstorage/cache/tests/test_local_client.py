@@ -25,11 +25,13 @@ from . import LocalClient
 from . import MockOptions
 from . import list_lrukeys as list_lrukeys_
 from . import list_lrufreq as list_lrufreq_
-
+from .test_memcache_client import AbstractStateCacheTests
 
 class LocalClientStrKeysValues(LocalClient):
     # Make the cache accept and return str keys and values,
-    # for ease of dealing with size limits (and compatibility with old tests)
+    # for ease of dealing with size limits,
+    # bust mostly for compatibility with old tests, before LocalClient
+    # implemented IStateCache
 
     key_weight = len
 
@@ -402,53 +404,8 @@ class LocalClientStrKeysValuesTests(TestCase):
         self.assertEqual(1, threading.active_count())
 
 
-class LocalClientOIDTests(TestCase):
+class LocalClientOIDTests(AbstractStateCacheTests):
     # Uses true oid/int keys and state/tid values.
 
     def getClass(self):
         return LocalClient
-
-    def _makeOne(self, **kw):
-        options = MockOptions.from_args(**kw)
-        inst = self.getClass()(options)
-        return inst
-
-    def test_set_multi_and_get_multi(self):
-        c = self._makeOne()
-
-        c.set_multi({(0, 0): (b'abc', 0),
-                     (0, 1): (b'def', 1),
-                     (1, 0): (b'ghi', 0)})
-        # Hits on primary key
-        self.assertEqual(c(0, 0),
-                         (b'abc', 0))
-        self.assertEqual(c(1, 0),
-                         (b'ghi', 0))
-        # Hits on secondary key
-        self.assertEqual(c(0, -1, 1),
-                         (b'def', 1))
-        self.assertEqual(c(1, -1, 0),
-                         (b'ghi', 0))
-
-        # And those actually copied the data to the primary key, which
-        # is now a hit.
-        self.assertEqual(c(0, -1),
-                         (b'def', 1))
-        self.assertEqual(c(1, -1),
-                         (b'ghi', 0))
-
-class MemcacheClientOIDTests(LocalClientOIDTests):
-
-    def setUp(self):
-        from relstorage.tests.fakecache import data
-        data.clear()
-
-    tearDown = setUp
-
-    def getClass(self):
-        from relstorage.cache.storage_cache import _MemcacheStateCache
-        class _StateCache(_MemcacheStateCache):
-            def __init__(self, _):
-                from relstorage.tests.fakecache import Client
-                super(_StateCache, self).__init__(Client(''), 'pfx')
-        return _StateCache

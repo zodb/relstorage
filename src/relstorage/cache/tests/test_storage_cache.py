@@ -52,14 +52,16 @@ class StorageCacheTests(TestCase):
 
     def test_ctor(self):
         from relstorage.tests.fakecache import Client
-        from relstorage.cache.storage_cache import _MemcacheStateCache
+        from relstorage.cache.memcache_client import MemcacheStateCache
         c = self._makeOne()
         self.assertEqual(len(c.clients_local_first), 2)
         self.assertEqual(len(c.clients_global_first), 2)
-        self.assertIsInstance(c.clients_global_first[0], _MemcacheStateCache)
+        self.assertIsInstance(c.clients_global_first[0], MemcacheStateCache)
         self.assertIsInstance(c.clients_global_first[0].client, Client)
         self.assertEqual(c.clients_global_first[0].client.servers, ['host:9999'])
         self.assertEqual(c.prefix, 'myprefix')
+        self.assertEqual(c.size, 0)
+        self.assertEqual(c.limit, MockOptionsWithFakeCache.cache_local_mb * 1000000)
 
         # can be closed multiple times
         c.close()
@@ -92,9 +94,12 @@ class StorageCacheTests(TestCase):
         c = self._makeOne()
         c.checkpoints = (0, 0)
         c.tpc_begin()
-        c.store_temp(2, b'abc')
         # tid is 2016-09-29 11:35:58,120
+        # (That used to matter when we stored that information as a
+        # filesystem modification time.)
         tid = 268595726030645777
+        oid = 2
+        c.store_temp(oid, b'abc')
         c.after_tpc_finish(p64(268595726030645777))
 
         key = list(iter(c.local_client))[0]
@@ -103,7 +108,7 @@ class StorageCacheTests(TestCase):
         c.options.cache_local_dir = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, c.options.cache_local_dir, True)
 
-        c.save()
+        c.save(close_async=False)
         files = os.listdir(c.options.cache_local_dir)
         __traceback_info__ = files
         # Older versions of sqlite may leave -shm and -wal
@@ -113,6 +118,24 @@ class StorageCacheTests(TestCase):
         # Creating one in the same place automatically loads it.
         c2 = self._makeOne(cache_local_dir=c.options.cache_local_dir)
         self.assertEqual(1, len(c2))
+
+        # The data is there, but there were no checkpoints stored in the
+        # local client --- that happens from polling --- so there's
+        # no delta maps or checkpoints here
+        self.assertIsNone(c2.checkpoints)
+        self.assertIsEmpty(c2.delta_after0)
+        self.assertIsEmpty(c2.delta_after1)
+
+        # This time, write the checkpoints.
+        c.local_client.store_checkpoints(0, 0)
+        c.save(close_async=False)
+
+        c2 = self._makeOne(cache_local_dir=c.options.cache_local_dir)
+        self.assertEqual(1, len(c2))
+        self.assertEqual(c2.checkpoints, (0, 0))
+        self.assertEqual(dict(c2.delta_after0), {oid: tid})
+        self.assertIsEmpty(c2.delta_after1)
+
         self.test_closed_state(c2)
         self.test_closed_state(c)
 
@@ -331,15 +354,6 @@ class StorageCacheTests(TestCase):
         self.assertEqual(c.checkpoints, (50, 50))
         self.assertEqual(data['myprefix:checkpoints'], b'50 50')
 
-    def test_after_poll_reinstate_checkpoints(self):
-        from relstorage.tests.fakecache import data
-        self.assertEqual(data, {})
-        c = self._makeOne()
-        c.checkpoints = (40, 30)
-        c.after_poll(None, 40, 50, [])
-        self.assertEqual(c.checkpoints, (50, 50))
-        self.assertEqual(data['myprefix:checkpoints'], b'40 30')
-
     def test_after_poll_future_checkpoints_when_cp_exist(self):
         from relstorage.tests.fakecache import data
         data['myprefix:checkpoints'] = b'90 80'
@@ -382,19 +396,29 @@ class StorageCacheTests(TestCase):
     def test_after_poll_new_checkpoints(self):
         from relstorage.tests.fakecache import data
         data['myprefix:checkpoints'] = b'50 40'
-        adapter = MockAdapter()
-        c = self.getClass()(adapter, MockOptionsWithFakeCache(), 'myprefix')
         # Note that OID 3 changed twice.  list_changes is not required
         # to provide the list of changes in order, so simulate
-        # a list of changes that is out of order.
-        adapter.poller.changes = [(3, 42), (1, 35), (2, 45), (3, 41)]
-        c.checkpoints = (40, 30)
-        c.current_tid = 40
-        c.after_poll(None, 40, 50, [(3, 42), (2, 45), (3, 41)])
-        self.assertEqual(c.checkpoints, (50, 40))
-        self.assertEqual(data['myprefix:checkpoints'], b'50 40')
-        self.assertEqual(dict(c.delta_after0), {})
-        self.assertEqual(dict(c.delta_after1), {2: 45, 3: 42})
+        # a list of changes that is out of order. It's also not required
+        # to provide a list of tuples; it could provide a list of lists.
+        # That turns out to matter to the BTree constructor.
+        changes = [(3, 42), (1, 35), (2, 45), (3, 41)]
+
+        for f in (tuple, list):
+            adapter = MockAdapter()
+            c = self.getClass()(adapter, MockOptionsWithFakeCache(), 'myprefix')
+            adapter.poller.changes = [f(t) for t in changes]
+            __traceback_info__ = adapter.poller.changes
+            c.checkpoints = (40, 30)
+            c.current_tid = 40
+
+            shifted_checkpoints = c.after_poll(None, 40, 50, None)
+
+            self.assertEqual(c.checkpoints, (50, 40))
+            self.assertIsNone(shifted_checkpoints)
+            self.assertEqual(data['myprefix:checkpoints'], b'50 40')
+            self.assertEqual(dict(c.delta_after0), {})
+            self.assertEqual(dict(c.delta_after1), {2: 45, 3: 42})
+            self.assertEqual(c.local_client.get_checkpoints(), shifted_checkpoints)
 
     def test_after_poll_gap(self):
         from relstorage.tests.fakecache import data
@@ -419,8 +443,45 @@ class StorageCacheTests(TestCase):
         c.delta_size_limit = 2
         c.checkpoints = (40, 30)
         c.current_tid = 40
-        c.after_poll(None, 40, 314, [(1, 45), (2, 46)])
+        shifted_checkpoints = c.after_poll(None, 40, 314, [(1, 45), (2, 46)])
         self.assertEqual(c.checkpoints, (40, 30))
-        self.assertEqual(data['myprefix:checkpoints'], b'314 40')
+        self.assertEqual(shifted_checkpoints, (314, 40))
+        self.assertEqual(c.local_client.get_checkpoints(), shifted_checkpoints)
+        self.assertEqual(dict(c.delta_after0), {1: 45, 2: 46})
+        self.assertEqual(dict(c.delta_after1), {})
+
+    def test_after_poll_shift_checkpoints_already_changed(self):
+        # We can arrange for the view to be inconsistent by
+        # interjecting some code to change things.
+        from relstorage.tests.fakecache import data
+        data['myprefix:checkpoints'] = b'40 30'
+        c = self._makeOne()
+        c.delta_size_limit = 2
+        c.checkpoints = (40, 30)
+        c.current_tid = 40
+        old_suggest = c._suggest_shifted_checkpoints
+        def suggest():
+            data['myprefix:checkpoints'] = b'1 1'
+            return old_suggest()
+        c._suggest_shifted_checkpoints = suggest
+
+        shifted_checkpoints = c.after_poll(None, 40, 314, [(1, 45), (2, 46)])
+        self.assertEqual(c.checkpoints, (40, 30))
+        self.assertIsNone(shifted_checkpoints)
+        self.assertEqual(c.local_client.get_checkpoints(), shifted_checkpoints)
+        self.assertEqual(dict(c.delta_after0), {1: 45, 2: 46})
+        self.assertEqual(dict(c.delta_after1), {})
+
+    def test_after_poll_shift_checkpoints_huge(self):
+        from relstorage.tests.fakecache import data
+        data['myprefix:checkpoints'] = b'40 30'
+        c = self._makeOne()
+        c.delta_size_limit = 0
+        c.checkpoints = (40, 30)
+        c.current_tid = 40
+        shifted_checkpoints = c.after_poll(None, 40, 314, [(1, 45), (2, 46)])
+        self.assertEqual(c.checkpoints, (40, 30))
+        self.assertEqual(shifted_checkpoints, (314, 314))
+        self.assertEqual(c.local_client.get_checkpoints(), shifted_checkpoints)
         self.assertEqual(dict(c.delta_after0), {1: 45, 2: 46})
         self.assertEqual(dict(c.delta_after1), {})
