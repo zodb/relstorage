@@ -30,6 +30,7 @@ from relstorage._compat import iteritems
 from relstorage.autotemp import AutoTemporaryFile
 from relstorage.cache import persistence
 from relstorage.cache.interfaces import IPersistentCache
+from relstorage.cache.interfaces import IStateCache
 from relstorage.cache.interfaces import OID_TID_MAP_TYPE
 from relstorage.cache.local_client import LocalClient
 from relstorage.cache.memcache_client import MemcacheStateCache
@@ -38,8 +39,78 @@ from relstorage.cache.trace import ZEOTracer
 logger = log = logging.getLogger(__name__)
 
 class _UsedAfterRelease(object):
-    pass
+    size = limit = 0
+    def __len__(self):
+        return 0
+    close = lambda s: None
+    stats = lambda s: {}
 _UsedAfterRelease = _UsedAfterRelease()
+
+@interface.implementer(IStateCache)
+class _MultiStateCache(object):
+    """
+    A proxy that encapsulates the handling of a local and a global
+    cache.
+
+    This lets us write loop-free code in all cases in StorageCache,
+    but still use both local and global caches.
+
+    For the case that there's just a local cache, which is common and
+    semi-recommended, we can just use that object directly.
+    """
+
+    __slots__ = ('l', 'g')
+
+    def __init__(self, lcache, gcache):
+        self.l = lcache
+        self.g = gcache
+
+    def close(self):
+        if self.l is not None:
+            self.l.close()
+            self.g.close()
+            self.l = None
+            self.g = None
+
+    def flush_all(self):
+        self.l.flush_all()
+        self.g.flush_all()
+
+    def __getitem__(self, key):
+        result = self.l[key]
+        if not result:
+            result = self.g[key]
+            if result:
+                self.l[key] = result
+        return result
+
+    def __setitem__(self, key, value):
+        self.l[key] = value
+        self.g[key] = value
+
+    def __call__(self, oid, tid1, tid2):
+        result = self.l(oid, tid1, tid2)
+        if not result:
+            result = self.g(oid, tid1, tid2)
+            if result:
+                self.l[(oid, tid1)] = result
+        return result
+
+    def set_multi(self, data):
+        self.l.set_multi(data)
+        self.g.set_multi(data)
+
+    # Unlike everything else, checkpoints are on the global
+    # client first and then the local one.
+
+    def get_checkpoints(self):
+        return self.g.get_checkpoints() or self.l.get_checkpoints()
+
+    def store_checkpoints(self, c0, c1):
+        # TODO: Is there really much value in storing the checkpoints
+        # globally (as opposed to just on a single process)?
+        self.g.store_checkpoints(c0, c1)
+        return self.l.store_checkpoints(c0, c1)
 
 
 @interface.implementer(IPersistentCache)
@@ -102,19 +173,16 @@ class StorageCache(object):
         # entries in the delta_after maps.
         self.delta_size_limit = options.cache_delta_size_limit
 
-        self.clients_local_first = []
         if local_client is None:
-            self.clients_local_first.append(LocalClient(options, self.prefix))
+            self.local_client = LocalClient(options, self.prefix)
         else:
-            self.clients_local_first.append(local_client)
+            self.local_client = local_client
 
         shared_cache = MemcacheStateCache.from_options(options, self.prefix)
         if shared_cache is not None:
-            self.clients_local_first.append(shared_cache)
-
-        # self.clients_local_first is in order from local to global caches,
-        # while self.clients_global_first is in order from global to local.
-        self.clients_global_first = list(reversed(self.clients_local_first))
+            self.cache = _MultiStateCache(self.local_client, shared_cache)
+        else:
+            self.cache = self.local_client
 
         if local_client is None:
             self.restore()
@@ -136,40 +204,22 @@ class StorageCache(object):
     __nonzero__ = __bool__
 
     def __len__(self):
-        if self.clients_local_first is _UsedAfterRelease:
-            return 0
         return len(self.local_client)
 
     @property
     def size(self):
-        if self.clients_local_first is _UsedAfterRelease:
-            return 0
         return self.local_client.size
 
     @property
     def limit(self):
-        if self.clients_local_first is _UsedAfterRelease:
-            return 0
         return self.local_client.limit
-
-    @property
-    def local_client(self):
-        """
-        The (shared) local in-memory cache client.
-        """
-        return self.clients_local_first[0]
 
     def stats(self):
         """
         Return stats. This is a debugging aid only. The format is undefined and intended
         for human inspection only.
         """
-        try:
-            local_client = self.local_client
-        except TypeError:
-            return {'closed': True}
-        else:
-            return local_client.stats()
+        return self.local_client.stats()
 
     def new_instance(self):
         """
@@ -198,19 +248,10 @@ class StorageCache(object):
 
         This is usually memcache connections if they're in use.
         """
-        clients = ()
-        if self.clients_local_first is not _UsedAfterRelease:
-            clients = self.clients_local_first
-
-        for client in clients:
-            client.close()
-
+        self.cache.close()
         # Release our clients. If we had a non-shared local cache,
-        # this will also allow it to release any memory its holding.
-        # Set them to non-iterables to make it obvious if we are used
-        # after release.
-        self.clients_local_first = _UsedAfterRelease
-        self.clients_global_first = _UsedAfterRelease
+        # this will also allow it to release any memory it's holding.
+        self.local_client = self.cache = _UsedAfterRelease
 
     def save(self, **save_args):
         """
@@ -285,8 +326,7 @@ class StorageCache(object):
         .. versionchanged:: 2.0b6
            Added the ``load_persistent`` keyword. This argument is provisional.
         """
-        for client in self.clients_local_first:
-            client.flush_all()
+        self.cache.flush_all()
 
         self.checkpoints = None
         # After this our current_tid is probably out of sync with the
@@ -411,24 +451,21 @@ class StorageCache(object):
         # checkpoints[1]. Also, when both checkpoints are set to the
         # same transaction ID, we don't need to ask for the same key
         # twice.
-
+        cache = self.cache
         tid_int = self.delta_after0.get(oid_int)
         if tid_int:
             # This object changed after checkpoint0, so
             # there is only one place to look for its state: the exact key.
             key = (oid_int, tid_int)
-            for client in self.clients_local_first:
-                cache_data = client[key]
-                if cache_data:
-                    # Cache hit.
-                    # TODO: If this wasn't the local client, copy it to the local client,
-                    # as we do for the other keys?
-                    assert cache_data[1] == tid_int
-                    # Note that we trace all cache hits, not just the local cache hit.
-                    # This makes the simulation less useful, but the stats might still have
-                    # value to people trying different tuning options manually.
-                    self._trace(0x22, oid_int, tid_int, dlen=len(cache_data[0]))
-                    return cache_data
+            cache_data = cache[key]
+            if cache_data:
+                # Cache hit.
+                assert cache_data[1] == tid_int
+                # Note that we trace all cache hits, not just the local cache hit.
+                # This makes the simulation less useful, but the stats might still have
+                # value to people trying different tuning options manually.
+                self._trace(0x22, oid_int, tid_int, dlen=len(cache_data[0]))
+                return cache_data
 
             # Cache miss.
             self._trace(0x20, oid_int)
@@ -437,8 +474,7 @@ class StorageCache(object):
             self._check_tid_after_load(oid_int, actual_tid_int, tid_int)
 
             # At this point we know that tid_int == actual_tid_int
-            for client in self.clients_local_first:
-                client[key] = (state, actual_tid_int)
+            cache[key] = (state, actual_tid_int)
             return state, tid_int
 
         # Make a list of cache keys to query. The list will have either
@@ -454,21 +490,15 @@ class StorageCache(object):
 
         preferred_key = (oid_int, tid1)
 
-        for client in self.clients_local_first:
-            # Query the cache. Query multiple keys simultaneously to
-            # minimize latency. The client is responsible for moving
-            # the data to the preferred key if it wasn't found there.
-            response = client(oid_int, tid1, tid2)
-            if response: # We have a hit!
-                state, actual_tid = response
-                local_client = self.local_client
-                if client is not local_client:
-                    # Copy to the local client
-                    # at the preferred key
-                    local_client[preferred_key] = response
-                # Cache hit
-                self._trace(0x22, oid_int, actual_tid, dlen=len(state))
-                return state, actual_tid
+        # Query the cache. Query multiple keys simultaneously to
+        # minimize latency. The client is responsible for moving
+        # the data to the preferred key if it wasn't found there.
+        response = cache(oid_int, tid1, tid2)
+        if response: # We have a hit!
+            state, actual_tid = response
+            # Cache hit
+            self._trace(0x22, oid_int, actual_tid, dlen=len(state))
+            return state, actual_tid
 
         # Cache miss.
         self._trace(0x20, oid_int)
@@ -477,8 +507,7 @@ class StorageCache(object):
             self._check_tid_after_load(oid_int, tid_int)
             # Record this as a store into the cache, ZEO does.
             self._trace(0x52, oid_int, tid_int, dlen=len(state) if state else 0)
-            for client in self.clients_local_first:
-                client[preferred_key] = (state, tid_int)
+            cache[preferred_key] = (state, tid_int)
         return state, tid_int
 
     def tpc_begin(self):
@@ -534,21 +563,20 @@ class StorageCache(object):
         # Trace these. This is the equivalent of ZEOs
         # ClientStorage._update_cache.
         self._trace_store_current(tid_int, items)
+        cache = self.cache
         for startpos, endpos, oid_int in items:
             state, length = self._read_temp_state(startpos, endpos)
             cachekey = (oid_int, tid_int)
             item_size = length + len(cachekey)
             if send_size and send_size + item_size >= self.send_limit:
-                for client in self.clients_local_first:
-                    client.set_multi(to_send)
+                cache.set_multi(to_send)
                 to_send.clear()
                 send_size = 0
             to_send[cachekey] = (state, tid_int)
             send_size += item_size
 
         if to_send:
-            for client in self.clients_local_first:
-                client.set_multi(to_send)
+            cache.set_multi(to_send)
 
         self.queue_contents.clear()
         self.queue.seek(0)
@@ -605,12 +633,7 @@ class StorageCache(object):
         my_prev_tid_int = self.current_tid
         self.current_tid = new_tid_int
 
-        global_checkpoints = None
-        for client in self.clients_global_first:
-            s = client.get_checkpoints()
-            if s and s[0] >= s[1]:
-                global_checkpoints = s
-                break
+        global_checkpoints = self.cache.get_checkpoints()
 
         if not global_checkpoints:
             # No other instance has established an opinion yet,
@@ -681,15 +704,10 @@ class StorageCache(object):
         # it was our first poll.
         assert not self.checkpoints
 
-        new_checkpoints = (new_tid_int, new_tid_int)
         # Initialize the checkpoints; we've never polled before.
-        cache_checkpoints = new_checkpoints
-        log.debug("Initializing checkpoints: %s", cache_checkpoints)
+        log.debug("Initializing checkpoints: %s", new_tid_int)
 
-        for client in self.clients_global_first:
-            client.store_checkpoints(*cache_checkpoints)
-
-        self.checkpoints = new_checkpoints
+        self.checkpoints = self.cache.store_checkpoints(new_tid_int, new_tid_int)
 
     def __poll_update_delta0_from_changes(self, changes):
         m = self.delta_after0
@@ -782,11 +800,7 @@ class StorageCache(object):
             change_to,
             delta_size
         )
-
-        for client in self.clients_global_first:
-            old_value = client.get_checkpoints()
-            if old_value:
-                break
+        old_value = self.cache.get_checkpoints()
         if old_value and old_value != expect:
             log.debug(
                 "Checkpoints already shifted to %s, not broadcasting.",
@@ -796,8 +810,7 @@ class StorageCache(object):
         # Shift the checkpoints.
         # Although this is a race with other instances, the race
         # should not matter.
-        for client in self.clients_global_first:
-            client.store_checkpoints(*change_to)
+        self.cache.store_checkpoints(*change_to)
         # The poll code will later see the new checkpoints
         # and update self.checkpoints and self.delta_after(0|1).
 

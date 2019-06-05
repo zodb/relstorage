@@ -116,7 +116,8 @@ class MemcacheStateCache(object):
                 # Invalid checkpoint cache value; ignore it.
                 pass
             else:
-                return c0, c1
+                # More validation
+                return (c0, c1) if c0 >= c1 else None
 
     def close(self):
         self.client.disconnect_all()

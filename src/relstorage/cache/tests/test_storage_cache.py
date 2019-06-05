@@ -54,11 +54,10 @@ class StorageCacheTests(TestCase):
         from relstorage.tests.fakecache import Client
         from relstorage.cache.memcache_client import MemcacheStateCache
         c = self._makeOne()
-        self.assertEqual(len(c.clients_local_first), 2)
-        self.assertEqual(len(c.clients_global_first), 2)
-        self.assertIsInstance(c.clients_global_first[0], MemcacheStateCache)
-        self.assertIsInstance(c.clients_global_first[0].client, Client)
-        self.assertEqual(c.clients_global_first[0].client.servers, ['host:9999'])
+        cache = c.cache
+        self.assertIsInstance(cache.g, MemcacheStateCache)
+        self.assertIsInstance(cache.g.client, Client)
+        self.assertEqual(cache.g.client.servers, ['host:9999'])
         self.assertEqual(c.prefix, 'myprefix')
         self.assertEqual(c.size, 0)
         self.assertEqual(c.limit, MockOptionsWithFakeCache.cache_local_mb * 1000000)
@@ -165,6 +164,8 @@ class StorageCacheTests(TestCase):
         data['myprefix:state:55:2'] = p64(55) + b'abc'
         res = c.load(None, 2)
         self.assertEqual(res, (b'abc', 55))
+        # And it got copied to the local cache
+        self.assertEqual(c.local_client[(2, 55)], (b'abc', 55))
 
     def test_load_using_delta_after0_miss(self):
         adapter = MockAdapter()

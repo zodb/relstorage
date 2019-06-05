@@ -412,7 +412,7 @@ class GenericRelStorageTests(
         try:
             c1 = db.open()
             self.assertEqual(
-                c1._storage._cache.clients_global_first[0].client.servers,
+                c1._storage._cache.cache.g.client.servers,
                 ['x:1', 'y:2'])
             r1 = c1.root()
             # The root state and checkpoints should now be cached.
@@ -570,8 +570,7 @@ class GenericRelStorageTests(
 
             # Clear the caches (but not delta_after*)
             c3._resetCache()
-            for client in c3._storage._cache.clients_local_first:
-                client.flush_all()
+            c3._storage._cache.cache.flush_all()
 
             obj3 = c3.root()['obj']
             # Should have loaded the new object.
