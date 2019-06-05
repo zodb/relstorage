@@ -16,6 +16,7 @@ from __future__ import division
 from __future__ import print_function
 
 # pylint:disable=too-many-lines,abstract-method,too-many-public-methods,attribute-defined-outside-init
+import threading
 import unittest
 from functools import partial
 
@@ -25,6 +26,8 @@ from relstorage.cache.cache_ring import Cache as _BaseCache
 from relstorage.cache.local_client import LocalClient as _BaseLocalClient
 from relstorage.cache.mapping import SizedLRUMapping as _BaseSizedLRUMapping
 from relstorage.options import Options
+
+from relstorage.tests import TestCase
 
 
 class Cache(_BaseCache):
@@ -41,7 +44,7 @@ class LocalClient(_BaseLocalClient):
     _bucket_type = SizedLRUMapping
 
 
-class StorageCacheTests(unittest.TestCase):
+class StorageCacheTests(TestCase):
 
     def setUp(self):
         from relstorage.tests.fakecache import data
@@ -52,11 +55,7 @@ class StorageCacheTests(unittest.TestCase):
         from relstorage.tests.fakecache import data
         data.clear()
         for inst in self._instances:
-            inst.close()
-            assert len(inst) == 0 # pylint:disable=len-as-condition
-            assert bool(inst)
-            assert inst.size == 0
-            assert inst.limit == 0
+            inst.close(close_async=False)
 
     def getClass(self):
         from relstorage.cache import StorageCache
@@ -83,6 +82,19 @@ class StorageCacheTests(unittest.TestCase):
         # can be closed multiple times
         c.close()
         c.close()
+        self.test_closed_state(c)
+
+    def test_closed_state(self, c=None):
+        if c is None:
+            c = self._makeOne()
+        c.close(close_async=False)
+
+        self.assertEqual(len(c), 0)
+        self.assertTrue(c)
+        self.assertEqual(c.size, 0)
+        self.assertEqual(c.limit, 0)
+        # At no point did we spawn threads.
+        self.assertEqual(threading.active_count(), 1)
 
     def test_stats(self):
         inst = self._makeOne()
@@ -91,13 +103,9 @@ class StorageCacheTests(unittest.TestCase):
         self.assertIsInstance(inst.stats(), dict)
 
     def test_save(self):
-        import threading
         import tempfile
         import os
         import shutil
-        import time
-
-        active_threads = threading.active_count()
 
         c = self._makeOne()
         c.checkpoints = (0, 0)
@@ -123,10 +131,8 @@ class StorageCacheTests(unittest.TestCase):
         # Creating one in the same place automatically loads it.
         c2 = self._makeOne(cache_local_dir=c.options.cache_local_dir)
         self.assertEqual(1, len(c2))
-
-        # Avoid warnings from testrunner
-        while threading.active_count() > active_threads:
-            time.sleep(0.01)
+        self.test_closed_state(c2)
+        self.test_closed_state(c)
 
     def test_clear(self):
         from relstorage.tests.fakecache import data
@@ -172,12 +178,8 @@ class StorageCacheTests(unittest.TestCase):
         c.checkpoints = (50, 40)
         c.delta_after0[2] = 55
         adapter.mover.data[2] = (b'abc', 56)
-        try:
+        with self.assertRaisesRegex(AssertionError, "Detected an inconsistency"):
             c.load(None, 2)
-        except AssertionError as e:
-            self.assertTrue('Detected an inconsistency' in e.args[0])
-        else:
-            self.fail("Failed to report cache inconsistency")
 
     def test_load_using_delta_after0_future_error(self):
         adapter = MockAdapter()
@@ -187,12 +189,8 @@ class StorageCacheTests(unittest.TestCase):
         c.delta_after0[2] = 55
         adapter.mover.data[2] = ('abc', 56)
         from ZODB.POSException import ReadConflictError
-        try:
+        with self.assertRaisesRegex(ReadConflictError, "future"):
             c.load(None, 2)
-        except ReadConflictError as e:
-            self.assertTrue('future' in e.message)
-        else:
-            self.fail("Failed to generate a conflict error")
 
     def test_load_using_checkpoint0_hit(self):
         from relstorage.tests.fakecache import data
@@ -454,7 +452,7 @@ def list_lrufreq_(lru, lru_name):
     return [e.frequency for e in getattr(lru, '_' + lru_name)]
 
 
-class SizedLRUMappingTests(unittest.TestCase):
+class SizedLRUMappingTests(TestCase):
 
     def assertNone(self, o):
         if o is not None:
@@ -832,7 +830,7 @@ class LocalClientStrKeysValues(LocalClient):
             v = v[0]
         return v
 
-class LocalClientStrKeysValuesTests(unittest.TestCase):
+class LocalClientStrKeysValuesTests(TestCase):
     def getClass(self):
         return LocalClientStrKeysValues
 
@@ -1185,8 +1183,10 @@ class LocalClientStrKeysValuesTests(unittest.TestCase):
         cache_files = get_cache_files()
         self.assertEqual(len_initial_cache_files, len(cache_files))
 
+        # At no point did we spawn extra threads
+        self.assertEqual(1, threading.active_count())
 
-class CacheRingTests(unittest.TestCase):
+class CacheRingTests(TestCase):
 
     def _makeOne(self, limit):
         from relstorage.cache.cache_ring import CacheRing
@@ -1224,7 +1224,7 @@ class CacheRingTests(unittest.TestCase):
         lru.remove(entrya)
         self.assertFalse(lru)
 
-class LocalClientOIDTests(unittest.TestCase):
+class LocalClientOIDTests(TestCase):
     # Uses true oid/int keys and state/tid values.
 
     def getClass(self):
@@ -1275,7 +1275,7 @@ class MemcacheClientOIDTests(LocalClientOIDTests):
                 super(_StateCache, self).__init__(Client(''), 'pfx')
         return _StateCache
 
-class CacheTests(unittest.TestCase):
+class CacheTests(TestCase):
 
     def test_bad_generation_index_attribute_error(self):
         cache = Cache(20)
@@ -1285,11 +1285,9 @@ class CacheTests(unittest.TestCase):
         getattr(cache.generations[3], 'limit')
 
         # Gen 0 should be missing
-        with self.assertRaises(AttributeError) as ex:
+        with self.assertRaisesRegex(AttributeError,
+                                    "Generation 0 has no attribute 'on_hit'"):
             cache.generations[0].on_hit()
-
-        msg = "Generation 0 has no attribute 'on_hit'"
-        self.assertEqual(ex.exception.args[0], msg)
 
     def test_free_reuse(self):
         cache = Cache(20)
@@ -1440,7 +1438,7 @@ class MockOptions(Options):
 
     def __setattr__(self, name, value):
         if name not in Options.valid_option_names():
-            raise AttributeError("Invalid option", name)
+            raise AttributeError("Invalid option", name) # pragma: no cover
         object.__setattr__(self, name, value)
 
 class MockOptionsWithFakeCache(MockOptions):
