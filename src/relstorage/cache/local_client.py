@@ -753,7 +753,9 @@ class _DatabaseModel(object):
         FROM object_state
         ORDER BY frequency ASC, tid ASC, zoid ASC
         """)
-        batch = RowBatcher(batch_cur, row_limit=999 // 1)
+        batch = RowBatcher(batch_cur,
+                           row_limit=999 // 1,
+                           delete_placeholder='?')
         for row in cur:
             zoid, size = row
             how_much_to_trim -= size

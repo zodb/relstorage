@@ -23,14 +23,23 @@ class RowBatcher(object):
     """
     Generic row batcher.
 
-    Expects '%s' parameters and a tuple for each row.
+    Inserting can use whatever paramater placeholder format
+    and parameter format the cursor supports.
+
+    Deleting needs to use ordered parameters. The placeholder
+    can be set in the ``delete_placeholder`` attribute.
     """
 
     row_limit = 100
     size_limit = 1 << 20
+    delete_placeholder = '%s'
+    # For testing, force the delete order to be deterministic
+    # when multiple columns are involved
+    sorted_deletes = False
 
-    def __init__(self, cursor, row_limit=None):
+    def __init__(self, cursor, row_limit=None, delete_placeholder="%s"):
         self.cursor = cursor
+        self.delete_placeholder = delete_placeholder
         if row_limit is not None:
             self.row_limit = row_limit
 
@@ -47,15 +56,11 @@ class RowBatcher(object):
         self.inserts = defaultdict(dict)  # {(command, header, row_schema, suffix): {rowkey: [row]}}
 
     def delete_from(self, table, **kw):
-        """
-        .. caution:: The keyword values must have a valid str representation.
-        """
         if not kw:
             raise AssertionError("Need at least one column value")
         columns = tuple(sorted(kw))
         key = (table, columns)
         rows = self.deletes[key]
-        # string conversion in done by _do_deletes
         row = tuple(kw[column] for column in columns)
         rows.add(row)
         self.rows_added += 1
@@ -89,24 +94,28 @@ class RowBatcher(object):
         count = 0
         for (table, columns), rows in sorted(iteritems(self.deletes)):
             count += len(rows)
-            # XXX: Stop doing string conversion manually. Let the
-            # cursor do it. It may have a non-text protocol for integer
-            # objects; it may also have a different representation in text.
+            # Be careful not to use % formatting on a string already
+            # containing `delete_placeholder`
             if len(columns) == 1:
-                value_str = ','.join(str(v) for (v,) in rows)
+                # TODO: Some databases, like Postgres, natively support
+                # array types, which can be much faster.
+                # We should do that.
+                placeholder_str = ','.join([self.delete_placeholder] * len(rows))
                 stmt = "DELETE FROM %s WHERE %s IN (%s)" % (
-                    table, columns[0], value_str)
+                    table, columns[0], placeholder_str)
             else:
-                lines = []
-                for row in rows:
-                    line = []
-                    for i, column in enumerate(columns):
-                        line.append("%s = %s" % (column, row[i]))
-                    lines.append(" AND ".join(line))
+                row_template = " AND ".join(
+                    ("%s=" % (column,)) + self.delete_placeholder
+                    for column in columns
+                )
+                row_template = "(%s)" % (row_template,)
+                rows_template = [row_template] * len(rows)
                 stmt = "DELETE FROM %s WHERE %s" % (
-                    table, " OR ".join(lines))
+                    table, " OR ".join(rows_template))
 
-            self.cursor.execute(stmt)
+            rows = sorted(rows) if self.sorted_deletes else rows
+            rows = list(itertools.chain.from_iterable(rows))
+            self.cursor.execute(stmt, rows)
         return count
 
     def _do_inserts(self):
