@@ -581,24 +581,32 @@ class _DatabaseModel(object):
         self.use_Upsert = use_upsert
         self.use_paren_update = use_paren_update
 
-    def close(self):
-        self.connection.close()
-
-    _schema = """
+    # The main repository of our data. This uses the OID of the object
+    # as the INTEGER PRIMARY KEY --- that's a special type of key that
+    # means this table is a clustered table, organized with that
+    # column as its primary key.
+    #
+    # This reduces overhead of having a secondary (hidden) 'rowid' column
+    # to do the clusteing on, to it's important.
+    _state_table_schema = """
     CREATE TABLE IF NOT EXISTS object_state (
         zoid INTEGER PRIMARY KEY,
         tid INTEGER NOT NULL ,
         frequency INTEGER NOT NULL,
         state BLOB
     );
+    """
 
-    -- This loses all the constraints and primary key
-    -- Does that matter?
-    CREATE TEMPORARY TABLE temp_state
-    AS
-    SELECT * FROM object_state
-    LIMIT 0;
+    # We want to keep the clustering for the temporary table,
+    # so the integer primary key matters.
+    _temp_table_schema = _state_table_schema.replace(
+        "object_state", 'temp_state'
+    ).replace('TABLE', 'TEMPORARY TABLE')
 
+    def close(self):
+        self.connection.close()
+
+    _schema = _state_table_schema + '\n' + _temp_table_schema + """
     CREATE TABLE IF NOT EXISTS checkpoints (
         id INTEGER PRIMARY KEY, cp0 INTEGER, cp1 INTEGER
     );

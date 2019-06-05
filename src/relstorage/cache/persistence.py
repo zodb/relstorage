@@ -137,9 +137,33 @@ class Connection(sqlite3.Connection):
         else:
             c()
 
+# PRAGMA statements don't allow ? placeholders
+# when executed. This is probably a bug in the sqlite3
+# module.
+def _execute_pragma(cur, name, value):
+    stmt = 'PRAGMA %s = %s' % (name, value)
+    cur.execute(stmt)
 
+def _execute_pragmas(cur, **kwargs):
+    for k, v in kwargs.items():
+        # Query, report, then change
+        stmt = 'PRAGMA %s' % (k,)
+        cur.execute(stmt)
+        orig_value = cur.fetchone()[0]
+        if v is not None and v != orig_value:
+            _execute_pragma(cur, k, v)
+            cur.execute(stmt)
+            new_value = cur.fetchone()[0]
+            logger.debug(
+                "Original %s = %s. Desired %s = %s. Updated %s = %s",
+                k, orig_value,
+                k, v,
+                k, new_value)
+        else:
+            logger.debug("Using %s = %s", k, orig_value)
 
-def _connect_to_file(fname, factory=Connection, close_async=True):
+def _connect_to_file(fname, factory=Connection, close_async=True,
+                     pragmas=None):
 
     connection = sqlite3.connect(
         fname,
@@ -163,9 +187,54 @@ def _connect_to_file(fname, factory=Connection, close_async=True):
         # instead just switch your application to Unicode strings.
         connection.text_factory = str
 
+    # Make sure we have at least one pragma that touches
+    # the database so that we can verify that it's not corrupt.
+    pragmas.setdefault('journal_mode', 'wal')
+    cur = connection.cursor()
+    try:
+        _execute_pragmas(cur, **pragmas)
+    except:
+        cur.close()
+        if hasattr(connection, 'rs_close_async'):
+            connection.rs_close_async = False
+            connection.close()
+        raise
+
+    cur.close()
+
     return connection
 
-def sqlite_connect(options, prefix, overwrite=False, max_wal=10*1024*1024, close_async=True):
+_MB = 1024 * 1024
+DEFAULT_MAX_WAL = 10 * _MB
+DEFAULT_CLOSE_ASYNC = True
+# Benchmarking on at least one system doesn't show an improvement to
+# either reading or writing by forcing a large mmap_size.
+DEFAULT_MMAP_SIZE = None
+# 4096 is the page size in current releases of sqlite; older versions
+# used 1024. A larger page makes sense as we have biggish values.
+# Going larger doesn't make much difference in benchmarks.
+DEFAULT_PAGE_SIZE = 4096
+# Control where temporary data is:
+#
+# FILE = a deleted disk file (that sqlite never flushes so
+# theoretically just exists in the operating system's filesystem
+# cache)
+#
+# MEMORY = explicitly in memory only
+#
+# DEFAULT = compile time default. Benchmarking for large writes
+# doesn't show much difference between FILE and MEMORY, so don't
+# bother to change from the default.
+DEFAULT_TEMP_STORE = None
+
+
+def sqlite_connect(options, prefix,
+                   overwrite=False,
+                   max_wal=DEFAULT_MAX_WAL,
+                   close_async=DEFAULT_CLOSE_ASYNC,
+                   mmap_size=DEFAULT_MMAP_SIZE,
+                   page_size=DEFAULT_PAGE_SIZE,
+                   temp_store=DEFAULT_TEMP_STORE):
     """
     Return a DB-API Connection object.
 
@@ -182,36 +251,50 @@ def sqlite_connect(options, prefix, overwrite=False, max_wal=10*1024*1024, close
 
     fname = os.path.join(parent_dir, 'relstorage-cache-' + prefix + '.sqlite3')
     wal_fname = fname + '-wal'
-    if overwrite:
+    def destroy():
         logger.info("Replacing any existing cache at %s", fname)
         __quiet_remove(fname)
         __quiet_remove(wal_fname)
+    if overwrite:
+        destroy()
 
-    connection = _connect_to_file(fname, close_async=close_async)
-    # WAL mode can actually be a bit slower at commit time,
-    # but buys us better concurrency.
+    pragmas = {
+        # WAL mode can actually be a bit slower at commit time,
+        # but buys us better concurrency.
+        'journal_mode': 'wal',
+        'mmap_size': mmap_size,
+        'page_size': page_size,
+        'temp_store': temp_store,
+        # Eliminate as much checkpoint disk IO as we can. We're just
+        # a cache, not a primary source of truth.
+        'synchronous': 'OFF',
+        # Disable auto-checkpoint so that commits have
+        # reliable duration; after commit, if it's a good time,
+        # we can run 'PRAGMA wal_checkpoint'. (In most cases, the last
+        # database connection that's open will essentially do that
+        # automatically.)
+        'wal_autocheckpoint': 0,
+        'threads': 2,
+        # Things to query and report.
+        'soft_heap_limit': None,
+        # The default of -2000 is 2000 pages. At 4K page size,
+        # that's 8MB.
+        'cache_size': None,
+    }
+
     try:
-        cur = connection.execute('PRAGMA journal_mode = WAL')
+        connection = _connect_to_file(fname, close_async=close_async,
+                                      pragmas=pragmas)
     except sqlite3.DatabaseError:
         if overwrite:
+            # We already destroyed. Uh-oh!
             raise
         logger.info("Corrupt cache database at %s; replacing", fname)
-        connection.rs_close_async = False
-        connection.close()
-        return sqlite_connect(options, prefix, True)
+        destroy()
+        connection = _connect_to_file(fname, close_async=close_async,
+                                      pragmas=pragmas)
 
-    mode = cur.fetchall()[0][0]
-    if mode != 'wal':
-        raise ValueError("Couldn't set WAL mode")
-
-    cur.execute("PRAGMA synchronous = OFF")
-    # Disable auto-checkpoint so that commits have
-    # reliable duration; after commit, if it's a good time,
-    # we can run 'PRAGMA wal_checkpoint'. (In most cases, the last
-    # database connection that's open will essentially do that
-    # automatically.)
-    cur.execute("PRAGMA wal_autocheckpoint = 0")
-    # In fact, now might be a good time to checkpoint. If we're opening the
+    # Now might be a good time to checkpoint. If we're opening the
     # DB, we could be around for awhile. Doing the checkpoint will
     # release the GIL, so it's good to do in another thread.
     # (If we're monkey-patched by gevent, do so in a gevent worker)
@@ -236,8 +319,6 @@ def sqlite_connect(options, prefix, overwrite=False, max_wal=10*1024*1024, close
         from relstorage._compat import spawn
         spawn(checkpoint)
 
-
-    cur.close()
     return connection, fname
 
 def __quiet_remove(path):
