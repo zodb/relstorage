@@ -19,9 +19,6 @@ import logging
 import operator
 import time
 
-from relstorage._compat import iteritems
-from relstorage._compat import itervalues
-from relstorage._compat import iterkeys
 from relstorage._compat import get_memory_usage
 from relstorage.cache.cache_ring import Cache
 from relstorage.cache.persistence import Pickler
@@ -64,6 +61,8 @@ class SizedLRUMapping(object):
 
     _cache_type = Cache
 
+    _dict_type = dict
+
     def __init__(self, weight_limit, key_weight=len, value_weight=len):
         # We experimented with using OOBTree and LOBTree
         # for the type of self._dict. The OOBTree has a similar
@@ -75,24 +74,35 @@ class SizedLRUMapping(object):
         # own dict specializations. We were hoping to be able to write faster pickles with
         # large BTrees, but since that's not the case, we abandoned the idea.
 
+        self._cache = self._cache_type(weight_limit, key_weight, value_weight)
         # This holds all the ring entries, no matter which ring they are in.
-        cache = self._cache = self._cache_type(weight_limit, key_weight, value_weight)
-        self._dict = cache.data
-
-        self._protected = cache.protected
-        self._probation = cache.probation
-        self._eden = cache.eden
-        self._gens = cache.generations
+        self._dict = dct = self._dict_type()
 
         self._hits = 0
         self._misses = 0
         self._sets = 0
         self.limit = weight_limit
         self._next_age_at = 1000
+        self.keys = getattr(dct, 'iterkeys', dct.keys)
+
+
+    # Backwards compatibility for testing
+    @property
+    def _eden(self):
+        return self._cache.eden
+
+    @property
+    def _protected(self):
+        return self._cache.protected
+
+    @property
+    def _probation(self):
+        return self._cache.probation
+    # End BWC
 
     @property
     def size(self):
-        return self._eden.size + self._protected.size + self._probation.size
+        return self._cache.size
 
     def reset_stats(self):
         self._hits = 0
@@ -110,9 +120,7 @@ class SizedLRUMapping(object):
             'ratio': self._hits / total if total else 0,
             'size': len(self._dict),
             'bytes': self.size,
-            'eden_stats': self._eden.stats(),
-            'prot_stats': self._protected.stats(),
-            'prob_stats': self._probation.stats(),
+            'lru_stats': self._cache.stats(),
         }
 
     def __len__(self):
@@ -127,16 +135,18 @@ class SizedLRUMapping(object):
             self.size, self.limit, len(self), self.stats()['hits']
         )
 
+    def iterentries(self):
+        # Iterating the dict is safer than iterating the generations
+        # in the case of mutations
+        return getattr(self._dict, 'itervalues', self._dict.values)()
+
     def values(self):
-        for entry in itervalues(self._dict):
+        for entry in self.iterentries():
             yield entry.value
 
     def items(self):
-        for k, entry in iteritems(self._dict):
-            yield k, entry.value
-
-    def keys(self):
-        return iterkeys(self._dict)
+        for entry in self.iterentries():
+            yield (entry.key, entry.value)
 
     def _age(self):
         # Age only when we're full and would thus need to evict; this
@@ -188,23 +198,26 @@ class SizedLRUMapping(object):
         passed to the :meth:`handle_evicted_items` method.
         """
         dct = self._dict
-
-        if key in dct:
-            entry = dct[key]
+        entry = dct.get(key)
+        if entry is not None:
             # This bumps its frequency, and potentially ejects other items.
-            evicted_items = self._gens[entry.cffi_entry.r_parent].update_MRU(entry, value)
+            evicted_items = self._cache.update_MRU(entry, value)
         else:
             # New values have a frequency of 1 and might evict other
             # items.
-            lru = self._eden
-            entry, evicted_items = lru.add_MRU(key, value)
+            entry, evicted_items = self._cache.add_MRU(key, value)
             dct[key] = entry
 
         if evicted_items:
+            # Make us consistent:
+            # Remove them from our lookup dict.
+            # By the time we get here, they're already out of the ring,
+            # meaning their key and value have been lost.
+            for k, _ in evicted_items:
+                del dct[k]
+
             self.handle_evicted_items(evicted_items)
         self._sets += 1
-
-        # TODO: Notifications about evicted keys
 
         # Do we need to move this up above the eviction choices?
         # Inline some of the logic about whether to age or not; avoiding the
@@ -223,18 +236,18 @@ class SizedLRUMapping(object):
     def __delitem__(self, key):
         entry = self._dict[key]
         del self._dict[key]
-        self._gens[entry.cffi_entry.r_parent].remove(entry)
+        self._cache.remove(entry)
 
     def get_and_bubble_all(self, keys):
         # This is only used in testing now, the higher levels
         # use `get_from_key_or_backup_key`
         dct = self._dict
-        gens = self._gens
+        cache = self._cache
         res = {}
         for key in keys:
             entry = dct.get(key)
             if entry is not None:
-                gens[entry.cffi_entry.r_parent].on_hit(entry)
+                cache.on_hit(entry)
                 res[key] = entry.value
 
         self._hits += len(res)
@@ -254,22 +267,19 @@ class SizedLRUMapping(object):
             self._misses += 1
             return
 
-        # TODO: Tests specifically for this.
         self._hits += 1
         result = entry.value
-        if not at_backup:
-            self._gens[entry.cffi_entry.r_parent].on_hit(entry)
-        else:
+        if at_backup:
             # Move the backup key to the current key.
-            # Compensate for what we're about to do,
-            # we don't want this to show up as a set in our
-            # stats, and it shouldn't cause anything to be evicted
-            self._sets -= 1
-            # TODO: We could probably more directly use this entry
-            # object. As it is, it goes back on the freelist
-            del entry
-            del self[backup_key]
-            self[pref_key] = result
+            # We assume that the key weights are the same,
+            # or at least don't make a meaningful difference.
+            # By doing so, we can reuse the same entry object,
+            # keeping its frequency and so forth.
+            entry.key = backup_key
+            del dct[backup_key]
+            dct[pref_key] = entry
+        self._cache.on_hit(entry)
+
         return result
 
 
@@ -351,7 +361,7 @@ class SizedLRUMapping(object):
             new_entries_newest_first.reverse()
             keys_and_values = new_entries_newest_first
 
-        added_entries = self._eden.add_MRUs(keys_and_values)
+        added_entries = self._cache.add_MRUs(keys_and_values)
         stored = len(added_entries)
         for e in added_entries:
             # XXX: Why doesn't eden.add_MRUs do this? It has access
@@ -378,9 +388,7 @@ class SizedLRUMapping(object):
         with the highest frequency (most used) being last in the list. (Unless you specify *sort*
         to be false, in which case the order is not specified.)
         """
-        entries = list(self._probation)
-        entries.extend(self._protected)
-        entries.extend(self._eden)
+        entries = list(self._cache)
 
         if len(entries) != len(self._dict): # pragma: no cover
             raise CacheCorruptedError(

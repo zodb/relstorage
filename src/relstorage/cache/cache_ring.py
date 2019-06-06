@@ -130,15 +130,13 @@ class Cache(object):
                            protected_limit=0,
                            probation_limit=0,
                            key_weight=len, value_weight=len):
-        # This must hold all the ring entries, no matter which ring they are in.
-        data = {}
         cffi_cache = ffi_new("RSCache*")
 
         generations = {}
         for klass, limit in ((EdenRing, eden_limit),
                              (ProtectedRing, protected_limit),
                              (ProbationRing, probation_limit)):
-            generation = klass(limit, cffi_cache, data, key_weight, value_weight)
+            generation = klass(limit, cffi_cache, key_weight, value_weight)
             setattr(cffi_cache, generation.__name__, generation.ring_home)
             generations[generation.__name__] = generation
         return generations
@@ -154,11 +152,12 @@ class Cache(object):
             value_weight=value_weight
         )
 
-        self.eden = generations['eden']
+        self.eden = generations['eden'] # type: EdenRing
+        self.add_MRU = self.eden.add_MRU
+        self.add_MRUs = self.eden.add_MRUs
         self.protected = generations['protected']
         self.probation = generations['probation']
 
-        self.data = self.eden.data
         self.cffi_cache = self.eden.cffi_cache
 
         generations = list(Cache.generations) # Preserve the NoSuchGeneration initializers
@@ -183,8 +182,34 @@ class Cache(object):
     def age_lists(self):
         _lru_age_lists(self.cffi_cache)
 
+    def update_MRU(self, entry, value):
+        return self.generations[entry.cffi_entry.r_parent].update_MRU(entry, value)
 
-class CacheRingNode(object):
+    def remove(self, entry):
+        self.generations[entry.cffi_entry.r_parent].remove(entry)
+
+    def on_hit(self, entry):
+        self.generations[entry.cffi_entry.r_parent].on_hit(entry)
+
+    @property
+    def size(self):
+        return self.eden.size + self.protected.size + self.probation.size
+
+    def stats(self):
+        return {
+            'eden_stats': self.eden.stats(),
+            'prot_stats': self.protected.stats(),
+            'prob_stats': self.probation.stats(),
+        }
+
+    def __iter__(self):
+        return itertools.chain(self.probation, self.protected, self.eden)
+
+
+class CacheRingEntry(object):
+    """
+    The Python-level objects holding the Python-level key and value.
+    """
 
     __slots__ = (
         'key', 'value', 'len',
@@ -282,11 +307,6 @@ class CacheRing(object):
     # among all the rings of the cache.
     cffi_cache = None
 
-    # The dictionary holding all the entries. This is needed
-    # so we can handle eviction. It should be shared among all the
-    # rings of a cache.
-    data = None
-
     # The list of free CacheRingNode objects. It should be shared
     # among all the rings of a cache.
     node_free_list = ()
@@ -294,14 +314,13 @@ class CacheRing(object):
     PARENT_CONST = 0
 
     def __init__(self, limit,
-                 cffi_cache, data,
+                 cffi_cache,
                  key_weight=len, value_weight=len):
 
         self.limit = limit
         self.key_weight = key_weight
         self.value_weight = value_weight
         self.cffi_cache = cffi_cache
-        self.data = data
         node = self.ring_home = ffi.new("RSRing")
         node.r_next = node
         node.r_prev = node
@@ -334,7 +353,7 @@ class CacheRing(object):
         for i, (k, v) in enumerate(ordered_keys_and_values):
             node = nodes + i # pointer arithmetic gets RSRingNode*; nodes[i] returns the struct
             weight = key_weight(k) + value_weight(v)
-            entry = CacheRingNode(k, v, weight, node)
+            entry = CacheRingEntry(k, v, weight, node)
             entry._cffi_owning_node = nodes
             entries.append(entry)
         return nodes, entries
@@ -371,7 +390,7 @@ class CacheRing(object):
             new_entry = node_free_list.pop()
             new_entry.reset(key, value, weight)
         else:
-            new_entry = CacheRingNode(key, value, weight)
+            new_entry = CacheRingEntry(key, value, weight)
 
         _ring_add(self.ring_home, new_entry.cffi_ring_node)
         return new_entry
@@ -391,26 +410,25 @@ class CacheRing(object):
         entry.set_value(value, new_size)
 
         if old_size == new_size:
-            # Treat it as a simple hit
-            return self.on_hit(entry)
+            # Treat it as a simple hit; nothing could get evicted.
+            self.on_hit(entry)
+            return ()
 
-        rejected_items = _lru_update_mru(self.cffi_cache,
-                                         self.ring_home,
-                                         entry.cffi_ring_node,
-                                         old_size, new_size)
+        evicted_ring = _lru_update_mru(self.cffi_cache,
+                                       self.ring_home,
+                                       entry.cffi_ring_node,
+                                       old_size, new_size)
 
-        if not rejected_items.r_next:
+        if not evicted_ring.r_next:
             # Nothing rejected.
             return ()
 
-        dct = self.data
-        node = rejected_items.r_next
+        node = evicted_ring.r_next
         evicted_items = []
         node_free_list = self.node_free_list
         while node:
-            key = ffi_from_handle(node.user_data).key
-            old_entry = dct.pop(key)
-            evicted_items.append((key, old_entry.value))
+            old_entry = ffi_from_handle(node.user_data)
+            evicted_items.append((old_entry.key, old_entry.value))
             old_entry.reset_for_free_list()
             node_free_list.append(old_entry)
 
@@ -442,6 +460,12 @@ class EdenRing(CacheRing):
 
     @_mutates_free_list
     def add_MRUs(self, ordered_keys_and_values, total_count=None):
+        """
+        Returns a sequence of added entries.
+
+        You *must* keep the objects in the sequence alive while they remain in
+        the ring, until they are explicitly removed or evicted.
+        """
         # ordered_keys_and_values may be a generator, in which case you
         # must provide total_count. Beware, though: if you provide many, many
         # more values than can fit, you can find up allocating a large
@@ -526,27 +550,34 @@ class EdenRing(CacheRing):
 
     @_mutates_free_list
     def add_MRU(self, key, value):
+        """
+        Returns ``(added_entry, (evicted_key, evicted_value))``
+
+        You *must* keep the ``added_entry`` object alive while it
+        remains in the ring, until it is explicitly removed or
+        it is evicted.
+        """
         node_free_list = self.node_free_list
         weight = self.key_weight(key) + self.value_weight(value)
         if node_free_list:
             new_entry = node_free_list.pop()
             new_entry.reset(key, value, weight)
         else:
-            new_entry = CacheRingNode(key, value, weight)
-        evicted_items = _eden_add(self.cffi_cache,
-                                  new_entry.cffi_ring_node)
+            new_entry = CacheRingEntry(key, value, weight)
 
-        if not evicted_items.r_next:
+        evicted_ring = _eden_add(self.cffi_cache,
+                                 new_entry.cffi_ring_node)
+
+        if not evicted_ring.r_next:
             # Nothing rejected.
             return new_entry, ()
 
-        dct = self.data
-        node = evicted_items.r_next
+        node = evicted_ring.r_next
         evicted_items = []
         while node:
-            key = ffi_from_handle(node.user_data).key
-            old_entry = dct.pop(key)
-            evicted_items.append((key, old_entry.value))
+            old_entry = ffi_from_handle(node.user_data)
+
+            evicted_items.append((old_entry.key, old_entry.value))
             # TODO: Should we avoid this if _cffi_owning_node is set?
             # To allow that big array to get GC'd sooner
             old_entry.reset_for_free_list()

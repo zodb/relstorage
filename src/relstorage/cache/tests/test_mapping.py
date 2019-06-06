@@ -46,14 +46,39 @@ class SizedLRUMappingTests(TestCase):
         self.assertEqual(b.size, 0)
         b['abc'] = b'defghi'
         self.assertEqual(b.size, 9)
+        # Other Mapping APIs
+        self.assertIn('abc', b)
+        self.assertEqual(list(b.keys()),
+                         ['abc'])
+        self.assertEqual(list(b.items()),
+                         [('abc', b'defghi')])
+        self.assertEqual(list(b.values()),
+                         [b'defghi'])
+
         b['abc'] = b'123'
         self.assertEqual(b.size, 6)
+        self.assertEqual(list(b.keys()),
+                         ['abc'])
+        self.assertEqual(list(b.items()),
+                         [('abc', b'123')])
+        self.assertEqual(list(b.values()),
+                         [b'123'])
+
         b['abc'] = b''
         self.assertEqual(b.size, 3)
         b['abc'] = b'defghi'
         self.assertEqual(b.size, 9)
+
         del b['abc']
         self.assertEqual(b.size, 0)
+        self.assertNotIn('abc', b)
+        self.assertEqual(list(b.keys()),
+                         [])
+        self.assertEqual(list(b.items()),
+                         [])
+        self.assertEqual(list(b.values()),
+                         [])
+
 
     def test_set_limit(self):
         b = self.getClass()(5)
@@ -234,15 +259,17 @@ class SizedLRUMappingTests(TestCase):
         bio.seek(0)
         return bucket.read_from_stream(bio)
 
-    def _save(self, bio, bucket, options, byte_limit=None):
+    def _save(self, bio, bucket, options, byte_limit=None, pickle_fast=False):
         bio.seek(0)
         writer = bio
-        count = bucket.write_to_stream(writer, byte_limit or options.cache_local_dir_write_max_size)
+        count = bucket.write_to_stream(writer,
+                                       byte_limit or options.cache_local_dir_write_max_size,
+                                       pickle_fast=pickle_fast)
         writer.flush()
         bio.seek(0)
         return count
 
-    def test_load_and_store(self, options=None):
+    def test_load_and_store(self, options=None, pickle_fast=False):
         # pylint:disable=too-many-statements
         from io import BytesIO
         if options is None:
@@ -252,7 +279,7 @@ class SizedLRUMappingTests(TestCase):
 
         bio = BytesIO()
 
-        self._save(bio, client1, options)
+        self._save(bio, client1, options, pickle_fast=pickle_fast)
         # Regardless of its read frequency, it's still written
         client2 = self.getClass()(100)
         count, stored = self._load(bio, client2)
@@ -326,7 +353,7 @@ class SizedLRUMappingTests(TestCase):
         self.assertEqual(client1.size, client1_max_size)
 
         bio = BytesIO()
-        self._save(bio, client1, options, client1_max_size)
+        self._save(bio, client1, options, client1_max_size, pickle_fast=pickle_fast)
 
 
         client1 = self.getClass()(100)
@@ -369,7 +396,7 @@ class SizedLRUMappingTests(TestCase):
         # A is much more popular than b
 
         bio = BytesIO()
-        self._save(bio, client1, options, 2)
+        self._save(bio, client1, options, 2, pickle_fast=pickle_fast)
 
         client2 = self.getClass()(100)
         count, stored = self._load(bio, client2)
@@ -378,7 +405,30 @@ class SizedLRUMappingTests(TestCase):
         self.assertEqual(list_lrukeys_(client2, 'eden'), ['a'])
 
 
-    def test_load_and_store_to_gzip(self):
-        options = MockOptions()
-        options.cache_local_dir_compress = True
-        self.test_load_and_store(options)
+    def test_load_and_store_fast(self):
+        self.test_load_and_store(pickle_fast=True)
+
+    def test_get_backup_not_found(self):
+        c = self.getClass()(100)
+        c.get_from_key_or_backup_key(None, None)
+        self.assertEqual(c._misses, 1)
+
+    def test_get_backup_at_pref(self):
+        c = self.getClass()(100)
+        c['a'] = b'1'
+        c['b'] = b'2'
+
+        result = c.get_from_key_or_backup_key('a', 'b')
+        self.assertEqual(result, b'1')
+        self.assertEqual(c._hits, 1)
+
+    def test_get_backup_at_backup(self):
+        c = self.getClass()(100)
+        c['b'] = b'1'
+
+        result = c.get_from_key_or_backup_key('a', 'b')
+        self.assertEqual(result, b'1')
+        self.assertEqual(c._hits, 1)
+        self.assertEqual(c._sets, 1)
+        self.assertEqual(len(c), 1)
+        self.assertNotIn('b', c)

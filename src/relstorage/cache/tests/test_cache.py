@@ -23,7 +23,7 @@ class CacheRingTests(TestCase):
 
     def _makeOne(self, limit):
         from relstorage.cache.cache_ring import CacheRing
-        return CacheRing(limit, None, None)
+        return CacheRing(limit, None)
 
     def test_mru_lru_ring(self):
         lru = self._makeOne(100)
@@ -100,11 +100,23 @@ class CacheTests(TestCase):
         entryb = lru.add_MRU('b', b'')
         entryc = lru.add_MRU('c', b'1')
         entryd = lru.add_MRU('d', b'1')
-        for e in entrya, entryb, entryc, entryd:
-            cache.data[e.key] = e
-        lru.update_MRU(entryb, b'1234567890')
-        lru.update_MRU(entryb, b'1234567890') # coverage
-        lru.update_MRU(entryc, b'1234567890')
+        evicted = lru.update_MRU(entryb, b'1234567890')
+        self.assertEqual(evicted, ())
+        # Not changing the size is just a hit, it doesnt't
+        # evict anything.
+        evicted = lru.update_MRU(entryb, b'1234567890')
+        self.assertEqual(evicted, ())
+        evicted = lru.update_MRU(entryc, b'1234567890')
+
+        # a and d were evicted and placed on the freelist
+        self.assertEqual(entrya.key, None)
+        self.assertEqual(entrya.value, None)
+        self.assertEqual(entryd.key, None)
+        self.assertEqual(entryd.key, None)
+
+        self.assertEqual(evicted,
+                         [('a', b''),
+                          ('d', b'1')])
         self.assertEqual(2, len(lru.node_free_list))
 
         lru.add_MRU('c', b'1')
