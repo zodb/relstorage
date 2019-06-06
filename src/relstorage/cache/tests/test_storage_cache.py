@@ -86,9 +86,8 @@ class StorageCacheTests(TestCase):
         inst.close()
         self.assertIsInstance(inst.stats(), dict)
 
-    def test_save(self):
+    def _setup_for_save(self):
         import tempfile
-        import os
         import shutil
 
         c = self._makeOne()
@@ -100,7 +99,7 @@ class StorageCacheTests(TestCase):
         tid = 268595726030645777
         oid = 2
         c.store_temp(oid, b'abc')
-        c.after_tpc_finish(p64(268595726030645777))
+        c.after_tpc_finish(p64(tid))
 
         key = list(iter(c.local_client))[0]
         self.assertEqual((2, tid), key)
@@ -108,6 +107,11 @@ class StorageCacheTests(TestCase):
         c.options.cache_local_dir = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, c.options.cache_local_dir, True)
 
+        return c, oid, tid
+
+    def test_save(self):
+        import os
+        c, oid, tid = self._setup_for_save()
         c.save(close_async=False)
         files = os.listdir(c.options.cache_local_dir)
         __traceback_info__ = files
@@ -141,6 +145,14 @@ class StorageCacheTests(TestCase):
 
         self.test_closed_state(c2)
         self.test_closed_state(c)
+
+    def test_save_no_hits_no_sets(self):
+        import os
+        c, _, _ = self._setup_for_save()
+        c.local_client.reset_stats()
+        c.save(close_async=False)
+        files = os.listdir(c.options.cache_local_dir)
+        self.assertEmpty(files)
 
     def test_clear(self):
         from relstorage.tests.fakecache import data
@@ -490,3 +502,43 @@ class StorageCacheTests(TestCase):
         self.assertEqual(c.local_client.get_checkpoints(), shifted_checkpoints)
         self.assertEqual(dict(c.delta_after0), {1: 45, 2: 46})
         self.assertEqual(dict(c.delta_after1), {})
+
+
+class PersistentRowFilterTests(TestCase):
+
+    def _makeOne(self):
+        from relstorage.cache.storage_cache import _PersistentRowFilter
+        return _PersistentRowFilter(dict)
+
+    def test_no_checkpoints(self):
+        f = self._makeOne()
+
+        rows = [(1, 2, 3)]
+        results = list(f(None, rows))
+        self.assertEqual(results, [(1, 2, 3, 2)])
+        self.assertEmpty(f.delta_after0)
+        self.assertEmpty(f.delta_after1)
+
+    def test_deltas(self):
+        f = self._makeOne()
+
+        cp0 = 5000
+        cp1 = 4000
+
+        tid_after0 = 5000
+        tid_after1 = 4000
+        old_tid = 3999
+
+        rows = [
+            (1, tid_after0, 1),
+            (2, tid_after1, 2),
+            (3, old_tid, 3)
+        ]
+
+        results = list(f((cp0, cp1), rows))
+
+        self.assertEqual(results, [
+            (1, tid_after0, 1, tid_after0),
+            (2, tid_after1, 2, tid_after1),
+            (3, tid_after0, 3, old_tid)
+        ])

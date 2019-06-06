@@ -16,7 +16,6 @@ from __future__ import division
 from __future__ import print_function
 
 import bz2
-import functools
 import sqlite3
 import threading
 import time
@@ -28,6 +27,9 @@ from zope import interface
 
 from relstorage._compat import iteritems
 from relstorage._compat import get_memory_usage
+from relstorage._util import timer as _timer
+from relstorage._util import log_timed as _log_timed
+
 from relstorage.adapters.batch import RowBatcher
 from relstorage.cache.persistence import sqlite_connect
 from relstorage.cache.interfaces import IStateCache
@@ -40,33 +42,6 @@ from relstorage.cache.mapping import SizedLRUMapping as LocalClientBucket
 
 logger = __import__('logging').getLogger(__name__)
 
-class _timer(object):
-    begin = None
-    end = None
-    duration = None
-
-    try:
-        from pyperf import perf_counter as counter
-    except ImportError: # pragma: no cover
-        counter = time.time
-
-    def __enter__(self):
-        self.begin = self.counter()
-        return self
-
-    def __exit__(self, t, v, tb):
-        self.end = self.counter()
-        self.duration = self.end - self.begin
-
-def _log_timed(func):
-    @functools.wraps(func)
-    def timer(*args, **kwargs):
-        t = _timer()
-        with t:
-            result = func(*args, **kwargs)
-        logger.debug("Function %s took %s", func.__name__, t.duration)
-        return result
-    return timer
 
 
 @interface.implementer(IStateCache,
@@ -106,7 +81,7 @@ class LocalClient(object):
         # TIDs; only if they were already in here do we continue to keep track.
         # At write time, if we can't meet the requirement ourself, we at least
         # make sure there are no stale entries in the cache database.
-        self.__min_allowed_writeback = OID_TID_MAP_TYPE()
+        self._min_allowed_writeback = OID_TID_MAP_TYPE()
 
         self.flush_all()
 
@@ -153,8 +128,8 @@ class LocalClient(object):
     def save(self, overwrite=False, close_async=True):
         options = self.options
         if options.cache_local_dir and self.__bucket.size:
-            conn, pathname = sqlite_connect(options, self.prefix,
-                                            overwrite=overwrite, close_async=close_async)
+            conn = sqlite_connect(options, self.prefix,
+                                  overwrite=overwrite, close_async=close_async)
             with closing(conn):
                 try:
                     self.write_to_sqlite(conn)
@@ -164,19 +139,22 @@ class LocalClient(object):
                     logger.exception("Failed to save cache")
             # Testing: Return a signal when we tried to write
             # something.
-            return pathname
+            return 1
 
-    def restore(self):
+    def restore(self, row_filter=None):
         """
-        Return ``(delta_after0, delta_after1)``.
+        Load the data from the persistent database.
 
-        If no data could be loaded, returns ``None``.
+        If *row_filter* is given, it is a ``callable(checkpoints, row_iter)``
+        that should return an iterator of four-tuples: ``(oid, key_tid, state, state_tid)``
+        from the input rows ``(oid, state_tid, actual_tid)``. It is guaranteed
+        that you won't see the same oid more than once.
         """
         options = self.options
         if options.cache_local_dir:
-            conn, fname = sqlite_connect(options, self.prefix, close_async=False)
+            conn = sqlite_connect(options, self.prefix, close_async=False)
             with closing(conn):
-                return self.read_from_sqlite(conn, fname)
+                self.read_from_sqlite(conn, row_filter)
 
     @property
     def _bucket0(self):
@@ -203,7 +181,7 @@ class LocalClient(object):
                 value_weight=self.value_weight,
             )
             self.checkpoints = None
-            self.__min_allowed_writeback = OID_TID_MAP_TYPE()
+            self._min_allowed_writeback = OID_TID_MAP_TYPE()
 
     def reset_stats(self):
         self.__bucket.reset_stats()
@@ -251,8 +229,8 @@ class LocalClient(object):
 
         with self._lock:
             self.__bucket[oid_tid] = (cvalue, tid) # possibly evicts
-            if tid > self.__min_allowed_writeback.get(oid_tid[0], MAX_TID):
-                self.__min_allowed_writeback[oid_tid[0]] = tid
+            if tid > self._min_allowed_writeback.get(oid_tid[0], MAX_TID):
+                self._min_allowed_writeback[oid_tid[0]] = tid
 
     def set_multi(self, keys_and_values):
         for k, v in iteritems(keys_and_values):
@@ -276,7 +254,7 @@ class LocalClient(object):
         return self.__bucket.values()
 
     @_log_timed
-    def read_from_sqlite(self, connection, storage=None):
+    def read_from_sqlite(self, connection, row_filter=None):
         import gc
         gc.collect() # Free memory, we're about to make big allocations.
         mem_before = get_memory_usage()
@@ -289,11 +267,9 @@ class LocalClient(object):
         else:
             cp0, cp1 = (0, 0)
 
-        delta_after0 = OID_TID_MAP_TYPE()
-        delta_after1 = OID_TID_MAP_TYPE()
         #cur = _ExplainCursor(cur)
 
-        self.__min_allowed_writeback = db.oid_to_tid
+        self._min_allowed_writeback = db.oid_to_tid
 
         # XXX: The cache_ring is going to consume all the items we
         # give it, even if it doesn't actually add them to the cache.
@@ -316,43 +292,45 @@ class LocalClient(object):
             # In large benchmarks, this function accounts for 31%
             # of the time to load data; iterating the cursor takes 12%
             # and allocating the state bytes takes 11%.
-            rows = []
-            bytes_read = 0
             cur = db.fetch_rows_by_priority()
+            # row_filter produces the sequence (oid, key_tid, state, actual_tid)
+            if row_filter is not None:
+                row_iter = row_filter(checkpoints, cur)
+            else:
+                # default_row_filter needs the output of a row_filter,
+                # so expand that here
+                row_iter = ((r[0], r[1], r[2], r[1]) for r in cur)
 
-            for row in cur:
-                oid = row[0]
-                tid = row[1]
-                state = row[2]
-
-                if tid >= cp0:
-                    key = (oid, tid)
-                    delta_after0[oid] = tid
-                elif tid >= cp1:
-                    key = (oid, tid)
-                    delta_after1[oid] = tid
-                else:
-                    # Old generation, no delta.
-                    # Even though this is old, it could be good to have it,
-                    # it might be something that doesn't change much.
-                    key = (oid, cp0)
-
-                rows.append((key, (state, tid)))
-                bytes_read += len(state) + 32 + 16
-                if bytes_read > self.limit:
-                    break
-            cur.close()
             # Look at them from most to least recent,
-            # but insert them the other way
-            rows.reverse()
-            return rows
+            # but insert them the other way.
+            # This also has the side-effect of materializing the
+            # generators.
+            items = list(self._default_row_filter(row_iter))
+            items.reverse()
+            cur.close()
+            return items
 
         self.__bucket.bulk_update(data(),
-                                  source=storage or connection,
-                                  log_count=len(self.__min_allowed_writeback),
+                                  source=connection,
+                                  log_count=len(self._min_allowed_writeback),
                                   mem_usage_before=mem_before)
 
-        return delta_after0, delta_after1
+
+    def _default_row_filter(self, rows):
+        # The default row filter merely keeps us within
+        # our size limit.
+        key_weight = self.key_weight
+        value_weight = self.value_weight
+        bytes_read = 0
+        for row in rows:
+            oid, key_tid, state, state_tid = row
+            key = (oid, key_tid)
+            value = (state, state_tid)
+            yield key, value
+            bytes_read += key_weight(key) + value_weight(value)
+            if bytes_read >= self.limit:
+                break
+
 
     @_log_timed
     def _items_to_write(self, stored_oid_tid):
@@ -396,8 +374,8 @@ class LocalClient(object):
         #   ['oid', 'tid', 'state', 'frequency',
         #    'generation', 'min_allowed_tid', 'allowed'])
         newest_entries = OID_OBJECT_MAP_TYPE()
-        pop_min_required_tid = self.__min_allowed_writeback.pop
-        get_min_required_tid = self.__min_allowed_writeback.get # pylint:disable=no-member
+        pop_min_required_tid = self._min_allowed_writeback.pop
+        get_min_required_tid = self._min_allowed_writeback.get # pylint:disable=no-member
         get_current_oid_tid = stored_oid_tid.get
         thresholds = {'eden': 0, 'protected': 1, 'probation': 0}
         with _timer() as t:
@@ -512,14 +490,14 @@ class LocalClient(object):
             # Delete anything we still know is stale, because we
             # saw a new TID for it, but we had nothing to replace it with.
             min_allowed_writeback = OID_TID_MAP_TYPE()
-            for k, v in self.__min_allowed_writeback.items():
+            for k, v in self._min_allowed_writeback.items():
                 if stored_oid_tid.get(k) < v:
                     min_allowed_writeback[k] = v
             db.trim_to_size(self.limit, min_allowed_writeback)
             del min_allowed_writeback
         # Typically we write when we're closing and don't expect to do
         # anything else, so there's no need to keep tracking this info.
-        self.__min_allowed_writeback = OID_TID_MAP_TYPE()
+        self._min_allowed_writeback = OID_TID_MAP_TYPE()
 
         # Cleanups
         cur.close()

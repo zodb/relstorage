@@ -324,7 +324,7 @@ def sqlite_connect(options, prefix,
         from relstorage._compat import spawn
         spawn(checkpoint)
 
-    return connection, fname
+    return connection
 
 def __quiet_remove(path):
     try:

@@ -13,3 +13,5 @@ class TestCase(unittest.TestCase):
 
     def assertIsEmpty(self, container):
         self.assertEqual(len(container), 0)
+
+    assertEmpty = assertIsEmpty

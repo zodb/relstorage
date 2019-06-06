@@ -407,5 +407,46 @@ class LocalClientStrKeysValuesTests(TestCase):
 class LocalClientOIDTests(AbstractStateCacheTests):
     # Uses true oid/int keys and state/tid values.
 
+    tid = 34567
+    key_tid = 33333
+    oid = 12345
+
+    key = (oid, key_tid)
+    value = (b'statebytes', tid)
+
     def getClass(self):
         return LocalClient
+
+    def test_items(self):
+        c = self._makeOne()
+        self.assertEqual(list(c.items()), [])
+
+        c[self.key] = self.value
+        self.assertEqual(list(c.items()), [(self.key, self.value)])
+
+    def test_values(self):
+        c = self._makeOne()
+        self.assertEqual(list(c.values()), [])
+
+        c[self.key] = self.value
+        self.assertEqual(list(c.values()), [self.value])
+
+    def test_setitem_min_allowed_missing(self):
+        c = self._makeOne()
+
+        c[self.key] = self.value
+        self.assertIsEmpty(c._min_allowed_writeback)
+
+    def test_setitem_min_allowed_greater(self):
+        c = self._makeOne()
+        min_allowed = self.tid * 2
+        c._min_allowed_writeback[self.oid] = min_allowed
+        c[self.key] = self.value
+        self.assertEqual(c._min_allowed_writeback[self.oid], min_allowed)
+
+    def test_setitem_min_allowed_less(self):
+        c = self._makeOne()
+        min_allowed = 1
+        c._min_allowed_writeback[self.oid] = min_allowed
+        c[self.key] = self.value
+        self.assertEqual(c._min_allowed_writeback[self.oid], self.tid)

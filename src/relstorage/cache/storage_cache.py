@@ -274,23 +274,20 @@ class StorageCache(object):
         assert not len(self.local_client) # pylint:disable=len-as-condition
         assert not self.checkpoints
 
-        # Note that there may have been data in the file that we
-        # didn't get to actually store but that still comes back in
-        # the delta_map; that's ok.
-        result = self.local_client.restore()
-        if not result:
-            return
+        # Note that there may have been a tiny amount of data in the
+        # file that we didn't get to actually store but that still
+        # comes back in the delta_map; that's ok.
+        row_filter = _PersistentRowFilter(self._delta_map_type)
+        self.local_client.restore(row_filter)
 
-        # TODO: The delta computation and use of checkpoints should
-        # really be at this level.
-        delta_after0, delta_after1 = result
         self.checkpoints = self.local_client.get_checkpoints()
         if self.checkpoints:
             # No point keeping the delta maps otherwise,
-            # we have to poll
+            # we have to poll. If there were no checkpoints, it means
+            # we saved without having ever completed a poll.
             self.current_tid = self.checkpoints[0]
-            self.delta_after0 = delta_after0
-            self.delta_after1 = delta_after1
+            self.delta_after0 = row_filter.delta_after0
+            self.delta_after1 = row_filter.delta_after1
 
         logger.debug(
             "Restored with current_tid %s and checkpoints %s and deltas %s %s",
@@ -815,3 +812,37 @@ class StorageCache(object):
         # and update self.checkpoints and self.delta_after(0|1).
 
         return change_to
+
+class _PersistentRowFilter(object):
+
+    def __init__(self, delta_type):
+        self.delta_type = delta_type
+        self.delta_after0 = self.delta_type()
+        self.delta_after1 = self.delta_type()
+
+    def __call__(self, checkpoints, row_iter):
+        if not checkpoints:
+            # Nothing to do, no transforms are possible.
+            # But we do need to expand it to the expected form
+            for row in row_iter:
+                oid, actual_tid, state = row
+                yield oid, actual_tid, state, actual_tid
+        else:
+            delta_after0 = self.delta_after0
+            delta_after1 = self.delta_after1
+            cp0, cp1 = checkpoints
+            for row in row_iter:
+                oid, actual_tid, state = row
+
+                if actual_tid >= cp0:
+                    key_tid = actual_tid
+                    delta_after0[oid] = actual_tid
+                elif actual_tid >= cp1:
+                    key_tid = actual_tid
+                    delta_after1[oid] = actual_tid
+                else:
+                    # Old generation, no delta.
+                    # Even though this is old, it could be good to have it,
+                    # it might be something that doesn't change much.
+                    key_tid = cp0
+                yield oid, key_tid, state, actual_tid
