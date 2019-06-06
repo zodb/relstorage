@@ -23,7 +23,7 @@ class CacheRingTests(TestCase):
 
     def _makeOne(self, limit):
         from relstorage.cache.cache_ring import CacheRing
-        return CacheRing(limit)
+        return CacheRing(limit, None, None)
 
     def test_mru_lru_ring(self):
         lru = self._makeOne(100)
@@ -44,10 +44,6 @@ class CacheRingTests(TestCase):
 
         self.assertEqual(len(lru), 3)
 
-    def test_add_MRUs_empty(self):
-        from relstorage.cache.cache_ring import EdenRing
-        lru = EdenRing(100, len, len)
-        self.assertEqual((), lru.add_MRUs([]))
 
     def test_bool(self):
         lru = self._makeOne(100)
@@ -56,6 +52,31 @@ class CacheRingTests(TestCase):
         self.assertTrue(lru)
         lru.remove(entrya)
         self.assertFalse(lru)
+
+class EdenRingTests(TestCase):
+
+    def _makeOne(self, limit, key_weight=len, value_weight=len):
+        generations = Cache.create_generations(eden_limit=limit,
+                                               key_weight=key_weight,
+                                               value_weight=value_weight)
+        return generations['eden']
+
+    def test_add_MRUs_empty(self):
+        lru = self._makeOne(100)
+        self.assertEqual((), lru.add_MRUs([]))
+
+    def test_add_MRUs_too_many(self):
+        lru = self._makeOne(100)
+        too_many = [(str(i), 'a' * i) for i in range(50)]
+
+        # Make sure we have more then enough on the free list.
+        lru.init_node_free_list(len(too_many) + 1)
+
+        # They just exceed the limit
+        added = lru.add_MRUs(too_many)
+
+        # Much less got added.
+        self.assertEqual(len(added), 13)
 
 class CacheTests(TestCase):
 

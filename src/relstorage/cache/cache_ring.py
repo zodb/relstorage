@@ -54,13 +54,11 @@ class _NoSuchGeneration(object):
     # For more specific error messages; if we get an AttributeError
     # on this object, it means we have corrupted the cache. We only
     # expect to wind up with this in generation 0.
-
+    __name__ = 'NoSuchGeneration'
     def __init__(self, generation_number):
         self.__gen_num = generation_number
 
     def __getattr__(self, name):
-        if name == '__name__':
-            return 'NoSuchGeneration'
         msg = "Generation %s has no attribute %r" % (self.__gen_num, name)
         raise AttributeError(msg)
 
@@ -69,7 +67,7 @@ class Cache(object):
     """
     A sized cache.
 
-    The cache moves items between three rings, as determined by
+    The cache moves items between three generations, as determined by
     an admittance policy.
 
     * Items begin in *eden*, where they stay until eden grows too
@@ -126,22 +124,42 @@ class Cache(object):
     #: indexing variable on Py2.)
     generations = tuple((_NoSuchGeneration(i) for i in range(4)))
 
+    @classmethod
+    def create_generations(cls,
+                           eden_limit=0,
+                           protected_limit=0,
+                           probation_limit=0,
+                           key_weight=len, value_weight=len):
+        # This must hold all the ring entries, no matter which ring they are in.
+        data = {}
+        cffi_cache = ffi_new("RSCache*")
+
+        generations = {}
+        for klass, limit in ((EdenRing, eden_limit),
+                             (ProtectedRing, protected_limit),
+                             (ProbationRing, probation_limit)):
+            generation = klass(limit, cffi_cache, data, key_weight, value_weight)
+            setattr(cffi_cache, generation.__name__, generation.ring_home)
+            generations[generation.__name__] = generation
+        return generations
+
     def __init__(self, byte_limit, key_weight=len, value_weight=len):
         self._byte_limit = byte_limit
-        # This must hold all the ring entries, no matter which ring they are in.
-        self.data = {}
 
-        self.protected = ProtectedRing(int(byte_limit * self._gen_protected_pct),
-                                       key_weight, value_weight)
-        self.probation = ProbationRing(int(byte_limit * self._gen_probation_pct),
-                                       key_weight, value_weight)
-        self.eden = EdenRing(int(byte_limit * self._gen_eden_pct),
-                             key_weight, value_weight)
+        generations = self.create_generations(
+            eden_limit=int(byte_limit * self._gen_eden_pct),
+            protected_limit=int(byte_limit * self._gen_protected_pct),
+            probation_limit=int(byte_limit * self._gen_probation_pct),
+            key_weight=key_weight,
+            value_weight=value_weight
+        )
 
-        self.cffi_cache = ffi_new("RSCache*",
-                                  {'eden': self.eden.ring_home,
-                                   'protected': self.protected.ring_home,
-                                   'probation': self.probation.ring_home})
+        self.eden = generations['eden']
+        self.protected = generations['protected']
+        self.probation = generations['probation']
+
+        self.data = self.eden.data
+        self.cffi_cache = self.eden.cffi_cache
 
         generations = list(Cache.generations) # Preserve the NoSuchGeneration initializers
         for gen in (self.protected, self.probation, self.eden):
@@ -150,11 +168,8 @@ class Cache(object):
 
         # Setup the shared data structures for the generations
         node_free_list = self._make_node_free_list()
-        for value, name in ((self.data, 'data'),
-                            (self.cffi_cache, 'cffi_cache'),
-                            (node_free_list, 'node_free_list')):
-            for ring in self.generations[1:]:
-                setattr(ring, name, value)
+        for ring in self.generations[1:]:
+            setattr(ring, 'node_free_list', node_free_list)
 
     def _make_node_free_list(self):
         "Create the node free list and preallocate any desired entries"
@@ -162,10 +177,7 @@ class Cache(object):
         if self._preallocate_entries:
             needed_entries = self._byte_limit // self._preallocate_avg_size
             entry_count = min(self._preallocate_max_count, needed_entries)
-
-            keys_and_values = itertools.repeat(('', (b'', 0)), entry_count)
-            _, nodes = self.eden._preallocate_entries(keys_and_values, entry_count)
-            node_free_list.extend(nodes)
+            node_free_list = self.eden.init_node_free_list(entry_count)
         return node_free_list
 
     def age_lists(self):
@@ -221,16 +233,17 @@ class CacheRingNode(object):
     frequency = property(lambda self: self.cffi_entry.frequency,
                          lambda self, nv: setattr(self.cffi_entry, 'frequency', nv))
 
+    _RING_NAMES = [
+        'NoSuchGeneration',
+        'eden',
+        'protected',
+        'probation',
+    ]
+
     @property
     def ring_name(self):
-        parent = self.cffi_entry.r_parent
-        if parent == 0:
-            return 'NoSuchGeneration'
-        if parent == 1:
-            return 'eden'
-        if parent == '2':
-            return 'protected'
-        return 'probation'
+        ring_no = self.cffi_entry.r_parent
+        return self._RING_NAMES[ring_no]
 
     def set_value(self, value, weight):
         if value == self.value:
@@ -280,10 +293,15 @@ class CacheRing(object):
 
     PARENT_CONST = 0
 
-    def __init__(self, limit, key_weight=len, value_weight=len):
+    def __init__(self, limit,
+                 cffi_cache, data,
+                 key_weight=len, value_weight=len):
+
         self.limit = limit
         self.key_weight = key_weight
         self.value_weight = value_weight
+        self.cffi_cache = cffi_cache
+        self.data = data
         node = self.ring_home = ffi.new("RSRing")
         node.r_next = node
         node.r_prev = node
@@ -291,6 +309,13 @@ class CacheRing(object):
         node.u.head.generation = self.PARENT_CONST
 
         self.node_free_list = []
+
+    def init_node_free_list(self, entry_count):
+        assert not self.node_free_list
+        keys_and_values = itertools.repeat(('', (b'', 0)), entry_count)
+        _, nodes = self._preallocate_entries(keys_and_values, entry_count)
+        self.node_free_list.extend(nodes)
+        return self.node_free_list
 
     def _preallocate_entries(self, ordered_keys_and_values, count=None):
         """
@@ -413,6 +438,7 @@ class CacheRing(object):
 class EdenRing(CacheRing):
     __name__ = 'eden'
     PARENT_CONST = 1
+
 
     @_mutates_free_list
     def add_MRUs(self, ordered_keys_and_values, total_count=None):
