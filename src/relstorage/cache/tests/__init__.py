@@ -54,7 +54,7 @@ class MockPoller(object):
         # a length. Return exactly the item in the list because
         # it may be a type other than a tuple
         for change in self.changes:
-            oid, tid = change
+            _, tid = change
             if tid > after_tid and tid <= last_tid:
                 yield change
 

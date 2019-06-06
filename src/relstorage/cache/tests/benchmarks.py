@@ -351,7 +351,7 @@ class StorageTraceSimulator(object):
     def _simulate_storage(self, records, cache_local_mb, f):
         # pylint:disable=too-many-locals,too-many-statements
         from relstorage.cache.storage_cache import StorageCache
-        from relstorage.cache.tests.test_cache import MockAdapter
+        from relstorage.cache.tests import MockAdapter
         from ZODB.utils import p64
 
         TRANSACTION_SIZE = 10
@@ -421,10 +421,9 @@ class StorageTraceSimulator(object):
                 def stats(self):
                     return self._cache.stats()
 
-            local_client = root_cache.clients_local_first[0]
+            local_client = root_cache.local_client
             local_client = RecordingCache(local_client)
-            root_cache.clients_local_first[0] = local_client
-            root_cache.clients_global_first[0] = local_client
+            root_cache.local_client = root_cache.cache = local_client
 
         # Initialize to the current TID
         current_tid_int = 2
@@ -470,12 +469,12 @@ class StorageTraceSimulator(object):
                     cache.bm_changes[oid_int] = current_tid_int
 
         done = time.time()
-        stats = root_cache.clients_local_first[0].stats()
+        stats = root_cache.stats()
         self._report_one(stats, f, cache_local_mb, now, done)
 
-        if hasattr(root_cache.clients_local_first[0], 'operations'):
+        if hasattr(root_cache.local_client, 'operations'):
             with open(f + '.' + str(options.cache_local_mb) + '.ctrace', 'w') as fp:
-                for o in root_cache.clients_local_first[0].operations:
+                for o in root_cache.local_client.operations:
                     fp.write("%s,%s,%d\n" % o)
         return stats
 

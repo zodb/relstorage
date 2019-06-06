@@ -37,6 +37,7 @@ class StorageCacheTests(TestCase):
         from relstorage.tests.fakecache import data
         data.clear()
         for inst in self._instances:
+            inst.options.cache_local_dir = None
             inst.close(close_async=False)
 
     def getClass(self):
@@ -134,6 +135,9 @@ class StorageCacheTests(TestCase):
         self.assertEqual(c2.checkpoints, (0, 0))
         self.assertEqual(dict(c2.delta_after0), {oid: tid})
         self.assertIsEmpty(c2.delta_after1)
+
+        c.options.cache_local_dir = None
+        c2.options.cache_local_dir = None
 
         self.test_closed_state(c2)
         self.test_closed_state(c)

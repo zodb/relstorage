@@ -143,6 +143,11 @@ class Connection(sqlite3.Connection):
 def _execute_pragma(cur, name, value):
     stmt = 'PRAGMA %s = %s' % (name, value)
     cur.execute(stmt)
+    # On PyPy, it's important to traverse the cursor, even if
+    # you don't expect any results, because it still counts as
+    # a statement that's open and can cause 'OperationalError:
+    # can't commit with SQL operations active'.
+    cur.fetchall()
 
 def _execute_pragmas(cur, **kwargs):
     for k, v in kwargs.items():
