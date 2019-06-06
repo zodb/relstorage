@@ -110,7 +110,8 @@ class Cache(object):
     # especially, or large cache sizes) because when zodbshootout clears caches,
     # our implementation throws this object all away, and then allocates again.
     # Meanwhile, all the old objects have to be GC'd.
-    _preallocate_entries = True
+    # This is disabled for now because of a crash observed on Python 2.7
+    _preallocate_entries = False
     # If so, how many? Try to get enough to fill the cache assuming objects are
     # this size on average
     _preallocate_avg_size = 512
@@ -329,11 +330,12 @@ class CacheRing(object):
 
         self.node_free_list = []
 
-    def init_node_free_list(self, entry_count):
+    def init_node_free_list(self, entry_count): # pylint:disable=unused-argument
+        # Init node free list is disabled for now.
         assert not self.node_free_list
-        keys_and_values = itertools.repeat(('', (b'', 0)), entry_count)
-        _, nodes = self._preallocate_entries(keys_and_values, entry_count)
-        self.node_free_list.extend(nodes)
+        # keys_and_values = itertools.repeat(('', (b'', 0)), entry_count)
+        # _, nodes = self._preallocate_entries(keys_and_values, entry_count)
+        # self.node_free_list.extend(nodes)
         return self.node_free_list
 
     def _preallocate_entries(self, ordered_keys_and_values, count=None):
@@ -456,7 +458,7 @@ class CacheRing(object):
 class EdenRing(CacheRing):
     __name__ = 'eden'
     PARENT_CONST = 1
-
+    _mutated_free_list = True
 
     @_mutates_free_list
     def add_MRUs(self, ordered_keys_and_values, total_count=None):
@@ -478,7 +480,10 @@ class EdenRing(CacheRing):
             return ()
         # Start by using existing entries *if* we haven't mutated the free list
         # (Because the C code needs contiguous data)
-        if not self._mutated_free_list and self.node_free_list:
+        # XXX: There seem to be some corner case crashing issues in this logic
+        # having to do with when GC occurs. Preallocation is disabled for now.
+
+        if not self._mutated_free_list and self.node_free_list: # pragma: no cover
             self._mutated_free_list = True
             # Take the number of entries out of the free list and
             # pair them up with keys/values
@@ -499,6 +504,11 @@ class EdenRing(CacheRing):
             if len(added_entries) < len(entries):
                 # We had no room, stop looking at the data,
                 # which could be a generator.
+                # XXX: If we didn't actually consume all the
+                # entries we took off the list, and we had more entries
+                # than we needed in the free list, which was contiguous,
+                # then we wind up with a gap of unused memory in the array.
+                # The `entry` objects are now going to get GC'd, `
                 return added_entries
 
 

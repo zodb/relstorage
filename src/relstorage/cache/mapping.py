@@ -19,7 +19,7 @@ import logging
 import operator
 import time
 
-from relstorage._compat import get_memory_usage
+from relstorage._util import get_memory_usage
 from relstorage.cache.cache_ring import Cache
 from relstorage.cache.persistence import Pickler
 from relstorage.cache.persistence import Unpickler

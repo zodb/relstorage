@@ -11,12 +11,16 @@
 # FOR A PARTICULAR PURPOSE.
 #
 ##############################################################################
+"""
+Helpers for various disk-based persistent storage format.
+
+Doesn't actually do any persistence itself.
+"""
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
 import logging
-import time
 import os
 import os.path
 import sqlite3
@@ -116,10 +120,11 @@ class Connection(sqlite3.Connection):
         # "PRAGMA wal_checkpoint(RESTART)".
         #
         # This can be slow, and it releases the GIL, so do that in another thread
-        if self._rs_has_closed:
+        if self._rs_has_closed: # pragma: no cover
             return
         self._rs_has_closed = True
-        from relstorage._compat import spawn
+        from relstorage._util import spawn as _spawn
+        spawn = _spawn if self.rs_close_async else lambda f: f()
         def c():
             # Recommended best practice is to OPTIMIZE the database for
             # each closed connection. OPTIMIZE needs to run in each connection
@@ -132,10 +137,8 @@ class Connection(sqlite3.Connection):
                 logger.exception("Failed to optimize database; was it removed?")
 
             super(Connection, self).close()
-        if self.rs_close_async:
-            spawn(c)
-        else:
-            c()
+        spawn(c)
+
 
 # PRAGMA statements don't allow ? placeholders
 # when executed. This is probably a bug in the sqlite3
@@ -152,13 +155,16 @@ def _execute_pragma(cur, name, value):
 def _execute_pragmas(cur, **kwargs):
     for k, v in kwargs.items():
         # Query, report, then change
+        __traceback_info__ = k, v
         stmt = 'PRAGMA %s' % (k,)
         cur.execute(stmt)
-        orig_value = cur.fetchone()[0]
+        row = cur.fetchone()
+        orig_value = row[0] if row else None
         if v is not None and v != orig_value:
             _execute_pragma(cur, k, v)
             cur.execute(stmt)
-            new_value = cur.fetchone()[0]
+            row = cur.fetchone()
+            new_value = row[0] if row else None
             logger.debug(
                 "Original %s = %s. Desired %s = %s. Updated %s = %s",
                 k, orig_value,
@@ -235,7 +241,7 @@ DEFAULT_TEMP_STORE = None
 
 def sqlite_connect(options, prefix,
                    overwrite=False,
-                   max_wal=DEFAULT_MAX_WAL,
+                   max_wal_size=DEFAULT_MAX_WAL,
                    close_async=DEFAULT_CLOSE_ASYNC,
                    mmap_size=DEFAULT_MMAP_SIZE,
                    page_size=DEFAULT_PAGE_SIZE,
@@ -246,22 +252,33 @@ def sqlite_connect(options, prefix,
     .. caution:: Using the connection as a context manager does **not**
        result in the connection being closed, only committed or rolled back.
     """
-    parent_dir = _normalize_path(options)
-    try:
-        # make it if needed. try to avoid a time-of-use/check
-        # race (not that it matters here)
-        os.makedirs(parent_dir)
-    except os.error:
-        pass
+    parent_dir = options.cache_local_dir
+    # Allow for memory and temporary databases:
+    if parent_dir != ':memory:' and parent_dir:
+        parent_dir = _normalize_path(options)
+        try:
+            # make it if needed. try to avoid a time-of-use/check
+            # race (not that it matters here)
+            os.makedirs(parent_dir)
+        except os.error:
+            pass
 
-    fname = os.path.join(parent_dir, 'relstorage-cache-' + prefix + '.sqlite3')
-    wal_fname = fname + '-wal'
-    def destroy():
-        logger.info("Replacing any existing cache at %s", fname)
-        __quiet_remove(fname)
-        __quiet_remove(wal_fname)
+        fname = os.path.join(parent_dir, 'relstorage-cache-' + prefix + '.sqlite3')
+        wal_fname = fname + '-wal'
+        def destroy():
+            logger.info("Replacing any existing cache at %s", fname)
+            __quiet_remove(fname)
+            __quiet_remove(wal_fname)
+    else:
+        fname = parent_dir
+        wal_fname = None
+        def destroy():
+            "Nothing to do."
+
+    corrupt_db_ex = sqlite3.DatabaseError
     if overwrite:
         destroy()
+        corrupt_db_ex = ()
 
     pragmas = {
         # WAL mode can actually be a bit slower at commit time,
@@ -278,7 +295,10 @@ def sqlite_connect(options, prefix,
         # we can run 'PRAGMA wal_checkpoint'. (In most cases, the last
         # database connection that's open will essentially do that
         # automatically.)
-        'wal_autocheckpoint': 0,
+        # XXX: Is that really worth it? We'll just begin by increasing
+        # it
+        # 'wal_autocheckpoint': 0,
+        'wal_autocheckpoint': max_wal_size // page_size,
         'threads': 2,
         # Things to query and report.
         'soft_heap_limit': None,
@@ -290,39 +310,11 @@ def sqlite_connect(options, prefix,
     try:
         connection = _connect_to_file(fname, close_async=close_async,
                                       pragmas=pragmas)
-    except sqlite3.DatabaseError:
-        if overwrite:
-            # We already destroyed. Uh-oh!
-            raise
+    except corrupt_db_ex:
         logger.info("Corrupt cache database at %s; replacing", fname)
         destroy()
         connection = _connect_to_file(fname, close_async=close_async,
                                       pragmas=pragmas)
-
-    # Now might be a good time to checkpoint. If we're opening the
-    # DB, we could be around for awhile. Doing the checkpoint will
-    # release the GIL, so it's good to do in another thread.
-    # (If we're monkey-patched by gevent, do so in a gevent worker)
-    if (not overwrite
-            and os.path.exists(wal_fname)
-            and os.stat(wal_fname).st_size >= max_wal):
-        # TODO: Explicit test for this condition.
-        def checkpoint():
-            conn = _connect_to_file(fname, factory=sqlite3.Connection)
-            begin = time.time()
-            cur = conn.execute("PRAGMA wal_checkpoint(RESTART)")
-            ok, modified_pages, number_moved_to_db = cur.fetchone()
-            cur.execute("PRAGMA optimize")
-            end = time.time()
-            logger.info(
-                "Checkpointed WAL database %s in %s. "
-                "Busy? %s Modified pages: %d, moved pages: %d",
-                fname, end - begin, ok == 0, modified_pages, number_moved_to_db
-            )
-            conn.close()
-
-        from relstorage._compat import spawn
-        spawn(checkpoint)
 
     return connection
 

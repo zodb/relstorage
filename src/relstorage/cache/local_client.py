@@ -16,7 +16,6 @@ from __future__ import division
 from __future__ import print_function
 
 import bz2
-import sqlite3
 import threading
 import time
 import zlib
@@ -26,22 +25,23 @@ from contextlib import closing
 from zope import interface
 
 from relstorage._compat import iteritems
-from relstorage._compat import get_memory_usage
+from relstorage._util import get_memory_usage
 from relstorage._util import timer as _timer
 from relstorage._util import log_timed as _log_timed
 
-from relstorage.adapters.batch import RowBatcher
-from relstorage.cache.persistence import sqlite_connect
 from relstorage.cache.interfaces import IStateCache
 from relstorage.cache.interfaces import IPersistentCache
 from relstorage.cache.interfaces import OID_OBJECT_MAP_TYPE
 from relstorage.cache.interfaces import OID_TID_MAP_TYPE
 from relstorage.cache.interfaces import MAX_TID
 from relstorage.cache.interfaces import CacheCorruptedError
+
 from relstorage.cache.mapping import SizedLRUMapping as LocalClientBucket
 
-logger = __import__('logging').getLogger(__name__)
+from relstorage.cache.persistence import sqlite_connect
+from relstorage.cache.local_database import Database
 
+logger = __import__('logging').getLogger(__name__)
 
 
 @interface.implementer(IStateCache,
@@ -137,6 +137,8 @@ class LocalClient(object):
                     # The cache_trace_analysis.rst test fills
                     # us with junk data and triggers this.
                     logger.exception("Failed to save cache")
+                    self.flush_all()
+                    return 0
             # Testing: Return a signal when we tried to write
             # something.
             return 1
@@ -259,7 +261,7 @@ class LocalClient(object):
         gc.collect() # Free memory, we're about to make big allocations.
         mem_before = get_memory_usage()
 
-        db = _DatabaseModel(connection)
+        db = Database.from_connection(connection)
         checkpoints = db.checkpoints
         if checkpoints:
             cp0, cp1 = checkpoints
@@ -449,7 +451,7 @@ class LocalClient(object):
         # pylint:disable=too-many-locals
         cur = connection.cursor()
 
-        db = _DatabaseModel(connection)
+        db = Database.from_connection(connection)
         begin = time.time()
 
         # The batch size depends on how many params a stored proc can
@@ -521,328 +523,3 @@ class LocalClient(object):
             stats['hits'], stats['misses'], stats['ratio'], stats['sets'])
 
         return count_written
-
-class _SimpleQueryProperty(object):
-    """
-    Wraps a query that returns one value in one row.
-    """
-
-    def __init__(self, sql):
-        self.sql = sql
-
-    def __get__(self, inst, klass):
-        if inst is None:
-            return self
-
-        inst.cursor.execute(self.sql)
-        return inst.cursor.fetchone()[0]
-
-class _DatabaseModel(object):
-    SUPPORTS_UPSERT = sqlite3.sqlite_version_info >= (3, 28)
-    SUPPORTS_PAREN_UPDATE = sqlite3.sqlite_version_info >= (3, 15)
-
-    def __new__(cls,
-                connection, # pylint:disable=unused-argument
-                use_upsert=SUPPORTS_UPSERT,
-                use_paren_update=SUPPORTS_PAREN_UPDATE):
-        kind = _UpsertUpdateDatabaseModel
-        if not use_upsert:
-            kind = _ParenUpdateDatabaseModel if use_paren_update else _OldUpdateDatabaseModel
-        return object.__new__(kind)
-
-    def __init__(self, connection,
-                 use_upsert=SUPPORTS_UPSERT,
-                 use_paren_update=SUPPORTS_PAREN_UPDATE):
-        self.connection = connection
-        self.cursor = connection.cursor()
-        self.cursor.arraysize = 100
-        self.create_schema()
-        self.use_Upsert = use_upsert
-        self.use_paren_update = use_paren_update
-
-    # The main repository of our data. This uses the OID of the object
-    # as the INTEGER PRIMARY KEY --- that's a special type of key that
-    # means this table is a clustered table, organized with that
-    # column as its primary key.
-    #
-    # This reduces overhead of having a secondary (hidden) 'rowid' column
-    # to do the clusteing on, to it's important.
-    _state_table_schema = """
-    CREATE TABLE IF NOT EXISTS object_state (
-        zoid INTEGER PRIMARY KEY,
-        tid INTEGER NOT NULL ,
-        frequency INTEGER NOT NULL,
-        state BLOB
-    );
-    """
-
-    # We want to keep the clustering for the temporary table,
-    # so the integer primary key matters.
-    _temp_table_schema = _state_table_schema.replace(
-        "object_state", 'temp_state'
-    ).replace('TABLE', 'TEMPORARY TABLE')
-
-    def close(self):
-        self.connection.close()
-
-    _schema = _state_table_schema + '\n' + _temp_table_schema + """
-    CREATE TABLE IF NOT EXISTS checkpoints (
-        id INTEGER PRIMARY KEY, cp0 INTEGER, cp1 INTEGER
-    );
-
-    CREATE INDEX IF NOT EXISTS IX_object_state_f_tid
-    ON object_state (frequency DESC, tid DESC);
-    """
-
-    total_state_len = _SimpleQueryProperty(
-        "SELECT SUM(LENGTH(state)) FROM object_state"
-    )
-
-    total_state_count = _SimpleQueryProperty(
-        "SELECT COUNT(zoid) FROM object_state"
-    )
-
-    def create_schema(self):
-        self.cursor.executescript(self._schema)
-
-    @property
-    def oid_to_tid(self):
-        """
-        A map from OID to its corresponding TID, for
-        all the data in the database.
-        """
-        self.cursor.execute('SELECT zoid, tid FROM object_state')
-        return OID_TID_MAP_TYPE(list(self.cursor))
-
-    @property
-    def checkpoints(self):
-        self.cursor.execute("SELECT cp0, cp1 FROM checkpoints")
-        return self.cursor.fetchone()
-
-    def fetch_rows_by_priority(self):
-        """
-        The returned cursor will iterate ``(zoid, tid, state)``
-        from most useful to least useful.
-        """
-        # Do this in a new cursor so it can interleave.
-
-        # Read these in priority order; as a tie-breaker, choose newer transactions
-        # over older transactions.
-        # We could probably use a window function over SUM(LENGTH(state)) to only select
-        # the rows that will actually fit.
-        cur = self.connection.execute("""
-        SELECT zoid, tid, state
-        FROM object_state
-        ORDER BY frequency DESC, tid DESC
-        """)
-        cur.arraysize = 100
-        return cur
-
-    def store_temp(self, rows):
-        # The batch size depends on how many params a stored proc can
-        # have; if we go too big we get OperationalError: too many SQL
-        # variables. The default is 999.
-        # Note that the multiple-value syntax was added in
-        # 3.7.11, 2012-03-20.
-
-        batch = RowBatcher(self.cursor, row_limit=999 // 4)
-
-        for row in rows:
-            size = len(row[2])
-            batch.insert_into(
-                'temp_state(zoid, tid, state, frequency)',
-                '?, ?, ?, ?',
-                row,
-                row[0],
-                size
-            )
-
-        batch.flush()
-        return batch.total_rows_inserted, batch.total_size_inserted
-
-    def move_from_temp(self):
-        raise NotImplementedError
-
-    def update_checkpoints(self, cp0, cp1):
-        raise NotImplementedError
-
-    def trim_to_size(self, limit, min_allowed_oid):
-        # Manipulates a transaction.
-        if not min_allowed_oid and self.total_state_len <= limit:
-            # Nothing to do.
-            return
-
-        # TODO: Write tests for this
-        # Take out the lock and check again.
-        cur = self.cursor
-        if min_allowed_oid:
-            # This could be easily optimized for a small number of rows,
-            # or use a custom RowBatcher that handles <= instead of =
-            # operator.
-            logger.info("Checking table of size %d against %d stale entries",
-                        self.total_state_count, len(min_allowed_oid))
-            def is_stale(zoid, tid, min_allowed=min_allowed_oid.get):
-                return min_allowed(zoid, tid) > tid
-
-            self.connection.create_function('is_stale', 2, is_stale)
-
-        cur.execute('BEGIN IMMEDIATE')
-
-        if min_allowed_oid:
-            cur.execute('DELETE FROM object_state WHENE is_stale(zoid, tid)')
-
-        byte_count = self.total_state_len
-        if byte_count <= limit:
-            # Someone else did it, yay!
-            cur.execute('COMMIT')
-            return
-
-        really_big = byte_count > limit * 2
-        how_much_to_trim = byte_count - limit
-        logger.info(
-            "State too large; need to trim %d to reach %d",
-            how_much_to_trim,
-            limit,
-        )
-
-        rows_deleted = self._trim_state(how_much_to_trim)
-
-        cur.execute('COMMIT')
-        # Rewrite the file? If we were way over our target, that probably
-        # matters. And sometimes we might want to do it just to do it and
-        # optimize the tables.
-        if really_big:
-            cur.execute('VACUUM')
-        logger.info(
-            "Trimmed %d rows (desired: %d actual: %d)",
-            rows_deleted, limit, byte_count
-        )
-
-
-    def _trim_state(self, how_much_to_trim):
-        # Try to get the oldest, least used objects we can.
-        # We could probably use a window function over SUM(LENGTH(state))
-        # to limit the select to just the rows we want.
-        cur = self.cursor
-        # We'll be interleaving statements so we must use a
-        # separate cursor
-        batch_cur = self.connection.cursor()
-        cur.execute("""
-        SELECT zoid, LENGTH(state)
-        FROM object_state
-        ORDER BY frequency ASC, tid ASC, zoid ASC
-        """)
-        batch = RowBatcher(batch_cur,
-                           row_limit=999 // 1,
-                           delete_placeholder='?')
-        for row in cur:
-            zoid, size = row
-            how_much_to_trim -= size
-            batch.delete_from('object_state', zoid=zoid)
-            if how_much_to_trim <= 0:
-                break
-        batch.flush()
-        batch_cur.close()
-        return batch.total_rows_deleted
-
-class _UpsertUpdateDatabaseModel(_DatabaseModel):
-
-    def move_from_temp(self):
-        self.cursor.execute("""
-        INSERT INTO object_state (zoid, tid, frequency, state)
-        SELECT zoid, tid, frequency, state
-        FROM temp_state
-        WHERE true
-        ON CONFLICT(zoid) DO UPDATE
-        SET tid = excluded.tid,
-            state = excluded.state,
-            frequency = excluded.frequency + object_state.frequency
-        WHERE excluded.tid > tid
-        """)
-
-    def update_checkpoints(self, cp0, cp1):
-        self.cursor.execute("""
-        INSERT INTO checkpoints (id, cp0, cp1)
-        VALUES (0, ?, ?)
-        ON CONFLICT(id) DO UPDATE SET cp0 = excluded.cp0, cp1 = excluded.cp1
-        WHERE excluded.cp0 > cp0
-        """, (cp0, cp1))
-
-class _ParenUpdateDatabaseModel(_DatabaseModel):
-    def move_from_temp(self):
-        self._update_existing_values()
-
-        self.cursor.execute("""
-        INSERT INTO object_state (zoid, tid, state, frequency)
-        SELECT zoid, tid, state, frequency
-        FROM temp_state
-        WHERE zoid NOT IN (SELECT zoid FROM object_state)
-        """)
-
-    def _update_existing_values(self):
-        self.cursor.execute("""
-            WITH newer_values AS (SELECT temp_state.*
-                FROM temp_state
-                INNER JOIN object_state on temp_state.zoid = object_state.zoid
-                WHERE object_state.tid < temp_state.tid
-            )
-            UPDATE object_state
-            SET (tid, frequency, state) = (SELECT newer_values.tid,
-                                            newer_values.frequency + object_state.frequency,
-                                            newer_values.state
-                                           FROM newer_values WHERE newer_values.zoid = zoid)
-            WHERE zoid IN (SELECT zoid FROM newer_values)
-        """)
-
-    def update_checkpoints(self, cp0, cp1):
-        cur = self.cursor
-        cur.execute("SELECT cp0, cp1 FROM checkpoints")
-        row = cur.fetchone()
-        if not row:
-            # First time in.
-            cur.execute("""
-            INSERT INTO checkpoints (id, cp0, cp1)
-            VALUES (0, ?, ?)
-            """, (cp0, cp1))
-        elif row[0] < cp0:
-            cur.execute("""
-            UPDATE checkpoints SET cp0 = ?, cp1 = ?
-            """, (cp0, cp1))
-
-
-class _OldUpdateDatabaseModel(_ParenUpdateDatabaseModel):
-    def _update_existing_values(self):
-        self.cursor.execute("""
-        WITH newer_values AS (SELECT temp_state.*
-            FROM temp_state
-            INNER JOIN object_state on temp_state.zoid = object_state.zoid
-            WHERE object_state.tid < temp_state.tid
-        )
-        UPDATE object_state
-        SET tid = (SELECT newer_values.tid
-                   FROM newer_values WHERE newer_values.zoid = zoid),
-        frequency = (SELECT  newer_values.frequency + object_state.frequency
-                     FROM newer_values WHERE newer_values.zoid = zoid),
-            state = (SELECT newer_values.state
-                     FROM newer_values WHERE newer_values.zoid = zoid)
-        WHERE zoid IN (SELECT zoid FROM newer_values)
-        """)
-
-class _ExplainCursor(object):
-    def __init__(self, cur):
-        self.cur = cur
-
-    def __getattr__(self, name):
-        return getattr(self.cur, name)
-
-    def __iter__(self):
-        return iter(self.cur)
-
-    def execute(self, sql, *args):
-        if sql.strip().startswith(('INSERT', 'SELECT', 'DELETE')):
-            exp = 'EXPLAIN QUERY PLAN ' + sql.lstrip()
-            print(sql)
-            self.cur.execute(exp, *args)
-            for row in self.cur:
-                print(*row)
-        return self.cur.execute(sql, *args)

@@ -450,3 +450,51 @@ class LocalClientOIDTests(AbstractStateCacheTests):
         c._min_allowed_writeback[self.oid] = min_allowed
         c[self.key] = self.value
         self.assertEqual(c._min_allowed_writeback[self.oid], self.tid)
+
+    def test_default_row_filter_size_limit(self):
+        c = self._makeOne()
+        c.limit = 0
+        rows = [
+            (0, 0, b'big state', 0),
+            (1, 1, b'second state', 0)
+        ]
+
+        filtered = list(c._default_row_filter(rows))
+        self.assertEqual(filtered,
+                         [((0, 0), (b'big state', 0))])
+
+    def test_cache_corruption_on_save(self):
+        c = self._makeOne(cache_local_dir=':memory:')
+        c[self.key] = self.value
+        # Different key, same real tid, different state. Uh-oh!
+        c[(self.oid, 1)] = (b'bad bytes', self.tid)
+
+        self.assertEqual(c.save(close_async=False), 0)
+        # And the cache was flushed.
+        self.assertIsNone(c[self.key])
+
+    def test_delete_stale_objects_on_save(self):
+        from relstorage.cache.local_database import Database
+        from relstorage.cache.persistence import sqlite_connect
+        c = self._makeOne(cache_local_dir=":memory:")
+
+        conn = sqlite_connect(c.options, 'ignored-pfx', close_async=False)
+        self.addCleanup(conn.close)
+        db = Database.from_connection(conn)
+        db.store_temp([(0, 0, b'state', 0)])
+        db.move_from_temp()
+        self.assertEqual(dict(db.oid_to_tid), {0: 0})
+        conn.commit()
+        # Pretend we loaded this from the db
+        c._min_allowed_writeback[0] = 0
+
+        # Pass a newer version through
+        c[(0, 1)] = (b'state', 1)
+        self.assertEqual(c._min_allowed_writeback[0], 1)
+        # Evict it so we don't have it to write.
+        del c._bucket0[(0, 1)]
+
+        # But it gets removed based on having seen it and knowing
+        # it's there.
+        c.write_to_sqlite(conn)
+        self.assertEmpty(db.oid_to_tid)

@@ -112,7 +112,7 @@ class StorageCacheTests(TestCase):
     def test_save(self):
         import os
         c, oid, tid = self._setup_for_save()
-        c.save(close_async=False)
+        c.save(overwrite=True, close_async=False)
         files = os.listdir(c.options.cache_local_dir)
         __traceback_info__ = files
         # Older versions of sqlite may leave -shm and -wal
