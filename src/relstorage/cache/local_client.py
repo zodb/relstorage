@@ -37,7 +37,7 @@ from relstorage.cache.interfaces import OID_TID_MAP_TYPE
 from relstorage.cache.interfaces import MAX_TID
 from relstorage.cache.interfaces import CacheCorruptedError
 
-from relstorage.cache.mapping import SizedLRUMapping as LocalClientBucket
+from relstorage.cache.mapping import SizedLRUMapping
 
 from relstorage.cache.persistence import sqlite_connect
 from relstorage.cache.local_database import Database
@@ -61,9 +61,11 @@ class LocalClient(object):
         b'.b': bz2.decompress
     }
 
-    _bucket_type = LocalClientBucket
+    _bucket_type = SizedLRUMapping
 
-    def __init__(self, options, prefix=None):
+    def __init__(self, options,
+                 prefix=None,
+                 lru_kind=None):
         self._lock = threading.Lock()
         self.options = options
         self.checkpoints = None
@@ -72,6 +74,8 @@ class LocalClient(object):
         # The real MB value is 1024 * 1024 = 1048576
         self.limit = int(1000000 * options.cache_local_mb)
         self._value_limit = options.cache_local_object_max
+        if lru_kind:
+            self._bucket_type = lru_kind
         self.__bucket = None
 
         # The {oid: tid} that we read from the cache.

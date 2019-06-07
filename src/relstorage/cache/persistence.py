@@ -252,7 +252,7 @@ def sqlite_connect(options, prefix,
     .. caution:: Using the connection as a context manager does **not**
        result in the connection being closed, only committed or rolled back.
     """
-    parent_dir = options.cache_local_dir
+    parent_dir = getattr(options, 'cache_local_dir', options)
     # Allow for memory and temporary databases:
     if parent_dir != ':memory:' and parent_dir:
         parent_dir = _normalize_path(options)

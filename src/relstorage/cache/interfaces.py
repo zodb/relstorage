@@ -148,6 +148,11 @@ class ILRUCache(Interface):
         Count how many entries are in the cache.
         """
 
+    def stats():
+        """
+        Return info about the cache.
+        """
+
     def update_MRU(entry, value):
         """
         Given an entry that is known to be in the cache, update its

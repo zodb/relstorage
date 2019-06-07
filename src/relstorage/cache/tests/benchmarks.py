@@ -25,6 +25,7 @@ from collections import namedtuple
 from pyperf import perf_counter
 
 from relstorage.options import Options
+from relstorage._util import get_memory_usage
 
 logger = __import__('logging').getLogger(__name__)
 
@@ -527,7 +528,8 @@ class StorageTraceSimulator(object):
 def save_load_benchmark(runner):
     # pylint:disable=too-many-locals,too-many-statements
     import io
-    from relstorage.cache.mapping import SizedLRUMapping as LocalClientBucket
+    from relstorage.cache.lru_sqlite import SqlMapping
+    from relstorage.cache.mapping import SizedLRUMapping
     from relstorage.cache import persistence as _Loader
     from relstorage.cache.local_client import LocalClient
 
@@ -541,40 +543,48 @@ def save_load_benchmark(runner):
     cache_options.cache_local_dir = runner.args.temp #'/tmp'
     cache_options.cache_local_dir_compress = False
     cache_options.cache_local_mb = 525
-    client = LocalClient(cache_options, cache_pfx)
-    # Monkey with the internals so we don't have to
-    # populate multiple times.
-    bucket = client._LocalClient__bucket
-    #print("Testing", type(bucket._dict))
 
     # Note use of worker task number: This is fragile and directly relates to
     # the order in which we pass functions to run_and_report_funcs
-    if runner.args.worker:
+    def create_and_populate_client():
+        client = LocalClient(cache_options, cache_pfx, SqlMapping)
+        # Monkey with the internals so we don't have to
+        # populate multiple times.
+        bucket = client._bucket0
+        #print("Testing", type(bucket._dict))
+
         # Only need to populate in the workers.
         size_dists = [100] * 800 + [300] * 500 + [1024] * 300 + [2048] * 200 + [4096] * 150
 
         with open('/dev/urandom', 'rb') as rnd:
             data = [rnd.read(x) for x in size_dists]
         data_iter = itertools.cycle(data)
+        keys_and_values = []
+        len_values = 0
         j = 0
         for j, datum in enumerate(data_iter):
-            if len(datum) > bucket.limit or bucket.size + len(datum) > bucket.limit:
+            if len(datum) > bucket.limit or len_values + len(datum) > bucket.limit:
                 break
+            len_values += len(datum)
             # To ensure the pickle memo cache doesn't just write out "use object X",
             # but distinct copies of the strings, we need to copy them
-            bucket[(j, j)] = (datum[:-1] + b'x', j)
-            # We need to get the item so its frequency goes up enough to be written
-            # (this is while we're doing an aging at write time, which may go away).
-            # Using an assert statement causes us to write nothing if -O is used.
-            if bucket[(j, j)] is datum:
-                raise AssertionError()
+            keys_and_values.append(
+                ((j, j), (datum[:-1] + b'x', j))
+            )
 
-
+            # # We need to get the item so its frequency goes up enough to be written
+            # # (this is while we're doing an aging at write time, which may go away).
+            # # Using an assert statement causes us to write nothing if -O is used.
+            # if bucket[(j, j)] is datum:
+            #     raise AssertionError()
+        mem_before = get_memory_usage()
+        bucket.bulk_update(keys_and_values, mem_usage_before=mem_before)
         client.store_checkpoints(j, j)
+        del keys_and_values
         assert len(bucket) > 0 # pylint:disable=len-as-condition
         assert len(bucket) == len(client)
         #print("Len", len(bucket), "size", bucket.size, "checkpoints", client.get_checkpoints())
-
+        return client, bucket
 
     def _open(fd, mode):
         return io.open(fd, mode, buffering=16384)
@@ -589,6 +599,7 @@ def save_load_benchmark(runner):
             os.makedirs(runner.args.temp)
         except OSError:
             pass
+        _, bucket = create_and_populate_client()
         prefix = 'relstorage-cache-' + cache_pfx + '.'
         suffix = '.T'
         fd, _ = tempfile.mkstemp(prefix=prefix, suffix=suffix, dir=runner.args.temp)
@@ -601,22 +612,24 @@ def save_load_benchmark(runner):
     def load_mapping():
         if not runner.args.do_stream:
             return 3
-        load_from_file = write_mapping()
+        load_from_file = write_mapping() # XXX: Broken
 
         begin = perf_counter()
-        b2 = LocalClientBucket(bucket.limit)
+        b2 = SizedLRUMapping(bucket.limit) # pylint:disable=undefined-variable
         with _open(load_from_file, 'rb') as f:
             b2.read_from_stream(f)
         end = perf_counter()
         return end - begin
 
     def write_client():
+        client, _ = create_and_populate_client()
         begin = perf_counter()
         client.save(overwrite=True)
         end = perf_counter()
         return end - begin
 
     def write_client_dups():
+        client, _ = create_and_populate_client()
         begin = perf_counter()
         client.save(overwrite=False, close_async=False)
         end = perf_counter()
@@ -624,7 +637,7 @@ def save_load_benchmark(runner):
 
     def read_client():
         begin = perf_counter()
-        c2 = LocalClient(cache_options, cache_pfx)
+        c2 = LocalClient(cache_options, cache_pfx, SqlMapping)
         c2.restore()
         end = perf_counter()
         return end - begin
@@ -637,7 +650,7 @@ def save_load_benchmark(runner):
         ('read client', read_client),
     ))
 
-    if not runner.args.worker:
+    if not runner.args.worker and 0:
         stream = {'write': benchmarks['write stream'],
                   'read': benchmarks['read stream']}
         db = {'write': benchmarks['write client fresh'],

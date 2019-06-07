@@ -368,7 +368,8 @@ class SizedLRUMapping(object):
             # XXX: Why doesn't eden.add_MRUs do this? It has access
             # to the data dictionary.
             assert e.key not in data, (e.key, e)
-            assert e.cffi_entry.r_parent, e.key
+            # Entries aren't guaranteed to be cffi anymore.
+            # assert e.cffi_entry.r_parent, e.key
             data[e.key] = e
 
         then = time.time()

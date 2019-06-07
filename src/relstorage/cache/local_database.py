@@ -34,7 +34,7 @@ from relstorage.cache.interfaces import OID_TID_MAP_TYPE
 
 logger = __import__('logging').getLogger(__name__)
 
-class _SimpleQueryProperty(object):
+class SimpleQueryProperty(object):
     """
     Wraps a query that returns one value in one row.
     """
@@ -107,11 +107,11 @@ class Database(ABC):
     ON object_state (frequency DESC, tid DESC);
     """
 
-    total_state_len = _SimpleQueryProperty(
+    total_state_len = SimpleQueryProperty(
         "SELECT TOTAL(LENGTH(state)) FROM object_state"
     )
 
-    total_state_count = _SimpleQueryProperty(
+    total_state_count = SimpleQueryProperty(
         "SELECT COUNT(zoid) FROM object_state"
     )
 
