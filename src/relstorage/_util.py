@@ -94,3 +94,16 @@ def get_memory_usage():
     # If not available, fall back to rss as an aproximation.
     mem_usage = getattr(rusage, 'uss', 0) or rusage.rss
     return mem_usage
+
+def byte_display(size):
+    """
+    Returns a size with the correct unit (KB, MB), given the size in bytes.
+    The output should be given to zope.i18n.translate()
+    """
+    if size == 0:
+        return '0 KB'
+    if size <= 1024:
+        return '1 KB'
+    if size > 1048576:
+        return '%0.02f MB' % (size / 1048576.0)
+    return '%d KB' % (size / 1024.0)

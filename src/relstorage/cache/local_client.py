@@ -26,6 +26,7 @@ from zope import interface
 
 from relstorage._compat import iteritems
 from relstorage._util import get_memory_usage
+from relstorage._util import byte_display
 from relstorage._util import timer as _timer
 from relstorage._util import log_timed as _log_timed
 
@@ -264,12 +265,7 @@ class LocalClient(object):
         db = Database.from_connection(connection)
         checkpoints = db.checkpoints
         if checkpoints:
-            cp0, cp1 = checkpoints
-            self.store_checkpoints(cp0, cp1)
-        else:
-            cp0, cp1 = (0, 0)
-
-        #cur = _ExplainCursor(cur)
+            self.store_checkpoints(*checkpoints)
 
         self._min_allowed_writeback = db.oid_to_tid
 
@@ -285,72 +281,97 @@ class LocalClient(object):
         # is probably much bigger than we need. So we need to give an
         # accurate count, and the easiest way to do that is to materialize
         # the list of rows.
+        #
+        # In practice, we can assume that the limit hasn't changed between this
+        # run and the last run, so the database will already have been trimmed
+        # to fit the desired size, so essentially all the rows in the database
+        # should go in our cache.
         @_log_timed
         def data():
             # Do this here so that we don't have the result
             # in a local variable and it can be collected
             # before we measure the memory delta.
             #
-            # In large benchmarks, this function accounts for 31%
-            # of the time to load data; iterating the cursor takes 12%
-            # and allocating the state bytes takes 11%.
+            # In large benchmarks, this function accounts for 57%
+            # of the total time to load data. 26% of the total is
+            # fetching rows from sqlite, and 18% of the total is allocating
+            # storage for the blob state.
+            #
+            # We make one call into sqlite and let it handle the iterating.
             cur = db.fetch_rows_by_priority()
-            # row_filter produces the sequence (oid, key_tid, state, actual_tid)
+            items = cur.fetchall()
+            cur.close()
+            # Items are (oid, key_tid, state, actual_tid)
+            items = db.fetch_rows_by_priority().fetchall()
+            # row_filter produces the sequence ((oid, key_tid) (state, actual_tid))
             if row_filter is not None:
-                row_iter = row_filter(checkpoints, cur)
+                row_iter = row_filter(checkpoints, items)
+                items = list(row_iter)
             else:
-                # default_row_filter needs the output of a row_filter,
-                # so expand that here
-                row_iter = ((r[0], r[1], r[2], r[1]) for r in cur)
+                items = [(r[:2], r[2:]) for r in items]
 
             # Look at them from most to least recent,
             # but insert them the other way.
-            # This also has the side-effect of materializing the
-            # generators.
-            items = list(self._default_row_filter(row_iter))
             items.reverse()
-            cur.close()
             return items
 
+        # In the large benchmark, this is 25% of the total time.
+        # 18% of the total time is preallocating the entry nodes.
         self.__bucket.bulk_update(data(),
                                   source=connection,
                                   log_count=len(self._min_allowed_writeback),
                                   mem_usage_before=mem_before)
 
-
-    def _default_row_filter(self, rows):
-        # The default row filter merely keeps us within
-        # our size limit.
-        key_weight = self.key_weight
-        value_weight = self.value_weight
-        bytes_read = 0
-        for row in rows:
-            oid, key_tid, state, state_tid = row
-            key = (oid, key_tid)
-            value = (state, state_tid)
-            yield key, value
-            bytes_read += key_weight(key) + value_weight(value)
-            if bytes_read >= self.limit:
-                break
-
-
     @_log_timed
+    def _newest_items(self):
+        """
+        Return a dict {oid: entry} for just the newest entries.
+        """
+        # In a very large cache, with absolutely no duplicates,
+        # this accounts for 2.5% of the time taken to save.
+        newest_entries = OID_OBJECT_MAP_TYPE()
+        for entry in self.__bucket.iterentries():
+            oid, _ = entry.key
+            stored_entry = newest_entries.get(oid)
+            if stored_entry is None:
+                newest_entries[oid] = entry
+            elif stored_entry.value[1] < entry.value[1]:
+                newest_entries[oid] = entry
+            elif stored_entry.value[1] == entry.value[1]:
+                if stored_entry.value[0] != entry.value[0]:
+                    raise CacheCorruptedError(
+                        "The object %x has two different states for transaction %x" % (
+                            oid, entry.value[1]
+                        )
+                    )
+        return newest_entries
+
     def _items_to_write(self, stored_oid_tid):
         # pylint:disable=too-many-locals
-        all_entries = self.__bucket.items_to_write(sort=False)
-        all_entries_len = len(all_entries)
+        all_entries_len = len(self.__bucket)
+
+        # Tune quickly to the newest entries, materializing the list
+        # TODO: Should we consolidate frequency information for the OID?
+        # That can be expensive in the CFFI ring.
+        newest_entries = self._newest_items()
 
         # Only write the newest entry for each OID.
-        # Track frequency information for the OID, not the (oid, tid)
+
 
         # Newly added items have a frequency of 1. They *may* be
         # useless stuff we picked up from an old cache file and
         # haven't touched again, or they may be something that
         # really is new and we have no track history for (that
         # would be in eden generation).
-        # Ideally we want to do something here that's similar to what the
-        # SegmentedLRU does: if we would reject an item from eden, then only
-        # keep it if it's better than the least popular thing in probation.
+        #
+        # Ideally we want to do something here that's similar to what
+        # the SegmentedLRU does: if we would reject an item from eden,
+        # then only keep it if it's better than the least popular
+        # thing in probation.
+        #
+        # It's not clear that we have a good algorithm for this, and
+        # what we tried takes a lot of time, so we don't bother.
+        # TODO: Finish tuning these.
 
         # But we have a problem: If there's an object in the existing
         # cache that we have updated but now exclude, we would fail to
@@ -369,90 +390,54 @@ class LocalClient(object):
         # Later, if there's anything left in the dictionary, we *know* there
         # may be stale entries in the cache, and we remove them.
 
-        # TODO: Finish tuning these.
-        # These apply to the first place we saw the OID
-        # {oid ->
-        #   First, the components of the row so we can slice
-        #   ['oid', 'tid', 'state', 'frequency',
-        #    'generation', 'min_allowed_tid', 'allowed'])
-        newest_entries = OID_OBJECT_MAP_TYPE()
         pop_min_required_tid = self._min_allowed_writeback.pop
         get_min_required_tid = self._min_allowed_writeback.get # pylint:disable=no-member
         get_current_oid_tid = stored_oid_tid.get
-        thresholds = {'eden': 0, 'protected': 1, 'probation': 0}
+        removed_entry_count = 0
+        # When we accumulate all the rows here before returning them,
+        # this function shows as about 3% of the total time to save
+        # in a very large database.
         with _timer() as t:
-            # This is very ugly, but it's been pretty optimized.
-            # Creating the new list is 14% of the runtime of a large
-            # storage benchmark. This whole function is 18%.
-            while all_entries:
-                entry = all_entries.pop() # let us reclaim memory as we go
-                oid = entry.key[0]
-                current = newest_entries.get(oid)
-                if current is None:
-                    # We must have something at least this fresh
-                    # to consider writing it out
-                    min_allowed = get_min_required_tid(oid, -1)
-                    # If we have something >= min_allowed, but == this,
-                    # it's not worth putting in the database. To accomodate both
-                    # conditions, we artificially inflate this.
-                    current_tid = get_current_oid_tid(oid, -2) + 1
-                    min_allowed = current_tid if current_tid > min_allowed else min_allowed
-                    current = newest_entries[oid] = [
-                        oid, -1, None, 0,
-                        entry.ring_name,
-                        min_allowed,
-                        False
-                    ]
-                current[3] += entry.frequency
-                state, tid = entry.value
-                current_tid = current[1]
-                if tid > current_tid:
-                    current[1] = tid
-                    current[2] = state
-                elif tid == current_tid:
-                    if state != current[2]:
-                        raise CacheCorruptedError(
-                            "The object %x has two different states for transaction %x" % (
-                                current[0], tid
-                            )
-                        )
+            for oid, entry in newest_entries.items():
+                # We must have something at least this fresh
+                # to consider writing it out
+                actual_tid = entry.value[1]
+                min_allowed = get_min_required_tid(oid, -1)
+                if min_allowed > actual_tid:
+                    removed_entry_count += 1
+                    continue
 
-                current[6] = (
-                    current_tid >= current[5]
-                    # basically, if we only saw a OID in the protected generation,
-                    # it must have been used more than once.
-                    and current[3] > thresholds[current[4]]
-                )
-                del state
-                del current
-            del all_entries
+                # If we have something >= min_allowed, but == this,
+                # it's not worth writing to the database (states should be identical).
+                current_tid = get_current_oid_tid(oid, -1)
+                if current_tid >= actual_tid:
+                    removed_entry_count += 1
+                    continue
 
-            # TODO: Need a specific test that this is whitling down to the objects
-            # we want.
-            # Iterate this; we produce lots of garbage from the slicing, etc,
-            # and we want to reclaim as we go.
-            final_entry_count = 0
-            for key in list(newest_entries):
-                value = newest_entries.pop(key)
-                if value[6]:
-                    final_entry_count += 1
-                    yield value[:4]
-                    # We're able to satisfy this, so we don't need to consider
-                    # it in our min_allowed set anymore.
-                    pop_min_required_tid(value[0], None)
+                yield (oid, actual_tid, entry.value[0], entry.frequency)
+
+                # We're able to satisfy this, so we don't need to consider
+                # it in our min_allowed set anymore.
+                # XXX: This isn't really the right place to do this.
+                # Move this and write a test.
+                pop_min_required_tid(oid, None)
 
         logger.debug("Consolidated from %d entries to %d entries in %s",
-                     all_entries_len, final_entry_count,
+                     all_entries_len, len(newest_entries) - removed_entry_count,
                      t.duration)
 
     @_log_timed
     def write_to_sqlite(self, connection):
-
         # pylint:disable=too-many-locals
+        mem_before = get_memory_usage()
+
         cur = connection.cursor()
 
         db = Database.from_connection(connection)
         begin = time.time()
+
+        # In a large benchmark, store_temp() accounts for 32%
+        # of the total time, while move_from_temp accounts for 49%.
 
         # The batch size depends on how many params a stored proc can
         # have; if we go too big we get OperationalError: too many SQL
@@ -513,13 +498,16 @@ class LocalClient(object):
 
         end = time.time()
         stats = self.stats()
+        mem_after = get_memory_usage()
         logger.info(
             "Wrote %d items (%d bytes) to %s in %s "
             "(%s to fetch current, %s to insert batch, %s to write, %s to trim, %s to gc). "
+            "Used %s memory. "
             "Total hits %s; misses %s; ratio %s (stores: %s)",
             count_written, bytes_written, connection, end - begin,
             fetch_current - begin, batch_timer.duration, exclusive_timer.duration,
             trim_timer.duration, gc_timer.duration,
+            byte_display(mem_after - mem_before),
             stats['hits'], stats['misses'], stats['ratio'], stats['sets'])
 
         return count_written

@@ -513,9 +513,9 @@ class PersistentRowFilterTests(TestCase):
     def test_no_checkpoints(self):
         f = self._makeOne()
 
-        rows = [(1, 2, 3)]
+        rows = [(1, 2, 3, 2)]
         results = list(f(None, rows))
-        self.assertEqual(results, [(1, 2, 3, 2)])
+        self.assertEqual(results, [((1, 2), (3, 2))])
         self.assertEmpty(f.delta_after0)
         self.assertEmpty(f.delta_after1)
 
@@ -530,15 +530,15 @@ class PersistentRowFilterTests(TestCase):
         old_tid = 3999
 
         rows = [
-            (1, tid_after0, 1),
-            (2, tid_after1, 2),
-            (3, old_tid, 3)
+            (1, tid_after0, b'1', tid_after0),
+            (2, tid_after1, b'2', tid_after1),
+            (3, old_tid, b'3', old_tid)
         ]
 
         results = list(f((cp0, cp1), rows))
 
         self.assertEqual(results, [
-            (1, tid_after0, 1, tid_after0),
-            (2, tid_after1, 2, tid_after1),
-            (3, tid_after0, 3, old_tid)
+            ((1, tid_after0), (b'1', tid_after0)),
+            ((2, tid_after1), (b'2', tid_after1)),
+            ((3, tid_after0), (b'3', old_tid))
         ])

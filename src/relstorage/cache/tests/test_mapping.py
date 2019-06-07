@@ -362,10 +362,18 @@ class SizedLRUMappingTests(TestCase):
         self.assertEqual(stored, 2)
         self.assertEqual(client1.size, client1_max_size)
 
+        # Because the keys had equal frequencies, then when
+        # they were sorted by frequency, it came down to the original
+        # iteration order. In the past, we iterated through the cffi rings,
+        # but that's relatively slow. Now we iterate across our internal
+        # dictionary, which can have arbitrary orders,
+        # so we can't actually predict which key wound up where.
+
         list_lrukeys = partial(list_lrukeys_, client1)
-        self.assertEqual(list_lrukeys('eden'), ['abc'])
         self.assertEqual(list_lrukeys('probation'), [])
-        self.assertEqual(list_lrukeys('protected'), ['def'])
+
+        self.assertEqual(len(list_lrukeys('eden')), 1)
+        self.assertEqual(len(list_lrukeys('protected')), 1)
 
         # Don't write anything if the limit is too small, but
         # we can still read it.

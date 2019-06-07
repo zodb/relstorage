@@ -451,18 +451,6 @@ class LocalClientOIDTests(AbstractStateCacheTests):
         c[self.key] = self.value
         self.assertEqual(c._min_allowed_writeback[self.oid], self.tid)
 
-    def test_default_row_filter_size_limit(self):
-        c = self._makeOne()
-        c.limit = 0
-        rows = [
-            (0, 0, b'big state', 0),
-            (1, 1, b'second state', 0)
-        ]
-
-        filtered = list(c._default_row_filter(rows))
-        self.assertEqual(filtered,
-                         [((0, 0), (b'big state', 0))])
-
     def test_cache_corruption_on_save(self):
         c = self._makeOne(cache_local_dir=':memory:')
         c[self.key] = self.value
@@ -486,6 +474,7 @@ class LocalClientOIDTests(AbstractStateCacheTests):
         self.assertEqual(dict(db.oid_to_tid), {0: 0})
         conn.commit()
         # Pretend we loaded this from the db
+        c[(0, 0)] = (b'state', 0)
         c._min_allowed_writeback[0] = 0
 
         # Pass a newer version through

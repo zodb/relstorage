@@ -822,27 +822,30 @@ class _PersistentRowFilter(object):
 
     def __call__(self, checkpoints, row_iter):
         if not checkpoints:
-            # Nothing to do, no transforms are possible.
-            # But we do need to expand it to the expected form
+            # Nothing to do except put in correct format, no transforms are possible.
             for row in row_iter:
-                oid, actual_tid, state = row
-                yield oid, actual_tid, state, actual_tid
+                yield row[:2], row[2:]
         else:
             delta_after0 = self.delta_after0
             delta_after1 = self.delta_after1
             cp0, cp1 = checkpoints
             for row in row_iter:
-                oid, actual_tid, state = row
+                # We don't care about the extra suggested key tid
+                suggested_key = row[:2]
+                value = row[2:]
+                oid = suggested_key[0]
+                actual_tid = value[1]
 
                 if actual_tid >= cp0:
-                    key_tid = actual_tid
+                    # They must match in both these cases
+                    key = suggested_key
                     delta_after0[oid] = actual_tid
                 elif actual_tid >= cp1:
-                    key_tid = actual_tid
+                    key = suggested_key
                     delta_after1[oid] = actual_tid
                 else:
                     # Old generation, no delta.
                     # Even though this is old, it could be good to have it,
                     # it might be something that doesn't change much.
-                    key_tid = cp0
-                yield oid, key_tid, state, actual_tid
+                    key = (oid, cp0)
+                yield key, value

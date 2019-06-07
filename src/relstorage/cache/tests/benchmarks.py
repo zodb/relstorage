@@ -22,6 +22,8 @@ import random
 import time
 from collections import namedtuple
 
+from pyperf import perf_counter
+
 from relstorage.options import Options
 
 logger = __import__('logging').getLogger(__name__)
@@ -62,7 +64,9 @@ def profiled(func, name, runner):
 
 
     def f():
-        handle, _ = tempfile.mkstemp('.vmprof', prefix=name, dir=runner.args.temp)
+        prefix = name.replace(' ', '_') + '-'
+        suffix = '.vmprof' + "%d%d" % (sys.version_info[:2])
+        handle, _ = tempfile.mkstemp(suffix, prefix=prefix, dir=runner.args.temp)
         vmprof.enable(handle, lines=True)
         func()
         vmprof.disable()
@@ -100,7 +104,8 @@ def _combine_benchmark_results(options, group_name, benchmark_group, cache_optio
         suite.dump(fname, replace=True)
 
 
-def run_and_report_funcs(runner, named_funcs, profile=False):
+def run_and_report_funcs(runner, named_funcs):
+    profile = runner.args.profile
     benchmarks = {}
     for name, func in named_funcs:
         if profile:
@@ -535,7 +540,7 @@ def save_load_benchmark(runner):
     cache_options = MockOptions()
     cache_options.cache_local_dir = runner.args.temp #'/tmp'
     cache_options.cache_local_dir_compress = False
-    cache_options.cache_local_mb = 10
+    cache_options.cache_local_mb = 525
     client = LocalClient(cache_options, cache_pfx)
     # Monkey with the internals so we don't have to
     # populate multiple times.
@@ -576,6 +581,9 @@ def save_load_benchmark(runner):
 
 
     def write_mapping():
+        if not runner.args.do_stream:
+            return 3
+
         import tempfile
         try:
             os.makedirs(runner.args.temp)
@@ -583,28 +591,43 @@ def save_load_benchmark(runner):
             pass
         prefix = 'relstorage-cache-' + cache_pfx + '.'
         suffix = '.T'
-        fd, path = tempfile.mkstemp(prefix=prefix, suffix=suffix, dir=runner.args.temp)
+        fd, _ = tempfile.mkstemp(prefix=prefix, suffix=suffix, dir=runner.args.temp)
         with _open(fd, 'wb') as f:
+            begin = perf_counter()
             bucket.write_to_stream(f, pickle_fast=True)
-        return path
-
-    if runner.args.worker_task == 1:
-        load_from_file = write_mapping()
+            end = perf_counter()
+        return end - begin
 
     def load_mapping():
+        if not runner.args.do_stream:
+            return 3
+        load_from_file = write_mapping()
+
+        begin = perf_counter()
         b2 = LocalClientBucket(bucket.limit)
         with _open(load_from_file, 'rb') as f:
             b2.read_from_stream(f)
+        end = perf_counter()
+        return end - begin
 
     def write_client():
-        client.save(overwrite=True, close_async=False)
+        begin = perf_counter()
+        client.save(overwrite=True)
+        end = perf_counter()
+        return end - begin
 
     def write_client_dups():
+        begin = perf_counter()
         client.save(overwrite=False, close_async=False)
+        end = perf_counter()
+        return end - begin
 
     def read_client():
+        begin = perf_counter()
         c2 = LocalClient(cache_options, cache_pfx)
         c2.restore()
+        end = perf_counter()
+        return end - begin
 
     benchmarks = run_and_report_funcs(runner, (
         ('write stream', write_mapping),
@@ -634,6 +657,12 @@ def main():
 
     def args_hook(cmd, args):
         cmd.extend(('--type', args.type))
+        if args.profile:
+            cmd.extend(('--profile',))
+        if args.do_stream:
+            cmd.extend(('--do-stream',))
+        if args.log:
+            cmd.extend(('--log',))
         cmd.extend(('--temp', temp))
     runner = pyperf.Runner(add_cmdline_args=args_hook)
     runner.argparser.add_argument(
@@ -643,6 +672,15 @@ def main():
     )
     runner.argparser.add_argument(
         '--temp'
+    )
+    runner.argparser.add_argument(
+        '--profile', action='store_true',
+    )
+    runner.argparser.add_argument(
+        '--log', action='store_true'
+    )
+    runner.argparser.add_argument(
+        '--do-stream', action='store_true',
     )
     runner.parse_args()
     kind = runner.args.type
@@ -655,8 +693,9 @@ def main():
     if kind == 'local':
         local_benchmark(runner)
     elif kind == 'io':
-        #import logging
-        #logging.basicConfig(level=logging.DEBUG)
+        if runner.args.log:
+            import logging
+            logging.basicConfig(level=logging.DEBUG)
         save_load_benchmark(runner)
     elif kind == 'simlocal':
         StorageTraceSimulator().simulate('local')

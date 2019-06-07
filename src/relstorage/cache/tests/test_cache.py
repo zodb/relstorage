@@ -15,11 +15,8 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-import unittest
 
 from relstorage.tests import TestCase
-
-from . import Cache
 
 class CacheRingTests(TestCase):
 
@@ -45,7 +42,7 @@ class CacheRingTests(TestCase):
         self.assertEqual(lru.get_LRU(), entryc)
 
         self.assertEqual(len(lru), 3)
-
+        self.assertEqual(len(list(lru)), 3)
 
     def test_bool(self):
         lru = self._makeOne(100)
@@ -57,10 +54,19 @@ class CacheRingTests(TestCase):
 
 class EdenRingTests(TestCase):
 
+    def setUp(self):
+        self._generations = []
+
+    tearDown = setUp
+
     def _makeOne(self, limit, key_weight=len, value_weight=len):
+        from . import Cache
+        # Must hold on to *all* of them, or they get deallocated
+        # and bad things happen.
         generations = Cache.create_generations(eden_limit=limit,
                                                key_weight=key_weight,
                                                value_weight=value_weight)
+        self._generations.append(generations)
         return generations['eden']
 
     def test_add_MRUs_empty(self):
@@ -70,7 +76,6 @@ class EdenRingTests(TestCase):
     def test_add_MRUs_too_many(self):
         lru = self._makeOne(100)
         too_many = [(str(i), 'a' * i) for i in range(50)]
-
         # Make sure we have more then enough on the free list.
         lru.init_node_free_list(len(too_many) + 1)
         # They just exceed the limit
@@ -80,8 +85,15 @@ class EdenRingTests(TestCase):
 
 class CacheTests(TestCase):
 
+    def _getClass(self):
+        from . import Cache
+        return Cache
+
+    def _makeOne(self, limit):
+        return self._getClass()(limit)
+
     def test_bad_generation_index_attribute_error(self):
-        cache = Cache(20)
+        cache = self._makeOne(20)
         # Check proper init
         getattr(cache.generations[1], 'limit')
         getattr(cache.generations[2], 'limit')
@@ -93,7 +105,7 @@ class CacheTests(TestCase):
             cache.generations[0].on_hit()
 
     def test_free_reuse(self):
-        cache = Cache(20)
+        cache = self._makeOne(20)
         lru = cache.protected
         self.assertEqual(lru.limit, 16)
         entrya = lru.add_MRU('a', b'')
@@ -123,7 +135,7 @@ class CacheTests(TestCase):
         self.assertEqual(1, len(lru.node_free_list))
 
     def test_add_too_many_MRUs_goes_to_free_list(self):
-        class _Cache(Cache):
+        class _Cache(self._getClass()):
             _preallocate_entries = False
 
         cache = _Cache(20)
@@ -143,7 +155,7 @@ class CacheTests(TestCase):
         self.assertIsNone(cache.eden.node_free_list[0].value)
 
     def test_add_too_many_MRUs_works_aronud_big_entry(self):
-        cache = Cache(20)
+        cache = self._makeOne(20)
 
         entries = cache.eden.add_MRUs([('1', 'a'),
                                        # This entry itself will fit nowhere
@@ -166,9 +178,8 @@ class CacheTests(TestCase):
 
         self.assertEqual(cache.eden.PARENT_CONST, entry.cffi_ring_node.u.entry.r_parent)
 
-    @unittest.expectedFailure
-    def test_add_MRUs_uses_existing_free_list(self): # pragma: no cover
-        class _Cache(Cache):
+    def test_add_MRUs_uses_existing_free_list(self):
+        class _Cache(self._getClass()):
             _preallocate_avg_size = 7
             _preallocate_entries = True
 
@@ -212,7 +223,7 @@ class CacheTests(TestCase):
     def test_add_MRUs_reject_sets_sentinel_values(self):
         # When we find an item that completely fills the cache,
         # all the rest of the items are marked as rejected.
-        cache = Cache(20)
+        cache = self._makeOne(20)
         self.assertEqual(2, cache.eden.limit)
         self.assertEqual(2, cache.probation.limit)
         self.assertEqual(16, cache.protected.limit)
@@ -237,3 +248,5 @@ class CacheTests(TestCase):
         self.assertEqual(keys(cache.probation), ['2'])
         self.assertEqual('1 2 3'.split(), [e.key for e in added_entries])
         self.assertEqual(3, len(added_entries))
+        self.assertEqual(3, len(cache))
+        self.assertEqual(3, len(list(cache)))

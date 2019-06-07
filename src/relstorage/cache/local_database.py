@@ -24,9 +24,11 @@ from __future__ import division
 from __future__ import print_function
 
 from abc import abstractmethod
+from contextlib import closing
 import sqlite3
 
 from relstorage._compat import ABC
+from relstorage._util import log_timed
 from relstorage.adapters.batch import RowBatcher
 from relstorage.cache.interfaces import OID_TID_MAP_TYPE
 
@@ -53,8 +55,9 @@ class Database(ABC):
 
     This should generally be the latest state found in the cache.
     """
-    SUPPORTS_UPSERT = sqlite3.sqlite_version_info >= (3, 28)
-    SUPPORTS_PAREN_UPDATE = sqlite3.sqlite_version_info >= (3, 15)
+    SUPPORTS_UPSERT = sqlite3.sqlite_version_info >= (3, 28) # 2019-04-16
+    SUPPORTS_WINDOW = sqlite3.sqlite_version_info >= (3, 25) # 2018-09-15
+    SUPPORTS_PAREN_UPDATE = sqlite3.sqlite_version_info >= (3, 15) # 2016-10-14
 
     @classmethod
     def from_connection(cls,
@@ -116,13 +119,15 @@ class Database(ABC):
         self.cursor.executescript(self._schema)
 
     @property
+    @log_timed
     def oid_to_tid(self):
         """
         A map from OID to its corresponding TID, for
         all the data in the database.
         """
-        self.cursor.execute('SELECT zoid, tid FROM object_state')
-        return OID_TID_MAP_TYPE(list(self.cursor))
+        cur = self.connection.execute('SELECT zoid, tid FROM object_state')
+        with closing(cur):
+            return OID_TID_MAP_TYPE(cur.fetchall())
 
     @property
     def checkpoints(self):
@@ -134,17 +139,33 @@ class Database(ABC):
 
     def fetch_rows_by_priority(self):
         """
-        The returned cursor will iterate ``(zoid, tid, state)``
+        The returned cursor will iterate ``(zoid, tid, state, tid)``
         from most useful to least useful.
+
+        The extra tid is to allow for a uniform row syntax when we
+        don't want to do any key tid transforms. The row can neatly be
+        sliced as ``[r:2], r[2:]`` to get ``(key, value)`` pairs.
         """
         # Do this in a new cursor so it can interleave.
 
         # Read these in priority order; as a tie-breaker, choose newer transactions
         # over older transactions.
-        # We could probably use a window function over SUM(LENGTH(state)) to only select
-        # the rows that will actually fit.
+        # We could  use a window function over SUM(LENGTH(state)) to only select
+        # the rows that will actually fit:
+        #
+        # SELECT * FROM (
+        #  SELECT zoid, tid, state,
+        #   sum(length(state)) over (order by frequency desc, tid desc) as cum_size
+        #  FROM object_state
+        # ORDER BY frequency DESC, tid DESC
+        # )
+        # WHERE cum_size < ?
+        #
+        # However, that seems to generate a poor query plan that actually looks
+        # at all the rows (it doesn't understand that cum_size can only increase.)
+        # Plus, window functions were only added to sqlite 3.25
         cur = self.connection.execute("""
-        SELECT zoid, tid, state
+        SELECT zoid, tid, state, tid
         FROM object_state
         ORDER BY frequency DESC, tid DESC
         """)
@@ -162,20 +183,22 @@ class Database(ABC):
         # Note that the multiple-value syntax was added in
         # 3.7.11, 2012-03-20.
 
-        batch = RowBatcher(self.cursor, row_limit=999 // 4)
-
-        for row in rows:
-            size = len(row[2])
-            batch.insert_into(
-                'temp_state(zoid, tid, state, frequency)',
-                '?, ?, ?, ?',
-                row,
-                row[0],
-                size
-            )
-
-        batch.flush()
-        return batch.total_rows_inserted, batch.total_size_inserted
+        # Benchmarking shows essentially no difference between this
+        # simple method and using our RowBatcher to produce
+        # multi-value statements. vmprof shows all of the time spent
+        # in *this* function right here, nothing any lower (the next lower function it shows is
+        # _pysqlite_fetch_one_row, taking  1.1% of the execution of *this* function).
+        # I'm Not entirely sure what that means.
+        self.cursor.executemany(
+            'INSERT INTO temp_state(zoid, tid, state, frequency) '
+            'VALUES (?, ?, ?, ?)',
+            rows
+        )
+        try:
+            return len(rows), -1
+        except TypeError:
+            # Must have been a generator. No way to know.
+            return -1, -1
 
     @abstractmethod
     def move_from_temp(self):

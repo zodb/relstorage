@@ -20,6 +20,7 @@ import operator
 import time
 
 from relstorage._util import get_memory_usage
+from relstorage._util import byte_display
 from relstorage.cache.cache_ring import Cache
 from relstorage.cache.persistence import Pickler
 from relstorage.cache.persistence import Unpickler
@@ -377,30 +378,31 @@ class SizedLRUMapping(object):
         log.debug(
             "Examined %d and stored %d items from %s in %s using %s bytes.",
             log_count, stored, getattr(source, 'name', source),
-            then - now, mem_usage_after - mem_usage_before)
+            then - now, byte_display(mem_usage_after - mem_usage_before))
         return log_count, stored
 
-    def items_to_write(self, byte_limit=None, sort=True):
+    def items_to_write(self,
+                       byte_limit=None):
         """
-        Return an sequence of ``(key, value, total_weight, frequency, generation)`` pairs.
+        Return an iterator of entry objects.
 
-        The items are returned in **reverse** frequency order, the ones
-        with the highest frequency (most used) being last in the list. (Unless you specify *sort*
-        to be false, in which case the order is not specified.)
+        The items are returned in **reverse** frequency order, the
+        ones with the highest frequency (most used) being last in the
+        list. (Unless you specify *sort* to be false, in which case
+        the order is not specified.)
         """
-        entries = list(self._cache)
-
-        if len(entries) != len(self._dict): # pragma: no cover
+        if len(self._cache) != len(self._dict): # pragma: no cover
             raise CacheCorruptedError(
                 "Cache consistency problem. There are %d ring entries and %d dict entries. "
                 "Refusing to write." % (
-                    len(entries), len(self._dict)))
+                    len(self._cache), len(self._dict)))
+
+        entries = self.iterentries()
 
         # Adding key as a tie-breaker makes no sense, and is slow.
         # We use an attrgetter directly on the node for speed
-        if sort:
-            frequency_getter = operator.attrgetter('cffi_entry.frequency')
-            entries.sort(key=frequency_getter)
+        frequency_getter = operator.attrgetter('cffi_entry.frequency')
+        entries = sorted(entries, key=frequency_getter)
 
         # Write up to the byte limit
         if byte_limit:

@@ -94,9 +94,9 @@ class UpdateTests(TestCase):
 
         rows_in_db = list(self.db.fetch_rows_by_priority())
         rows_in_db.sort()
-        self.assertEqual(rows_in_db[0], (0, 1, b'0'))
-        self.assertEqual(rows_in_db[1], (1, 1, b'1'))
-        self.assertEqual(rows_in_db[2], (2, 2, b'2b'))
+        self.assertEqual(rows_in_db[0], (0, 1, b'0', 1))
+        self.assertEqual(rows_in_db[1], (1, 1, b'1', 1))
+        self.assertEqual(rows_in_db[2], (2, 2, b'2b', 2))
 
 
     def test_trim_to_size_deletes_stale(self):
