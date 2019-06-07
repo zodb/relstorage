@@ -22,6 +22,10 @@ from __future__ import print_function
 import functools
 import itertools
 
+from zope import interface
+
+from relstorage.cache.interfaces import ILRUCache
+from relstorage.cache.interfaces import ILRUItem
 from . import _cache_ring
 
 try:
@@ -62,7 +66,7 @@ class _NoSuchGeneration(object):
         msg = "Generation %s has no attribute %r" % (self.__gen_num, name)
         raise AttributeError(msg)
 
-
+@interface.implementer(ILRUCache)
 class Cache(object):
     """
     A sized cache.
@@ -142,7 +146,7 @@ class Cache(object):
         return generations
 
     def __init__(self, byte_limit, key_weight=len, value_weight=len):
-        self._byte_limit = byte_limit
+        self.limit = self._byte_limit = byte_limit
 
         generations = self.create_generations(
             eden_limit=int(byte_limit * self._gen_eden_pct),
@@ -179,8 +183,10 @@ class Cache(object):
             node_free_list = self.eden.init_node_free_list(entry_count)
         return node_free_list
 
-    def age_lists(self):
+    def age_frequencies(self):
         _lru_age_lists(self.cffi_cache)
+
+    age_lists = age_frequencies # BWC
 
     def update_MRU(self, entry, value):
         return self.generations[entry.cffi_entry.r_parent].update_MRU(entry, value)
@@ -195,6 +201,10 @@ class Cache(object):
     def size(self):
         return self.eden.size + self.protected.size + self.probation.size
 
+    @property
+    def weight(self):
+        return self.size
+
     def __len__(self):
         return len(self.eden) + len(self.protected) + len(self.probation)
 
@@ -208,14 +218,14 @@ class Cache(object):
     def __iter__(self):
         return itertools.chain(self.probation, self.protected, self.eden)
 
-
+@interface.implementer(ILRUItem)
 class CacheRingEntry(object):
     """
     The Python-level objects holding the Python-level key and value.
     """
 
     __slots__ = (
-        'key', 'value', 'len',
+        'key', 'value', 'weight',
         'cffi_ring_node', 'cffi_ring_handle',
         'cffi_entry',
         # This is an owning pointer that is allocated when we
@@ -239,14 +249,14 @@ class CacheRingEntry(object):
         entry.frequency = 1
         # We denormalize len to avoid accessing through CFFI (but it is needed
         # by the C code).
-        self.len = entry.weight = weight
+        self.weight = entry.weight = weight
 
     def reset(self, key, value, weight):
         self.key = key
         self.value = value
         entry = self.cffi_entry
         entry.frequency = 1
-        self.len = entry.weight = weight
+        self.weight = entry.weight = weight
 
     def reset_for_free_list(self):
         """
@@ -255,7 +265,7 @@ class CacheRingEntry(object):
 
         You must call `reset` to use this node again.
         """
-        self.key = self.value = self.len = None
+        self.key = self.value = self.weight = None
         self.cffi_entry.r_parent = 0 # make sure we can't dereference a generation
 
     frequency = property(lambda self: self.cffi_entry.frequency,
@@ -265,14 +275,14 @@ class CacheRingEntry(object):
         if value == self.value:
             return
         self.value = value
-        self.len = self.cffi_entry.weight = weight
+        self.weight = self.cffi_entry.weight = weight
 
     # We don't implement __len__---we want people to access .len
     # directly to avoid the function call as it showed up in benchmarks
 
     def __repr__(self):
         return ("<%s key=%r f=%d size=%d>" %
-                (type(self).__name__, self.key, self.frequency, self.len))
+                (type(self).__name__, self.key, self.frequency, self.weight))
 
 def _mutates_free_list(func):
     @functools.wraps(func)
@@ -396,7 +406,7 @@ class CacheRing(object):
 
     @_mutates_free_list
     def update_MRU(self, entry, value):
-        old_size = entry.len
+        old_size = entry.weight
         new_size = self.key_weight(entry.key) + self.value_weight(value)
         entry.set_value(value, new_size)
 

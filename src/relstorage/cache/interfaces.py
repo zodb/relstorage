@@ -119,6 +119,73 @@ class IPersistentCache(Interface):
         Restore the cache from disk.
         """
 
+class ILRUItem(Interface):
+    """
+    An entry in an `ILRUCache`.
+
+    Keys and values must not be changed; the frequency
+    can be increased.
+    """
+
+    key = Attribute("The key for the entry")
+    value = Attribute("The value for the entry")
+    frequency = Attribute("The frequency of accesses to the entry.")
+    weight = Attribute("The weight of the entry.")
+
+class ILRUCache(Interface):
+    """
+    A container of cached keys and values and associated metadata,
+    limited to containing a total weight less than some limit.
+
+    Values may be evicted when new ones are added.
+    """
+
+    limit = Attribute("The maximim weight allowed.")
+    weight = Attribute("The weight of the entries in the cache.")
+
+    def __len__():
+        """
+        Count how many entries are in the cache.
+        """
+
+    def update_MRU(entry, value):
+        """
+        Given an entry that is known to be in the cache, update its
+        ``value`` to the new *value* and mark it as the most recently used.
+
+        Because the value's weight may have changed, this may evict other items.
+        If so, they are returned as ``[(key, value)]``.
+        """
+
+    def add_MRU(key, value):
+        """
+        Insert a new item in the cache, as the most recently used.
+
+        Returns the entry, and any items that had to be evicted to make room.
+        """
+
+    def add_MRUs(ordered_keys_and_values):
+        """
+        Add as many of the key/value pairs in *ordered_keys_and_values* as possible,
+        without evicting any existing items.
+
+        Returns the entries that were added.
+        """
+
+    def remove(entry):
+        """
+        Remove the entry from the cache.
+        """
+
+    def age_frequencies():
+        """Call to periodically adjust the frequencies of items."""
+
+    def on_hit(entry):
+        """
+        Notice that the entry is being accessed and adjust its frequency
+        and move any items around in the cache as necessary.
+        """
+
 
 class CacheCorruptedError(AssertionError):
     """

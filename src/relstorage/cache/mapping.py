@@ -413,9 +413,9 @@ class SizedLRUMapping(object):
             bytes_written = 0
             entries_to_write = []
             for entry in reversed(entries):
-                bytes_written += entry.len
+                bytes_written += entry.weight
                 if bytes_written > byte_limit:
-                    bytes_written -= entry.len
+                    bytes_written -= entry.weight
                     break
                 entries_to_write.append(entry)
             # Now we can write in reverse popularity order
@@ -477,7 +477,7 @@ class SizedLRUMapping(object):
         for entry in entries:
             k = entry.key
             v = entry.value
-            weight = entry.len
+            weight = entry.weight
             bytes_written += weight
             count_written += 1
             dump((k, v))

@@ -16,7 +16,11 @@ from __future__ import division
 from __future__ import print_function
 
 
+from hamcrest import assert_that
+from nti.testing.matchers import verifiably_provides
+
 from relstorage.tests import TestCase
+from relstorage.cache import interfaces
 
 class CacheRingTests(TestCase):
 
@@ -92,6 +96,9 @@ class CacheTests(TestCase):
     def _makeOne(self, limit):
         return self._getClass()(limit)
 
+    def test_implements(self):
+        assert_that(self._makeOne(100), verifiably_provides(interfaces.ILRUCache))
+
     def test_bad_generation_index_attribute_error(self):
         cache = self._makeOne(20)
         # Check proper init
@@ -103,6 +110,12 @@ class CacheTests(TestCase):
         with self.assertRaisesRegex(AttributeError,
                                     "Generation 0 has no attribute 'on_hit'"):
             cache.generations[0].on_hit()
+
+    def test_item_implements(self):
+        cache = self._makeOne(20)
+        lru = cache.protected
+        entrya = lru.add_MRU('a', b'')
+        assert_that(entrya, verifiably_provides(interfaces.ILRUItem))
 
     def test_free_reuse(self):
         cache = self._makeOne(20)
