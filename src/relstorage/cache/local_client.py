@@ -334,7 +334,7 @@ class LocalClient(object):
         # In a very large cache, with absolutely no duplicates,
         # this accounts for 2.5% of the time taken to save.
         newest_entries = OID_OBJECT_MAP_TYPE()
-        for entry in self.__bucket.iterentries():
+        for entry in self.__bucket.entries():
             oid, _ = entry.key
             stored_entry = newest_entries.get(oid)
             if stored_entry is None:

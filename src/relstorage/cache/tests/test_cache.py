@@ -114,7 +114,7 @@ class CacheTests(TestCase):
     def test_item_implements(self):
         cache = self._makeOne(20)
         entrya = cache.add_MRU('a', b'')
-        assert_that(entrya, verifiably_provides(interfaces.ILRUItem))
+        assert_that(entrya, verifiably_provides(interfaces.ILRUEntry))
 
     def test_free_reuse(self):
         cache = self._makeOne(20)

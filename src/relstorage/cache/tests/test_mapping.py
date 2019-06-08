@@ -92,8 +92,8 @@ class SizedLRUMappingTests(TestCase):
         # In the past this was 7 and 'abc' was ejected. But the generational
         # system lets us go a bit over.
         self.assertEqual(b.size, 11)
-        self.assertEqual(b.get('abc'), b'z')
-        self.assertEqual(b.get("abcd"), b'xyz')
+        self.assertEqual(b.peek('abc'), b'z')
+        self.assertEqual(b.peek("abcd"), b'xyz')
 
     def test_increasing_size_in_eden_w_empty_protected_bumps_to_protected(self):
         b = self.getClass()(40)
@@ -218,10 +218,10 @@ class SizedLRUMappingTests(TestCase):
 
         # We can access only the ones that remain
         for k in range(8):
-            self.assertNotNone(b.get(str(k)))
+            self.assertNotNone(b.peek(str(k)))
 
-        self.assertNone(b.get('8'))
-        self.assertNotNone(b.get('9'))
+        self.assertNone(b.peek('8'))
+        self.assertNotNone(b.peek('9'))
 
     def test_increasing_size_in_full_probation_full_protection_bumps_to_probation(self):
         # Fill up in the normal way
@@ -252,9 +252,9 @@ class SizedLRUMappingTests(TestCase):
 
         # We can access only the ones that remain
         for k in range(1, 10):
-            self.assertNotNone(b.get(str(k)))
+            self.assertNotNone(b.peek(str(k)))
 
-        self.assertNone(b.get('0'))
+        self.assertNone(b.peek('0'))
 
     def _load(self, bio, bucket):
         bio.seek(0)

@@ -110,18 +110,21 @@ def _combine_benchmark_results(options, group_name, benchmark_group, cache_optio
 def run_and_report_funcs(runner, named_funcs):
     profile = runner.args.profile
     benchmarks = {}
-    for name, func in named_funcs:
+    for description in named_funcs:
+        func = description[1]
+        name = description[0]
+        args = description[2:]
         if profile:
             func = profiled(func, name, runner)
-        benchmark = runner.bench_time_func(name, func)
+        benchmark = runner.bench_time_func(name, func, *args)
         benchmarks[name] = benchmark
     return benchmarks
 
 
 def local_benchmark(runner):
-    # pylint:disable=too-many-statements
+    # pylint:disable=too-many-statements,too-many-locals
     from relstorage.cache.local_client import LocalClient
-    #from relstorage.cache.lru_sqlite import SqlMapping
+    from relstorage.cache.lru_sqlite import SqlMapping
     options = MockOptions()
     options.cache_local_mb = 100
     options.cache_local_compression = 'none'
@@ -174,51 +177,80 @@ def local_benchmark(runner):
             ALL_DATA[key] = (random_data, key[1])
     ALL_DATA = list(ALL_DATA.items())
     ALL_DATA.sort(key=lambda x: hash(x[0]))
-    #print(len(ALL_DATA), sum((len(v[1][0]) for v in ALL_DATA))/1024/1024)
+    #print("Entries", len(ALL_DATA),
+    #      "Data size", byte_display(sum((len(v[1][0]) for v in ALL_DATA))))
 
-    def makeOne(populate=True):
-        client = LocalClient(options, 'pfx')
+    def makeOne(bucket_kind, populate=True):
+        client = LocalClient(options, 'pfx', bucket_kind)
         if populate:
             client._bucket0.bulk_update(ALL_DATA)
         return client
 
-    def populate(loops):
-        client = makeOne()
+    def populate_equal(loops, bucket_kind):
+        # Because we will populate when we make,
+        # capture memory now to be able to include that.
         mem_before = get_memory_usage()
+        client = makeOne(bucket_kind)
 
         begin = perf_counter()
         for _ in range(loops):
             for k, v in ALL_DATA:
-                # install a copy that's equal
-                client[k] = v[:-1] + v[-1:]
+                # install a copy that's equal;
+                # this should mean no extra copies.
+                state = v[0]
+                state = state[:-1] + state[-1:]
+                new_v = (state, v[1])
+                assert new_v == v
+                assert new_v is not v
+                client[k] = new_v
         duration = perf_counter() - begin
         mem_used = get_memory_usage() - mem_before
         logger.info("Populated in %s; took %s mem; size: %d",
                     duration, byte_display(mem_used), len(client))
         return duration
 
-    def populate_empty(loops):
-        client = makeOne(populate=False)
+    def populate_not_equal(loops, bucket_kind):
+        # Because we will populate when we make,
+        # capture memory now to be able to include that.
         mem_before = get_memory_usage()
+        client = makeOne(bucket_kind)
+
         begin = perf_counter()
         for _ in range(loops):
             for k, v in ALL_DATA:
-                # install a copy that's equal
-                client[k] = v[:-1] + v[-1:]
+                # install a copy that's not quite equal.
+                # This should require saving it.
+                state = v[0]
+                state = state + b'1'
+                new_v = (state, v[1])
+                client[k] = new_v
         duration = perf_counter() - begin
         mem_used = get_memory_usage() - mem_before
         logger.info("Populated in %s; took %s mem; size: %d",
                     duration, byte_display(mem_used), len(client))
         return duration
 
-    def read(loops):
+    def populate_empty(loops, bucket_kind):
+        client = makeOne(bucket_kind, populate=False)
+        mem_before = get_memory_usage()
+        begin = perf_counter()
+        for _ in range(loops):
+            for k, v in ALL_DATA:
+                client[k] = v
+        duration = perf_counter() - begin
+        mem_used = get_memory_usage() - mem_before
+        logger.info("Populated in %s; took %s mem; size: %d",
+                    duration, byte_display(mem_used), len(client))
+        return duration
+
+    def read(loops, bucket_kind):
         # This is basically the worst-case scenario for a basic
         # segmented LRU: A repeating sequential scan, where no new
         # keys are added and all existing keys fit in the two parts of the
         # cache. Thus, entries just keep bouncing back and forth between
         # probation and protected. It so happens that this is our slowest
         # case.
-        client = makeOne(populate=True)
+        client = makeOne(bucket_kind, populate=True)
         begin = perf_counter()
         for _ in range(loops):
             for keys in key_groups:
@@ -237,8 +269,8 @@ def local_benchmark(runner):
         # print("Probation demotes", client._bucket0._probation.demote_count)
         # print("Probation removes", client._bucket0._probation.remove_count)
 
-    def mixed(loops):
-        client = makeOne(populate=True)
+    def mixed(loops, bucket_kind):
+        client = makeOne(bucket_kind, populate=True)
         hot_keys = key_groups[0]
         i = 0
         miss_count = 0
@@ -271,11 +303,26 @@ def local_benchmark(runner):
 
     #     print("Hit ratio", client.stats()['ratio'])
 
-    run_and_report_funcs(runner,
-                         (('pop ', populate),
-                          ('epop', populate_empty),
-                          ('read', read),
-                          ('mix ', mixed),))
+    groups = {}
+    for name, bucket in (
+            ('SQL', SqlMapping),
+            ('CFFI', None),
+    ):
+        benchmarks = run_and_report_funcs(
+            runner,
+            ((name + ' pop_eq', populate_equal, bucket),
+             (name + ' pop_ne', populate_not_equal, bucket),
+             (name + ' epop', populate_empty, bucket),
+             (name + ' read', read, bucket),
+             (name + ' mix ', mixed, bucket),))
+        group = {
+            k[len(name) + 1:]: v for k, v in benchmarks.items()
+        }
+        groups[name] = group
+
+    if not runner.args.worker:
+        for name, group in groups.items():
+            _combine_benchmark_results(runner.args, name, group, options)
 
 
 StorageRecord = namedtuple('Record', ['asu', 'lba', 'size', 'opcode', 'ts'])
@@ -681,7 +728,7 @@ def save_load_benchmark(runner):
         ('read client', read_client),
     ))
 
-    if not runner.args.worker and 0:
+    if not runner.args.worker:
         stream = {'write': benchmarks['write stream'],
                   'read': benchmarks['read stream']}
         db = {'write': benchmarks['write client fresh'],

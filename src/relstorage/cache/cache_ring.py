@@ -25,7 +25,7 @@ import itertools
 from zope import interface
 
 from relstorage.cache.interfaces import ILRUCache
-from relstorage.cache.interfaces import ILRUItem
+from relstorage.cache.interfaces import ILRUEntry
 from . import _cache_ring
 
 try:
@@ -201,6 +201,45 @@ class Cache(object):
             node_free_list = self.eden.init_node_free_list(entry_count)
         return node_free_list
 
+
+    # mapping operations, operating on user-level key/value pairs.
+
+    def __iter__(self):
+        return iter(self.data)
+
+    def __contains__(self, key):
+        return key in self.data
+
+    def __setitem__(self, key, value):
+        entry = self.get(key)
+        if entry is not None:
+            # This bumps its frequency, and potentially ejects other items.
+            self.update_MRU(entry, value)
+        else:
+            # New values have a frequency of 1 and might evict other
+            # items.
+            self.add_MRU(key, value)
+
+        assert key in self
+
+    def __delitem__(self, key):
+        entry = self.data[key]
+        del self.data[key]
+        self.generations[entry.cffi_entry.r_parent].remove(entry)
+
+    def __getitem__(self, key):
+        entry = self.get(key)
+        if entry is not None:
+            self.on_hit(entry)
+            return entry.value
+
+    # Cache-specific operations.
+
+    def peek(self, key):
+        entry = self.get(key)
+        if entry is not None:
+            return entry.value
+
     def age_frequencies(self):
         _lru_age_lists(self.cffi_cache)
 
@@ -224,23 +263,6 @@ class Cache(object):
         for k, _ in evicted_items:
             del self.data[k]
 
-    def __setitem__(self, key, value):
-        entry = self.get(key)
-        if entry is not None:
-            # This bumps its frequency, and potentially ejects other items.
-            self.update_MRU(entry, value)
-        else:
-            # New values have a frequency of 1 and might evict other
-            # items.
-            self.add_MRU(key, value)
-
-        assert key in self
-
-    def __delitem__(self, key):
-        entry = self.data[key]
-        del self.data[key]
-        self.generations[entry.cffi_entry.r_parent].remove(entry)
-
     def on_hit(self, entry):
         self.generations[entry.cffi_entry.r_parent].on_hit(entry)
 
@@ -262,17 +284,11 @@ class Cache(object):
             'prob_stats': self.probation.stats(),
         }
 
-    def itervalues(self):
+    def entries(self):
         return getattr(self.data, 'itervalues', self.data.values)()
 
-    def __iter__(self):
-        return iter(self.data)
 
-    def __contains__(self, key):
-        return key in self.data
-
-
-@interface.implementer(ILRUItem)
+@interface.implementer(ILRUEntry)
 class CacheRingEntry(object):
     """
     The Python-level objects holding the Python-level key and value.

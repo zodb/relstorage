@@ -20,9 +20,11 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import sqlite3
+
 from zope import interface
 
-from .interfaces import ILRUItem
+from .interfaces import ILRUEntry
 from .interfaces import ILRUCache
 from .persistence import sqlite_connect
 from .local_database import SimpleQueryProperty
@@ -93,10 +95,19 @@ class SQLiteCache(object):
         return Item(key, value), ()
 
     def add_MRUs(self, key_values):
+        def k():
+            written = 0
+            for k, v in key_values:
+                written += len(v[0])
+                if written < self.limit:
+                    yield k + v
+                else:
+                    break
+
         self.cursor.executemany(
             'insert into object_state (zoid, key_tid, state, state_tid) '
             'values (?, ?, ?, ?)',
-            (k + v for k, v in key_values)
+            k()
         )
         return ()
 
@@ -109,12 +120,14 @@ class SQLiteCache(object):
             value + item.key
         )
 
-    def remove(self, item):
+    def _remove(self, key):
         self.cursor.execute(
             'delete from object_state where zoid = ? and key_tid = ?',
-            (item.key[0], item.key[1])
+            key
         )
 
+    def remove(self, item):
+        self._remove(item.key)
 
     def age_frequencies(self):
         pass
@@ -124,36 +137,45 @@ class SQLiteCache(object):
     def on_hit(self, entry):
         pass
 
-    def itervalues(self):
+    def entries(self):
         cur = self.connection.execute("SELECT zoid, key_tid, state, state_tid from object_state")
         for row in cur:
             yield Item(row[:2], row[2:])
         cur.close()
 
     def __contains__(self, key):
-        return self.get(key) is not None
+        return self[key] is not None
 
-    def get(self, key):
+    def __getitem__(self, key):
+        # TODO: Make this count as a hit.
         cur = self.connection.execute(
-            'SELECT zoid, key_tid, state, state_tid FROM object_state '
+            'SELECT state, state_tid FROM object_state '
             'WHERE zoid = ? and key_tid = ? ',
             key
         )
         row = cur.fetchone()
         cur.close()
-        if row:
-            return Item(row[:2], row[2:])
+        return row
+
+    peek = __getitem__ # peek is not supposed to count as a hit
 
     def __iter__(self):
-        pass
+        cur = self.connection.execute('SELECT zoid, key_tid FROM object_state')
+        for row in cur:
+            yield row
+        cur.close()
 
     def __setitem__(self, key, value):
-        pass
+        # TODO: Upserts where possible.
+        try:
+            self.add_MRU(key, value)
+        except sqlite3.IntegrityError:
+            self.update_MRU(Item(key, value), value)
 
     def __delitem__(self, key):
-        pass
+        self._remove(key)
 
-@interface.implementer(ILRUItem)
+@interface.implementer(ILRUEntry)
 class Item(object):
     weight = None
     frequency = 0

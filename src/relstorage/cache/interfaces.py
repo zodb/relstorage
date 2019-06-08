@@ -119,12 +119,14 @@ class IPersistentCache(Interface):
         Restore the cache from disk.
         """
 
-class ILRUItem(Interface):
+class ILRUEntry(Interface):
     """
     An entry in an `ILRUCache`.
 
-    Keys and values must not be changed; the frequency
-    can be increased.
+    This is a read-only object. The containing cache
+    is in charge of all the attributes, and they must not
+    be changed behind its back.
+
     """
 
     key = Attribute("The key for the entry")
@@ -137,7 +139,16 @@ class ILRUCache(Interface):
     A container of cached keys and values and associated metadata,
     limited to containing a total weight less than some limit.
 
+    The interface is mapping-like, and specified in terms of keys and
+    values. For access to the additional stored metadata, different
+    methods are defined.
+
     Values may be evicted when new ones are added.
+
+    The cache may not store None values.
+
+    The cache may have specific restrictions on the type and format
+    of keys and values it accepts.
     """
 
     # TODO: This is a mix of user-level (key/value) and implementation
@@ -146,9 +157,58 @@ class ILRUCache(Interface):
     limit = Attribute("The maximim weight allowed.")
     weight = Attribute("The weight of the entries in the cache.")
 
+    # Mapping-like methods.
+
+    def __getitem__(key):
+        """
+        Get a value by key. If there is no value
+        for the key, or it has been evicted, return None.
+
+        This should be considered a hit on the key.
+
+        This never results in raising a `KeyError`.
+        """
+
     def __len__():
         """
         Count how many entries are in the cache.
+        """
+    def __contains__(key):
+        "Is the key in the cache?"
+
+    def __iter__():
+        "Iterate the keys"
+
+    def __setitem__(key, value):
+        """
+        Either set or update an entry.
+
+        This is like either ``update_MRU`` or ``add_MRU``,
+        depending on whether an entry exists.
+
+        This may evict items.
+        """
+
+    def __delitem__(key):
+        """
+        Remove the entry from the cache.
+
+        If it does not exist, it is an error.
+        """
+
+    ###
+    # Cache-specific operations.
+    ###
+
+    def peek(key):
+        """
+        Similar to ``__getitem__``, but *does not* count
+        as a hit on the key, merely returns a value if its present.
+        """
+
+    def entries():
+        """
+        Iterate all the `ILRUEntry` values.
         """
 
     def stats():
@@ -159,17 +219,19 @@ class ILRUCache(Interface):
     def update_MRU(entry, value):
         """
         Given an entry that is known to be in the cache, update its
-        ``value`` to the new *value* and mark it as the most recently used.
+        ``value`` to the new *value* and mark it as the most recently
+        used.
 
-        Because the value's weight may have changed, this may evict other items.
-        If so, they are returned as ``[(key, value)]``.
+        Because the value's weight may have changed, this may evict
+        other items. If so, they are returned as ``[(key, value)]``.
         """
 
     def add_MRU(key, value):
         """
         Insert a new item in the cache, as the most recently used.
 
-        Returns the entry, and any items that had to be evicted to make room.
+        Returns the entry, and any item pairs that had to be evicted
+        to make room.
         """
 
     def add_MRUs(ordered_keys_and_values):
@@ -183,42 +245,17 @@ class ILRUCache(Interface):
     def age_frequencies():
         """Call to periodically adjust the frequencies of items."""
 
+
     def on_hit(entry):
         """
         Notice that the entry is being accessed and adjust its frequency
         and move any items around in the cache as necessary.
+
+        This does not usually need to be manually called; it is maintained
+        through normal cache access.
         """
 
-    def itervalues():
-        """
-        Iterate all the ILRUItem values.
-        """
 
-    def get(key): # pylint:disable=arguments-differ
-        """
-        Get an item by key.
-
-        This should not be considered a hit.        """
-
-    def __contains__(key):
-        "Is the key in the cache?"
-
-    def __iter__():
-        "Iterate the keys"
-
-    def __setitem__(key, value):
-        """
-        Either set or update an entry.
-        This is like either ``update_MRU`` or ``add_MRU``,
-        depending on whether an entry exists.
-
-        This may evict items.
-        """
-
-    def __delitem__(key):
-        """
-        Remove the entry from the cache.
-        """
 
 class CacheCorruptedError(AssertionError):
     """

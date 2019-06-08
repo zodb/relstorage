@@ -37,4 +37,4 @@ class CacheTests(TestCase):
     def test_item_implements(self):
         cache = self._makeOne(20)
         entrya = cache.add_MRU((0, 0), (b'', 0))[0]
-        assert_that(entrya, verifiably_provides(interfaces.ILRUItem))
+        assert_that(entrya, verifiably_provides(interfaces.ILRUEntry))

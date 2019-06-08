@@ -69,6 +69,10 @@ class SizedLRUMapping(object):
         self.limit = weight_limit
         self._next_age_at = 1000
 
+        # Copy some methods for speed
+        self.entries = self._cache.entries
+        self.peek = self._cache.peek
+
     def keys(self):
         return iter(self._cache)
 
@@ -121,17 +125,12 @@ class SizedLRUMapping(object):
             self.size, self.limit, len(self), self.stats()['hits']
         )
 
-    def iterentries(self):
-        # Iterating the dict is safer than iterating the generations
-        # in the case of mutations
-        return self._cache.itervalues()
-
     def values(self):
-        for entry in self.iterentries():
+        for entry in self.entries():
             yield entry.value
 
     def items(self):
-        for entry in self.iterentries():
+        for entry in self.entries():
             yield (entry.key, entry.value)
 
     def _age(self):
@@ -215,18 +214,17 @@ class SizedLRUMapping(object):
     def get_from_key_or_backup_key(self, pref_key, backup_key):
         dct = self._cache
 
-        entry = dct.get(pref_key)
+        value = dct[pref_key]
         at_backup = False
-        if entry is None and backup_key is not None:
+        if value is None and backup_key is not None:
             at_backup = True
-            entry = dct.get(backup_key)
+            value = dct[backup_key]
 
-        if entry is None:
+        if value is None:
             self._misses += 1
             return
 
         self._hits += 1
-        result = entry.value
         if at_backup:
             # TODO: Define a low-level operation for this
             # so that we can preserve frequency information.
@@ -237,27 +235,16 @@ class SizedLRUMapping(object):
             # By doing so, we can reuse the same entry object,
             # keeping its frequency and so forth.
             del dct[backup_key]
-            # XXX: Define this.
-            dct[pref_key] = result
-        else:
-            # TODO: The cache should really be handling this.
-            # We probably shouldn't see entries at all in most cases.
-            self._cache.on_hit(entry)
+            dct[pref_key] = value
 
-        return result
-
-
-    def get(self, key):
-        # Testing only. Does not bubble or increment.
-        entry = self._cache.get(key)
-        if entry is not None:
-            return entry.value
+        return value
 
     def __getitem__(self, key):
-        # Testing only. Doesn't bubble.
-        entry = self._cache.get(key)
-        entry.frequency += 1
-        return entry.value
+        value = self._cache[key]
+        if value is None:
+            raise KeyError(key)
+        return value
+
 
     # See micro_benchmark_results.rst for a discussion about the approach.
 
@@ -348,7 +335,7 @@ class SizedLRUMapping(object):
         list. (Unless you specify *sort* to be false, in which case
         the order is not specified.)
         """
-        entries = self.iterentries()
+        entries = self.entries()
 
         # Adding key as a tie-breaker makes no sense, and is slow.
         # We use an attrgetter directly on the node for speed
