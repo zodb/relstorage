@@ -113,7 +113,7 @@ class CacheTests(TestCase):
 
     def test_item_implements(self):
         cache = self._makeOne(20)
-        entrya = cache.add_MRU('a', b'')[0]
+        entrya = cache.add_MRU('a', b'')
         assert_that(entrya, verifiably_provides(interfaces.ILRUItem))
 
     def test_free_reuse(self):
@@ -240,7 +240,7 @@ class CacheTests(TestCase):
         self.assertEqual(2, cache.probation.limit)
         self.assertEqual(16, cache.protected.limit)
 
-        added_entries = cache.eden.add_MRUs([
+        added_entries = cache.add_MRUs([
             # over fill eden
             ('1', b'012345678901234'),
             # 1 goes to protected, filling it. eden is also over full with 2. probation is empty

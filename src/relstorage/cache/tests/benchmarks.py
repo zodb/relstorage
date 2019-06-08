@@ -26,6 +26,7 @@ from pyperf import perf_counter
 
 from relstorage.options import Options
 from relstorage._util import get_memory_usage
+from relstorage._util import byte_display
 
 logger = __import__('logging').getLogger(__name__)
 
@@ -64,14 +65,15 @@ def profiled(func, name, runner):
     import tempfile
 
 
-    def f():
+    def f(*args):
         prefix = name.replace(' ', '_') + '-'
         suffix = '.vmprof' + "%d%d" % (sys.version_info[:2])
         handle, _ = tempfile.mkstemp(suffix, prefix=prefix, dir=runner.args.temp)
         vmprof.enable(handle, lines=True)
-        func()
+        result = func(*args)
         vmprof.disable()
         os.close(handle)
+        return result
 
     return f
 
@@ -111,13 +113,15 @@ def run_and_report_funcs(runner, named_funcs):
     for name, func in named_funcs:
         if profile:
             func = profiled(func, name, runner)
-        benchmark = runner.bench_func(name, func)
+        benchmark = runner.bench_time_func(name, func)
         benchmarks[name] = benchmark
     return benchmarks
 
 
 def local_benchmark(runner):
+    # pylint:disable=too-many-statements
     from relstorage.cache.local_client import LocalClient
+    #from relstorage.cache.lru_sqlite import SqlMapping
     options = MockOptions()
     options.cache_local_mb = 100
     options.cache_local_compression = 'none'
@@ -172,57 +176,84 @@ def local_benchmark(runner):
     ALL_DATA.sort(key=lambda x: hash(x[0]))
     #print(len(ALL_DATA), sum((len(v[1][0]) for v in ALL_DATA))/1024/1024)
 
+    def makeOne(populate=True):
+        client = LocalClient(options, 'pfx')
+        if populate:
+            client._bucket0.bulk_update(ALL_DATA)
+        return client
 
-    client = LocalClient(options)
+    def populate(loops):
+        client = makeOne()
+        mem_before = get_memory_usage()
 
-    def populate():
-        for k, v in ALL_DATA:
-            client[k] = v
+        begin = perf_counter()
+        for _ in range(loops):
+            for k, v in ALL_DATA:
+                # install a copy that's equal
+                client[k] = v[:-1] + v[-1:]
+        duration = perf_counter() - begin
+        mem_used = get_memory_usage() - mem_before
+        logger.info("Populated in %s; took %s mem; size: %d",
+                    duration, byte_display(mem_used), len(client))
+        return duration
 
-    populate()
+    def populate_empty(loops):
+        client = makeOne(populate=False)
+        mem_before = get_memory_usage()
+        begin = perf_counter()
+        for _ in range(loops):
+            for k, v in ALL_DATA:
+                # install a copy that's equal
+                client[k] = v[:-1] + v[-1:]
+        duration = perf_counter() - begin
+        mem_used = get_memory_usage() - mem_before
+        logger.info("Populated in %s; took %s mem; size: %d",
+                    duration, byte_display(mem_used), len(client))
+        return duration
 
-    def populate_empty():
-        c = LocalClient(options)
-        for k, v in ALL_DATA:
-            c[k] = v
-
-    def read():
+    def read(loops):
         # This is basically the worst-case scenario for a basic
         # segmented LRU: A repeating sequential scan, where no new
         # keys are added and all existing keys fit in the two parts of the
         # cache. Thus, entries just keep bouncing back and forth between
         # probation and protected. It so happens that this is our slowest
         # case.
-        for keys in key_groups:
-            for k in keys:
-                res = client[k]
-                #assert len(res) == len(keys)
-                if not res:
-                    continue
-                assert res[0] == random_data
+        client = makeOne(populate=True)
+        begin = perf_counter()
+        for _ in range(loops):
+            for keys in key_groups:
+                for k in keys:
+                    res = client[k]
+                    #assert len(res) == len(keys)
+                    if not res:
+                        continue
+                    assert res[0] == random_data
 
         print("Hit ratio: ", client.stats()['ratio'])
-
+        return perf_counter() - begin
         # import pprint
         # pprint.pprint(client._bucket0.stats())
         # print("Probation promotes", client._bucket0._probation.promote_count)
         # print("Probation demotes", client._bucket0._probation.demote_count)
         # print("Probation removes", client._bucket0._probation.remove_count)
 
-    def mixed():
+    def mixed(loops):
+        client = makeOne(populate=True)
         hot_keys = key_groups[0]
         i = 0
         miss_count = 0
-        for k, v in ALL_DATA:
-            i += 1
-            client[k] = v
-            if i == len(hot_keys):
-                for hot_key in hot_keys:
-                    res = client[hot_key]
-                    if not res:
-                        miss_count += 1
-                i = 0
-
+        begin = perf_counter()
+        for _ in range(loops):
+            for k, v in ALL_DATA:
+                i += 1
+                client[k] = v
+                if i == len(hot_keys):
+                    for hot_key in hot_keys:
+                        res = client[hot_key]
+                        if not res:
+                            miss_count += 1
+                    i = 0
+        return perf_counter() - begin
     # def mixed_for_stats():
     #     # This is a trivial function that simulates the way
     #     # new keys can come in over time as we reset our checkpoints.
@@ -702,13 +733,13 @@ def main():
     if not temp:
         temp = tempfile.mkdtemp('.rsbench')
         need_cleanup = True
+    if runner.args.log:
+        import logging
+        logging.basicConfig(level=logging.DEBUG)
 
     if kind == 'local':
         local_benchmark(runner)
     elif kind == 'io':
-        if runner.args.log:
-            import logging
-            logging.basicConfig(level=logging.DEBUG)
         save_load_benchmark(runner)
     elif kind == 'simlocal':
         StorageTraceSimulator().simulate('local')

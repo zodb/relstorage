@@ -128,6 +128,8 @@ class Cache(object):
     #: indexing variable on Py2.)
     generations = tuple((_NoSuchGeneration(i) for i in range(4)))
 
+    _dict_type = dict
+
     @classmethod
     def create_generations(cls,
                            eden_limit=0,
@@ -147,6 +149,24 @@ class Cache(object):
 
     def __init__(self, byte_limit, key_weight=len, value_weight=len):
         self.limit = self._byte_limit = byte_limit
+        # This holds all the ring entries, no matter which ring they are in.
+
+        # We experimented with using OOBTree and LOBTree for the type
+        # of self.data. The OOBTree has a similar but slightly slower
+        # performance profile (as would be expected given the big-O
+        # complexity) as a dict, but very large ones can't be pickled
+        # in a single shot! The LOBTree works faster and uses less
+        # memory than the OOBTree or the dict *if* all the keys are
+        # integers; which they currently are not. Plus the LOBTrees
+        # are slower on PyPy than its own dict specializations. We
+        # were hoping to be able to write faster pickles with large
+        # BTrees, but since that's not the case, we abandoned the
+        # idea.
+        #
+        # Maybe a two-level index, like fsIndex?
+
+        self.data = self._dict_type()
+        self.get = self.data.get
 
         generations = self.create_generations(
             eden_limit=int(byte_limit * self._gen_eden_pct),
@@ -157,8 +177,6 @@ class Cache(object):
         )
 
         self.eden = generations['eden'] # type: EdenRing
-        self.add_MRU = self.eden.add_MRU
-        self.add_MRUs = self.eden.add_MRUs
         self.protected = generations['protected']
         self.probation = generations['probation']
 
@@ -188,10 +206,39 @@ class Cache(object):
 
     age_lists = age_frequencies # BWC
 
-    def update_MRU(self, entry, value):
-        return self.generations[entry.cffi_entry.r_parent].update_MRU(entry, value)
+    def add_MRU(self, key, value):
+        item, evicted_items = self.eden.add_MRU(key, value)
+        for k, _ in evicted_items:
+            del self.data[k]
+        self.data[key] = item
+        return item
 
-    def remove(self, entry):
+    def add_MRUs(self, ordered_keys):
+        added_entries = self.eden.add_MRUs(ordered_keys)
+        for entry in added_entries:
+            self.data[entry.key] = entry
+        return added_entries
+
+    def update_MRU(self, entry, value):
+        evicted_items = self.generations[entry.cffi_entry.r_parent].update_MRU(entry, value)
+        for k, _ in evicted_items:
+            del self.data[k]
+
+    def __setitem__(self, key, value):
+        entry = self.get(key)
+        if entry is not None:
+            # This bumps its frequency, and potentially ejects other items.
+            self.update_MRU(entry, value)
+        else:
+            # New values have a frequency of 1 and might evict other
+            # items.
+            self.add_MRU(key, value)
+
+        assert key in self
+
+    def __delitem__(self, key):
+        entry = self.data[key]
+        del self.data[key]
         self.generations[entry.cffi_entry.r_parent].remove(entry)
 
     def on_hit(self, entry):
@@ -215,8 +262,15 @@ class Cache(object):
             'prob_stats': self.probation.stats(),
         }
 
+    def itervalues(self):
+        return getattr(self.data, 'itervalues', self.data.values)()
+
     def __iter__(self):
-        return itertools.chain(self.probation, self.protected, self.eden)
+        return iter(self.data)
+
+    def __contains__(self, key):
+        return key in self.data
+
 
 @interface.implementer(ILRUItem)
 class CacheRingEntry(object):

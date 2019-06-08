@@ -24,7 +24,6 @@ from relstorage._util import byte_display
 from relstorage.cache.cache_ring import Cache
 from relstorage.cache.persistence import Pickler
 from relstorage.cache.persistence import Unpickler
-from relstorage.cache.interfaces import CacheCorruptedError
 
 log = logging.getLogger(__name__)
 
@@ -62,30 +61,16 @@ class SizedLRUMapping(object):
 
     _cache_type = Cache
 
-    _dict_type = dict
-
     def __init__(self, weight_limit, key_weight=len, value_weight=len):
-        # We experimented with using OOBTree and LOBTree
-        # for the type of self._dict. The OOBTree has a similar
-        # but slightly slower performance profile (as would be expected
-        # given the big-O complexity) as a dict, but very large ones can't
-        # be pickled in a single shot! The LOBTree works faster and uses less
-        # memory than the OOBTree or the dict *if* all the keys are integers;
-        # which they currently are not. Plus the LOBTrees are slower on PyPy than its
-        # own dict specializations. We were hoping to be able to write faster pickles with
-        # large BTrees, but since that's not the case, we abandoned the idea.
-
         self._cache = self._cache_type(weight_limit, key_weight, value_weight)
-        # This holds all the ring entries, no matter which ring they are in.
-        self._dict = dct = self._dict_type()
-
         self._hits = 0
         self._misses = 0
         self._sets = 0
         self.limit = weight_limit
         self._next_age_at = 1000
-        self.keys = getattr(dct, 'iterkeys', dct.keys)
 
+    def keys(self):
+        return iter(self._cache)
 
     # Backwards compatibility for testing
     @property
@@ -119,16 +104,16 @@ class SizedLRUMapping(object):
             'misses': self._misses,
             'sets': self._sets,
             'ratio': self._hits / total if total else 0,
-            'size': len(self._dict),
+            'len': len(self),
             'bytes': self.size,
             'lru_stats': self._cache.stats(),
         }
 
     def __len__(self):
-        return len(self._dict)
+        return len(self._cache)
 
     def __iter__(self):
-        return iter(self._dict)
+        return iter(self._cache)
 
     def __repr__(self):
         return "<%s at %x size=%d limit=%d len=%d hit_ratio=%d>" % (
@@ -139,7 +124,7 @@ class SizedLRUMapping(object):
     def iterentries(self):
         # Iterating the dict is safer than iterating the generations
         # in the case of mutations
-        return getattr(self._dict, 'itervalues', self._dict.values)()
+        return self._cache.itervalues()
 
     def values(self):
         for entry in self.iterentries():
@@ -161,8 +146,7 @@ class SizedLRUMapping(object):
         # Dynamically calculate how often we need to age. By default, this is
         # based on what Caffeine's PerfectFrequency does: 10 * max
         # cache entries
-        dct = self._dict
-        age_period = self._age_factor * len(dct)
+        age_period = self._age_factor * len(self._cache)
         operations = self._hits + self._sets
         if operations - self._aged_at < age_period:
             self._next_age_at = age_period
@@ -173,10 +157,10 @@ class SizedLRUMapping(object):
         self._aged_at = operations
         now = time.time()
         log.debug("Beginning frequency aging for %d cache entries",
-                  len(dct))
+                  len(self._cache))
         self._cache.age_lists()
         done = time.time()
-        log.debug("Aged %d cache entries in %s", len(dct), done - now)
+        log.debug("Aged %d cache entries in %s", len(self._cache), done - now)
 
         self._next_age_at = int(self._aged_at * 1.5) # in case the dict shrinks
 
@@ -195,29 +179,8 @@ class SizedLRUMapping(object):
         (because this is called in the event of a cache miss, when
         we needed the item).
 
-        This operation may evict existing items. If it does, they are
-        passed to the :meth:`handle_evicted_items` method.
         """
-        dct = self._dict
-        entry = dct.get(key)
-        if entry is not None:
-            # This bumps its frequency, and potentially ejects other items.
-            evicted_items = self._cache.update_MRU(entry, value)
-        else:
-            # New values have a frequency of 1 and might evict other
-            # items.
-            entry, evicted_items = self._cache.add_MRU(key, value)
-            dct[key] = entry
-
-        if evicted_items:
-            # Make us consistent:
-            # Remove them from our lookup dict.
-            # By the time we get here, they're already out of the ring,
-            # meaning their key and value have been lost.
-            for k, _ in evicted_items:
-                del dct[k]
-
-            self.handle_evicted_items(evicted_items)
+        self._cache[key] = value
         self._sets += 1
 
         # Do we need to move this up above the eviction choices?
@@ -228,25 +191,19 @@ class SizedLRUMapping(object):
 
         return True
 
-    def handle_evicted_items(self, items):
-        """Does nothing."""
-
     def __contains__(self, key):
-        return key in self._dict
+        return key in self._cache
 
     def __delitem__(self, key):
-        entry = self._dict[key]
-        del self._dict[key]
-        self._cache.remove(entry)
+        del self._cache[key]
 
     def get_and_bubble_all(self, keys):
         # This is only used in testing now, the higher levels
         # use `get_from_key_or_backup_key`
-        dct = self._dict
         cache = self._cache
         res = {}
         for key in keys:
-            entry = dct.get(key)
+            entry = cache.get(key)
             if entry is not None:
                 cache.on_hit(entry)
                 res[key] = entry.value
@@ -256,7 +213,7 @@ class SizedLRUMapping(object):
         return res
 
     def get_from_key_or_backup_key(self, pref_key, backup_key):
-        dct = self._dict
+        dct = self._cache
 
         entry = dct.get(pref_key)
         at_backup = False
@@ -271,28 +228,34 @@ class SizedLRUMapping(object):
         self._hits += 1
         result = entry.value
         if at_backup:
+            # TODO: Define a low-level operation for this
+            # so that we can preserve frequency information.
+
             # Move the backup key to the current key.
             # We assume that the key weights are the same,
             # or at least don't make a meaningful difference.
             # By doing so, we can reuse the same entry object,
             # keeping its frequency and so forth.
-            entry.key = backup_key
             del dct[backup_key]
-            dct[pref_key] = entry
-        self._cache.on_hit(entry)
+            # XXX: Define this.
+            dct[pref_key] = result
+        else:
+            # TODO: The cache should really be handling this.
+            # We probably shouldn't see entries at all in most cases.
+            self._cache.on_hit(entry)
 
         return result
 
 
     def get(self, key):
         # Testing only. Does not bubble or increment.
-        entry = self._dict.get(key)
+        entry = self._cache.get(key)
         if entry is not None:
             return entry.value
 
     def __getitem__(self, key):
         # Testing only. Doesn't bubble.
-        entry = self._dict[key]
+        entry = self._cache.get(key)
         entry.frequency += 1
         return entry.value
 
@@ -347,7 +310,7 @@ class SizedLRUMapping(object):
 
         log_count = log_count or len(keys_and_values)
 
-        data = self._dict
+        data = self._cache
 
         if data:
             # Loading more data into an existing bucket.
@@ -358,19 +321,12 @@ class SizedLRUMapping(object):
             # first, so that as we iterate the last item in the list
             # becomes the MRU item.
             new_entries_newest_first = [t for t in keys_and_values
-                                        if t[0] not in self._dict]
+                                        if t[0] not in data]
             new_entries_newest_first.reverse()
             keys_and_values = new_entries_newest_first
 
-        added_entries = self._cache.add_MRUs(keys_and_values)
+        added_entries = data.add_MRUs(keys_and_values)
         stored = len(added_entries)
-        for e in added_entries:
-            # XXX: Why doesn't eden.add_MRUs do this? It has access
-            # to the data dictionary.
-            assert e.key not in data, (e.key, e)
-            # Entries aren't guaranteed to be cffi anymore.
-            # assert e.cffi_entry.r_parent, e.key
-            data[e.key] = e
 
         then = time.time()
         del keys_and_values # For memory reporting.
@@ -392,12 +348,6 @@ class SizedLRUMapping(object):
         list. (Unless you specify *sort* to be false, in which case
         the order is not specified.)
         """
-        if len(self._cache) != len(self._dict): # pragma: no cover
-            raise CacheCorruptedError(
-                "Cache consistency problem. There are %d ring entries and %d dict entries. "
-                "Refusing to write." % (
-                    len(self._cache), len(self._dict)))
-
         entries = self.iterentries()
 
         # Adding key as a tie-breaker makes no sense, and is slow.

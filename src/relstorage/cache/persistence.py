@@ -178,7 +178,9 @@ def _connect_to_file(fname, factory=Connection, close_async=True,
 
     connection = sqlite3.connect(
         fname,
-        # We'll manage transactions, thank you.
+        # If we do nothing, this means we're in autocommit
+        # mode. Creating our own transactions with BEGIN
+        # disables that until the COMMIT.
         isolation_level=None,
         factory=factory,
         # We explicitly push closing off to a new thread.
@@ -283,6 +285,8 @@ def sqlite_connect(options, prefix,
     pragmas = {
         # WAL mode can actually be a bit slower at commit time,
         # but buys us better concurrency.
+        # Note: In-memory databases always use 'memory' as the journal mode;
+        # temporary databases always use 'delete'.
         'journal_mode': 'wal',
         'mmap_size': mmap_size,
         'page_size': page_size,

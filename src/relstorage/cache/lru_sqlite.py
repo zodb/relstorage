@@ -36,7 +36,24 @@ class SQLiteCache(object):
     def __init__(self, limit, key_weight=None, value_weight=None): # pylint:disable=unused-argument
         # The weight functions are ignored, we don't need them.
         self.limit = limit
-        conn = self.connection = sqlite_connect(":memory:", 'ignored', close_async=False)
+        conn = self.connection = sqlite_connect("", 'ignored', close_async=False)
+        # isolation_level = None (autocommit)
+        # WITHOUT ROWID
+        #        pop    epop    read    mix
+        # mem    5s     8.4s    2.3s    7.95s
+        #        856MB  782MB
+        # temp   6080ms 22.2s   3080s   13.6s
+        #        1.4MB  2.2MB
+        #
+        # WITH ROWID
+        # mem    2.5    3.2ms   1660ms   4.2s
+        #        200MB  189M
+        # temp   2.8s   3360ms  1930ms   5050ms
+        #        2.1MB  172KB
+        #
+        # CFFI ring
+        #        832ms  982ms   355ms    1340ms
+        #        8.16MB 13.7MB
         conn.executescript("""
         CREATE TABLE object_state(
             zoid INTEGER NOT NULL,
@@ -66,6 +83,8 @@ class SQLiteCache(object):
         return self.total_state_count
 
     def add_MRU(self, key, value):
+        # TODO: Conflict resolution
+        # TODO: Frequency bumps and generation hopping.
         self.cursor.execute(
             'insert into object_state (zoid, key_tid, state, state_tid) '
             'values (?, ?, ?, ?)',
@@ -82,6 +101,8 @@ class SQLiteCache(object):
         return ()
 
     def update_MRU(self, item, value):
+        # TODO: Conflict resolution
+        # TODO: Frequency bumps and generation hopping.
         self.cursor.execute(
             'update object_state set state = ?, state_tid = ?'
             'where zoid = ? and key_tid = ?',
@@ -98,47 +119,58 @@ class SQLiteCache(object):
     def age_frequencies(self):
         pass
 
+    age_lists = age_frequencies
+
     def on_hit(self, entry):
         pass
 
-@interface.implementer(ILRUItem)
-class Item(object):
-    key = None
-    value = None
-    weight = None
-    frequency = 0
+    def itervalues(self):
+        cur = self.connection.execute("SELECT zoid, key_tid, state, state_tid from object_state")
+        for row in cur:
+            yield Item(row[:2], row[2:])
+        cur.close()
 
-    def __init__(self, key, value):
-        self.key = key
-        self.value = value
+    def __contains__(self, key):
+        return self.get(key) is not None
 
-# This is temporary until we move the data storage down.
-class ItemDict(object):
-    def __init__(self, cache):
-        self.lru_cache = cache
-        self.conn = cache.connection
+    def get(self, key):
+        cur = self.connection.execute(
+            'SELECT zoid, key_tid, state, state_tid FROM object_state '
+            'WHERE zoid = ? and key_tid = ? ',
+            key
+        )
+        row = cur.fetchone()
+        cur.close()
+        if row:
+            return Item(row[:2], row[2:])
 
-    def __bool__(self):
-        return len(self.lru_cache) > 0
-
-    __nonzero__ = __bool__
-
-    def __len__(self):
-        return len(self.lru_cache)
+    def __iter__(self):
+        pass
 
     def __setitem__(self, key, value):
         pass
 
-    def values(self):
-        cur = self.conn.execute("SELECT zoid, key_tid, state, state_tid from object_state")
-        for row in cur:
-            yield Item(row[:2], row[2:])
+    def __delitem__(self, key):
+        pass
 
-    itervalues = values
+@interface.implementer(ILRUItem)
+class Item(object):
+    weight = None
+    frequency = 0
+
+    def __init__(self, key, value):
+        self._key = key
+        self._value = value
+
+    @property
+    def key(self):
+        return self._key
+
+    @property
+    def value(self):
+        return self._value
+
+
 
 class SqlMapping(SizedLRUMapping):
     _cache_type = SQLiteCache
-
-    def __init__(self, *args, **kwargs):
-        super(SqlMapping, self).__init__(*args, **kwargs)
-        self._dict = ItemDict(self._cache)

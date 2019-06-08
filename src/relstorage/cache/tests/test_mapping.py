@@ -46,6 +46,7 @@ class SizedLRUMappingTests(TestCase):
         self.assertEqual(b.size, 0)
         b['abc'] = b'defghi'
         self.assertEqual(b.size, 9)
+        self.assertEqual(b['abc'], b'defghi')
         # Other Mapping APIs
         self.assertIn('abc', b)
         self.assertEqual(list(b.keys()),

@@ -140,6 +140,9 @@ class ILRUCache(Interface):
     Values may be evicted when new ones are added.
     """
 
+    # TODO: This is a mix of user-level (key/value) and implementation
+    # level (ILRUItem); make the separation much more clear.
+
     limit = Attribute("The maximim weight allowed.")
     weight = Attribute("The weight of the entries in the cache.")
 
@@ -177,11 +180,6 @@ class ILRUCache(Interface):
         Returns the entries that were added.
         """
 
-    def remove(entry):
-        """
-        Remove the entry from the cache.
-        """
-
     def age_frequencies():
         """Call to periodically adjust the frequencies of items."""
 
@@ -191,6 +189,36 @@ class ILRUCache(Interface):
         and move any items around in the cache as necessary.
         """
 
+    def itervalues():
+        """
+        Iterate all the ILRUItem values.
+        """
+
+    def get(key): # pylint:disable=arguments-differ
+        """
+        Get an item by key.
+
+        This should not be considered a hit.        """
+
+    def __contains__(key):
+        "Is the key in the cache?"
+
+    def __iter__():
+        "Iterate the keys"
+
+    def __setitem__(key, value):
+        """
+        Either set or update an entry.
+        This is like either ``update_MRU`` or ``add_MRU``,
+        depending on whether an entry exists.
+
+        This may evict items.
+        """
+
+    def __delitem__(key):
+        """
+        Remove the entry from the cache.
+        """
 
 class CacheCorruptedError(AssertionError):
     """
