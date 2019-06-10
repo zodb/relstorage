@@ -40,7 +40,7 @@ class IStateCache(Interface):
     implementations (such as memcache) that only support string
     keys will need to convert.
 
-    All return values for states return (state_bytes, tid_int).
+    All return values for states return ``(state_bytes, tid_int)``.
 
     We use special methods where possible because those are slightly
     faster to invoke.
@@ -151,9 +151,6 @@ class ILRUCache(Interface):
     of keys and values it accepts.
     """
 
-    # TODO: This is a mix of user-level (key/value) and implementation
-    # level (ILRUItem); make the separation much more clear.
-
     limit = Attribute("The maximim weight allowed.")
     weight = Attribute("The weight of the entries in the cache.")
 
@@ -183,10 +180,14 @@ class ILRUCache(Interface):
         """
         Either set or update an entry.
 
-        This is like either ``update_MRU`` or ``add_MRU``,
-        depending on whether an entry exists.
+        If the key already existed in the cache, then update its
+        ``value`` to the new *value* and mark it as the most recently
+        used.
 
-        This may evict items.
+        Otherwise, create a new entry for the key, setting it to the
+        most recently used.
+
+        This may evict other items.
         """
 
     def __delitem__(key):
@@ -199,6 +200,22 @@ class ILRUCache(Interface):
     ###
     # Cache-specific operations.
     ###
+
+    def get_from_key_or_backup_key(pref_key, backup_key):
+        """
+        Get a value stored at either *pref_key* or, failing that,
+        *backup_key*.
+
+        *backup_key* may be None if there is no second key.
+
+        If a value is found at *backup_key*, then it is
+        moved to be stored at *pref_key*, while retaining its
+        frequency information.
+
+        Counts as  a hit on whichever key matches.
+
+        This is used to implement ``IStateCache.__call__``.
+        """
 
     def peek(key):
         """
@@ -216,21 +233,11 @@ class ILRUCache(Interface):
         Return info about the cache.
         """
 
-    def update_MRU(entry, value):
-        """
-        Given an entry that is known to be in the cache, update its
-        ``value`` to the new *value* and mark it as the most recently
-        used.
-
-        Because the value's weight may have changed, this may evict
-        other items. If so, they are returned as ``[(key, value)]``.
-        """
-
     def add_MRU(key, value):
         """
         Insert a new item in the cache, as the most recently used.
 
-        Returns the entry, and any item pairs that had to be evicted
+        Returns the new entry, and any item pairs that had to be evicted
         to make room.
         """
 
@@ -245,19 +252,97 @@ class ILRUCache(Interface):
     def age_frequencies():
         """Call to periodically adjust the frequencies of items."""
 
+class IGeneration(Interface):
+    """
+    A generation in a cache.
+    """
+    limit = Attribute("The maximim weight allowed.")
+    __name__ = Attribute("The name of the generation")
+    generation_number = Attribute("The number of the generation.")
 
-    def on_hit(entry):
+    def __iter__():
         """
-        Notice that the entry is being accessed and adjust its frequency
-        and move any items around in the cache as necessary.
-
-        This does not usually need to be manually called; it is maintained
-        through normal cache access.
+        Iterate the ILRUEntry objects in this generation,
+        from most recent to least recently used.
         """
 
+class IGenerationalLRUCache(ILRUCache):
+    """
+    The cache moves items between three generations, as determined by
+    an admittance policy.
+
+    * Items begin in *eden*, where they stay until eden grows too
+      large.
+
+    * When eden grows too large, the least recently used item is then
+      (conceptually) moved to the *probation* ring. If this would make
+      the probation ring too large, the *frequency* of the least
+      recently used item from the probation ring is compared to the
+      frequency of the incoming item. Only if the incoming item is more
+      popular than the item it would force off the probation ring is it
+      kept (and the probation item removed). Otherwise the eden item is
+      removed.
+
+    * When an item in probation is accessed, it is moved to the
+      *protected* ring. The protected ring is the largest ring. When
+      adding an item to it would make it too large, the least recently
+      used item is demoted to probation, following the same rules as for
+      eden.
+
+    This cache only approximately follows its size limit. It may
+    temporarily become larger.
+    """
+
+    eden = Attribute("The youngest generation.")
+    protected = Attribute("The protected generation.")
+    probation = Attribute("The probation generation.")
+    generations = Attribute("Ordered list of generations, with 0 being NoSuchGeneration.")
 
 
 class CacheCorruptedError(AssertionError):
     """
     Raised when we detect cache corruption.
     """
+
+class NoSuchGeneration(object):
+    # For more specific error messages; if we get an AttributeError
+    # on this object, it means we have corrupted the cache. We only
+    # expect to wind up with this in generation 0.
+    __name__ = 'NoSuchGeneration'
+    def __init__(self, generation_number):
+        self.__gen_num = generation_number
+
+    def __getattr__(self, name):
+        msg = "Generation %s has no attribute %r" % (self.__gen_num, name)
+        raise AttributeError(msg)
+
+class GenerationalCacheBase(object):
+    # Percentage of our byte limit that should be dedicated
+    # to the main "protected" generation
+    _gen_protected_pct = 0.8
+    # Percentage of our byte limit that should be dedicated
+    # to the initial "eden" generation
+    _gen_eden_pct = 0.1
+    # Percentage of our byte limit that should be dedicated
+    # to the "probationary"generation
+    _gen_probation_pct = 0.1
+    # By default these numbers add up to 1.0, but it would be possible to
+    # overcommit by making them sum to more than 1.0. (For very small
+    # limits, the rounding will also make them overcommit).
+
+    #: A "mapping" between the __parent__ of an entry and the generation
+    #: ring that holds it. (Indexing by ints is faster than a dictionary lookup
+    #: especially on PyPy.) Initialize to an object that will report a bad lookup
+    #: for the right generation. (The generator expression keeps us from leaking the
+    #: indexing variable on Py2.)
+    generations = tuple((NoSuchGeneration(i) for i in range(4)))
+
+    def __init__(self, limit, eden, protected, probation):
+        self.limit = limit
+        self.eden = eden
+        self.protected = protected
+        self.probation = probation
+        generations = list(GenerationalCacheBase.generations) # Preserve the NoSuchGeneration initializers
+        for gen in (self.protected, self.probation, self.eden):
+            generations[gen.generation_number] = gen
+        self.generations = tuple(generations)

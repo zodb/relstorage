@@ -39,15 +39,23 @@ class SimpleQueryProperty(object):
     Wraps a query that returns one value in one row.
     """
 
-    def __init__(self, sql):
-        self.sql = sql
+    def __init__(self, sql, param_names=()):
+        self.query = sql
+        self.param_names = param_names
 
     def __get__(self, inst, klass):
         if inst is None: # pragma: no cover
             return self
 
-        inst.cursor.execute(self.sql)
+        inst.cursor.execute(
+            self.query,
+            [getattr(inst, n) for n in self.param_names])
         return inst.cursor.fetchone()[0]
+
+SUPPORTS_UPSERT = sqlite3.sqlite_version_info >= (3, 28) # 2019-04-16
+SUPPORTS_WINDOW = sqlite3.sqlite_version_info >= (3, 25) # 2018-09-15
+SUPPORTS_PAREN_UPDATE = sqlite3.sqlite_version_info >= (3, 15) # 2016-10-14
+SUPPORTS_CTE = sqlite3.sqlite_version_info >= (3, 8, 3) # 2014-02-03
 
 class Database(ABC):
     """
@@ -55,9 +63,6 @@ class Database(ABC):
 
     This should generally be the latest state found in the cache.
     """
-    SUPPORTS_UPSERT = sqlite3.sqlite_version_info >= (3, 28) # 2019-04-16
-    SUPPORTS_WINDOW = sqlite3.sqlite_version_info >= (3, 25) # 2018-09-15
-    SUPPORTS_PAREN_UPDATE = sqlite3.sqlite_version_info >= (3, 15) # 2016-10-14
 
     @classmethod
     def from_connection(cls,
@@ -404,7 +409,7 @@ class _ExplainCursor(object): # pragma: no cover (A debugging aid)
         return iter(self.cur)
 
     def execute(self, sql, *args):
-        if sql.strip().startswith(('INSERT', 'SELECT', 'DELETE')):
+        if sql.strip().startswith(('INSERT', 'SELECT', 'DELETE', 'WITH')):
             exp = 'EXPLAIN QUERY PLAN ' + sql.lstrip()
             print(sql)
             self.cur.execute(exp, *args)

@@ -5,6 +5,7 @@ from __future__ import print_function
 
 import unittest
 
+from relstorage.cache import local_database
 from relstorage.cache.local_database import Database
 from relstorage.cache.persistence import sqlite_connect
 
@@ -167,13 +168,13 @@ class UpdateTests(TestCase):
         self.assertEqual(dict(self.db.oid_to_tid), {0: 1})
 
 
-@unittest.skipIf(not Database.SUPPORTS_UPSERT,
+@unittest.skipIf(not local_database.SUPPORTS_UPSERT,
                  "Requires upserts")
 class UpsertUpdateTests(UpdateTests):
     USE_UPSERT = True
 
 
-@unittest.skipIf(not Database.SUPPORTS_PAREN_UPDATE,
+@unittest.skipIf(not local_database.SUPPORTS_PAREN_UPDATE,
                  "Requires paren updates")
 class ParenUpdateTests(UpdateTests):
     USE_PAREN_UPDATE = True

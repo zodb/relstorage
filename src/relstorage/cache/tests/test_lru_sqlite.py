@@ -15,26 +15,10 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+from relstorage.cache.tests.test_lru_cffiring import GenericLRUCacheTests
 
-from hamcrest import assert_that
-from nti.testing.matchers import verifiably_provides
-
-from relstorage.tests import TestCase
-from relstorage.cache import interfaces
-
-class CacheTests(TestCase):
+class CacheTests(GenericLRUCacheTests):
 
     def _getClass(self):
         from relstorage.cache.lru_sqlite import SQLiteCache
         return SQLiteCache
-
-    def _makeOne(self, limit):
-        return self._getClass()(limit)
-
-    def test_implements(self):
-        assert_that(self._makeOne(100), verifiably_provides(interfaces.ILRUCache))
-
-    def test_item_implements(self):
-        cache = self._makeOne(20)
-        entrya = cache.add_MRU((0, 0), (b'', 0))[0]
-        assert_that(entrya, verifiably_provides(interfaces.ILRUEntry))

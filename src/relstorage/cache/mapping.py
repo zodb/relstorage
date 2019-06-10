@@ -21,7 +21,7 @@ import time
 
 from relstorage._util import get_memory_usage
 from relstorage._util import byte_display
-from relstorage.cache.cache_ring import Cache
+from relstorage.cache.lru_cffiring import CFFICache
 from relstorage.cache.persistence import Pickler
 from relstorage.cache.persistence import Unpickler
 
@@ -42,12 +42,6 @@ class SizedLRUMapping(object):
     and values. If :func:`len` is not appropriate for this, supply
     your own *key_weight* and *value_weight* functions.
 
-    When items are evicted as a result of exceeding this object's
-    configured *weight_limit*, the method :meth:`handle_evicted_items`
-    method is called. This method can be replaced on an instance with
-    an attribute to handle the evicted items; by default we do
-    nothing. Methods that can evict objects are documented as such.
-
     This class is not threadsafe, accesses to :meth:`__setitem__` and
     :meth:`get_and_bubble_all` must be protected by a lock.
     """
@@ -59,9 +53,10 @@ class SizedLRUMapping(object):
     # When did we last age?
     _aged_at = 0
 
-    _cache_type = Cache
+    _cache_type = CFFICache
 
-    def __init__(self, weight_limit, key_weight=len, value_weight=len):
+    def __init__(self, weight_limit,
+                 key_weight=len, value_weight=len):
         self._cache = self._cache_type(weight_limit, key_weight, value_weight)
         self._hits = 0
         self._misses = 0
@@ -202,41 +197,21 @@ class SizedLRUMapping(object):
         cache = self._cache
         res = {}
         for key in keys:
-            entry = cache.get(key)
-            if entry is not None:
-                cache.on_hit(entry)
-                res[key] = entry.value
+            value = cache[key]
+            if value is not None:
+                res[key] = value
 
         self._hits += len(res)
         self._misses += len(keys) - len(res)
         return res
 
     def get_from_key_or_backup_key(self, pref_key, backup_key):
-        dct = self._cache
-
-        value = dct[pref_key]
-        at_backup = False
-        if value is None and backup_key is not None:
-            at_backup = True
-            value = dct[backup_key]
+        value = self._cache.get_from_key_or_backup_key(pref_key, backup_key)
 
         if value is None:
             self._misses += 1
-            return
-
-        self._hits += 1
-        if at_backup:
-            # TODO: Define a low-level operation for this
-            # so that we can preserve frequency information.
-
-            # Move the backup key to the current key.
-            # We assume that the key weights are the same,
-            # or at least don't make a meaningful difference.
-            # By doing so, we can reuse the same entry object,
-            # keeping its frequency and so forth.
-            del dct[backup_key]
-            dct[pref_key] = value
-
+        else:
+            self._hits += 1
         return value
 
     def __getitem__(self, key):

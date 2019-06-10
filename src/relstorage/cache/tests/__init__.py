@@ -9,7 +9,7 @@ from __future__ import print_function
 
 
 from relstorage.options import Options
-from relstorage.cache.cache_ring import Cache as _BaseCache
+from relstorage.cache.lru_cffiring import CFFICache as _BaseCache
 from relstorage.cache.mapping import SizedLRUMapping as _BaseSizedLRUMapping
 from relstorage.cache.local_client import LocalClient as _BaseLocalClient
 

@@ -20,14 +20,13 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-import sqlite3
-
 from zope import interface
 
 from .interfaces import ILRUEntry
 from .interfaces import ILRUCache
 from .persistence import sqlite_connect
 from .local_database import SimpleQueryProperty
+from .local_database import SUPPORTS_UPSERT
 from .mapping import SizedLRUMapping
 
 logger = __import__('logging').getLogger(__name__)
@@ -62,13 +61,17 @@ class SQLiteCache(object):
             key_tid INTEGER NOT NULL,
             state BLOB,
             state_tid INTEGER NOT NULL,
-            frequencies INTEGER NOT NULL DEFAULT 0,
+            frequency INTEGER NOT NULL DEFAULT 1,
+            time_of_use INTEGER NOT NULL DEFAULT 0,
             PRIMARY KEY (zoid, key_tid)
         );
+
+        CREATE INDEX ix_ttl ON object_state (time_of_use);
         """)
 
         self.cursor = conn.cursor()
-
+        self.time_of_use_counter = 0
+        self.size = 0
 
     size = weight = total_state_len = SimpleQueryProperty(
         "SELECT TOTAL(LENGTH(state)) FROM object_state"
@@ -84,70 +87,139 @@ class SQLiteCache(object):
     def __len__(self):
         return self.total_state_count
 
-    def add_MRU(self, key, value):
-        # TODO: Conflict resolution
-        # TODO: Frequency bumps and generation hopping.
-        self.cursor.execute(
-            'insert into object_state (zoid, key_tid, state, state_tid) '
-            'values (?, ?, ?, ?)',
-            key + value
+    if SUPPORTS_UPSERT:
+        _insert_stmt = """
+        INSERT
+        INTO object_state (zoid, key_tid, state, state_tid, time_of_use)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT (zoid, key_tid)
+        DO UPDATE SET state = excluded.state, state_tid = excluded.state_tid,
+                      time_of_use = excluded.time_of_use,
+                      frequency = frequency + 1
+        """
+    else:
+        # XXX: This is really slow on conflicts.
+        _insert_stmt = """
+        INSERT OR REPLACE
+        INTO object_state (zoid, key_tid, state, state_tid, time_of_use)
+        VALUES (?, ?, ?, ?, ?)
+        """
+
+    def __setitem__(self, key, value):
+        self.time_of_use_counter += 1
+        self.size += len(value[0])
+        cur = self.connection.cursor()
+        cur.execute("BEGIN")
+        cur = self.connection.execute(
+            self._insert_stmt,
+            key + value + (self.time_of_use_counter, )
         )
-        return Item(key, value), ()
+        self._trim(cur)
+        cur.execute("COMMIT")
+        cur.close()
+
+    def add_MRU(self, key, value):
+        self[key] = value
+        return Item(key, value)
 
     def add_MRUs(self, key_values):
-        def k():
-            written = 0
+        items = []
+        def k(begin_size, counter):
+            written = begin_size
             for k, v in key_values:
-                written += len(v[0])
-                if written < self.limit:
-                    yield k + v
-                else:
+                state, state_tid = v
+                weight = len(state)
+                if written + weight <= self.limit:
+                    written += weight
+                    items.append(Item(k, v, weight))
+                    oid, key_tid = k
+                    counter += 1
+                    yield oid, key_tid, state, state_tid, counter
+            self.time_of_use_counter = counter
+
+        cur = self.connection.cursor()
+
+        cur.execute("BEGIN")
+        cur.execute('SELECT TOTAL(LENGTH(state)), COALESCE(MAX(time_of_use), 0) FROM object_state')
+        begin_size, begin_counter = cur.fetchone()
+        self.cursor.executemany(
+            """
+            INSERT OR REPLACE
+            INTO object_state (zoid, key_tid, state, state_tid, time_of_use)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            k(begin_size, begin_counter)
+        )
+        self._trim(cur)
+        cur.execute("COMMIT")
+        cur.close()
+        return items
+
+    def _trim(self, cur):
+        size = self.size
+        limit = self.limit
+        if size > self.limit:
+            # TODO: Can we write this with a CTE?
+            # A window function doesn't help.
+
+            cur.execute(
+                'SELECT rowid, length(state) FROM object_state '
+                'ORDER BY time_of_use, LENGTH(state) DESC'
+            )
+
+            to_remove = []
+            for row in cur:
+                to_remove.append(row[:1])
+                size -= row[1]
+                if size <= limit:
                     break
 
-        self.cursor.executemany(
-            'insert into object_state (zoid, key_tid, state, state_tid) '
-            'values (?, ?, ?, ?)',
-            k()
-        )
-        return ()
 
-    def update_MRU(self, item, value):
-        # TODO: Conflict resolution
-        # TODO: Frequency bumps and generation hopping.
-        self.cursor.execute(
-            'update object_state set state = ?, state_tid = ?'
-            'where zoid = ? and key_tid = ?',
-            value + item.key
-        )
-
-    def _remove(self, key):
-        self.cursor.execute(
-            'delete from object_state where zoid = ? and key_tid = ?',
-            key
-        )
-
-    def remove(self, item):
-        self._remove(item.key)
+            cur.executemany("""
+            DELETE FROM object_state
+            WHERE rowid = ?
+            """, to_remove)
+            self.size = size
 
     def age_frequencies(self):
         pass
 
     age_lists = age_frequencies
 
-    def on_hit(self, entry):
-        pass
-
     def entries(self):
-        cur = self.connection.execute("SELECT zoid, key_tid, state, state_tid from object_state")
+        cur = self.connection.execute(
+            "SELECT zoid, key_tid, state, state_tid, frequency "
+            "FROM object_state "
+            "ORDER BY time_of_use "
+        )
         for row in cur:
-            yield Item(row[:2], row[2:])
+            yield Item(row[:2], row[2:4], row[4])
         cur.close()
 
     def __contains__(self, key):
-        return self[key] is not None
+        return self.peek(key) is not None
 
     def __getitem__(self, key):
-        # TODO: Make this count as a hit.
+        cur = self.connection.execute(
+            'SELECT state, state_tid, rowid FROM object_state '
+            'WHERE zoid = ? and key_tid = ? ',
+            key
+        )
+        result = None
+        row = cur.fetchone()
+        if row:
+            self.time_of_use_counter += 1
+            state, state_tid, rowid = row
+            cur.execute(
+                "UPDATE object_state SET frequency = frequency + 1, time_of_use = ? "
+                "WHERE rowid = ?",
+                (self.time_of_use_counter, rowid)
+            )
+            result = state, state_tid
+        cur.close()
+        return result
+
+    def peek(self, key):
         cur = self.connection.execute(
             'SELECT state, state_tid FROM object_state '
             'WHERE zoid = ? and key_tid = ? ',
@@ -157,7 +229,36 @@ class SQLiteCache(object):
         cur.close()
         return row
 
-    peek = __getitem__ # peek is not supposed to count as a hit
+    def get_from_key_or_backup_key(self, pref_key, backup_key):
+        oid = pref_key[0]
+        pref_tid = pref_key[1]
+        if backup_key is not None:
+            # Must be for the same zoid
+            # Apparently we can't get row results from executescript()
+            # even if a select is the last thing.
+            assert backup_key[0] == oid
+            backup_tid = backup_key[1]
+            cur = self.connection.execute("""
+            UPDATE object_state
+            SET key_tid = {pref_tid:d}
+            WHERE zoid = {oid:d}
+            AND key_tid = {backup_tid:d}
+            AND NOT EXISTS (
+                SELECT 1 FROM object_state
+                WHERE zoid = {oid:d}
+                AND key_tid = {pref_tid:d}
+            );
+            """.format(oid=oid, backup_tid=backup_tid, pref_tid=pref_tid))
+
+        cur = self.connection.execute(
+            'SELECT state, state_tid FROM object_state '
+            'WHERE zoid = ? and key_tid = ? ',
+            pref_key
+        )
+
+        row = cur.fetchone()
+        cur.close()
+        return row
 
     def __iter__(self):
         cur = self.connection.execute('SELECT zoid, key_tid FROM object_state')
@@ -165,34 +266,27 @@ class SQLiteCache(object):
             yield row
         cur.close()
 
-    def __setitem__(self, key, value):
-        # TODO: Upserts where possible.
-        try:
-            self.add_MRU(key, value)
-        except sqlite3.IntegrityError:
-            self.update_MRU(Item(key, value), value)
-
     def __delitem__(self, key):
-        self._remove(key)
+        self.cursor.execute(
+            'delete from object_state where zoid = ? and key_tid = ?',
+            key
+        )
+
+        try:
+            del self.size
+        except AttributeError:
+            pass
 
 @interface.implementer(ILRUEntry)
 class Item(object):
     weight = None
     frequency = 0
 
-    def __init__(self, key, value):
-        self._key = key
-        self._value = value
-
-    @property
-    def key(self):
-        return self._key
-
-    @property
-    def value(self):
-        return self._value
-
-
+    def __init__(self, key, value, frequency=0, weight=None):
+        self.key = key
+        self.value = value
+        self.frequency = frequency
+        self.weight = weight if weight else len(value[0])
 
 class SqlMapping(SizedLRUMapping):
     _cache_type = SQLiteCache

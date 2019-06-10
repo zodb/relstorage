@@ -24,8 +24,10 @@ import itertools
 
 from zope import interface
 
-from relstorage.cache.interfaces import ILRUCache
+from relstorage.cache.interfaces import IGenerationalLRUCache
+from relstorage.cache.interfaces import IGeneration
 from relstorage.cache.interfaces import ILRUEntry
+from relstorage.cache.interfaces import GenerationalCacheBase
 from . import _cache_ring
 
 try:
@@ -53,60 +55,10 @@ _lru_on_hit = _FFI_RING.rsc_on_hit
 _lru_age_lists = _FFI_RING.rsc_age_lists
 _eden_add_many = _FFI_RING.rsc_eden_add_many
 
-class _NoSuchGeneration(object):
-    """Marker object for the missing generation ring"""
-    # For more specific error messages; if we get an AttributeError
-    # on this object, it means we have corrupted the cache. We only
-    # expect to wind up with this in generation 0.
-    __name__ = 'NoSuchGeneration'
-    def __init__(self, generation_number):
-        self.__gen_num = generation_number
 
-    def __getattr__(self, name):
-        msg = "Generation %s has no attribute %r" % (self.__gen_num, name)
-        raise AttributeError(msg)
 
-@interface.implementer(ILRUCache)
-class Cache(object):
-    """
-    A sized cache.
-
-    The cache moves items between three generations, as determined by
-    an admittance policy.
-
-    * Items begin in *eden*, where they stay until eden grows too
-      large.
-    * When eden grows too large, the least recently used item
-      is then (conceptually) moved to the *probation* ring. If this
-      would make the probation ring too large, the *frequency* of
-      the least recently used item from the probation ring is compared to the frequency
-      of the incoming item. Only if the incoming item is more popular than
-      the item it would force off the probation ring is it kept (and the probation item removed).
-      Otherwise the eden item is removed.
-    * When an item in probation is accessed, it is moved to the *protected* ring.
-      The protected ring is the largest ring. When adding an item to it would
-      make it too large, the least recently used item is demoted to probation, following
-      the same rules as for eden.
-
-    This cache only approximately follows its size limit. It may temporarily become
-    larger.
-
-    You are responsible for moving items into and out of the `data` and determining
-    what a hit is.
-    """
-
-    # Percentage of our byte limit that should be dedicated
-    # to the main "protected" generation
-    _gen_protected_pct = 0.8
-    # Percentage of our byte limit that should be dedicated
-    # to the initial "eden" generation
-    _gen_eden_pct = 0.1
-    # Percentage of our byte limit that should be dedicated
-    # to the "probationary"generation
-    _gen_probation_pct = 0.1
-    # By default these numbers add up to 1.0, but it would be possible to
-    # overcommit by making them sum to more than 1.0. (For very small
-    # limits, the rounding will also make them overcommit).
+@interface.implementer(IGenerationalLRUCache)
+class CFFICache(GenerationalCacheBase):
 
     # Should we allocate some nodes in a contiguous block on startup?
     # NOTE: For large cache sizes, this can be slow. It actually makes
@@ -121,13 +73,6 @@ class Cache(object):
     # But no more than this number.
     _preallocate_max_count = 150000 # 8 MB array
 
-    #: A "mapping" between the __parent__ of an entry and the generation
-    #: ring that holds it. (Indexing by ints is faster than a dictionary lookup
-    #: especially on PyPy.) Initialize to an object that will report a bad lookup
-    #: for the right generation. (The generator expression keeps us from leaking the
-    #: indexing variable on Py2.)
-    generations = tuple((_NoSuchGeneration(i) for i in range(4)))
-
     _dict_type = dict
 
     @classmethod
@@ -139,16 +84,15 @@ class Cache(object):
         cffi_cache = ffi_new("RSCache*")
 
         generations = {}
-        for klass, limit in ((EdenRing, eden_limit),
-                             (ProtectedRing, protected_limit),
-                             (ProbationRing, probation_limit)):
+        for klass, limit in ((Eden, eden_limit),
+                             (Protected, protected_limit),
+                             (Probation, probation_limit)):
             generation = klass(limit, cffi_cache, key_weight, value_weight)
             setattr(cffi_cache, generation.__name__, generation.ring_home)
             generations[generation.__name__] = generation
         return generations
 
     def __init__(self, byte_limit, key_weight=len, value_weight=len):
-        self.limit = self._byte_limit = byte_limit
         # This holds all the ring entries, no matter which ring they are in.
 
         # We experimented with using OOBTree and LOBTree for the type
@@ -176,16 +120,12 @@ class Cache(object):
             value_weight=value_weight
         )
 
-        self.eden = generations['eden'] # type: EdenRing
-        self.protected = generations['protected']
-        self.probation = generations['probation']
+        super(CFFICache, self).__init__(byte_limit,
+                                        generations['eden'],
+                                        generations['protected'],
+                                        generations['probation'])
 
         self.cffi_cache = self.eden.cffi_cache
-
-        generations = list(Cache.generations) # Preserve the NoSuchGeneration initializers
-        for gen in (self.protected, self.probation, self.eden):
-            generations[gen.PARENT_CONST] = gen
-        self.generations = tuple(generations)
 
         # Setup the shared data structures for the generations
         node_free_list = self._make_node_free_list()
@@ -196,7 +136,7 @@ class Cache(object):
         "Create the node free list and preallocate any desired entries"
         node_free_list = []
         if self._preallocate_entries:
-            needed_entries = self._byte_limit // self._preallocate_avg_size
+            needed_entries = self.limit // self._preallocate_avg_size
             entry_count = min(self._preallocate_max_count, needed_entries)
             node_free_list = self.eden.init_node_free_list(entry_count)
         return node_free_list
@@ -234,6 +174,19 @@ class Cache(object):
             return entry.value
 
     # Cache-specific operations.
+
+    def get_from_key_or_backup_key(self, pref_key, backup_key):
+        entry = self.get(pref_key)
+        if entry is None:
+            entry = self.get(backup_key)
+            if entry is not None:
+                # Swap the key (which we assume has the same weight).
+                entry.key = pref_key
+                del self.data[backup_key]
+                self.data[pref_key] = entry
+        if entry is not None:
+            self.on_hit(entry)
+            return entry.value
 
     def peek(self, key):
         entry = self.get(key)
@@ -367,7 +320,8 @@ def _mutates_free_list(func):
 
     return mutates
 
-class CacheRing(object):
+@interface.implementer(IGeneration)
+class Generation(object):
 
     # For the bulk insertion method add_MRUs in the eden generation, we need
     # to know whether or not the node_free_list we have is still the original
@@ -524,9 +478,9 @@ class CacheRing(object):
         }
 
 
-class EdenRing(CacheRing):
+class Eden(Generation):
     __name__ = 'eden'
-    PARENT_CONST = 1
+    PARENT_CONST = generation_number = 1
 
     @_mutates_free_list
     def add_MRUs(self, ordered_keys_and_values, total_count=None):
@@ -659,14 +613,14 @@ class EdenRing(CacheRing):
             node = node.r_next
         return new_entry, evicted_items
 
-class ProtectedRing(CacheRing):
+class Protected(Generation):
     __name__ = 'protected'
-    PARENT_CONST = 2
+    PARENT_CONST = generation_number = 2
 
 
-class ProbationRing(CacheRing):
+class Probation(Generation):
     __name__ = 'probation'
-    PARENT_CONST = 3
+    PARENT_CONST = generation_number = 3
 
     def on_hit(self, entry):
         # Move the entry to the protected LRU on its very first hit, where
