@@ -259,11 +259,6 @@ class RelStorage(UndoLogCompatible,
 
         # Creating the storage cache may have loaded cache files, and if so,
         # we have a previous tid state.
-        # If we set this to the stored value, we get great cache hits,
-        # but get conflicts on the 'add' benchmark. If we set it to one less,
-        # we get no conflicts but terrible cache hits on the cold benchmark
-        # in history preserving mode, because that transaction usually cannot be
-        # found.
         if self._cache.current_tid:
             self._prev_polled_tid = self._cache.current_tid
 
@@ -1382,7 +1377,8 @@ class RelStorage(UndoLogCompatible,
         except ReadConflictError as e:
             # The database connection is stale, but postpone this
             # error until the application tries to read or write something.
-            # XXX: We probably need to drop our pickle cache?
+            # XXX: We probably need to drop our pickle cache? At least the local
+            # delta_after* maps/current_tid/checkpoints?
             self._stale_error = e
             return (), prev
 

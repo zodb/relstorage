@@ -261,11 +261,11 @@ class StorageCache(object):
             # (our __bool__ is not consistent with our len)
             stats = self.local_client.stats()
             if stats['hits'] or stats['sets']:
-                # Only write this out if (1) it proved useful ON (2)
+                # Only write this out if (1) it proved useful OR (2)
                 # we've made modifications. Otherwise, we're writing a consolidated
                 # file for no good reason.
                 # TODO: Consider the correctness here, now that we have a
-                # more accurate cache.
+                # more accurate cache. Should that maybe be AND?
                 return self.local_client.save(**save_args)
             logger.debug("Cannot justify writing cache file, no hits or misses")
 
@@ -341,6 +341,8 @@ class StorageCache(object):
 
     @staticmethod
     def _trace(*_args, **_kwargs): # pylint:disable=method-hidden
+        # TODO: Introduce a IStateCache wrapper for handling tracing.
+        # The fastest method is the one you don't call.
         # Dummy method for when we don't do tracing
         return
 
@@ -414,6 +416,7 @@ class StorageCache(object):
                        'pid': os.getpid(),
                        'thread_ident': threading.current_thread(),
                    })
+            # TODO: Make this rasie a CacheCorruptedError.
             raise AssertionError(msg)
 
     def load(self, cursor, oid_int):
@@ -511,6 +514,7 @@ class StorageCache(object):
         """Prepare temp space for objects to cache."""
         # start with a fresh in-memory buffer instead of reusing one that might
         # already be spooled to disk.
+        # TODO: An alternate idea would be a temporary sqlite database.
         self.queue = AutoTemporaryFile()
         self.queue_contents = {}
 

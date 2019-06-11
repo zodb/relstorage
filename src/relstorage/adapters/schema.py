@@ -364,7 +364,7 @@ class AbstractSchemaInstaller(ABC):
 
         columns = self._column_descriptions(cursor)
         # Make sure to read the (empty) result, some drivers (CMySQLConnector)
-        # are picky about that and won't let you close a cursore without reading
+        # are picky about that and won't let you close a cursor without reading
         # everything.
         cursor.fetchall()
         for column_descr in columns:

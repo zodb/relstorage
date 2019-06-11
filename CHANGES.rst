@@ -18,10 +18,13 @@
 
 - Drop support for pg8000 older than 1.11.0.
 
-- Drop support for MySQL Connector/Python older than 8.0.16. Newer
-  versions were broken. See :issue:`228`.
+- Drop support for MySQL Connector/Python older than 8.0.16. Many
+  older versions are known to be broken. See :issue:`228`.
 
 - Test support for MySQL Connector/Python on PyPy.
+
+  .. caution:: Prior to  PyPy 7.2, it is necessary to disable JIT
+               inlining due to a PyPy bug with ``struct.unpack``.
 
 - Drop support for PyPy older than 5.3.1.
 
