@@ -45,12 +45,17 @@ class AbstractStateCacheTests(TestCase):
     def test_provides(self):
         assert_that(self._makeOne(), verifiably_provides(IStateCache))
 
-    def test_set_multi_and_get_multi(self):
+    def test_set_all_for_tid(self):
         c = self._makeOne()
 
-        c.set_multi({(0, 0): (b'abc', 0),
-                     (0, 1): (b'def', 1),
-                     (1, 0): (b'ghi', 0)})
+        c.set_all_for_tid(
+            0,
+            [(b'abc', 0),
+             (b'ghi', 1),])
+        c.set_all_for_tid(
+            1,
+            [(b'def', 0)]
+        )
         # Hits on primary key
         self.assertEqual(c(0, 0),
                          (b'abc', 0))
@@ -68,6 +73,9 @@ class AbstractStateCacheTests(TestCase):
                          (b'def', 1))
         self.assertEqual(c(1, -1),
                          (b'ghi', 0))
+
+    def test_updating_delta_map(self):
+        self.assertIs(self._makeOne().updating_delta_map(self), self)
 
 class MemcacheClientTests(AbstractStateCacheTests):
 

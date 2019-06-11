@@ -289,9 +289,10 @@ class StorageCacheTests(TestCase):
         c.store_temp(1, b'def')
         c.store_temp(2, b'ghi')
         self.assertEqual(b'ghi', c.read_temp(2))
-        self.assertEqual(c.queue_contents, {1: (3, 6), 2: (6, 9)})
-        c.queue.seek(0)
-        self.assertEqual(c.queue.read(), b'abcdefghi')
+        self.assertEqual(dict(c.queue.stored_oids), {1: (3, 6), 2: (6, 9)})
+        f = c.queue._queue
+        f.seek(0)
+        self.assertEqual(f.read(), b'abcdefghi')
         c.checkpoints = (1, 0)
         c.after_tpc_finish(p64(3))
 
@@ -304,7 +305,7 @@ class StorageCacheTests(TestCase):
         c.store_temp(2, b'abc')
         c.store_temp(3, b'def')
         tid = p64(55)
-        c.send_queue(tid)
+        c._send_queue(tid)
         self.assertEqual(data, {
             'myprefix:state:55:2': tid + b'abc',
             'myprefix:state:55:3': tid + b'def',
@@ -314,12 +315,13 @@ class StorageCacheTests(TestCase):
     def test_send_queue_large(self):
         from relstorage.tests.fakecache import data
         c = self._makeOne()
-        c.send_limit = 100
+        self.assertEqual(c.cache.g.send_limit, 1024 * 1024)
+        c.cache.g.send_limit = 100
         c.tpc_begin()
         c.store_temp(2, b'abc')
         c.store_temp(3, b'def' * 100)
         tid = p64(55)
-        c.send_queue(tid)
+        c._send_queue(tid)
         self.assertEqual(data, {
             'myprefix:state:55:2': tid + b'abc',
             'myprefix:state:55:3': tid + (b'def' * 100),
@@ -330,13 +332,12 @@ class StorageCacheTests(TestCase):
         c = self._makeOne()
         c.tpc_begin()
         tid = p64(55)
-        c.send_queue(tid)
+        c._send_queue(tid)
         self.assertEqual(data, {})
 
     def test_after_tpc_finish(self):
         c = self._makeOne()
         c.tpc_begin()
-        c.after_tpc_finish(p64(55))
         c.after_tpc_finish(p64(55))
         # XXX: This test doesn't actually assert anything. It used to check
         # the commit-count key, but we don't use that anymore.
@@ -345,8 +346,7 @@ class StorageCacheTests(TestCase):
         c = self._makeOne()
         c.tpc_begin()
         c.clear_temp()
-        self.assertEqual(c.queue_contents, None)
-        self.assertEqual(c.queue, None)
+        self.assertIsNone(c.queue)
 
     def test_after_poll_init_checkpoints(self):
         from relstorage.tests.fakecache import data

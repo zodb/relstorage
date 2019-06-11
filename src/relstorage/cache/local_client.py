@@ -24,7 +24,6 @@ from contextlib import closing
 
 from zope import interface
 
-from relstorage._compat import iteritems
 from relstorage._util import get_memory_usage
 from relstorage._util import byte_display
 from relstorage._util import timer as _timer
@@ -237,9 +236,9 @@ class LocalClient(object):
             if tid > self._min_allowed_writeback.get(oid_tid[0], MAX_TID):
                 self._min_allowed_writeback[oid_tid[0]] = tid
 
-    def set_multi(self, keys_and_values):
-        for k, v in iteritems(keys_and_values):
-            self[k] = v
+    def set_all_for_tid(self, tid_int, state_oid_iter):
+        for state, oid_int in state_oid_iter:
+            self[(oid_int, tid_int)] = (state, tid_int)
 
     def store_checkpoints(self, cp0, cp1):
         # No lock, the assignment should be atomic
@@ -257,6 +256,9 @@ class LocalClient(object):
 
     def values(self):
         return self.__bucket.values()
+
+    def updating_delta_map(self, deltas):
+        return deltas
 
     @_log_timed
     def read_from_sqlite(self, connection, row_filter=None):
