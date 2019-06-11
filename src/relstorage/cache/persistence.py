@@ -11,18 +11,19 @@
 # FOR A PARTICULAR PURPOSE.
 #
 ##############################################################################
+"""
+Helpers for various disk-based persistent storage format.
+
+Doesn't actually do any persistence itself.
+"""
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-import glob
-import gzip
-import io
 import logging
 import os
 import os.path
-import tempfile
-import time
+import sqlite3
 
 from relstorage._compat import PY3
 
@@ -48,65 +49,6 @@ def _normalize_path(options):
     path = os.path.expanduser(os.path.expandvars(options.cache_local_dir))
     path = os.path.abspath(path)
     return path
-
-
-def _open(_options, filename, *args):
-    return io.open(filename, *args, buffering=16384)
-
-
-def _gzip_ext(options):
-    if options.cache_local_dir_compress:
-        return ".rscache.gz"
-    return ".rscache"
-
-
-def _gzip_file(options, filename, fileobj, **kwargs):
-    if not options.cache_local_dir_compress:
-        return fileobj
-    # These files would *appear* to be extremely compressable. One
-    # zodbshootout example with random data compressed a 3.4MB
-    # file to 393K and a 19M file went to 3M.
-
-    # As far as speed goes: for writing a 512MB file containing
-    # 650,987 values with only 1950 distinct values (so
-    # potentially highly compressible, although none of the
-    # identical items were next to each other in the dict on
-    # purpose) of random data under Python 2.7:
-
-    # no GzipFile is                   8s
-    # GzipFile with compresslevel=0 is 11s
-    # GzipFile with compresslevel=5 is 28s (NOTE: Time was the same for Python 3)
-
-    # But the on disk size at compresslevel=5 was 526,510,662
-    # compared to the in-memory size of 524,287,388 (remembering
-    # there is more overhead on disk). So its hardly worth it.
-
-    # Under Python 2.7, buffering is *critical* for performance.
-    # Python 3 doesn't have this problem as much for reads, but it's nice to still do.
-
-    # For writing, the fileobj itself must be buffered; this is
-    # taken care of by passing objects obtained from io.open; without
-    # that low-level BufferdWriter, what is 10s to write 512MB in 600K objects
-    # becomes 40s.
-
-    gz_cache_file = gzip.GzipFile(filename, fileobj=fileobj, **kwargs)
-    if kwargs.get('mode') == 'rb':
-        # For reading, 2.7 without buffering 100,000 objects from a
-        # 2MB file takes 4 seconds; with it, it takes around 1.3.
-        return io.BufferedReader(gz_cache_file)
-
-    return gz_cache_file
-
-
-def _list_cache_files(options, prefix):
-    "Returns a list of absolute paths"
-    path = _normalize_path(options)
-    possible_caches = glob.glob(os.path.join(path, 'relstorage-cache-'
-                                             + prefix
-                                             + '.*'
-                                             + _gzip_ext(options)))
-    return [os.path.abspath(x) for x in possible_caches]
-
 
 def trace_file(options, prefix):
     # Return an open file for tracing to, if that is set up.
@@ -142,88 +84,243 @@ def trace_file(options, prefix):
         log.info("opened tracefile %r", fname)
     return tf
 
+class Connection(sqlite3.Connection):
+    # pylint:disable=assigning-non-slot
+    # Something about inheriting from an extension
+    # class seems to get pylint confused.
 
-def _stat_cache_files(options, prefix):
+    __slots__ = (
+        'rs_db_filename',
+        'rs_close_async',
+        '_rs_has_closed',
+    )
+
+    def __init__(self, *args, **kwargs):
+        super(Connection, self).__init__(*args, **kwargs)
+
+        self.rs_db_filename = None
+        self.rs_close_async = True
+        self._rs_has_closed = False
+
+    def __repr__(self):
+        if not self.rs_db_filename:
+            return super(Connection, self).__repr__()
+        return '<Connection at %x to %r>' % (
+            id(self), self.rs_db_filename
+        )
+
+    def close(self):
+        # If we're the only connection open to this database,
+        # and SQLITE_FCNTL_PERSIST_WAL is true (by default
+        # *most* places, but apparently not in the sqlite3
+        # 3.24 shipped with Apple in macOS 10.14.5), then when
+        # we close the database the wal file that was built up
+        # by any of the writes that have been done will be automatically
+        # combined with the database file, as if with
+        # "PRAGMA wal_checkpoint(RESTART)".
+        #
+        # This can be slow, and it releases the GIL, so do that in another thread
+        if self._rs_has_closed: # pragma: no cover
+            return
+        self._rs_has_closed = True
+        from relstorage._util import spawn as _spawn
+        spawn = _spawn if self.rs_close_async else lambda f: f()
+        def c():
+            # Recommended best practice is to OPTIMIZE the database for
+            # each closed connection. OPTIMIZE needs to run in each connection
+            # so it can see what tables and indexes were used. It's usually fast,
+            # but has the potential to be slow, so let it happen in the background.
+            try:
+                self.execute("PRAGMA optimize")
+            except sqlite3.DatabaseError:
+                # It's possible the file was removed.
+                logger.exception("Failed to optimize database; was it removed?")
+
+            super(Connection, self).close()
+        spawn(c)
+
+
+# PRAGMA statements don't allow ? placeholders
+# when executed. This is probably a bug in the sqlite3
+# module.
+def _execute_pragma(cur, name, value):
+    stmt = 'PRAGMA %s = %s' % (name, value)
+    cur.execute(stmt)
+    # On PyPy, it's important to traverse the cursor, even if
+    # you don't expect any results, because it still counts as
+    # a statement that's open and can cause 'OperationalError:
+    # can't commit with SQL operations active'.
+    cur.fetchall()
+
+def _execute_pragmas(cur, **kwargs):
+    for k, v in kwargs.items():
+        # Query, report, then change
+        __traceback_info__ = k, v
+        stmt = 'PRAGMA %s' % (k,)
+        cur.execute(stmt)
+        row = cur.fetchone()
+        orig_value = row[0] if row else None
+        if v is not None and v != orig_value:
+            _execute_pragma(cur, k, v)
+            cur.execute(stmt)
+            row = cur.fetchone()
+            new_value = row[0] if row else None
+            logger.debug(
+                "Original %s = %s. Desired %s = %s. Updated %s = %s",
+                k, orig_value,
+                k, v,
+                k, new_value)
+        else:
+            logger.debug("Using %s = %s", k, orig_value)
+
+def _connect_to_file(fname, factory=Connection, close_async=True,
+                     pragmas=None):
+
+    connection = sqlite3.connect(
+        fname,
+        # If we do nothing, this means we're in autocommit
+        # mode. Creating our own transactions with BEGIN
+        # disables that until the COMMIT.
+        isolation_level=None,
+        factory=factory,
+        # We explicitly push closing off to a new thread.
+        check_same_thread=False,
+        timeout=10)
+    if isinstance(connection, Connection):
+        connection.rs_db_filename = fname
+        connection.rs_close_async = close_async
+
+    if str is bytes:
+        # We don't use the TEXT type, but even so
+        # sqlite complains:
+        #
+        # ProgrammingError: You must not use 8-bit bytestrings unless
+        # you use a text_factory that can interpret 8-bit bytestrings
+        # (like text_factory = str). It is highly recommended that you
+        # instead just switch your application to Unicode strings.
+        connection.text_factory = str
+
+    # Make sure we have at least one pragma that touches
+    # the database so that we can verify that it's not corrupt.
+    pragmas.setdefault('journal_mode', 'wal')
+    cur = connection.cursor()
+    try:
+        _execute_pragmas(cur, **pragmas)
+    except:
+        cur.close()
+        if hasattr(connection, 'rs_close_async'):
+            connection.rs_close_async = False
+            connection.close()
+        raise
+
+    cur.close()
+
+    return connection
+
+_MB = 1024 * 1024
+DEFAULT_MAX_WAL = 10 * _MB
+DEFAULT_CLOSE_ASYNC = True
+# Benchmarking on at least one system doesn't show an improvement to
+# either reading or writing by forcing a large mmap_size.
+DEFAULT_MMAP_SIZE = None
+# 4096 is the page size in current releases of sqlite; older versions
+# used 1024. A larger page makes sense as we have biggish values.
+# Going larger doesn't make much difference in benchmarks.
+DEFAULT_PAGE_SIZE = 4096
+# Control where temporary data is:
+#
+# FILE = a deleted disk file (that sqlite never flushes so
+# theoretically just exists in the operating system's filesystem
+# cache)
+#
+# MEMORY = explicitly in memory only
+#
+# DEFAULT = compile time default. Benchmarking for large writes
+# doesn't show much difference between FILE and MEMORY, so don't
+# bother to change from the default.
+DEFAULT_TEMP_STORE = None
+
+
+def sqlite_connect(options, prefix,
+                   overwrite=False,
+                   max_wal_size=DEFAULT_MAX_WAL,
+                   close_async=DEFAULT_CLOSE_ASYNC,
+                   mmap_size=DEFAULT_MMAP_SIZE,
+                   page_size=DEFAULT_PAGE_SIZE,
+                   temp_store=DEFAULT_TEMP_STORE):
     """
-    Return a list of cache file names,
-    sorted so that the newest and largest files are first.
+    Return a DB-API Connection object.
+
+    .. caution:: Using the connection as a context manager does **not**
+       result in the connection being closed, only committed or rolled back.
     """
-    stats = []
-    for possible_cache_path in _list_cache_files(options, prefix):
+    parent_dir = getattr(options, 'cache_local_dir', options)
+    # Allow for memory and temporary databases:
+    if parent_dir != ':memory:' and parent_dir:
+        parent_dir = _normalize_path(options)
         try:
-            stats.append((os.stat(possible_cache_path), possible_cache_path))
-        except os.error: # pragma: no cover
-            # file must be gone, probably we're cleaning things out
+            # make it if needed. try to avoid a time-of-use/check
+            # race (not that it matters here)
+            os.makedirs(parent_dir)
+        except os.error:
             pass
 
-    # Newest and biggest first; tie breaker of the filename
-    stats.sort(key=lambda s: (s[0].st_mtime, s[0].st_size, s[1]), reverse=True)
-    return [s[1] for s in stats]
-
-
-def count_cache_files(options, prefix):
-    return len(_list_cache_files(options, prefix))
-
-
-def load_local_cache(options, prefix, local_client_bucket):
-    # Given an options that points to a local cache dir,
-    # choose a file from that directory and load it.
-    stats = _stat_cache_files(options, prefix)
-    if not stats:
-        log.debug("No cache files found")
-
-    max_load = options.cache_local_dir_read_count or len(stats)
-    loaded_count = 0
-
-    for cache_path in stats:
-        if loaded_count >= max_load:
-            break
-
-        try:
-            with _open(options, cache_path, 'rb') as raw_cache_file:
-                with _gzip_file(options, cache_path, fileobj=raw_cache_file, mode='rb') as gzf:
-                    _, stored = local_client_bucket.read_from_stream(gzf)
-                    loaded_count += 1
-                    if not stored or local_client_bucket.size >= local_client_bucket.limit:
-                        break # pragma: no cover
-        except (NameError, AttributeError): # pragma: no cover
-            # Programming errors, need to be caught in testing
-            raise
-        except Exception: # pylint:disable=broad-except
-            log.exception("Invalid cache file %r", cache_path)
-            __quiet_remove(cache_path)
-    return loaded_count
-
-def __write_temp_cache_file(options, prefix, parent_dir, persistent_cache):
-    prefix = 'relstorage-cache-' + prefix + '.'
-    suffix = _gzip_ext(options) + '.T'
-    fd, path = tempfile.mkstemp(prefix=prefix, suffix=suffix, dir=parent_dir)
-    try:
-        with _open(options, fd, 'wb') as f:
-            with _gzip_file(options, filename=path, fileobj=f, mode='wb', compresslevel=5) as fz:
-                persistent_cache.write_to_stream(fz)
-        # fd is now closed (by the fileobj)
-    except:
-        __quiet_remove(path)
-        raise
+        fname = os.path.join(parent_dir, 'relstorage-cache-' + prefix + '.sqlite3')
+        wal_fname = fname + '-wal'
+        def destroy():
+            logger.info("Replacing any existing cache at %s", fname)
+            __quiet_remove(fname)
+            __quiet_remove(wal_fname)
     else:
-        return path
+        fname = parent_dir
+        wal_fname = None
+        def destroy():
+            "Nothing to do."
 
-def __set_mod_time(new_path, persistent_cache):
+    corrupt_db_ex = sqlite3.DatabaseError
+    if overwrite:
+        destroy()
+        corrupt_db_ex = ()
+
+    pragmas = {
+        # WAL mode can actually be a bit slower at commit time,
+        # but buys us better concurrency.
+        # Note: In-memory databases always use 'memory' as the journal mode;
+        # temporary databases always use 'delete'.
+        'journal_mode': 'wal',
+        'mmap_size': mmap_size,
+        'page_size': page_size,
+        'temp_store': temp_store,
+        # Eliminate as much checkpoint disk IO as we can. We're just
+        # a cache, not a primary source of truth.
+        'synchronous': 'OFF',
+        # Disable auto-checkpoint so that commits have
+        # reliable duration; after commit, if it's a good time,
+        # we can run 'PRAGMA wal_checkpoint'. (In most cases, the last
+        # database connection that's open will essentially do that
+        # automatically.)
+        # XXX: Is that really worth it? We'll just begin by increasing
+        # it
+        # 'wal_autocheckpoint': 0,
+        'wal_autocheckpoint': max_wal_size // page_size,
+        'threads': 2,
+        # Things to query and report.
+        'soft_heap_limit': None,
+        # The default of -2000 is 2000 pages. At 4K page size,
+        # that's 8MB.
+        'cache_size': None,
+    }
+
     try:
-        f = persistent_cache.get_cache_modification_time_for_stream
-    except AttributeError:
-        mod_time = None
-    else:
-        mod_time = f()
+        connection = _connect_to_file(fname, close_async=close_async,
+                                      pragmas=pragmas)
+    except corrupt_db_ex:
+        logger.info("Corrupt cache database at %s; replacing", fname)
+        destroy()
+        connection = _connect_to_file(fname, close_async=close_async,
+                                      pragmas=pragmas)
 
-    if mod_time and mod_time > 0:
-        # Older PyPy on Linux raises an OSError/Errno22 if the mod_time is less than 0
-        # and is a float
-        # (https://bitbucket.org/pypy/pypy/issues/2408/cpython-difference-osutime-path-11-11)
-        logger.debug("Setting date of %r to cache time %s (current time %s)",
-                     new_path, mod_time, time.time())
-        os.utime(new_path, (mod_time, mod_time))
+    return connection
 
 def __quiet_remove(path):
     try:
@@ -233,62 +330,3 @@ def __quiet_remove(path):
         return False
     else:
         return True
-
-def save_local_cache(options, prefix, persistent_cache):
-    # Dump the file.
-    parent_dir = _normalize_path(options)
-    try:
-        # make it if needed. try to avoid a time-of-use/check
-        # race (not that it matters here)
-        os.makedirs(parent_dir)
-    except os.error:
-        pass
-
-
-    try:
-        path = __write_temp_cache_file(options, prefix, parent_dir, persistent_cache)
-    except (NameError, AttributeError): # pragma: no cover
-        # programming errors that should be caught in testing
-        raise
-    except Exception: # pylint:disable=broad-except
-        log.exception("Failed to save cache file %s", persistent_cache)
-        return
-
-    # Ok, now pick a place to put it, dropping the oldest file,
-    # if necessary.
-
-    # Now assign our permanent name by stripping the tmp suffix and renaming
-    assert path.endswith(".T")
-    new_path = path[:-2]
-
-    try:
-        os.rename(path, new_path)
-    except os.error: # pragma: no cover
-        log.exception("Failed to rename %r to %r", path, new_path)
-        __quiet_remove(path)
-        raise
-
-    del path
-
-    __set_mod_time(new_path, persistent_cache)
-
-
-    # Now remove any extra (old, small) files if we have too many
-    # If there are multiple storages shutting down, they will race
-    # each other to do this.
-    stats = _stat_cache_files(options, prefix)
-    while len(stats) > options.cache_local_dir_count and len(stats) > 1:
-        oldest_file = stats[-1]
-        # It's possible but unlikely for two processes to write to disk within the limit
-        # of filesystem modification time tracking. If one of those processes
-        # was us, then we still have to pick a loser.
-
-        if not __quiet_remove(oldest_file):
-            # One process will succeed, all the others will fail
-            log.info("Failed to prune file %r; stopping", oldest_file)
-            break
-
-        stats = _stat_cache_files(options, prefix)
-
-
-    return new_path

@@ -55,7 +55,7 @@ difference narrows but is still perceptible. (Naturally on PyPy the
 reverse is true: pickle and zodbpickle are very slow, but marshal is
 much faster. We could, but don't, take advantage of that.)
 
-Writing 525MB of data, 655K keys (no compression):
+Writing 525MB (524,285,508 bytes) of data, 655K (651,065) keys (no compression):
 
 - code as-of commit e58126a (the previous major optimizations for version 1 format)
   version 1 format, solid dict under 3.4: write: 3.8s/read 7.09s
@@ -121,6 +121,67 @@ the original numbers::
 
   read  average 6.409313925498282 stddev 0.18588680639842908
   write average 5.651123669245862 stddev 0.023198867394568865
+
+With commit d844311078079a3e203883b5e1e0dbac4e385b81 on Python 3.7.3::
+
+  write: Mean +- std dev: 2.09 sec +- 0.06 sec
+  read : Mean +- std dev: 3.83 sec +- 0.11 sec
+
+pyperf's tracemalloc reports that write uses 129.5MB (probably for the
+pickler memo cache) and read uses 816.7MB; using psutil to check the USS
+around the read loop shows a change of 1200 MB (1,250,291,712) for the
+first iteration and 841 MB (882,823,168) for the second.
+
+When the code is modified to use (oid_int, tid_int) tuples for keys
+and (state_bytes, tid_int) tuples for values, we get times that are
+surprisingly somewhat worse::
+
+  write: Mean +- std dev: 2.30 sec +- 0.05 sec
+  read: Mean +- std dev: 4.22 sec +- 0.12 sec
+
+The cache contains 619,735 keys using 500MB (524,998,312) of data
+(``cache_local_mb = 525``). Writing it reports 165.0 MB of memory used
+(turning on ``pickler.fast`` to disable the memo reduces this to
+52.4MB). Reading reports 877.2MB used (but if ``pickler.fast`` was set
+to True on writing, this goes up to 1509 MB), with a delta USS change
+of 251MB (264,032,256).
+
+Turning ``pickler.fast`` on, we get::
+
+  write stream: Mean +- std dev: 1.55 sec +- 0.06 sec
+  read stream: Mean +- std dev: 3.66 sec +- 0.24 sec
+
+Reading reports a delta USS of 944MB (989,327,360) for the first
+iteration, and 371MB (388,587,520) for the second. The third
+iteration, strangely, shows 741MB (776,749,056).
+
+At the level of the local client, which uses sqlite, for this same
+data, we take::
+
+  write client fresh: Mean +- std dev: 7.82 sec +- 0.10 sec
+  write client dups: Mean +- std dev: 2.02 sec +- 0.14 sec
+  read client: Mean +- std dev: 6.79 sec +- 0.17 sec
+
+The allocation and USS patterns are very close to the same as for
+reading the stream. We spend 4.3s to put rows in the temp table when
+the file doesn't exist, and 1.9 seconds to do so when we don't
+actually need to put any items in for the dups case.
+
+This is slower, but enables a much better caching experience. The file
+size on disk is 732,467,200 to store 524,287,908 bytes in memory.
+That's a supremely large cache. A more reasonable 50mb cache gets us::
+
+  write stream: Mean +- std dev: 166 ms +- 0 ms
+  read stream: Mean +- std dev: 411 ms +- 5 ms
+  write client fresh: Mean +- std dev: 1.09 sec +- 0.01 sec
+  write client dups: Mean +- std dev: 185 ms +- 4 ms
+  read client: Mean +- std dev: 548 ms +- 2 ms
+
+  write stream: 5232.9 kB
+  read stream: 91.6 MB
+  write client fresh: 9242.2 kB
+  write client dups: 9475.8 kB
+  read client: 91.0 MB
 
 Simulations
 ===========

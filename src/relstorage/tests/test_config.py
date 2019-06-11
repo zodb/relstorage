@@ -100,3 +100,24 @@ class TestConfig(unittest.TestCase):
         factory.open()
 
         mock_mysql.assert_called_once_with(a_conn_setting=42, options=self._make_expected_options())
+
+
+class TestOptions(unittest.TestCase):
+
+    def test_deprecated_warnings(self):
+        import warnings
+        for name in options.Options._deprecated_options:
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter('default')
+                class C(object):
+                    pass
+                setattr(C, name, 42)
+                options.Options.copy_valid_options(C)
+
+            self.assertEqual(1, len(caught))
+            self.assertIn(name, str(caught[0].message))
+
+    def test_resolve_storage(self):
+        from relstorage.cache.lru_sqlite import SqlMapping
+        o = options.Options(cache_local_storage='relstorage.cache.lru_sqlite.SqlMapping')
+        self.assertIs(o.cache_local_storage, SqlMapping)

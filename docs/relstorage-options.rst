@@ -358,6 +358,15 @@ Persistent Local Caching
 Like ZEO, RelStorage can store its local cache to disk for a quicker
 application warmup period.
 
+.. versionchanged:: 3.0a1
+   The persistent file format and contents have been substantially
+   changed to produce much better hit rates.
+
+   Reading and writing the cache files is slower, however, as the
+   cache size gets larger.
+
+   The cache files must be located on a local (not network) filesystem.
+
 .. versionadded:: 2.0b2
    This is a new, *experimental* feature. While there should
    be no problems enabling it, the exact details of its
@@ -379,34 +388,30 @@ cache-local-dir
         This is similar to the ZEO persistent cache, but adds *no
         overhead* to normal transactions.
 
-        This directory will be populated with a number of files (up to
-        ``cache-local-dir-count`` files), written each time a
+        This directory will be populated with files written each time a
         RelStorage instance is closed. If multiple RelStorage
         processes are working against the same database (for example,
         the workers of gunicorn), then they will each write and read
         files in this directory. On startup, the files will be
         combined to get the "warmest" possible cache.
 
-        Each file could potentially be up to the size of
-        ``cache-local-dir-write-max-size`` (but see
-        ``cache-local-dir-compress``) The time taken to load the cache
-        file (which only occurs when RelStorage is first opened) and
-        the time taken to save the cache file (which only occurs when
-        the database is closed) are proportional to the total size of
-        the cache; thus, a cache that is too large (holding many
-        unused entries) will slow down startup/shutdown for no
-        benefit. However, the timing is probably not a practical
-        concern compared to the disk usage; on one system, a 300MB
-        uncompressed cache file can be saved in 3-4 seconds and read
-        in 2-3 seconds.
+        The time taken to load the cache file (which only occurs when
+        RelStorage is first opened) and the time taken to save the
+        cache file (which only occurs when the database is closed) are
+        proportional to the total size of the cache; thus, a cache
+        that is too large (holding many unused entries) will slow down
+        startup/shutdown for no benefit. However, the timing is
+        probably not a practical concern compared to the disk usage;
+        on one system, a 300MB uncompressed cache file can be saved in
+        3-4 seconds and read in 2-3 seconds.
 
         This directory can be shared among storages connected to
         different databases, so long as they all have a distinct
         ``cache-prefix``.
 
         If this directory does not exist, we will attempt to create it
-        on startup. It may be possible to share this directory across
-        machines, but that has not been tested.
+        on startup. This directory must be a local filesystem, not
+        network storage.
 
         .. tip::
            If the database (ZODB.DB object) is not properly
@@ -419,6 +424,9 @@ cache-local-dir-count
 
         The default is 20.
 
+        .. versionchanged:: 3.0a1
+           This setting is now ignored and a single file is used.
+
 cache-local-dir-compress
         Whether to compress the persistent cache files on disk. The
         default is false because individual entries are usually already
@@ -428,6 +436,9 @@ cache-local-dir-compress
         (and hence slow down opening the storage).
 
         .. versionadded:: 2.0b5
+
+        .. versionchanged:: 3.0a1
+           This setting is now ignored and no extra compression is applied.
 
 cache-local-dir-read-count
         The maximum number of files to read to populate the cache on
@@ -455,6 +466,9 @@ cache-local-dir-read-count
 
         .. versionadded:: 2.0b5
 
+        .. versionchanged:: 3.0a1
+           This setting is now ignored and a single file is used.
+
 cache-local-dir-write-max-size
         The *approximate* maximum size of each individual cache file
         on disk. When not specified (the default), the maximum file
@@ -471,6 +485,11 @@ cache-local-dir-write-max-size
         entries that are only used at application startup.
 
         .. versionadded:: 2.0b7
+
+
+        .. versionchanged:: 3.0a1
+           This setting is now ignored and up to ``cache-local-mb``
+           will be stored.
 
 Remote Caching
 --------------

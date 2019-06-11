@@ -19,25 +19,31 @@ import logging
 import operator
 import time
 
-from zope import interface
-
-from relstorage.cache.cache_ring import Cache
-from relstorage.cache.interfaces import IPersistentCache
+from relstorage._util import get_memory_usage
+from relstorage._util import byte_display
+from relstorage.cache.lru_cffiring import CFFICache
 from relstorage.cache.persistence import Pickler
 from relstorage.cache.persistence import Unpickler
 
 log = logging.getLogger(__name__)
 
 
-@interface.implementer(IPersistentCache)
 class SizedLRUMapping(object):
     """
-    A map that keeps a record of its approx. size.
+    A map that keeps a record of its approx. weight (size), evicting
+    the least useful items when that size is exceeded.
 
-    keys must be `str`` and values must be byte strings.
+    Keys and values can be arbitrary, but should be of homogeneous
+    types that cannot be self-referential; immutable objects like
+    tuples, ints, and strings are best.
 
-    This class is not threadsafe, accesses to __setitem__ and get_and_bubble_all
-    must be protected by a lock.
+    In order for this class to properly handle evicting values when it
+    gets too big, it must be able to determine the size of the keys
+    and values. If :func:`len` is not appropriate for this, supply
+    your own *key_weight* and *value_weight* functions.
+
+    This class is not threadsafe, accesses to :meth:`__setitem__` and
+    :meth:`get_and_bubble_all` must be protected by a lock.
     """
 
     # What multiplier of the number of items in the cache do we apply
@@ -47,38 +53,41 @@ class SizedLRUMapping(object):
     # When did we last age?
     _aged_at = 0
 
-    _cache_type = Cache
+    _cache_type = CFFICache
 
-    def __init__(self, limit):
-        # We experimented with using OOBTree and LOBTree
-        # for the type of self._dict. The OOBTree has a similar
-        # but slightly slower performance profile (as would be expected
-        # given the big-O complexity) as a dict, but very large ones can't
-        # be pickled in a single shot! The LOBTree works faster and uses less
-        # memory than the OOBTree or the dict *if* all the keys are integers;
-        # which they currently are not. Plus the LOBTrees are slower on PyPy than its
-        # own dict specializations. We were hoping to be able to write faster pickles with
-        # large BTrees, but since that's not the case, we abandoned the idea.
-
-        # This holds all the ring entries, no matter which ring they are in.
-        cache = self._cache = self._cache_type(limit)
-        self._dict = cache.data
-
-
-        self._protected = cache.protected
-        self._probation = cache.probation
-        self._eden = cache.eden
-        self._gens = cache.generations
-
+    def __init__(self, weight_limit,
+                 key_weight=len, value_weight=len):
+        self._cache = self._cache_type(weight_limit, key_weight, value_weight)
         self._hits = 0
         self._misses = 0
         self._sets = 0
-        self.limit = limit
+        self.limit = weight_limit
         self._next_age_at = 1000
+
+        # Copy some methods for speed
+        self.entries = self._cache.entries
+        self.peek = self._cache.peek
+
+    def keys(self):
+        return iter(self._cache)
+
+    # Backwards compatibility for testing
+    @property
+    def _eden(self):
+        return self._cache.eden
+
+    @property
+    def _protected(self):
+        return self._cache.protected
+
+    @property
+    def _probation(self):
+        return self._cache.probation
+    # End BWC
 
     @property
     def size(self):
-        return self._eden.size + self._protected.size + self._probation.size
+        return self._cache.size
 
     def reset_stats(self):
         self._hits = 0
@@ -94,18 +103,31 @@ class SizedLRUMapping(object):
             'misses': self._misses,
             'sets': self._sets,
             'ratio': self._hits / total if total else 0,
-            'size': len(self._dict),
+            'len': len(self),
             'bytes': self.size,
-            'eden_stats': self._eden.stats(),
-            'prot_stats': self._protected.stats(),
-            'prob_stats': self._probation.stats(),
+            'lru_stats': self._cache.stats(),
         }
 
     def __len__(self):
-        return len(self._dict)
+        return len(self._cache)
 
     def __iter__(self):
-        return iter(self._dict)
+        return iter(self._cache)
+
+    def __repr__(self):
+        return "<%s at %x size=%d limit=%d len=%d hit_ratio=%d cache=%r>" % (
+            self.__class__.__name__, id(self),
+            self.size, self.limit, len(self), self.stats()['hits'],
+            self._cache
+        )
+
+    def values(self):
+        for entry in self.entries():
+            yield entry.value
+
+    def items(self):
+        for entry in self.entries():
+            yield (entry.key, entry.value)
 
     def _age(self):
         # Age only when we're full and would thus need to evict; this
@@ -119,8 +141,7 @@ class SizedLRUMapping(object):
         # Dynamically calculate how often we need to age. By default, this is
         # based on what Caffeine's PerfectFrequency does: 10 * max
         # cache entries
-        dct = self._dict
-        age_period = self._age_factor * len(dct)
+        age_period = self._age_factor * len(self._cache)
         operations = self._hits + self._sets
         if operations - self._aged_at < age_period:
             self._next_age_at = age_period
@@ -131,10 +152,10 @@ class SizedLRUMapping(object):
         self._aged_at = operations
         now = time.time()
         log.debug("Beginning frequency aging for %d cache entries",
-                  len(dct))
+                  len(self._cache))
         self._cache.age_lists()
         done = time.time()
-        log.debug("Aged %d cache entries in %s", len(dct), done - now)
+        log.debug("Aged %d cache entries in %s", len(self._cache), done - now)
 
         self._next_age_at = int(self._aged_at * 1.5) # in case the dict shrinks
 
@@ -152,22 +173,9 @@ class SizedLRUMapping(object):
         The item is considered to be the most-recently-used item
         (because this is called in the event of a cache miss, when
         we needed the item).
+
         """
-        # These types are gated by LocalClient, we don't need to double
-        # check.
-        #assert isinstance(key, str)
-        #assert isinstance(value, bytes)
-
-        dct = self._dict
-
-        if key in dct:
-            entry = dct[key]
-            self._gens[entry.cffi_entry.r_parent].update_MRU(entry, value)
-        else:
-            lru = self._eden
-            entry = lru.add_MRU(key, value)
-            dct[key] = entry
-
+        self._cache[key] = value
         self._sets += 1
 
         # Do we need to move this up above the eviction choices?
@@ -179,47 +187,49 @@ class SizedLRUMapping(object):
         return True
 
     def __contains__(self, key):
-        return key in self._dict
+        return key in self._cache
 
     def __delitem__(self, key):
-        entry = self._dict[key]
-        del self._dict[key]
-        self._gens[entry.cffi_entry.r_parent].remove(entry)
+        del self._cache[key]
 
     def get_and_bubble_all(self, keys):
-        dct = self._dict
-        gens = self._gens
+        # This is only used in testing now, the higher levels
+        # use `get_from_key_or_backup_key`
+        cache = self._cache
         res = {}
         for key in keys:
-            entry = dct.get(key)
-            if entry is not None:
-                self._hits += 1
-                gens[entry.cffi_entry.r_parent].on_hit(entry)
-                res[key] = entry.value
-            else:
-                self._misses += 1
+            value = cache[key]
+            if value is not None:
+                res[key] = value
+
+        self._hits += len(res)
+        self._misses += len(keys) - len(res)
         return res
 
-    def get(self, key):
-        # Testing only. Does not bubble or increment.
-        entry = self._dict.get(key)
-        if entry is not None:
-            return entry.value
+    def get_from_key_or_backup_key(self, pref_key, backup_key):
+        value = self._cache.get_from_key_or_backup_key(pref_key, backup_key)
+
+        if value is None:
+            self._misses += 1
+        else:
+            self._hits += 1
+        return value
 
     def __getitem__(self, key):
-        # Testing only. Doesn't bubble.
-        entry = self._dict[key]
-        entry.frequency += 1
-        return entry.value
+        value = self._cache[key]
+        if value is None:
+            raise KeyError(key)
+        return value
+
 
     # See micro_benchmark_results.rst for a discussion about the approach.
 
-    _FILE_VERSION = 4
+    _FILE_VERSION = 5
 
     def read_from_stream(self, cache_file):
-        now = time.time()
         # Unlike write_to_stream, using the raw stream
         # is fine for both Py 2 and 3.
+        mem_usage_before = get_memory_usage()
         unpick = Unpickler(cache_file)
 
         # Local optimizations
@@ -229,48 +239,112 @@ class SizedLRUMapping(object):
         if version != self._FILE_VERSION: # pragma: no cover
             raise ValueError("Incorrect version of cache_file")
 
-        entries_oldest_first = list()
-        entries_oldest_first_append = entries_oldest_first.append
+        keys_and_values = []
         try:
             while 1:
-                entries_oldest_first_append(load())
+                k_v = load()
+                keys_and_values.append(k_v)
         except EOFError:
             pass
-        count = len(entries_oldest_first)
 
-        def _insert_entries(entries):
-            stored = 0
-            # local optimizations
-            data = self._dict
-            added_entries = self._eden.add_MRUs(entries)
+        # Reclaim memory
+        del load
+        del unpick
 
-            for e in added_entries:
-                assert e.key not in data
-                assert e.cffi_entry.r_parent, e.key
-                data[e.key] = e
-                stored += 1
-            return stored
+        return self.bulk_update(keys_and_values, cache_file, mem_usage_before=mem_usage_before)
 
-        stored = 0
-        if not self._dict:
-            # Empty, so quickly take everything they give us,
-            # oldest first so that the result is actually LRU
-            stored = _insert_entries(entries_oldest_first)
-        else:
+    def bulk_update(self, keys_and_values,
+                    source='<unknown>',
+                    log_count=None,
+                    mem_usage_before=None):
+        """
+        Insert all the ``(key, value)`` pairs found in *keys_and_values*.
+
+        This will permute the most-recently-used status of any existing entries.
+        Entries in the *keys_and_values* iterable should be returned from
+        least recent to most recent, as the items at the end will be considered to be
+        the most recent. (Alternately, you can think of them as needing to be in order
+        from lowest priority to highest priority.)
+
+        This will never evict existing entries from the cache.
+        """
+        now = time.time()
+        mem_usage_before = mem_usage_before if mem_usage_before is not None else get_memory_usage()
+        mem_usage_before_this = get_memory_usage()
+        log_count = log_count or len(keys_and_values)
+
+        data = self._cache
+
+        if data:
             # Loading more data into an existing bucket.
             # Load only the *new* keys, trying to get the newest ones
             # because LRU is going to get messed up anyway.
-            new_entries_newest_first = [t for t in entries_oldest_first
-                                        if t[0] not in self._dict]
+            #
+            # If we were empty, then take what they give us, LRU
+            # first, so that as we iterate the last item in the list
+            # becomes the MRU item.
+            new_entries_newest_first = [t for t in keys_and_values
+                                        if t[0] not in data]
             new_entries_newest_first.reverse()
-            stored = _insert_entries(new_entries_newest_first)
+            keys_and_values = new_entries_newest_first
+            del new_entries_newest_first
+
+        stored = data.add_MRUs(keys_and_values, return_count_only=True)
 
         then = time.time()
-        log.info("Examined %d and stored %d items from %s in %s",
-                 count, stored, cache_file, then - now)
-        return count, stored
+        del keys_and_values # For memory reporting.
+        mem_usage_after = get_memory_usage()
+        log.info(
+            "Examined %d and stored %d items from %s in %s using %s. "
+            "(%s local) (%s)",
+            log_count, stored, getattr(source, 'name', source),
+            then - now,
+            byte_display(mem_usage_after - mem_usage_before),
+            byte_display(mem_usage_after - mem_usage_before_this),
+            self)
+        return log_count, stored
 
-    def write_to_stream(self, cache_file, byte_limit=None):
+    def items_to_write(self,
+                       byte_limit=None):
+        """
+        Return an iterator of entry objects.
+
+        The items are returned in **reverse** frequency order, the
+        ones with the highest frequency (most used) being last in the
+        list. (Unless you specify *sort* to be false, in which case
+        the order is not specified.)
+        """
+        entries = self.entries()
+
+        # Adding key as a tie-breaker makes no sense, and is slow.
+        # We use an attrgetter directly on the node for speed
+        frequency_getter = operator.attrgetter('cffi_entry.frequency')
+        entries = sorted(entries, key=frequency_getter)
+
+        # Write up to the byte limit
+        if byte_limit:
+            # They provided us a byte limit. Our normal approach of
+            # writing LRU won't work, because we'd wind up chopping off
+            # the most frequent items! So first we begin by taking out
+            # everything until we fit.
+            bytes_written = 0
+            entries_to_write = []
+            for entry in reversed(entries):
+                bytes_written += entry.weight
+                if bytes_written > byte_limit:
+                    bytes_written -= entry.weight
+                    break
+                entries_to_write.append(entry)
+            # Now we can write in reverse popularity order
+            entries_to_write.reverse()
+            entries = entries_to_write
+            bytes_written = 0
+            del entries_to_write
+
+        return entries
+
+    def write_to_stream(self, cache_file, byte_limit=None, pickle_fast=False):
+        # give *pickle_fast* as True if you know you don't need the pickle memo.
         now = time.time()
         # pickling the items is about 3x faster than marshal
 
@@ -285,6 +359,8 @@ class SizedLRUMapping(object):
         # down to about 7s. However, since we switched to writing many
         # smaller objects, that need goes away.
         pickler = Pickler(cache_file, -1) # Highest protocol
+        if pickle_fast:
+            pickler.fast = True
         dump = pickler.dump
 
         dump(self._FILE_VERSION) # Version marker
@@ -312,57 +388,22 @@ class SizedLRUMapping(object):
 
         # We get the entries from our MRU lists (in careful order) rather than from the dict
         # so that we have stable iteration order regardless of PYTHONHASHSEED or insertion order.
-
-        entries = list(self._probation)
-        entries.extend(self._protected)
-        entries.extend(self._eden)
-
-        if len(entries) != len(self._dict): # pragma: no cover
-            log.warning("Cache consistency problem. There are %d ring entries and %d dict entries. "
-                        "Refusing to write.",
-                        len(entries), len(self._dict))
-            return
-
-        # Adding key as a tie-breaker makes no sense, and is slow.
-        # We use an attrgetter directly on the node for speed
-
-        entries.sort(key=operator.attrgetter('cffi_entry.frequency'))
-
-
-
-        # Write up to the byte limit
-        count_written = 0
+        entries = self.items_to_write(byte_limit)
         bytes_written = 0
-        if not byte_limit:
-            byte_limit = self.limit
-        else:
-            # They provided us a byte limit. Our normal approach of
-            # writing LRU won't work, because we'd wind up chopping of
-            # the most frequent items! So first we begin by taking out
-            # everything until we fit.
-            entries_to_write = []
-            for entry in reversed(entries):
-                bytes_written += entry.len
-                if bytes_written > byte_limit:
-                    bytes_written -= entry.len
-                    break
-                entries_to_write.append(entry)
-            # Now we can write in reverse popularity order
-            entries_to_write.reverse()
-            entries = entries_to_write
-            bytes_written = 0
-            del entries_to_write
+        count_written = 0
         for entry in entries:
-            bytes_written += entry.len
+            k = entry.key
+            v = entry.value
+            weight = entry.weight
+            bytes_written += weight
             count_written += 1
-            if bytes_written > byte_limit:
-                bytes_written -= entry.len
-                break
-
-            dump((entry.key, entry.value))
+            dump((k, v))
 
         then = time.time()
         stats = self.stats()
-        log.info("Wrote %d items (%d bytes) to %s in %s. Total hits %s; misses %s; ratio %s",
-                 count_written, bytes_written, cache_file, then - now,
-                 stats['hits'], stats['misses'], stats['ratio'])
+        log.debug("Wrote %d items (%d bytes) to %s in %s. Total hits %s; misses %s; ratio %s",
+                  count_written, bytes_written, getattr(cache_file, 'name', cache_file),
+                  then - now,
+                  stats['hits'], stats['misses'], stats['ratio'])
+
+        return count_written

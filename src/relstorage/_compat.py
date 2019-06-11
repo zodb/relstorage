@@ -72,34 +72,3 @@ else:
     from base64 import encodestring as base64_encodebytes
     from base64 import decodestring as base64_decodebytes
     casefold = str.lower
-
-
-def get_this_psutil_process():
-    # Returns a freshly queried object each time.
-    try:
-        from psutil import Process, AccessDenied
-        # Make sure it works (why would we be denied access to our own process?)
-        try:
-            proc = Process()
-            proc.memory_full_info()
-        except AccessDenied: # pragma: no cover
-            proc = None
-    except ImportError:
-        proc = None
-    return proc
-
-def get_memory_usage():
-    """
-    Get a number representing the current memory usage.
-
-    Returns 0 if this is not available.
-    """
-    proc = get_this_psutil_process()
-    if proc is None:
-        return 0
-
-    rusage = proc.memory_full_info()
-    # uss only documented available on Windows, Linux, and OS X.
-    # If not available, fall back to rss as an aproximation.
-    mem_usage = getattr(rusage, 'uss', 0) or rusage.rss
-    return mem_usage

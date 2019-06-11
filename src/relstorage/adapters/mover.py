@@ -16,6 +16,7 @@
 from __future__ import absolute_import
 
 from hashlib import md5
+from abc import abstractmethod
 
 from perfmetrics import Metric
 from zope.interface import implementer
@@ -23,13 +24,14 @@ from zope.interface import implementer
 from ..iter import fetchmany
 from ._util import noop_when_history_free
 from ._util import query_property as _query_property
+from .._compat import ABC
 from .batch import RowBatcher
 from .interfaces import IObjectMover
 
 metricmethod_sampled = Metric(method=True, rate=0.1)
 
 @implementer(IObjectMover)
-class AbstractObjectMover(object):
+class AbstractObjectMover(ABC):
 
     def __init__(self, database_driver, options, runner=None,
                  version_detector=None,
@@ -231,6 +233,7 @@ class AbstractObjectMover(object):
             suffix=suffix
         )
 
+    @abstractmethod
     def store_temp(self, cursor, batcher, oid, prev_tid, data):
         raise NotImplementedError()
 

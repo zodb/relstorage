@@ -73,6 +73,7 @@ class Options(object):
     pack_batch_timeout = 1.0
     #: How long to pause if we can't get the lock
     pack_commit_busy_delay = 5.0
+
     #: List of memcache servers
     cache_servers = ()  # ['127.0.0.1:11211']
     #: Module to wrap a memcache connection with.
@@ -87,20 +88,17 @@ class Options(object):
     cache_local_compression = 'zlib'
     #: Directory holding persistent cache files
     cache_local_dir = None
-    #: How many persistent cache files to keep
-    cache_local_dir_count = 20
-    #: How many persistent cache files to read
-    cache_local_dir_read_count = None
-    #: How big a cache file can be
-    cache_local_dir_write_max_size = None
-    #: Compress the cache files?
-    cache_local_dir_compress = False
     #: Switch checkpoints after this many writes
     cache_delta_size_limit = 20000 if not PYPY else 10000
+    #: Implementation of ILRUCache to use for local cache
+    #: storage.
+    cache_local_storage = None
+
     #: How long to wait for a commit lock
     commit_lock_timeout = 30
     #: Lock ID for Oracle
     commit_lock_id = 0
+
     #: Automatically create the schema if needed
     create_schema = True
     #: Which database driver to use
@@ -108,14 +106,43 @@ class Options(object):
 
     # If share_local_cache is off, each storage instance has a private
     # cache rather than a shared cache.  This option exists mainly for
-    # simulating disconnected caches in tests.
+    # simulating disconnected caches in tests and can't be set from ZConfig.
     share_local_cache = True
+
+
+    # Deprecated things
+    #: How many persistent cache files to keep
+    cache_local_dir_count = None
+    #: How many persistent cache files to read
+    cache_local_dir_read_count = None
+    #: How big a cache file can be
+    cache_local_dir_write_max_size = None
+    #: Compress the cache files?
+    cache_local_dir_compress = None
+
+    _deprecated_options = (
+        'cache_local_dir_count',
+        'cache_local_dir_read_count',
+        'cache_local_dir_write_max_size',
+        'cache_local_dir_compress',
+    )
+
 
     def __init__(self, **kwoptions):
         for key, value in kwoptions.items():
             if not hasattr(self, key):
                 raise TypeError("Unknown parameter: %s" % key)
+            if key in self._deprecated_options:
+                import warnings
+                warnings.warn(
+                    "The option %s is deprecated and ignored." % (key,),
+                    FutureWarning
+                )
+
             setattr(self, key, value)
+        if isinstance(self.cache_local_storage, str):
+            from zope.dottedname import resolve as dottedname
+            self.cache_local_storage = dottedname.resolve(self.cache_local_storage)
 
     @classmethod
     def copy_valid_options(cls, other_options):

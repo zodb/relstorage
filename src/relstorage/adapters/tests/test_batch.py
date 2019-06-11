@@ -28,6 +28,9 @@ class RowBatcherTests(unittest.TestCase):
         self.assertEqual(cursor.executed, [])
         self.assertEqual(batcher.rows_added, 1)
         self.assertEqual(batcher.size_added, 0)
+        self.assertEqual(batcher.total_rows_inserted, 0)
+        self.assertEqual(batcher.total_rows_deleted, 0)
+        self.assertEqual(batcher.total_size_inserted, 0)
         self.assertEqual(dict(batcher.deletes),
                          {('mytable', ('id',)): set([(2,)])})
 
@@ -44,21 +47,17 @@ class RowBatcherTests(unittest.TestCase):
     def test_delete_auto_flush(self):
         cursor = MockCursor()
         batcher = self.getClass()(cursor, 2)
-
-        key = ('mytable', ('id',))
-
-        class SetList(list):
-            def add(self, k):
-                self.append(k)
-
-        batcher.deletes[key] = SetList() # preserve order
+        batcher.sorted_deletes = True
         batcher.delete_from("mytable", id=2)
         batcher.delete_from("mytable", id=1)
         self.assertEqual(cursor.executed,
-                         [('DELETE FROM mytable WHERE id IN (2,1)', None)])
+                         [('DELETE FROM mytable WHERE id IN (%s,%s)', ((1, 2)))])
         self.assertEqual(batcher.rows_added, 0)
         self.assertEqual(batcher.size_added, 0)
         self.assertEqual(batcher.deletes, {})
+        self.assertEqual(batcher.total_rows_inserted, 0)
+        self.assertEqual(batcher.total_rows_deleted, 2)
+        self.assertEqual(batcher.total_size_inserted, 0)
 
     def test_insert_defer(self):
         cursor = MockCursor()
@@ -76,6 +75,38 @@ class RowBatcherTests(unittest.TestCase):
         self.assertEqual(batcher.inserts, {
             ('INSERT', 'mytable (id, name)', '%s, id || %s', ''): {1: (1, 'a')}
         })
+        self.assertEqual(batcher.total_rows_inserted, 0)
+        self.assertEqual(batcher.total_rows_deleted, 0)
+        self.assertEqual(batcher.total_size_inserted, 0)
+
+    def test_insert_defer_multi_table(self):
+        cursor = MockCursor()
+        batcher = self.getClass()(cursor)
+        batcher.insert_into(
+            "mytable (id, name)",
+            "%s, id || %s",
+            (1, 'a'),
+            rowkey=1,
+            size=3,
+        )
+        batcher.insert_into(
+            "othertable (name)",
+            "?",
+            ('a'),
+            rowkey=1,
+            size=1,
+        )
+
+        self.assertEqual(cursor.executed, [])
+        self.assertEqual(batcher.rows_added, 2)
+        self.assertEqual(batcher.size_added, 4)
+        self.assertEqual(dict(batcher.inserts), {
+            ('INSERT', 'mytable (id, name)', '%s, id || %s', ''): {1: (1, 'a')},
+            ('INSERT', 'othertable (name)', '?', ''): {1: ('a')},
+        })
+        self.assertEqual(batcher.total_rows_inserted, 0)
+        self.assertEqual(batcher.total_rows_deleted, 0)
+        self.assertEqual(batcher.total_size_inserted, 0)
 
     def test_insert_replace(self):
         cursor = MockCursor()
@@ -149,10 +180,49 @@ class RowBatcherTests(unittest.TestCase):
         self.assertEqual(batcher.rows_added, 0)
         self.assertEqual(batcher.size_added, 0)
         self.assertEqual(batcher.inserts, {})
+        self.assertEqual(batcher.total_rows_inserted, 2)
+        self.assertEqual(batcher.total_rows_deleted, 0)
+        self.assertEqual(batcher.total_size_inserted, 10)
+
+
+    def test_insert_auto_flush_multi_table(self):
+        cursor = MockCursor()
+        batcher = self.getClass()(cursor)
+        batcher.size_limit = 10
+        batcher.insert_into(
+            "mytable (id, name)",
+            "%s, id || %s",
+            (1, 'a'),
+            rowkey=1,
+            size=5,
+            )
+        batcher.insert_into(
+            "mytable (id, name)",
+            "%s, id || %s",
+            (2, 'B'),
+            rowkey=2,
+            size=5,
+            )
+        self.assertEqual(
+            cursor.executed,
+            [(
+                'INSERT INTO mytable (id, name) VALUES\n'
+                '(%s, id || %s),\n'
+                '(%s, id || %s)\n',
+                (1, 'a', 2, 'B'))
+            ])
+        self.assertEqual(batcher.rows_added, 0)
+        self.assertEqual(batcher.size_added, 0)
+        self.assertEqual(batcher.inserts, {})
+        self.assertEqual(batcher.total_rows_inserted, 2)
+        self.assertEqual(batcher.total_rows_deleted, 0)
+        self.assertEqual(batcher.total_size_inserted, 10)
 
     def test_flush(self):
         cursor = MockCursor()
-        batcher = self.getClass()(cursor)
+        batcher = self.getClass()(cursor, delete_placeholder="?")
+        # Make sure we preserve order in multi-column
+        batcher.sorted_deletes = True
         batcher.delete_from("mytable", id=1)
         batcher.insert_into(
             "mytable (id, name)",
@@ -161,9 +231,14 @@ class RowBatcherTests(unittest.TestCase):
             rowkey=1,
             size=5,
             )
+        batcher.delete_from("mytable", id=1, key='abc')
+        batcher.delete_from("mytable", id=2, key='def')
         batcher.flush()
         self.assertEqual(cursor.executed, [
-            ('DELETE FROM mytable WHERE id IN (1)', None),
+            ('DELETE FROM mytable WHERE id IN (?)',
+             ((1,))),
+            ('DELETE FROM mytable WHERE (id=? AND key=?) OR (id=? AND key=?)',
+             (1, 'abc', 2, 'def')),
             ('INSERT INTO mytable (id, name) VALUES\n(%s, id || %s)\n',
              (1, 'a')),
         ])
@@ -281,13 +356,5 @@ class MockCursor(object):
     def setinputsizes(self, **kw):
         self.inputsizes.update(kw)
     def execute(self, stmt, params=None):
+        params = tuple(params) if isinstance(params, list) else params
         self.executed.append((stmt, params))
-
-def test_suite():
-    suite = unittest.TestSuite()
-    suite.addTest(unittest.makeSuite(RowBatcherTests))
-    suite.addTest(unittest.makeSuite(OracleRowBatcherTests))
-    return suite
-
-if __name__ == '__main__':
-    unittest.main(defaultTest='test_suite')

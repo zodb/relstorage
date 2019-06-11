@@ -14,40 +14,53 @@
 """Batch table row insert/delete support.
 """
 from collections import defaultdict
+import itertools
 
 from relstorage._compat import iteritems
-from relstorage._compat import itervalues
 
 
 class RowBatcher(object):
     """
     Generic row batcher.
 
-    Expects '%s' parameters and a tuple for each row.
+    Inserting can use whatever paramater placeholder format
+    and parameter format the cursor supports.
+
+    Deleting needs to use ordered parameters. The placeholder
+    can be set in the ``delete_placeholder`` attribute.
     """
 
     row_limit = 100
     size_limit = 1 << 20
+    delete_placeholder = '%s'
+    # For testing, force the delete order to be deterministic
+    # when multiple columns are involved
+    sorted_deletes = False
 
-    def __init__(self, cursor, row_limit=None):
+    def __init__(self, cursor, row_limit=None, delete_placeholder="%s"):
         self.cursor = cursor
+        self.delete_placeholder = delete_placeholder
         if row_limit is not None:
             self.row_limit = row_limit
+
+        # These are cumulative
+        self.total_rows_inserted = 0
+        self.total_size_inserted = 0
+        self.total_rows_deleted = 0
+
+        # These all get reset at each flush()
         self.rows_added = 0
         self.size_added = 0
+
         self.deletes = defaultdict(set)   # {(table, columns_tuple): set([(column_value,)])}
         self.inserts = defaultdict(dict)  # {(command, header, row_schema, suffix): {rowkey: [row]}}
 
     def delete_from(self, table, **kw):
-        """
-        .. caution:: The keyword values must have a valid str representation.
-        """
         if not kw:
             raise AssertionError("Need at least one column value")
         columns = tuple(sorted(kw))
         key = (table, columns)
         rows = self.deletes[key]
-        # string conversion in done by _do_deletes
         row = tuple(kw[column] for column in columns)
         rows.add(row)
         self.rows_added += 1
@@ -61,56 +74,73 @@ class RowBatcher(object):
         rows[rowkey] = row  # note that this may replace a row
         self.rows_added += 1
         self.size_added += size
+
         if (self.rows_added >= self.row_limit
                 or self.size_added >= self.size_limit):
             self.flush()
 
     def flush(self):
         if self.deletes:
-            self._do_deletes()
+            self.total_rows_deleted += self._do_deletes()
             self.deletes.clear()
         if self.inserts:
-            self._do_inserts()
+            self.total_rows_inserted += self._do_inserts()
             self.inserts.clear()
+        self.total_size_inserted += self.size_added
         self.rows_added = 0
         self.size_added = 0
 
     def _do_deletes(self):
+        count = 0
         for (table, columns), rows in sorted(iteritems(self.deletes)):
-            # XXX: Stop doing string conversion manually. Let the
-            # cursor do it. It may have a non-text protocol for integer
-            # objects; it may also have a different representation in text.
+            count += len(rows)
+            # Be careful not to use % formatting on a string already
+            # containing `delete_placeholder`
             if len(columns) == 1:
-                value_str = ','.join(str(v) for (v,) in rows)
+                # TODO: Some databases, like Postgres, natively support
+                # array types, which can be much faster.
+                # We should do that.
+                placeholder_str = ','.join([self.delete_placeholder] * len(rows))
                 stmt = "DELETE FROM %s WHERE %s IN (%s)" % (
-                    table, columns[0], value_str)
+                    table, columns[0], placeholder_str)
             else:
-                lines = []
-                for row in rows:
-                    line = []
-                    for i, column in enumerate(columns):
-                        line.append("%s = %s" % (column, row[i]))
-                    lines.append(" AND ".join(line))
+                row_template = " AND ".join(
+                    ("%s=" % (column,)) + self.delete_placeholder
+                    for column in columns
+                )
+                row_template = "(%s)" % (row_template,)
+                rows_template = [row_template] * len(rows)
                 stmt = "DELETE FROM %s WHERE %s" % (
-                    table, " OR ".join(lines))
+                    table, " OR ".join(rows_template))
 
-            self.cursor.execute(stmt)
+            rows = sorted(rows) if self.sorted_deletes else rows
+            rows = list(itertools.chain.from_iterable(rows))
+            self.cursor.execute(stmt, rows)
+        return count
 
     def _do_inserts(self):
-        items = sorted(iteritems(self.inserts))
+        count = 0
+        # In the case that we have only a single table we're inserting into,
+        # and thus common key values, we don't need to sort or iterate.
+        # If we have multiple tables, we never want to sort by the rows too,
+        # that doesn't make any sense.
+        if len(self.inserts) == 1:
+            items = [self.inserts.popitem()]
+        else:
+            items = sorted(iteritems(self.inserts), key=lambda i: i[0])
         for (command, header, row_schema, suffix), rows in items:
             # Batched inserts
-            parts = []
-            params = []
-            s = "(%s)" % row_schema
-            for row in itervalues(rows):
-                parts.append(s)
-                params.extend(row)
+            rows = list(rows.values())
+            count += len(rows)
+            value_template = "(%s)" % row_schema
+            values_template = [value_template] * len(rows)
+            params = list(itertools.chain.from_iterable(rows))
 
             stmt = "%s INTO %s VALUES\n%s\n%s" % (
-                command, header, ',\n'.join(parts), suffix)
+                command, header, ',\n'.join(values_template), suffix)
             # e.g.,
             # INSERT INTO table(c1, c2)
             # VALUES (%s, %s), (%s, %s), (%s, %s)
             # <suffix>
-            self.cursor.execute(stmt, tuple(params))
+            self.cursor.execute(stmt, params)
+        return count
