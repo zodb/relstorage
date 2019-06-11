@@ -36,6 +36,11 @@ class SizedLRUMappingTests(TestCase):
     def getClass(self):
         return SizedLRUMapping
 
+    def test_get_empty(self):
+        c = self.getClass()(100)
+        with self.assertRaises(KeyError):
+            c[(0, 0)] # pylint:disable=pointless-statement
+
     def test_age_empty(self):
         c = self.getClass()(100)
         c._age_factor = 0

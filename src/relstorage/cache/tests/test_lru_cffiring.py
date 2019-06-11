@@ -156,6 +156,35 @@ class GenericLRUCacheTests(TestCase):
         self.assertEqual(4, len(cache))
         return cache
 
+    def test_age(self):
+        cache = self._makeOne(100)
+
+        entries = cache.add_MRUs([
+            ((1, 0), (b'abcde', 0)),
+            ((2, 0), (b'abcde', 0)),
+            ((3, 0), (b'abcde', 0)),
+            ((4, 0), (b'abcde', 0)),
+        ])
+
+        self.assertEqual(
+            [(1, 0), (2, 0), (3, 0), (4, 0)],
+            [e.key for e in entries]
+        )
+
+        for _ in range(4):
+            for e in entries:
+                _ = cache[e.key]
+
+        freqs = [e.frequency for e in cache.entries()]
+        self.assertEqual([5] * len(entries), freqs)
+
+        # By half each time
+        cache.age_frequencies()
+        freqs = [e.frequency for e in cache.entries()]
+        self.assertEqual([2] * len(entries), freqs)
+        return cache
+
+
     def test_delete(self):
         cache = self._makeOne(20)
         cache[(1, 0)] = (b'abc', 0)
@@ -163,7 +192,7 @@ class GenericLRUCacheTests(TestCase):
         self.assertEqual(1, len(cache))
         self.assertEqual(3, cache.size)
         self.assertEqual((b'abc', 0), cache[(1, 0)])
-        self.assertEqual(list(cache), [(1,0)])
+        self.assertEqual(list(cache), [(1, 0)])
         del cache[(1, 0)]
         self.assertNotIn((1, 0), cache)
         self.assertEqual(0, len(cache))

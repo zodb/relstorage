@@ -64,8 +64,7 @@ class LocalClient(object):
     _bucket_type = SizedLRUMapping
 
     def __init__(self, options,
-                 prefix=None,
-                 lru_kind=None):
+                 prefix=None):
         self._lock = threading.Lock()
         self.options = options
         self.checkpoints = None
@@ -74,8 +73,8 @@ class LocalClient(object):
         # The real MB value is 1024 * 1024 = 1048576
         self.limit = int(1000000 * options.cache_local_mb)
         self._value_limit = options.cache_local_object_max
-        if lru_kind:
-            self._bucket_type = lru_kind
+        if options.cache_local_storage:
+            self._bucket_type = options.cache_local_storage
         self.__bucket = None
 
         # The {oid: tid} that we read from the cache.
@@ -170,15 +169,14 @@ class LocalClient(object):
 
     @staticmethod
     def key_weight(_):
-        # All keys are equally weighted: the size of two 64-bit
-        # integers
-        return 32
+        # All keys are equally weighted, and we don't count them.
+        return 0
 
     @staticmethod
     def value_weight(value):
         # Values are the (state, actual_tid) pair, and their
-        # weight is the size of the state plus one 64-bit integer
-        return len(value[0] if value[0] else b'') + 16
+        # weight is the size of the state
+        return len(value[0] if value[0] else b'')
 
     def flush_all(self):
         with self._lock:
@@ -397,7 +395,8 @@ class LocalClient(object):
         pop_min_required_tid = self._min_allowed_writeback.pop
         get_min_required_tid = self._min_allowed_writeback.get # pylint:disable=no-member
         get_current_oid_tid = stored_oid_tid.get
-        removed_entry_count = 0
+        min_allowed_count = 0
+        matching_tid_count = 0
         # When we accumulate all the rows here before returning them,
         # this function shows as about 3% of the total time to save
         # in a very large database.
@@ -408,14 +407,14 @@ class LocalClient(object):
                 actual_tid = entry.value[1]
                 min_allowed = get_min_required_tid(oid, -1)
                 if min_allowed > actual_tid:
-                    removed_entry_count += 1
+                    min_allowed_count += 1
                     continue
 
                 # If we have something >= min_allowed, but == this,
                 # it's not worth writing to the database (states should be identical).
                 current_tid = get_current_oid_tid(oid, -1)
                 if current_tid >= actual_tid:
-                    removed_entry_count += 1
+                    matching_tid_count += 1
                     continue
 
                 yield (oid, actual_tid, entry.value[0], entry.frequency)
@@ -426,9 +425,13 @@ class LocalClient(object):
                 # Move this and write a test.
                 pop_min_required_tid(oid, None)
 
-        logger.debug("Consolidated from %d entries to %d entries in %s",
-                     all_entries_len, len(newest_entries) - removed_entry_count,
-                     t.duration)
+        removed_entry_count = matching_tid_count + min_allowed_count
+        logger.info(
+            "Consolidated from %d entries to %d entries "
+            "(rejected stale: %d; already in db: %d) in %s",
+            all_entries_len, len(newest_entries) - removed_entry_count,
+            min_allowed_count, matching_tid_count,
+            t.duration)
 
     @_log_timed
     def write_to_sqlite(self, connection):
@@ -452,7 +455,7 @@ class LocalClient(object):
             cur.execute('BEGIN')
             stored_oid_tid = db.oid_to_tid
             fetch_current = time.time()
-            count_written, bytes_written = db.store_temp(self._items_to_write(stored_oid_tid))
+            count_written, _ = db.store_temp(self._items_to_write(stored_oid_tid))
             cur.execute("COMMIT")
 
 
@@ -504,14 +507,14 @@ class LocalClient(object):
         stats = self.stats()
         mem_after = get_memory_usage()
         logger.info(
-            "Wrote %d items (%d bytes) to %s in %s "
+            "Wrote %d items to %s in %s "
             "(%s to fetch current, %s to insert batch, %s to write, %s to trim, %s to gc). "
-            "Used %s memory. "
+            "Used %s memory. (Storage: %s) "
             "Total hits %s; misses %s; ratio %s (stores: %s)",
-            count_written, bytes_written, connection, end - begin,
+            count_written, connection, end - begin,
             fetch_current - begin, batch_timer.duration, exclusive_timer.duration,
             trim_timer.duration, gc_timer.duration,
-            byte_display(mem_after - mem_before),
+            byte_display(mem_after - mem_before), self._bucket0,
             stats['hits'], stats['misses'], stats['ratio'], stats['sets'])
 
         return count_written

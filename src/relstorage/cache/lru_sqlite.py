@@ -71,7 +71,6 @@ class SQLiteCache(object):
 
         self.cursor = conn.cursor()
         self.time_of_use_counter = 0
-        self.size = 0
 
     size = weight = total_state_len = SimpleQueryProperty(
         "SELECT TOTAL(LENGTH(state)) FROM object_state"
@@ -80,6 +79,12 @@ class SQLiteCache(object):
     total_state_count = SimpleQueryProperty(
         "SELECT COUNT(zoid) FROM object_state"
     )
+
+    def __repr__(self):
+        return "<%s at %x using %r>" % (
+            self.__class__.__name__, id(self),
+            self.connection
+        )
 
     def stats(self):
         return {}
@@ -98,7 +103,7 @@ class SQLiteCache(object):
                       frequency = frequency + 1
         """
     else:
-        # XXX: This is really slow on conflicts.
+        # XXX: This seems really slow on conflicts.
         _insert_stmt = """
         INSERT OR REPLACE
         INTO object_state (zoid, key_tid, state, state_tid, time_of_use)
@@ -107,23 +112,21 @@ class SQLiteCache(object):
 
     def __setitem__(self, key, value):
         self.time_of_use_counter += 1
-        self.size += len(value[0])
-        cur = self.connection.cursor()
-        cur.execute("BEGIN")
         cur = self.connection.execute(
             self._insert_stmt,
             key + value + (self.time_of_use_counter, )
         )
-        self._trim(cur)
-        cur.execute("COMMIT")
         cur.close()
 
     def add_MRU(self, key, value):
         self[key] = value
         return Item(key, value)
 
-    def add_MRUs(self, key_values):
+    def add_MRUs(self, key_values, return_count_only=False):
         items = []
+        if return_count_only:
+            items.append(0)
+
         def k(begin_size, counter):
             written = begin_size
             for k, v in key_values:
@@ -131,7 +134,10 @@ class SQLiteCache(object):
                 weight = len(state)
                 if written + weight <= self.limit:
                     written += weight
-                    items.append(Item(k, v, weight))
+                    if return_count_only:
+                        items[0] += 1
+                    else:
+                        items.append(Item(k, v, weight))
                     oid, key_tid = k
                     counter += 1
                     yield oid, key_tid, state, state_tid, counter
@@ -153,7 +159,7 @@ class SQLiteCache(object):
         self._trim(cur)
         cur.execute("COMMIT")
         cur.close()
-        return items
+        return items if not return_count_only else items[0]
 
     def _trim(self, cur):
         size = self.size
@@ -164,7 +170,7 @@ class SQLiteCache(object):
 
             cur.execute(
                 'SELECT rowid, length(state) FROM object_state '
-                'ORDER BY time_of_use, LENGTH(state) DESC'
+                'ORDER BY time_of_use, frequency, LENGTH(state) DESC'
             )
 
             to_remove = []
@@ -174,15 +180,21 @@ class SQLiteCache(object):
                 if size <= limit:
                     break
 
-
             cur.executemany("""
             DELETE FROM object_state
             WHERE rowid = ?
             """, to_remove)
-            self.size = size
+
 
     def age_frequencies(self):
-        pass
+        cur = self.connection.cursor()
+        cur.execute('BEGIN')
+        cur.execute("UPDATE object_state SET frequency = frequency / 2")
+        # Remove 0 frequency items before trying more expensive
+        # trimming.
+        cur.execute('DELETE FROM object_state WHERE frequency = 0')
+        self._trim(cur)
+        cur.execute('COMMIT')
 
     age_lists = age_frequencies
 
@@ -272,10 +284,6 @@ class SQLiteCache(object):
             key
         )
 
-        try:
-            del self.size
-        except AttributeError:
-            pass
 
 @interface.implementer(ILRUEntry)
 class Item(object):

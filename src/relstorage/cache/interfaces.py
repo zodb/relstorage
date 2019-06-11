@@ -241,12 +241,14 @@ class ILRUCache(Interface):
         to make room.
         """
 
-    def add_MRUs(ordered_keys_and_values):
+    def add_MRUs(ordered_keys_and_values, return_count_only=False):
         """
         Add as many of the key/value pairs in *ordered_keys_and_values* as possible,
         without evicting any existing items.
 
-        Returns the entries that were added.
+        Returns the entries that were added, unless *return_count_only* is given,
+        in which case it returns the count added instead. (This can save memory
+        if the entries are not actually needed.)
         """
 
     def age_frequencies():
@@ -342,7 +344,8 @@ class GenerationalCacheBase(object):
         self.eden = eden
         self.protected = protected
         self.probation = probation
-        generations = list(GenerationalCacheBase.generations) # Preserve the NoSuchGeneration initializers
+        # Preserve the NoSuchGeneration initializers
+        generations = list(GenerationalCacheBase.generations)
         for gen in (self.protected, self.probation, self.eden):
             generations[gen.generation_number] = gen
         self.generations = tuple(generations)

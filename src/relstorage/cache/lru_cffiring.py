@@ -205,11 +205,11 @@ class CFFICache(GenerationalCacheBase):
         self.data[key] = item
         return item
 
-    def add_MRUs(self, ordered_keys):
+    def add_MRUs(self, ordered_keys, return_count_only=False):
         added_entries = self.eden.add_MRUs(ordered_keys)
         for entry in added_entries:
             self.data[entry.key] = entry
-        return added_entries
+        return added_entries if not return_count_only else len(added_entries)
 
     def update_MRU(self, entry, value):
         evicted_items = self.generations[entry.cffi_entry.r_parent].update_MRU(entry, value)

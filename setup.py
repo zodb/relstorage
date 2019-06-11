@@ -93,6 +93,7 @@ setup(
         'cffi',
         'perfmetrics',
         'zope.interface',
+        'zope.dottedname',
         'zc.lockfile',
         # These are the versions we're testing against. ZODB 5.2.2 is
         # when checkSecure() went away and IMVCCAfterCompletionStorage

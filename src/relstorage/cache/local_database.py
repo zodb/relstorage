@@ -47,10 +47,13 @@ class SimpleQueryProperty(object):
         if inst is None: # pragma: no cover
             return self
 
-        inst.cursor.execute(
+        cur = inst.connection.execute(
             self.query,
             [getattr(inst, n) for n in self.param_names])
-        return inst.cursor.fetchone()[0]
+
+        result = cur.fetchone()[0]
+        cur.close()
+        return result
 
 SUPPORTS_UPSERT = sqlite3.sqlite_version_info >= (3, 28) # 2019-04-16
 SUPPORTS_WINDOW = sqlite3.sqlite_version_info >= (3, 25) # 2018-09-15
@@ -194,16 +197,14 @@ class Database(ABC):
         # in *this* function right here, nothing any lower (the next lower function it shows is
         # _pysqlite_fetch_one_row, taking  1.1% of the execution of *this* function).
         # I'm Not entirely sure what that means.
+        rows = list(rows) # materialize
         self.cursor.executemany(
             'INSERT INTO temp_state(zoid, tid, state, frequency) '
             'VALUES (?, ?, ?, ?)',
             rows
         )
-        try:
-            return len(rows), -1
-        except TypeError:
-            # Must have been a generator. No way to know.
-            return -1, -1
+
+        return len(rows), -1
 
     @abstractmethod
     def move_from_temp(self):
@@ -273,7 +274,7 @@ class Database(ABC):
             cur.execute('VACUUM')
         logger.info(
             "Trimmed %d rows (desired: %d actual: %d)",
-            rows_deleted, limit, byte_count
+            rows_deleted, limit, self.total_state_len
         )
 
 

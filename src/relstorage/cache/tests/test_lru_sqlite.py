@@ -22,3 +22,19 @@ class CacheTests(GenericLRUCacheTests):
     def _getClass(self):
         from relstorage.cache.lru_sqlite import SQLiteCache
         return SQLiteCache
+
+    def test_age(self):
+        cache = super(CacheTests, self).test_age()
+        # In our case, aging also trims
+        self.assertEqual(4, len(cache))
+        self.assertEqual(20, cache.size)
+        cache.limit = 10
+        cache.age_frequencies()
+        self.assertEqual(2, len(cache))
+        self.assertEqual(10, cache.size)
+        freqs = [e.frequency for e in cache.entries()]
+        self.assertEqual([1] * len(freqs), freqs)
+
+        # A frequency going to 0 removes it entirely
+        cache.age_frequencies()
+        self.assertEqual(0, len(cache))

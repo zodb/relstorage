@@ -698,8 +698,9 @@ class StorageCache(object):
     def __poll_establish_global_checkpoints(self, new_tid_int):
         # Because we *always* have checkpoints in our
         # local_client, once we've set them, this also means that
-        # it was our first poll.
-        assert not self.checkpoints
+        # it was our first poll. Of course, with multi-threaded race conditions,
+        # that might not actually be the case.
+        # assert not self.checkpoints
 
         # Initialize the checkpoints; we've never polled before.
         log.debug("Initializing checkpoints: %s", new_tid_int)

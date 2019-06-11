@@ -74,6 +74,9 @@
     <key name="cache-local-mb" datatype="integer" required="no">
       <description>See the RelStorage README.txt file.</description>
     </key>
+    <key name="cache-local-storage" datatype="dotted-name" required="no">
+      <description>Undocumented in 3.0a1.</description>
+    </key>
     <key name="cache-local-dir" datatype="string" required="no">
       <description>See the RelStorage README.txt file.</description>
     </key>
@@ -83,10 +86,10 @@
     <key name="cache-local-dir-read-count" datatype="integer" required="no">
       <description>See the RelStorage README.txt file.</description>
     </key>
-    <key name="cache-local-dir-compress" datatype="boolean" required="no" default="false">
+    <key name="cache-local-dir-compress" datatype="boolean" required="no">
       <description>See the RelStorage README.txt file.</description>
     </key>
-    <key name="cache-local-dir-write-max-size" datatype="byte-size" required="no" default="0">
+    <key name="cache-local-dir-write-max-size" datatype="byte-size" required="no">
       <description>See the RelStorage README.txt file.</description>
     </key>
     <key name="cache-local-object-max" datatype="byte-size" required="no">

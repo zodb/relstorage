@@ -181,7 +181,8 @@ def local_benchmark(runner):
     #      "Data size", byte_display(sum((len(v[1][0]) for v in ALL_DATA))))
 
     def makeOne(bucket_kind, populate=True):
-        client = LocalClient(options, 'pfx', bucket_kind)
+        options.cache_local_storage = bucket_kind
+        client = LocalClient(options, 'pfx')
         if populate:
             client._bucket0.bulk_update(ALL_DATA)
         return client
@@ -621,11 +622,12 @@ def save_load_benchmark(runner):
     cache_options.cache_local_dir = runner.args.temp #'/tmp'
     cache_options.cache_local_dir_compress = False
     cache_options.cache_local_mb = 525
+    cache_options.cache_local_storage = SqlMapping
 
     # Note use of worker task number: This is fragile and directly relates to
     # the order in which we pass functions to run_and_report_funcs
     def create_and_populate_client():
-        client = LocalClient(cache_options, cache_pfx, SqlMapping)
+        client = LocalClient(cache_options, cache_pfx)
         # Monkey with the internals so we don't have to
         # populate multiple times.
         bucket = client._bucket0
@@ -715,7 +717,7 @@ def save_load_benchmark(runner):
 
     def read_client():
         begin = perf_counter()
-        c2 = LocalClient(cache_options, cache_pfx, SqlMapping)
+        c2 = LocalClient(cache_options, cache_pfx)
         c2.restore()
         end = perf_counter()
         return end - begin

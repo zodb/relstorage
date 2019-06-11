@@ -67,6 +67,11 @@
   while still using the C extensions of ``mysqlclient`` to communicate
   with MySQL. This is now recommended over ``umysqldb``.
 
+- Rewrite the persistent cache implementation. It now is likely to
+  produce much higher hit rates (100% on some benchmarks, compared to
+  1-2% before). It is currently slower to read and write, however.
+  This is a work in progress. See :pr:`243`.
+
 2.1.1 (2019-01-07)
 ==================
 

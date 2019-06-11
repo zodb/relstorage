@@ -115,9 +115,10 @@ class SizedLRUMapping(object):
         return iter(self._cache)
 
     def __repr__(self):
-        return "<%s at %x size=%d limit=%d len=%d hit_ratio=%d>" % (
+        return "<%s at %x size=%d limit=%d len=%d hit_ratio=%d cache=%r>" % (
             self.__class__.__name__, id(self),
-            self.size, self.limit, len(self), self.stats()['hits']
+            self.size, self.limit, len(self), self.stats()['hits'],
+            self._cache
         )
 
     def values(self):
@@ -269,7 +270,7 @@ class SizedLRUMapping(object):
         """
         now = time.time()
         mem_usage_before = mem_usage_before if mem_usage_before is not None else get_memory_usage()
-
+        mem_usage_before_this = get_memory_usage()
         log_count = log_count or len(keys_and_values)
 
         data = self._cache
@@ -286,18 +287,21 @@ class SizedLRUMapping(object):
                                         if t[0] not in data]
             new_entries_newest_first.reverse()
             keys_and_values = new_entries_newest_first
+            del new_entries_newest_first
 
-        added_entries = data.add_MRUs(keys_and_values)
-        stored = len(added_entries)
+        stored = data.add_MRUs(keys_and_values, return_count_only=True)
 
         then = time.time()
         del keys_and_values # For memory reporting.
-        del added_entries
         mem_usage_after = get_memory_usage()
-        log.debug(
-            "Examined %d and stored %d items from %s in %s using %s bytes.",
+        log.info(
+            "Examined %d and stored %d items from %s in %s using %s. "
+            "(%s local) (%s)",
             log_count, stored, getattr(source, 'name', source),
-            then - now, byte_display(mem_usage_after - mem_usage_before))
+            then - now,
+            byte_display(mem_usage_after - mem_usage_before),
+            byte_display(mem_usage_after - mem_usage_before_this),
+            self)
         return log_count, stored
 
     def items_to_write(self,

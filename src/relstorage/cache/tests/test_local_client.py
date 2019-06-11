@@ -20,6 +20,8 @@ from functools import partial
 
 from relstorage.tests import TestCase
 
+from relstorage.cache.mapping import SizedLRUMapping
+from relstorage.cache.lru_sqlite import SqlMapping
 
 from . import LocalClient
 from . import MockOptions
@@ -27,76 +29,49 @@ from . import list_lrukeys as list_lrukeys_
 from . import list_lrufreq as list_lrufreq_
 from .test_memcache_client import AbstractStateCacheTests
 
-class LocalClientStrKeysValues(LocalClient):
-    # Make the cache accept and return str keys and values,
-    # for ease of dealing with size limits,
-    # bust mostly for compatibility with old tests, before LocalClient
-    # implemented IStateCache
 
-    key_weight = len
+class MockOptionsWithSQL(MockOptions):
+    cache_local_storage = SqlMapping
 
-    def value_weight(self, value):
-        return len(value[0] if value[0] else b'')
+class MockOptionsWithMapping(MockOptions):
+    cache_local_storage = SizedLRUMapping
 
-    def __setitem__(self, key, val):
-        super(LocalClientStrKeysValues, self).__setitem__(key, (val, 0))
 
-    def __getitem__(self, key):
-        v = self(None, None, None, (key, None))
-        if v is not None:
-            v = v[0]
-        return v
+class LocalClientStrKeysValuesGenerationalTests(TestCase):
+    """
+    Depend on having an IGenerationalLRUCache as the backing storage.
+    """
 
-class LocalClientStrKeysValuesTests(TestCase):
+    class LocalClientStrKeysValues(LocalClient):
+        # Make the cache accept and return str keys and values,
+        # for ease of dealing with size limits,
+        # bust mostly for compatibility with old tests, before LocalClient
+        # implemented IStateCache
+
+        key_weight = len
+
+        def value_weight(self, value):
+            return len(value[0] if value[0] else b'')
+
+        def __setitem__(self, key, val):
+            LocalClient.__setitem__(self, key, (val, 0))
+
+        def __getitem__(self, key):
+            v = self(None, None, None, (key, None))
+            if v is not None:
+                v = v[0]
+            return v
+
     def getClass(self):
-        return LocalClientStrKeysValues
+        return self.LocalClientStrKeysValues
+
+    Options = MockOptions
 
     def _makeOne(self, **kw):
-        options = MockOptions.from_args(**kw)
+        options = self.Options.from_args(**kw)
         inst = self.getClass()(options, 'pfx')
         inst.restore()
         return inst
-
-    def test_ctor(self):
-        c = self._makeOne()
-        self.assertEqual(c.limit, 1000000)
-        self.assertEqual(c._value_limit, 16384)
-        # cover
-        self.assertIn('hits', c.stats())
-        c.reset_stats()
-        c.close()
-
-        self.assertRaises(ValueError,
-                          self._makeOne,
-                          cache_local_compression='unsup')
-
-    def test_set_and_get_string_compressed(self):
-        c = self._makeOne(cache_local_compression='zlib')
-        c['abc'] = b'def'
-        self.assertEqual(c['abc'], b'def')
-        self.assertEqual(c['xyz'], None)
-
-    def test_set_and_get_string_uncompressed(self):
-        c = self._makeOne(cache_local_compression='none')
-        c['abc'] = b'def'
-        self.assertEqual(c['abc'], b'def')
-        self.assertEqual(c['xyz'], None)
-
-    def test_set_and_get_object_too_large(self):
-        c = self._makeOne(cache_local_compression='none')
-        c['abc'] = b'abcdefgh' * 10000
-        self.assertEqual(c['abc'], None)
-
-    def test_set_with_zero_space(self):
-        options = MockOptions()
-        options.cache_local_mb = 0
-        c = self.getClass()(options)
-        self.assertEqual(c.limit, 0)
-        self.assertEqual(c._value_limit, 16384)
-        c['abc'] = 1
-        c['def'] = b''
-        self.assertEqual(c['abc'], None)
-        self.assertEqual(c['def'], None)
 
     def test_bucket_sizes_without_compression(self):
         # pylint:disable=too-many-statements
@@ -321,91 +296,11 @@ class LocalClientStrKeysValuesTests(TestCase):
         self.assertEqual(list_lrukeys('probation'), ['k6'])
         self.assertEqual(list_lrukeys('protected'), ['k1'])
 
-    def test_load_and_save(self):
-        # pylint:disable=too-many-statements,too-many-locals
-        import tempfile
-        import shutil
-        import os
-
-        root_temp_dir = tempfile.mkdtemp(".rstest_cache")
-        self.addCleanup(shutil.rmtree, root_temp_dir, True)
-        # Intermediate directories will be auto-created
-        temp_dir = os.path.join(root_temp_dir, 'child1', 'child2')
-
-        c = self._makeOne(cache_local_dir=temp_dir)
-        # Doing the restore created the database.
-        files = os.listdir(temp_dir)
-        __traceback_info__ = files
-        # There may be up to 3 files here, including the -wal and -shm
-        # files, depending on how the database is closed and how the database
-        # was configured. It also depends os when we look: some of the wal cleanup
-        # we push to a background thread.
-        def get_cache_files():
-            return [x for x in os.listdir(temp_dir) if x.endswith('sqlite3')]
-        cache_files = get_cache_files()
-        len_initial_cache_files = len(cache_files)
-        self.assertEqual(len_initial_cache_files, 1)
-        # Saving an empty bucket does nothing
-        self.assertFalse(c.save(close_async=False))
-
-        # Watch the tids here: The LocalClientStrKeysValues layer
-        # puts a tid of 0 in the value portion, and then later
-        # we normalize all those on read.
-        key = (0, 0)
-        val = b'abc'
-        c[key] = val
-        c.__getitem__(key) # Increment the count so it gets saved
-        self.assertTrue(c.save(close_async=False))
-        cache_files = get_cache_files()
-        self.assertEqual(len(cache_files), len_initial_cache_files)
-        self.assertTrue(cache_files[0].startswith('relstorage-cache-'), cache_files)
-
-        # Loading it works
-        c2 = self._makeOne(cache_local_dir=temp_dir)
-        self.assertEqual(c2[key], val)
-        cache_files = get_cache_files()
-        self.assertEqual(len_initial_cache_files, len(cache_files))
-
-        # Add a new key and saving updates the existing file.
-        key2 = (1, 1)
-        val2 = b'def'
-        c2[key2] = val2
-        c2.__getitem__(key2) # increment
-
-        c2.save(close_async=False)
-        new_cache_files = get_cache_files()
-        # Same file still
-        self.assertEqual(cache_files, new_cache_files)
-
-        # And again
-        cache_files = new_cache_files
-        c2.save(close_async=False)
-        new_cache_files = get_cache_files()
-        self.assertEqual(cache_files, new_cache_files)
-
-        # Notice, though, that we normalized the tid value
-        # on reading.
-        c3 = self._makeOne(cache_local_dir=temp_dir)
-        self.assertEqual(c3[key], val)
-        self.assertIsNone(c3[key2])
-        self.assertEqual(c3[(1, 0)], val2)
-
-        # If we corrupt the file, it is silently ignored and removed
-        for f in new_cache_files:
-            with open(os.path.join(temp_dir, f), 'wb') as f:
-                f.write(b'Nope!')
-
-        c3 = self._makeOne(cache_local_dir=temp_dir)
-        self.assertEqual(c3[key], None)
-        cache_files = get_cache_files()
-        self.assertEqual(len_initial_cache_files, len(cache_files))
-
-        # At no point did we spawn extra threads
-        self.assertEqual(1, threading.active_count())
-
 
 class LocalClientOIDTests(AbstractStateCacheTests):
     # Uses true oid/int keys and state/tid values.
+
+    Options = MockOptionsWithMapping
 
     tid = 34567
     key_tid = 33333
@@ -414,8 +309,15 @@ class LocalClientOIDTests(AbstractStateCacheTests):
     key = (oid, key_tid)
     value = (b'statebytes', tid)
 
+    missing_key = (-1, -1)
+
     def getClass(self):
         return LocalClient
+
+    def test_bucket_kind(self):
+        c = self._makeOne()
+        bucket = c._bucket0
+        self.assertIsInstance(bucket, self.Options.cache_local_storage)
 
     def test_items(self):
         c = self._makeOne()
@@ -487,3 +389,133 @@ class LocalClientOIDTests(AbstractStateCacheTests):
         # it's there.
         c.write_to_sqlite(conn)
         self.assertEmpty(db.oid_to_tid)
+
+    def test_ctor(self):
+        c = self._makeOne()
+        self.assertEqual(c.limit, 1000000)
+        self.assertEqual(c._value_limit, 16384)
+        # cover
+        self.assertIn('hits', c.stats())
+        c.reset_stats()
+        c.close()
+
+        self.assertRaises(ValueError,
+                          self._makeOne,
+                          cache_local_compression='unsup')
+
+    def test_set_and_get_string_compressed(self):
+        c = self._makeOne(cache_local_compression='zlib')
+        c[self.key] = self.value
+        self.assertEqual(c[self.key], self.value)
+        self.assertEqual(c[self.missing_key], None)
+
+    def test_set_and_get_string_uncompressed(self):
+        c = self._makeOne(cache_local_compression='none')
+        c[self.key] = self.value
+        self.assertEqual(c[self.key], self.value)
+        self.assertEqual(c[self.missing_key], None)
+
+    def test_set_and_get_object_too_large(self):
+        c = self._makeOne(cache_local_compression='none')
+        c[self.key] = (b'abcdefgh' * 10000, 1)
+        self.assertEqual(c[self.key], None)
+
+    def test_set_with_zero_space(self):
+        c = self._makeOne(cache_local_mb=0)
+        self.assertEqual(c.limit, 0)
+        self.assertEqual(c._value_limit, 16384)
+        c[self.key] = self.value
+        c[self.missing_key] = (b'', 1)
+        self.assertEqual(c[self.key], None)
+        self.assertEqual(c[self.missing_key], None)
+
+    def test_load_and_save(self):
+        # pylint:disable=too-many-statements,too-many-locals
+        import tempfile
+        import shutil
+        import os
+
+        root_temp_dir = tempfile.mkdtemp(".rstest_cache")
+        self.addCleanup(shutil.rmtree, root_temp_dir, True)
+        # Intermediate directories will be auto-created
+        temp_dir = os.path.join(root_temp_dir, 'child1', 'child2')
+
+        c = self._makeOne(cache_local_dir=temp_dir)
+        c.restore()
+        # Doing the restore created the database.
+        files = os.listdir(temp_dir)
+        __traceback_info__ = files
+        # There may be up to 3 files here, including the -wal and -shm
+        # files, depending on how the database is closed and how the database
+        # was configured. It also depends os when we look: some of the wal cleanup
+        # we push to a background thread.
+        def get_cache_files():
+            return [x for x in os.listdir(temp_dir) if x.endswith('sqlite3')]
+        cache_files = get_cache_files()
+        len_initial_cache_files = len(cache_files)
+        self.assertEqual(len_initial_cache_files, 1)
+        # Saving an empty bucket does nothing
+        self.assertFalse(c.save(close_async=False))
+
+        key = (0, 0)
+        val = (b'abc', 0)
+        c[key] = val
+        c.__getitem__(key) # Increment the count so it gets saved
+        self.assertEqual(c[key], val)
+
+        self.assertTrue(c.save(close_async=False))
+
+        cache_files = get_cache_files()
+        self.assertEqual(len(cache_files), len_initial_cache_files)
+        self.assertTrue(cache_files[0].startswith('relstorage-cache-'), cache_files)
+
+        # Loading it works
+        c2 = self._makeOne(cache_local_dir=temp_dir)
+        c2.restore()
+        self.assertEqual(c2[key], val)
+        cache_files = get_cache_files()
+        self.assertEqual(len_initial_cache_files, len(cache_files))
+
+        # Add a new key and saving updates the existing file.
+        key2 = (1, 1)
+        val2 = (b'def', 0)
+        c2[key2] = val2
+        c2.__getitem__(key2) # increment
+
+        c2.save(close_async=False)
+        new_cache_files = get_cache_files()
+        # Same file still
+        self.assertEqual(cache_files, new_cache_files)
+
+        # And again
+        cache_files = new_cache_files
+        c2.save(close_async=False)
+        new_cache_files = get_cache_files()
+        self.assertEqual(cache_files, new_cache_files)
+
+        # Notice, though, that we normalized the tid value
+        # on reading.
+        c3 = self._makeOne(cache_local_dir=temp_dir)
+        c3.restore()
+        self.assertEqual(c3[key], val)
+        self.assertIsNone(c3[key2])
+        self.assertEqual(c3[(1, 0)], val2)
+
+        # If we corrupt the file, it is silently ignored and removed
+        for f in new_cache_files:
+            with open(os.path.join(temp_dir, f), 'wb') as f:
+                f.write(b'Nope!')
+
+        c3 = self._makeOne(cache_local_dir=temp_dir)
+        c3.restore()
+        self.assertEqual(c3[key], None)
+        cache_files = get_cache_files()
+        self.assertEqual(len_initial_cache_files, len(cache_files))
+
+        # At no point did we spawn extra threads
+        self.assertEqual(1, threading.active_count())
+
+
+class LocalClientSqlOIDTests(LocalClientOIDTests):
+
+    Options = MockOptionsWithSQL
