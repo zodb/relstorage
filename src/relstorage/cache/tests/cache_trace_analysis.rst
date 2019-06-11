@@ -48,14 +48,14 @@ Check to make sure the cache analysis scripts work.
     ...             cache.after_poll(None, cache.current_tid, serial, [(oid, serial)])
     ...             assert cache.current_tid == serial
     ...             cache.store_temp(oid, data)
-    ...             cache.send_queue(p64(serial))
+    ...             cache._send_queue(p64(serial))
     ...             cache.adapter.mover.data[oid] = (data, serial)
     ...         else:
     ...             new_cache.current_tid = serial
     ...             v = new_cache.load(None, oid)
     ...             if v[0] is None:
     ...                 new_cache.store_temp(oid, data)
-    ...                 new_cache.send_queue(p64(serial))
+    ...                 new_cache._send_queue(p64(serial))
     ...                 cache.adapter.mover.data[oid] = (data, serial)
     ...     cache.close(close_async=False)
 

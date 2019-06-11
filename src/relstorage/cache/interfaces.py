@@ -73,9 +73,17 @@ class IStateCache(Interface):
         matches the value tid.
         """
 
-    def set_multi(keys_and_values):
+    def set_all_for_tid(tid_int, state_oid_iter):
         """
-        Given a mapping from keys to values, set them all.
+        Store the states for the ``(state, oid_int)`` pairs under
+        ``(oid_int, tid_int)`` keys.
+
+        The *state_oid_iter* is an **iteable** of ``(state, oid_int)`` pairs;
+        this method may choose to buffer a limited amount of those pairs before
+        passing them on to the underlying storage in a bulk group.
+
+        As an **iterable**, *state_oid_iter* may be consumed multiple
+        times.
         """
 
     def store_checkpoints(cp0_tid, cp1_tid):
@@ -99,6 +107,16 @@ class IStateCache(Interface):
         """
         Clear cached data.
         """
+
+    ##
+    # Methods that are here to assist with tracing.
+    ##
+
+    def updating_delta_map(oid_tid_map):
+        """
+        Return a new map that can (temporarily) observe set actions.
+        """
+
 
 class IPersistentCache(Interface):
     """

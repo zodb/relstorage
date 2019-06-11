@@ -35,6 +35,10 @@ from relstorage.cache.interfaces import IStateCache
 @interface.implementer(IStateCache)
 class MemcacheStateCache(object):
 
+    # send_limit: approximate limit on the bytes to buffer before
+    # sending to the cache.
+    send_limit = 1024 * 1024
+
     @classmethod
     def from_options(cls, options, prefix=''):
         """
@@ -93,12 +97,29 @@ class MemcacheStateCache(object):
         cache_data = p64(actual_tid) + (state_bytes or b'')
         self.client.set(key, cache_data)
 
-    def set_multi(self, keys_and_values):
+    def _set_multi(self, keys_and_values):
         formatted = {
             '%s:state:%d:%d' % (self.prefix, tid, oid): (p64(actual_tid) + (state or b''))
             for (oid, tid), (state, actual_tid) in iteritems(keys_and_values)
         }
         self.client.set_multi(formatted)
+
+    def set_all_for_tid(self, tid_int, state_oid_iter):
+        send_size = 0
+        to_send = {}
+        for state, oid_int in state_oid_iter:
+            length = len(state)
+            cachekey = (oid_int, tid_int)
+            item_size = length + len(cachekey)
+            if send_size and send_size + item_size >= self.send_limit:
+                self._set_multi(to_send)
+                to_send.clear()
+                send_size = 0
+            to_send[cachekey] = (state, tid_int)
+            send_size += item_size
+
+        if to_send:
+            self._set_multi(to_send)
 
     def store_checkpoints(self, cp0_tid, cp1_tid):
         checkpoint_data = '%d %d' % (cp0_tid, cp1_tid)
@@ -125,3 +146,6 @@ class MemcacheStateCache(object):
 
     def flush_all(self):
         self.client.flush_all()
+
+    def updating_delta_map(self, deltas):
+        return deltas

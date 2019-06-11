@@ -25,16 +25,17 @@ from ZODB.utils import p64
 from ZODB.utils import u64
 from zope import interface
 
-from relstorage._compat import iteritems
 
 from relstorage.autotemp import AutoTemporaryFile
 from relstorage.cache import persistence
 from relstorage.cache.interfaces import IPersistentCache
-from relstorage.cache.interfaces import IStateCache
 from relstorage.cache.interfaces import OID_TID_MAP_TYPE
+from relstorage.cache.interfaces import OID_OBJECT_MAP_TYPE
 from relstorage.cache.local_client import LocalClient
 from relstorage.cache.memcache_client import MemcacheStateCache
 from relstorage.cache.trace import ZEOTracer
+from relstorage.cache._statecache_wrappers import MultiStateCache
+from relstorage.cache._statecache_wrappers import TracingStateCache
 
 logger = log = logging.getLogger(__name__)
 
@@ -46,71 +47,6 @@ class _UsedAfterRelease(object):
     stats = lambda s: {}
 _UsedAfterRelease = _UsedAfterRelease()
 
-@interface.implementer(IStateCache)
-class _MultiStateCache(object):
-    """
-    A proxy that encapsulates the handling of a local and a global
-    cache.
-
-    This lets us write loop-free code in all cases in StorageCache,
-    but still use both local and global caches.
-
-    For the case that there's just a local cache, which is common and
-    semi-recommended, we can just use that object directly.
-    """
-
-    __slots__ = ('l', 'g')
-
-    def __init__(self, lcache, gcache):
-        self.l = lcache
-        self.g = gcache
-
-    def close(self):
-        if self.l is not None:
-            self.l.close()
-            self.g.close()
-            self.l = None
-            self.g = None
-
-    def flush_all(self):
-        self.l.flush_all()
-        self.g.flush_all()
-
-    def __getitem__(self, key):
-        result = self.l[key]
-        if not result:
-            result = self.g[key]
-            if result:
-                self.l[key] = result
-        return result
-
-    def __setitem__(self, key, value):
-        self.l[key] = value
-        self.g[key] = value
-
-    def __call__(self, oid, tid1, tid2):
-        result = self.l(oid, tid1, tid2)
-        if not result:
-            result = self.g(oid, tid1, tid2)
-            if result:
-                self.l[(oid, tid1)] = result
-        return result
-
-    def set_multi(self, data):
-        self.l.set_multi(data)
-        self.g.set_multi(data)
-
-    # Unlike everything else, checkpoints are on the global
-    # client first and then the local one.
-
-    def get_checkpoints(self):
-        return self.g.get_checkpoints() or self.l.get_checkpoints()
-
-    def store_checkpoints(self, c0, c1):
-        # TODO: Is there really much value in storing the checkpoints
-        # globally (as opposed to just on a single process)?
-        self.g.store_checkpoints(c0, c1)
-        return self.l.store_checkpoints(c0, c1)
 
 
 @interface.implementer(IPersistentCache)
@@ -123,16 +59,12 @@ class StorageCache(object):
     """
     # pylint:disable=too-many-instance-attributes,too-many-public-methods
 
-    # send_limit: approximate limit on the bytes to buffer before
-    # sending to the cache.
-    send_limit = 1024 * 1024
-
-    # queue is an AutoTemporaryFile during transaction commit.
+    # queue is a _TemporaryStorage used during commit
     queue = None
-
-    # queue_contents is a map of {oid_int: (startpos, endpos)}
-    # during transaction commit.
-    queue_contents = None
+    # store_temp and read_temp are methods copied from the queue while
+    # we are committing.
+    store_temp = None
+    read_temp = None
 
     # checkpoints, when set, is a tuple containing the integer
     # transaction ID of the two current checkpoints. checkpoint0 is
@@ -180,7 +112,7 @@ class StorageCache(object):
 
         shared_cache = MemcacheStateCache.from_options(options, self.prefix)
         if shared_cache is not None:
-            self.cache = _MultiStateCache(self.local_client, shared_cache)
+            self.cache = MultiStateCache(self.local_client, shared_cache)
         else:
             self.cache = self.local_client
 
@@ -195,8 +127,7 @@ class StorageCache(object):
 
         self._tracer = _tracer
         if hasattr(self._tracer, 'trace_store_current'):
-            self._trace = self._tracer.trace
-            self._trace_store_current = self._tracer.trace_store_current
+            self.cache = TracingStateCache(self.cache, _tracer)
 
     # XXX: Note that our __bool__ and __len__ are NOT consistent
     def __bool__(self):
@@ -307,8 +238,6 @@ class StorageCache(object):
             # Note we can't do this in release(). Release is called on
             # all instances, while close() is only called on the main one.
             self._tracer.close()
-            del self._trace
-            del self._trace_store_current
             del self._tracer
 
     def clear(self, load_persistent=True):
@@ -338,18 +267,6 @@ class StorageCache(object):
 
         if load_persistent:
             self.restore()
-
-    @staticmethod
-    def _trace(*_args, **_kwargs): # pylint:disable=method-hidden
-        # TODO: Introduce a IStateCache wrapper for handling tracing.
-        # The fastest method is the one you don't call.
-        # Dummy method for when we don't do tracing
-        return
-
-    @staticmethod
-    def _trace_store_current(_tid_int, _items): # pylint:disable=method-hidden
-        # Dummy method for when we don't do tracing
-        return
 
     def _check_tid_after_load(self, oid_int, actual_tid_int,
                               expect_tid_int=None):
@@ -430,7 +347,8 @@ class StorageCache(object):
         # pylint:disable=too-many-statements,too-many-branches,too-many-locals
         if not self.checkpoints:
             # No poll has occurred yet. For safety, don't use the cache.
-            self._trace(0x20, oid_int)
+            # Note that without going through the cache, we can't
+            # go through tracing either.
             return self.adapter.mover.load_current(cursor, oid_int)
 
         # Get the object from the transaction specified
@@ -461,19 +379,16 @@ class StorageCache(object):
             if cache_data:
                 # Cache hit.
                 assert cache_data[1] == tid_int
-                # Note that we trace all cache hits, not just the local cache hit.
-                # This makes the simulation less useful, but the stats might still have
-                # value to people trying different tuning options manually.
-                self._trace(0x22, oid_int, tid_int, dlen=len(cache_data[0]))
                 return cache_data
 
             # Cache miss.
-            self._trace(0x20, oid_int)
             state, actual_tid_int = self.adapter.mover.load_current(
                 cursor, oid_int)
             self._check_tid_after_load(oid_int, actual_tid_int, tid_int)
 
             # At this point we know that tid_int == actual_tid_int
+            # XXX: Previously, we did not trace this as a store into the cache.
+            # Why?
             cache[key] = (state, actual_tid_int)
             return state, tid_int
 
@@ -496,91 +411,32 @@ class StorageCache(object):
         response = cache(oid_int, tid1, tid2)
         if response: # We have a hit!
             state, actual_tid = response
-            # Cache hit
-            self._trace(0x22, oid_int, actual_tid, dlen=len(state))
             return state, actual_tid
 
         # Cache miss.
-        self._trace(0x20, oid_int)
         state, tid_int = self.adapter.mover.load_current(cursor, oid_int)
         if tid_int:
             self._check_tid_after_load(oid_int, tid_int)
-            # Record this as a store into the cache, ZEO does.
-            self._trace(0x52, oid_int, tid_int, dlen=len(state) if state else 0)
             cache[preferred_key] = (state, tid_int)
         return state, tid_int
 
     def tpc_begin(self):
         """Prepare temp space for objects to cache."""
-        # start with a fresh in-memory buffer instead of reusing one that might
-        # already be spooled to disk.
-        # TODO: An alternate idea would be a temporary sqlite database.
-        self.queue = AutoTemporaryFile()
-        self.queue_contents = {}
+        q = self.queue = _TemporaryStorage()
+        self.store_temp = q.store_temp
+        self.read_temp = q.read_temp
 
-    def store_temp(self, oid_int, state):
-        """Queue an object for caching.
-
-        Typically, we can't actually cache the object yet, because its
-        transaction ID is not yet chosen.
-        """
-        assert isinstance(state, bytes)
-        queue = self.queue
-        queue.seek(0, 2)  # seek to end
-        startpos = queue.tell()
-        queue.write(state)
-        endpos = queue.tell()
-        self.queue_contents[oid_int] = (startpos, endpos)
-
-
-    def _read_temp_state(self, startpos, endpos):
-        self.queue.seek(startpos)
-        length = endpos - startpos
-        state = self.queue.read(length)
-        if len(state) != length:
-            raise AssertionError("Queued cache data is truncated")
-        return state, length
-
-    def read_temp(self, oid_int):
-        """
-        Return the bytes for a previously stored temporary item.
-        """
-        startpos, endpos = self.queue_contents[oid_int]
-        return self._read_temp_state(startpos, endpos)[0]
-
-    def send_queue(self, tid):
+    def _send_queue(self, tid):
         """Now that this tid is known, send all queued objects to the cache"""
         tid_int = u64(tid)
-        send_size = 0
-        to_send = {}
 
-        # Order the queue by file position, which should help if the
-        # file is large and needs to be read sequentially from disk.
-        items = [
-            (startpos, endpos, oid_int)
-            for (oid_int, (startpos, endpos)) in iteritems(self.queue_contents)
-        ]
-        items.sort()
-        # Trace these. This is the equivalent of ZEOs
+        # Trace these. This is the equivalent of ZEO's
         # ClientStorage._update_cache.
-        self._trace_store_current(tid_int, items)
-        cache = self.cache
-        for startpos, endpos, oid_int in items:
-            state, length = self._read_temp_state(startpos, endpos)
-            cachekey = (oid_int, tid_int)
-            item_size = length + len(cachekey)
-            if send_size and send_size + item_size >= self.send_limit:
-                cache.set_multi(to_send)
-                to_send.clear()
-                send_size = 0
-            to_send[cachekey] = (state, tid_int)
-            send_size += item_size
-
-        if to_send:
-            cache.set_multi(to_send)
-
-        self.queue_contents.clear()
-        self.queue.seek(0)
+        self.cache.set_all_for_tid(tid_int, self.queue)
+        # We only do this because cache_trace_analysis uses us
+        # in ways that aren't quite accurate. We'd prefer to call clear_temp()
+        # at this point.
+        self.queue.reset()
 
     def after_tpc_finish(self, tid):
         """
@@ -593,20 +449,21 @@ class StorageCache(object):
         tid_int = u64(tid)
 
         if self.checkpoints:
-            for oid_int in self.queue_contents:
+            for oid_int in self.queue.stored_oids:
                 # Future cache lookups for oid_int should now use
                 # the tid just committed.
                 self.delta_after0[oid_int] = tid_int
 
-        self.send_queue(tid)
+        self._send_queue(tid)
 
     def clear_temp(self):
         """Discard all transaction-specific temporary data.
 
         Called after transaction finish or abort.
         """
-        self.queue_contents = None
         if self.queue is not None:
+            self.store_temp = None
+            self.read_temp = None
             self.queue.close()
             self.queue = None
 
@@ -712,15 +569,12 @@ class StorageCache(object):
         self.checkpoints = self.cache.store_checkpoints(new_tid_int, new_tid_int)
 
     def __poll_update_delta0_from_changes(self, changes):
-        m = self.delta_after0
+        m = self.cache.updating_delta_map(self.delta_after0)
         m_get = m.get
-        trace = self._trace
         for oid_int, tid_int in changes:
-            my_tid_int = m_get(oid_int)
-            if my_tid_int is None or tid_int > my_tid_int:
+            my_tid_int = m_get(oid_int, -1)
+            if tid_int > my_tid_int:
                 m[oid_int] = tid_int
-                # 0x1C = invalidate (hit, saving non-current)
-                trace(0x1C, oid_int, tid_int)
 
     def __poll_replace_checkpoints(self, cursor, new_checkpoints, new_tid_int):
         # We have to replace the checkpoints.
@@ -755,13 +609,13 @@ class StorageCache(object):
             del change_list
 
             # Put the changes in new_delta_after*.
+            updating_0 = self.cache.updating_delta_map(new_delta_after0)
+            updating_1 = self.cache.updating_delta_map(new_delta_after1)
             for oid_int, tid_int in change_dict.items():
-                # 0x1C = invalidate (hit, saving non-current)
-                self._trace(0x1C, oid_int, tid_int)
                 if tid_int > cp0:
-                    new_delta_after0[oid_int] = tid_int
+                    updating_0[oid_int] = tid_int
                 elif tid_int > cp1:
-                    new_delta_after1[oid_int] = tid_int
+                    updating_1[oid_int] = tid_int
 
         self.checkpoints = new_checkpoints
         self.delta_after0 = new_delta_after0
@@ -854,3 +708,70 @@ class _PersistentRowFilter(object):
                     # it might be something that doesn't change much.
                     key = (oid, cp0)
                 yield key, value
+
+
+class _TemporaryStorage(object):
+    def __init__(self):
+        # start with a fresh in-memory buffer instead of reusing one that might
+        # already be spooled to disk.
+        # TODO: An alternate idea would be a temporary sqlite database.
+        self._queue = AutoTemporaryFile()
+        self._queue_contents = OID_OBJECT_MAP_TYPE()
+
+    def reset(self):
+        self._queue_contents.clear()
+        self._queue.seek(0)
+
+    def store_temp(self, oid_int, state):
+        """Queue an object for caching.
+
+        Typically, we can't actually cache the object yet, because its
+        transaction ID is not yet chosen.
+        """
+        assert isinstance(state, bytes)
+        queue = self._queue
+        queue.seek(0, 2)  # seek to end
+        startpos = queue.tell()
+        queue.write(state)
+        endpos = queue.tell()
+        self._queue_contents[oid_int] = (startpos, endpos)
+
+    @property
+    def stored_oids(self):
+        return self._queue_contents
+
+    def _read_temp_state(self, startpos, endpos):
+        self._queue.seek(startpos)
+        length = endpos - startpos
+        state = self._queue.read(length)
+        if len(state) != length:
+            raise AssertionError("Queued cache data is truncated")
+        return state, length
+
+    def read_temp(self, oid_int):
+        """
+        Return the bytes for a previously stored temporary item.
+        """
+        startpos, endpos = self._queue_contents[oid_int]
+        return self._read_temp_state(startpos, endpos)[0]
+
+    def __iter__(self):
+        for startpos, endpos, oid_int in self.items():
+            state, _ = self._read_temp_state(startpos, endpos)
+            yield state, oid_int
+
+    def items(self):
+        # Order the queue by file position, which should help
+        # if the file is large and needs to be read
+        # sequentially from disk.
+        items = [
+            (startpos, endpos, oid_int)
+            for (oid_int, (startpos, endpos)) in self._queue_contents.items()
+        ]
+        items.sort()
+        return items
+
+    def close(self):
+        self._queue.close()
+        self._queue = None
+        self._queue_contents = None
