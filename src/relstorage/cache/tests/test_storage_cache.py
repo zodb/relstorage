@@ -194,14 +194,16 @@ class StorageCacheTests(TestCase):
         self.assertEqual(res, (b'abc', 55))
 
     def test_load_using_delta_after0_inconsistent(self):
+        from relstorage.cache.interfaces import CacheConsistencyError
         adapter = MockAdapter()
         c = self.getClass()(adapter, MockOptionsWithFakeCache(), 'myprefix')
         c.current_tid = 60
         c.checkpoints = (50, 40)
         c.delta_after0[2] = 55
         adapter.mover.data[2] = (b'abc', 56)
-        with self.assertRaisesRegex(AssertionError, "Detected an inconsistency"):
+        with self.assertRaisesRegex(CacheConsistencyError, "Detected an inconsistency"):
             c.load(None, 2)
+        self.assertIsNone(c.checkpoints)
 
     def test_load_using_delta_after0_future_error(self):
         adapter = MockAdapter()
@@ -410,15 +412,65 @@ class StorageCacheTests(TestCase):
         self.assertEqual(dict(c.delta_after0), {2: 45})
         self.assertEqual(dict(c.delta_after1), {1: 35})
 
+    def test_after_poll_new_checkpoints_bad_changes_duplicates(self):
+        from relstorage.tests.fakecache import data
+        from relstorage.cache.interfaces import CacheConsistencyError
+        data['myprefix:checkpoints'] = b'50 40'
+
+        # Note that OID 3 changed twice. `list_changes` is required
+        # to only produce the most recent change for a given
+        # OID, so this data is in violation of the contract. Make sure
+        # that we catch that.
+        changes = [(3, 42), (1, 35), (2, 45), (3, 41)]
+
+        adapter = MockAdapter()
+        c = self.getClass()(adapter, MockOptionsWithFakeCache(), 'myprefix')
+        adapter.poller.changes = changes
+        __traceback_info__ = adapter.poller.changes
+        c.checkpoints = (40, 30)
+        c.current_tid = 40
+
+        with self.assertRaisesRegex(CacheConsistencyError, "to have total len"):
+            c.after_poll(None, 40, 50, None)
+        self.assertIsNone(c.checkpoints)
+        self.assertEqual(0, c.current_tid)
+
+    def test_after_poll_new_checkpoints_bad_changes_out_of_order(self):
+        from relstorage.tests.fakecache import data
+        from relstorage.cache.interfaces import CacheConsistencyError
+        data['myprefix:checkpoints'] = b'50 40'
+
+        adapter = MockAdapter()
+        c = self.getClass()(adapter, MockOptionsWithFakeCache(), 'myprefix')
+        c.checkpoints = (40, 30)
+        c.current_tid = 40
+
+        # Too high
+        adapter.poller.list_changes = lambda *args: [(3, 51)]
+        with self.assertRaisesRegex(CacheConsistencyError, "out of range"):
+            c.after_poll(None, 40, 50, None)
+        self.assertIsNone(c.checkpoints)
+        self.assertEqual(0, c.current_tid)
+
+        # Too low
+        c.checkpoints = (40, 30)
+        c.current_tid = 40
+        adapter.poller.list_changes = lambda *args: [(3, 40)]
+        with self.assertRaisesRegex(CacheConsistencyError, "out of range"):
+            c.after_poll(None, 40, 50, None)
+        self.assertIsNone(c.checkpoints)
+        self.assertEqual(0, c.current_tid)
+
     def test_after_poll_new_checkpoints(self):
         from relstorage.tests.fakecache import data
         data['myprefix:checkpoints'] = b'50 40'
-        # Note that OID 3 changed twice.  list_changes is not required
-        # to provide the list of changes in order, so simulate
-        # a list of changes that is out of order. It's also not required
-        # to provide a list of tuples; it could provide a list of lists.
-        # That turns out to matter to the BTree constructor.
-        changes = [(3, 42), (1, 35), (2, 45), (3, 41)]
+
+        # list_changes isn't required to provide changes in any particular
+        # order.
+        # list_changes isn't not required to provide a list of tuples;
+        # it could provide a list of lists. That turns out to matter
+        # to the BTree constructor.
+        changes = [(3, 42), (1, 35), (2, 45)]
 
         for f in (tuple, list):
             adapter = MockAdapter()

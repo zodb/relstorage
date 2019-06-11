@@ -31,6 +31,7 @@ from relstorage.cache import persistence
 from relstorage.cache.interfaces import IPersistentCache
 from relstorage.cache.interfaces import OID_TID_MAP_TYPE
 from relstorage.cache.interfaces import OID_OBJECT_MAP_TYPE
+from relstorage.cache.interfaces import CacheConsistencyError
 from relstorage.cache.local_client import LocalClient
 from relstorage.cache.memcache_client import MemcacheStateCache
 from relstorage.cache.trace import ZEOTracer
@@ -240,30 +241,48 @@ class StorageCache(object):
             self._tracer.close()
             del self._tracer
 
+    def _reset(self, message=None):
+        """
+        Reset the transaction state of only this instance.
+
+        If this is being done in a transactional way, it must be followed
+        by raising an exception. If the *message* parameter is provided,
+        then a ``CacheConsistencyError`` will be raised when this
+        method returns.
+        """
+        # As if we've never polled
+        self.checkpoints = None
+        self.current_tid = 0
+        self.delta_after0 = self._delta_map_type()
+        self.delta_after1 = self._delta_map_type()
+        if message:
+            raise CacheConsistencyError(message)
+
+
     def clear(self, load_persistent=True):
         """
-        Remove all data from the cache.  Called by speed tests.
+        Remove all data from the cache, both locally (and shared among
+        other instances), and globally.
 
-        Starting from the introduction of persistent cache files,
-        this also results in the local client being repopulated with
-        the current set of persistent data. The *load_persistent* keyword can
-        be used to control this.
+        Called by speed tests.
 
-        .. versionchanged:: 2.0b6
-           Added the ``load_persistent`` keyword. This argument is provisional.
+        Starting from the introduction of persistent cache files, this
+        also results in the local client being repopulated with the
+        current set of persistent data. The *load_persistent* keyword
+        can be used to control this.
+
+        .. versionchanged:: 2.0b6 Added the ``load_persistent``
+        keyword. This argument is provisional.
         """
-        self.cache.flush_all()
-
-        self.checkpoints = None
+        self._reset()
         # After this our current_tid is probably out of sync with the
         # storage's current_tid. Whether or not we load data from
         # persistent caches, it's probably in the past of what the
         # storage thinks.
         # XXX: Ideally, we should be able to populate that information
         # back up so that we get the right polls.
-        self.current_tid = 0
-        self.delta_after0 = self._delta_map_type()
-        self.delta_after1 = self._delta_map_type()
+
+        self.cache.flush_all()
 
         if load_persistent:
             self.restore()
@@ -291,6 +310,10 @@ class StorageCache(object):
 
         if expect_tid_int is not None and actual_tid_int != expect_tid_int:
             # Uh-oh, the cache is inconsistent with the database.
+            # We didn't get a TID from the future, but it's not what we
+            # had in our delta_after0 map, which means...we missed a change
+            # somewhere.
+            #
             # Possible causes:
             #
             # - The database MUST provide a snapshot view for each
@@ -300,6 +323,10 @@ class StorageCache(object):
             #   can not provide a snapshot view. (InnoDB is
             #   sufficient.)
             #
+            # - (Similar to the last one.) Using too low of a
+            #   isolation level for the database connection and
+            #   viewing unrelated data.
+            #
             # - Something could be writing to the database out
             #   of order, such as a version of RelStorage that
             #   acquires a different commit lock.
@@ -308,6 +335,10 @@ class StorageCache(object):
             #   in after_poll() that caused it to ignore the
             #   transaction order, leading it to sometimes put the
             #   wrong tid in delta_after*.
+            #
+            # - Restarting a load connection at a future point we hadn't
+            #   actually polled to, such that our current_tid is out of sync
+            #   with the connection's *actual* viewable tid?
             cp0, cp1 = self.checkpoints
 
             msg = ("Detected an inconsistency "
@@ -333,8 +364,9 @@ class StorageCache(object):
                        'pid': os.getpid(),
                        'thread_ident': threading.current_thread(),
                    })
-            # TODO: Make this rasie a CacheCorruptedError.
-            raise AssertionError(msg)
+            # We reset ourself as if we hadn't polled, and hope the transient
+            # error gets retried in a working, consistent view.
+            self._reset(msg)
 
     def load(self, cursor, oid_int):
         """
@@ -363,12 +395,17 @@ class StorageCache(object):
         # checkpoints[0] is the preferred location.
         #
         # If delta_after0 contains oid_int, we should not look at any
-        # other cache keys, since the tid_int specified in delta_after0
-        # replaces all older transaction IDs. Similarly, if
-        # delta_after1 contains oid_int, we should not look at
-        # checkpoints[1]. Also, when both checkpoints are set to the
-        # same transaction ID, we don't need to ask for the same key
-        # twice.
+        # other cache keys, since the tid_int specified in
+        # delta_after0 replaces all older transaction IDs. We *know*
+        # that oid_int should be at (exactly) tid_int because we
+        # either made that change ourself (after_tpc_finish) *or* we
+        # have polled within our current database transaction (or a
+        # previous one) and been told that the oid changed in tid.
+        #
+        # Similarly, if delta_after1 contains oid_int, we should not
+        # look at checkpoints[1]. Also, when both checkpoints are set
+        # to the same transaction ID, we don't need to ask for the
+        # same key twice.
         cache = self.cache
         tid_int = self.delta_after0.get(oid_int)
         if tid_int:
@@ -427,11 +464,14 @@ class StorageCache(object):
         self.read_temp = q.read_temp
 
     def _send_queue(self, tid):
-        """Now that this tid is known, send all queued objects to the cache"""
+        """
+        Now that this tid is known, send all queued objects to the
+        cache. The cache will have ``(oid, tid)`` entry for each object
+        we have been holding on to (well, in a big transaction, some of them
+        might actually not get stored in the cache. But we try!)
+        """
         tid_int = u64(tid)
 
-        # Trace these. This is the equivalent of ZEO's
-        # ClientStorage._update_cache.
         self.cache.set_all_for_tid(tid_int, self.queue)
         # We only do this because cache_trace_analysis uses us
         # in ways that aren't quite accurate. We'd prefer to call clear_temp()
@@ -451,8 +491,20 @@ class StorageCache(object):
         if self.checkpoints:
             for oid_int in self.queue.stored_oids:
                 # Future cache lookups for oid_int should now use
-                # the tid just committed.
+                # the tid just committed. We're about to flush that
+                # data to the cache.
                 self.delta_after0[oid_int] = tid_int
+        # Under what circumstances would we get here (after commiting
+        # a transaction) without ever having polled to establish
+        # checkpoints? Turns out that database-level APIs like
+        # db.undo() use the master storage, not an MVCC instance. And
+        # the master storage and storage instance never gets to poll
+        # in those cases.
+        # Of course, if we restored from persistent cache files the master
+        # could have checkpoints.
+        #
+        # TODO: Create a special subclass for MVCC instances and separate
+        # the state handling.
 
         self._send_queue(tid)
 
@@ -580,42 +632,55 @@ class StorageCache(object):
         # We have to replace the checkpoints.
         cp0, cp1 = new_checkpoints
 
-        # Use the checkpoints specified by the cache.
-        # Rebuild delta_after0 and delta_after1.
+        # Use the checkpoints specified by the cache (or equal to new_tid_int,
+        # if the cache was in the future.)
+
+        # Rebuild delta_after0 and delta_after1, if we can.
+        # If we can't, because we don't actually have a range, do nothing.
+        # If the case that the checkpoints are (new_tid, new_tid),
+        # we'll do nothing and have no delta maps. This is because, hopefully,
+        # next time we poll we'll be able to use the global checkpoints and
+        # catch up then.
         new_delta_after0 = self._delta_map_type()
         new_delta_after1 = self._delta_map_type()
         if cp1 < new_tid_int:
-            # poller.list_changes(after_tid, last_tid) provides an iterator of
-            # (oid, tid) where tid > after_tid and tid <= last_tid.
+            # poller.list_changes(cp1, new_tid_int) provides an iterator of
+            # (oid, tid) where tid > cp1 and tid <= new_tid_int. It is guaranteed
+            # that each oid shows up only once.
             change_list = self.adapter.poller.list_changes(
                 cursor, cp1, new_tid_int)
-
-            # Make a dictionary that contains, for each oid, the most
-            # recent tid listed in changes. This works because sorting the
-            # (oid, tid) pairs puts the newest tid at the back, and constructing
-            # the dictionary from that sorted list preserves order, keeping the
-            # last key that it saw.
-            change_list = sorted(change_list) # Note this materializes the iterator
-            try:
-                change_dict = self._delta_map_type(change_list)
-            except TypeError:
-                # pg8000 returns a list of lists, not a list of tuples. The
-                # BTree constructor is very particular about that. Normally one
-                # would use pg8000 on PyPy, where we don't use BTrees, so this shouldn't
-                # actually come up in practice.
-                change_dict = self._delta_map_type()
-                for oid_int, tid_int in change_list:
-                    change_dict[oid_int] = tid_int
-            del change_list
 
             # Put the changes in new_delta_after*.
             updating_0 = self.cache.updating_delta_map(new_delta_after0)
             updating_1 = self.cache.updating_delta_map(new_delta_after1)
-            for oid_int, tid_int in change_dict.items():
+            for oid_int, tid_int in change_list:
+                if tid_int <= cp1 or tid_int > new_tid_int:
+                    self._reset(
+                        "Requested changes %d < tid <= %d "
+                        "but change %d for OID %d out of range." % (
+                            cp1, new_tid_int,
+                            tid_int, oid_int
+                        )
+                    )
+
                 if tid_int > cp0:
                     updating_0[oid_int] = tid_int
-                elif tid_int > cp1:
+                else:
+                    # This must be > cp1
                     updating_1[oid_int] = tid_int
+
+            # Everybody has a home (we didn't get duplicate entries
+            # or multiple entries for the same OID with different TID)
+            l0 = len(new_delta_after0)
+            l1 = len(new_delta_after1)
+            if l0 + l1 != len(change_list):
+                self._reset(
+                    "Expected delta_after0 (%d) and delta_after1 (%d) "
+                    "to have total len %d, not %d" % (
+                        l0, l1,
+                        len(change_list), l0 + l1
+                    )
+                )
 
         self.checkpoints = new_checkpoints
         self.delta_after0 = new_delta_after0

@@ -19,6 +19,8 @@ from zope.interface import Attribute
 from zope.interface import Interface
 
 import BTrees
+from transaction.interfaces import TransientError
+from ZODB.POSException import StorageError
 
 from relstorage._compat import PYPY
 
@@ -319,9 +321,19 @@ class IGenerationalLRUCache(ILRUCache):
     generations = Attribute("Ordered list of generations, with 0 being NoSuchGeneration.")
 
 
-class CacheCorruptedError(AssertionError):
+class CacheCorruptedError(StorageError):
     """
-    Raised when we detect cache corruption.
+    Raised when we detect internal cache corruption,
+    outside of any particular transaction.
+    """
+
+class CacheConsistencyError(StorageError, TransientError):
+    """
+    Raised when we detect internal cache corruption, having to do with
+    transactional consistency.
+
+    This is probably a transient error. By the time it is raised, the
+    faulty cache will have been cleared, and we can try again.
     """
 
 class NoSuchGeneration(object):

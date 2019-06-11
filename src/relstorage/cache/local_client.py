@@ -242,6 +242,9 @@ class LocalClient(object):
 
     def store_checkpoints(self, cp0, cp1):
         # No lock, the assignment should be atomic
+        # Both checkpoints should be None, or the same integer,
+        # or cp0 should be ahead of cp1. Anything else is a bug.
+        assert cp0 == cp1 or cp0 > cp1
         cp = self.checkpoints = cp0, cp1
         return cp
 

@@ -56,6 +56,7 @@ from relstorage._compat import iterkeys
 from relstorage._compat import loads
 from relstorage.blobhelper import BlobHelper
 from relstorage.cache import StorageCache
+from relstorage.cache.interfaces import CacheConsistencyError
 from relstorage.options import Options
 
 # pylint:disable=too-many-lines
@@ -567,7 +568,12 @@ class RelStorage(UndoLogCompatible,
         with self._lock:
             self._before_load()
             cursor = self._load_cursor
-            state, tid_int = cache.load(cursor, oid_int)
+            try:
+                state, tid_int = cache.load(cursor, oid_int)
+            except CacheConsistencyError:
+                log.exception("Cache consistency error; restarting load")
+                self._drop_load_connection()
+                raise
 
         if tid_int is None:
             self._log_keyerror(oid_int, "no tid found")
@@ -1379,12 +1385,16 @@ class RelStorage(UndoLogCompatible,
             # error until the application tries to read or write something.
             # XXX: We probably need to drop our pickle cache? At least the local
             # delta_after* maps/current_tid/checkpoints?
+            log.error("ReadConflictError from polling invalidations; %s", e)
             self._stale_error = e
             return (), prev
 
         self._stale_error = None
 
         # Inform the cache of the changes.
+        # It's not good if this raises a CacheConsistencyError, that should
+        # be a fresh connection. It's not clear that we can take any steps to
+        # recover that the cache hasn't already taken.
         self._cache.after_poll(
             self._load_cursor, prev, new_polled_tid, changes)
 
