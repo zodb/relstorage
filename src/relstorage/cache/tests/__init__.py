@@ -50,13 +50,15 @@ class MockPoller(object):
     def __init__(self):
         self.changes = []  # [(oid, tid)]
     def list_changes(self, _cursor, after_tid, last_tid):
-        # Return a generator, because the caller shouldn't assume
-        # a length. Return exactly the item in the list because
+        # Return a list, because the caller is allowed
+        # to assume a length. Return exactly the item in the list because
         # it may be a type other than a tuple
-        for change in self.changes:
-            _, tid = change
-            if tid > after_tid and tid <= last_tid:
-                yield change
+        return [
+            item
+            for item in self.changes
+            if item[1] > after_tid and item[1] <= last_tid
+        ]
+
 
 class Cache(_BaseCache):
     # Tweak the generation sizes to match what we developed the tests with

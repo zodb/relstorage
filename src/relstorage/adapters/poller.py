@@ -29,6 +29,9 @@ log = logging.getLogger(__name__)
 class Poller(object):
     """Database change notification poller"""
 
+    # The zoid is the primary key on both ``current_object`` (history
+    # preserving) and ``object_state`` (history free), so these
+    # queries are guaranteed to only produce an OID once.
     _list_changes_range_queries = (
         """
         SELECT zoid, tid
@@ -174,10 +177,8 @@ class Poller(object):
         return changes, new_polled_tid
 
     def list_changes(self, cursor, after_tid, last_tid):
-        """Return the (oid, tid) values changed in a range of transactions.
-
-        The returned iterable must include the latest changes in the range
-        after_tid < tid <= last_tid.
+        """
+        See ``IPoller``.
         """
         params = {'min_tid': after_tid, 'max_tid': last_tid}
         cursor.execute(self._list_changes_range_query, params)

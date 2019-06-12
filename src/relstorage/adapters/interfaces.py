@@ -542,10 +542,16 @@ class IPoller(Interface):
         """
 
     def list_changes(cursor, after_tid, last_tid):
-        """Return the (oid, tid) values changed in a range of transactions.
+        """
+        Return the ``(oid, tid)`` values changed in a range of
+        transactions.
 
-        The returned iterable must include all changes in the range
-        after_tid < tid <= last_tid.
+        The returned sequence (which has a defined ``len``) must
+        include the latest changes in the range *after_tid* < ``tid``
+        <= *last_tid*.
+
+        The ``oid`` values returned will be distinct: each ``oid``
+        will have been changed in exactly one ``tid``.
         """
 
 

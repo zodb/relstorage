@@ -75,6 +75,17 @@
   1-2% before). It is currently slower to read and write, however.
   This is a work in progress. See :pr:`243`.
 
+- Add more aggressive validation and, when possible, corrections for
+  certain types of cache consistency errors. Previously an
+  ``AssertionError`` would be raised with the message "Detected an
+  inconsistency between RelStorage and the database...". We now
+  proactively try harder to avoid that situation based on some
+  educated guesses about when it could happen, and should it still
+  happen we now reset the cache and raise a type of ``TransientError``
+  allowing the application to retry. A few instances where previously
+  incorrect data could be cached may now raise such a
+  ``TransientError``. See :pr:`245`.
+
 2.1.1 (2019-01-07)
 ==================
 

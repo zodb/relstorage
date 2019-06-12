@@ -56,6 +56,7 @@ from relstorage._compat import iterkeys
 from relstorage._compat import loads
 from relstorage.blobhelper import BlobHelper
 from relstorage.cache import StorageCache
+from relstorage.cache.interfaces import CacheConsistencyError
 from relstorage.options import Options
 
 # pylint:disable=too-many-lines
@@ -567,7 +568,12 @@ class RelStorage(UndoLogCompatible,
         with self._lock:
             self._before_load()
             cursor = self._load_cursor
-            state, tid_int = cache.load(cursor, oid_int)
+            try:
+                state, tid_int = cache.load(cursor, oid_int)
+            except CacheConsistencyError:
+                log.exception("Cache consistency error; restarting load")
+                self._drop_load_connection()
+                raise
 
         if tid_int is None:
             self._log_keyerror(oid_int, "no tid found")
@@ -1211,6 +1217,14 @@ class RelStorage(UndoLogCompatible,
         the transaction.
         """
 
+        # This is called directly from code in DB.py on a new instance
+        # (created either by new_instance() or a special
+        # undo_instance()). That new instance is never asked to load
+        # anything, or poll invalidations, so our storage cache is ineffective
+        # (unless we had loaded persistent state files)
+        #
+        # TODO: Implement 'undo_instance' to make this clear.
+
         if self._stale_error is not None:
             raise self._stale_error
         if self._is_read_only:
@@ -1379,12 +1393,16 @@ class RelStorage(UndoLogCompatible,
             # error until the application tries to read or write something.
             # XXX: We probably need to drop our pickle cache? At least the local
             # delta_after* maps/current_tid/checkpoints?
+            log.error("ReadConflictError from polling invalidations; %s", e)
             self._stale_error = e
             return (), prev
 
         self._stale_error = None
 
         # Inform the cache of the changes.
+        # It's not good if this raises a CacheConsistencyError, that should
+        # be a fresh connection. It's not clear that we can take any steps to
+        # recover that the cache hasn't already taken.
         self._cache.after_poll(
             self._load_cursor, prev, new_polled_tid, changes)
 
