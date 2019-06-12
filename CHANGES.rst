@@ -19,6 +19,10 @@
 
 - Drop support for ZODB 4 and ZEO 4.
 
+- Officially drop support for versions of MySQL before 5.7. We haven't
+  been testing on anything older than that for some time, and older
+  than 5.6 for some time before that.
+
 - Drop the ``poll_interval`` parameter. It has been deprecated with a
   warning and ignored since 2.0.0b2. See :issue:`222`.
 

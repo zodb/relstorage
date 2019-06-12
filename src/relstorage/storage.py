@@ -816,6 +816,9 @@ class RelStorage(UndoLogCompatible,
                 self._store_cursor, self._batcher_row_limit)
 
             if tid is not None:
+                # This is an extension we use for copyTransactionsFrom;
+                # it is not part of the IStorage API.
+
                 # hold the commit lock and add the transaction now
                 cursor = self._store_cursor
                 packed = (status == 'p')

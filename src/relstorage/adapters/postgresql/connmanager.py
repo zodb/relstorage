@@ -88,5 +88,26 @@ class Psycopg2ConnectionManager(AbstractConnectionManager):
 
         Returns (conn, cursor).
         """
+        # XXX: SERIALIZABLE isn't allowed on streaming replicas
+        # (https://www.enterprisedb.com/blog/serializable-postgresql-11-and-beyond)
+        # Do we really need SERIALIZABLE? Wouldn't REPEATABLE READ be
+        # sufficient?
+        #
+        # TODO: Set the transaction to READ ONLY mode. This can be done with
+        # a SET TRANSACTION command, or psycopg2 likes the 'conn.readonly' property
+        # (2.7+) or conn.set_session().
+        # TODO: Enable deferrable transactions if we stay in serializable, read only
+        # mode. This should generally be faster, as the *only* serializable transactions
+        # we have should be READ ONLY.
         return self.open(self.isolation_serializable,
                          replica_selector=self.ro_replica_selector)
+
+    # TODO: Define _do_open_for_store to change the default isolation
+    # level from READ COMMITTED to REPEATABLE READ? READ COMMITTED
+    # takes a MVCC snapshot for every individual *statement* in the
+    # transaction; REPEATABLE READ takes a snapshot for the whole
+    # duration of the transaction, beginning at the first
+    # SELECT/UPDATE/INSERT statement. We could get by with fewer locks
+    # that way (see locker.py).
+    # def _do_open_for_store(self):
+    #    return self.open('REPEATABLE READ')

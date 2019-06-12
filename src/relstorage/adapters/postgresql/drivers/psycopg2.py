@@ -63,6 +63,8 @@ class Psycopg2Driver(AbstractModuleDriver):
 
     def connect_with_isolation(self, isolation, *args, **kwargs):
         conn = self.connect(*args, **kwargs)
+        # XXX: `set_isolation_level` is deprecated and doesn't handle
+        # many cases; assigning to the property is preferred in 2.7+.
         conn.set_isolation_level(isolation)
         return conn, conn.cursor()
 
