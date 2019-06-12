@@ -31,17 +31,19 @@
 - Drop support for MySQL Connector/Python older than 8.0.16. Many
   older versions are known to be broken. See :issue:`228`.
 
-- Test support for MySQL Connector/Python on PyPy.
+- Test support for MySQL Connector/Python on PyPy. See :issue:`228`.
 
-  .. caution:: Prior to  PyPy 7.2, it is necessary to disable JIT
-               inlining due to a PyPy bug with ``struct.unpack``.
+  .. caution:: Prior to PyPy 7.2, it is necessary to disable JIT
+               inlining due to `a PyPy bug
+               <https://bitbucket.org/pypy/pypy/issues/3014/jit-issue-inlining-structunpack-hh>`_
+               with ``struct.unpack``.
 
 - Drop support for PyPy older than 5.3.1.
 
 - Drop support for the "MySQL Connector/Python" driver name since it
   wasn't possible to know if it would use the C extension or the
   Python implementation. Instead, explicitly use the 'Py' or 'C'
-  prefixed name.
+  prefixed name. See :pr:`229`.
 
 - Drop the internal and undocumented environment variables that could be
   used to force configurations that did not specify a database driver
