@@ -12,10 +12,11 @@
 #
 ##############################################################################
 
-import unittest
+from relstorage.tests import TestCase
+from relstorage.tests import MockCursor
 
 
-class RowBatcherTests(unittest.TestCase):
+class RowBatcherTests(TestCase):
 
     def getClass(self):
         from relstorage.adapters.batch import RowBatcher
@@ -244,7 +245,7 @@ class RowBatcherTests(unittest.TestCase):
         ])
 
 
-class OracleRowBatcherTests(unittest.TestCase):
+class OracleRowBatcherTests(TestCase):
 
     def getClass(self):
         from relstorage.adapters.oracle.batch import OracleRowBatcher
@@ -347,14 +348,3 @@ class OracleRowBatcherTests(unittest.TestCase):
             'rawdata_0': MockRawType,
             'rawdata_1': MockRawType,
         })
-
-
-class MockCursor(object):
-    def __init__(self):
-        self.executed = []
-        self.inputsizes = {}
-    def setinputsizes(self, **kw):
-        self.inputsizes.update(kw)
-    def execute(self, stmt, params=None):
-        params = tuple(params) if isinstance(params, list) else params
-        self.executed.append((stmt, params))

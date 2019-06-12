@@ -5,7 +5,9 @@
 3.0a2 (unreleased)
 ==================
 
-- Nothing changed yet.
+- Make MySQL and PostgreSQL use a prepared statement to get
+  transaction IDs during commit. This may be slightly faster.
+  See :issue:`246`.
 
 
 3.0a1 (2019-06-12)

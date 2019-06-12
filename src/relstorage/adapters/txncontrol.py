@@ -90,15 +90,19 @@ class GenericTransactionControl(AbstractTransactionControl):
         tid = row[0]
         return tid if tid is not None else 0
 
+    _add_transaction_query = """
+    INSERT INTO transaction
+           (tid, packed, username, description, extension)
+    VALUES (%s, %s, %s, %s, %s)
+    """
+
     @noop_when_history_free
     def add_transaction(self, cursor, tid, username, description, extension,
-                        packed=False):
-        stmt = """
-        INSERT INTO transaction
-            (tid, packed, username, description, extension)
-        VALUES (%s, %s, %s, %s, %s)
-        """
+                        packed=False,
+                        # We don't expect subclasses to override, so we
+                        # bind early for speed. TODO: Benchmark.
+                        _stmt=_add_transaction_query):
         binary = self.Binary
-        cursor.execute(stmt, (
+        cursor.execute(_stmt, (
             tid, packed, binary(username),
             binary(description), binary(extension)))

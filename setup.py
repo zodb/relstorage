@@ -32,7 +32,7 @@ memcache_require = [
 ]
 
 tests_require = [
-    'mock',
+    'mock', # XXX: This should probably be dependent on Python version
     # random2 is a forward port of python 2's random to
     # python 3. Our test_cache_stats (inherited from ZEO)
     # needs that. Without it, the tests can work on Py2 but
