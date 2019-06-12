@@ -12,12 +12,13 @@
 #
 ##############################################################################
 """PostgreSQL adapter for RelStorage."""
-from __future__ import absolute_import
+from __future__ import absolute_import, print_function
 
 import logging
 import re
 
 from zope.interface import implementer
+from ZODB.POSException import Unsupported
 
 from ...options import Options
 from .._abstract_drivers import _select_driver
@@ -39,6 +40,7 @@ from .oidallocator import PostgreSQLOIDAllocator
 from .schema import PostgreSQLSchemaInstaller
 from .stats import PostgreSQLStats
 from .txncontrol import PostgreSQLTransactionControl
+from .txncontrol import PG8000TransactionControl
 
 log = logging.getLogger(__name__)
 
@@ -81,8 +83,10 @@ class PostgreSQLAdapter(object):
         )
 
         mover_type = PostgreSQLObjectMover
+        txn_type = PostgreSQLTransactionControl
         if driver.__name__ == 'pg8000':
             mover_type = PG8000ObjectMover
+            txn_type = PG8000TransactionControl
 
         self.mover = mover_type(
             driver,
@@ -90,10 +94,8 @@ class PostgreSQLAdapter(object):
             runner=self.runner,
             version_detector=self.version_detector,
         )
-        self.connmanager.add_on_store_opened(self.mover.on_store_opened)
-        self.connmanager.add_on_load_opened(self.mover.on_load_opened)
         self.oidallocator = PostgreSQLOIDAllocator()
-        self.txncontrol = PostgreSQLTransactionControl(
+        self.txncontrol = txn_type(
             keep_history=self.keep_history,
             driver=driver,
         )
@@ -104,8 +106,6 @@ class PostgreSQLAdapter(object):
             runner=self.runner,
             revert_when_stale=options.revert_when_stale,
         )
-        self.connmanager.add_on_load_opened(self._prepare_get_latest_tid)
-        self.connmanager.add_on_store_opened(self._prepare_get_latest_tid)
 
         if self.keep_history:
             self.packundo = HistoryPreservingPackUndo(
@@ -137,6 +137,12 @@ class PostgreSQLAdapter(object):
             keep_history=self.keep_history
         )
 
+        self.connmanager.add_on_store_opened(self.mover.on_store_opened)
+        self.connmanager.add_on_load_opened(self.mover.on_load_opened)
+        self.connmanager.add_on_load_opened(self.__prepare_statements)
+        self.connmanager.add_on_store_opened(self.__prepare_store_statements)
+
+
     _get_latest_tid_queries = (
         """
         SELECT tid
@@ -158,11 +164,54 @@ class PostgreSQLAdapter(object):
 
     _prepare_get_latest_tid_query = query_property('_prepare_get_latest_tid')
 
-    def _prepare_get_latest_tid(self, cursor, restart=False):
+    def __prepare_statements(self, cursor, restart=False):
         if restart:
             return
+
+        # TODO: Generalize all of this better. There should be a
+        # registry of things to prepare, or we should wrap cursors to
+        # detect and prepare when needed. Preparation and switching to
+        # EXECUTE should be automatic for drivers that don't already do that.
+
+        # A meta-class or base class __new__ could handle proper
+        # history/free query selection without this mass of tuples and
+        # manual properties and property names.
         stmt = self._prepare_get_latest_tid_query
         cursor.execute(stmt)
+
+    def __prepare_store_statements(self, cursor, restart=False):
+        if restart:
+            return
+
+        self.__prepare_statements(cursor, restart)
+        try:
+            stmt = self.txncontrol._prepare_add_transaction_query
+        except (Unsupported, AttributeError):
+            # AttributeError is from the PG8000 version,
+            # Unsupported is from history-free
+            pass
+        else:
+            # For some reason, preparing the INSERT statement also wants
+            # to acquire a lock. If we're committing is another
+            # transaction, this can block indefinitely (if that other transaction
+            # happens to be in this same thread!)
+            # checkIterationIntraTransaction (PostgreSQLHistoryPreservingRelStorageTests_psycopg2)
+            # easily triggers this. Fortunately, I don't think this
+            # is a common case, and we can workaround the test failure by
+            # only prepping this in the store connection.
+            # TODO: Is there a more general solution?
+            cursor.execute('SET lock_timeout = 100') # Requires 9.3+ to detect this.
+            cursor.execute(stmt)
+            cursor.execute('SET lock_timeout = 0')
+
+            # If we don't commit now, our prepared statement will,
+            # for some reason, hold an *exclusive* lock on the transaction
+            # table. That will prevent commits from working, because they
+            # also currently lock the entire transaction table.
+            # (Must be commit, not rollback, or the temp tables we created
+            # would vanish.)
+            cursor.connection.commit()
+
 
     def new_instance(self):
         inst = type(self)(dsn=self._dsn, options=self.options)

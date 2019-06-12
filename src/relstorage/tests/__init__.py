@@ -52,5 +52,10 @@ class MockCursor(object):
     def fetchone(self):
         return self.results.pop(0)
 
+    def fetchall(self):
+        r = self.results
+        self.results = None
+        return r
+
     def close(self):
         self.closed = True

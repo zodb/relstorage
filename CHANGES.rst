@@ -6,9 +6,8 @@
 ==================
 
 - Make MySQL and PostgreSQL use a prepared statement to get
-  transaction IDs during commit. This may be slightly faster.
-  See :issue:`246`.
-
+  transaction IDs. PostgreSQL also uses a prepared statement to set
+  them. This may be slightly faster. See :issue:`246`.
 
 3.0a1 (2019-06-12)
 ==================

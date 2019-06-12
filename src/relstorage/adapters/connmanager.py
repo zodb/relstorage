@@ -11,7 +11,7 @@
 # FOR A PARTICULAR PURPOSE.
 #
 ##############################################################################
-from __future__ import absolute_import
+from __future__ import absolute_import, print_function
 
 from perfmetrics import metricmethod
 from zope.interface import implementer

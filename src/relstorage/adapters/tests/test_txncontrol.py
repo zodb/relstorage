@@ -60,7 +60,7 @@ class TestTransactionControl(TestCase):
     def test_get_tid_empty_db(self):
         inst = self._makeOne()
         cur = MockCursor()
-        cur.results = [None]
+        cur.results = None
 
         self.assertEqual(inst.get_tid(cur), 0)
 

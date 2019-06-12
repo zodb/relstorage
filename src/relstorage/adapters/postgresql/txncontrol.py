@@ -15,14 +15,39 @@
 
 from __future__ import absolute_import
 
+from ZODB.POSException import Unsupported
 from ..txncontrol import GenericTransactionControl
+from .._util import query_property
+from .mover import to_prepared_queries
 
-
-class PostgreSQLTransactionControl(GenericTransactionControl):
+class _PostgreSQLTransactionControl(GenericTransactionControl):
 
     # See adapter.py for where this is prepared.
     # Either history preserving or not, it's the same.
     _get_tid_query = 'EXECUTE get_latest_tid'
 
+
     def __init__(self, keep_history, driver):
         GenericTransactionControl.__init__(self, keep_history, driver.Binary)
+
+
+class PostgreSQLTransactionControl(_PostgreSQLTransactionControl):
+
+    # (tid, packed, username, description, extension)
+    _add_transaction_query = 'EXECUTE add_transaction(%s, %s, %s, %s, %s)'
+
+    _prepare_add_transaction_queries = to_prepared_queries(
+        'add_transaction',
+        [
+            GenericTransactionControl._add_transaction_query,
+            Unsupported("No transactions in HF mode"),
+        ],
+        ('BIGINT', 'BOOLEAN', 'BYTEA', 'BYTEA', 'BYTEA')
+    )
+
+    _prepare_add_transaction_query = query_property('_prepare_add_transaction')
+
+
+class PG8000TransactionControl(_PostgreSQLTransactionControl):
+    # We can't handle the parameterized prepared statements.
+    pass

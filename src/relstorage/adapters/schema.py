@@ -128,10 +128,12 @@ class AbstractSchemaInstaller(ABC):
         """
         raise NotImplementedError()
 
-    #: The type of the column used to hold binary strings
+    #: The type of the column used to hold binary strings.
+    #: Our default is appropriate for PostgreSQL.
     COLTYPE_BINARY_STRING = 'BYTEA'
     #: The suffix needed (after the closing ')') to make sure a
     #: table behaves in a transactional manner.
+    #: Our default is appropriate for PostgreSQL.
     TRANSACTIONAL_TABLE_SUFFIX = ''
 
     CREATE_TRANSACTION_STMT_TMPL = """
