@@ -168,6 +168,10 @@ class StorageCache(object):
         # Also, if there have been enough changes that someone has shifted the
         # checkpoints, cache.checkpoints won't match the global checkpoints
         # and they will wind up discarding the delta maps on the first poll.
+        #
+        # Alternately, we could watch our children created here, and see
+        # which one is still alive and has the highest `current_tid` indicating the
+        # most recent poll, and copy that information.
         cache.checkpoints = self.checkpoints
         cache.delta_after0 = self._delta_map_type(self.delta_after0)
         cache.delta_after1 = self._delta_map_type(self.delta_after1)
@@ -415,7 +419,7 @@ class StorageCache(object):
             cache_data = cache[key]
             if cache_data:
                 # Cache hit.
-                assert cache_data[1] == tid_int
+                assert cache_data[1] == tid_int, cache_data[1]
                 return cache_data
 
             # Cache miss.
@@ -497,11 +501,11 @@ class StorageCache(object):
         # Under what circumstances would we get here (after commiting
         # a transaction) without ever having polled to establish
         # checkpoints? Turns out that database-level APIs like
-        # db.undo() use the master storage, not an MVCC instance. And
-        # the master storage and storage instance never gets to poll
-        # in those cases.
+        # db.undo() use new storage instances in an unusual way, and
+        # will not necessarily have polled by the time they commit.
+        #
         # Of course, if we restored from persistent cache files the master
-        # could have checkpoints.
+        # could have checkpoints we copied down.
         #
         # TODO: Create a special subclass for MVCC instances and separate
         # the state handling.

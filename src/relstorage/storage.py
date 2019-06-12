@@ -1217,6 +1217,14 @@ class RelStorage(UndoLogCompatible,
         the transaction.
         """
 
+        # This is called directly from code in DB.py on a new instance
+        # (created either by new_instance() or a special
+        # undo_instance()). That new instance is never asked to load
+        # anything, or poll invalidations, so our storage cache is ineffective
+        # (unless we had loaded persistent state files)
+        #
+        # TODO: Implement 'undo_instance' to make this clear.
+
         if self._stale_error is not None:
             raise self._stale_error
         if self._is_read_only:

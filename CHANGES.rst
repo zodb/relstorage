@@ -84,7 +84,7 @@
   happen we now reset the cache and raise a type of ``TransientError``
   allowing the application to retry. A few instances where previously
   incorrect data could be cached may now raise such a
-  ``TransientError``.
+  ``TransientError``. See :pr:`245`.
 
 2.1.1 (2019-01-07)
 ==================
