@@ -16,9 +16,15 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+from ZODB.POSException import Unsupported
+
 from relstorage.tests import TestCase
+from relstorage.tests import MockOptions
 
 from .. import mover
+
+class MockDriver(object):
+    pass
 
 class TestFunctions(TestCase):
 
@@ -73,3 +79,37 @@ class TestFunctions(TestCase):
                 '        WHERE zoid = $1'
             ]
         )
+
+class TestPostgreSQLObjectMover(TestCase):
+
+    def _getClass(self):
+        return mover.PostgreSQLObjectMover
+
+    def _makeOne(self, **options):
+        return self._getClass()(MockDriver(),
+                                MockOptions.from_args(**options))
+
+    _expected_move_from_temp_hf_insert_query = 'EXECUTE move_from_temp(%s)'
+
+    def test_prep_statements_hf(self):
+        inst = self._makeOne(keep_history=False)
+        self.assertEqual(
+            inst._move_from_temp_hf_insert_query,
+            self._expected_move_from_temp_hf_insert_query
+        )
+
+    def test_prep_statements_hp(self):
+        inst = self._makeOne(keep_history=True)
+        with self.assertRaises(Unsupported):
+            getattr(inst, '_move_from_temp_hf_insert_query')
+
+
+class TestPG8000ObjectMover(TestPostgreSQLObjectMover):
+
+    def setUp(self):
+        super(TestPG8000ObjectMover, self).setUp()
+        raw = mover.PostgreSQLObjectMover._move_from_temp_hf_insert_query_raw
+        self._expected_move_from_temp_hf_insert_query = raw
+
+    def _getClass(self):
+        return mover.PG8000ObjectMover

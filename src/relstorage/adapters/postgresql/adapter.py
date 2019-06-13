@@ -180,36 +180,27 @@ class PostgreSQLAdapter(object):
         cursor.execute(stmt)
 
     def __prepare_store_statements(self, cursor, restart=False):
-        if restart:
-            return
+        if not restart:
+            self.__prepare_statements(cursor, restart)
+            try:
+                stmt = self.txncontrol._prepare_add_transaction_query
+            except (Unsupported, AttributeError):
+                # AttributeError is from the PG8000 version,
+                # Unsupported is from history-free
+                pass
+            else:
+                cursor.execute(stmt)
 
-        self.__prepare_statements(cursor, restart)
-        try:
-            stmt = self.txncontrol._prepare_add_transaction_query
-        except (Unsupported, AttributeError):
-            # AttributeError is from the PG8000 version,
-            # Unsupported is from history-free
-            pass
-        else:
-            # For some reason, preparing the INSERT statement also wants
-            # to acquire a lock. If we're committing is another
-            # transaction, this can block indefinitely (if that other transaction
-            # happens to be in this same thread!)
-            # checkIterationIntraTransaction (PostgreSQLHistoryPreservingRelStorageTests_psycopg2)
-            # easily triggers this. Fortunately, I don't think this
-            # is a common case, and we can workaround the test failure by
-            # only prepping this in the store connection.
-            # TODO: Is there a more general solution?
-            cursor.execute('SET lock_timeout = 100') # Requires 9.3+ to detect this.
-            cursor.execute(stmt)
-            cursor.execute('SET lock_timeout = 0')
-
-            # If we don't commit now, our prepared statement will,
-            # for some reason, hold an *exclusive* lock on the transaction
-            # table. That will prevent commits from working, because they
-            # also currently lock the entire transaction table.
-            # (Must be commit, not rollback, or the temp tables we created
-            # would vanish.)
+            # If we don't commit now, any INSERT prepared statement
+            # for some reason, hold an *exclusive* lock on the table
+            # it references. That can prevent commits from working,
+            # depending no the table, because we also lock tables when
+            # committing. (Must be commit, not rollback, or the temp
+            # tables we created would vanish.)
+            #
+            # We're the last hook, we handle this for ours and for
+            # the mover's statements.
+            cursor.execute('SET lock_timeout = 0') # restore infinite lock timeout
             cursor.connection.commit()
 
 

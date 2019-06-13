@@ -48,29 +48,33 @@ def query_property(base_name,
 
     To use, define a property ending in `_queries` that is a
     two-tuple, where the preserving query comes first and the dropping
-    query comes second. This indirection lets subclasses override these
-    queries.
+    query comes second. This indirection lets subclasses override
+    these queries.
 
-    Then define a property, passing the base name (without _queries) to
-    this function.
+    Then define a property, passing the base name (without _queries)
+    to this function.
 
-    The correct query will be lazily picked at runtime. The instance must have the
-    ``keep_history`` attribute.
+    The correct query will be lazily picked at runtime. The instance
+    must have the ``keep_history`` attribute.
 
-    If the chosen query is an exception instance, it will be raised instead
-    of returned. This allows defining a query that is only supported in one of the
-    two modes.
+    If the chosen query is an exception instance or class, it will be raised
+    instead of returned. This allows defining a query that is only
+    supported in one of the two modes. Usually, this exception should be
+    :class:`ZODB.POSException.Unsupported`.
 
-    :keyword str extension: This string will be appended to whatever query
-      is chosen before it is formatted and before it is returned.
-    :keyword bool formatted: If True (*not* the default), then the chosen query
-      will be formatted using the ``self.runner.script_vars``.
+    :keyword str extension: This string will be appended to whatever
+        query is chosen before it is formatted and before it is returned.
+    :keyword bool formatted: If True (*not* the default), then the
+        chosen query will be formatted using the
+    ``self.runner.script_vars``.
     """
 
     def prop(inst):
         queries = getattr(inst, base_name + '_queries')
         query = queries[0] if inst.keep_history else queries[1]
-        if isinstance(query, Exception):
+        if isinstance(query, Exception) or (
+                isinstance(query, type)
+                and issubclass(query, Exception)):
             raise query
 
         if extension:

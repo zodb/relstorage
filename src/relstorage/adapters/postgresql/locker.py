@@ -101,9 +101,10 @@ class PostgreSQLLocker(AbstractLocker):
         except self.lock_exceptions as e:
             if nowait:
                 return False
-            six.reraise(UnableToAcquireCommitLockError,
-                        'Acquiring a commit lock failed: %s' % (e,),
-                        sys.exc_info()[2])
+            six.reraise(
+                UnableToAcquireCommitLockError,
+                UnableToAcquireCommitLockError('Acquiring a commit lock failed: %s' % (e,)),
+                sys.exc_info()[2])
         return True
 
     def release_commit_lock(self, cursor):

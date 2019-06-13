@@ -2,6 +2,8 @@
 
 import unittest
 
+from relstorage.options import Options
+
 class TestCase(unittest.TestCase):
     # Avoid deprecation warnings; 2.7 doesn't have
     # assertRaisesRegex
@@ -59,3 +61,21 @@ class MockCursor(object):
 
     def close(self):
         self.closed = True
+
+class MockOptions(Options):
+    cache_module_name = '' # disable
+    cache_servers = ''
+    cache_local_mb = 1
+    cache_local_dir_count = 1 # shrink
+
+    @classmethod
+    def from_args(cls, **kwargs):
+        inst = cls()
+        for k, v in kwargs.items():
+            setattr(inst, k, v)
+        return inst
+
+    def __setattr__(self, name, value):
+        if name not in Options.valid_option_names():
+            raise AttributeError("Invalid option", name) # pragma: no cover
+        object.__setattr__(self, name, value)
