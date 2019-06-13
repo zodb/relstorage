@@ -55,8 +55,8 @@ class SimpleQueryProperty(object):
         cur.close()
         return result
 
-SUPPORTS_UPSERT = sqlite3.sqlite_version_info >= (3, 28) # 2019-04-16
 SUPPORTS_WINDOW = sqlite3.sqlite_version_info >= (3, 25) # 2018-09-15
+SUPPORTS_UPSERT = sqlite3.sqlite_version_info >= (3, 24) # 2018-06-04
 SUPPORTS_PAREN_UPDATE = sqlite3.sqlite_version_info >= (3, 15) # 2016-10-14
 SUPPORTS_CTE = sqlite3.sqlite_version_info >= (3, 8, 3) # 2014-02-03
 

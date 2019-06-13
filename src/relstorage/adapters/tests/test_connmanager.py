@@ -12,10 +12,12 @@
 #
 ##############################################################################
 
-import unittest
+from relstorage.tests import TestCase
+from relstorage.tests import MockCursor
+from relstorage.tests import MockConnection
 
 
-class AbstractConnectionManagerTests(unittest.TestCase):
+class AbstractConnectionManagerTests(TestCase):
 
     def test_without_replica_conf(self):
         from relstorage.adapters.connmanager import AbstractConnectionManager
@@ -86,29 +88,3 @@ class MockOptions(object):
         self.replica_conf = fn
         self.ro_replica_conf = ro_fn
         self.replica_timeout = 600.0
-
-class MockConnection(object):
-    rolled_back = False
-    closed = False
-    replica = None
-
-    def rollback(self):
-        self.rolled_back = True
-
-    def close(self):
-        self.closed = True
-
-class MockCursor(object):
-    closed = False
-
-    def close(self):
-        self.closed = True
-
-
-def test_suite():
-    suite = unittest.TestSuite()
-    suite.addTest(unittest.makeSuite(AbstractConnectionManagerTests))
-    return suite
-
-if __name__ == '__main__':
-    unittest.main(defaultTest='test_suite')

@@ -1,6 +1,7 @@
+# -*- coding: utf-8 -*-
 ##############################################################################
 #
-# Copyright (c) 2009 Zope Foundation and Contributors.
+# Copyright (c) 2019 Zope Foundation and Contributors.
 # All Rights Reserved.
 #
 # This software is subject to the provisions of the Zope Public License,
@@ -11,15 +12,22 @@
 # FOR A PARTICULAR PURPOSE.
 #
 ##############################################################################
-"""TransactionControl implementations"""
-
 from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
 
-from ..txncontrol import GenericTransactionControl
+from relstorage.adapters.tests import test_txncontrol
 
+class MockDriver(object):
+    Binary = bytes
 
-class MySQLTransactionControl(GenericTransactionControl):
+class TestMySQLTransactionControl(test_txncontrol.TestTransactionControl):
 
-    # See adapter.py for where this is prepared.
-    # Either history preserving or not, it's the same.
-    _get_tid_query = 'EXECUTE get_latest_tid'
+    def _getClass(self):
+        from ..txncontrol import MySQLTransactionControl
+        return MySQLTransactionControl
+
+    def _get_hf_tid_query(self):
+        return 'EXECUTE get_latest_tid'
+
+    _get_hp_tid_query = _get_hf_tid_query

@@ -20,6 +20,7 @@ from abc import abstractmethod
 
 from perfmetrics import Metric
 from zope.interface import implementer
+from ZODB.POSException import Unsupported
 
 from ..iter import fetchmany
 from ._util import noop_when_history_free
@@ -201,9 +202,18 @@ class AbstractObjectMover(ABC):
     on_store_opened_statement_names = ()
 
     def on_store_opened(self, cursor, restart=False):
+        if restart:
+            return
+
         if not restart:
             for stmt_name in self.on_store_opened_statement_names:
-                cursor.execute(getattr(self, stmt_name))
+                try:
+                    prep = getattr(self, stmt_name)
+                except Unsupported:
+                    # Must not be needed
+                    pass
+                else:
+                    cursor.execute(prep)
 
 
     #: A sequence of *names* of attributes on this object that are statements to be
@@ -366,6 +376,12 @@ class AbstractObjectMover(ABC):
 
         Should replace all entries in object_state with the
         same zoid from temp_store.
+
+        This implementation is in two steps, first deleting from
+        ``object_state``, and then copying from ``temp_store`` using
+        :attr:`_move_from_temp_hf_insert_query`.
+
+        Blobs are handled separately.
         """
 
         stmt = """

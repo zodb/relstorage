@@ -11,7 +11,7 @@
 # FOR A PARTICULAR PURPOSE.
 #
 ##############################################################################
-from __future__ import absolute_import
+from __future__ import absolute_import, print_function
 
 import logging
 
@@ -100,7 +100,7 @@ class Poller(object):
         # pylint:disable=unused-argument
         # find out the tid of the most recent transaction.
         cursor.execute(self.poll_query)
-        rows = list(cursor)
+        rows = cursor.fetchall()
         if not rows or not rows[0][0]:
             # No data, must be fresh database, without even
             # the root object.
@@ -144,7 +144,6 @@ class Poller(object):
 
 
         # New transaction(s) have been added.
-
         if self.keep_history:
             # If the previously polled transaction no longer exists,
             # the cache is too old and needs to be cleared.
@@ -173,7 +172,6 @@ class Poller(object):
 
         cursor.execute(stmt, params)
         changes = cursor.fetchall()
-
         return changes, new_polled_tid
 
     def list_changes(self, cursor, after_tid, last_tid):

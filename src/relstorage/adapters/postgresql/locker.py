@@ -17,7 +17,10 @@ Locker implementations.
 
 from __future__ import absolute_import
 
+import sys
+
 from perfmetrics import metricmethod
+import six
 from zope.interface import implementer
 
 from ..interfaces import ILocker
@@ -75,7 +78,8 @@ class PostgreSQLLocker(AbstractLocker):
                     stmt = """
                     %s
                     LOCK TABLE commit_lock IN EXCLUSIVE MODE%s;
-                    LOCK TABLE transaction, current_object IN SHARE MODE;
+                    LOCK TABLE transaction IN SHARE MODE;
+                    LOCK TABLE current_object IN SHARE MODE;
                     """ % (timeout_stmt, nowait and ' NOWAIT' or '',)
                 else:
                     stmt = """
@@ -83,24 +87,24 @@ class PostgreSQLLocker(AbstractLocker):
                     LOCK TABLE commit_lock IN EXCLUSIVE MODE%s;
                     LOCK TABLE object_state IN SHARE MODE
                     """ % (timeout_stmt, nowait and ' NOWAIT' or '',)
-                for s in stmt.splitlines():
-                    if not s.strip():
-                        continue
-                    cursor.execute(s)
             else:
                 stmt = """
                 %s
                 LOCK TABLE commit_lock IN EXCLUSIVE MODE%s
                 """ % (timeout_stmt, ' NOWAIT' if nowait else '')
-                for s in stmt.splitlines():
-                    if not s.strip():
-                        continue
-                    cursor.execute(s)
 
-        except self.lock_exceptions:
+            for s in stmt.splitlines():
+                if not s.strip():
+                    continue
+                cursor.execute(s)
+
+        except self.lock_exceptions as e:
             if nowait:
                 return False
-            raise UnableToAcquireCommitLockError('Acquiring a commit lock failed')
+            six.reraise(
+                UnableToAcquireCommitLockError,
+                UnableToAcquireCommitLockError('Acquiring a commit lock failed: %s' % (e,)),
+                sys.exc_info()[2])
         return True
 
     def release_commit_lock(self, cursor):

@@ -11,7 +11,7 @@
 # FOR A PARTICULAR PURPOSE.
 #
 ##############################################################################
-from __future__ import absolute_import
+from __future__ import absolute_import, print_function
 
 from perfmetrics import metricmethod
 from zope.interface import implementer
@@ -63,6 +63,8 @@ class AbstractConnectionManager(object):
         Add a callable(cursor, restart=bool) for when a store connection
         is opened.
 
+        Hooks are called in the order added.
+
         .. versionadded:: 2.1a1
         """
         self._on_store_opened += (f,)
@@ -72,6 +74,8 @@ class AbstractConnectionManager(object):
     def add_on_load_opened(self, f):
         """
         Add a callable (cursor, restart=bool) for when a load connection is opened.
+
+        Hooks are called in the order added.
 
         .. versionadded:: 2.1a1
         """
