@@ -128,11 +128,11 @@ class LocalClient(object):
         return data
 
     @_log_timed
-    def save(self, overwrite=False, close_async=True):
+    def save(self, **sqlite_args):
         options = self.options
         if options.cache_local_dir and self.__bucket.size:
             conn = sqlite_connect(options, self.prefix,
-                                  overwrite=overwrite, close_async=close_async)
+                                  **sqlite_args)
             with closing(conn):
                 try:
                     self.write_to_sqlite(conn)

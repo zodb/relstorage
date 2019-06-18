@@ -28,6 +28,7 @@ from persistent import Persistent
 from persistent.mapping import PersistentMapping
 from zc.zlibstorage import ZlibStorage
 
+import ZODB.tests.util
 from ZODB.DB import DB
 from ZODB.FileStorage import FileStorage
 from ZODB.POSException import ReadConflictError
@@ -98,7 +99,14 @@ class StorageCreatingMixin(ABC):
             if util.CACHE_SERVERS and util.CACHE_MODULE_NAME:
                 kw['cache_servers'] = util.CACHE_SERVERS
                 kw['cache_module_name'] = util.CACHE_MODULE_NAME
-                kw['cache_prefix'] = type(self).__name__ + self._testMethodName
+        if 'cache_prefix' not in kw:
+            kw['cache_prefix'] = type(self).__name__ + self._testMethodName
+        if 'cache_local_dir' not in kw:
+            # Always use a persistent cache. This helps discover errors in
+            # the persistent cache.
+            # These tests run in a temporary directory that gets cleaned up, so the CWD is
+            # appropriate.
+            kw['cache_local_dir'] = '.'
 
         assert self.driver_name
         options = Options(keep_history=self.keep_history, driver=self.driver_name, **kw)
@@ -125,13 +133,10 @@ class RelStorageTestBase(StorageCreatingMixin,
     __to_close = ()
 
     def setUp(self):
+        # This sets up a temporary directory for each test and
+        # changes to it.
+        super(RelStorageTestBase, self).setUp()
         self.__to_close = []
-        # Note that we're deliberately NOT calling super's setup.
-        # It does stuff on disk, etc, that's not necessary for us
-        # and just slows us down by ~10%.
-        #super(RelStorageTestBase, self).setUp()
-        # Also note that subclasses might not even call us! If they're going to
-        # use _closing, they have to.
 
     def _closing(self, o):
         """
@@ -143,19 +148,26 @@ class RelStorageTestBase(StorageCreatingMixin,
         self.__to_close.append(o)
         return o
 
+    def _close(self):
+        # Override from StorageTestBase.
+
+        # Try to avoid creating one through our _storage property.
+        if '_storage' in self.__dict__:
+            storage = self._storage
+        else:
+            storage = self._storage_created
+        self._storage = None
+
+        if storage is not None:
+            storage.close()
+            storage.cleanup()
+
     def tearDown(self):
         transaction.abort()
         for x in reversed(self.__to_close):
             x.close()
         self.__to_close = ()
-        # XXX: This could create one! Do subclasses override self._storage?
-        storage = self._storage
-        if storage is not None:
-            self._storage = None
-            storage.close()
-            storage.cleanup()
-        # See comments in setUp.
-        #super(RelStorageTestBase, self).tearDown()
+        super(RelStorageTestBase, self).tearDown()
 
     def get_storage(self):
         # Create a storage with default options
@@ -977,7 +989,10 @@ class GenericRelStorageTests(
 
 
 class AbstractRSZodbConvertTests(StorageCreatingMixin,
-                                 FSZODBConvertTests):
+                                 FSZODBConvertTests,
+                                 # This one isn't cooperative in
+                                 # setUp(), so it needs to be last.
+                                 ZODB.tests.util.TestCase):
     keep_history = True
     filestorage_name = 'source'
     relstorage_name = 'destination'
@@ -1124,8 +1139,8 @@ class AbstractToFileStorage(_TempDirMixin,
         self._dst.close()
         self._dst.cleanup()
         self._dst = None
-        super(AbstractToFileStorage, self).tearDown()
         self.clearTempDir()
+        super(AbstractToFileStorage, self).tearDown()
 
     def new_dest(self):
         return self._closing(FileStorage(self._dst_path))
@@ -1145,8 +1160,8 @@ class AbstractFromFileStorage(_TempDirMixin,
         self._dst.close()
         self._dst.cleanup()
         self._dst = None
-        super(AbstractFromFileStorage, self).tearDown()
         self.clearTempDir()
+        super(AbstractFromFileStorage, self).tearDown()
 
     def new_dest(self):
         return self._dst

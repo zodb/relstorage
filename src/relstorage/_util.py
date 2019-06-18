@@ -51,10 +51,21 @@ def log_timed(func):
         return result
     return f
 
+def _thread_spawn(func, args):
+    import threading
+    t = threading.Thread(target=func, args=args)
+    t.name = t.name + '-spawn-' + func.__name__
+    t.start()
+    return t
+
+def _gevent_pool_spawn(func, args):
+    import gevent
+    return gevent.get_hub().threadpool.spawn(func, *args)
+
 def spawn(func, args=()):
     """Execute func in a different (real) thread"""
-    import threading
-    submit = lambda func, args: threading.Thread(target=func, args=args).start()
+
+    submit = _thread_spawn
     try:
         import gevent.monkey
         import gevent
@@ -62,7 +73,7 @@ def spawn(func, args=()):
         pass
     else:
         if gevent.monkey.is_module_patched('threading'):
-            submit = lambda func, args: gevent.get_hub().threadpool.spawn(func, *args)
+            submit = _gevent_pool_spawn
     submit(func, args)
 
 def get_this_psutil_process():

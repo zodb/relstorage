@@ -775,6 +775,11 @@ class _PersistentRowFilter(object):
                     # Old generation, no delta.
                     # Even though this is old, it could be good to have it,
                     # it might be something that doesn't change much.
+                    #
+                    # Using `cp0` is our fallback preferred key, so
+                    # this doesn't have to get copied from cp1 later.
+                    #
+                    # XXX: This is probably wrong. See https://github.com/zodb/relstorage/issues/249
                     key = (oid, cp0)
                 yield key, value
 
