@@ -96,6 +96,7 @@ class Connection(sqlite3.Connection):
     )
 
     def __init__(self, *args, **kwargs):
+        __traceback_info__ = args, kwargs
         super(Connection, self).__init__(*args, **kwargs)
 
         self.rs_db_filename = None

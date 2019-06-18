@@ -433,7 +433,7 @@ class StorageCacheTests(TestCase):
         with self.assertRaisesRegex(CacheConsistencyError, "to have total len"):
             c.after_poll(None, 40, 50, None)
         self.assertIsNone(c.checkpoints)
-        self.assertEqual(0, c.current_tid)
+        self.assertIsNone(c.current_tid)
 
     def test_after_poll_new_checkpoints_bad_changes_out_of_order(self):
         from relstorage.tests.fakecache import data
@@ -450,7 +450,7 @@ class StorageCacheTests(TestCase):
         with self.assertRaisesRegex(CacheConsistencyError, "out of range"):
             c.after_poll(None, 40, 50, None)
         self.assertIsNone(c.checkpoints)
-        self.assertEqual(0, c.current_tid)
+        self.assertIsNone(c.current_tid)
 
         # Too low
         c.checkpoints = (40, 30)
@@ -459,7 +459,7 @@ class StorageCacheTests(TestCase):
         with self.assertRaisesRegex(CacheConsistencyError, "out of range"):
             c.after_poll(None, 40, 50, None)
         self.assertIsNone(c.checkpoints)
-        self.assertEqual(0, c.current_tid)
+        self.assertIsNone(c.current_tid)
 
     def test_after_poll_new_checkpoints(self):
         from relstorage.tests.fakecache import data

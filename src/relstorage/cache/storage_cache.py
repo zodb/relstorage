@@ -81,7 +81,11 @@ class StorageCache(object):
     # We assign to this *only* after executing a poll, or
     # when reading data from the persistent cache (which happens at
     # startup, and usually also when someone calls clear())
-    current_tid = 0
+    #
+    # Start with None so we can distinguish the case of never polled/
+    # no tid in persistent cache from a TID of 0, which can happen in
+    # tests.
+    current_tid = None
 
     _tracer = None
 
@@ -255,8 +259,11 @@ class StorageCache(object):
         method returns.
         """
         # As if we've never polled
-        self.checkpoints = None
-        self.current_tid = 0
+        for name in ('checkpoints', 'current_tid'):
+            try:
+                delattr(self, name)
+            except AttributeError:
+                pass
         self.delta_after0 = self._delta_map_type()
         self.delta_after1 = self._delta_map_type()
         if message:
@@ -544,7 +551,7 @@ class StorageCache(object):
         *prev_tid_int* can be None, in which case the changes
         parameter will be ignored. new_tid_int can not be None.
         """
-        my_prev_tid_int = self.current_tid
+        my_prev_tid_int = self.current_tid or 0
         self.current_tid = new_tid_int
 
         global_checkpoints = self.cache.get_checkpoints()

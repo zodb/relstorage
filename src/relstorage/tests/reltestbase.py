@@ -169,19 +169,25 @@ class RelStorageTestBase(StorageCreatingMixin,
         self.__to_close = ()
         super(RelStorageTestBase, self).tearDown()
 
+    def make_storage_to_cache(self):
+        return self.make_storage()
+
     def get_storage(self):
         # Create a storage with default options
         # if it has not been created already.
         storage = self._storage_created
         if storage is None:
-            storage = self.make_storage()
+            storage = self.make_storage_to_cache()
             self._storage_created = storage
         return storage
 
     def set_storage(self, storage):
         self._storage_created = storage
 
-    _storage = property(get_storage, set_storage)
+    _storage = property(
+        lambda self: self.get_storage(),
+        lambda self, nv: self.set_storage(nv)
+    )
 
     def open(self, read_only=False):
         # This is used by a few ZODB tests that close and reopen the storage.
@@ -206,6 +212,65 @@ class GenericRelStorageTests(
         ReadOnlyStorage.ReadOnlyStorage,
     ):
 
+    def checkNoConflictWhenChangeMissedByPersistentCacheAfterCP0(self):
+        storage1 = self._storage
+        db1 = self._closing(DB(storage1))
+        c1 = db1.open()
+        c1.root()['myobj'] = 42
+        transaction.commit()
+        orig_checkpoints = c1._storage._cache.checkpoints
+        self.assertIsNotNone(orig_checkpoints)
+        # We have a saved TID for the root object.
+        self.assertIn(0, c1._storage._cache.delta_after0)
+        tid = c1._storage._cache.delta_after0[0]
+        __traceback_info__ = tid
+        self.assertEqual(c1._storage._cache.current_tid, tid)
+        c1.close()
+        db1.close()
+        del db1, c1, storage1
+
+        # A storage that will not update the persistent cache.
+        storage2 = self.make_storage(cache_local_dir=None, zap=False)
+        # It didn't read checkpoints or TID
+        self.assertIsNone(storage2._cache.checkpoints)
+        self.assertIsNone(storage2._cache.current_tid)
+        db2 = self._closing(DB(storage2))
+        c2 = db2.open()
+        # We've polled and gained checkpoints
+        self.assertIsNotNone(c2._storage._cache.checkpoints)
+        c2.root()['myobj'] = 420
+        transaction.commit()
+        # The tid changed
+        self.assertIn(0, c2._storage._cache.delta_after0)
+        new_tid = c2._storage._cache.delta_after0[0]
+        self.assertGreater(new_tid, tid)
+        c2.close()
+        db2.close()
+        del db2, storage2, c2
+
+        # Now a new storage that will read the persistent cache
+        storage3 = self.make_storage(zap=False)
+        # It did read checkpoints and TID
+        self.assertIsNotNone(storage3._cache.checkpoints)
+        self.assertEqual(storage3._cache.checkpoints, orig_checkpoints)
+        self.assertIn(0, storage3._cache.delta_after0)
+        self.assertEqual(storage3._cache.delta_after0[0], tid)
+        self.assertIsNotNone(storage3._cache.current_tid)
+        db3 = self._closing(DB(storage3))
+        c3 = db3.open()
+        # Polling, however, caught us up, because the object changed
+        # after current_tid.
+        self.assertIn(0, c3._storage._cache.delta_after0)
+        self.assertEqual(c3._storage._cache.delta_after0[0], new_tid)
+
+        r = c3.root()
+        self.assertEqual(r['myobj'], 420)
+        c3.root()['myobj'] = 180
+        transaction.commit()
+        c3.close()
+        db3.close()
+
+
     def checkLen(self):
         # Override the version from BasicStorage because we
         # actually do guarantee to keep track of the counts.
@@ -219,7 +284,6 @@ class GenericRelStorageTests(
         self._dostore(data=PersistentMapping())
         self._dostore(data=PersistentMapping())
         self.assertEqual(len(self._storage), 2)
-
 
     def checkDropAndPrepare(self):
         # Under PyPy, this test either takes a very long time (PyMySQL)
@@ -1104,23 +1168,7 @@ class DoubleCommitter(Persistent):
         return Persistent.__getstate__(self)
 
 
-class _TempDirMixin(object):
-
-    __temp_dir = None
-
-    def getTempDir(self):
-        if not self.__temp_dir:
-            self.__temp_dir = tempfile.mkdtemp('.rstest')
-        return self.__temp_dir
-
-    def clearTempDir(self):
-        if self.__temp_dir:
-            shutil.rmtree(self.__temp_dir)
-            self.__temp_dir = None
-
-
-class AbstractToFileStorage(_TempDirMixin,
-                            RelStorageTestBase):
+class AbstractToFileStorage(RelStorageTestBase):
     # Subclass this and set:
     # - keep_history = True; and
     # - A base class of UndoableRecoveryStorage
@@ -1129,38 +1177,53 @@ class AbstractToFileStorage(_TempDirMixin,
     # - keep_history = False; and
     # A base class of BasicRecoveryStorage
 
+    # We rely on being placed in a temporary directory by a super
+    # class that will be cleaned up by tearDown().
+
     def setUp(self):
         super(AbstractToFileStorage, self).setUp()
-        self._storage = self.make_storage()
-        self._dst_path = os.path.join(self.getTempDir(), 'Dest.fs')
-        self._dst = FileStorage(self._dst_path, create=True)
+        self._dst_path = 'Dest.fs'
+        self.__dst = None
+
+    @property
+    def _dst(self):
+        if self.__dst is None:
+            self.__dst = FileStorage(self._dst_path, create=True)
+        return self.__dst
 
     def tearDown(self):
-        self._dst.close()
-        self._dst.cleanup()
-        self._dst = None
-        self.clearTempDir()
+        if self.__dst is not None:
+            self.__dst.close()
+            self.__dst.cleanup()
+        self.__dst = None
         super(AbstractToFileStorage, self).tearDown()
 
     def new_dest(self):
         return self._closing(FileStorage(self._dst_path))
 
 
-class AbstractFromFileStorage(_TempDirMixin,
-                              RelStorageTestBase):
+class AbstractFromFileStorage(RelStorageTestBase):
     # As for AbstractToFileStorage
 
     def setUp(self):
         super(AbstractFromFileStorage, self).setUp()
-        self._dst = self._storage
-        self._src_path = os.path.join(self.getTempDir(), 'Source.fs')
-        self._storage = FileStorage(self._src_path, create=True)
+        self._src_path = 'Source.fs'
+        self.__dst = None
+
+    def make_storage_to_cache(self):
+        return FileStorage(self._src_path, create=True)
+
+    @property
+    def _dst(self):
+        if self.__dst is None:
+            self.__dst = self.make_storage()
+        return self.__dst
 
     def tearDown(self):
-        self._dst.close()
-        self._dst.cleanup()
-        self._dst = None
-        self.clearTempDir()
+        if self.__dst is not None:
+            self.__dst.close()
+            self.__dst.cleanup()
+            self.__dst = None
         super(AbstractFromFileStorage, self).tearDown()
 
     def new_dest(self):

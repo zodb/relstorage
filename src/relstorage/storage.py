@@ -260,7 +260,7 @@ class RelStorage(UndoLogCompatible,
 
         # Creating the storage cache may have loaded cache files, and if so,
         # we have a previous tid state.
-        if self._cache.current_tid:
+        if self._cache.current_tid is not None:
             self._prev_polled_tid = self._cache.current_tid
 
 
