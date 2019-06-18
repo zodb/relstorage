@@ -10,11 +10,17 @@
 
 - Make MySQL and PostgreSQL use a prepared statement to get
   transaction IDs. PostgreSQL also uses a prepared statement to set
-  them. This may be slightly faster. See :issue:`246`.
+  them. This can be slightly faster. See :issue:`246`.
 
 - Make PostgreSQL use a prepared statement to move objects to their
   final destination during commit (history free only). See
   :issue:`246`.
+
+- Fix an issue with persistent caches written to from multiple
+  instances sometimes getting stale data after a restart. Note: This
+  makes the persistent cache less useful for objects that rarely
+  change in a database that features other actively changing objects;
+  it is hoped this can be addressed in the future. See :issue:`249`.
 
 3.0a1 (2019-06-12)
 ==================

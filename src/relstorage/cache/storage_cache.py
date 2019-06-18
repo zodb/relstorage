@@ -225,6 +225,13 @@ class StorageCache(object):
             # No point keeping the delta maps otherwise,
             # we have to poll. If there were no checkpoints, it means
             # we saved without having ever completed a poll.
+            #
+            # We choose the cp0 as our beginning TID at which to
+            # resume polling. We have information on cached data as it
+            # relates to those checkpoints. (TODO: Are we sure that
+            # the delta maps we've just built are actually accurate
+            # as-of this particular TID we're choosing to poll from?)
+            #
             self.current_tid = self.checkpoints[0]
             self.delta_after0 = row_filter.delta_after0
             self.delta_after1 = row_filter.delta_after1
@@ -426,7 +433,7 @@ class StorageCache(object):
             cache_data = cache[key]
             if cache_data:
                 # Cache hit.
-                assert cache_data[1] == tid_int, cache_data[1]
+                assert cache_data[1] == tid_int, (cache_data[1], key)
                 return cache_data
 
             # Cache miss.
@@ -764,30 +771,36 @@ class _PersistentRowFilter(object):
             delta_after0 = self.delta_after0
             delta_after1 = self.delta_after1
             cp0, cp1 = checkpoints
+
             for row in row_iter:
-                # We don't care about the extra suggested key tid
-                suggested_key = row[:2]
+                # Rows are (oid, tid, state, tid), where the two tids
+                # are always equal.
+                key = row[:2]
                 value = row[2:]
-                oid = suggested_key[0]
+                oid = key[0]
                 actual_tid = value[1]
 
                 if actual_tid >= cp0:
-                    # They must match in both these cases
-                    key = suggested_key
                     delta_after0[oid] = actual_tid
                 elif actual_tid >= cp1:
-                    key = suggested_key
+                    # XXX: This might not be right. We'll poll for
+                    # changes after cp0 (because we set that as our
+                    # current_tid/the storage's prev_polled_tid), but
+                    # we won't poll for changes after cp1.
                     delta_after1[oid] = actual_tid
                 else:
-                    # Old generation, no delta.
-                    # Even though this is old, it could be good to have it,
+                    # This is too old and outside our checkpoints for
+                    # when something changed. It could be good to have it,
                     # it might be something that doesn't change much.
+                    # Unfortunately, we can't just stick it in our fallback
+                    # keys (oid, cp0) or (oid, cp1), because it might not be current,
+                    # and we definitely don't poll this far back.
                     #
-                    # Using `cp0` is our fallback preferred key, so
-                    # this doesn't have to get copied from cp1 later.
-                    #
-                    # XXX: This is probably wrong. See https://github.com/zodb/relstorage/issues/249
-                    key = (oid, cp0)
+                    # Our options are to put it in with its natural key and hope
+                    # we later wind up constructing that key (how could we do that?)
+                    # or drop it; since we don't know what key it was actively being
+                    # found under before, dropping it is our best option. Sadly.
+                    continue
                 yield key, value
 
 

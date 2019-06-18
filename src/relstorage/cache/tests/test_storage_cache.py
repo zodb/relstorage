@@ -579,6 +579,8 @@ class PersistentRowFilterTests(TestCase):
 
         tid_after0 = 5000
         tid_after1 = 4000
+        # The old_tid, outside the checkpoint range,
+        # will get dropped.
         old_tid = 3999
 
         rows = [
@@ -592,5 +594,4 @@ class PersistentRowFilterTests(TestCase):
         self.assertEqual(results, [
             ((1, tid_after0), (b'1', tid_after0)),
             ((2, tid_after1), (b'2', tid_after1)),
-            ((3, tid_after0), (b'3', old_tid))
         ])

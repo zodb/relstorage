@@ -349,7 +349,7 @@ class GenericRelStorageTests(
         del db2, storage2, c2
 
         # Now move the persistent checkpoints forward, pushing the
-        # last TID for the root out of the delta ranges.
+        # last TID for the root object out of the delta ranges.
         c1._storage._cache.local_client.store_checkpoints(new_tid, new_tid)
 
         c1.close()
@@ -364,16 +364,21 @@ class GenericRelStorageTests(
         self.assertEqual(storage3._cache.current_tid, new_tid)
         # The root object, however, was not put into a delta map.
         self.assertNotIn(0, storage3._cache.delta_after0)
+        # Nor is it in the cache at any key.
+        keys_for_root = [k for k in storage3._cache.local_client if k[0] == 0]
+        self.assertEqual(0, len(keys_for_root))
         db3 = self._closing(DB(storage3))
         tx3 = transaction.TransactionManager()
         c3 = db3.open(tx3)
         # Polling did not find the change. We think we're current with new_tid,
         # and the root changed in that transaction.
         self.assertNotIn(0, c3._storage._cache.delta_after0)
-        # The data is in the cache, though, at (oid, cp0)
+        # Opening the database loaded the root object, so it's now in the cache,
+        # with accurate data.
         cache_data = c3._storage._cache.local_client[(0, new_tid)]
         self.assertIsNotNone(cache_data)
-        self.assertEqual(cache_data[1], tid3)
+        __traceback_info__ = tid3, tid4, new_tid
+        self.assertEqual(cache_data[1], new_tid)
         r = c3.root()
         # The current data is visible.
         self.assertEqual(r['myobj'], 420)
