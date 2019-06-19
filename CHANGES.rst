@@ -2,7 +2,7 @@
  Changes
 =========
 
-3.0a2 (unreleased)
+3.0a2 (2019-06-19)
 ==================
 
 - Drop support for PostgreSQL versions earlier than 9.6. See
