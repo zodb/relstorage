@@ -96,10 +96,11 @@ class Connection(sqlite3.Connection):
     )
 
     def __init__(self, *args, **kwargs):
+        __traceback_info__ = args, kwargs
         super(Connection, self).__init__(*args, **kwargs)
 
         self.rs_db_filename = None
-        self.rs_close_async = True
+        self.rs_close_async = DEFAULT_CLOSE_ASYNC
         self._rs_has_closed = False
 
     def __repr__(self):
@@ -125,7 +126,7 @@ class Connection(sqlite3.Connection):
         self._rs_has_closed = True
         from relstorage._util import spawn as _spawn
         spawn = _spawn if self.rs_close_async else lambda f: f()
-        def c():
+        def optimize_and_close():
             # Recommended best practice is to OPTIMIZE the database for
             # each closed connection. OPTIMIZE needs to run in each connection
             # so it can see what tables and indexes were used. It's usually fast,
@@ -137,7 +138,7 @@ class Connection(sqlite3.Connection):
                 logger.exception("Failed to optimize database; was it removed?")
 
             super(Connection, self).close()
-        spawn(c)
+        spawn(optimize_and_close)
 
 
 # PRAGMA statements don't allow ? placeholders
@@ -173,7 +174,31 @@ def _execute_pragmas(cur, **kwargs):
         else:
             logger.debug("Using %s = %s", k, orig_value)
 
-def _connect_to_file(fname, factory=Connection, close_async=True,
+_MB = 1024 * 1024
+DEFAULT_MAX_WAL = 10 * _MB
+DEFAULT_CLOSE_ASYNC = False
+# Benchmarking on at least one system doesn't show an improvement to
+# either reading or writing by forcing a large mmap_size.
+DEFAULT_MMAP_SIZE = None
+# 4096 is the page size in current releases of sqlite; older versions
+# used 1024. A larger page makes sense as we have biggish values.
+# Going larger doesn't make much difference in benchmarks.
+DEFAULT_PAGE_SIZE = 4096
+# Control where temporary data is:
+#
+# FILE = a deleted disk file (that sqlite never flushes so
+# theoretically just exists in the operating system's filesystem
+# cache)
+#
+# MEMORY = explicitly in memory only
+#
+# DEFAULT = compile time default. Benchmarking for large writes
+# doesn't show much difference between FILE and MEMORY, so don't
+# bother to change from the default.
+DEFAULT_TEMP_STORE = None
+
+def _connect_to_file(fname, factory=Connection,
+                     close_async=DEFAULT_CLOSE_ASYNC,
                      pragmas=None):
 
     connection = sqlite3.connect(
@@ -204,9 +229,11 @@ def _connect_to_file(fname, factory=Connection, close_async=True,
     # the database so that we can verify that it's not corrupt.
     pragmas.setdefault('journal_mode', 'wal')
     cur = connection.cursor()
+    __traceback_info__ = cur, pragmas
     try:
         _execute_pragmas(cur, **pragmas)
     except:
+        logger.exception("Failed to execute pragmas")
         cur.close()
         if hasattr(connection, 'rs_close_async'):
             connection.rs_close_async = False
@@ -216,30 +243,6 @@ def _connect_to_file(fname, factory=Connection, close_async=True,
     cur.close()
 
     return connection
-
-_MB = 1024 * 1024
-DEFAULT_MAX_WAL = 10 * _MB
-DEFAULT_CLOSE_ASYNC = True
-# Benchmarking on at least one system doesn't show an improvement to
-# either reading or writing by forcing a large mmap_size.
-DEFAULT_MMAP_SIZE = None
-# 4096 is the page size in current releases of sqlite; older versions
-# used 1024. A larger page makes sense as we have biggish values.
-# Going larger doesn't make much difference in benchmarks.
-DEFAULT_PAGE_SIZE = 4096
-# Control where temporary data is:
-#
-# FILE = a deleted disk file (that sqlite never flushes so
-# theoretically just exists in the operating system's filesystem
-# cache)
-#
-# MEMORY = explicitly in memory only
-#
-# DEFAULT = compile time default. Benchmarking for large writes
-# doesn't show much difference between FILE and MEMORY, so don't
-# bother to change from the default.
-DEFAULT_TEMP_STORE = None
-
 
 def sqlite_connect(options, prefix,
                    overwrite=False,
@@ -255,7 +258,7 @@ def sqlite_connect(options, prefix,
        result in the connection being closed, only committed or rolled back.
     """
     parent_dir = getattr(options, 'cache_local_dir', options)
-    # Allow for memory and temporary databases:
+    # Allow for memory and temporary databases (empty string):
     if parent_dir != ':memory:' and parent_dir:
         parent_dir = _normalize_path(options)
         try:

@@ -44,6 +44,7 @@ class AbstractZODBConvertBase(unittest.TestCase):
     zap_supported_by_dest = False
 
     def setUp(self):
+        super(AbstractZODBConvertBase, self).setUp()
         self._to_close = []
 
     def tearDown(self):
@@ -66,6 +67,7 @@ class AbstractZODBConvertBase(unittest.TestCase):
         # 2.5.0 and 5.3.
         gc.collect()
         gc.collect()
+        super(AbstractZODBConvertBase, self).tearDown()
 
     def _closing(self, thing):
         self._to_close.append(thing)

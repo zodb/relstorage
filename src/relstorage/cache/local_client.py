@@ -128,11 +128,11 @@ class LocalClient(object):
         return data
 
     @_log_timed
-    def save(self, overwrite=False, close_async=True):
+    def save(self, **sqlite_args):
         options = self.options
         if options.cache_local_dir and self.__bucket.size:
             conn = sqlite_connect(options, self.prefix,
-                                  overwrite=overwrite, close_async=close_async)
+                                  **sqlite_args)
             with closing(conn):
                 try:
                     self.write_to_sqlite(conn)
@@ -305,11 +305,11 @@ class LocalClient(object):
             # storage for the blob state.
             #
             # We make one call into sqlite and let it handle the iterating.
+            # Items are (oid, key_tid, state, actual_tid). Currently,
+            # key_tid == actual_tid
             cur = db.fetch_rows_by_priority()
             items = cur.fetchall()
             cur.close()
-            # Items are (oid, key_tid, state, actual_tid)
-            items = db.fetch_rows_by_priority().fetchall()
             # row_filter produces the sequence ((oid, key_tid) (state, actual_tid))
             if row_filter is not None:
                 row_iter = row_filter(checkpoints, items)

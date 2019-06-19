@@ -433,7 +433,7 @@ class StorageCacheTests(TestCase):
         with self.assertRaisesRegex(CacheConsistencyError, "to have total len"):
             c.after_poll(None, 40, 50, None)
         self.assertIsNone(c.checkpoints)
-        self.assertEqual(0, c.current_tid)
+        self.assertIsNone(c.current_tid)
 
     def test_after_poll_new_checkpoints_bad_changes_out_of_order(self):
         from relstorage.tests.fakecache import data
@@ -450,7 +450,7 @@ class StorageCacheTests(TestCase):
         with self.assertRaisesRegex(CacheConsistencyError, "out of range"):
             c.after_poll(None, 40, 50, None)
         self.assertIsNone(c.checkpoints)
-        self.assertEqual(0, c.current_tid)
+        self.assertIsNone(c.current_tid)
 
         # Too low
         c.checkpoints = (40, 30)
@@ -459,7 +459,7 @@ class StorageCacheTests(TestCase):
         with self.assertRaisesRegex(CacheConsistencyError, "out of range"):
             c.after_poll(None, 40, 50, None)
         self.assertIsNone(c.checkpoints)
-        self.assertEqual(0, c.current_tid)
+        self.assertIsNone(c.current_tid)
 
     def test_after_poll_new_checkpoints(self):
         from relstorage.tests.fakecache import data
@@ -579,6 +579,8 @@ class PersistentRowFilterTests(TestCase):
 
         tid_after0 = 5000
         tid_after1 = 4000
+        # The old_tid, outside the checkpoint range,
+        # will get dropped.
         old_tid = 3999
 
         rows = [
@@ -592,5 +594,4 @@ class PersistentRowFilterTests(TestCase):
         self.assertEqual(results, [
             ((1, tid_after0), (b'1', tid_after0)),
             ((2, tid_after1), (b'2', tid_after1)),
-            ((3, tid_after0), (b'3', old_tid))
         ])
