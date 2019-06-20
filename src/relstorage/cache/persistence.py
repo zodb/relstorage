@@ -20,6 +20,7 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import errno
 import logging
 import os
 import os.path
@@ -244,18 +245,10 @@ def _connect_to_file(fname, factory=Connection,
 
     return connection
 
-def sqlite_connect(options, prefix,
-                   overwrite=False,
-                   max_wal_size=DEFAULT_MAX_WAL,
-                   close_async=DEFAULT_CLOSE_ASYNC,
-                   mmap_size=DEFAULT_MMAP_SIZE,
-                   page_size=DEFAULT_PAGE_SIZE,
-                   temp_store=DEFAULT_TEMP_STORE):
+def sqlite_files(options, prefix):
     """
-    Return a DB-API Connection object.
-
-    .. caution:: Using the connection as a context manager does **not**
-       result in the connection being closed, only committed or rolled back.
+    Calculate the sqlite filename and return it, plus a function that will
+    destroy the sqlite file.
     """
     parent_dir = getattr(options, 'cache_local_dir', options)
     # Allow for memory and temporary databases (empty string):
@@ -270,15 +263,34 @@ def sqlite_connect(options, prefix,
 
         fname = os.path.join(parent_dir, 'relstorage-cache-' + prefix + '.sqlite3')
         wal_fname = fname + '-wal'
+        shm_fname = fname + '-shm'
         def destroy():
             logger.info("Replacing any existing cache at %s", fname)
             __quiet_remove(fname)
             __quiet_remove(wal_fname)
+            __quiet_remove(shm_fname)
     else:
         fname = parent_dir
         wal_fname = None
         def destroy():
             "Nothing to do."
+    return fname, destroy
+
+
+def sqlite_connect(options, prefix,
+                   overwrite=False,
+                   max_wal_size=DEFAULT_MAX_WAL,
+                   close_async=DEFAULT_CLOSE_ASYNC,
+                   mmap_size=DEFAULT_MMAP_SIZE,
+                   page_size=DEFAULT_PAGE_SIZE,
+                   temp_store=DEFAULT_TEMP_STORE):
+    """
+    Return a DB-API Connection object.
+
+    .. caution:: Using the connection as a context manager does **not**
+       result in the connection being closed, only committed or rolled back.
+    """
+    fname, destroy = sqlite_files(options, prefix)
 
     corrupt_db_ex = sqlite3.DatabaseError
     if overwrite:
@@ -318,7 +330,7 @@ def sqlite_connect(options, prefix,
         connection = _connect_to_file(fname, close_async=close_async,
                                       pragmas=pragmas)
     except corrupt_db_ex:
-        logger.info("Corrupt cache database at %s; replacing", fname)
+        logger.exception("Corrupt cache database at %s; replacing", fname)
         destroy()
         connection = _connect_to_file(fname, close_async=close_async,
                                       pragmas=pragmas)
@@ -328,8 +340,12 @@ def sqlite_connect(options, prefix,
 def __quiet_remove(path):
     try:
         os.unlink(path)
-    except os.error: # pragma: no cover
-        log.debug("Failed to remove %r", path)
+    except os.error as e:
+        # TODO: Use FileNotFoundError on Python 3
+        log_meth = log.exception
+        if e.errno == errno.ENOENT:
+            log_meth = log.debug
+        log_meth("Failed to remove %r", path)
         return False
     else:
         return True

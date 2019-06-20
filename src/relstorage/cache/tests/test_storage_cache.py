@@ -109,15 +109,25 @@ class StorageCacheTests(TestCase):
 
         return c, oid, tid
 
-    def test_save(self):
+    def assertNoPersistentCache(self, cache):
         import os
+        from relstorage.cache.persistence import sqlite_files
+        fname, _ = sqlite_files(cache.options, cache.prefix)
+        if fname:
+            self.assertFalse(os.path.exists(fname), fname)
+
+    def assertPersistentCache(self, cache):
+        import os
+        from relstorage.cache.persistence import sqlite_files
+        fname, _ = sqlite_files(cache.options, cache.prefix)
+        if fname:
+            self.assertTrue(os.path.exists(fname), fname)
+
+    def test_save(self):
         c, oid, tid = self._setup_for_save()
+        self.assertNoPersistentCache(c)
         c.save(overwrite=True, close_async=False)
-        files = os.listdir(c.options.cache_local_dir)
-        __traceback_info__ = files
-        # Older versions of sqlite may leave -shm and -wal
-        # files around.
-        self.assertGreaterEqual(len(files), 1)
+        self.assertPersistentCache(c)
 
         # Creating one in the same place automatically loads it.
         c2 = self._makeOne(cache_local_dir=c.options.cache_local_dir)
@@ -147,12 +157,38 @@ class StorageCacheTests(TestCase):
         self.test_closed_state(c)
 
     def test_save_no_hits_no_sets(self):
-        import os
         c, _, _ = self._setup_for_save()
         c.local_client.reset_stats()
         c.save(close_async=False)
-        files = os.listdir(c.options.cache_local_dir)
-        self.assertEmpty(files)
+        self.assertNoPersistentCache(c)
+
+    def test_zap_all(self):
+        c, _, _ = self._setup_for_save()
+        self.assertNoPersistentCache(c)
+
+        c.save(overwrite=True, close_async=False)
+        self.assertPersistentCache(c)
+
+        c.zap_all()
+        self.assertEmpty(c)
+        self.assertNoPersistentCache(c)
+
+        # We can do it again and again
+        c.zap_all()
+        self.assertEmpty(c)
+        self.assertNoPersistentCache(c)
+
+    def test_zap_all_no_local_dir(self):
+        c, _, _ = self._setup_for_save()
+        self.assertNoPersistentCache(c)
+        c.options.cache_local_dir = None
+
+        c.save(overwrite=True, close_async=False)
+        self.assertNoPersistentCache(c)
+
+        c.zap_all()
+        self.assertEmpty(c)
+        self.assertNoPersistentCache(c)
 
     def test_clear(self):
         from relstorage.tests.fakecache import data

@@ -290,7 +290,7 @@ class StorageCache(object):
         can be used to control this.
 
         .. versionchanged:: 2.0b6 Added the ``load_persistent``
-        keyword. This argument is provisional.
+           keyword. This argument is provisional.
         """
         self._reset()
         # After this our current_tid is probably out of sync with the
@@ -304,6 +304,15 @@ class StorageCache(object):
 
         if load_persistent:
             self.restore()
+
+    def zap_all(self):
+        """
+        Remove all data from the cache, both locally (and shared among
+        other instances, and globally); in addition, remove any
+        persistent cache files on disk.
+        """
+        self.clear(load_persistent=False)
+        self.local_client.zap_all()
 
     def _check_tid_after_load(self, oid_int, actual_tid_int,
                               expect_tid_int=None):
