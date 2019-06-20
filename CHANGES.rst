@@ -5,8 +5,8 @@
 3.0a3 (unreleased)
 ==================
 
-- Nothing changed yet.
-
+- Zapping a storage now also removes any persistent cache files. See
+  :issue:`241`.
 
 3.0a2 (2019-06-19)
 ==================

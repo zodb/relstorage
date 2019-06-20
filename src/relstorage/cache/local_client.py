@@ -39,6 +39,7 @@ from relstorage.cache.interfaces import CacheCorruptedError
 from relstorage.cache.mapping import SizedLRUMapping
 
 from relstorage.cache.persistence import sqlite_connect
+from relstorage.cache.persistence import sqlite_files
 from relstorage.cache.local_database import Database
 
 logger = __import__('logging').getLogger(__name__)
@@ -160,6 +161,10 @@ class LocalClient(object):
             conn = sqlite_connect(options, self.prefix, close_async=False)
             with closing(conn):
                 self.read_from_sqlite(conn, row_filter)
+
+    def zap_all(self):
+        _, destroy = sqlite_files(self.options, self.prefix)
+        destroy()
 
     @property
     def _bucket0(self):

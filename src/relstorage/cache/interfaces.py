@@ -139,6 +139,11 @@ class IPersistentCache(Interface):
         Restore the cache from disk.
         """
 
+    def zap_all():
+        """
+        Remove the cache from disk.
+        """
+
 class ILRUEntry(Interface):
     """
     An entry in an `ILRUCache`.
