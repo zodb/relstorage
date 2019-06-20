@@ -122,7 +122,10 @@ class StorageCreatingMixin(ABC):
             # with them? This leads to connections remaining open with
             # locks on PyPy, so on PostgreSQL we can't TRUNCATE tables
             # and have to go the slow route.
-            storage.zap_all(slow=True)
+            #
+            # As of 2019-06-20 with PyPy 7.1.1, I'm no longer able to replicate
+            # a problem like that locally, so we go back to the fast way.
+            storage.zap_all()
         return self._wrap_storage(storage)
 
 

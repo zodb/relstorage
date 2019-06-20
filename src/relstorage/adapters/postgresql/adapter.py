@@ -210,7 +210,7 @@ class PostgreSQLAdapter(object):
         return inst
 
     def __str__(self):
-        parts = [self.__class__.__name__]
+        parts = []
         if self.keep_history:
             parts.append('history preserving')
         else:
@@ -218,7 +218,11 @@ class PostgreSQLAdapter(object):
         dsnparts = self._dsn.split()
         s = ' '.join(p for p in dsnparts if not p.startswith('password'))
         parts.append('dsn=%r' % s)
-        return ", ".join(parts)
+        return "<%s at %x %s>" % (
+            self.__class__.__name__, id(self), ",".join(parts)
+        )
+
+    __repr__ = __str__
 
 
 

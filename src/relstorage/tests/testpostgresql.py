@@ -25,28 +25,28 @@ from .util import AbstractTestSuiteBuilder
 class PostgreSQLAdapterMixin(object):
 
     def make_adapter(self, options, db=None):
-        if db is None:
-            if self.keep_history:
-                db = self.base_dbname
-            else:
-                db = self.base_dbname + '_hf'
         return PostgreSQLAdapter(
-            dsn='dbname=%s user=relstoragetest password=relstoragetest' % db,
+            dsn=self.__get_adapter_zconfig_dsn(db),
             options=options,
         )
 
     def get_adapter_class(self):
         return PostgreSQLAdapter
 
-    def __get_adapter_zconfig_dsn(self):
-        if self.keep_history:
-            dbname = self.base_dbname
-        else:
-            dbname = self.base_dbname + '_hf'
+    def __get_adapter_zconfig_dsn(self, dbname=None):
+        if dbname is None:
+            if self.keep_history:
+                dbname = self.base_dbname
+            else:
+                dbname = self.base_dbname + '_hf'
         dsn = (
             "dbname='%s' user='relstoragetest' password='relstoragetest'"
             % dbname
         )
+        # psycopg2cffi can have a unix socket path hardcoded in it,
+        # and that path may not be right
+        if 'cffi' in self.driver_name.lower():
+            dsn += " host='127.0.0.1'"
         return dsn
 
     def get_adapter_zconfig(self):
