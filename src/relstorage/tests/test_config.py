@@ -22,10 +22,10 @@ from __future__ import print_function
 
 import unittest
 
-import mock
-
 from relstorage import config
 from relstorage import options
+
+from . import mock
 
 class MockZConfig(object):
 

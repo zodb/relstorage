@@ -51,10 +51,10 @@ notifications:
 
 before_install:
   - python --version
-  - python -c 'import sqlite3; print(sqlite3.sqlite_version)'
 before_script:
   - ccache -s
   - mysql -uroot -e 'select version()'
+  - python -c 'import sqlite3; print(sqlite3.sqlite_version)'
 
 install:
   - pip install -U pip
