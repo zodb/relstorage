@@ -22,6 +22,7 @@ from zope.interface import implementer
 from ..interfaces import ISchemaInstaller
 from ..schema import AbstractSchemaInstaller
 
+logger = __import__('logging').getLogger(__name__)
 
 @implementer(ISchemaInstaller)
 class MySQLSchemaInstaller(AbstractSchemaInstaller):
@@ -62,9 +63,9 @@ class MySQLSchemaInstaller(AbstractSchemaInstaller):
     COLTYPE_BINARY_STRING = 'BLOB'
     TRANSACTIONAL_TABLE_SUFFIX = 'ENGINE = InnoDB'
 
-    # As usual, MySQL has an annoying implementation of this and we
+    # As usual, MySQL has a quirky implementation of this feature and we
     # have to re-specify *everything* about the column. MySQL 8 supports the
-    # simple 'RENAME ... TO ... syntax that everyone else does.
+    # simple 'RENAME ... TO ...' syntax that everyone else does.
     _rename_transaction_empty_stmt = (
         "ALTER TABLE transaction CHANGE empty is_empty "
         "BOOLEAN NOT NULL DEFAULT FALSE"
@@ -239,14 +240,19 @@ class MySQLSchemaInstaller(AbstractSchemaInstaller):
     def _create_temp_undo(self, _cursor):
         return
 
-    def _init_after_create(self, cursor):
-        if self.keep_history:
-            stmt = """
-            INSERT INTO transaction (tid, username, description)
-            VALUES (0, 'system', 'special transaction for object creation');
-            """
-            self.runner.run_script(cursor, stmt)
-
     def _reset_oid(self, cursor):
         stmt = "TRUNCATE new_oid;"
         self.runner.run_script(cursor, stmt)
+
+    # We can't TRUNCATE tables that have foreign-key relationships
+    # with other tables, but we can drop them. This has to be followed up by
+    # creating them again.
+    _zap_all_tbl_stmt = 'DROP TABLE %s'
+
+    def _after_zap_all_tables(self, cursor, slow=False):
+        if not slow:
+            logger.debug("Creating tables after drop")
+            self.create(cursor)
+            logger.debug("Done creating tables after drop")
+        else:
+            super(MySQLSchemaInstaller, self)._after_zap_all_tables(cursor, slow)

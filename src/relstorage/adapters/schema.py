@@ -380,7 +380,8 @@ class AbstractSchemaInstaller(ABC):
 
     _rename_transaction_empty_stmt = 'ALTER TABLE transaction RENAME COLUMN empty TO is_empty'
 
-    _zap_all_tbl_stmt = 'DELETE FROM %s'
+    # Subclasses can redefine these.
+    _slow_zap_all_tbl_stmt = _zap_all_tbl_stmt = 'DELETE FROM %s'
 
     def zap_all(self, reset_oid=True, slow=False):
         """
@@ -391,24 +392,24 @@ class AbstractSchemaInstaller(ABC):
             DELETEd. This is helpful when other connections might be open and
             holding some kind of locks.
         """
-        stmt = self._zap_all_tbl_stmt if not slow else AbstractSchemaInstaller._zap_all_tbl_stmt
+        stmt = self._zap_all_tbl_stmt if not slow else self._slow_zap_all_tbl_stmt
 
         def callback(_conn, cursor):
             existent = set(self.list_tables(cursor))
-            todo = reversed(self.all_tables)
+            todo = list(self.all_tables)
+            todo.reverse() # using reversed()  doesn't print nicely
             log.debug("Checking tables: %r", todo)
             for table in todo:
                 log.debug("Considering table %s", table)
                 if table.startswith('temp_'):
                     continue
                 if table in existent:
-                    log.debug("Deleting from table %s...", table)
-                    cursor.execute(stmt % table)
+                    table_stmt = stmt % table
+                    log.debug(table_stmt)
+                    cursor.execute(table_stmt)
             log.debug("Done deleting from tables.")
 
-            log.debug("Running init script.")
-            self._init_after_create(cursor)
-            log.debug("Done running init script.")
+            self._after_zap_all_tables(cursor, slow)
 
             if reset_oid:
                 log.debug("Running OID reset script.")
@@ -416,6 +417,11 @@ class AbstractSchemaInstaller(ABC):
                 log.debug("Done running OID reset script.")
 
         self.connmanager.open_and_call(callback)
+
+    def _after_zap_all_tables(self, cursor, slow=False):
+        log.debug("Running init script. Slow: %s", slow)
+        self._init_after_create(cursor)
+        log.debug("Done running init script.")
 
 
     def drop_all(self):

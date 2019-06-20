@@ -8,6 +8,10 @@
 - Zapping a storage now also removes any persistent cache files. See
   :issue:`241`.
 
+- Zapping a MySQL storage now issues ``DROP TABLE`` statements instead
+  of ``DELETE FROM`` statements. This is much faster on large
+  databases. See :issue:`242`.
+
 3.0a2 (2019-06-19)
 ==================
 

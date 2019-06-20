@@ -276,8 +276,9 @@ class AbstractTestSuiteBuilder(ABC):
 
                     adapter_maker = self.use_adapter()
                     adapter = adapter_maker.make_adapter(options, db)
+                    __traceback_info__ = adapter, options
                     storage = RelStorage(adapter, name=name, options=options)
-                    storage.zap_all(slow=True)
+                    storage.zap_all()
                     return storage
 
                 prefix = '%s_%s%s' % (
