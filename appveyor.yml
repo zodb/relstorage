@@ -96,7 +96,7 @@ build_script:
 test_script:
   - if not "%GWHEEL_ONLY%"=="true" cmd /c .travis\mysql.cmd
   - if not "%GWHEEL_ONLY%"=="true" cmd /c .travis\postgres.cmd
-  - if not "%GWHEEL_ONLY%"=="true" %PYEXE% -m zope.testrunner --test-path=src --auto-color
+  - if not "%GWHEEL_ONLY%"=="true" %PYEXE% -m zope.testrunner --test-path=src -vvv --color --slow-test 3
 
 after_test:
   - "%CMD_IN_ENV% %PYEXE% setup.py bdist_wheel -d dist"

@@ -40,9 +40,13 @@ class PostgreSQLAdapterMixin(object):
             else:
                 dbname = self.base_dbname + '_hf'
         dsn = (
-            "dbname='%s' user='relstoragetest' host='127.0.0.1' password='relstoragetest'"
+            "dbname='%s' user='relstoragetest' password='relstoragetest'"
             % dbname
         )
+        # psycopg2cffi can have a unix socket path hardcoded in it,
+        # and that path may not be right
+        if 'cffi' in self.driver_name.lower():
+            dsn += " host='127.0.0.1'"
         return dsn
 
     def get_adapter_zconfig(self):
