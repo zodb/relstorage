@@ -3,12 +3,12 @@ from __future__ import print_function
 
 import unittest
 
-import mock
 from pkg_resources import DistributionNotFound
 
 from relstorage.zodburi_resolver import RelStorageURIResolver
 from relstorage.zodburi_resolver import SuffixMultiplier
 
+from . import mock
 
 class AbstractURIResolverTestBase(unittest.TestCase):
 

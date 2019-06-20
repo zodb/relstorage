@@ -32,7 +32,7 @@ memcache_require = [
 ]
 
 tests_require = [
-    'mock', # XXX: This should probably be dependent on Python version
+    'mock ; python_version == "2.7"',
     # random2 is a forward port of python 2's random to
     # python 3. Our test_cache_stats (inherited from ZEO)
     # needs that. Without it, the tests can work on Py2 but
@@ -152,13 +152,15 @@ setup(
         'all_tested_drivers': [
             # Install all the supported drivers for the platform.
             # first, mysql
-            'PyMySQL >= 0.6.6',
+            'PyMySQL >= 0.6.6; python_version == "3.7" or platform_python_implementation == "PyPy" or sys_platform == "win32"',
             'mysqlclient >= 1.4;platform_python_implementation=="CPython" and sys_platform != "win32"',
-            'mysql-connector-python >= 8.0.16',
+            'mysql-connector-python >= 8.0.16; python_version == "3.7" or platform_python_implementation == "PyPy"',
 
             # postgresql
-            'pg8000 >= 1.11.0', # pure-python
-            'psycopg2cffi >= 2.7.4', # CFFI, runs on all implementations.
+            # pure-python
+            'pg8000 >= 1.11.0; python_version == "2.7" or platform_python_implementation == "PyPy"',
+            # CFFI, runs on all implementations.
+            'psycopg2cffi >= 2.7.4; python_version == "2.7" or platform_python_implementation == "PyPy"',
             'psycopg2 >= 2.6.1; platform_python_implementation == "CPython"',
         ],
     },

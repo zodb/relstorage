@@ -12,6 +12,9 @@
   of ``DELETE FROM`` statements. This is much faster on large
   databases. See :issue:`242`.
 
+- Workaround the PyPy 7.1 JIT bug using MySQL Connector/Python. It is no
+  longer necessary to disable the JIT in PyPy 7.1.
+
 3.0a2 (2019-06-19)
 ==================
 
@@ -57,7 +60,7 @@
 
 - Test support for MySQL Connector/Python on PyPy. See :issue:`228`.
 
-  .. caution:: Prior to PyPy 7.2, it is necessary to disable JIT
+  .. caution:: Prior to PyPy 7.2 or RelStorage 3.0a3, it is necessary to disable JIT
                inlining due to `a PyPy bug
                <https://bitbucket.org/pypy/pypy/issues/3014/jit-issue-inlining-structunpack-hh>`_
                with ``struct.unpack``.

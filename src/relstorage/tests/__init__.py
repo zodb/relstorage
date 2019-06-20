@@ -4,6 +4,13 @@ import unittest
 
 from relstorage.options import Options
 
+try:
+    from unittest import mock
+except ImportError: # Python 2
+    import mock
+
+mock = mock
+
 class TestCase(unittest.TestCase):
     # Avoid deprecation warnings; 2.7 doesn't have
     # assertRaisesRegex

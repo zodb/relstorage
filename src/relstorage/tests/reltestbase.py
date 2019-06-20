@@ -53,6 +53,7 @@ from relstorage._compat import ABC
 
 from . import fakecache
 from . import util
+from . import mock
 from .test_zodbconvert import FSZODBConvertTests
 
 
@@ -1100,7 +1101,6 @@ class GenericRelStorageTests(
         from ZODB.interfaces import IMVCCAfterCompletionStorage
         self._storage = self.make_storage(revert_when_stale=False)
 
-        import mock
         with mock.patch.object(self._storage,
                                '_rollback_load_connection') as rb:
             self._storage.afterCompletion()

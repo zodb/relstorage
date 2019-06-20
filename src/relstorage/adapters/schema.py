@@ -296,13 +296,15 @@ class AbstractSchemaInstaller(ABC):
     def _reset_oid(self, cursor):
         raise NotImplementedError()
 
-    def create(self, cursor):
+    def create(self, cursor, existing_tables=()):
         """Create the database tables."""
         for table in self.all_tables:
-            meth = getattr(self, '_create_' + table)
-            meth(cursor)
+            if table not in existing_tables:
+                meth = getattr(self, '_create_' + table)
+                meth(cursor)
 
-        self._init_after_create(cursor)
+        if 'transaction' not in existing_tables:
+            self._init_after_create(cursor)
 
         tables = self.list_tables(cursor)
         self.check_compatibility(cursor, tables)
@@ -313,10 +315,8 @@ class AbstractSchemaInstaller(ABC):
         # to make subclasses have easier time.
         def callback(_conn, cursor):
             tables = self.list_tables(cursor)
-            if 'object_state' not in tables:
-                self.create(cursor)
-            else:
-                self.check_compatibility(cursor, tables)
+            self.create(cursor, tables)
+            if 'transaction' in tables:
                 self.update_schema(cursor, tables)
         self.connmanager.open_and_call(callback)
 
@@ -337,8 +337,9 @@ class AbstractSchemaInstaller(ABC):
                 )
         if 'blob_chunk' not in tables:
             raise StorageError(
-                "Schema mismatch; please create the blob_chunk tables."
-                "See migration instructions for RelStorage 1.5."
+                "Schema mismatch; please create the blob_chunk tables. "
+                "See migration instructions for RelStorage 1.5. "
+                "All tables: %s" % (tables,)
             )
 
     def update_schema(self, cursor, tables): # pylint:disable=unused-argument

@@ -21,6 +21,7 @@ from __future__ import print_function
 from zope.interface import implementer
 
 from relstorage._compat import PY2
+from relstorage._compat import PYPY
 from relstorage.adapters.interfaces import IDBDriver
 
 from . import AbstractMySQLDriver
@@ -30,7 +31,10 @@ __all__ = [
     'CMySQLConnectorDriver',
 ]
 
+logger = __import__('logging').getLogger(__name__)
+
 _base_name = 'MySQL Connector/Python'
+
 
 @implementer(IDBDriver)
 class PyMySQLConnectorDriver(AbstractMySQLDriver):
@@ -46,6 +50,31 @@ class PyMySQLConnectorDriver(AbstractMySQLDriver):
     _CONVERTER_CLASS = None
     _GEVENT_CAPABLE = True
     _GEVENT_NEEDS_SOCKET_PATCH = True
+
+    if PYPY:
+        def __init__(self):
+            super(PyMySQLConnectorDriver, self).__init__()
+            # Patch to work around JIT bug found in (at least) 7.1.1
+            # https://bitbucket.org/pypy/pypy/issues/3014/jit-issue-inlining-structunpack-hh
+            try:
+                from mysql.connector import catch23
+                from mysql.connector import protocol
+            except ImportError: # pragma: no cover
+                catch23 = protocol = None
+
+            if not hasattr(catch23, 'struct_unpack') or not hasattr(protocol, 'struct_unpack'):
+                # pragma: no cover
+                logger.debug("Unknown mysql.connector; not patching for PyPy JIT")
+            else:
+                logger.debug("Patching mysql.connector for PyPy JIT bug")
+                from struct import unpack
+                def struct_unpack(fmt, buf):
+                    if isinstance(buf, bytearray):
+                        buf = bytes(buf)
+                    return unpack(fmt, buf)
+
+                catch23.struct_unpack = struct_unpack
+                protocol.struct_unpack = struct_unpack
 
     @classmethod
     def _get_converter_class(cls):
