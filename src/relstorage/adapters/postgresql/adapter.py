@@ -34,6 +34,7 @@ from . import drivers
 from .connmanager import Psycopg2ConnectionManager
 from .locker import PostgreSQLLocker
 from .mover import PG8000ObjectMover
+from .mover import Psycopg2ObjectMover
 from .mover import PostgreSQLObjectMover
 from .mover import to_prepared_queries
 from .oidallocator import PostgreSQLOIDAllocator
@@ -87,6 +88,12 @@ class PostgreSQLAdapter(object):
         if driver.__name__ == 'pg8000':
             mover_type = PG8000ObjectMover
             txn_type = PG8000TransactionControl
+        elif driver.__name__ == 'psycopg2':
+            # Sadly, psycopg2cffi 2.8.2 fails to correctly
+            # handle 'COPY FROM STDIN' in copy_expert().
+            # It's not immediately obvious why that is.
+            # XXX: Figure out what the difference is.
+            mover_type = Psycopg2ObjectMover
 
         self.mover = mover_type(
             driver,

@@ -27,10 +27,11 @@ from zope import interface
 
 
 from relstorage.autotemp import AutoTemporaryFile
+from relstorage._compat import OID_TID_MAP_TYPE
+from relstorage._compat import OID_OBJECT_MAP_TYPE
+
 from relstorage.cache import persistence
 from relstorage.cache.interfaces import IPersistentCache
-from relstorage.cache.interfaces import OID_TID_MAP_TYPE
-from relstorage.cache.interfaces import OID_OBJECT_MAP_TYPE
 from relstorage.cache.interfaces import CacheConsistencyError
 from relstorage.cache.local_client import LocalClient
 from relstorage.cache.memcache_client import MemcacheStateCache
@@ -61,7 +62,7 @@ class StorageCache(object):
     # pylint:disable=too-many-instance-attributes,too-many-public-methods
 
     # queue is a _TemporaryStorage used during commit
-    queue = None
+    temp_objects = None
     # store_temp and read_temp are methods copied from the queue while
     # we are committing.
     store_temp = None
@@ -486,7 +487,7 @@ class StorageCache(object):
 
     def tpc_begin(self):
         """Prepare temp space for objects to cache."""
-        q = self.queue = _TemporaryStorage()
+        q = self.temp_objects = _TemporaryStorage()
         self.store_temp = q.store_temp
         self.read_temp = q.read_temp
 
@@ -499,11 +500,11 @@ class StorageCache(object):
         """
         tid_int = u64(tid)
 
-        self.cache.set_all_for_tid(tid_int, self.queue)
+        self.cache.set_all_for_tid(tid_int, self.temp_objects)
         # We only do this because cache_trace_analysis uses us
         # in ways that aren't quite accurate. We'd prefer to call clear_temp()
         # at this point.
-        self.queue.reset()
+        self.temp_objects.reset()
 
     def after_tpc_finish(self, tid):
         """
@@ -516,7 +517,7 @@ class StorageCache(object):
         tid_int = u64(tid)
 
         if self.checkpoints:
-            for oid_int in self.queue.stored_oids:
+            for oid_int in self.temp_objects.stored_oids:
                 # Future cache lookups for oid_int should now use
                 # the tid just committed. We're about to flush that
                 # data to the cache.
@@ -540,11 +541,11 @@ class StorageCache(object):
 
         Called after transaction finish or abort.
         """
-        if self.queue is not None:
+        if self.temp_objects is not None:
             self.store_temp = None
             self.read_temp = None
-            self.queue.close()
-            self.queue = None
+            self.temp_objects.close()
+            self.temp_objects = None
 
     def after_poll(self, cursor, prev_tid_int, new_tid_int, changes):
         """
@@ -819,14 +820,16 @@ class _TemporaryStorage(object):
         # already be spooled to disk.
         # TODO: An alternate idea would be a temporary sqlite database.
         self._queue = AutoTemporaryFile()
+        # {oid: (startpos, endpos, prev_tid_int)}
         self._queue_contents = OID_OBJECT_MAP_TYPE()
 
     def reset(self):
         self._queue_contents.clear()
         self._queue.seek(0)
 
-    def store_temp(self, oid_int, state):
-        """Queue an object for caching.
+    def store_temp(self, oid_int, state, prev_tid_int=0):
+        """
+        Queue an object for caching.
 
         Typically, we can't actually cache the object yet, because its
         transaction ID is not yet chosen.
@@ -837,7 +840,11 @@ class _TemporaryStorage(object):
         startpos = queue.tell()
         queue.write(state)
         endpos = queue.tell()
-        self._queue_contents[oid_int] = (startpos, endpos)
+        self._queue_contents[oid_int] = (startpos, endpos, prev_tid_int)
+
+    def __len__(self):
+        # How many distinct OIDs have been stored?
+        return len(self._queue_contents)
 
     @property
     def stored_oids(self):
@@ -849,27 +856,28 @@ class _TemporaryStorage(object):
         state = self._queue.read(length)
         if len(state) != length:
             raise AssertionError("Queued cache data is truncated")
-        return state, length
+        return state
 
     def read_temp(self, oid_int):
         """
         Return the bytes for a previously stored temporary item.
         """
-        startpos, endpos = self._queue_contents[oid_int]
-        return self._read_temp_state(startpos, endpos)[0]
+        startpos, endpos, _ = self._queue_contents[oid_int]
+        return self._read_temp_state(startpos, endpos)
 
     def __iter__(self):
-        for startpos, endpos, oid_int in self.items():
-            state, _ = self._read_temp_state(startpos, endpos)
-            yield state, oid_int
+        read_temp_state = self._read_temp_state
+        for startpos, endpos, oid_int, prev_tid_int in self.items():
+            state = read_temp_state(startpos, endpos)
+            yield state, oid_int, prev_tid_int
 
     def items(self):
         # Order the queue by file position, which should help
         # if the file is large and needs to be read
         # sequentially from disk.
         items = [
-            (startpos, endpos, oid_int)
-            for (oid_int, (startpos, endpos)) in self._queue_contents.items()
+            (startpos, endpos, oid_int, prev_tid_int)
+            for (oid_int, (startpos, endpos, prev_tid_int)) in self._queue_contents.items()
         ]
         items.sort()
         return items

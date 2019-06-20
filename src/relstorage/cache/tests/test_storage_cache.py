@@ -327,8 +327,9 @@ class StorageCacheTests(TestCase):
         c.store_temp(1, b'def')
         c.store_temp(2, b'ghi')
         self.assertEqual(b'ghi', c.read_temp(2))
-        self.assertEqual(dict(c.queue.stored_oids), {1: (3, 6), 2: (6, 9)})
-        f = c.queue._queue
+        self.assertEqual(dict(c.temp_objects.stored_oids),
+                         {1: (3, 6, 0), 2: (6, 9, 0)})
+        f = c.temp_objects._queue
         f.seek(0)
         self.assertEqual(f.read(), b'abcdefghi')
         c.checkpoints = (1, 0)
@@ -384,7 +385,7 @@ class StorageCacheTests(TestCase):
         c = self._makeOne()
         c.tpc_begin()
         c.clear_temp()
-        self.assertIsNone(c.queue)
+        self.assertIsNone(c.temp_objects)
 
     def test_after_poll_init_checkpoints(self):
         from relstorage.tests.fakecache import data

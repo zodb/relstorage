@@ -28,11 +28,11 @@ from relstorage._util import get_memory_usage
 from relstorage._util import byte_display
 from relstorage._util import timer as _timer
 from relstorage._util import log_timed as _log_timed
+from relstorage._compat import OID_OBJECT_MAP_TYPE
+from relstorage._compat import OID_TID_MAP_TYPE
 
 from relstorage.cache.interfaces import IStateCache
 from relstorage.cache.interfaces import IPersistentCache
-from relstorage.cache.interfaces import OID_OBJECT_MAP_TYPE
-from relstorage.cache.interfaces import OID_TID_MAP_TYPE
 from relstorage.cache.interfaces import MAX_TID
 from relstorage.cache.interfaces import CacheCorruptedError
 
@@ -242,7 +242,7 @@ class LocalClient(object):
                 self._min_allowed_writeback[oid_tid[0]] = tid
 
     def set_all_for_tid(self, tid_int, state_oid_iter):
-        for state, oid_int in state_oid_iter:
+        for state, oid_int, _ in state_oid_iter:
             self[(oid_int, tid_int)] = (state, tid_int)
 
     def store_checkpoints(self, cp0, cp1):

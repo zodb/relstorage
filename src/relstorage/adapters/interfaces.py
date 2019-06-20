@@ -380,7 +380,11 @@ class IObjectMover(Interface):
         """
 
     def current_object_tids(cursor, oids):
-        """Returns the current {oid: tid} for specified object ids."""
+        """
+        Returns the current {oid_int: tid_int} for specified object ids.
+
+        Note that this may be a BTree mapping, not a dictionary.
+        """
 
     def on_store_opened(cursor, restart=False):
         """Create the temporary table for storing objects.
@@ -392,14 +396,22 @@ class IObjectMover(Interface):
     def make_batcher(cursor, row_limit):
         """Return an object to be used for batch store operations.
 
-        row_limit is the maximum number of rows to queue before
+        *row_limit* is the maximum number of rows to queue before
         calling the database.
         """
 
-    def store_temp(cursor, batcher, oid, prev_tid, data):
-        """Store an object in the temporary table.
+    def store_temps(cursor, state_oid_tid_iter):
+        """
+        Store many objects in the temporary table.
 
-        batcher is an object returned by self.make_batcher().
+        *batcher* is an object returned by :meth:`make_batcher`.
+
+        *state_oid_tid_iter* is an iterable providing tuples
+        ``(data, oid_int, prev_tid_int)``. It is guaranteed that the
+        ``oid_int`` values will be distinct. It is further guaranteed that
+        this method will not be called more than once in a given transaction;
+        further updates to the temporary table will be made using
+        ``replace_temp``, one at a time.
         """
 
     def restore(cursor, batcher, oid, tid, data, stmt_buf):

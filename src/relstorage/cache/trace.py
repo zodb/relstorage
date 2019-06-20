@@ -79,7 +79,7 @@ class ZEOTracer(object):
         # we only work with the one defined in storage_cache.
         with self._lock:
             now = time.time()
-            for startpos, endpos, oid_int in state_oid_iter.items():
+            for startpos, endpos, oid_int, _prev_tid_int in state_oid_iter.items():
                 self._trace(0x52, oid_int, tid_int, dlen=endpos - startpos, now=now)
 
     def close(self):

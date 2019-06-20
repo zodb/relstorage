@@ -168,6 +168,7 @@ class PG8000Driver(AbstractModuleDriver):
     def connect_with_isolation(self, isolation, dsn):
         conn = self.connect(dsn)
         cursor = conn.cursor()
+        cursor.copy_expert = lambda sql, stream: cursor.execute(sql, stream=stream)
         # For the current transaction
         cursor.execute('SET TRANSACTION %s' % isolation)
         # For future transactions on this same connection.

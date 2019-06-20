@@ -17,6 +17,7 @@ from __future__ import absolute_import, print_function
 
 import functools
 import os
+import struct
 
 from zope.interface import implementer
 from ZODB.POSException import Unsupported
@@ -329,6 +330,21 @@ class PostgreSQLObjectMover(AbstractObjectMover):
             if blob is not None and not blob.closed:
                 blob.close()
 
+    def _do_store_temps_using_copy(self, cursor, state_oid_tid_iter):
+        # History-preserving storages need the md5 to compare states.
+        # We could calculate that on the server using pgcrypto, if its
+        # available. Or we could just compare directly, instead of comparing
+        # md5; that's fast on PostgreSQL.
+        if state_oid_tid_iter:
+            buf = TempStoreCopyBuffer(state_oid_tid_iter,
+                                      self._compute_md5sum if self.keep_history else None)
+            cursor.copy_expert(buf.COPY_COMMAND, buf)
+            # This follow up query fails to find any rows on
+            # psycopg2cffi. Not clear why.
+            # cursor.execute("SELECT zoid, prev_tid FROM temp_store")
+            # inserted = cursor.fetchall()
+            # assert len(buf) == len(inserted), (len(buf), len(inserted))
+
 
 class PG8000ObjectMover(PostgreSQLObjectMover):
     # Delete the statements that need paramaters.
@@ -341,3 +357,103 @@ class PG8000ObjectMover(PostgreSQLObjectMover):
         Unsupported("States accumulate in history-preserving mode"),
         PostgreSQLObjectMover._move_from_temp_hf_insert_query_raw
     )
+
+    store_temps = PostgreSQLObjectMover._do_store_temps_using_copy
+
+
+class Psycopg2ObjectMover(PostgreSQLObjectMover):
+    # Take advantage of COPY IN, using copy_expert, which only
+    # works on Psycogp2. Notably, psycopg2cffi doesn't work for some reason.
+    store_temps = PostgreSQLObjectMover._do_store_temps_using_copy
+
+
+class TempStoreCopyBuffer(object):
+    """
+    A binary file-like object for putting data into
+    ``temp_store``.
+    """
+
+    COPY_COMMAND = "COPY temp_store (zoid, prev_tid, md5, state) FROM STDIN WITH (FORMAT binary)"
+
+    def __init__(self, state_oid_tid_iterable, digester):
+        self.state_oid_tid_iterable = state_oid_tid_iterable
+        self._iter = iter(state_oid_tid_iterable)
+        self._digester = digester
+        if digester and bytes is not str:
+            # On Python 3, this outputs a str, but our protocol needs bytes
+            self._digester = lambda s: digester(s).encode("ascii")
+        # psycopg2 holds a reference to the read() method, so we
+        # can't dynamically swizzle it out at runtime without some
+        # redirectien.
+        self._read = self._read_tuple
+
+    SIGNATURE = b'PGCOPY\n\xff\r\n\0'
+    FLAGS = struct.pack("!i", 0)
+    EXTENSION_LEN = struct.pack("!i", 0)
+    HEADER = SIGNATURE + FLAGS + EXTENSION_LEN
+    # All tuples begin with their length in 16 signed bits, which is the same for all tuples
+    # (zoid, prev_tid, md5, state)
+    # We put the only part that varies, state, at the end, so we can simply
+    # append it (TODO: Would we be better using a bytearray?)
+    _common = "!hiqiqi"
+    WITH_SUM = struct.Struct(_common + "32si")
+    NO_SUM = struct.Struct(_common + "i")
+    # Each column in the tuple is a 32-bit length (-1
+    # for NULL), followed by exactly that many bytes of data.
+    # Each column datum is written in binary format; for character
+    # fields (like md5) that turns out to be a direct dump of the ascii.
+    # For BIGINT fields, that's an 8-byte big-endian encoding
+    # For BYTEA fields, it's just the raw data
+    # Finally, the trailer is a tuple size of -1
+    TRAILER = struct.pack("!h", -1)
+
+    def read(self, size=0):
+        header = b''
+        if self.HEADER:
+            header = self.HEADER
+            self.HEADER = b''
+        return self._read(header, size)
+
+    def __len__(self):
+        return len(self.state_oid_tid_iterable)
+
+    def _read_tuple(self, header, size,
+                    _pack_md5=WITH_SUM.pack,
+                    _pack_nosum=NO_SUM.pack):
+        result = header
+        digester = self._digester
+        while len(result) < size:
+            try:
+                data, oid_int, tid_int = next(self._iter)
+            except StopIteration:
+                self._read = self._read_done
+                result += self.TRAILER
+                break
+            else:
+                len_data = len(data)
+                md5 = digester(data) if digester is not None else None
+                # TODO: Maybe we should be using a bytearray and
+                # pack_into?
+                if md5:
+                    header = _pack_md5(
+                        4,
+                        8, oid_int,
+                        8, tid_int,
+                        32, md5,
+                        len_data
+                    )
+                else:
+                    header = _pack_nosum(
+                        4,
+                        8, oid_int,
+                        8, tid_int,
+                        -1,
+                        len_data
+                    )
+
+                result += header + data
+
+        return result
+
+    def _read_done(self, _header, _size):
+        return b''

@@ -15,6 +15,10 @@
 - Workaround the PyPy 7.1 JIT bug using MySQL Connector/Python. It is no
   longer necessary to disable the JIT in PyPy 7.1.
 
+- Make the psycopg2 and pg8000 drivers use PostgreSQL's efficient
+  binary ``COPY FROM`` to initially store objects into the database.
+  This can be 20-25% faster. See :issue:`247`.
+
 3.0a2 (2019-06-19)
 ==================
 

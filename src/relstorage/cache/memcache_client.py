@@ -107,7 +107,7 @@ class MemcacheStateCache(object):
     def set_all_for_tid(self, tid_int, state_oid_iter):
         send_size = 0
         to_send = {}
-        for state, oid_int in state_oid_iter:
+        for state, oid_int, _ in state_oid_iter:
             length = len(state)
             cachekey = (oid_int, tid_int)
             item_size = length + len(cachekey)

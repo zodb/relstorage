@@ -50,11 +50,11 @@ class AbstractStateCacheTests(TestCase):
 
         c.set_all_for_tid(
             0,
-            [(b'abc', 0),
-             (b'ghi', 1),])
+            [(b'abc', 0, -1),
+             (b'ghi', 1, -1),])
         c.set_all_for_tid(
             1,
-            [(b'def', 0)]
+            [(b'def', 0, -1)]
         )
         # Hits on primary key
         self.assertEqual(c(0, 0),

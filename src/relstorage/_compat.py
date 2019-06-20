@@ -13,6 +13,7 @@ from __future__ import print_function
 import platform
 import sys
 
+import BTrees
 # XXX: This is a private module in ZODB, but it has a lot
 # of knowledge about how to choose the right implementation
 # based on Python version and implementation. We at least
@@ -42,6 +43,10 @@ else:
     iteritems = dict.iteritems
     iterkeys = dict.iterkeys
     itervalues = dict.itervalues
+
+OID_TID_MAP_TYPE = BTrees.family64.II.BTree if not PYPY else dict
+OID_OBJECT_MAP_TYPE = BTrees.family64.IO.BTree if not PYPY else dict
+
 
 # Types
 
