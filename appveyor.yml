@@ -74,6 +74,7 @@ install:
 
   # Check that we have the expected version and architecture for Python
   - "%PYEXE% --version"
+  - "%PYEXE% -c \"import sqlite3; print(sqlite3.sqlite_version)\""
   - "%PYEXE% -c \"import struct; print(struct.calcsize('P') * 8)\""
 
   - "%CMD_IN_ENV% %PYEXE% -m pip install --disable-pip-version-check -U pip"

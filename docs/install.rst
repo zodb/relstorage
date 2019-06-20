@@ -53,8 +53,7 @@ On PyPy, install psycopg2cffi 2.7.4+ or PyMySQL 0.6.6+ (PyPy will
 generally work with psycopg2 and mysqlclient, but it will be *much*
 slower; in contrast, pg8000 performs nearly as well. cx_Oracle is
 untested on PyPy). MySQL Connector/Python is tested to work on PyPy
-7.1, but requires `disabling JIT inlining
-<https://bitbucket.org/pypy/pypy/issues/3014/jit-issue-inlining-structunpack-hh>`__.
+7.1.
 
 Here's a table of known (tested) working adapters; adapters **in
 bold** are the recommended adapter.
