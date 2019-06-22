@@ -810,6 +810,9 @@ class _PersistentRowFilter(object):
                     # we later wind up constructing that key (how could we do that?)
                     # or drop it; since we don't know what key it was actively being
                     # found under before, dropping it is our best option. Sadly.
+                    #
+                    # TODO: Use adapter.mover.current_object_tids() to check for currency
+                    # and store it if it's current.
                     continue
                 yield key, value
 
