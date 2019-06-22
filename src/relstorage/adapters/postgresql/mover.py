@@ -331,7 +331,7 @@ class PostgreSQLObjectMover(AbstractObjectMover):
             if blob is not None and not blob.closed:
                 blob.close()
 
-    def _do_store_temps_using_copy(self, cursor, state_oid_tid_iter):
+    def store_temps(self, cursor, state_oid_tid_iter):
         # History-preserving storages need the md5 to compare states.
         # We could calculate that on the server using pgcrypto, if its
         # available. Or we could just compare directly, instead of comparing
@@ -340,11 +340,6 @@ class PostgreSQLObjectMover(AbstractObjectMover):
             buf = TempStoreCopyBuffer(state_oid_tid_iter,
                                       self._compute_md5sum if self.keep_history else None)
             cursor.copy_expert(buf.COPY_COMMAND, buf)
-            # This follow up query fails to find any rows on
-            # psycopg2cffi. Not clear why.
-            # cursor.execute("SELECT zoid, prev_tid FROM temp_store")
-            # inserted = cursor.fetchall()
-            # assert len(buf) == len(inserted), (len(buf), len(inserted))
 
 
 class PG8000ObjectMover(PostgreSQLObjectMover):
@@ -358,14 +353,6 @@ class PG8000ObjectMover(PostgreSQLObjectMover):
         Unsupported("States accumulate in history-preserving mode"),
         PostgreSQLObjectMover._move_from_temp_hf_insert_query_raw
     )
-
-    store_temps = PostgreSQLObjectMover._do_store_temps_using_copy
-
-
-class Psycopg2ObjectMover(PostgreSQLObjectMover):
-    # Take advantage of COPY IN, using copy_expert, which only
-    # works on Psycogp2. Notably, psycopg2cffi doesn't work for some reason.
-    store_temps = PostgreSQLObjectMover._do_store_temps_using_copy
 
 
 class TempStoreCopyBuffer(io.BufferedIOBase):
@@ -393,7 +380,7 @@ class TempStoreCopyBuffer(io.BufferedIOBase):
 
         self._done = False
         self._header = self.HEADER
-        self._buffer = b''
+        self._buffer = bytearray(8192)
 
 
     SIGNATURE = b'PGCOPY\n\xff\r\n\0'
@@ -417,8 +404,11 @@ class TempStoreCopyBuffer(io.BufferedIOBase):
     def read(self, size=-1):
         # We don't handle "read everything in one go".
         # assert size is not None and size > 0
+        if self._done:
+            return b''
+
         if len(self._buffer) < size:
-            self._buffer = bytearray(size)
+            self._buffer.extend(bytearray(size - len(self._buffer)))
 
         count = self.readinto(self._buffer)
         if not count:

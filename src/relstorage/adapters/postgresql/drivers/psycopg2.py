@@ -30,14 +30,6 @@ __all__ = [
     'Psycopg2Driver',
 ]
 
-def _create_connection(mod):
-    class Psycopg2Connection(mod.extensions.connection):
-        # The replica attribute holds the name of the replica this
-        # connection is bound to.
-        __slots__ = ('replica',)
-
-    return Psycopg2Connection
-
 
 @implementer(IDBDriver)
 class Psycopg2Driver(AbstractModuleDriver):
@@ -55,11 +47,19 @@ class Psycopg2Driver(AbstractModuleDriver):
         # pylint:disable=no-member
 
         self.Binary = psycopg2.Binary
-        self.connect = _create_connection(psycopg2)
+        self.connect = self._create_connection(psycopg2)
 
         # extensions
         self.ISOLATION_LEVEL_READ_COMMITTED = psycopg2.extensions.ISOLATION_LEVEL_READ_COMMITTED
         self.ISOLATION_LEVEL_SERIALIZABLE = psycopg2.extensions.ISOLATION_LEVEL_SERIALIZABLE
+
+    def _create_connection(self, mod):
+        class Psycopg2Connection(mod.extensions.connection):
+            # The replica attribute holds the name of the replica this
+            # connection is bound to.
+            __slots__ = ('replica',)
+
+        return Psycopg2Connection
 
     def connect_with_isolation(self, isolation, *args, **kwargs):
         conn = self.connect(*args, **kwargs)

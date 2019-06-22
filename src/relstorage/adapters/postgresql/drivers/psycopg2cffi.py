@@ -30,3 +30,29 @@ class Psycopg2cffiDriver(Psycopg2Driver):
     MODULE_NAME = __name__
     PRIORITY = 2
     PRIORITY_PYPY = 1
+
+    def _create_connection(self, mod):
+        # The psycopg2cffi cursor doesn't go through the generic
+        # ``execute()`` function for copy_to/from/expert, it goes
+        # right to the low-level _pq_execute() method. As a
+        # consequence, the connection object's state may not be right.
+        # It doesn't know that a transaction has been started, and so
+        # consequently the next time we *do* use ``execute()``, it begins a
+        # new transaction. Because that clears temp tables, we're hosed.
+        # Thus, to make copy play right, we need to keep the connection in the loop;
+        # we can do that by making sure we call ``execute()`` before doing a copy,
+        # or we can directly make the same low-level call that is missing;
+        # we choose the later.
+
+        class Cursor(mod.extensions.cursor):
+
+            def copy_expert(self, *args, **kwargs):
+                self.connection._begin_transaction()
+                return super(Cursor, self).copy_expert(*args, **kwargs)
+
+        class Connection(super(Psycopg2cffiDriver, self)._create_connection(mod)):
+            def __init__(self, dsn, **kwargs):
+                super(Connection, self).__init__(dsn, **kwargs)
+                self.cursor_factory = Cursor
+
+        return Connection
