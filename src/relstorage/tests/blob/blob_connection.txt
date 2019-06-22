@@ -32,6 +32,9 @@ calling the blob's open method:
 
     >>> nothing = transaction.begin()
     >>> anotherblob = Blob()
+    >>> try:
+    ...    root._p_activate()
+    ... except: pass
     >>> root['anotherblob'] = anotherblob
     >>> nothing = transaction.commit()
 

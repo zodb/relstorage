@@ -22,16 +22,12 @@ import BTrees
 from transaction.interfaces import TransientError
 from ZODB.POSException import StorageError
 
-from relstorage._compat import PYPY
-
 # pylint: disable=inherit-non-class,no-method-argument,no-self-argument
 # pylint:disable=unexpected-special-method-signature
 # pylint:disable=signature-differs
 
 # An LLBTree uses much less memory than a dict, and is still plenty fast on CPython;
 # it's just as big and slower on PyPy, though.
-OID_TID_MAP_TYPE = BTrees.family64.II.BTree if not PYPY else dict
-OID_OBJECT_MAP_TYPE = BTrees.family64.IO.BTree if not PYPY else dict
 MAX_TID = BTrees.family64.maxint
 
 class IStateCache(Interface):
@@ -80,9 +76,10 @@ class IStateCache(Interface):
         Store the states for the ``(state, oid_int)`` pairs under
         ``(oid_int, tid_int)`` keys.
 
-        The *state_oid_iter* is an **iteable** of ``(state, oid_int)`` pairs;
-        this method may choose to buffer a limited amount of those pairs before
-        passing them on to the underlying storage in a bulk group.
+        The *state_oid_iter* is an **iteable** of ``(state, oid_int,
+        prev_tid_int)`` pairs; this method may choose to buffer a
+        limited amount of those pairs before passing them on to the
+        underlying storage in a bulk group.
 
         As an **iterable**, *state_oid_iter* may be consumed multiple
         times.

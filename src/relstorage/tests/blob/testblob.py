@@ -270,22 +270,24 @@ class RecoveryBlobStorage(BlobTestBase,
             )
         db = DB(self._storage)
         conn = db.open()
-        conn.root()[1] = ZODB.blob.Blob()
+        root = conn.root()
+        root._p_activate()
+        root[1] = ZODB.blob.Blob()
         transaction.commit()
-        conn.root()[2] = ZODB.blob.Blob()
-        with conn.root()[2].open('w') as f:
+        root[2] = ZODB.blob.Blob()
+        with root[2].open('w') as f:
             f.write(b'some data')
         transaction.commit()
-        conn.root()[3] = ZODB.blob.Blob()
-        with conn.root()[3].open('w') as f:
+        root[3] = ZODB.blob.Blob()
+        with root[3].open('w') as f:
             f.write(
                 (b''.join(struct.pack(">I", random.randint(0, (1<<32)-1))
                           for i in range(random.randint(10000, 20000)))
                 )[:-random.randint(1, 4)]
             )
         transaction.commit()
-        conn.root()[2] = ZODB.blob.Blob()
-        with conn.root()[2].open('w') as f:
+        root[2] = ZODB.blob.Blob()
+        with root[2].open('w') as f:
             f.write(b'some other data')
         transaction.commit()
         self._dst.copyTransactionsFrom(self._storage)
@@ -654,6 +656,7 @@ def storage_reusable_suite(prefix, factory,
         test.globs['file_type'] = file_type
 
     suite = unittest.TestSuite()
+    # XXX: Port these to be real tests.
     tests = ["blob_connection.txt", "blob_importexport.txt",]
     if not (PY3 and WIN):
         # This fails on Windows/Py3 for unknown reasons.

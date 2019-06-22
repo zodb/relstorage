@@ -28,9 +28,10 @@ from contextlib import closing
 import sqlite3
 
 from relstorage._compat import ABC
+from relstorage._compat import OID_TID_MAP_TYPE
 from relstorage._util import log_timed
 from relstorage.adapters.batch import RowBatcher
-from relstorage.cache.interfaces import OID_TID_MAP_TYPE
+
 
 logger = __import__('logging').getLogger(__name__)
 

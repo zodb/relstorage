@@ -43,17 +43,16 @@ from ZODB.POSException import StorageError
 from ZODB.POSException import StorageTransactionError
 from ZODB.POSException import Unsupported
 from ZODB.UndoLogCompatible import UndoLogCompatible
-from ZODB.utils import p64
-from ZODB.utils import u64
+from ZODB.utils import p64 as int64_to_8bytes
+from ZODB.utils import u64 as bytes8_to_int64
 from zope import interface
 from zope.interface import implementer
 
 from relstorage._compat import base64_decodebytes
 from relstorage._compat import base64_encodebytes
 from relstorage._compat import dumps
-from relstorage._compat import iteritems
-from relstorage._compat import iterkeys
 from relstorage._compat import loads
+from relstorage._compat import OID_TID_MAP_TYPE
 from relstorage.blobhelper import BlobHelper
 from relstorage.cache import StorageCache
 from relstorage.cache.interfaces import CacheConsistencyError
@@ -161,8 +160,8 @@ class RelStorage(UndoLogCompatible,
     # Otherwise, blobhelper is None.
     blobhelper = None
 
-    # _txn_check_serials: {oid, serial}; confirms that certain objects
-    # have not changed at commit.
+    # _txn_check_serials: {oid_int: tid_int}; confirms that certain objects
+    # have not changed at commit. May be a BTree
     _txn_check_serials = None
 
     # _batcher: An object that accumulates store operations
@@ -562,7 +561,7 @@ class RelStorage(UndoLogCompatible,
         if self._stale_error is not None:
             raise self._stale_error
 
-        oid_int = u64(oid)
+        oid_int = bytes8_to_int64(oid)
         cache = self._cache
 
         with self._lock:
@@ -584,7 +583,7 @@ class RelStorage(UndoLogCompatible,
             # an object whose creation has been undone.
             self._log_keyerror(oid_int, "creation has been undone")
             raise POSKeyError(oid)
-        return state, p64(tid_int)
+        return state, int64_to_8bytes(tid_int)
 
     def getTid(self, oid):
         if self._stale_error is not None:
@@ -601,8 +600,8 @@ class RelStorage(UndoLogCompatible,
     @Metric(method=True, rate=0.1)
     def loadSerial(self, oid, serial):
         """Load a specific revision of an object"""
-        oid_int = u64(oid)
-        tid_int = u64(serial)
+        oid_int = bytes8_to_int64(oid)
+        tid_int = bytes8_to_int64(serial)
 
         with self._lock:
             self._before_load()
@@ -624,7 +623,7 @@ class RelStorage(UndoLogCompatible,
         if self._stale_error is not None:
             raise self._stale_error
 
-        oid_int = u64(oid)
+        oid_int = bytes8_to_int64(oid)
 
         with self._lock:
             if self._store_cursor is not None:
@@ -634,11 +633,11 @@ class RelStorage(UndoLogCompatible,
             else:
                 self._before_load()
                 cursor = self._load_cursor
-            if not self._adapter.mover.exists(cursor, u64(oid)):
+            if not self._adapter.mover.exists(cursor, bytes8_to_int64(oid)):
                 raise POSKeyError(oid)
 
             state, start_tid = self._adapter.mover.load_before(
-                cursor, oid_int, u64(tid))
+                cursor, oid_int, bytes8_to_int64(tid))
 
             if start_tid is None:
                 return None
@@ -653,11 +652,11 @@ class RelStorage(UndoLogCompatible,
             end_int = self._adapter.mover.get_object_tid_after(
                 cursor, oid_int, start_tid)
             if end_int is not None:
-                end = p64(end_int)
+                end = int64_to_8bytes(end_int)
             else:
                 end = None
 
-            return state, p64(start_tid), end
+            return state, int64_to_8bytes(start_tid), end
 
     @Metric(method=True, rate=0.1)
     def store(self, oid, serial, data, version, transaction):
@@ -675,23 +674,27 @@ class RelStorage(UndoLogCompatible,
         # That should not happen, should it?
         assert self._prepared_txn is None
 
-        adapter = self._adapter
+        #adapter = self._adapter
         cache = self._cache
         cursor = self._store_cursor
         assert cursor is not None
-        oid_int = u64(oid)
+        oid_int = bytes8_to_int64(oid)
         if serial:
             # XXX PY3: ZODB.tests.IteratorStorage passes a str (non-bytes) value for oid
-            prev_tid_int = u64(serial if isinstance(serial, bytes) else serial.encode('ascii'))
+            prev_tid_int = bytes8_to_int64(
+                serial
+                if isinstance(serial, bytes)
+                else serial.encode('ascii')
+            )
         else:
             prev_tid_int = 0
 
         with self._lock:
             self._max_stored_oid = max(self._max_stored_oid, oid_int)
-            # save the data in a temporary table
-            adapter.mover.store_temp(
-                cursor, self._batcher, oid_int, prev_tid_int, data)
-            cache.store_temp(oid_int, data)
+            # Save the data locally in a temporary place. Later, closer to commit time,
+            # we'll send it all over at once. This lets us do things like use
+            # COPY in postgres.
+            cache.store_temp(oid_int, data, prev_tid_int)
             return None
 
     def restore(self, oid, serial, data, version, prev_txn, transaction):
@@ -715,12 +718,16 @@ class RelStorage(UndoLogCompatible,
         adapter = self._adapter
         cursor = self._store_cursor
         assert cursor is not None
-        oid_int = u64(oid)
-        tid_int = u64(serial)
+        oid_int = bytes8_to_int64(oid)
+        tid_int = bytes8_to_int64(serial)
 
         with self._lock:
             self._max_stored_oid = max(self._max_stored_oid, oid_int)
-            # save the data.  Note that data can be None.
+            # Save the `data`.  Note that `data` can be None.
+            # Note also that this doesn't go through the cache.
+
+            # TODO: Make it go through the cache, or at least the same
+            # sort of queing thing, so that we can do a bulk COPY?
             adapter.mover.restore(
                 cursor, self._batcher, oid_int, tid_int, data)
 
@@ -735,16 +742,20 @@ class RelStorage(UndoLogCompatible,
             raise ReadConflictError(
                 oid=oid, serials=(committed_tid, serial))
 
+        serial_int = bytes8_to_int64(serial)
+        oid_int = bytes8_to_int64(oid)
         if self._txn_check_serials is None:
-            self._txn_check_serials = {}
+            self._txn_check_serials = OID_TID_MAP_TYPE()
         else:
             # If this transaction already specified a different serial for
             # this oid, the transaction conflicts with itself.
-            previous_serial = self._txn_check_serials.get(oid, serial)
-            if previous_serial != serial:
+            previous_serial_int = self._txn_check_serials.get(oid_int, serial_int)
+            if previous_serial_int != serial_int:
                 raise ReadConflictError(
-                    oid=oid, serials=(previous_serial, serial))
-        self._txn_check_serials[oid] = serial
+                    oid=oid,
+                    serials=(int64_to_8bytes(previous_serial_int),
+                             serial))
+        self._txn_check_serials[oid_int] = serial_int
 
     def deleteObject(self, oid, oldserial, transaction): # pylint:disable=method-hidden
         # NOTE: packundo.deleteObject is only defined for
@@ -812,6 +823,7 @@ class RelStorage(UndoLogCompatible,
             self._restart_store()
             adapter = self._adapter
             self._cache.tpc_begin()
+            # This is now only used for restore()
             self._batcher = self._adapter.mover.make_batcher(
                 self._store_cursor, self._batcher_row_limit)
 
@@ -823,7 +835,7 @@ class RelStorage(UndoLogCompatible,
                 cursor = self._store_cursor
                 packed = (status == 'p')
                 adapter.locker.hold_commit_lock(cursor, ensure_current=True)
-                tid_int = u64(tid)
+                tid_int = bytes8_to_int64(tid)
                 try:
                     adapter.txncontrol.add_transaction(
                         cursor, tid_int, user, desc, ext, packed)
@@ -840,7 +852,9 @@ class RelStorage(UndoLogCompatible,
         return self._transaction
 
     def _prepare_tid(self):
-        """Choose a tid for the current transaction.
+        """
+        Choose a tid for the current transaction, and exclusively lock
+        the database commit lock.
 
         This should be done as late in the commit as possible, since
         it must hold an exclusive commit lock.
@@ -862,10 +876,10 @@ class RelStorage(UndoLogCompatible,
         last_tid = adapter.txncontrol.get_tid(cursor)
         now = time.time()
         stamp = TimeStamp(*(time.gmtime(now)[:5] + (now % 60,)))
-        stamp = stamp.laterThan(TimeStamp(p64(last_tid)))
+        stamp = stamp.laterThan(TimeStamp(int64_to_8bytes(last_tid)))
         tid = stamp.raw()
 
-        tid_int = u64(tid)
+        tid_int = bytes8_to_int64(tid)
         adapter.txncontrol.add_transaction(cursor, tid_int, user, desc, ext)
         self._tid = tid
 
@@ -911,9 +925,9 @@ class RelStorage(UndoLogCompatible,
         for conflict in conflicts:
             oid_int, prev_tid_int, serial_int = conflict
             data = self._cache.read_temp(oid_int)
-            oid = p64(oid_int)
-            prev_tid = p64(prev_tid_int)
-            serial = p64(serial_int)
+            oid = int64_to_8bytes(oid_int)
+            prev_tid = int64_to_8bytes(prev_tid_int)
+            serial = int64_to_8bytes(serial_int)
 
             rdata = self.tryToResolveConflict(oid, prev_tid, serial, data)
             if rdata is None:
@@ -923,13 +937,14 @@ class RelStorage(UndoLogCompatible,
 
             # resolved
             data = rdata
+            # TODO: Make this use the bulk methods so we can use COPY.
             self._adapter.mover.replace_temp(
                 cursor, oid_int, prev_tid_int, data)
             resolved.add(oid)
             cache.store_temp(oid_int, data)
 
         # Move the new states into the permanent table
-        tid_int = u64(self._tid)
+        tid_int = bytes8_to_int64(self._tid)
 
         if self.blobhelper is not None:
             txn_has_blobs = self.blobhelper.txn_has_blobs
@@ -963,7 +978,11 @@ class RelStorage(UndoLogCompatible,
                 raise
 
     def _vote(self):
-        """Prepare the transaction for final commit."""
+        """
+        Prepare the transaction for final commit.
+
+        Takes the exclusive database commit lock.
+        """
         # This method initiates a two-phase commit process,
         # saving the name of the prepared transaction in self._prepared_txn.
 
@@ -977,27 +996,34 @@ class RelStorage(UndoLogCompatible,
         cursor = self._store_cursor
         assert cursor is not None
         conn = self._store_conn
+        adapter = self._adapter
+        mover = adapter.mover
 
         # execute all remaining batch store operations
+        mover.store_temps(cursor, self._cache.temp_objects)
+
+        # If we had done any restore(), they'll be found in self._batcher.
+        # TODO: Generalize that to be able to do bulk inserts too.
         self._batcher.flush()
 
         # Reserve all OIDs used by this transaction
         if self._max_stored_oid > self._max_new_oid:
-            self._adapter.oidallocator.set_min_oid(
+            adapter.oidallocator.set_min_oid(
                 cursor, self._max_stored_oid + 1)
 
-        self._prepare_tid()
-        tid_int = u64(self._tid)
+        self._prepare_tid() # Here's where we take the global commit lock.
+        tid_int = bytes8_to_int64(self._tid)
 
         if self._txn_check_serials:
-            oid_ints = [u64(oid) for oid in iterkeys(self._txn_check_serials)]
-            current = self._adapter.mover.current_object_tids(cursor, oid_ints)
-            for oid, expect in iteritems(self._txn_check_serials):
-                oid_int = u64(oid)
-                actual = p64(current.get(oid_int, 0))
-                if actual != expect:
+            oid_ints = self._txn_check_serials.keys()
+            current = mover.current_object_tids(cursor, oid_ints)
+            for oid_int, expect_tid_int in self._txn_check_serials.items():
+                actual_tid_int = current.get(oid_int, 0)
+                if actual_tid_int != expect_tid_int:
                     raise ReadConflictError(
-                        oid=oid, serials=(actual, expect))
+                        oid=int64_to_8bytes(oid_int),
+                        serials=(int64_to_8bytes(actual_tid_int),
+                                 int64_to_8bytes(expect_tid_int)))
 
         resolved_serials = self._finish_store()
         self._adapter.mover.update_current(cursor, tid_int)
@@ -1088,9 +1114,9 @@ class RelStorage(UndoLogCompatible,
                 # so our MVCC state is "floating".
                 # Read directly from the database to get the latest value,
                 self._before_load() # connect if needed
-                return p64(self._adapter.txncontrol.get_tid(self._load_cursor))
+                return int64_to_8bytes(self._adapter.txncontrol.get_tid(self._load_cursor))
 
-            return max(self._ltid, p64(self._prev_polled_tid or 0))
+            return max(self._ltid, int64_to_8bytes(self._prev_polled_tid or 0))
 
     def new_oid(self):
         if self._stale_error is not None:
@@ -1113,7 +1139,7 @@ class RelStorage(UndoLogCompatible,
 
             oid_int = self._preallocated_oids.pop()
             self._max_new_oid = max(self._max_new_oid, oid_int)
-            return p64(oid_int)
+            return int64_to_8bytes(oid_int)
 
     def cleanup(self):
         pass
@@ -1147,7 +1173,7 @@ class RelStorage(UndoLogCompatible,
             i = 0
             res = []
             for tid_int, user, desc, ext in rows:
-                tid = p64(tid_int)
+                tid = int64_to_8bytes(tid_int)
                 # Note that user and desc are schizophrenic. The transaction
                 # interface specifies that they are a Python str, *probably*
                 # meaning bytes. But code in the wild and the ZODB test suite
@@ -1183,7 +1209,7 @@ class RelStorage(UndoLogCompatible,
         with self._lock:
             self._before_load()
             cursor = self._load_cursor
-            oid_int = u64(oid)
+            oid_int = bytes8_to_int64(oid)
             try:
                 rows = self._adapter.dbiter.iter_object_history(
                     cursor, oid_int)
@@ -1192,7 +1218,7 @@ class RelStorage(UndoLogCompatible,
 
             res = []
             for tid_int, username, description, extension, length in rows:
-                tid = p64(tid_int)
+                tid = int64_to_8bytes(tid_int)
                 if extension:
                     d = loads(extension)
                 else:
@@ -1237,7 +1263,7 @@ class RelStorage(UndoLogCompatible,
 
         undo_tid = base64_decodebytes(transaction_id + b'\n') # pylint:disable=deprecated-method
         assert len(undo_tid) == 8
-        undo_tid_int = u64(undo_tid)
+        undo_tid_int = bytes8_to_int64(undo_tid)
 
         with self._lock:
             adapter = self._adapter
@@ -1253,10 +1279,10 @@ class RelStorage(UndoLogCompatible,
                 self._prepare_tid()
                 adapter.packundo.verify_undoable(cursor, undo_tid_int)
 
-                self_tid_int = u64(self._tid)
+                self_tid_int = bytes8_to_int64(self._tid)
                 copied = adapter.packundo.undo(
                     cursor, undo_tid_int, self_tid_int)
-                oids = [p64(oid_int) for oid_int, _ in copied]
+                oids = [int64_to_8bytes(oid_int) for oid_int, _ in copied]
 
                 # Update the current object pointers immediately, so that
                 # subsequent undo operations within this transaction will see
@@ -1292,7 +1318,7 @@ class RelStorage(UndoLogCompatible,
             if not state:
                 return ()
 
-            return {u64(oid) for oid in referencesf(state)}
+            return {bytes8_to_int64(oid) for oid in referencesf(state)}
 
         # Use a private connection (lock_conn and lock_cursor) to
         # hold the pack lock.  Have the adapter open temporary
@@ -1307,7 +1333,7 @@ class RelStorage(UndoLogCompatible,
                     # Find the latest commit before or at the pack time.
                     pack_point = TimeStamp(*time.gmtime(t)[:5] + (t % 60,)).raw()
                     tid_int = adapter.packundo.choose_pack_transaction(
-                        u64(pack_point))
+                        bytes8_to_int64(pack_point))
                     if tid_int is None:
                         log.debug("all transactions before %s have already "
                                   "been packed", time.ctime(t))
@@ -1316,7 +1342,7 @@ class RelStorage(UndoLogCompatible,
                     if prepack_only:
                         log.info("pack: beginning pre-pack")
 
-                    s = time.ctime(TimeStamp(p64(tid_int)).timeTime())
+                    s = time.ctime(TimeStamp(int64_to_8bytes(tid_int)).timeTime())
                     log.info("pack: analyzing transactions committed "
                              "%s or before", s)
 
@@ -1382,7 +1408,7 @@ class RelStorage(UndoLogCompatible,
         # Ignore changes made by the last transaction committed
         # by this connection.
         if self._ltid is not None:
-            ignore_tid = u64(self._ltid)
+            ignore_tid = bytes8_to_int64(self._ltid)
         else:
             ignore_tid = None
         prev = self._prev_polled_tid
@@ -1430,7 +1456,7 @@ class RelStorage(UndoLogCompatible,
                 oids = None
             else:
                 # The value is ignored, only key matters
-                oids = {p64(oid_int): 1 for oid_int, _tid_int in changes}
+                oids = {int64_to_8bytes(oid_int): 1 for oid_int, _tid_int in changes}
             return oids
 
     @metricmethod
@@ -1487,18 +1513,25 @@ class RelStorage(UndoLogCompatible,
         """
         assert not version
         with self._lock:
-            self._batcher.flush()
+            # We used to flush the batcher here, for some reason.
             cursor = self._store_cursor
             self.blobhelper.storeBlob(cursor, self.store,
                                       oid, serial, data, blobfilename, version, txn)
 
     def restoreBlob(self, oid, serial, data, blobfilename, prev_txn, txn):
-        """Write blob data already committed in a separate database
+        """
+        Write blob data already committed in a separate database
 
         See the restore and storeBlob methods.
         """
         self.restore(oid, serial, data, '', prev_txn, txn)
         with self._lock:
+            # Restoring the entry for the blob used the batcher, and
+            # we're going to want to foreign-key off of that data when
+            # we add blob chunks (since we skip the temp tables).
+            # Ideally, we wouldn't need to flush the batcher here
+            # (we'd prefer having DEFERRABLE INITIALLY DEFERRED FK
+            # constraints, but as-of 8.0 MySQL doesn't support that.)
             self._batcher.flush()
             cursor = self._store_cursor
             self.blobhelper.restoreBlob(cursor, oid, serial, blobfilename)
@@ -1555,7 +1588,7 @@ class RelStorage(UndoLogCompatible,
                 rate = 0.0
             rate_str = '%1.3f' % rate
             log.info("Copied tid %d,%5d records | %6s MB/s (%6d/%6d,%7s)",
-                     u64(trans.tid), num_txn_records, rate_str,
+                     bytes8_to_int64(trans.tid), num_txn_records, rate_str,
                      txnum, num_txns, pct_complete)
 
         elapsed = time.time() - begin_time
@@ -1573,11 +1606,11 @@ class TransactionIterator(object):
         self._closed = False
 
         if start is not None:
-            start_int = u64(start)
+            start_int = bytes8_to_int64(start)
         else:
             start_int = 1
         if stop is not None:
-            stop_int = u64(stop)
+            stop_int = bytes8_to_int64(stop)
         else:
             stop_int = None
 
@@ -1629,7 +1662,7 @@ class RelStorageTransactionRecord(TransactionRecord):
     def __init__(self, trans_iter, tid_int, user, desc, ext, packed):
         self._trans_iter = trans_iter
         self._tid_int = tid_int
-        tid = p64(tid_int)
+        tid = int64_to_8bytes(tid_int)
         status = 'p' if packed else ' '
         user = user or b''
         description = desc or b''
@@ -1679,7 +1712,7 @@ class Record(DataRecord):
     """An object state in a transaction"""
 
     def __init__(self, tid, oid_int, data):
-        DataRecord.__init__(self, p64(oid_int), tid, data, None)
+        DataRecord.__init__(self, int64_to_8bytes(oid_int), tid, data, None)
 
 def _zlibstorage_new_instance(self):
     new_self = type(self).__new__(type(self))

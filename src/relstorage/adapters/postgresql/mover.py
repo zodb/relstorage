@@ -16,7 +16,9 @@
 from __future__ import absolute_import, print_function
 
 import functools
+import io
 import os
+import struct
 
 from zope.interface import implementer
 from ZODB.POSException import Unsupported
@@ -329,6 +331,16 @@ class PostgreSQLObjectMover(AbstractObjectMover):
             if blob is not None and not blob.closed:
                 blob.close()
 
+    def store_temps(self, cursor, state_oid_tid_iter):
+        # History-preserving storages need the md5 to compare states.
+        # We could calculate that on the server using pgcrypto, if its
+        # available. Or we could just compare directly, instead of comparing
+        # md5; that's fast on PostgreSQL.
+        if state_oid_tid_iter:
+            buf = TempStoreCopyBuffer(state_oid_tid_iter,
+                                      self._compute_md5sum if self.keep_history else None)
+            cursor.copy_expert(buf.COPY_COMMAND, buf)
+
 
 class PG8000ObjectMover(PostgreSQLObjectMover):
     # Delete the statements that need paramaters.
@@ -341,3 +353,130 @@ class PG8000ObjectMover(PostgreSQLObjectMover):
         Unsupported("States accumulate in history-preserving mode"),
         PostgreSQLObjectMover._move_from_temp_hf_insert_query_raw
     )
+
+
+class TempStoreCopyBuffer(io.BufferedIOBase):
+    """
+    A binary file-like object for putting data into
+    ``temp_store``.
+    """
+
+    # pg8000 uses readinto(); psycopg2 uses read().
+
+    COPY_COMMAND = "COPY temp_store (zoid, prev_tid, md5, state) FROM STDIN WITH (FORMAT binary)"
+
+    def __init__(self, state_oid_tid_iterable, digester):
+        super(TempStoreCopyBuffer, self).__init__()
+        self.state_oid_tid_iterable = state_oid_tid_iterable
+        self._iter = iter(state_oid_tid_iterable)
+        self._digester = digester
+        if digester and bytes is not str:
+            # On Python 3, this outputs a str, but our protocol needs bytes
+            self._digester = lambda s: digester(s).encode("ascii")
+        if self._digester:
+            self._read_tuple = self._read_one_tuple_md5
+        else:
+            self._read_tuple = self._read_one_tuple_no_md5
+
+        self._done = False
+        self._header = self.HEADER
+        self._buffer = bytearray(8192)
+
+
+    SIGNATURE = b'PGCOPY\n\xff\r\n\0'
+    FLAGS = struct.pack("!i", 0)
+    EXTENSION_LEN = struct.pack("!i", 0)
+    HEADER = SIGNATURE + FLAGS + EXTENSION_LEN
+    # All tuples begin with their length in 16 signed bits, which is the same for all tuples
+    # (zoid, prev_tid, md5, state)
+    _common = "!hiqiqi"
+    WITH_SUM = struct.Struct(_common + "32si")
+    NO_SUM = struct.Struct(_common + "i")
+    # Each column in the tuple is a 32-bit length (-1
+    # for NULL), followed by exactly that many bytes of data.
+    # Each column datum is written in binary format; for character
+    # fields (like md5) that turns out to be a direct dump of the ascii.
+    # For BIGINT fields, that's an 8-byte big-endian encoding
+    # For BYTEA fields, it's just the raw data
+    # Finally, the trailer is a tuple size of -1
+    TRAILER = struct.pack("!h", -1)
+
+    def read(self, size=-1):
+        # We don't handle "read everything in one go".
+        # assert size is not None and size > 0
+        if self._done:
+            return b''
+
+        if len(self._buffer) < size:
+            self._buffer.extend(bytearray(size - len(self._buffer)))
+
+        count = self.readinto(self._buffer)
+        if not count:
+            return b''
+        return bytes(self._buffer)
+
+    def readinto(self, buf):
+        # We basically ignore the size of the buffer,
+        # writing more into it if we need to.
+        if self._done:
+            return 0
+
+        requested = len(buf)
+        # bytearray.clear() is only in Python 3
+        del buf[:]
+
+        buf.extend(self._header)
+        self._header = b''
+
+        while len(buf) < requested:
+            try:
+                self._read_tuple(buf)
+            except StopIteration:
+                buf.extend(self.TRAILER)
+                self._done = True
+                break
+
+        return len(buf)
+
+    def __len__(self):
+        return len(self.state_oid_tid_iterable)
+
+    def _read_one_tuple_md5(self,
+                            buf,
+                            _pack_into=WITH_SUM.pack_into,
+                            _header_size=WITH_SUM.size,
+                            _blank_header=bytearray(WITH_SUM.size)):
+
+        data, oid_int, tid_int = next(self._iter)
+        len_data = len(data)
+        md5 = self._digester(data)
+        offset = len(buf)
+        buf.extend(_blank_header)
+        _pack_into(
+            buf, offset,
+            4,
+            8, oid_int,
+            8, tid_int,
+            32, md5,
+            len_data
+        )
+        buf.extend(data)
+
+    def _read_one_tuple_no_md5(self,
+                               buf,
+                               _pack_into=NO_SUM.pack_into,
+                               _header_size=NO_SUM.size,
+                               _blank_header=bytearray(NO_SUM.size)):
+        data, oid_int, tid_int = next(self._iter)
+        len_data = len(data)
+        offset = len(buf)
+        buf.extend(_blank_header)
+        _pack_into(
+            buf, offset,
+            4,
+            8, oid_int,
+            8, tid_int,
+            -1,
+            len_data
+        )
+        buf.extend(data)

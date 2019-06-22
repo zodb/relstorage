@@ -22,6 +22,7 @@ from perfmetrics import Metric
 from zope.interface import implementer
 from ZODB.POSException import Unsupported
 
+from .._compat import OID_TID_MAP_TYPE
 from ..iter import fetchmany
 from ._util import noop_when_history_free
 from ._util import query_property as _query_property
@@ -181,20 +182,24 @@ class AbstractObjectMover(ABC):
 
     _current_object_tids_query = _query_property('_current_object_tids')
 
+    _current_object_tids_map_type = OID_TID_MAP_TYPE
+
     @metricmethod_sampled
     def current_object_tids(self, cursor, oids):
         """Returns the current {oid: tid} for specified object ids."""
-        res = {}
+        res = self._current_object_tids_map_type()
         _stmt = self._current_object_tids_query
         oids = list(oids)
         while oids:
-            # XXX: Dangerous (SQL injection)! And probably slow. Can we do better?
+            # XXX: Dangerous (SQL injection)! And probably slow. Can
+            # we do better? Under PostgreSQL with psycopg2, we should
+            # be able to pass a list and have it automatically turned into
+            # an array and use an IN/ANY operator.
             oid_list = ','.join(str(oid) for oid in oids[:1000])
             del oids[:1000]
             stmt = _stmt % (oid_list,)
             cursor.execute(stmt)
-            for oid, tid in fetchmany(cursor):
-                res[oid] = tid
+            res.update(cursor.fetchall())
         return res
 
     #: A sequence of *names* of attributes on this object that are statements to be
@@ -228,7 +233,8 @@ class AbstractObjectMover(ABC):
     def _generic_store_temp(self, batcher, oid, prev_tid, data,
                             command='INSERT', suffix=''):
         md5sum = self._compute_md5sum(data)
-
+        # TODO: Now that we guarantee not to feed duplicates here, drop
+        # the conflict handling.
         if command == 'INSERT' and not suffix:
             # MySQL uses command=REPLACE for an UPSERT
             # PostgreSQL 9.5+ uses a suffix='ON CONFLICT UPDATE...' for an UPSERT
@@ -246,6 +252,14 @@ class AbstractObjectMover(ABC):
     @abstractmethod
     def store_temp(self, cursor, batcher, oid, prev_tid, data):
         raise NotImplementedError()
+
+    @metricmethod_sampled
+    def store_temps(self, cursor, state_oid_tid_iter):
+        batcher = self.make_batcher(cursor) # Default row limit
+        store_temp = self.store_temp
+        for data, oid_int, tid_int in state_oid_tid_iter:
+            store_temp(cursor, batcher, oid_int, tid_int, data)
+        batcher.flush()
 
     @metricmethod_sampled
     def _generic_restore(self, batcher, oid, tid, data, command='INSERT'):
