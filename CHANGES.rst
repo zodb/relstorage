@@ -19,6 +19,9 @@
   binary ``COPY FROM`` to initially store objects into the database.
   This can be 20-25% faster. See :issue:`247`.
 
+- Silence a warning about ``cursor.connection`` from pg8000. See
+  :issue:`238`.
+
 3.0a2 (2019-06-19)
 ==================
 

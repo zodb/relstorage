@@ -19,8 +19,12 @@ pg8000 IDBDriver implementations.
 from __future__ import absolute_import
 from __future__ import print_function
 
+import io
+from collections import deque
+
 from zope.interface import implementer
 
+from relstorage._compat import PY3
 from ..._abstract_drivers import AbstractModuleDriver
 from ..._abstract_drivers import _ConnWrapper
 from ...interfaces import IDBDriver
@@ -108,19 +112,11 @@ class _ReadBlob(object):
         self._cursor.close()
         self.closed = True
 
-def _make_lobject_method_for_connection(self, binary):
-    def lobject(oid=0, mode='', new_oid=0, new_file=None):
-        if oid == 0 and new_oid == 0 and mode == 'wb':
-            if new_file:
-                # Upload the whole file right now.
-                return _UploadBlob(self, new_file, binary)
-            return _WriteBlob(self, binary)
-        if oid != 0 and mode == 'rb':
-            return _ReadBlob(self, oid)
-        raise AssertionError("Unsupported params", dict(locals()))
 
-    return lobject
+class _tuple_deque(deque):
 
+    def append(self, row): # pylint:disable=arguments-differ
+        deque.append(self, tuple(row))
 
 @implementer(IDBDriver)
 class PG8000Driver(AbstractModuleDriver):
@@ -139,7 +135,73 @@ class PG8000Driver(AbstractModuleDriver):
 
         # XXX: Testing. Can we remove?
         self.disconnected_exceptions += (AttributeError,)
-        self._connect = self.driver_module.connect
+
+        Binary = self.Binary
+
+        class Cursor(self.driver_module.Cursor):
+            def __init__(self, conn):
+                super(Cursor, self).__init__(conn)
+                # pylint:disable=access-member-before-definition
+                assert isinstance(self._cached_rows, deque)
+                # Make sure rows are tuples, not lists.
+                # BTrees don't like lists.
+                self._cached_rows = _tuple_deque()
+
+            @property
+            def connection(self):
+                # silence the warning it wants to generate:
+                # "UserWarning: DB-API extension cursor.connection used"
+                return self._c
+
+            # pg8000 on Python 3 wants to call `stream.readinto`,
+            # unlike psycopg2, which just uses `stream.read`. We don't implement
+            # that natively, so wrap it up.
+            # XXX: Do better than buffering the whole thing.
+            if PY3:
+                def copy_expert(self, sql, stream):
+                    bio = io.BytesIO()
+                    s = stream.read()
+                    while s:
+                        bio.write(s)
+                        s = stream.read()
+
+                    bio.seek(0)
+                    return self.execute(sql, stream=bio)
+            else:
+                def copy_expert(self, sql, stream):
+                    return self.execute(sql, stream=stream)
+
+        class Connection(self.driver_module.Connection):
+            def __init__(self,
+                         user, host='localhost',
+                         unix_sock=None,
+                         port=5432, database=None,
+                         password=None, ssl=None,
+                         timeout=None, application_name=None,
+                         max_prepared_statements=1000,
+                         tcp_keepalive=True):
+                # pylint:disable=useless-super-delegation
+                # We have to do this because the super class requires
+                # all these arguments and doesn't have defaults
+                super(Connection, self).__init__(
+                    user, host, unix_sock,
+                    port, database, password, ssl, timeout, application_name,
+                    max_prepared_statements, tcp_keepalive)
+
+            def cursor(self):
+                return Cursor(self)
+
+            def lobject(self, oid=0, mode='', new_oid=0, new_file=None):
+                if oid == 0 and new_oid == 0 and mode == 'wb':
+                    if new_file:
+                        # Upload the whole file right now.
+                        return _UploadBlob(self, new_file, Binary)
+                    return _WriteBlob(self, Binary)
+                if oid != 0 and mode == 'rb':
+                    return _ReadBlob(self, oid)
+                raise AssertionError("Unsupported params", dict(locals()))
+
+        self._connect = Connection
 
     # For debugging
     _wrap = False
@@ -157,7 +219,7 @@ class PG8000Driver(AbstractModuleDriver):
                 key = 'database'
             kwds[key] = value
         conn = self._connect(**kwds)
-        conn.lobject = _make_lobject_method_for_connection(conn, self.Binary)
+
         return _ConnWrapper(conn) if self._wrap else conn
 
     # Extensions
@@ -168,7 +230,6 @@ class PG8000Driver(AbstractModuleDriver):
     def connect_with_isolation(self, isolation, dsn):
         conn = self.connect(dsn)
         cursor = conn.cursor()
-        cursor.copy_expert = lambda sql, stream: cursor.execute(sql, stream=stream)
         # For the current transaction
         cursor.execute('SET TRANSACTION %s' % isolation)
         # For future transactions on this same connection.

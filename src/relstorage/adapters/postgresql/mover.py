@@ -407,7 +407,7 @@ class TempStoreCopyBuffer(object):
     # Finally, the trailer is a tuple size of -1
     TRAILER = struct.pack("!h", -1)
 
-    def read(self, size=0):
+    def read(self, size=8192):
         header = b''
         if self.HEADER:
             header = self.HEADER
@@ -433,7 +433,8 @@ class TempStoreCopyBuffer(object):
                 len_data = len(data)
                 md5 = digester(data) if digester is not None else None
                 # TODO: Maybe we should be using a bytearray and
-                # pack_into?
+                # pack_into? Or if we implement readinto() we can wrap a
+                # io.BufferedReader around us
                 if md5:
                     header = _pack_md5(
                         4,
@@ -452,7 +453,6 @@ class TempStoreCopyBuffer(object):
                     )
 
                 result += header + data
-
         return result
 
     def _read_done(self, _header, _size):

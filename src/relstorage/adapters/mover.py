@@ -182,10 +182,12 @@ class AbstractObjectMover(ABC):
 
     _current_object_tids_query = _query_property('_current_object_tids')
 
+    _current_object_tids_map_type = OID_TID_MAP_TYPE
+
     @metricmethod_sampled
     def current_object_tids(self, cursor, oids):
         """Returns the current {oid: tid} for specified object ids."""
-        res = OID_TID_MAP_TYPE()
+        res = self._current_object_tids_map_type()
         _stmt = self._current_object_tids_query
         oids = list(oids)
         while oids:
