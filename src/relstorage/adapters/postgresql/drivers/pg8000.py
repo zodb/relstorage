@@ -19,12 +19,10 @@ pg8000 IDBDriver implementations.
 from __future__ import absolute_import
 from __future__ import print_function
 
-import io
 from collections import deque
 
 from zope.interface import implementer
 
-from relstorage._compat import PY3
 from ..._abstract_drivers import AbstractModuleDriver
 from ..._abstract_drivers import _ConnWrapper
 from ...interfaces import IDBDriver
@@ -153,23 +151,8 @@ class PG8000Driver(AbstractModuleDriver):
                 # "UserWarning: DB-API extension cursor.connection used"
                 return self._c
 
-            # pg8000 on Python 3 wants to call `stream.readinto`,
-            # unlike psycopg2, which just uses `stream.read`. We don't implement
-            # that natively, so wrap it up.
-            # XXX: Do better than buffering the whole thing.
-            if PY3:
-                def copy_expert(self, sql, stream):
-                    bio = io.BytesIO()
-                    s = stream.read()
-                    while s:
-                        bio.write(s)
-                        s = stream.read()
-
-                    bio.seek(0)
-                    return self.execute(sql, stream=bio)
-            else:
-                def copy_expert(self, sql, stream):
-                    return self.execute(sql, stream=stream)
+            def copy_expert(self, sql, stream):
+                return self.execute(sql, stream=stream)
 
         class Connection(self.driver_module.Connection):
             def __init__(self,

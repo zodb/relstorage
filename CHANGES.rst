@@ -17,7 +17,7 @@
 
 - Make the psycopg2 and pg8000 drivers use PostgreSQL's efficient
   binary ``COPY FROM`` to initially store objects into the database.
-  This can be 20-25% faster. See :issue:`247`.
+  This can be 20-40% faster. See :issue:`247`.
 
 - Silence a warning about ``cursor.connection`` from pg8000. See
   :issue:`238`.

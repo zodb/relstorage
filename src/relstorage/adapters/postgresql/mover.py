@@ -16,6 +16,7 @@
 from __future__ import absolute_import, print_function
 
 import functools
+import io
 import os
 import struct
 
@@ -367,25 +368,33 @@ class Psycopg2ObjectMover(PostgreSQLObjectMover):
     store_temps = PostgreSQLObjectMover._do_store_temps_using_copy
 
 
-class TempStoreCopyBuffer(object):
+class TempStoreCopyBuffer(io.BufferedIOBase):
     """
     A binary file-like object for putting data into
     ``temp_store``.
     """
 
+    # pg8000 uses readinto(); psycopg2 uses read().
+
     COPY_COMMAND = "COPY temp_store (zoid, prev_tid, md5, state) FROM STDIN WITH (FORMAT binary)"
 
     def __init__(self, state_oid_tid_iterable, digester):
+        super(TempStoreCopyBuffer, self).__init__()
         self.state_oid_tid_iterable = state_oid_tid_iterable
         self._iter = iter(state_oid_tid_iterable)
         self._digester = digester
         if digester and bytes is not str:
             # On Python 3, this outputs a str, but our protocol needs bytes
             self._digester = lambda s: digester(s).encode("ascii")
-        # psycopg2 holds a reference to the read() method, so we
-        # can't dynamically swizzle it out at runtime without some
-        # redirectien.
-        self._read = self._read_tuple
+        if self._digester:
+            self._read_tuple = self._read_one_tuple_md5
+        else:
+            self._read_tuple = self._read_one_tuple_no_md5
+
+        self._done = False
+        self._header = self.HEADER
+        self._buffer = b''
+
 
     SIGNATURE = b'PGCOPY\n\xff\r\n\0'
     FLAGS = struct.pack("!i", 0)
@@ -393,8 +402,6 @@ class TempStoreCopyBuffer(object):
     HEADER = SIGNATURE + FLAGS + EXTENSION_LEN
     # All tuples begin with their length in 16 signed bits, which is the same for all tuples
     # (zoid, prev_tid, md5, state)
-    # We put the only part that varies, state, at the end, so we can simply
-    # append it (TODO: Would we be better using a bytearray?)
     _common = "!hiqiqi"
     WITH_SUM = struct.Struct(_common + "32si")
     NO_SUM = struct.Struct(_common + "i")
@@ -407,53 +414,79 @@ class TempStoreCopyBuffer(object):
     # Finally, the trailer is a tuple size of -1
     TRAILER = struct.pack("!h", -1)
 
-    def read(self, size=8192):
-        header = b''
-        if self.HEADER:
-            header = self.HEADER
-            self.HEADER = b''
-        return self._read(header, size)
+    def read(self, size=-1):
+        # We don't handle "read everything in one go".
+        # assert size is not None and size > 0
+        if len(self._buffer) < size:
+            self._buffer = bytearray(size)
+
+        count = self.readinto(self._buffer)
+        if not count:
+            return b''
+        return bytes(self._buffer)
+
+    def readinto(self, buf):
+        # We basically ignore the size of the buffer,
+        # writing more into it if we need to.
+        if self._done:
+            return 0
+
+        requested = len(buf)
+        # bytearray.clear() is only in Python 3
+        del buf[:]
+
+        buf.extend(self._header)
+        self._header = b''
+
+        while len(buf) < requested:
+            try:
+                self._read_tuple(buf)
+            except StopIteration:
+                buf.extend(self.TRAILER)
+                self._done = True
+                break
+
+        return len(buf)
 
     def __len__(self):
         return len(self.state_oid_tid_iterable)
 
-    def _read_tuple(self, header, size,
-                    _pack_md5=WITH_SUM.pack,
-                    _pack_nosum=NO_SUM.pack):
-        result = header
-        digester = self._digester
-        while len(result) < size:
-            try:
-                data, oid_int, tid_int = next(self._iter)
-            except StopIteration:
-                self._read = self._read_done
-                result += self.TRAILER
-                break
-            else:
-                len_data = len(data)
-                md5 = digester(data) if digester is not None else None
-                # TODO: Maybe we should be using a bytearray and
-                # pack_into? Or if we implement readinto() we can wrap a
-                # io.BufferedReader around us
-                if md5:
-                    header = _pack_md5(
-                        4,
-                        8, oid_int,
-                        8, tid_int,
-                        32, md5,
-                        len_data
-                    )
-                else:
-                    header = _pack_nosum(
-                        4,
-                        8, oid_int,
-                        8, tid_int,
-                        -1,
-                        len_data
-                    )
+    def _read_one_tuple_md5(self,
+                            buf,
+                            _pack_into=WITH_SUM.pack_into,
+                            _header_size=WITH_SUM.size,
+                            _blank_header=bytearray(WITH_SUM.size)):
 
-                result += header + data
-        return result
+        data, oid_int, tid_int = next(self._iter)
+        len_data = len(data)
+        md5 = self._digester(data)
+        offset = len(buf)
+        buf.extend(_blank_header)
+        _pack_into(
+            buf, offset,
+            4,
+            8, oid_int,
+            8, tid_int,
+            32, md5,
+            len_data
+        )
+        buf.extend(data)
 
-    def _read_done(self, _header, _size):
-        return b''
+    def _read_one_tuple_no_md5(self,
+                               buf,
+                               _pack_into=NO_SUM.pack_into,
+                               _header_size=NO_SUM.size,
+                               _blank_header=bytearray(NO_SUM.size)):
+        data, oid_int, tid_int = next(self._iter)
+        len_data = len(data)
+        offset = len(buf)
+        buf.extend(_blank_header)
+        _pack_into(
+            buf, offset,
+            4,
+            8, oid_int,
+            8, tid_int,
+            -1,
+            len_data
+        )
+        buf.extend(data)
