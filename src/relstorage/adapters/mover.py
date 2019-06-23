@@ -173,11 +173,9 @@ class AbstractObjectMover(ABC):
         if row:
             return row[0]
 
-    # NOTE: These are not database param escapes, they are Python
-    # escapes, so they shouldn't be translated to :1, etc.
     _current_object_tids_queries = (
-        "SELECT zoid, tid FROM current_object WHERE zoid IN (%s)",
-        "SELECT zoid, tid FROM object_state WHERE zoid IN (%s)"
+        (('zoid', 'tid'), 'current_object', 'zoid'),
+        (('zoid', 'tid'), 'object_state', 'zoid'),
     )
 
     _current_object_tids_query = _query_property('_current_object_tids')
@@ -188,18 +186,10 @@ class AbstractObjectMover(ABC):
     def current_object_tids(self, cursor, oids):
         """Returns the current {oid: tid} for specified object ids."""
         res = self._current_object_tids_map_type()
-        _stmt = self._current_object_tids_query
-        oids = list(oids)
-        while oids:
-            # XXX: Dangerous (SQL injection)! And probably slow. Can
-            # we do better? Under PostgreSQL with psycopg2, we should
-            # be able to pass a list and have it automatically turned into
-            # an array and use an IN/ANY operator.
-            oid_list = ','.join(str(oid) for oid in oids[:1000])
-            del oids[:1000]
-            stmt = _stmt % (oid_list,)
-            cursor.execute(stmt)
-            res.update(cursor.fetchall())
+        columns, table, filter_column = self._current_object_tids_query
+        batcher = self.make_batcher(cursor, row_limit=1000)
+        rows = batcher.select_from(columns, table, **{filter_column: oids})
+        res = self._current_object_tids_map_type(rows)
         return res
 
     #: A sequence of *names* of attributes on this object that are statements to be

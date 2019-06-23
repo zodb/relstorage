@@ -394,6 +394,29 @@ class GenericRelStorageTests(
         c3.close()
         db3.close()
 
+    def checkCurrentObjectTidsRoot(self):
+        # Get the root object in place
+        db = self._closing(DB(self._storage))
+        conn = self._closing(db.open())
+
+        storage = conn._storage
+        cursor = storage._load_cursor
+        oid_to_tid = storage._adapter.mover.current_object_tids(cursor, [0])
+        self.assertEqual(1, len(oid_to_tid))
+        self.assertIn(0, oid_to_tid)
+
+        # Ask for many, many objects that don't exist.
+        # Force the implementation to loop if that's what it does internally.
+        oid_to_tid = storage._adapter.mover.current_object_tids(cursor, range(0, 3523))
+        self.assertEqual(1, len(oid_to_tid))
+        self.assertIn(0, oid_to_tid)
+
+        # No matching oids.
+        oid_to_tid = storage._adapter.mover.current_object_tids(cursor, range(1, 3523))
+        self.assertEqual(0, len(oid_to_tid))
+
+        conn.close()
+        db.close()
 
     def checkLen(self):
         # Override the version from BasicStorage because we
