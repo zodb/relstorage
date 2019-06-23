@@ -140,10 +140,15 @@ class RowBatcher(object):
                 params = rows
 
             if these_params_need_flattened:
-                params = sorted(params) if self.sorted_deletes else params
-                params = list(itertools.chain.from_iterable(params))
+                params = self._flatten_params(params)
+            __traceback_info__ = params
             self.cursor.execute(stmt, params)
         return count
+
+    def _flatten_params(self, params):
+        params = sorted(params) if self.sorted_deletes else params
+        params = list(itertools.chain.from_iterable(params))
+        return params
 
     def _make_single_column_query(self, command, table,
                                   filter_column, filter_value,

@@ -32,7 +32,13 @@ class PostgreSQLRowBatcher(RowBatcher):
         stmt = "%s FROM %s WHERE %s = ANY (%s)" % (
             command, table, filter_column, self.delete_placeholder
         )
-        # We only pass a single parameter, and it doesn't need flattened.
+        # We only pass a single parameter, and it doesn't need further
+        # flattening.
         # It does have to be an actual list, though
-        params = filter_value if isinstance(filter_value, list) else list(filter_value)
+        params = filter_value
+        if rows_need_flattened:
+            # This is guaranteed to return a list
+            params = self._flatten_params(params)
+        elif not isinstance(params, list):
+            params = list(params)
         return stmt, (params,), False
