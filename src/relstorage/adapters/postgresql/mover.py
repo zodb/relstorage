@@ -188,7 +188,6 @@ class PostgreSQLObjectMover(AbstractObjectMover):
         stmt = self._move_from_temp_hf_insert_query
         cursor.execute(stmt, (tid,))
 
-
     @metricmethod_sampled
     def store_temp(self, _cursor, batcher, oid, prev_tid, data):
         suffix = """

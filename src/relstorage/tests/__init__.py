@@ -50,6 +50,7 @@ class MockCursor(object):
         self.executed = []
         self.inputsizes = {}
         self.results = []
+        self.many_results = None
 
     def setinputsizes(self, **kw):
         self.inputsizes.update(kw)
@@ -62,6 +63,8 @@ class MockCursor(object):
         return self.results.pop(0)
 
     def fetchall(self):
+        if self.many_results:
+            return self.many_results.pop(0)
         r = self.results
         self.results = None
         return r

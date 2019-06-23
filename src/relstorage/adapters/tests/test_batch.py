@@ -244,6 +244,50 @@ class RowBatcherTests(TestCase):
              (1, 'a')),
         ])
 
+    def test_select_one(self):
+        cursor = MockCursor()
+        batcher = self.getClass()(cursor)
+        batcher.select_from(('zoid', 'tid'), 'object_state', oids=(1,))
+        self.assertEqual(cursor.executed, [
+            ('SELECT zoid,tid FROM object_state WHERE oids IN (%s)',
+             (1,))
+        ])
+
+    def test_select_multiple_one_batch(self):
+        cursor = MockCursor()
+        batcher = self.getClass()(cursor)
+        batcher.select_from(('zoid', 'tid'), 'object_state',
+                            oids=(1, 2, 3, 4))
+        self.assertEqual(cursor.executed, [
+            ('SELECT zoid,tid FROM object_state WHERE oids IN (%s,%s,%s,%s)',
+             (1, 2, 3, 4))
+        ])
+
+    def test_select_multiple_many_batch(self):
+        cursor = MockCursor()
+        cursor.many_results = [
+            [(1, 1)],
+            [(3, 1)],
+            []
+        ]
+        batcher = self.getClass()(cursor)
+        batcher.row_limit = 2
+        rows = batcher.select_from(('zoid', 'tid'), 'object_state',
+                                   oids=(1, 2, 3, 4, 5))
+        self.assertEqual(cursor.executed, [
+            ('SELECT zoid,tid FROM object_state WHERE oids IN (%s,%s)',
+             (1, 2,)),
+            ('SELECT zoid,tid FROM object_state WHERE oids IN (%s,%s)',
+             (3, 4,)),
+            ('SELECT zoid,tid FROM object_state WHERE oids IN (%s)',
+             (5,)),
+        ])
+
+        self.assertEqual(rows, [
+            (1, 1),
+            (3, 1)
+        ])
+
 
 class OracleRowBatcherTests(TestCase):
 
@@ -348,3 +392,53 @@ class OracleRowBatcherTests(TestCase):
             'rawdata_0': MockRawType,
             'rawdata_1': MockRawType,
         })
+
+class PostgreSQLRowBatcherTests(TestCase):
+
+    def getClass(self):
+        from relstorage.adapters.postgresql.batch import PostgreSQLRowBatcher
+        return PostgreSQLRowBatcher
+
+    def test_select_one(self):
+        cursor = MockCursor()
+        batcher = self.getClass()(cursor)
+        batcher.select_from(('zoid', 'tid'), 'object_state', oids=(1,))
+        self.assertEqual(cursor.executed, [
+            ('SELECT zoid,tid FROM object_state WHERE oids = ANY (%s)',
+             ([1,],))
+        ])
+
+    def test_select_multiple_one_batch(self):
+        cursor = MockCursor()
+        batcher = self.getClass()(cursor)
+        batcher.select_from(('zoid', 'tid'), 'object_state',
+                            oids=(1, 2, 3, 4))
+        self.assertEqual(cursor.executed, [
+            ('SELECT zoid,tid FROM object_state WHERE oids = ANY (%s)',
+             ([1, 2, 3, 4],))
+        ])
+
+    def test_select_multiple_many_batch(self):
+        cursor = MockCursor()
+        cursor.many_results = [
+            [(1, 1)],
+            [(3, 1)],
+            []
+        ]
+        batcher = self.getClass()(cursor)
+        batcher.row_limit = 2
+        rows = batcher.select_from(('zoid', 'tid'), 'object_state',
+                                   oids=(1, 2, 3, 4, 5))
+        self.assertEqual(cursor.executed, [
+            ('SELECT zoid,tid FROM object_state WHERE oids = ANY (%s)',
+             ([1, 2,],)),
+            ('SELECT zoid,tid FROM object_state WHERE oids = ANY (%s)',
+             ([3, 4,],)),
+            ('SELECT zoid,tid FROM object_state WHERE oids = ANY (%s)',
+             ([5,],)),
+        ])
+
+        self.assertEqual(rows, [
+            (1, 1),
+            (3, 1)
+        ])

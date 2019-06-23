@@ -79,6 +79,29 @@ class RowBatcher(object):
                 or self.size_added >= self.size_limit):
             self.flush()
 
+    def select_from(self, columns, table, **kw):
+        """
+        Handles a query of the ``WHERE col IN (?, ?,)`` type.
+
+        The keyword arguments should be of length 1, containing
+        an iterable of the values to check.
+
+        Returns a list of matching rows.
+        """
+        assert len(kw) == 1
+        filter_column, filter_values = kw.popitem()
+        filter_values = list(filter_values)
+        results = []
+        command = 'SELECT %s' % (','.join(columns),)
+        while filter_values:
+            filter_subset = filter_values[:self.row_limit]
+            del filter_values[:self.row_limit]
+            descriptor = [[(table, (filter_column,)), filter_subset]]
+            self._do_batch(command, descriptor, rows_need_flattened=False)
+            results.extend(self.cursor.fetchall())
+        return results
+
+
     def flush(self):
         if self.deletes:
             self.total_rows_deleted += self._do_deletes()
@@ -91,18 +114,19 @@ class RowBatcher(object):
         self.size_added = 0
 
     def _do_deletes(self):
+        return self._do_batch('DELETE', sorted(iteritems(self.deletes)))
+
+    def _do_batch(self, command, descriptors, rows_need_flattened=True):
         count = 0
-        for (table, columns), rows in sorted(iteritems(self.deletes)):
+        for (table, columns), rows in descriptors:
             count += len(rows)
             # Be careful not to use % formatting on a string already
             # containing `delete_placeholder`
+            these_params_need_flattened = rows_need_flattened
             if len(columns) == 1:
-                # TODO: Some databases, like Postgres, natively support
-                # array types, which can be much faster.
-                # We should do that.
-                placeholder_str = ','.join([self.delete_placeholder] * len(rows))
-                stmt = "DELETE FROM %s WHERE %s IN (%s)" % (
-                    table, columns[0], placeholder_str)
+                stmt, params, these_params_need_flattened = self._make_single_column_query(
+                    command, table,
+                    columns[0], rows, rows_need_flattened)
             else:
                 row_template = " AND ".join(
                     ("%s=" % (column,)) + self.delete_placeholder
@@ -110,13 +134,30 @@ class RowBatcher(object):
                 )
                 row_template = "(%s)" % (row_template,)
                 rows_template = [row_template] * len(rows)
-                stmt = "DELETE FROM %s WHERE %s" % (
+                stmt = "%s FROM %s WHERE %s" % (
+                    command,
                     table, " OR ".join(rows_template))
+                params = rows
 
-            rows = sorted(rows) if self.sorted_deletes else rows
-            rows = list(itertools.chain.from_iterable(rows))
-            self.cursor.execute(stmt, rows)
+            if these_params_need_flattened:
+                params = self._flatten_params(params)
+            __traceback_info__ = params
+            self.cursor.execute(stmt, params)
         return count
+
+    def _flatten_params(self, params):
+        params = sorted(params) if self.sorted_deletes else params
+        params = list(itertools.chain.from_iterable(params))
+        return params
+
+    def _make_single_column_query(self, command, table,
+                                  filter_column, filter_value,
+                                  rows_need_flattened):
+        placeholder_str = ','.join([self.delete_placeholder] * len(filter_value))
+        stmt = "%s FROM %s WHERE %s IN (%s)" % (
+            command, table, filter_column, placeholder_str
+        )
+        return stmt, filter_value, rows_need_flattened
 
     def _do_inserts(self):
         count = 0

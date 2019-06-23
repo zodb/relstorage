@@ -31,6 +31,7 @@ from ..packundo import HistoryPreservingPackUndo
 from ..poller import Poller
 from ..scriptrunner import ScriptRunner
 from . import drivers
+from .batch import PostgreSQLRowBatcher
 from .connmanager import Psycopg2ConnectionManager
 from .locker import PostgreSQLLocker
 from .mover import PG8000ObjectMover
@@ -93,6 +94,7 @@ class PostgreSQLAdapter(object):
             options=options,
             runner=self.runner,
             version_detector=self.version_detector,
+            batcher_factory=PostgreSQLRowBatcher,
         )
         self.oidallocator = PostgreSQLOIDAllocator()
         self.txncontrol = txn_type(
