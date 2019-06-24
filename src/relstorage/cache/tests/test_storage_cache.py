@@ -597,7 +597,8 @@ class PersistentRowFilterTests(TestCase):
 
     def _makeOne(self):
         from relstorage.cache.storage_cache import _PersistentRowFilter
-        return _PersistentRowFilter(dict)
+        adapter = MockAdapter()
+        return _PersistentRowFilter(adapter, dict)
 
     def test_no_checkpoints(self):
         f = self._makeOne()

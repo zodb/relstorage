@@ -89,7 +89,7 @@ class Options(object):
     #: Directory holding persistent cache files
     cache_local_dir = None
     #: Switch checkpoints after this many writes
-    cache_delta_size_limit = 20000 if not PYPY else 10000
+    cache_delta_size_limit = 100000 if not PYPY else 50000
     #: Implementation of ILRUCache to use for local cache
     #: storage.
     cache_local_storage = None

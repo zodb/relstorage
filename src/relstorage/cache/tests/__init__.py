@@ -12,21 +12,35 @@ from relstorage.cache.mapping import SizedLRUMapping as _BaseSizedLRUMapping
 from relstorage.cache.local_client import LocalClient as _BaseLocalClient
 
 from relstorage.tests import MockOptions
+from relstorage.tests import MockCursor
 
 class MockOptionsWithFakeMemcache(MockOptions):
     cache_module_name = 'relstorage.tests.fakecache'
     cache_servers = 'host:9999'
 
+class MockConnmanager(object):
+    def open_and_call(self, callback):
+        return callback(None, None)
+
 class MockAdapter(object):
     def __init__(self):
         self.mover = MockObjectMover()
         self.poller = MockPoller()
+        self.connmanager = MockConnmanager()
 
 class MockObjectMover(object):
     def __init__(self):
         self.data = {}  # {oid_int: (state, tid_int)}
+
     def load_current(self, _cursor, oid_int):
         return self.data.get(oid_int, (None, None))
+
+    def current_object_tids(self, _cursor, oids):
+        return {
+            oid: self.data[oid][1]
+            for oid in oids
+            if oid in self.data
+        }
 
 class MockPoller(object):
     def __init__(self):
