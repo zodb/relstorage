@@ -345,12 +345,16 @@ cache-delta-size-limit
         beneficial. The cost is about 300K of memory for every 10000
         on CPython.
 
-        The default is 20000 on CPython, 10000 on PyPy.
+        The default is 100,000 on CPython, 50,000 on PyPy.
 
         .. versionchanged:: 2.0b7
            Double the default size from 10000 to 20000 on CPython. The
            use of LLBTree for the internal data structure means we use
            much less memory than we did before.
+
+        .. versionchanged:: 3.0a3
+           Increase the sizes again. With better persistent caching,
+           these become increasingly important.
 
 Persistent Local Caching
 ~~~~~~~~~~~~~~~~~~~~~~~~

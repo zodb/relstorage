@@ -29,6 +29,8 @@ from zope import interface
 from relstorage.autotemp import AutoTemporaryFile
 from relstorage._compat import OID_TID_MAP_TYPE
 from relstorage._compat import OID_OBJECT_MAP_TYPE
+from relstorage._compat import iteroiditems
+from relstorage._util import log_timed
 
 from relstorage.cache import persistence
 from relstorage.cache.interfaces import IPersistentCache
@@ -218,7 +220,7 @@ class StorageCache(object):
         # Note that there may have been a tiny amount of data in the
         # file that we didn't get to actually store but that still
         # comes back in the delta_map; that's ok.
-        row_filter = _PersistentRowFilter(self._delta_map_type)
+        row_filter = _PersistentRowFilter(self.adapter, self._delta_map_type)
         self.local_client.restore(row_filter)
 
         self.checkpoints = self.local_client.get_checkpoints()
@@ -767,20 +769,28 @@ class StorageCache(object):
 
 class _PersistentRowFilter(object):
 
-    def __init__(self, delta_type):
-        self.delta_type = delta_type
-        self.delta_after0 = self.delta_type()
-        self.delta_after1 = self.delta_type()
+    def __init__(self, adapter, delta_type):
+        self.adapter = adapter
+        self.delta_after0 = delta_type()
+        self.delta_after1 = delta_type()
 
     def __call__(self, checkpoints, row_iter):
         if not checkpoints:
             # Nothing to do except put in correct format, no transforms are possible.
+            # XXX: Is there really even any reason to return these? We'll probably
+            # never generate keys that match them.
             for row in row_iter:
                 yield row[:2], row[2:]
         else:
             delta_after0 = self.delta_after0
             delta_after1 = self.delta_after1
             cp0, cp1 = checkpoints
+
+            # {oid: (state, actual_tid)}
+            # This holds things that we're not sure about; we hold onto them
+            # and run a big query at the end to determine whether they're still valid or
+            # not.
+            needs_checked = OID_OBJECT_MAP_TYPE()
 
             for row in row_iter:
                 # Rows are (oid, tid, state, tid), where the two tids
@@ -804,17 +814,50 @@ class _PersistentRowFilter(object):
                     # it might be something that doesn't change much.
                     # Unfortunately, we can't just stick it in our fallback
                     # keys (oid, cp0) or (oid, cp1), because it might not be current,
-                    # and we definitely don't poll this far back.
+                    # and the storage won't poll this far back.
                     #
-                    # Our options are to put it in with its natural key and hope
-                    # we later wind up constructing that key (how could we do that?)
-                    # or drop it; since we don't know what key it was actively being
-                    # found under before, dropping it is our best option. Sadly.
-                    #
-                    # TODO: Use adapter.mover.current_object_tids() to check for currency
-                    # and store it if it's current.
+                    # The solution is to hold onto it and run a manual poll ourself;
+                    # if it's still valid, good. If not, we really should try to
+                    # remove it from the database so we don't keep checking.
+                    # We also should only do this poll if we have room in our cache
+                    # still (that should rarely be an issue; our db write size
+                    # matches our in-memory size except for the first startup after
+                    # a reduction in in-memory size.)
+                    needs_checked[oid] = value
                     continue
                 yield key, value
+            if needs_checked:
+                # TODO: Should this be a configurable option, like ZEO's
+                # 'drop-rather-invalidate'? So far I haven't seen signs that
+                # this will be particularly slow or burdensome.
+                self._poll_old_oids(needs_checked)
+                for oid, value in iteroiditems(needs_checked):
+                    # Anything left is guaranteed to still be at the tid we recorded
+                    # for it (except in the event of a concurrent transaction that
+                    # changed that object; that should be rare.) So these can go in
+                    # our fallback keys.
+                    yield (oid, cp0), value
+
+    @log_timed
+    def _poll_old_oids(self, to_check):
+        oids = list(to_check)
+        # In local tests, this function executes against PostgreSQL 11 in .78s
+        # for 133,002 older OIDs; or, .35s for 57,002 OIDs against MySQL 5.7.
+        logger.debug("Polling %d older oids stored in cache", len(oids))
+        def callback(_conn, cursor):
+            return self.adapter.mover.current_object_tids(cursor, oids)
+        current_tids_for_oids = self.adapter.connmanager.open_and_call(callback)
+
+        for oid in oids:
+            # TODO: Propagate these removals down to the database.
+            if oid not in current_tids_for_oids:
+                # Removed.
+                del to_check[oid]
+            elif to_check[oid][1] != current_tids_for_oids[oid]:
+                # Changed.
+                del to_check[oid]
+        logger.debug("Polled %d older oids stored in cache; %d survived",
+                     len(oids), len(to_check))
 
 
 class _TemporaryStorage(object):
@@ -880,7 +923,7 @@ class _TemporaryStorage(object):
         # sequentially from disk.
         items = [
             (startpos, endpos, oid_int, prev_tid_int)
-            for (oid_int, (startpos, endpos, prev_tid_int)) in self._queue_contents.items()
+            for (oid_int, (startpos, endpos, prev_tid_int)) in iteroiditems(self._queue_contents)
         ]
         items.sort()
         return items

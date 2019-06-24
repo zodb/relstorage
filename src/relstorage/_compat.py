@@ -47,6 +47,10 @@ else:
 OID_TID_MAP_TYPE = BTrees.family64.II.BTree if not PYPY else dict
 OID_OBJECT_MAP_TYPE = BTrees.family64.IO.BTree if not PYPY else dict
 
+def iteroiditems(d):
+    # Could be either a BTree, which always has 'iteritems',
+    # or a plain dict, which may or may not have iteritems.
+    return d.iteritems() if hasattr(d, 'iteritems') else d.items()
 
 # Types
 

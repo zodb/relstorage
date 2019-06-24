@@ -19,8 +19,18 @@
   store objects into the database. This can be 20-40% faster. See
   :issue:`247`.
 
+- Use more efficient mechanisms to poll the database for current TIDs
+  when verifying serials in transactions.
+
 - Silence a warning about ``cursor.connection`` from pg8000. See
   :issue:`238`.
+
+- Poll the database for the correct TIDs of older transactions when
+  loading from a persistent cache, and only use the entries if they
+  are current. This restores the functionality lost in the fix for
+  :issue:`249`.
+
+- Increase the default cache delta limit sizes.
 
 3.0a2 (2019-06-19)
 ==================
