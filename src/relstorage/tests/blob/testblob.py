@@ -4,7 +4,6 @@ from __future__ import print_function
 import atexit
 import collections
 import datetime
-import doctest
 import os
 import random
 import re
@@ -23,9 +22,19 @@ import ZODB.tests.StorageTestBase
 import ZODB.tests.util
 from ZODB.blob import Blob
 from ZODB.DB import DB
+from ZODB.serialize import referencesf
+
 from zope.testing import renormalizing
 
+from relstorage.tests import TestCase
 from relstorage.tests.RecoveryStorage import IteratorDeepCompare
+from relstorage.tests.blob.blob_packing import TestBlobPackHistoryPreservingMixin
+from relstorage.tests.blob.blob_packing import TestBlobPackHistoryFreeMixin
+from relstorage.tests.blob.blob_connection import TestConnectionBlobMixin
+from relstorage.tests.blob.blob_importexport import TestBlobImportExportMixin
+from relstorage.tests.blob.blob_transaction import TestBlobTransactionMixin
+from relstorage.tests.blob.blob_cache import TestBlobCacheMixin
+from relstorage.tests.blob import TestBlobMixin
 
 ##############################################################################
 #
@@ -40,25 +49,6 @@ from relstorage.tests.RecoveryStorage import IteratorDeepCompare
 # FOR A PARTICULAR PURPOSE.
 #
 ##############################################################################
-
-
-
-
-
-
-def new_time():
-    """Create a _new_ time stamp.
-
-    This method also makes sure that after retrieving a timestamp that was
-    *before* a transaction was committed, that at least one second passes so
-    the packing time actually is before the commit time.
-
-    """
-    now = anew_time = time.time()
-    while anew_time <= now:
-        anew_time = time.time()
-    time.sleep(1)
-    return anew_time
 
 
 with open(__file__, 'rb') as _f:
@@ -343,211 +333,167 @@ class LargeBlobTest(BlobTestBase):
         conn.close()
         db.close()
 
+class TestThingsPreviouslyDocTests(TestBlobMixin,
+                                   TestCase):
 
-def packing_with_uncommitted_data_non_undoing():
-    """
-    This covers regression for bug #130459.
+    def setUp(self):
+        setUp(self)
 
-    When uncommitted data exists it formerly was written to the root of the
-    blob_directory and confused our packing strategy. We now use a separate
-    temporary directory that is ignored while packing.
+    def tearDown(self):
+        tearDown(self)
 
-    >>> import transaction
-    >>> from ZODB.DB import DB
-    >>> from ZODB.serialize import referencesf
+    def create_storage(self):
+        raise NotImplementedError
 
-    >>> blob_storage = create_storage()
-    >>> database = DB(blob_storage)
-    >>> connection = database.open()
-    >>> root = connection.root()
-    >>> from ZODB.blob import Blob
-    >>> root['blob'] = Blob()
-    >>> connection.add(root['blob'])
-    >>> with root['blob'].open('w') as f: _ = f.write(b'test')
+    def test_packing_with_uncommitted_data_non_undoing(self):
+        """
+        This covers regression for bug #130459.
 
-    >>> blob_storage.pack(new_time(), referencesf)
+        When uncommitted data exists it formerly was written to the root of the
+        blob_directory and confused our packing strategy. We now use a separate
+        temporary directory that is ignored while packing.
+        """
 
-    Clean up:
+        blob_storage = self.create_storage()
+        database = DB(blob_storage)
+        connection = database.open()
+        root = connection.root()
+        root['blob'] = Blob()
+        connection.add(root['blob'])
+        with root['blob'].open('w') as f: _ = f.write(b'test')
 
-    >>> transaction.abort()
-    >>> connection.close()
-    >>> blob_storage.close()
-    >>> database.close()
+        blob_storage.pack(time.time(), referencesf)
 
-    """
+        # Clean up:
 
-def packing_with_uncommitted_data_undoing():
-    """
-    This covers regression for bug #130459.
+        transaction.abort()
+        connection.close()
+        blob_storage.close()
+        database.close()
 
-    When uncommitted data exists it formerly was written to the root of the
-    blob_directory and confused our packing strategy. We now use a separate
-    temporary directory that is ignored while packing.
+    def packing_with_uncommitted_data_undoing(self):
+        """
+        This covers regression for bug #130459.
 
-    >>> import transaction
-    >>> from ZODB.serialize import referencesf
+        When uncommitted data exists it formerly was written to the root of the
+        blob_directory and confused our packing strategy. We now use a separate
+        temporary directory that is ignored while packing.
+        """
+        blob_storage = self.create_storage()
+        database = DB(blob_storage)
+        connection = database.open()
+        root = connection.root()
+        root['blob'] = Blob()
+        connection.add(root['blob'])
+        with root['blob'].open('w') as f:
+            f.write(b'test')
 
-    >>> blob_storage = create_storage()
-    >>> database = DB(blob_storage)
-    >>> connection = database.open()
-    >>> root = connection.root()
-    >>> from ZODB.blob import Blob
-    >>> root['blob'] = Blob()
-    >>> connection.add(root['blob'])
-    >>> with root['blob'].open('w') as f: _ = f.write(b'test')
+        blob_storage.pack(time.time(), referencesf)
 
-    >>> blob_storage.pack(new_time(), referencesf)
+        transaction.abort()
+        connection.close()
+        database.close()
+        blob_storage.close()
 
-    Clean up:
+    def test_blob_file_permissions(self):
+        blob_storage = self.create_storage()
+        conn = ZODB.connection(blob_storage)
+        conn.root.x = ZODB.blob.Blob(b'test')
+        conn.transaction_manager.commit()
 
-    >>> transaction.abort()
-    >>> connection.close()
-    >>> database.close()
-    >>> blob_storage.close()
-    """
+        # Blobs have the readability of their parent directories:
+        READABLE = stat.S_IRUSR | stat.S_IRGRP | stat.S_IROTH
+        path = conn.root.x.committed()
+        self.assertEqual(
+            (os.stat(path).st_mode & READABLE),
+            (os.stat(os.path.dirname(path)).st_mode & READABLE))
 
-def test_blob_file_permissions():
-    """
-    >>> blob_storage = create_storage()
-    >>> conn = ZODB.connection(blob_storage)
-    >>> conn.root.x = ZODB.blob.Blob(b'test')
-    >>> conn.transaction_manager.commit()
+        # The committed file isn't writable:
+        WRITABLE = stat.S_IWUSR | stat.S_IWGRP | stat.S_IWOTH
+        self.assertEqual(0, os.stat(path).st_mode & WRITABLE)
+        conn.close()
 
-    Blobs have the readability of their parent directories:
+    def loadblob_tmpstore(self):
+        """
+        This is a test for assuring that the TmpStore's loadBlob implementation
+        falls back correctly to loadBlob on the backend.
+        """
 
-    >>> import stat
-    >>> READABLE = stat.S_IRUSR | stat.S_IRGRP | stat.S_IROTH
-    >>> path = conn.root.x.committed()
-    >>> ((os.stat(path).st_mode & READABLE) ==
-    ...  (os.stat(os.path.dirname(path)).st_mode & READABLE))
-    True
+        # First, let's setup a regular database and store a blob:
 
-    The committed file isn't writable:
-    >>> WRITABLE = stat.S_IWUSR | stat.S_IWGRP | stat.S_IWOTH
-    >>> os.stat(path).st_mode & WRITABLE
-    0
+        blob_storage = self.create_storage()
+        database = DB(blob_storage)
+        connection = database.open()
+        root = connection.root()
+        root['blob'] = Blob()
+        connection.add(root['blob'])
+        with root['blob'].open('w') as f: _ = f.write(b'test')
+        transaction.commit()
+        blob_oid = root['blob']._p_oid
+        tid = connection._storage.lastTransaction()
 
-    >>> conn.close()
-    """
+        # Now we open a database with a TmpStore in front:
 
+        from ZODB.Connection import TmpStore
+        tmpstore = TmpStore(blob_storage)
 
-def loadblob_tmpstore():
-    """
-    This is a test for assuring that the TmpStore's loadBlob implementation
-    falls back correctly to loadBlob on the backend.
+        # We can access the blob correctly:
+        self.assertEqual(
+            tmpstore.loadBlob(blob_oid, tid),
+            blob_storage.loadBlob(blob_oid, tid))
 
-    First, let's setup a regular database and store a blob:
+        connection.close()
+        blob_storage.close()
+        tmpstore.close()
+        database.close()
 
-    >>> blob_storage = create_storage()
-    >>> database = DB(blob_storage)
-    >>> connection = database.open()
-    >>> root = connection.root()
-    >>> from ZODB.blob import Blob
-    >>> root['blob'] = Blob()
-    >>> connection.add(root['blob'])
-    >>> with root['blob'].open('w') as f: _ = f.write(b'test')
-    >>> import transaction
-    >>> transaction.commit()
-    >>> blob_oid = root['blob']._p_oid
-    >>> tid = connection._storage.lastTransaction()
+    def do_not_depend_on_cwd(self):
+        bs = self.create_storage()
+        here = os.getcwd()
+        os.mkdir('evil')
+        os.chdir('evil')
+        db = DB(bs)
+        conn = db.open()
+        conn.root()['blob'] = ZODB.blob.Blob()
+        with conn.root()['blob'].open('w') as f:
+            f.write(b'data')
+        transaction.commit()
+        os.chdir(here)
+        with conn.root()['blob'].open() as f:
+            data = f.read()
+        self.assertEqual(data, 'data')
 
-    Now we open a database with a TmpStore in front:
+        bs.close()
 
-    >>> from ZODB.Connection import TmpStore
-    >>> tmpstore = TmpStore(blob_storage)
+    def savepoint_cleanup(self):
+        """Make sure savepoint data gets cleaned up."""
 
-    We can access the blob correctly:
+        bs = self.create_storage()
+        tdir = bs.temporaryDirectory()
+        os.listdir(tdir)
+        self.assertEmpty(os.listdir(tdir))
 
-    >>> tmpstore.loadBlob(blob_oid, tid) == blob_storage.loadBlob(blob_oid, tid)
-    True
+        db = DB(bs)
+        conn = db.open()
+        conn.root().b = ZODB.blob.Blob()
+        with conn.root().b.open('w') as f: _ = f.write(b'initial')
+        _ = transaction.savepoint()
+        self.assertEqual(1, len(os.listdir(tdir)))
 
-    Clean up:
+        transaction.abort()
+        savepoint_dir = os.path.join(tdir, 'savepoint')
+        self.assertFalse(
+            os.path.exists(savepoint_dir) and len(os.listdir(savepoint_dir)) > 0)
 
-    >>> connection.close()
-    >>> blob_storage.close()
-    >>> tmpstore.close()
-    >>> database.close()
-    """
+        conn.root().b = ZODB.blob.Blob()
+        with conn.root().b.open('w') as f: _ = f.write(b'initial')
+        transaction.commit()
+        with conn.root().b.open('w') as f: _ = f.write(b'1')
+        _ = transaction.savepoint()
+        transaction.abort()
+        self.assertFalse(os.path.exists(savepoint_dir) and len(os.listdir(savepoint_dir)) > 0)
 
-def do_not_depend_on_cwd():
-    """
-    >>> bs = create_storage()
-    >>> here = os.getcwd()
-    >>> os.mkdir('evil')
-    >>> os.chdir('evil')
-    >>> db = DB(bs)
-    >>> conn = db.open()
-    >>> conn.root()['blob'] = ZODB.blob.Blob()
-    >>> with conn.root()['blob'].open('w') as f: _ = f.write(b'data')
-    >>> transaction.commit()
-    >>> os.chdir(here)
-    >>> with conn.root()['blob'].open() as f: f.read()
-    'data'
-
-    >>> bs.close()
-    """
-
-# if False:
-#     # ZODB 3.8 fails this test because it creates a single
-#     # 'savepoints' directory.
-#     def savepoint_isolation():
-#         """Make sure savepoint data is distinct accross transactions
-
-#         >>> bs = create_storage()
-#         >>> db = DB(bs)
-#         >>> conn = db.open()
-#         >>> conn.root().b = ZODB.blob.Blob()
-#         >>> conn.root().b.open('w').write('initial')
-#         >>> transaction.commit()
-#         >>> conn.root().b.open('w').write('1')
-#         >>> _ = transaction.savepoint()
-#         >>> tm = transaction.TransactionManager()
-#         >>> conn2 = db.open(transaction_manager=tm)
-#         >>> conn2.root().b.open('w').write('2')
-#         >>> _ = tm.savepoint()
-#         >>> conn.root().b.open().read()
-#         '1'
-#         >>> conn2.root().b.open().read()
-#         '2'
-#         >>> transaction.abort()
-#         >>> tm.commit()
-#         >>> conn.sync()
-#         >>> conn.root().b.open().read()
-#         '2'
-#         >>> db.close()
-#         """
-
-def savepoint_cleanup():
-    """Make sure savepoint data gets cleaned up.
-
-    >>> bs = create_storage()
-    >>> tdir = bs.temporaryDirectory()
-    >>> os.listdir(tdir)
-    []
-
-    >>> db = DB(bs)
-    >>> conn = db.open()
-    >>> conn.root().b = ZODB.blob.Blob()
-    >>> with conn.root().b.open('w') as f: _ = f.write(b'initial')
-    >>> _ = transaction.savepoint()
-    >>> len(os.listdir(tdir))
-    1
-    >>> transaction.abort()
-    >>> savepoint_dir = os.path.join(tdir, 'savepoint')
-    >>> os.path.exists(savepoint_dir) and len(os.listdir(savepoint_dir)) > 0
-    False
-    >>> conn.root().b = ZODB.blob.Blob()
-    >>> with conn.root().b.open('w') as f: _ = f.write(b'initial')
-    >>> transaction.commit()
-    >>> with conn.root().b.open('w') as f: _ = f.write(b'1')
-    >>> _ = transaction.savepoint()
-    >>> transaction.abort()
-    >>> os.path.exists(savepoint_dir) and len(os.listdir(savepoint_dir)) > 0
-    False
-
-    >>> db.close()
-    """
-
+        db.close()
 
 def setUp(test):
     ZODB.tests.util.setUp(test)
@@ -620,14 +566,29 @@ checker = renormalizing.RENormalizing([
     (re.compile(r'\%(sep)s' % dict(sep=os.path.sep)), '/'),
 ])
 
-try:
-    file_type = file
-    PY3 = False
-except NameError:
-    # Py3: Python 3 does not have a file type.
-    import io
-    file_type = io.BufferedReader
-    PY3 = True
+class TestBlobPackingHP(TestBlobPackHistoryPreservingMixin,
+                        TestCase):
+    pass
+
+class TestBlobPackingHF(TestBlobPackHistoryFreeMixin,
+                        TestCase):
+    pass
+
+class TestConnectionBlob(TestConnectionBlobMixin,
+                         TestCase):
+    pass
+
+class TestBlobImportExport(TestBlobImportExportMixin,
+                           TestCase):
+    pass
+
+class TestBlobTransaction(TestBlobTransactionMixin,
+                          TestCase):
+    pass
+
+class TestBlobCache(TestBlobCacheMixin,
+                    TestCase):
+    pass
 
 WIN = sys.platform.startswith('win')
 
@@ -636,7 +597,6 @@ def storage_reusable_suite(prefix, factory,
                            test_packing=False,
                            test_undo=True,
                            keep_history=True,
-                           pack_test_name='blob_packing.txt',
                            test_blob_cache=False,
                            large_blob_size=None,
                            storage_is_available=True):
@@ -644,60 +604,16 @@ def storage_reusable_suite(prefix, factory,
 
     Pass a factory taking a name and a blob directory name.
     """
-    # pylint:disable=unused-argument
-    def setup(test):
-        setUp(test)
-        def create_storage(name='data', blob_dir=None, **kw):
-            if blob_dir is None:
-                blob_dir = '%s.bobs' % name
-            return factory(name, blob_dir, **kw)
-
-        test.globs['create_storage'] = create_storage
-        test.globs['file_type'] = file_type
 
     suite = unittest.TestSuite()
-    # XXX: Port these to be real tests.
-    tests = ["blob_connection.txt", "blob_importexport.txt",]
-    if not (PY3 and WIN):
-        # This fails on Windows/Py3 for unknown reasons.
-        # But it seems to be due to ZODB's blob helper, not us
-        # https://ci.appveyor.com/project/jamadden/relstorage/build/1.0.16/job/4cji13ml2sargblw#L199
-        tests.append('blob_transaction.txt')
 
-    if storage_is_available:
-        # Doctests don't do well when something raises unittest.SkipTest
-        suite.addTest(
-            doctest.DocFileSuite(
-                *tests,
-                setUp=setup, tearDown=tearDown,
-                optionflags=doctest.ELLIPSIS,
-                checker=checker
-            )
-        )
-        if test_packing:
-            suite.addTest(doctest.DocFileSuite(
-                pack_test_name,
-                setUp=setup, tearDown=tearDown,
-                checker=checker,
-                ))
-        if test_blob_cache:
-            suite.addTest(doctest.DocFileSuite(
-                "blob_cache.test",
-                setUp=setup, tearDown=tearDown,
-                checker=checker,
-            ))
-        suite.addTest(doctest.DocTestSuite(
-            setUp=setup, tearDown=tearDown,
-            checker=checker,
-            ))
-
-    def create_storage(self, name='data', blob_dir=None, **kw):
+    def create_storage(name='data', blob_dir=None, **kw):
         if blob_dir is None:
-            blob_dir = '%s.bobs' % name
+            blob_dir = '%s.blobs' % name
         return factory(name, blob_dir, **kw)
 
     def add_test_based_on_test_class(class_, **attr):
-        attr.update(create_storage=create_storage)
+        attr.update(create_storage=staticmethod(create_storage))
         new_class = class_.__class__(
             prefix + class_.__name__, (class_, ),
             attr,
@@ -705,6 +621,15 @@ def storage_reusable_suite(prefix, factory,
         new_class = unittest.skipUnless(storage_is_available, "Storage not available")(new_class)
         suite.addTest(unittest.makeSuite(new_class))
 
+    add_test_based_on_test_class(TestBlobTransaction)
+    add_test_based_on_test_class(TestBlobImportExport)
+    add_test_based_on_test_class(TestThingsPreviouslyDocTests)
+    add_test_based_on_test_class(TestConnectionBlob)
+    if test_blob_cache:
+        add_test_based_on_test_class(TestBlobCache)
+    if test_packing:
+        base = TestBlobPackingHP if keep_history else TestBlobPackingHF
+        add_test_based_on_test_class(base)
     if test_blob_storage_recovery:
         add_test_based_on_test_class(RecoveryBlobStorage)
     if test_undo:

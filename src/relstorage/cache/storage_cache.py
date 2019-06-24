@@ -100,13 +100,13 @@ class StorageCache(object):
         self.options = options
         self.prefix = prefix or ''
 
-        # delta_after0 contains {oid: tid} after checkpoint 0
+        # delta_after0 contains {oid: tid} *after* checkpoint 0
         # and before or at self.current_tid.
         self.delta_after0 = self._delta_map_type()
 
-        # delta_after1 contains {oid: tid} after checkpoint 1 and
-        # before or at checkpoint 0. The content of delta_after1 only
-        # changes when checkpoints move.
+        # delta_after1 contains {oid: tid} *after* checkpoint 1 and
+        # *before* or at checkpoint 0. The content of delta_after1 only
+        # changes when checkpoints shift and we rebuild it.
         self.delta_after1 = self._delta_map_type()
 
         # delta_size_limit places an approximate limit on the number of
@@ -681,6 +681,8 @@ class StorageCache(object):
                 cursor, cp1, new_tid_int)
 
             # Put the changes in new_delta_after*.
+            # Let the backing cache know about this (this is only done
+            # for tracing).
             updating_0 = self.cache.updating_delta_map(new_delta_after0)
             updating_1 = self.cache.updating_delta_map(new_delta_after1)
             for oid_int, tid_int in change_list:
@@ -801,12 +803,27 @@ class _PersistentRowFilter(object):
                 actual_tid = value[1]
 
                 if actual_tid >= cp0:
+                    # XXX: This is absolutely not right. We'll poll
+                    # for changes *after* cp0 (because we set that as
+                    # our current_tid/the storage's prev_polled_tid)
+                    # and update self._delta_after0, but we won't poll
+                    # for changes *after* cp1. self._delta_after1 is
+                    # only ever populated when we shift checkpoints;
+                    # we assume any changes that happen after that
+                    # point we catch in an updated self._delta_after0.
+                    # But because we're using >= here, instead of
+                    # strictly >, things that actually changed in
+                    # exactly cp0 we'll miss; they'll wind up as a
+                    # trusted key in delta_after1, and that state may
+                    # be outdated.
+                    #
+                    # Also, because we're combining data in the local database from
+                    # multiple sources, it's *possible* that some old cache
+                    # had checkpoints that are behind what we're working with now.
+                    # So we can't actually trust anything that we would put in delta_after1
+                    # without validating them.
                     delta_after0[oid] = actual_tid
                 elif actual_tid >= cp1:
-                    # XXX: This might not be right. We'll poll for
-                    # changes after cp0 (because we set that as our
-                    # current_tid/the storage's prev_polled_tid), but
-                    # we won't poll for changes after cp1.
                     delta_after1[oid] = actual_tid
                 else:
                     # This is too old and outside our checkpoints for
