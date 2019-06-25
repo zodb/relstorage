@@ -29,6 +29,8 @@ from ZODB._compat import loads
 PY3 = sys.version_info[0] == 3
 PY2 = not PY3
 PYPY = platform.python_implementation() == 'PyPy'
+WIN = sys.platform.startswith('win')
+MAC = sys.platform.startswith('darwin')
 
 # Dict support
 

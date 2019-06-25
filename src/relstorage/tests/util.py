@@ -6,7 +6,6 @@ from relstorage._compat import ABC
 
 # ZODB >= 3.9.  The blob directory can be a private cache.
 shared_blob_dir_choices = (False, True)
-support_blob_cache = True
 
 RUNNING_ON_TRAVIS = os.environ.get('TRAVIS')
 RUNNING_ON_APPVEYOR = os.environ.get('APPVEYOR')
@@ -292,17 +291,12 @@ class AbstractTestSuiteBuilder(ABC):
                 # since packing can not remove blobs from all caches.
                 test_packing = shared_blob_dir
 
-                if keep_history:
-                    pack_test_name = 'blob_packing.txt'
-                else:
-                    pack_test_name = 'blob_packing_history_free.txt'
-
                 suite.addTest(storage_reusable_suite(
                     prefix, create_storage,
+                    keep_history=keep_history,
                     test_blob_storage_recovery=True,
                     test_packing=test_packing,
                     test_undo=keep_history,
-                    pack_test_name=pack_test_name,
                     test_blob_cache=(not shared_blob_dir),
                     # PostgreSQL blob chunks are max 2GB in size
                     large_blob_size=(not shared_blob_dir) and (self.large_blob_size) + 100,
