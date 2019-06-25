@@ -5,6 +5,7 @@ from __future__ import absolute_import
 from __future__ import print_function
 
 import os
+import unittest
 
 from ZODB.interfaces import BlobError
 from ZODB.blob import Blob
@@ -13,14 +14,9 @@ from ZODB.POSException import ConnectionStateError
 from ZODB.POSException import POSKeyError
 import transaction
 
+from relstorage._compat import PY3
+from relstorage._compat import WIN
 from . import TestBlobMixin
-
-# Maybe this is fixed now?
-# if not (PY3 and WIN):
-#     # This fails on Windows/Py3 for unknown reasons.
-#     # But it seems to be due to ZODB's blob helper, not us
-#     # https://ci.appveyor.com/project/jamadden/relstorage/build/1.0.16/job/4cji13ml2sargblw#L199
-#     tests.append('blob_transaction.txt')
 
 class TestBlobTransactionMixin(TestBlobMixin):
 
@@ -376,6 +372,13 @@ class TestBlobTransactionMixin(TestBlobMixin):
             open(blob.committed(), 'w')
         conn.close()
 
+    @unittest.skipIf(
+        PY3 and WIN,
+        "Second call to storeBlob fails with FileNotFound."
+        # https://ci.appveyor.com/project/jamadden/relstorage/builds/25511645/job/ymq3vhao19f3f6mn
+        # Appears to be a bug in either ZEO or ZODB, not sure,
+        # in the OID-to-path logic
+    )
     def test_tpc_abort(self):
         # If a transaction is aborted in the middle of 2-phase commit, any data
         # stored are discarded.

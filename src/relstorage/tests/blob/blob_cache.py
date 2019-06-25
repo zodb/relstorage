@@ -178,7 +178,6 @@ class TestBlobCacheMixin(TestBlobMixin):
         self._wait_for_shrink_to_run()
         self.assertLess(self._size_blobs_in_directory(), 5000)
 
-
         # If we read all of the blobs, data will be downloaded again, as
         # necessary, but the cache size will remain not much bigger than the
         # target:
@@ -199,9 +198,6 @@ class TestBlobCacheMixin(TestBlobMixin):
         # provoke problems:
         self._populate()
 
-        # Deterministic random numbers so we can track down any failures.
-        random = random2.Random(42)
-
         verification_errors = []
 
         def verify_a_blob(i, conn, mode):
@@ -211,7 +207,9 @@ class TestBlobCacheMixin(TestBlobMixin):
                 # relying on the GIL here.
                 verification_errors.append(e)
 
-        def client():
+        def client(client_num):
+            # Deterministic random numbers so we can track down any failures.
+            random = random2.Random(client_num)
             conn = self.database.open()
             try:
                 for i in range(300):
@@ -223,7 +221,8 @@ class TestBlobCacheMixin(TestBlobMixin):
                 conn.close()
 
 
-        threads = [threading.Thread(target=client) for i in range(10)]
+        threads = [threading.Thread(target=client, args=(i,))
+                   for i in range(10)]
         for thread in threads:
             thread.setDaemon(True)
             thread.start()

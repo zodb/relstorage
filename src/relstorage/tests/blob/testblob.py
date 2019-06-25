@@ -9,7 +9,6 @@ import random
 import re
 import stat
 import struct
-import sys
 import tempfile
 import time
 import unittest
@@ -589,8 +588,6 @@ class TestBlobTransaction(TestBlobTransactionMixin,
 class TestBlobCache(TestBlobCacheMixin,
                     TestCase):
     pass
-
-WIN = sys.platform.startswith('win')
 
 def storage_reusable_suite(prefix, factory,
                            test_blob_storage_recovery=False,

@@ -32,6 +32,10 @@
 
 - Increase the default cache delta limit sizes.
 
+- Fix a race condition accessing non-shared blobs when the blob cache
+  limit was reached which could result in blobs appearing to be
+  spuriously empty. This was only observed on macOS. See :issue:`219`.
+
 3.0a2 (2019-06-19)
 ==================
 

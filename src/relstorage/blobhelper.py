@@ -102,16 +102,26 @@ class BlobHelper(object):
             tid_int = None
         self.adapter.mover.upload_blob(cursor, u64(oid), tid_int, filename)
 
+    def _get_lockable_blob_filename(self, oid, serial):
+        # Create the directory if needed
+        self.fshelper.getPathForOID(oid, True)
+        return self.fshelper.getBlobFilename(oid, serial)
+
     def loadBlob(self, cursor, oid, serial):
+        blob_filename = self._get_lockable_blob_filename(oid, serial)
+        lock = _lock_blob(blob_filename)
+        try:
+            return self._loadBlobLocked(cursor, oid, serial, blob_filename)
+        finally:
+            lock.close()
+
+    def _loadBlobLocked(self, cursor, oid, serial, blob_filename):
         # Load a blob. If it isn't present and we have a shared blob
         # directory, then assume that it doesn't exist on the server
         # and return None.
         # Note that the thread that cleans the blob cache up when it reaches
         # a maximum size could remove the blob file by the time the caller
         # gets the filename, so it could be gone.
-
-        blob_filename = self.fshelper.getBlobFilename(oid, serial)
-
         if os.path.exists(blob_filename):
             return _accessed(blob_filename)
 
@@ -127,50 +137,40 @@ class BlobHelper(object):
         # want to avoid getting it multiple times. We want to avoid
         # getting it multiple times even accross separate client
         # processes on the same machine. We'll use file locking.
+        # (accomplished by our caller.)
 
-        lock = _lock_blob(blob_filename)
-        try:
-            # We got the lock, so it's our job to download it. First,
-            # we'll double check that someone didn't download it while
-            # we were getting the lock:
+        # We got the lock, so it's our job to download it. First,
+        # we'll double check that someone didn't download it while
+        # we were getting the lock:
 
-            if os.path.exists(blob_filename):
-                return _accessed(blob_filename)
+        if os.path.exists(blob_filename):
+            return _accessed(blob_filename)
 
-            self.download_blob(cursor, oid, serial, blob_filename)
+        self.download_blob(cursor, oid, serial, blob_filename)
 
-            if os.path.exists(blob_filename):
-                return _accessed(blob_filename)
+        if os.path.exists(blob_filename):
+            return _accessed(blob_filename)
 
-            raise POSException.POSKeyError("No blob file", oid, serial)
-
-        finally:
-            lock.close()
+        raise POSException.POSKeyError("No blob file", oid, serial)
 
     def openCommittedBlobFile(self, cursor, oid, serial, blob=None):
-        blob_filename = self.loadBlob(cursor, oid, serial)
-        try:
-            if blob is None:
-                return open(blob_filename, 'rb')
-            return ZODB.blob.BlobFile(blob_filename, 'r', blob)
-        except IOError:
-            # The file got removed while we were opening.
-            # Fall through and try again with the protection of the lock.
-            pass
-
+        # First, try to make sure the file exists on disk.
+        blob_filename = self._get_lockable_blob_filename(oid, serial)
+        # Next, open and return it. This would be expected to either
+        # return a file we can read, or raise a FileNotFoundError.
+        # Sadly, on some platforms (macOS 10.14.5 with APFS on Python
+        # 3), this has a race condition with a concurrent unlink
+        # syscall from the cache cleaner, such that the open succeeds,
+        # but reading fails to return any data, depending on how the
+        # open and unlink syscalls are interleaved. So we must be sure
+        # to prevent the two from overlapping; we do that by holding
+        # the lock. See https://github.com/zodb/relstorage/issues/219
+        #
+        # Unfortunately, but not unexpectedly, this about doubles the amount
+        # of time it takes to open blobs that are already present.
         lock = _lock_blob(blob_filename)
         try:
-            blob_filename = self.fshelper.getBlobFilename(oid, serial)
-            if not os.path.exists(blob_filename):
-                if self.shared_blob_dir:
-                    # All the blobs are in a shared directory. If the
-                    # file isn't here, it's not anywhere.
-                    raise POSException.POSKeyError("No blob file", oid, serial)
-                self.download_blob(cursor, oid, serial, blob_filename)
-                if not os.path.exists(blob_filename):
-                    raise POSException.POSKeyError("No blob file", oid, serial)
-
-            _accessed(blob_filename)
+            self._loadBlobLocked(cursor, oid, serial, blob_filename)
             if blob is None:
                 return open(blob_filename, 'rb')
             return ZODB.blob.BlobFile(blob_filename, 'r', blob)
