@@ -1,12 +1,24 @@
+##############################################################################
+#
+# Copyright (c) 2004 Zope Foundation and Contributors.
+# All Rights Reserved.
+#
+# This software is subject to the provisions of the Zope Public License,
+# Version 2.1 (ZPL).  A copy of the ZPL should accompany this distribution.
+# THIS SOFTWARE IS PROVIDED "AS IS" AND ANY AND ALL EXPRESS OR IMPLIED
+# WARRANTIES ARE DISCLAIMED, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+# WARRANTIES OF TITLE, MERCHANTABILITY, AGAINST INFRINGEMENT, AND FITNESS
+# FOR A PARTICULAR PURPOSE.
+#
+##############################################################################
+
 from __future__ import absolute_import
 from __future__ import print_function
 
 import atexit
 import collections
-import datetime
 import os
 import random
-import re
 import stat
 import struct
 import tempfile
@@ -23,8 +35,6 @@ from ZODB.blob import Blob
 from ZODB.DB import DB
 from ZODB.serialize import referencesf
 
-from zope.testing import renormalizing
-
 from relstorage.tests import TestCase
 from relstorage.tests.RecoveryStorage import IteratorDeepCompare
 from relstorage.tests.blob.blob_packing import TestBlobPackHistoryPreservingMixin
@@ -34,75 +44,6 @@ from relstorage.tests.blob.blob_importexport import TestBlobImportExportMixin
 from relstorage.tests.blob.blob_transaction import TestBlobTransactionMixin
 from relstorage.tests.blob.blob_cache import TestBlobCacheMixin
 from relstorage.tests.blob import TestBlobMixin
-
-##############################################################################
-#
-# Copyright (c) 2004 Zope Foundation and Contributors.
-# All Rights Reserved.
-#
-# This software is subject to the provisions of the Zope Public License,
-# Version 2.1 (ZPL).  A copy of the ZPL should accompany this distribution.
-# THIS SOFTWARE IS PROVIDED "AS IS" AND ANY AND ALL EXPRESS OR IMPLIED
-# WARRANTIES ARE DISCLAIMED, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
-# WARRANTIES OF TITLE, MERCHANTABILITY, AGAINST INFRINGEMENT, AND FITNESS
-# FOR A PARTICULAR PURPOSE.
-#
-##############################################################################
-
-
-with open(__file__, 'rb') as _f:
-    # Just use the this module as the source of our data
-    # Capture it at import time because test cases may
-    # chdir(), and we may not have an absolute path in __file__,
-    # depending on how they are run.
-    _random_file_data = _f.read().replace(b'\n', b'').split()
-del _f
-
-
-def random_file(size, fd):
-    """
-    Create a random data of at least the given size, writing to fd.
-
-    See
-    http://jessenoller.com/2008/05/30/making-re-creatable-random-data-files-really-fast-in-python/
-    for the technique used.
-
-    Returns the md5 sum of the file contents for easy comparison.
-    """
-    def fdata():
-        seed = "1092384956781341341234656953214543219"
-        words = _random_file_data
-        a = collections.deque(words)
-        b = collections.deque(seed)
-        while True:
-            yield b' '.join(list(a)[0:1024])
-            a.rotate(int(b[0]))
-            b.rotate(1)
-    datagen = fdata()
-    bytes = 0
-    hasher = md5()
-    while bytes < size:
-        data = next(datagen)
-        hasher.update(data)
-        fd.write(data)
-        bytes += len(data)
-    return hasher.hexdigest()
-
-
-def md5sum(fd):
-    hasher = md5()
-    blocksize = hasher.block_size << 8
-    for data in iter(lambda: fd.read(blocksize), b''):
-        hasher.update(data)
-    return hasher.hexdigest()
-
-
-def sizeof_fmt(num):
-    for x in ['bytes', 'KB', 'MB', 'GB', 'TB']:
-        if num < 1024.0:
-            return "%3.1f%s" % (num, x)
-        num /= 1024.0
-
 
 class BlobTestBase(ZODB.tests.StorageTestBase.StorageTestBase):
 
@@ -286,7 +227,7 @@ class RecoveryBlobStorage(BlobTestBase,
         db.close()
 
 
-class LargeBlobTest(BlobTestBase):
+class LargeBlobTest(BlobTestBase): # pragma: no cover
     """Test large blob upload and download.
 
     Note that this test excercises the blob storage and only makes sense
@@ -296,10 +237,51 @@ class LargeBlobTest(BlobTestBase):
     level = 2 # Only run when selecting -a 2 or higher, or --all
     testsize = 0 # Set on the auto-generated parent class
 
-    def _log(self, msg):
-        print('%s [%s]: %s' % (
-            datetime.datetime.now().isoformat(' '),
-            self.__class__.__name__, msg))
+    with open(__file__, 'rb') as _f:
+        # Just use the this module as the source of our data
+        # Capture it at import time because test cases may
+        # chdir(), and we may not have an absolute path in __file__,
+        # depending on how they are run.
+        _random_file_data = _f.read().replace(b'\n', b'').split()
+    del _f
+
+
+    def _random_file(self, size, fd):
+        """
+        Create a random data of at least the given size, writing to fd.
+
+        See
+        http://jessenoller.com/2008/05/30/making-re-creatable-random-data-files-really-fast-in-python/
+        for the technique used.
+
+        Returns the md5 sum of the file contents for easy comparison.
+        """
+        def fdata():
+            seed = "1092384956781341341234656953214543219"
+            words = self._random_file_data
+            a = collections.deque(words)
+            b = collections.deque(seed)
+            while True:
+                yield b' '.join(list(a)[0:1024])
+                a.rotate(int(b[0]))
+                b.rotate(1)
+        datagen = fdata()
+        bytes = 0
+        hasher = md5()
+        while bytes < size:
+            data = next(datagen)
+            hasher.update(data)
+            fd.write(data)
+            bytes += len(data)
+        return hasher.hexdigest()
+
+
+    def _md5sum(self, fd):
+        hasher = md5()
+        blocksize = hasher.block_size << 8
+        for data in iter(lambda: fd.read(blocksize), b''):
+            hasher.update(data)
+        return hasher.hexdigest()
 
     def testLargeBlob(self):
         # Large blobs are chunked into multiple pieces, we want to know
@@ -307,12 +289,9 @@ class LargeBlobTest(BlobTestBase):
         db = DB(self._storage)
         conn = db.open()
         blob = conn.root()[1] = ZODB.blob.Blob()
-        size = sizeof_fmt(self.testsize)
-        self._log('Creating %s blob file' % size)
         blob_file = blob.open('w')
-        signature = random_file(self.testsize, blob_file)
+        signature = self._random_file(self.testsize, blob_file)
         blob_file.close()
-        self._log('Committing %s blob file' % size)
         transaction.commit()
         conn.close()
 
@@ -323,26 +302,15 @@ class LargeBlobTest(BlobTestBase):
                     ZODB.blob.remove_committed(os.path.join(base, f))
 
         # Re-download blob
-        self._log('Caching %s blob file' % size)
         conn = db.open()
         with conn.root()[1].open('r') as blob:
-            self._log('Creating signature for %s blob cache' % size)
-            self.assertEqual(md5sum(blob), signature)
+            self.assertEqual(self._md5sum(blob), signature)
 
         conn.close()
         db.close()
 
 class TestThingsPreviouslyDocTests(TestBlobMixin,
                                    TestCase):
-
-    def setUp(self):
-        setUp(self)
-
-    def tearDown(self):
-        tearDown(self)
-
-    def create_storage(self):
-        raise NotImplementedError
 
     def test_packing_with_uncommitted_data_non_undoing(self):
         """
@@ -353,8 +321,8 @@ class TestThingsPreviouslyDocTests(TestBlobMixin,
         temporary directory that is ignored while packing.
         """
 
-        blob_storage = self.create_storage()
-        database = DB(blob_storage)
+        blob_storage = self.blob_storage
+        database = self.database
         connection = database.open()
         root = connection.root()
         root['blob'] = Blob()
@@ -370,7 +338,7 @@ class TestThingsPreviouslyDocTests(TestBlobMixin,
         blob_storage.close()
         database.close()
 
-    def packing_with_uncommitted_data_undoing(self):
+    def test_packing_with_uncommitted_data_undoing(self):
         """
         This covers regression for bug #130459.
 
@@ -378,8 +346,8 @@ class TestThingsPreviouslyDocTests(TestBlobMixin,
         blob_directory and confused our packing strategy. We now use a separate
         temporary directory that is ignored while packing.
         """
-        blob_storage = self.create_storage()
-        database = DB(blob_storage)
+        blob_storage = self.blob_storage
+        database = self.database
         connection = database.open()
         root = connection.root()
         root['blob'] = Blob()
@@ -395,7 +363,7 @@ class TestThingsPreviouslyDocTests(TestBlobMixin,
         blob_storage.close()
 
     def test_blob_file_permissions(self):
-        blob_storage = self.create_storage()
+        blob_storage = self.blob_storage
         conn = ZODB.connection(blob_storage)
         conn.root.x = ZODB.blob.Blob(b'test')
         conn.transaction_manager.commit()
@@ -412,7 +380,7 @@ class TestThingsPreviouslyDocTests(TestBlobMixin,
         self.assertEqual(0, os.stat(path).st_mode & WRITABLE)
         conn.close()
 
-    def loadblob_tmpstore(self):
+    def test_loadblob_tmpstore(self):
         """
         This is a test for assuring that the TmpStore's loadBlob implementation
         falls back correctly to loadBlob on the backend.
@@ -420,13 +388,14 @@ class TestThingsPreviouslyDocTests(TestBlobMixin,
 
         # First, let's setup a regular database and store a blob:
 
-        blob_storage = self.create_storage()
-        database = DB(blob_storage)
+        blob_storage = self.blob_storage
+        database = self.database
         connection = database.open()
         root = connection.root()
         root['blob'] = Blob()
         connection.add(root['blob'])
-        with root['blob'].open('w') as f: _ = f.write(b'test')
+        with root['blob'].open('w') as f:
+            f.write(b'test')
         transaction.commit()
         blob_oid = root['blob']._p_oid
         tid = connection._storage.lastTransaction()
@@ -446,8 +415,8 @@ class TestThingsPreviouslyDocTests(TestBlobMixin,
         tmpstore.close()
         database.close()
 
-    def do_not_depend_on_cwd(self):
-        bs = self.create_storage()
+    def test_do_not_depend_on_cwd(self):
+        bs = self.blob_storage
         here = os.getcwd()
         os.mkdir('evil')
         os.chdir('evil')
@@ -460,19 +429,19 @@ class TestThingsPreviouslyDocTests(TestBlobMixin,
         os.chdir(here)
         with conn.root()['blob'].open() as f:
             data = f.read()
-        self.assertEqual(data, 'data')
+        self.assertEqual(data, b'data')
 
         bs.close()
 
-    def savepoint_cleanup(self):
+    def test_savepoint_cleanup(self):
         """Make sure savepoint data gets cleaned up."""
 
-        bs = self.create_storage()
+        bs = self.blob_storage
         tdir = bs.temporaryDirectory()
         os.listdir(tdir)
         self.assertEmpty(os.listdir(tdir))
 
-        db = DB(bs)
+        db = self.database
         conn = db.open()
         conn.root().b = ZODB.blob.Blob()
         with conn.root().b.open('w') as f: _ = f.write(b'initial')
@@ -493,12 +462,6 @@ class TestThingsPreviouslyDocTests(TestBlobMixin,
         self.assertFalse(os.path.exists(savepoint_dir) and len(os.listdir(savepoint_dir)) > 0)
 
         db.close()
-
-def setUp(test):
-    ZODB.tests.util.setUp(test)
-
-def tearDown(test):
-    ZODB.tests.util.tearDown(test)
 
 
 class MinimalTestLayer(object):
@@ -548,22 +511,6 @@ def rmtree(path):
             os.rmdir(dname)
     os.rmdir(path)
 
-checker = renormalizing.RENormalizing([
-    # Python 3 bytes add a "b".
-    (re.compile(r'b(".*?")'), r"\1"),
-    (re.compile(r"b('.*?')"), r"\1"),
-    # Windows shows result from 'u64' as long?
-    (re.compile(r"(\d+)L"), r"\1"),
-    # Python 3 adds module name to exceptions.
-    (re.compile("ZODB.POSException.ConflictError"), r"ConflictError"),
-    (re.compile("ZODB.POSException.POSKeyError"), r"POSKeyError"),
-    (re.compile("ZODB.POSException.ReadConflictError"), r"ReadConflictError"),
-    (re.compile("ZODB.POSException.Unsupported"), r"Unsupported"),
-    (re.compile("ZODB.interfaces.BlobError"), r"BlobError"),
-    # XXX document me
-    (re.compile(r'\%(sep)s\%(sep)s' % dict(sep=os.path.sep)), '/'),
-    (re.compile(r'\%(sep)s' % dict(sep=os.path.sep)), '/'),
-])
 
 class TestBlobPackingHP(TestBlobPackHistoryPreservingMixin,
                         TestCase):
