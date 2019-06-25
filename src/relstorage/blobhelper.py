@@ -30,6 +30,7 @@ from ZODB.utils import p64
 from ZODB.utils import u64
 
 from relstorage._compat import iteritems
+from relstorage._compat import MAC
 
 
 class BlobHelper(object):
@@ -107,21 +108,27 @@ class BlobHelper(object):
         self.fshelper.getPathForOID(oid, True)
         return self.fshelper.getBlobFilename(oid, serial)
 
-    def loadBlob(self, cursor, oid, serial):
+    def _lock_blob_for_download(self, oid, serial):
         blob_filename = self._get_lockable_blob_filename(oid, serial)
-        lock = _lock_blob(blob_filename)
-        try:
-            return self._loadBlobLocked(cursor, oid, serial, blob_filename)
-        finally:
-            lock.close()
+        return _lock_blob(blob_filename)
 
-    def _loadBlobLocked(self, cursor, oid, serial, blob_filename):
+    if MAC:
+        _lock_blob_for_open = _lock_blob_for_download
+    else:
+        _lock_blob_for_open = lambda self, oid, serial: None
+
+    def loadBlob(self, cursor, oid, serial):
+        blob_filename = self._loadBlobInternal(cursor, oid, serial)
+        return blob_filename
+
+    def _loadBlobInternal(self, cursor, oid, serial, blob_lock=None):
         # Load a blob. If it isn't present and we have a shared blob
         # directory, then assume that it doesn't exist on the server
         # and return None.
         # Note that the thread that cleans the blob cache up when it reaches
         # a maximum size could remove the blob file by the time the caller
         # gets the filename, so it could be gone.
+        blob_filename = self.fshelper.getBlobFilename(oid, serial)
         if os.path.exists(blob_filename):
             return _accessed(blob_filename)
 
@@ -130,9 +137,24 @@ class BlobHelper(object):
             # isn't here, it's not anywhere.
             raise POSException.POSKeyError("No blob file", oid, serial)
 
-        # First, we'll create the directory for this oid, if it doesn't exist.
-        self.fshelper.getPathForOID(oid, create=True)
+        # OK, it's not on disk in our cache. We need to lock and
+        # download. In order to lock, we need to create the directory
+        # first.
+        blob_filename = self._get_lockable_blob_filename(oid, serial)
+        my_lock = _lock_blob(blob_filename) if blob_lock is None else blob_lock
+        try:
+            blob_filename = self._loadBlobLocked(cursor, oid, serial, blob_filename)
+        finally:
+            if blob_lock is None:
+                # If we take out the lock, we close the lock.
+                # Otherwise, it's the caller's responsibility.
+                my_lock.close()
+        return blob_filename
 
+    def _loadBlobLocked(self, cursor, oid, serial, blob_filename):
+        """
+        Returns a filename that exists on disk, or raises a POSKeyError.
+        """
         # OK, it's not here and we (or someone) needs to get it. We
         # want to avoid getting it multiple times. We want to avoid
         # getting it multiple times even accross separate client
@@ -142,7 +164,6 @@ class BlobHelper(object):
         # We got the lock, so it's our job to download it. First,
         # we'll double check that someone didn't download it while
         # we were getting the lock:
-
         if os.path.exists(blob_filename):
             return _accessed(blob_filename)
 
@@ -153,9 +174,17 @@ class BlobHelper(object):
 
         raise POSException.POSKeyError("No blob file", oid, serial)
 
+    def _openCommittedBlobFileInternal(self, cursor, oid, serial, blob, open_lock):
+        blob_filename = self._loadBlobInternal(cursor, oid, serial, open_lock)
+        if blob is None:
+            result = open(blob_filename, 'rb')
+        else:
+            result = ZODB.blob.BlobFile(blob_filename, 'r', blob)
+        return result
+
     def openCommittedBlobFile(self, cursor, oid, serial, blob=None):
         # First, try to make sure the file exists on disk.
-        blob_filename = self._get_lockable_blob_filename(oid, serial)
+        #
         # Next, open and return it. This would be expected to either
         # return a file we can read, or raise a FileNotFoundError.
         # Sadly, on some platforms (macOS 10.14.5 with APFS on Python
@@ -166,16 +195,28 @@ class BlobHelper(object):
         # to prevent the two from overlapping; we do that by holding
         # the lock. See https://github.com/zodb/relstorage/issues/219
         #
-        # Unfortunately, but not unexpectedly, this about doubles the amount
-        # of time it takes to open blobs that are already present.
-        lock = _lock_blob(blob_filename)
+        # Unfortunately, but not unexpectedly, this about doubles the
+        # amount of time it takes to open blobs that are already
+        # present. So we jump through some hoops to only do this on
+        # platforms that we know need it.
+        blob_lock = self._lock_blob_for_open(oid, serial)
         try:
-            self._loadBlobLocked(cursor, oid, serial, blob_filename)
-            if blob is None:
-                return open(blob_filename, 'rb')
-            return ZODB.blob.BlobFile(blob_filename, 'r', blob)
+            try:
+                return self._openCommittedBlobFileInternal(cursor, oid, serial, blob, blob_lock)
+            except IOError:
+                # An IOError here should mean that the file couldn't be
+                # opened, probably because the cache cleaner came through
+                # and deleted it. If we had already opened a lock,
+                # then there's nothing we can do (the cache cleaner wouldn't have
+                # been able to delete it).
+                if blob_lock is not None: # pragma: no cover
+                    raise
+                # If we didn't have the lock, we need to try again with the lock.
+                blob_lock = self._lock_blob_for_download(oid, serial)
+                return self._openCommittedBlobFileInternal(cursor, oid, serial, blob, blob_lock)
         finally:
-            lock.close()
+            if blob_lock is not None:
+                blob_lock.close()
 
     def temporaryDirectory(self):
         return self.fshelper.temp_dir
