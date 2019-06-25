@@ -6,7 +6,6 @@ from relstorage._compat import ABC
 
 # ZODB >= 3.9.  The blob directory can be a private cache.
 shared_blob_dir_choices = (False, True)
-support_blob_cache = True
 
 RUNNING_ON_TRAVIS = os.environ.get('TRAVIS')
 RUNNING_ON_APPVEYOR = os.environ.get('APPVEYOR')

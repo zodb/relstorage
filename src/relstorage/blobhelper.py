@@ -118,8 +118,7 @@ class BlobHelper(object):
         _lock_blob_for_open = lambda self, oid, serial: None
 
     def loadBlob(self, cursor, oid, serial):
-        blob_filename = self._loadBlobInternal(cursor, oid, serial)
-        return blob_filename
+        return self._loadBlobInternal(cursor, oid, serial)
 
     def _loadBlobInternal(self, cursor, oid, serial, blob_lock=None):
         # Load a blob. If it isn't present and we have a shared blob
@@ -204,15 +203,15 @@ class BlobHelper(object):
             try:
                 return self._openCommittedBlobFileInternal(cursor, oid, serial, blob, blob_lock)
             except IOError:
-                # An IOError here should mean that the file couldn't be
-                # opened, probably because the cache cleaner came through
-                # and deleted it. If we had already opened a lock,
-                # then there's nothing we can do (the cache cleaner wouldn't have
-                # been able to delete it).
-                if blob_lock is not None: # pragma: no cover
-                    raise
+                # An IOError here should mean that the file couldn't
+                # be opened, probably because the cache cleaner came
+                # through and deleted it. If we had already opened a
+                # lock, then there's nothing we can do (the cache
+                # cleaner wouldn't have been able to delete it).
+                # However, we do test that we retry in that case.
+                if blob_lock is None:
+                    blob_lock = self._lock_blob_for_download(oid, serial)
                 # If we didn't have the lock, we need to try again with the lock.
-                blob_lock = self._lock_blob_for_download(oid, serial)
                 return self._openCommittedBlobFileInternal(cursor, oid, serial, blob, blob_lock)
         finally:
             if blob_lock is not None:
