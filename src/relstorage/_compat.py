@@ -46,8 +46,14 @@ else:
     iterkeys = dict.iterkeys
     itervalues = dict.itervalues
 
-OID_TID_MAP_TYPE = BTrees.family64.II.BTree if not PYPY else dict
-OID_OBJECT_MAP_TYPE = BTrees.family64.IO.BTree if not PYPY else dict
+if not PYPY:
+    OID_TID_MAP_TYPE = BTrees.family64.II.BTree
+    OID_OBJECT_MAP_TYPE = BTrees.family64.IO.BTree
+    OID_SET_TYPE = BTrees.family64.II.TreeSet
+else:
+    OID_TID_MAP_TYPE = dict
+    OID_OBJECT_MAP_TYPE = dict
+    OID_SET_TYPE = set
 
 def iteroiditems(d):
     # Could be either a BTree, which always has 'iteritems',

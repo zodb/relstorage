@@ -36,6 +36,10 @@
   limit was reached which could result in blobs appearing to be
   spuriously empty. This was only observed on macOS. See :issue:`219`.
 
+- Fix a bug computing the cache delta maps when restoring from
+  persistent cache that could cause data from a single transaction to
+  be stale, leading to spurious conflicts.
+
 3.0a2 (2019-06-19)
 ==================
 

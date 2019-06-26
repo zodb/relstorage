@@ -615,21 +615,65 @@ class PersistentRowFilterTests(TestCase):
         cp0 = 5000
         cp1 = 4000
 
-        tid_after0 = 5000
-        tid_after1 = 4000
+        tid_after0 = 5001
+        tid_after1 = 4001
         # The old_tid, outside the checkpoint range,
-        # will get dropped.
+        # will get completely dropped.
         old_tid = 3999
 
         rows = [
-            (1, tid_after0, b'1', tid_after0),
+            (0, tid_after0, b'0', tid_after0),
+            (1, cp0, b'1', cp0),
             (2, tid_after1, b'2', tid_after1),
-            (3, old_tid, b'3', old_tid)
+            (3, cp1, b'3', cp1),
+            (4, old_tid, b'4', old_tid)
         ]
 
         results = list(f((cp0, cp1), rows))
 
         self.assertEqual(results, [
-            ((1, tid_after0), (b'1', tid_after0)),
-            ((2, tid_after1), (b'2', tid_after1)),
+            (rows[0][:2], rows[0][2:]),
+            (rows[1][:2], rows[1][2:]),
+            (rows[2][:2], rows[2][2:]),
         ])
+
+        self.assertEqual(dict(f.delta_after0), {0: 5001})
+        # We attempted validation on this, and we found nothing,
+        # so we can't claim knowledge.
+        self.assertEqual(dict(f.delta_after1), {})
+        # 1 and 2 were polled because they would go in delta_after_1,
+        # 3 and 4 were polled because they fall outside the checkpoint ranges
+        self.assertEqual(set(f.polled_invalid_oids), {1, 2, 3, 4})
+
+        # Let's verify we can find things we poll for.
+        f = self._makeOne()
+        f.adapter.mover.data[2] = (b'', tid_after1)
+        f.adapter.mover.data[4] = (b'', old_tid)
+        results = list(f((cp0, cp1), rows))
+
+        self.assertEqual(results, [
+            (rows[0][:2], rows[0][2:]),
+            (rows[1][:2], rows[1][2:]),
+            (rows[2][:2], rows[2][2:]),
+            ((4, 5000), rows[4][2:]),
+        ])
+
+        self.assertEqual(dict(f.delta_after0), {0: tid_after0})
+        self.assertEqual(dict(f.delta_after1), {2: tid_after1})
+        self.assertEqual(set(f.polled_invalid_oids), {1, 3})
+
+        # Test when the tid doesn't match
+        f = self._makeOne()
+        f.adapter.mover.data[2] = (b'', tid_after1 + 2)
+        f.adapter.mover.data[4] = (b'', old_tid + 1)
+        results = list(f((cp0, cp1), rows))
+
+        self.assertEqual(results, [
+            (rows[0][:2], rows[0][2:]),
+            (rows[1][:2], rows[1][2:]),
+            (rows[2][:2], rows[2][2:]),
+        ])
+
+        self.assertEqual(dict(f.delta_after0), {0: tid_after0})
+        self.assertEqual(dict(f.delta_after1), {2: tid_after1 + 2})
+        self.assertEqual(set(f.polled_invalid_oids), {1, 2, 3, 4})

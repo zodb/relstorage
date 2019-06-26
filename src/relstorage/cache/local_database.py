@@ -146,6 +146,18 @@ class Database(ABC):
         self.cursor.execute("SELECT cp0, cp1 FROM checkpoints")
         return self.cursor.fetchone()
 
+    def remove_invalid_persistent_oids(self, bad_oids):
+        cur = self.cursor
+        cur.execute("BEGIN")
+        batch = RowBatcher(cur,
+                           row_limit=999 // 1,
+                           delete_placeholder='?')
+        for oid in bad_oids:
+            batch.delete_from('object_state', zoid=oid)
+        batch.flush()
+        cur.execute("COMMIT")
+        return batch.total_rows_deleted
+
     def fetch_rows_by_priority(self):
         """
         The returned cursor will iterate ``(zoid, tid, state, tid)``

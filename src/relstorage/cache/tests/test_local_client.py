@@ -512,6 +512,8 @@ class LocalClientOIDTests(AbstractStateCacheTests):
         cache_files = get_cache_files()
         self.assertEqual(len_initial_cache_files, len(cache_files))
 
+        c3.remove_invalid_persistent_oids([0])
+
         # At no point did we spawn extra threads
         self.assertEqual(1, threading.active_count())
 

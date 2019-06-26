@@ -16,7 +16,6 @@ from __future__ import absolute_import
 
 # pylint:disable=too-many-ancestors,abstract-method,too-many-public-methods,too-many-lines
 # pylint:disable=too-many-statements,too-many-locals
-import abc
 import os
 import random
 import shutil
@@ -34,8 +33,6 @@ from ZODB.DB import DB
 from ZODB.FileStorage import FileStorage
 from ZODB.POSException import ReadConflictError
 from ZODB.serialize import referencesf
-from ZODB.utils import u64
-from ZODB.utils import z64
 from ZODB.tests import BasicStorage
 from ZODB.tests import ConflictResolution
 from ZODB.tests import MTStorage
@@ -47,113 +44,22 @@ from ZODB.tests import Synchronization
 from ZODB.tests.StorageTestBase import zodb_pickle
 from ZODB.tests.StorageTestBase import zodb_unpickle
 
-from relstorage.options import Options
-from relstorage.storage import RelStorage
-from relstorage._compat import ABC
-
 from . import fakecache
 from . import util
 from . import mock
+from . import TestCase
+from . import StorageCreatingMixin
+from .persistentcache import PersistentCacheStorageTests
 from .test_zodbconvert import FSZODBConvertTests
 
 
-class StorageCreatingMixin(ABC):
-
-    keep_history = None # Override
-    driver_name = None # Override.
-
-    @abc.abstractmethod
-    def make_adapter(self, options):
-        # abstract method
-        raise NotImplementedError
-
-    @abc.abstractmethod
-    def get_adapter_class(self):
-        raise NotImplementedError
-
-    @abc.abstractmethod
-    def get_adapter_zconfig(self):
-        """
-        Return the part of the ZConfig string that makes the adapter.
-
-        That is, return the <postgresql>, <mysql> or <oracle> section.
-
-        Return text (unicode).
-        """
-        raise NotImplementedError
-
-    def get_adapter_zconfig_replica_conf(self):
-        return os.path.join(os.path.dirname(__file__), 'replicas.conf')
-
-    @abc.abstractmethod
-    def verify_adapter_from_zconfig(self, adapter):
-        """
-        Assert that the adapter configured from get_adapter_zconfig
-        is properly configured.
-        """
-        raise NotImplementedError
-
-    def _wrap_storage(self, storage):
-        return storage
-
-    def make_storage(self, zap=True, **kw):
-        if ('cache_servers' not in kw
-                and 'cache_module_name' not in kw
-                and kw.get('share_local_cache', True)):
-            if util.CACHE_SERVERS and util.CACHE_MODULE_NAME:
-                kw['cache_servers'] = util.CACHE_SERVERS
-                kw['cache_module_name'] = util.CACHE_MODULE_NAME
-        if 'cache_prefix' not in kw:
-            kw['cache_prefix'] = type(self).__name__ + self._testMethodName
-        if 'cache_local_dir' not in kw:
-            # Always use a persistent cache. This helps discover errors in
-            # the persistent cache.
-            # These tests run in a temporary directory that gets cleaned up, so the CWD is
-            # appropriate.
-            kw['cache_local_dir'] = '.'
-
-        assert self.driver_name
-        options = Options(keep_history=self.keep_history, driver=self.driver_name, **kw)
-        adapter = self.make_adapter(options)
-        storage = RelStorage(adapter, options=options)
-        storage._batcher_row_limit = 1
-        if zap:
-            # XXX: Some ZODB tests, possibly check4ExtStorageThread
-            # and check7StorageThreads don't close storages when done
-            # with them? This leads to connections remaining open with
-            # locks on PyPy, so on PostgreSQL we can't TRUNCATE tables
-            # and have to go the slow route.
-            #
-            # As of 2019-06-20 with PyPy 7.1.1, I'm no longer able to replicate
-            # a problem like that locally, so we go back to the fast way.
-            storage.zap_all()
-        return self._wrap_storage(storage)
-
-
 class RelStorageTestBase(StorageCreatingMixin,
+                         TestCase,
                          StorageTestBase.StorageTestBase):
 
     base_dbname = None # Override
     keep_history = None  # Override
     _storage_created = None
-
-    __to_close = ()
-
-    def setUp(self):
-        # This sets up a temporary directory for each test and
-        # changes to it.
-        super(RelStorageTestBase, self).setUp()
-        self.__to_close = []
-
-    def _closing(self, o):
-        """
-        Close the object before tearDown (opposite of addCleanup
-        so that exceptions will propagate).
-
-        Returns the given object.
-        """
-        self.__to_close.append(o)
-        return o
 
     def _close(self):
         # Override from StorageTestBase.
@@ -168,13 +74,6 @@ class RelStorageTestBase(StorageCreatingMixin,
         if storage is not None:
             storage.close()
             storage.cleanup()
-
-    def tearDown(self):
-        transaction.abort()
-        for x in reversed(self.__to_close):
-            x.close()
-        self.__to_close = ()
-        super(RelStorageTestBase, self).tearDown()
 
     def make_storage_to_cache(self):
         return self.make_storage()
@@ -210,6 +109,7 @@ class RelStorageTestBase(StorageCreatingMixin,
 
 class GenericRelStorageTests(
         RelStorageTestBase,
+        PersistentCacheStorageTests,
         BasicStorage.BasicStorage,
         PackableStorage.PackableStorage,
         Synchronization.SynchronizedStorage,
@@ -218,434 +118,6 @@ class GenericRelStorageTests(
         MTStorage.MTStorage,
         ReadOnlyStorage.ReadOnlyStorage,
     ):
-
-    def checkNoConflictWhenChangeMissedByPersistentCacheAfterCP0(self):
-        storage1 = self._storage
-        db1 = self._closing(DB(storage1))
-        c1 = db1.open()
-        c1.root()['myobj'] = 42
-        transaction.commit()
-        orig_checkpoints = c1._storage._cache.checkpoints
-        self.assertIsNotNone(orig_checkpoints)
-        # We have a saved TID for the root object.
-        self.assertIn(0, c1._storage._cache.delta_after0)
-        tid = c1._storage._cache.delta_after0[0]
-        __traceback_info__ = tid
-        self.assertEqual(c1._storage._cache.current_tid, tid)
-        c1.close()
-        db1.close()
-        del db1, c1, storage1
-
-        # A storage that will not update the persistent cache.
-        storage2 = self.make_storage(cache_local_dir=None, zap=False)
-        # It didn't read checkpoints or TID
-        self.assertIsNone(storage2._cache.checkpoints)
-        self.assertIsNone(storage2._cache.current_tid)
-        db2 = self._closing(DB(storage2))
-        c2 = db2.open()
-        # We've polled and gained checkpoints
-        self.assertIsNotNone(c2._storage._cache.checkpoints)
-        c2.root()['myobj'] = 420
-        transaction.commit()
-        # The tid changed
-        self.assertIn(0, c2._storage._cache.delta_after0)
-        new_tid = c2._storage._cache.delta_after0[0]
-        self.assertGreater(new_tid, tid)
-        c2.close()
-        db2.close()
-        del db2, storage2, c2
-
-        # Now a new storage that will read the persistent cache
-        storage3 = self.make_storage(zap=False)
-        # It did read checkpoints and TID
-        self.assertIsNotNone(storage3._cache.checkpoints)
-        self.assertEqual(storage3._cache.checkpoints, orig_checkpoints)
-        self.assertIn(0, storage3._cache.delta_after0)
-        self.assertEqual(storage3._cache.delta_after0[0], tid)
-        self.assertIsNotNone(storage3._cache.current_tid)
-        db3 = self._closing(DB(storage3))
-        c3 = db3.open()
-        # Polling, however, caught us up, because the object changed
-        # after current_tid.
-        self.assertIn(0, c3._storage._cache.delta_after0)
-        self.assertEqual(c3._storage._cache.delta_after0[0], new_tid)
-
-        r = c3.root()
-        self.assertEqual(r['myobj'], 420)
-        c3.root()['myobj'] = 180
-        transaction.commit()
-        c3.close()
-        db3.close()
-
-    def checkNoConflictWhenChangeMissedByPersistentCacheBeforeCP1(self):
-        tx1 = transaction.TransactionManager()
-        storage1 = self._storage
-        db1 = self._closing(DB(storage1))
-        c1 = db1.open(tx1)
-        c1.root()['myobj1'] = mapping = PersistentMapping()
-        c1.root()['myobj'] = 1
-        tx1.commit()
-        _ = c1._storage._cache.delta_after0[0]
-        c1._storage._cache.clear(load_persistent=False)
-
-        c1._storage.poll_invalidations()
-        c1.root()['myobj'] = 2
-        tx1.commit()
-        _ = c1._storage._cache.delta_after0[0]
-        c1._storage._cache.clear(load_persistent=False)
-
-        c1._storage.poll_invalidations()
-        c1.root()['myobj'] = 3
-        tx1.commit()
-        tid3 = c1._storage._cache.delta_after0[0]
-        c1._storage._cache.clear(load_persistent=False)
-
-        # Now, mutate an object that's not the root
-        # so that we get a new transaction after the root was
-        # modified.
-        c1._storage.poll_invalidations()
-        c1.root()['myobj1']['key'] = 1
-        mapping_oid = mapping._p_oid
-        mapping_oid_int = u64(mapping_oid)
-        tx1.commit()
-        tid4 = c1._storage._cache.delta_after0[mapping_oid_int]
-
-        orig_checkpoints = c1._storage._cache.checkpoints
-        self.assertIsNotNone(orig_checkpoints)
-        self.assertEqual(orig_checkpoints, (tid3, tid3))
-        self.assertEqual(c1._storage._cache.current_tid, tid4)
-
-        # the root is not in a delta
-        self.assertNotIn(0, c1._storage._cache.delta_after0)
-        # Nor is it in the cache, because the Connection's
-        # object cache still had the root and we were never
-        # asked.
-        cache_data = c1._storage._cache.local_client[(0, tid3)]
-        __traceback_info__ = list(c1._storage._cache.local_client)
-        self.assertIsNone(cache_data)
-        # So lets get it in the cache with its current TID.
-        c1._storage.load(z64)
-
-        cache_data = c1._storage._cache.local_client[(0, tid3)]
-        __traceback_info__ = list(c1._storage._cache.local_client)
-        self.assertIsNotNone(cache_data)
-        self.assertEqual(cache_data[1], tid3)
-
-        # Make some changes to the root in a storage that will not
-        # update the persistent cache.
-        storage2 = self.make_storage(cache_local_dir=None, zap=False)
-        # It didn't read checkpoints or TID
-        self.assertIsNone(storage2._cache.checkpoints)
-        self.assertIsNone(storage2._cache.current_tid)
-        db2 = self._closing(DB(storage2))
-        tx2 = transaction.TransactionManager()
-        c2 = db2.open(tx2)
-        # We've polled and gained checkpoints
-        self.assertIsNotNone(c2._storage._cache.checkpoints)
-        c2.root()['myobj'] = 420
-        tx2.commit()
-        # The tid changed
-        self.assertIn(0, c2._storage._cache.delta_after0)
-        new_tid = c2._storage._cache.delta_after0[0]
-        self.assertGreater(new_tid, tid4)
-        c2.close()
-        db2.close()
-        del db2, storage2, c2
-
-        # Now move the persistent checkpoints forward, pushing the
-        # last TID for the root object out of the delta ranges.
-        c1._storage._cache.local_client.store_checkpoints(new_tid, new_tid)
-
-        c1.close()
-        db1.close()
-        del db1, c1, storage1
-
-        # Now a new storage that will read the persistent cache
-        storage3 = self.make_storage(zap=False)
-        # It did read checkpoints and TID
-        self.assertIsNotNone(storage3._cache.checkpoints)
-        self.assertEqual(storage3._cache.checkpoints, (new_tid, new_tid))
-        self.assertEqual(storage3._cache.current_tid, new_tid)
-        # The root object, however, was not put into a delta map.
-        self.assertNotIn(0, storage3._cache.delta_after0)
-        # Nor is it in the cache at any key.
-        keys_for_root = [k for k in storage3._cache.local_client if k[0] == 0]
-        self.assertEqual(0, len(keys_for_root))
-        db3 = self._closing(DB(storage3))
-        tx3 = transaction.TransactionManager()
-        c3 = db3.open(tx3)
-        # Polling did not find the change. We think we're current with new_tid,
-        # and the root changed in that transaction.
-        # XXX: MySQL on Travis, but only there, not on appveyor and not locally,
-        # has a 0 in here. Why?
-        # self.assertNotIn(0, c3._storage._cache.delta_after0)
-
-        # Opening the database loaded the root object, so it's now in the cache,
-        # with accurate data.
-        cache_data = c3._storage._cache.local_client[(0, new_tid)]
-        self.assertIsNotNone(cache_data)
-        __traceback_info__ = tid3, tid4, new_tid
-        self.assertEqual(cache_data[1], new_tid)
-        r = c3.root()
-        # The current data is visible.
-        self.assertEqual(r['myobj'], 420)
-        c3.root()['myobj'] = 180
-        tx3.commit()
-        c3.close()
-        db3.close()
-
-    def checkNoConflictNoChangeInPersistentCacheBeforeCP1(self):
-        tx1 = transaction.TransactionManager()
-        storage1 = self._storage
-        db1 = self._closing(DB(storage1))
-        c1 = db1.open(tx1)
-        c1.root()['myobj1'] = mapping = PersistentMapping()
-        c1.root()['myobj'] = 1
-        tx1.commit()
-        _ = c1._storage._cache.delta_after0[0]
-        c1._storage._cache.clear(load_persistent=False)
-
-        c1._storage.poll_invalidations()
-        c1.root()['myobj'] = 2
-        tx1.commit()
-        _ = c1._storage._cache.delta_after0[0]
-        c1._storage._cache.clear(load_persistent=False)
-
-        c1._storage.poll_invalidations()
-        c1.root()['myobj'] = 3
-        tx1.commit()
-        last_root_tid_change = tid3 = c1._storage._cache.delta_after0[0]
-        c1._storage._cache.clear(load_persistent=False)
-
-        # Now, mutate an object that's not the root
-        # so that we get a new transaction after the root was
-        # modified.
-        c1._storage.poll_invalidations()
-        c1.root()['myobj1']['key'] = 1
-        mapping_oid = mapping._p_oid
-        mapping_oid_int = u64(mapping_oid)
-        tx1.commit()
-        tid4 = c1._storage._cache.delta_after0[mapping_oid_int]
-
-        orig_checkpoints = c1._storage._cache.checkpoints
-        self.assertIsNotNone(orig_checkpoints)
-        self.assertEqual(orig_checkpoints, (tid3, tid3))
-        self.assertEqual(c1._storage._cache.current_tid, tid4)
-
-        # the root is not in a delta
-        self.assertNotIn(0, c1._storage._cache.delta_after0)
-        # Nor is it in the cache, because the Connection's
-        # object cache still had the root and we were never
-        # asked.
-        cache_data = c1._storage._cache.local_client[(0, tid3)]
-        __traceback_info__ = list(c1._storage._cache.local_client)
-        self.assertIsNone(cache_data)
-        # So lets get it in the cache with its current TID.
-        c1._storage.load(z64)
-
-        cache_data = c1._storage._cache.local_client[(0, tid3)]
-        __traceback_info__ = list(c1._storage._cache.local_client)
-        self.assertIsNotNone(cache_data)
-        self.assertEqual(cache_data[1], tid3)
-
-        # Create a new transaction that doesn't change the root in a storage
-        # that won't update the persistent cache.
-        storage2 = self.make_storage(cache_local_dir=None, zap=False)
-        # It didn't read checkpoints or TID
-        self.assertIsNone(storage2._cache.checkpoints)
-        self.assertIsNone(storage2._cache.current_tid)
-        db2 = self._closing(DB(storage2))
-        tx2 = transaction.TransactionManager()
-        c2 = db2.open(tx2)
-        # We've polled and gained checkpoints
-        self.assertIsNotNone(c2._storage._cache.checkpoints)
-        c2.root()['myobj1']['key'] = 420
-        tx2.commit()
-        # The tid changed
-        self.assertIn(mapping_oid_int, c2._storage._cache.delta_after0)
-        new_tid = c2._storage._cache.delta_after0[mapping_oid_int]
-        self.assertGreater(new_tid, tid4)
-        c2.close()
-        db2.close()
-        del db2, storage2, c2
-
-        # Now move the persistent checkpoints forward, pushing the
-        # last TID for the root object out of the delta ranges.
-        c1._storage._cache.local_client.store_checkpoints(new_tid, new_tid)
-
-        c1.close()
-        db1.close()
-        del db1, c1, storage1
-
-        # Now a new storage that will read the persistent cache
-        storage3 = self.make_storage(zap=False)
-        # It did read checkpoints and TID
-        self.assertIsNotNone(storage3._cache.checkpoints)
-        self.assertEqual(storage3._cache.checkpoints, (new_tid, new_tid))
-        self.assertEqual(storage3._cache.current_tid, new_tid)
-        # The root object, however, was not put into a delta map.
-        self.assertNotIn(0, storage3._cache.delta_after0)
-        # But it is in the cache for its old key, because we verified it
-        # to still be in sync.
-        keys_for_root = [k for k in storage3._cache.local_client if k[0] == 0]
-        self.assertEqual(1, len(keys_for_root))
-        self.assertEqual((0, new_tid), keys_for_root[0])
-        db3 = self._closing(DB(storage3))
-        tx3 = transaction.TransactionManager()
-        c3 = db3.open(tx3)
-
-        # Opening the database loaded the root object, and it continues
-        # to be found at its old cache key.
-        cache_data = c3._storage._cache.local_client[(0, new_tid)]
-        self.assertIsNotNone(cache_data)
-        __traceback_info__ = tid3, tid4, new_tid
-        self.assertEqual(cache_data[1], last_root_tid_change)
-        r = c3.root()
-        # The current data is visible.
-        self.assertEqual(r['myobj'], 3)
-        self.assertEqual(r['myobj1']['key'], 420)
-        c3.root()['myobj'] = 180
-        r['myobj1']['key'] = 360
-        tx3.commit()
-        c3.close()
-        db3.close()
-
-    def checkNoConflictWhenDeletedNotInInPersistentCacheBeforeCP1(self):
-        tx1 = transaction.TransactionManager()
-        storage1 = self._storage
-        db1 = self._closing(DB(storage1))
-        c1 = db1.open(tx1)
-        c1.root()['myobj1'] = mapping = PersistentMapping()
-        mapping['key'] = PersistentMapping()
-        c1.root()['myobj'] = 1
-        tx1.commit()
-        _ = c1._storage._cache.delta_after0[0]
-        c1._storage._cache.clear(load_persistent=False)
-
-        c1._storage.poll_invalidations()
-        c1.root()['myobj'] = 2
-        tx1.commit()
-        _ = c1._storage._cache.delta_after0[0]
-        c1._storage._cache.clear(load_persistent=False)
-
-        c1._storage.poll_invalidations()
-        c1.root()['myobj'] = 3
-        tx1.commit()
-        last_root_tid_change = tid3 = c1._storage._cache.delta_after0[0]
-        c1._storage._cache.clear(load_persistent=False)
-
-        # Now, mutate an object that's not the root
-        # so that we get a new transaction after the root was
-        # modified.
-        c1._storage.poll_invalidations()
-        nested_mapping = c1.root()['myobj1']['key'] = PersistentMapping()
-        mapping_oid = mapping._p_oid
-        mapping_oid_int = u64(mapping_oid)
-        c1.add(nested_mapping)
-        nested_mapping_oid = nested_mapping._p_oid
-        nested_mapping_oid_int = u64(nested_mapping_oid)
-        tx1.commit()
-        tid4 = c1._storage._cache.delta_after0[mapping_oid_int]
-
-        orig_checkpoints = c1._storage._cache.checkpoints
-        self.assertIsNotNone(orig_checkpoints)
-        self.assertEqual(orig_checkpoints, (tid3, tid3))
-        self.assertEqual(c1._storage._cache.current_tid, tid4)
-
-        # the root is not in a delta
-        self.assertNotIn(0, c1._storage._cache.delta_after0)
-        # Nor is it in the cache, because the Connection's
-        # object cache still had the root and we were never
-        # asked.
-        cache_data = c1._storage._cache.local_client[(0, tid3)]
-        __traceback_info__ = list(c1._storage._cache.local_client)
-        self.assertIsNone(cache_data)
-        # So lets get it in the cache with its current TID.
-        c1._storage.load(z64)
-
-        cache_data = c1._storage._cache.local_client[(0, tid3)]
-        __traceback_info__ = list(c1._storage._cache.local_client)
-        self.assertIsNotNone(cache_data)
-        self.assertEqual(cache_data[1], tid3)
-
-        # Create a new transaction that deletes an object but
-        # that won't update the persistent cache.
-        storage2 = self.make_storage(cache_local_dir=None, zap=False)
-        # It didn't read checkpoints or TID
-        self.assertIsNone(storage2._cache.checkpoints)
-        self.assertIsNone(storage2._cache.current_tid)
-        db2 = self._closing(DB(storage2))
-        tx2 = transaction.TransactionManager()
-        c2 = db2.open(tx2)
-        # We've polled and gained checkpoints
-        self.assertIsNotNone(c2._storage._cache.checkpoints)
-        del c2.root()['myobj1']['key']
-        tx2.commit()
-        # The tid changed
-        self.assertIn(mapping_oid_int, c2._storage._cache.delta_after0)
-        new_tid = c2._storage._cache.delta_after0[mapping_oid_int]
-        self.assertGreater(new_tid, tid4)
-        c2.close()
-        db2.close()
-        # In order to actually remove this object, we must pack the storage.
-        t = time.time()
-        storage2.pack(t, ZODB.serialize.referencesf)
-
-        del db2, storage2, c2
-
-        # Now move the persistent checkpoints forward, pushing the
-        # last TID for the root object out of the delta ranges.
-        c1._storage._cache.local_client.store_checkpoints(new_tid, new_tid)
-
-        c1.close()
-        db1.close()
-        del db1, c1, storage1
-
-        # Now a new storage that will read the persistent cache
-        storage3 = self.make_storage(zap=False)
-        # It did read checkpoints and TID
-        self.assertIsNotNone(storage3._cache.checkpoints)
-        self.assertEqual(storage3._cache.checkpoints, (new_tid, new_tid))
-        self.assertEqual(storage3._cache.current_tid, new_tid)
-        # The deleted object was not put in a delta map
-        self.assertNotIn(nested_mapping_oid_int, storage3._cache.delta_after0)
-        self.assertNotIn(nested_mapping_oid_int, storage3._cache.delta_after1)
-        # Nor is it in a cache at the old key
-        keys_for_nested = [k for k in storage3._cache.local_client
-                           if k[0] == nested_mapping_oid_int]
-        __traceback_info__ = nested_mapping_oid_int, new_tid, keys_for_nested
-        self.assertEqual(0, len(keys_for_nested))
-
-        # Likewise, the parent mapping isn't found anywhere, because it
-        # changed
-        self.assertNotIn(mapping_oid_int, storage3._cache.delta_after0)
-        self.assertNotIn(mapping_oid_int, storage3._cache.delta_after1)
-        # Nor is it in a cache at the old key
-        keys_for_mapping = [k for k in storage3._cache.local_client
-                            if k[0] == mapping_oid_int]
-        self.assertEqual(0, len(keys_for_mapping))
-
-        db3 = self._closing(DB(storage3))
-        tx3 = transaction.TransactionManager()
-        c3 = db3.open(tx3)
-
-        # Opening the database loaded the root object, and it continues
-        # to be found at its old cache key.
-        cache_data = c3._storage._cache.local_client[(0, new_tid)]
-        self.assertIsNotNone(cache_data)
-        __traceback_info__ = tid3, tid4, new_tid
-        self.assertEqual(cache_data[1], last_root_tid_change)
-        r = c3.root()
-        # The current data is visible.
-        self.assertEqual(r['myobj'], 3)
-        self.assertNotIn('key', r['myobj1'])
-        c3.root()['myobj'] = 180
-        r['myobj1']['key'] = 360
-        tx3.commit()
-        # The parent mapping is now in the cache
-        self.assertIn(mapping_oid_int, c3._storage._cache.delta_after0)
-        c3.close()
-        db3.close()
 
     def checkCurrentObjectTidsRoot(self):
         # Get the root object in place
@@ -1339,19 +811,14 @@ class GenericRelStorageTests(
                 c.close()
 
             def updater():
-                thread_storage = self._storage.new_instance()
-                thread_db = DB(thread_storage)
-                try:
-                    for _ in range(updates_per_thread):
-                        thread_c = thread_db.open()
-                        try:
-                            thread_c.root()['length'].change(1)
-                            time.sleep(random.random() * 0.05)
-                            transaction.commit()
-                        finally:
-                            thread_c.close()
-                finally:
-                    thread_storage.close()
+                for _ in range(updates_per_thread):
+                    thread_c = db.open()
+                    try:
+                        thread_c.root()['length'].change(1)
+                        time.sleep(random.random() * 0.05)
+                        transaction.commit()
+                    finally:
+                        thread_c.close()
 
             import threading
             threads = []
