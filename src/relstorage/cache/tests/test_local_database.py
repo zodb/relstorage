@@ -99,6 +99,18 @@ class UpdateTests(TestCase):
         self.assertEqual(rows_in_db[1], (1, 1, b'1', 1))
         self.assertEqual(rows_in_db[2], (2, 2, b'2b', 2))
 
+    def test_remove_invalid_persistent_oids(self):
+        rows = [
+            (0, 1, b'0', 0),
+            (1, 1, b'0', 0),
+        ]
+        self.db.store_temp(rows)
+        self.db.move_from_temp()
+
+        invalid_oids = range(1, 5000)
+        count = self.db.remove_invalid_persistent_oids(invalid_oids)
+        self.assertEqual(count, len(invalid_oids))
+        self.assertEqual(dict(self.db.oid_to_tid), {0: 1})
 
     def test_trim_to_size_deletes_stale(self):
         rows = [

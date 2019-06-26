@@ -162,6 +162,24 @@ class LocalClient(object):
             with closing(conn):
                 self.read_from_sqlite(conn, row_filter)
 
+    @_log_timed
+    def remove_invalid_persistent_oids(self, bad_oids):
+        """
+        Remove data from the persistent cache for the given oids.
+        """
+        options = self.options
+        if not options.cache_local_dir:
+            return
+
+        count_removed = 0
+        conn = '(no oids to remove)'
+        if bad_oids:
+            conn = sqlite_connect(options, self.prefix, close_async=False)
+            with closing(conn):
+                db = Database.from_connection(conn)
+                count_removed = db.remove_invalid_persistent_oids(bad_oids)
+        logger.debug("Removed %d invalid OIDs from %s", count_removed, conn)
+
     def zap_all(self):
         _, destroy = sqlite_files(self.options, self.prefix)
         destroy()
@@ -495,7 +513,7 @@ class LocalClient(object):
             # saw a new TID for it, but we had nothing to replace it with.
             min_allowed_writeback = OID_TID_MAP_TYPE()
             for k, v in self._min_allowed_writeback.items():
-                if stored_oid_tid.get(k) < v:
+                if stored_oid_tid.get(k, MAX_TID) < v:
                     min_allowed_writeback[k] = v
             db.trim_to_size(self.limit, min_allowed_writeback)
             del min_allowed_writeback

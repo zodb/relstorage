@@ -29,6 +29,7 @@ from zope import interface
 from relstorage.autotemp import AutoTemporaryFile
 from relstorage._compat import OID_TID_MAP_TYPE
 from relstorage._compat import OID_OBJECT_MAP_TYPE
+from relstorage._compat import OID_SET_TYPE
 from relstorage._compat import iteroiditems
 from relstorage._util import log_timed
 
@@ -224,6 +225,7 @@ class StorageCache(object):
         # comes back in the delta_map; that's ok.
         row_filter = _PersistentRowFilter(self.adapter, self._delta_map_type)
         self.local_client.restore(row_filter)
+        self.local_client.remove_invalid_persistent_oids(row_filter.polled_invalid_oids)
 
         self.checkpoints = self.local_client.get_checkpoints()
         if self.checkpoints:
@@ -777,6 +779,7 @@ class _PersistentRowFilter(object):
         self.adapter = adapter
         self.delta_after0 = delta_type()
         self.delta_after1 = delta_type()
+        self.polled_invalid_oids = OID_SET_TYPE()
 
     def __call__(self, checkpoints, row_iter):
         if not checkpoints:
@@ -837,7 +840,7 @@ class _PersistentRowFilter(object):
                     # and the storage won't poll this far back.
                     #
                     # The solution is to hold onto it and run a manual poll ourself;
-                    # if it's still valid, good. If not, we really should try to
+                    # if it's still valid, good. If not, someone should
                     # remove it from the database so we don't keep checking.
                     # We also should only do this poll if we have room in our cache
                     # still (that should rarely be an issue; our db write size
@@ -874,25 +877,31 @@ class _PersistentRowFilter(object):
         current_tids_for_oids = self.adapter.connmanager.open_and_call(callback)
 
         for oid in oids:
-            # TODO: Propagate these removals down to the database.
-            if oid not in current_tids_for_oids:
-                # Removed.
+            if (oid not in current_tids_for_oids
+                    or to_check[oid][1] != current_tids_for_oids[oid]):
                 del to_check[oid]
-            elif to_check[oid][1] != current_tids_for_oids[oid]:
-                # Changed.
-                del to_check[oid]
+                self.polled_invalid_oids.add(oid)
+
         logger.debug("Polled %d older oids stored in cache; %d survived",
                      len(oids), len(to_check))
 
     @log_timed
     def _poll_delta_after1(self):
+        orig_delta_after1 = self.delta_after1
         oids = list(self.delta_after1)
-        logger.debug("Polling %d older oids stored in delta_after1", len(oids))
+        logger.debug("Polling %d oids in delta_after1", len(oids))
         def callback(_conn, cursor):
             return self.adapter.mover.current_object_tids(cursor, oids)
         current_tids_for_oids = self.adapter.connmanager.open_and_call(callback)
         self.delta_after1 = type(self.delta_after1)(current_tids_for_oids)
-
+        invalid_oids = {
+            oid
+            for oid, tid in iteroiditems(orig_delta_after1)
+            if oid not in self.delta_after1 or self.delta_after1[oid] != tid
+        }
+        self.polled_invalid_oids.update(invalid_oids)
+        logger.debug("Polled %d oids in delta_after1; %d survived",
+                     len(oids), len(oids) - len(invalid_oids))
 
 class _TemporaryStorage(object):
     def __init__(self):
