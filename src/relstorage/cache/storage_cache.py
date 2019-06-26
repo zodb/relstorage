@@ -15,6 +15,8 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+# pylint:disable=too-many-lines
+
 import logging
 import os
 import threading
@@ -466,7 +468,6 @@ class StorageCache(object):
         # Make a list of cache keys to query. The list will have either
         # 1 or 2 keys.
         cp0, cp1 = self.checkpoints
-        tid1 = cp0
         tid2 = None
         tid_int = self.delta_after1.get(oid_int)
         if tid_int:
@@ -474,12 +475,12 @@ class StorageCache(object):
         elif cp1 != cp0:
             tid2 = cp1
 
-        preferred_key = (oid_int, tid1)
+        preferred_key = (oid_int, cp0)
 
         # Query the cache. Query multiple keys simultaneously to
         # minimize latency. The client is responsible for moving
         # the data to the preferred key if it wasn't found there.
-        response = cache(oid_int, tid1, tid2)
+        response = cache(oid_int, cp0, tid2)
         if response: # We have a hit!
             state, actual_tid = response
             return state, actual_tid
@@ -490,6 +491,51 @@ class StorageCache(object):
             self._check_tid_after_load(oid_int, tid_int)
             cache[preferred_key] = (state, tid_int)
         return state, tid_int
+
+    def prefetch(self, cursor, oid_ints):
+        # Just like load(), but we only fetch the OIDs
+        # we can't find in the cache.
+        if not self.checkpoints:
+            # No point even trying, we would just throw the results away
+            return
+
+        to_fetch = OID_OBJECT_MAP_TYPE() # {oid: cache key}
+        cache = self.cache
+        cp0, cp1 = self.checkpoints
+        delta_after0 = self.delta_after0.get
+        delta_after1 = self.delta_after1.get
+        for oid_int in oid_ints:
+            tid_int = delta_after0(oid_int)
+            if tid_int:
+                key = (oid_int, tid_int)
+                cache_data = cache[key]
+                if not cache_data:
+                    # That was our one place, so we must fetch
+                    to_fetch[oid_int] = key
+                continue
+
+            tid2 = None
+            tid_int = delta_after1(oid_int)
+            if tid_int:
+                tid2 = tid_int
+            elif cp1 != cp0:
+                tid2 = cp1
+
+            cache_data = cache(oid_int, cp0, tid2)
+            if not cache_data:
+                preferred_key = (oid_int, cp0)
+                to_fetch[oid_int] = preferred_key
+
+        if not to_fetch:
+            return
+
+        for oid, state, tid_int in self.adapter.mover.load_currents(cursor, to_fetch):
+            key = to_fetch[oid]
+            # Note that we're losing the knowledge of whether the TID
+            # in the key came from delta_after0 or not, so we're not
+            # validating that part.
+            self._check_tid_after_load(oid, tid_int)
+            cache[key] = (state, tid_int)
 
     def tpc_begin(self):
         """Prepare temp space for objects to cache."""

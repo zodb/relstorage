@@ -247,7 +247,7 @@ class RowBatcherTests(TestCase):
     def test_select_one(self):
         cursor = MockCursor()
         batcher = self.getClass()(cursor)
-        batcher.select_from(('zoid', 'tid'), 'object_state', oids=(1,))
+        list(batcher.select_from(('zoid', 'tid'), 'object_state', oids=(1,)))
         self.assertEqual(cursor.executed, [
             ('SELECT zoid,tid FROM object_state WHERE oids IN (%s)',
              (1,))
@@ -256,8 +256,8 @@ class RowBatcherTests(TestCase):
     def test_select_multiple_one_batch(self):
         cursor = MockCursor()
         batcher = self.getClass()(cursor)
-        batcher.select_from(('zoid', 'tid'), 'object_state',
-                            oids=(1, 2, 3, 4))
+        list(batcher.select_from(('zoid', 'tid'), 'object_state',
+                                 oids=(1, 2, 3, 4)))
         self.assertEqual(cursor.executed, [
             ('SELECT zoid,tid FROM object_state WHERE oids IN (%s,%s,%s,%s)',
              (1, 2, 3, 4))
@@ -274,6 +274,7 @@ class RowBatcherTests(TestCase):
         batcher.row_limit = 2
         rows = batcher.select_from(('zoid', 'tid'), 'object_state',
                                    oids=(1, 2, 3, 4, 5))
+        rows = list(rows)
         self.assertEqual(cursor.executed, [
             ('SELECT zoid,tid FROM object_state WHERE oids IN (%s,%s)',
              (1, 2,)),
@@ -402,7 +403,7 @@ class PostgreSQLRowBatcherTests(TestCase):
     def test_select_one(self):
         cursor = MockCursor()
         batcher = self.getClass()(cursor)
-        batcher.select_from(('zoid', 'tid'), 'object_state', oids=(1,))
+        list(batcher.select_from(('zoid', 'tid'), 'object_state', oids=(1,)))
         self.assertEqual(cursor.executed, [
             ('SELECT zoid,tid FROM object_state WHERE oids = ANY (%s)',
              ([1,],))
@@ -411,8 +412,8 @@ class PostgreSQLRowBatcherTests(TestCase):
     def test_select_multiple_one_batch(self):
         cursor = MockCursor()
         batcher = self.getClass()(cursor)
-        batcher.select_from(('zoid', 'tid'), 'object_state',
-                            oids=(1, 2, 3, 4))
+        list(batcher.select_from(('zoid', 'tid'), 'object_state',
+                                 oids=(1, 2, 3, 4)))
         self.assertEqual(cursor.executed, [
             ('SELECT zoid,tid FROM object_state WHERE oids = ANY (%s)',
              ([1, 2, 3, 4],))
@@ -429,6 +430,7 @@ class PostgreSQLRowBatcherTests(TestCase):
         batcher.row_limit = 2
         rows = batcher.select_from(('zoid', 'tid'), 'object_state',
                                    oids=(1, 2, 3, 4, 5))
+        rows = list(rows)
         self.assertEqual(cursor.executed, [
             ('SELECT zoid,tid FROM object_state WHERE oids = ANY (%s)',
              ([1, 2,],)),
