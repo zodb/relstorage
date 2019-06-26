@@ -889,6 +889,9 @@ class _PersistentRowFilter(object):
     def _poll_delta_after1(self):
         orig_delta_after1 = self.delta_after1
         oids = list(self.delta_after1)
+        # TODO: We have a defined transaction range here that we're concerned
+        # about. We might be better off using poller.list_changes(), just like
+        # __poll_replace_checkpoints() does.
         logger.debug("Polling %d oids in delta_after1", len(oids))
         def callback(_conn, cursor):
             return self.adapter.mover.current_object_tids(cursor, oids)
