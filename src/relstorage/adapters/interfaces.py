@@ -353,9 +353,20 @@ class IObjectMover(Interface):
     """Move object states to/from the database and within the database."""
 
     def load_current(cursor, oid):
-        """Returns the current state and integer tid for an object.
+        """
+        Returns the current state and integer tid for an object.
 
-        oid is an integer.  Returns (None, None) if object does not exist.
+        *oid* is an integer. Returns (None, None) if object does not
+        exist.
+        """
+
+    def load_currents(cursor, oids):
+        """
+        Returns the oid integer, state, and integer tid for all the specified
+        objects.
+
+        *oids* is an iterable of integers. If any objects do no exist,
+        they are ignored.
         """
 
     def load_revision(cursor, oid, tid):

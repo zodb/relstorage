@@ -29,6 +29,7 @@ from persistent.mapping import PersistentMapping
 from zc.zlibstorage import ZlibStorage
 
 import ZODB.tests.util
+from ZODB.utils import z64
 from ZODB.DB import DB
 from ZODB.FileStorage import FileStorage
 from ZODB.POSException import ReadConflictError
@@ -921,6 +922,26 @@ class GenericRelStorageTests(
         from gevent.util import assert_switches
         with assert_switches():
             self.open()
+
+    def checkPrefetch(self):
+        db = DB(self._storage)
+        conn = db.open()
+
+        mapping = conn.root()['key'] = PersistentMapping()
+
+        transaction.commit()
+
+        self.assertEqual(3, len(self._storage._cache))
+        self._storage._cache.clear()
+        self.assertEmpty(self._storage._cache)
+
+        conn.prefetch(z64, mapping)
+
+        self.assertEqual(2, len(self._storage._cache))
+
+        # second time is a no-op
+        conn.prefetch(z64, mapping)
+        self.assertEqual(2, len(self._storage._cache))
 
 
 class AbstractRSZodbConvertTests(StorageCreatingMixin,

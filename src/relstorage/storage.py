@@ -555,24 +555,27 @@ class RelStorage(UndoLogCompatible,
             self._restart_load_and_poll()
         assert self._load_transaction_open == 'active'
 
-    @Metric(method=True, rate=0.1)
-    def load(self, oid, version=''):
-        # pylint:disable=unused-argument
+    def __load_using_method(self, meth, argument):
         if self._stale_error is not None:
             raise self._stale_error
-
-        oid_int = bytes8_to_int64(oid)
-        cache = self._cache
 
         with self._lock:
             self._before_load()
             cursor = self._load_cursor
             try:
-                state, tid_int = cache.load(cursor, oid_int)
+                return meth(cursor, argument)
             except CacheConsistencyError:
                 log.exception("Cache consistency error; restarting load")
                 self._drop_load_connection()
                 raise
+
+    @Metric(method=True, rate=0.1)
+    def load(self, oid, version=''):
+        # pylint:disable=unused-argument
+
+        oid_int = bytes8_to_int64(oid)
+
+        state, tid_int = self.__load_using_method(self._cache.load, oid_int)
 
         if tid_int is None:
             self._log_keyerror(oid_int, "no tid found")
@@ -585,11 +588,20 @@ class RelStorage(UndoLogCompatible,
             raise POSKeyError(oid)
         return state, int64_to_8bytes(tid_int)
 
-    def getTid(self, oid):
-        if self._stale_error is not None:
-            raise self._stale_error
+    def prefetch(self, oids):
+        prefetch = self._cache.prefetch
+        oid_ints = [bytes8_to_int64(oid) for oid in oids]
+        try:
+            self.__load_using_method(prefetch, oid_ints)
+        except Exception: # pylint:disable=broad-except
+            # This could raise self._stale_error, or
+            # CacheConsistencyError. Both of those mean that regular loads
+            # may fail too, but we don't know what our transaction state is
+            # at this time, so we don't want to raise it to the caller.
+            log.exception("Failed to prefetch")
 
-        _state, serial = self.load(oid, '')
+    def getTid(self, oid):
+        _state, serial = self.load(oid)
         return serial
 
     def loadEx(self, oid, version=''):
@@ -633,7 +645,7 @@ class RelStorage(UndoLogCompatible,
             else:
                 self._before_load()
                 cursor = self._load_cursor
-            if not self._adapter.mover.exists(cursor, bytes8_to_int64(oid)):
+            if not self._adapter.mover.exists(cursor, oid_int):
                 raise POSKeyError(oid)
 
             state, start_tid = self._adapter.mover.load_before(

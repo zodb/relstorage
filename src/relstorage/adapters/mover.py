@@ -59,7 +59,7 @@ class AbstractObjectMover(ABC):
         """
         SELECT state, tid
         FROM current_object
-            JOIN object_state USING(zoid, tid)
+        JOIN object_state USING(zoid, tid)
         WHERE zoid = %s
         """,
         """
@@ -92,6 +92,24 @@ class AbstractObjectMover(ABC):
             return state, tid
 
         return None, None
+
+    _load_currents_queries = (
+        (('zoid', 'state', 'tid'), 'current_object JOIN object_state USING(zoid, tid)', 'zoid'),
+        (('zoid', 'state', 'tid'), 'object_state', 'zoid'),
+    )
+
+    _load_currents_query = _query_property('_load_currents')
+
+    @metricmethod_sampled
+    def load_currents(self, cursor, oids):
+        """Returns the current {oid: tid} for specified object ids."""
+        columns, table, filter_column = self._load_currents_query
+        binary_column_as_state_type = self.driver.binary_column_as_state_type
+        batcher = self.make_batcher(cursor, row_limit=1000)
+        rows = batcher.select_from(columns, table, **{filter_column: oids})
+        for row in rows:
+            oid, state, tid = row
+            yield oid, binary_column_as_state_type(state), tid
 
     _load_revision_query = """
         SELECT state
@@ -189,7 +207,7 @@ class AbstractObjectMover(ABC):
         columns, table, filter_column = self._current_object_tids_query
         batcher = self.make_batcher(cursor, row_limit=1000)
         rows = batcher.select_from(columns, table, **{filter_column: oids})
-        res = self._current_object_tids_map_type(rows)
+        res = self._current_object_tids_map_type(list(rows))
         return res
 
     #: A sequence of *names* of attributes on this object that are statements to be

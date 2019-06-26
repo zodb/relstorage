@@ -86,21 +86,19 @@ class RowBatcher(object):
         The keyword arguments should be of length 1, containing
         an iterable of the values to check.
 
-        Returns a list of matching rows.
+        Returns a iterator of matching rows.
         """
         assert len(kw) == 1
         filter_column, filter_values = kw.popitem()
         filter_values = list(filter_values)
-        results = []
         command = 'SELECT %s' % (','.join(columns),)
         while filter_values:
             filter_subset = filter_values[:self.row_limit]
             del filter_values[:self.row_limit]
             descriptor = [[(table, (filter_column,)), filter_subset]]
             self._do_batch(command, descriptor, rows_need_flattened=False)
-            results.extend(self.cursor.fetchall())
-        return results
-
+            for row in self.cursor.fetchall():
+                yield row
 
     def flush(self):
         if self.deletes:

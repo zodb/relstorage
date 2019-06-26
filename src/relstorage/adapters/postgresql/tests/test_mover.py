@@ -72,7 +72,7 @@ class TestFunctions(TestCase):
             [
                 'PREPARE load_current (BIGINT) AS SELECT state, tid\n'
                 '        FROM current_object\n'
-                '            JOIN object_state USING(zoid, tid)\n'
+                '        JOIN object_state USING(zoid, tid)\n'
                 '        WHERE zoid = $1',
                 'PREPARE load_current (BIGINT) AS SELECT state, tid\n'
                 '        FROM object_state\n'

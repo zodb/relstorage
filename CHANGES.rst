@@ -5,7 +5,12 @@
 3.0a4 (unreleased)
 ==================
 
-- Nothing changed yet.
+- Add support for the ZODB 5 ``connection.prefetch(*args)`` API. This
+  takes either OIDs (``obj._p_oid``) or persistent ghost objects, or
+  an iterator of those things, and asks the storage to load them into
+  its cache for use in the future. In RelStorage, this uses the shared
+  cache and so may be useful for more than one thread. This can be
+  3x or more faster than loading objects on-demand. See :issue:`239`.
 
 
 3.0a3 (2019-06-26)
