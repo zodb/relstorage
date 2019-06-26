@@ -2,7 +2,7 @@
  Changes
 =========
 
-3.0a3 (unreleased)
+3.0a3 (2019-06-26)
 ==================
 
 - Zapping a storage now also removes any persistent cache files. See
