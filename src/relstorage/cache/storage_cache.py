@@ -77,9 +77,11 @@ class StorageCache(object):
 
     # current_tid contains the last polled transaction ID. Invariant:
     # when self.checkpoints is not None, self.delta_after0 has info
-    # from all transactions in the range:
+    # from *all* transactions in the range:
     #
-    #   self.checkpoints[0] < tid <= self.current_tid
+    #   (self.checkpoints[0], self.current_tid]
+    #
+    # (That is, `tid > self.checkpoints[0] and tid <= self.current_tid`)
     #
     # We assign to this *only* after executing a poll, or
     # when reading data from the persistent cache (which happens at
@@ -801,29 +803,30 @@ class _PersistentRowFilter(object):
                 value = row[2:]
                 oid = key[0]
                 actual_tid = value[1]
+                # See __poll_replace_checkpoints() to see how we build
+                # the delta maps.
+                #
+                # We'll poll for changes *after* cp0
+                # (because we set that as our current_tid/the
+                # storage's prev_polled_tid) and update
+                # self._delta_after0, but we won't poll for changes
+                # *after* cp1. self._delta_after1 is only ever
+                # populated when we shift checkpoints; we assume any
+                # changes that happen after that point we catch in an
+                # updated self._delta_after0.
+                #
+                # Also, because we're combining data in the local
+                # database from multiple sources, it's *possible* that
+                # some old cache had checkpoints that are behind what
+                # we're working with now. So we can't actually trust
+                # anything that we would put in delta_after1 without
+                # validating them. We still return it, but we may take
+                # it out of delta_after0 if it turns out to be
+                # invalid.
 
-                if actual_tid >= cp0:
-                    # XXX: This is absolutely not right. We'll poll
-                    # for changes *after* cp0 (because we set that as
-                    # our current_tid/the storage's prev_polled_tid)
-                    # and update self._delta_after0, but we won't poll
-                    # for changes *after* cp1. self._delta_after1 is
-                    # only ever populated when we shift checkpoints;
-                    # we assume any changes that happen after that
-                    # point we catch in an updated self._delta_after0.
-                    # But because we're using >= here, instead of
-                    # strictly >, things that actually changed in
-                    # exactly cp0 we'll miss; they'll wind up as a
-                    # trusted key in delta_after1, and that state may
-                    # be outdated.
-                    #
-                    # Also, because we're combining data in the local database from
-                    # multiple sources, it's *possible* that some old cache
-                    # had checkpoints that are behind what we're working with now.
-                    # So we can't actually trust anything that we would put in delta_after1
-                    # without validating them.
+                if actual_tid > cp0:
                     delta_after0[oid] = actual_tid
-                elif actual_tid >= cp1:
+                elif actual_tid > cp1:
                     delta_after1[oid] = actual_tid
                 else:
                     # This is too old and outside our checkpoints for
@@ -843,11 +846,16 @@ class _PersistentRowFilter(object):
                     needs_checked[oid] = value
                     continue
                 yield key, value
+
+            # Now validate things that need validated.
+
+            # TODO: Should this be a configurable option, like ZEO's
+            # 'drop-rather-invalidate'? So far I haven't seen signs that
+            # this will be particularly slow or burdensome.
+            self._poll_delta_after1()
+
             if needs_checked:
-                # TODO: Should this be a configurable option, like ZEO's
-                # 'drop-rather-invalidate'? So far I haven't seen signs that
-                # this will be particularly slow or burdensome.
-                self._poll_old_oids(needs_checked)
+                self._poll_old_oids_and_remove(needs_checked)
                 for oid, value in iteroiditems(needs_checked):
                     # Anything left is guaranteed to still be at the tid we recorded
                     # for it (except in the event of a concurrent transaction that
@@ -856,7 +864,7 @@ class _PersistentRowFilter(object):
                     yield (oid, cp0), value
 
     @log_timed
-    def _poll_old_oids(self, to_check):
+    def _poll_old_oids_and_remove(self, to_check):
         oids = list(to_check)
         # In local tests, this function executes against PostgreSQL 11 in .78s
         # for 133,002 older OIDs; or, .35s for 57,002 OIDs against MySQL 5.7.
@@ -875,6 +883,15 @@ class _PersistentRowFilter(object):
                 del to_check[oid]
         logger.debug("Polled %d older oids stored in cache; %d survived",
                      len(oids), len(to_check))
+
+    @log_timed
+    def _poll_delta_after1(self):
+        oids = list(self.delta_after1)
+        logger.debug("Polling %d older oids stored in delta_after1", len(oids))
+        def callback(_conn, cursor):
+            return self.adapter.mover.current_object_tids(cursor, oids)
+        current_tids_for_oids = self.adapter.connmanager.open_and_call(callback)
+        self.delta_after1 = type(self.delta_after1)(current_tids_for_oids)
 
 
 class _TemporaryStorage(object):

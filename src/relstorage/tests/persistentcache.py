@@ -218,6 +218,7 @@ class PersistentCacheStorageTests(TestCase):
             {key: old_tid},
             {key: old_value}
         )
+
     def checkNoConflictWhenChangeMissedByPersistentCacheAfterCP0(self):
         orig_tid, orig_checkpoints = self.__set_key_in_root_to(self._storage, 42)
 
@@ -229,11 +230,15 @@ class PersistentCacheStorageTests(TestCase):
         self.assertGreater(new_tid, orig_tid)
 
         # Now a new storage that will read the persistent cache.
-        # It has the original TID
-        storage3 = self.__make_storage_pcache(orig_checkpoints, orig_tid)
+        # It has the correct checkpoints, and the root oid is found in
+        # delta_after0, where we will poll for it.
+        storage3 = self.__make_storage_pcache(
+            orig_checkpoints,
+            expected_root_tid=orig_tid)
 
         db3 = self._closing(DB(storage3))
         c3 = db3.open()
+
         # Polling in the connection, however, caught us up, because the object changed
         # after current_tid.
         self.assert_oid_current(ROOT_OID, c3, new_tid)
