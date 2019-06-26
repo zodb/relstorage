@@ -811,19 +811,14 @@ class GenericRelStorageTests(
                 c.close()
 
             def updater():
-                thread_storage = self._storage.new_instance()
-                thread_db = DB(thread_storage)
-                try:
-                    for _ in range(updates_per_thread):
-                        thread_c = thread_db.open()
-                        try:
-                            thread_c.root()['length'].change(1)
-                            time.sleep(random.random() * 0.05)
-                            transaction.commit()
-                        finally:
-                            thread_c.close()
-                finally:
-                    thread_storage.close()
+                for _ in range(updates_per_thread):
+                    thread_c = db.open()
+                    try:
+                        thread_c.root()['length'].change(1)
+                        time.sleep(random.random() * 0.05)
+                        transaction.commit()
+                    finally:
+                        thread_c.close()
 
             import threading
             threads = []

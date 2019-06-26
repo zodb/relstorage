@@ -300,14 +300,14 @@ class PersistentCacheStorageTests(TestCase):
         return root_tid, mapping_tid, db1
 
     def checkNoConflictWhenChangeMissedByPersistentCacheBeforeCP1(self):
-        _root_tid, mapping_tid, db = self._populate_root_and_mapping()
+        _root_tid, _mapping_tid, db = self._populate_root_and_mapping()
 
         # Make some changes to the root in a storage that will not
         # read or update the persistent cache.
         new_tid, _ = self.__set_key_in_root_to(
             self.__make_storage_no_pcache(),
             420,
-            old_tid=mapping_tid
+            old_tid=None,
         )
 
         # Now move the persistent checkpoints forward, pushing the
