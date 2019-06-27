@@ -22,7 +22,6 @@ from __future__ import print_function
 
 import os
 import threading
-import time
 
 import random2
 
@@ -30,8 +29,8 @@ from ZODB.blob import Blob
 import transaction
 
 import relstorage.blobhelper
+from relstorage.tests.util import RUNNING_ON_CI
 from . import TestBlobMixin
-
 
 class TestBlobCacheMixin(TestBlobMixin):
 
@@ -50,22 +49,16 @@ class TestBlobCacheMixin(TestBlobMixin):
     }
 
     MAX_CLEANUP_THREADS = 1
+    # Too many client threads really slows us down because of the GIL,
+    # but we do need some concurrency.
+    CLIENT_COUNT = 4 if not RUNNING_ON_CI else 2
 
     def setUp(self):
         super(TestBlobCacheMixin, self).setUp()
         # We're going to wait for any threads we started to finish, so...
         self._old_threads = list(threading.enumerate())
 
-        # We want to check for name collisions in the blob cache dir.
-        # We'll try to provoke name collisions by reducing the number
-        # of cache directory subdirectories.
-        self._orig_blob_cache_layout_size = relstorage.blobhelper.BlobCacheLayout.size
-        relstorage.blobhelper.BlobCacheLayout.size = 11
-
-        # We want to be notified when blob cache cleanup completes
-        self.cleanup_finished = threading.Condition()
-        self.cleanup_finished.acquire() # Don't alert until we're watching!
-        run_lock = self.cleanup_lock = threading.Semaphore(self.MAX_CLEANUP_THREADS)
+        run_lock = threading.Semaphore(self.MAX_CLEANUP_THREADS)
         self._orig_check_blob_cache_size = relstorage.blobhelper._check_blob_cache_size
         def _check(*args):
             t = threading.current_thread()
@@ -82,28 +75,24 @@ class TestBlobCacheMixin(TestBlobMixin):
                 import traceback; traceback.print_exc()
             finally:
                 run_lock.release()
-                # Ok, someone was specifically waiting on us. But that
-                # doesn't mean that we were the ones to actually clean up
-                # the directory! If it was already locked, it's possible we
-                # didn't do anything. That's why we wait to acquire all the outstanding
-                # cleanup locks.
-                self.cleanup_finished.acquire()
-                self.cleanup_finished.notify()
-                self.cleanup_finished.release()
-
 
         relstorage.blobhelper._check_blob_cache_size = _check
 
+    def _wait_for_all_spawned_threads_to_finish(self):
+        # pylint:disable=method-hidden
+
+        # Do this only once, at the end.
+        to_join = set(threading.enumerate()) - set(self._old_threads)
+        for t in to_join:
+            t.join(10)
+        self._wait_for_all_spawned_threads_to_finish = lambda: None
+
     def tearDown(self):
-        # Let the shrink run as many more times as it needs to, if it's waiting.
-        self.cleanup_finished.release()
+        # # Let the shrink run as many more times as it needs to, if it's waiting.
+        # self.cleanup_finished.release()
+        self._wait_for_all_spawned_threads_to_finish()
         relstorage.blobhelper._check_blob_cache_size = self._orig_check_blob_cache_size
-        # Let them finish.
-        for t in threading.enumerate():
-            if t not in self._old_threads:
-                t.join(10)
         self._old_threads = []
-        relstorage.blobhelper.BlobCacheLayout.size = self._orig_blob_cache_layout_size
         super(TestBlobCacheMixin, self).tearDown()
 
     # Set this and BLOB_SIZE to create a total of 10,000
@@ -132,12 +121,10 @@ class TestBlobCacheMixin(TestBlobMixin):
 
         blob = conn.root()[i]
         with blob.open(mode) as f:
-            f_str = "%s - %s" % (f, id(f))
             read = f.read()
         self.assertEqual(
             read,
-            data_for_blob,
-            (i, blob, blob._p_blob_committed, f_str, mode, threading.current_thread()))
+            data_for_blob)
 
     def _verify_all_blobs(self, mode='r'):
         conn = self.database.open()
@@ -158,39 +145,31 @@ class TestBlobCacheMixin(TestBlobMixin):
                             raise
         return size
 
-    def _wait_for_shrink_to_run(self):
+    def _wait_for_shrinks_to_finish(self):
         # We already have this Condition acquired, and we keep it that way.
         # Wait for someone to notify us that a cleanup has finished.
-        self.cleanup_finished.wait()
-        # But don't go on to check until *all* outstanding cleanups have finished,
-        # just in case we don't get notified by the one that did all the work.
-        for _ in range(self.MAX_CLEANUP_THREADS):
-            self.cleanup_lock.acquire()
-        for _ in range(self.MAX_CLEANUP_THREADS):
-            self.cleanup_lock.release()
+        # We only allow one at a time, so this one did what was necessary.
+        self._wait_for_all_spawned_threads_to_finish()
+        size = self._size_blobs_in_directory()
+        self.assertLess(size, 5000)
 
     def test_exceed_size_and_shrink(self):
         self._populate()
         # We've committed 10000 bytes of data, but our target size is 3000.  We
         # expect to have not much more than the target size in the cache blob
-        # directory.
-        self.assertGreater(self._size_blobs_in_directory(), 2000)
-        self._wait_for_shrink_to_run()
-        self.assertLess(self._size_blobs_in_directory(), 5000)
+        # directory. At the end of the process. Concurrently, cleanups
+        # will be going on, racing with us to read.
 
         # If we read all of the blobs, data will be downloaded again, as
         # necessary, but the cache size will remain not much bigger than the
         # target:
         self._verify_all_blobs()
-        self._wait_for_shrink_to_run()
-        self.assertLess(self._size_blobs_in_directory(), 5000)
-
         self._verify_all_blobs()
-        self._wait_for_shrink_to_run()
-        self.assertLess(self._size_blobs_in_directory(), 5000)
 
         # This time using the 'committed' mode
         self._verify_all_blobs('c')
+        self._wait_for_shrinks_to_finish()
+
 
     def test_many_clients(self):
         # Now let see if we can stress things a bit.  We'll create many clients
@@ -213,7 +192,6 @@ class TestBlobCacheMixin(TestBlobMixin):
             conn = self.database.open()
             try:
                 for i in range(300):
-                    time.sleep(0)
                     i = random.randint(1, 100)
                     verify_a_blob(i, conn, 'r')
                     verify_a_blob(i, conn, 'c')
@@ -222,19 +200,16 @@ class TestBlobCacheMixin(TestBlobMixin):
 
 
         threads = [threading.Thread(target=client, args=(i,))
-                   for i in range(10)]
+                   for i in range(self.CLIENT_COUNT)]
         for thread in threads:
             thread.setDaemon(True)
             thread.start()
 
         for thread in threads:
-            thread.join(99)
-            self.assertFalse(thread.is_alive())
+            thread.join(10)
 
-        for thread in threads:
-            self.assertFalse(thread.is_alive())
+        del threads
 
-        self._wait_for_shrink_to_run()
-        self.assertLess(self._size_blobs_in_directory(), 5000)
+        self._wait_for_shrinks_to_finish()
         __traceback_info__ = verification_errors
         self.assertEmpty(verification_errors)
