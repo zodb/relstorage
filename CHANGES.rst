@@ -143,7 +143,8 @@
 
 - Add ``gevent MySQLdb``, a new driver that cooperates with gevent
   while still using the C extensions of ``mysqlclient`` to communicate
-  with MySQL. This is now recommended over ``umysqldb``.
+  with MySQL. This is now recommended over ``umysqldb``, which is
+  deprecated and will be removed.
 
 - Rewrite the persistent cache implementation. It now is likely to
   produce much higher hit rates (100% on some benchmarks, compared to

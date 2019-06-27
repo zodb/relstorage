@@ -28,6 +28,22 @@ Database Adapter
 You also need the Python database adapter that corresponds with your
 database.
 
+On CPython2, install psycopg2 2.8+, mysqlclient 1.4+, or cx_Oracle
+5.2+ (but use caution with 5.2.1+); PyMySQL 0.7, MySQL
+Connector/Python 8.0.16 and umysql are also tested to work as is
+pg8000.
+
+.. note:: umysql support is deprecated and will be removed.
+
+For CPython3, install psycopg2, mysqlclient 1.4+, or cx_Oracle;
+PyMySQL, MySQL Connector/Python  and pg8000 are also known to work.
+
+On PyPy, install psycopg2cffi 2.8+ or PyMySQL 0.6.6+ (PyPy will
+generally work with psycopg2 and mysqlclient, but it will be *much*
+slower; in contrast, pg8000 performs nearly as well. cx_Oracle is
+untested on PyPy). MySQL Connector/Python is tested to work on PyPy
+7.1.
+
 .. tip::
    The easiest way to get the recommended and tested database adapter for
    your platform and database is to install the corresponding RelStorage
@@ -38,25 +54,17 @@ database.
     pip install "RelStorage[postgresql]"
     pip install "RelStorage[oracle]"
 
+   Installing those packages may require you to have database client
+   software and development libraries already installed. Some packages
+   may provide binary wheels on PyPI for some platforms. In the case
+   of psycopg2, that binary package (which is not recommended for
+   production use) can be installed with the name ``psycopg2-binary``.
+   Note that the ``postgresql`` extra in RelStorage does **not**
+   install the binary but attempts to install from source.
 
-On CPython2, install psycopg2 2.6.1+, mysqlclient 1.4+, or cx_Oracle
-5.2+ (but use caution with 5.2.1+); PyMySQL 0.7, MySQL
-Connector/Python 8.0.16 and umysql are also tested to work as is
-pg8000.
-
-.. note:: umysql support is deprecated and will be removed.
-
-For CPython3, install psycopg2, mysqlclient 1.4+, or cx_Oracle;
-PyMySQL, MySQL Connector/Python  and pg8000 are also known to work.
-
-On PyPy, install psycopg2cffi 2.7.4+ or PyMySQL 0.6.6+ (PyPy will
-generally work with psycopg2 and mysqlclient, but it will be *much*
-slower; in contrast, pg8000 performs nearly as well. cx_Oracle is
-untested on PyPy). MySQL Connector/Python is tested to work on PyPy
-7.1.
 
 Here's a table of known (tested) working adapters; adapters **in
-bold** are the recommended adapter.
+bold** are the recommended adapter installed with the extra.
 
 .. table:: Tested Adapters
    :widths: auto

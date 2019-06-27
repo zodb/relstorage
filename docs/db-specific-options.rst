@@ -27,16 +27,21 @@ driver
 PostgreSQL Adapter Options
 ==========================
 
-RelStorage 2.1 performs best with PostgreSQL 9.5 or above.
+RelStorage 3.0 requires PostgreSQL 9.6 or above.
 
 The PostgreSQL adapter accepts:
 
 driver
-    The possible options are:
+    All of these drivers use the name of the corresponding PyPI
+    package. The possible options are:
 
     psycopg2
       A C-based driver that requires the PostgreSQL development
       libraries. Optimal on CPython, but not compatible with gevent.
+      Non-production, experimental usage, can install the
+      ``psycopg2-binary`` package to be able to use this driver
+      without `needing a C compiler
+      <http://initd.org/psycopg/docs/install.html#binary-packages>`_.
 
     psycopg2cffi
       A C-based driver that requires the PostgreSQL development
@@ -46,8 +51,6 @@ driver
     pg8000
      A pure-Python driver suitable for use with gevent. Works on all
      supported platforms.
-
-     .. note:: pg8000 requires PostgreSQL 9.4 or above for BLOB support.
 
 dsn
     Specifies the data source name for connecting to PostgreSQL.

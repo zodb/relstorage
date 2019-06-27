@@ -72,9 +72,8 @@ class PostgreSQLAdapter(object):
         )
         self.runner = ScriptRunner()
         self.locker = PostgreSQLLocker(
-            options=options,
-            lock_exceptions=driver.lock_exceptions,
-            version_detector=self.version_detector,
+            options,
+            driver.lock_exceptions,
         )
         self.schema = PostgreSQLSchemaInstaller(
             connmanager=self.connmanager,
@@ -208,7 +207,6 @@ class PostgreSQLAdapter(object):
 
     def new_instance(self):
         inst = type(self)(dsn=self._dsn, options=self.options)
-        inst.version_detector.version = self.version_detector.version
         return inst
 
     def __str__(self):

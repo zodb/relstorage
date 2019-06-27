@@ -32,26 +32,11 @@ from ..locker import AbstractLocker
 @implementer(ILocker)
 class PostgreSQLLocker(AbstractLocker):
 
-    _checked_lock_timeout = False
-    _has_lock_timeout = None
-
-    def __init__(self, options, lock_exceptions, version_detector):
-        super(PostgreSQLLocker, self).__init__(
-            options=options, lock_exceptions=lock_exceptions)
-        self.version_detector = version_detector
-
     @metricmethod
     def hold_commit_lock(self, cursor, ensure_current=False, nowait=False):
         # in PostgreSQL 9.3+, lock_timeout in ms; if nowait, then ignored
         timeout = (not nowait and self.commit_lock_timeout or 0) * 1000  # ms
-        timeout_stmt = ''
-        if not self._checked_lock_timeout:
-            # This won't change, we're only used for a single database.
-            self._has_lock_timeout = self._pg_has_lock_timeout(cursor)
-            self._checked_lock_timeout = True
-
-        if self._has_lock_timeout:
-            timeout_stmt = 'SET lock_timeout = %d; ' % timeout
+        timeout_stmt = 'SET lock_timeout = %d; ' % timeout
         try:
             if ensure_current:
                 # Hold commit_lock to prevent concurrent commits
@@ -108,12 +93,8 @@ class PostgreSQLLocker(AbstractLocker):
         return True
 
     def release_commit_lock(self, cursor):
-        # no action needed
+        # no action needed, locks released with transaction.
         pass
-
-    def _pg_has_lock_timeout(self, cursor):
-        """Returns True if PostgreSQL 9.3+, supporting lock_timeout"""
-        return self.version_detector.get_version(cursor) >= (9, 3)
 
     def hold_pack_lock(self, cursor):
         """Try to acquire the pack lock.
