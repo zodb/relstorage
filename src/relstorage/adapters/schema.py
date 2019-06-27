@@ -384,6 +384,7 @@ class AbstractSchemaInstaller(ABC):
     # Subclasses can redefine these.
     _slow_zap_all_tbl_stmt = _zap_all_tbl_stmt = 'DELETE FROM %s'
 
+
     def zap_all(self, reset_oid=True, slow=False):
         """
         Clear all data out of the database.
@@ -400,6 +401,7 @@ class AbstractSchemaInstaller(ABC):
             todo = list(self.all_tables)
             todo.reverse() # using reversed()  doesn't print nicely
             log.debug("Checking tables: %r", todo)
+            self._before_zap_all_tables(cursor, existent, slow)
             for table in todo:
                 log.debug("Considering table %s", table)
                 if table.startswith('temp_'):
@@ -418,6 +420,12 @@ class AbstractSchemaInstaller(ABC):
                 log.debug("Done running OID reset script.")
 
         self.connmanager.open_and_call(callback)
+
+    # Hooks for subclasses
+
+    def _before_zap_all_tables(self, cursor, tables, slow=False):
+        log.debug("Before zapping existing tables (%s) with %s; slow: %s",
+                  tables, cursor, slow)
 
     def _after_zap_all_tables(self, cursor, slow=False):
         log.debug("Running init script. Slow: %s", slow)

@@ -36,6 +36,7 @@ from ZODB.DB import DB
 from ZODB.serialize import referencesf
 
 from relstorage.tests import TestCase
+from relstorage.tests.util import USE_SMALL_BLOBS
 from relstorage.tests.RecoveryStorage import IteratorDeepCompare
 from relstorage.tests.blob.blob_packing import TestBlobPackHistoryPreservingMixin
 from relstorage.tests.blob.blob_packing import TestBlobPackHistoryFreeMixin
@@ -234,7 +235,9 @@ class LargeBlobTest(BlobTestBase): # pragma: no cover
     when shared_blob_support=False.
 
     """
-    level = 2 # Only run when selecting -a 2 or higher, or --all
+    # Only run when selecting -a 2 or higher, or --all if we're using
+    # huge blobs.
+    level = 2 if not USE_SMALL_BLOBS else 0
     testsize = 0 # Set on the auto-generated parent class
 
     with open(__file__, 'rb') as _f:
@@ -551,10 +554,13 @@ def storage_reusable_suite(prefix, factory,
 
     suite = unittest.TestSuite()
 
-    def create_storage(name='data', blob_dir=None, **kw):
+    def create_storage(name='data', blob_dir=None, zap=True, **kw):
         if blob_dir is None:
             blob_dir = '%s.blobs' % name
-        return factory(name, blob_dir, **kw)
+        storage = factory(name, blob_dir, **kw)
+        if zap:
+            storage.zap_all()
+        return storage
 
     def add_test_based_on_test_class(class_, **attr):
         attr.update(create_storage=staticmethod(create_storage))

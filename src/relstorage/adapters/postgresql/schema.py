@@ -71,12 +71,6 @@ class PostgreSQLSchemaInstaller(AbstractSchemaInstaller):
 
     database_type = 'postgresql'
 
-    # Use the fast, semi-transactional way to truncate tables. It's
-    # not MVCC safe, but "TRUNCATE is transaction-safe with respect to
-    # the data in the tables: the truncation will be safely rolled
-    # back if the surrounding transaction does not commit."
-    _zap_all_tbl_stmt = 'TRUNCATE TABLE %s CASCADE'
-
     def __init__(self, connmanager, runner, locker, keep_history):
         super(PostgreSQLSchemaInstaller, self).__init__(
             connmanager, runner, keep_history)
@@ -366,3 +360,28 @@ class PostgreSQLSchemaInstaller(AbstractSchemaInstaller):
     def _reset_oid(self, cursor):
         stmt = "ALTER SEQUENCE zoid_seq RESTART WITH 1;"
         self.runner.run_script(cursor, stmt)
+
+    # Use the fast, semi-transactional way to truncate tables. It's
+    # not MVCC safe, but "TRUNCATE is transaction-safe with respect to
+    # the data in the tables: the truncation will be safely rolled
+    # back if the surrounding transaction does not commit."
+    _zap_all_tbl_stmt = 'TRUNCATE TABLE %s CASCADE'
+
+    def _before_zap_all_tables(self, cursor, tables, slow=False):
+        super(PostgreSQLSchemaInstaller, self)._before_zap_all_tables(cursor, tables, slow)
+        if not slow and 'blob_chunk' in tables:
+            # If we're going to be truncating, it's important to
+            # remove the large objects through lo_unlink. We have a
+            # trigger that does that, but only for DELETE.
+            # The `vacuumlo` command cleans up any that might have been
+            # missed.
+
+            # This unfortunately results in returning a row for each
+            # object unlinked, but it should still be faster than
+            # running a DELETE and firing the trigger for each row.
+            cursor.execute("""
+            SELECT lo_unlink(t.chunk)
+            FROM
+            (SELECT DISTINCT chunk FROM blob_chunk)
+            AS t
+            """)

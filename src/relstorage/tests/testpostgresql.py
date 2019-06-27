@@ -84,14 +84,12 @@ class PostgreSQLTestSuiteBuilder(AbstractTestSuiteBuilder):
         if use_small_blobs:
             # Avoid creating 2GB blobs to be friendly to neighbors
             # and to run fast (2GB blobs take about 4 minutes on Travis
-            # CI as-of June 2016)
-            # XXX: This is dirty.
-            from relstorage.adapters.postgresql.mover import PostgreSQLObjectMover as ObjectMover
-            assert hasattr(ObjectMover, 'postgresql_blob_chunk_maxsize')
-            ObjectMover.postgresql_blob_chunk_maxsize = 1024 * 1024 * 10
-            large_blob_size = ObjectMover.postgresql_blob_chunk_maxsize * 2
+            # CI as-of June 2016).
+            # RS 3.0 no longer needs to chunk.
+            large_blob_size = 20 * 1024 * 1024
         else:
-            large_blob_size = 1 << 31
+            # Something bigger than 2GB (signed 32 bit int)
+            large_blob_size = (1 << 31) + 200 * 1024 * 1024
         return large_blob_size
 
 

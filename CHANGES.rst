@@ -12,6 +12,18 @@
   cache and so may be useful for more than one thread. This can be
   3x or more faster than loading objects on-demand. See :issue:`239`.
 
+- Stop chunking blob uploads on PostgreSQL. All supported versions
+  natively handle blobs greater than 2GB in size, and the server was
+  already chunking the blobs for storage, so our layer of extra chunking was
+  unnecessary.
+
+- Fix a bug that left large objects behind if a PostgreSQL database
+  containing any blobs was ever zapped (with ``storage.zap_all()``).
+  The ``zodbconvert`` command, the ``zodbshootout`` command, and the
+  RelStorage test suite could all zap databases. Running the
+  ``vacuumlo`` command included with PostgreSQL will free such
+  orphaned large objects, after which a regular ``vacuumdb`` command
+  can be used to reclaim space. See :issue:`260`.
 
 3.0a3 (2019-06-26)
 ==================

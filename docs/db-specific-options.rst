@@ -29,6 +29,20 @@ PostgreSQL Adapter Options
 
 RelStorage 3.0 requires PostgreSQL 9.6 or above.
 
+.. tip::
+
+   Persistent object state data (pickles) will default to being stored
+   on disk in a compressed format if they are longer than roughly
+   2,000 bytes. Thus wrapper storages like ``zc.zlibstorage`` are
+   unlikely to save much disk space. They may still reduce network
+   traffic, however, at the cost of CPU usage in the Python process.
+
+   If you used a compressing wrapper, `you can disable this disk
+   compression
+   <https://www.postgresql.org/docs/current/storage-toast.html#STORAGE-TOAST-ONDISK>`_
+   with the SQL command ``ALTER TABLE object_state ALTER COLUMN STATE
+   SET storage EXTERNAL``.
+
 The PostgreSQL adapter accepts:
 
 driver
