@@ -15,7 +15,6 @@
 """
 from __future__ import absolute_import, print_function
 
-import functools
 import io
 import os
 import struct
@@ -23,7 +22,6 @@ import struct
 from zope.interface import implementer
 from ZODB.POSException import Unsupported
 
-from ..._compat import xrange
 from .._util import query_property
 from ..interfaces import IObjectMover
 from ..mover import AbstractObjectMover
@@ -209,51 +207,26 @@ class PostgreSQLObjectMover(AbstractObjectMover):
     def download_blob(self, cursor, oid, tid, filename):
         """Download a blob into a file."""
         stmt = """
-        SELECT chunk_num, chunk
+        SELECT chunk
         FROM blob_chunk
         WHERE zoid = %s
             AND tid = %s
         ORDER BY chunk_num
         """
-
-        f = None
+        # Beginning in RelStorage 3, we no longer chunk blobs.
+        # All chunks were collapsed into one as part of the migration.
         bytecount = 0
-        read_chunk_size = self.blob_chunk_size
+        cursor.execute(stmt, (oid, tid))
+        rows = cursor.fetchall()
+        assert len(rows) == 1
+        loid, = rows[0]
 
-        try:
-            cursor.execute(stmt, (oid, tid))
-            for chunk_num, loid in cursor.fetchall():
-
-                blob = cursor.connection.lobject(loid, 'rb')
-
-                if chunk_num == 0:
-                    # Use the native psycopg2 blob export functionality
-                    blob.export(filename)
-                    blob.close()
-                    bytecount = os.path.getsize(filename)
-                    continue
-
-                if f is None:
-                    f = open(filename, 'ab') # Append, chunk 0 was an export
-
-                reader = iter(functools.partial(blob.read, read_chunk_size), b'')
-                for read_chunk in reader:
-                    f.write(read_chunk)
-                    bytecount += len(read_chunk)
-                blob.close()
-        except:
-            if f is not None:
-                f.close()
-                os.remove(filename)
-            raise
-
-        if f is not None:
-            f.close()
+        blob = cursor.connection.lobject(loid, 'rb')
+        # Use the native psycopg2 blob export functionality
+        blob.export(filename)
+        blob.close()
+        bytecount = os.path.getsize(filename)
         return bytecount
-
-    # PostgreSQL < 9.3 only supports up to 2GB of data per BLOB.
-    # Even above that, we can only use larger blobs on 64-bit builds.
-    postgresql_blob_chunk_maxsize = 1 << 31
 
     @metricmethod_sampled
     def upload_blob(self, cursor, oid, tid, filename):
@@ -289,46 +262,36 @@ class PostgreSQLObjectMover(AbstractObjectMover):
             VALUES (%(oid)s, %(chunk_num)s, %(loid)s)
             """
 
-        blob = None
+        # Since we only run on 9.6 and above, the sizes of large objects
+        # are allowed to exceed 2GB (int_32). The server is already chunking
+        # large objects internally by itself into 4KB pages, so there's no
+        # advantage to us also adding a layer of chunking.
+        #
+        # As long as we keep our usage simple, that's fine. Only
+        # blob.seek(), blob.truncate() and blob.tell() have a need to
+        # use a specific 64-bit function. `export()` and `import()`
+        # (called implicitly by creating the lobject with a local
+        # filename in psycopg2) work with small fixed buffers (8KB) and
+        # don't care about filesize or offset; they just need the
+        # `open` and `read` syscalls to handle 64-bit files (and don't
+        # they have to for Python to handle 64-bit files?)
+        #
+        # psycopg2 explicitly uses the 64 family of functions;
+        # psycopg2cffi does *not* but if it's built on 64-bit
+        # platform, that's fine. pg8000 uses the SQL interfaces, not
+        # the libpq interfaces, and that's also fine. Since we don't use
+        # any of the functions that need 64-bit aware, none of that should be an
+        # issue.
 
-        maxsize = self.postgresql_blob_chunk_maxsize
-        filesize = os.path.getsize(filename)
-        write_chunk_size = self.blob_chunk_size
+        # Create and upload the blob, getting a large object identifier.
+        blob = cursor.connection.lobject(0, 'wb', 0, filename)
+        blob.close()
 
-        if filesize <= maxsize:
-            # File is small enough to fit in one chunk, just use
-            # psycopg2 native file copy support
-            blob = cursor.connection.lobject(0, 'wb', 0, filename)
-            blob.close()
-            params = dict(oid=oid, chunk_num=0, loid=blob.oid)
-            if use_tid:
-                params['tid'] = tid
-            cursor.execute(insert_stmt, params)
-            return
-
-        # We need to divide this up into multiple chunks
-        f = open(filename, 'rb')
-        try:
-            chunk_num = 0
-            while True:
-                blob = cursor.connection.lobject(0, 'wb')
-                params = dict(oid=oid, chunk_num=chunk_num, loid=blob.oid)
-                if use_tid:
-                    params['tid'] = tid
-                cursor.execute(insert_stmt, params)
-
-                for _i in xrange(maxsize // write_chunk_size):
-                    write_chunk = f.read(write_chunk_size)
-                    if not blob.write(write_chunk):
-                        # EOF.
-                        return
-                if not blob.closed:
-                    blob.close()
-                chunk_num += 1
-        finally:
-            f.close()
-            if blob is not None and not blob.closed:
-                blob.close()
+        # Now put it into our blob_chunk table.
+        params = dict(oid=oid, chunk_num=0, loid=blob.oid)
+        if use_tid:
+            params['tid'] = tid
+        cursor.execute(insert_stmt, params)
 
     def store_temps(self, cursor, state_oid_tid_iter):
         # History-preserving storages need the md5 to compare states.

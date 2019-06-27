@@ -132,12 +132,24 @@ setup(
         'mysql:platform_python_implementation=="PyPy" or sys_platform == "win32"': [
             'PyMySQL>=0.6.6',
         ],
+        # Notes on psycopg2: In 2.8, they stopped distributing full
+        # binary wheels under that name. For that, you have to use
+        # psycopg2-binary (which in 2.8.3 appears to be compiled with
+        # the libpq from postgres 11). But that's not recommended for
+        # production usage because it can have conflicts with other libraries,
+        # and the authors specifically request that other modules not depend on
+        # psycopg2-binary.
+        # See http://initd.org/psycopg/docs/install.html#binary-packages
         'postgresql: platform_python_implementation == "CPython"': [
-            # 2.4.1+ is required for proper bytea handling
-            'psycopg2>=2.6.1',
+            # 2.4.1+ is required for proper bytea handling;
+            # 2.6+ is needed for 64-bit lobject support.
+            # 2.7+ is needed for Python 3.7 support and PostgreSQL 10+.
+            # 2.7.6+ is needed for PostgreSQL 11
+            'psycopg2 >= 2.8.3',
         ],
         'postgresql: platform_python_implementation == "PyPy"': [
-            'psycopg2cffi>=2.7.4',
+            # 2.8.0+ is needed for Python 3.7
+            'psycopg2cffi >= 2.8.1',
         ],
         'oracle': [
             'cx_Oracle>=5.0.0'

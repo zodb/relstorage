@@ -95,7 +95,7 @@ class AbstractTestSuiteBuilder(ABC):
 
     __name__ = None # PostgreSQL, MySQL, Oracle
 
-    def __init__(self, driver_options, use_adapter):
+    def __init__(self, driver_options, use_adapter, extra_test_classes=()):
         """
         :param driver_options: The ``IDBDriverOptions``
         :param use_adapter: A mixin class implementing the abstract methods
@@ -103,6 +103,7 @@ class AbstractTestSuiteBuilder(ABC):
         """
 
         self.drivers = driver_options
+        self.extra_test_classes = extra_test_classes
         self.base_dbname = os.environ.get('RELSTORAGETEST_DBNAME', 'relstoragetest')
         self.db_names = {
             'data': self.base_dbname,
@@ -250,12 +251,21 @@ class AbstractTestSuiteBuilder(ABC):
                                            klass,
                                            is_available)))
 
+        for klass in self.extra_test_classes:
+            suite.addTest(unittest.makeSuite(
+                self._new_class_for_driver(driver_name,
+                                           klass,
+                                           is_available)))
+
         from relstorage.tests.blob.testblob import storage_reusable_suite
         from relstorage.options import Options
         from relstorage.storage import RelStorage
 
         for shared_blob_dir in shared_blob_dir_choices:
             for keep_history in (False, True):
+                # TODO: Make any of the tests that are needing this
+                # subclass StorageCreatingMixin so we unify where
+                # that's handled.
                 def create_storage(name, blob_dir,
                                    shared_blob_dir=shared_blob_dir,
                                    keep_history=keep_history, **kw):

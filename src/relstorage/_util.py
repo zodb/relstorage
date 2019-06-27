@@ -109,7 +109,6 @@ def get_memory_usage():
 def byte_display(size):
     """
     Returns a size with the correct unit (KB, MB), given the size in bytes.
-    The output should be given to zope.i18n.translate()
     """
     if size == 0:
         return '0 KB'

@@ -27,16 +27,35 @@ driver
 PostgreSQL Adapter Options
 ==========================
 
-RelStorage 2.1 performs best with PostgreSQL 9.5 or above.
+RelStorage 3.0 requires PostgreSQL 9.6 or above.
+
+.. tip::
+
+   Persistent object state data (pickles) will default to being stored
+   on disk in a compressed format if they are longer than roughly
+   2,000 bytes. Thus wrapper storages like ``zc.zlibstorage`` are
+   unlikely to save much disk space. They may still reduce network
+   traffic, however, at the cost of CPU usage in the Python process.
+
+   If you used a compressing wrapper, `you can disable this disk
+   compression
+   <https://www.postgresql.org/docs/current/storage-toast.html#STORAGE-TOAST-ONDISK>`_
+   with the SQL command ``ALTER TABLE object_state ALTER COLUMN STATE
+   SET storage EXTERNAL``.
 
 The PostgreSQL adapter accepts:
 
 driver
-    The possible options are:
+    All of these drivers use the name of the corresponding PyPI
+    package. The possible options are:
 
     psycopg2
       A C-based driver that requires the PostgreSQL development
       libraries. Optimal on CPython, but not compatible with gevent.
+      Non-production, experimental usage, can install the
+      ``psycopg2-binary`` package to be able to use this driver
+      without `needing a C compiler
+      <http://initd.org/psycopg/docs/install.html#binary-packages>`_.
 
     psycopg2cffi
       A C-based driver that requires the PostgreSQL development
@@ -46,8 +65,6 @@ driver
     pg8000
      A pure-Python driver suitable for use with gevent. Works on all
      supported platforms.
-
-     .. note:: pg8000 requires PostgreSQL 9.4 or above for BLOB support.
 
 dsn
     Specifies the data source name for connecting to PostgreSQL.

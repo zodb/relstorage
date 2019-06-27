@@ -12,6 +12,32 @@
   cache and so may be useful for more than one thread. This can be
   3x or more faster than loading objects on-demand. See :issue:`239`.
 
+- Stop chunking blob uploads on PostgreSQL. All supported versions
+  natively handle blobs greater than 2GB in size, and the server was
+  already chunking the blobs for storage, so our layer of extra chunking was
+  unnecessary.
+
+  .. important::
+
+     The first time a storage is opened with this version,
+     blobs that have multiple chunks will be collapsed into a single
+     chunk. If there are many blobs larger than 2GB, this could take
+     some time.
+
+     It is recommended you have a backup before installing this
+     version.
+
+     To verify that the blobs were correctly migrated, you should
+     clean or remove your configured blob-cache directory, forcing new
+     blobs to be downloaded.
+
+- Fix a bug that left large objects behind if a PostgreSQL database
+  containing any blobs was ever zapped (with ``storage.zap_all()``).
+  The ``zodbconvert`` command, the ``zodbshootout`` command, and the
+  RelStorage test suite could all zap databases. Running the
+  ``vacuumlo`` command included with PostgreSQL will free such
+  orphaned large objects, after which a regular ``vacuumdb`` command
+  can be used to reclaim space. See :issue:`260`.
 
 3.0a3 (2019-06-26)
 ==================
@@ -143,7 +169,8 @@
 
 - Add ``gevent MySQLdb``, a new driver that cooperates with gevent
   while still using the C extensions of ``mysqlclient`` to communicate
-  with MySQL. This is now recommended over ``umysqldb``.
+  with MySQL. This is now recommended over ``umysqldb``, which is
+  deprecated and will be removed.
 
 - Rewrite the persistent cache implementation. It now is likely to
   produce much higher hit rates (100% on some benchmarks, compared to
