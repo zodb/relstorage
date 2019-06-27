@@ -43,7 +43,7 @@ script:
 # coverage slows PyPy down from 2minutes to 12+.
   - if [[ $TRAVIS_PYTHON_VERSION == 3.7 ]]; then pylint --rcfile=.pylintrc relstorage -f parseable -r n; fi
   - if [[ $TRAVIS_PYTHON_VERSION == pypy* ]]; then python -m zope.testrunner --test-path=src --auto-color --auto-progress; fi
-  - if [[ $TRAVIS_PYTHON_VERSION != pypy* ]]; then coverage run -m zope.testrunner --test-path=src --auto-color -vvv --slow-test 5; fi
+  - if [[ $TRAVIS_PYTHON_VERSION != pypy* ]]; then coverage run -m zope.testrunner --test-path=src --auto-color --auto-progress; fi
 after_success:
   - coveralls
 notifications:
