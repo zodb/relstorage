@@ -76,10 +76,10 @@ class PostgreSQLAdapter(object):
             driver.lock_exceptions,
         )
         self.schema = PostgreSQLSchemaInstaller(
+            options=options,
             connmanager=self.connmanager,
             runner=self.runner,
             locker=self.locker,
-            keep_history=self.keep_history,
         )
 
         mover_type = PostgreSQLObjectMover

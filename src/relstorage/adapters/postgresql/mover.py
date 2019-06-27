@@ -15,7 +15,6 @@
 """
 from __future__ import absolute_import, print_function
 
-import functools
 import io
 import os
 import struct
@@ -23,7 +22,6 @@ import struct
 from zope.interface import implementer
 from ZODB.POSException import Unsupported
 
-from ..._compat import xrange
 from .._util import query_property
 from ..interfaces import IObjectMover
 from ..mover import AbstractObjectMover
@@ -209,48 +207,25 @@ class PostgreSQLObjectMover(AbstractObjectMover):
     def download_blob(self, cursor, oid, tid, filename):
         """Download a blob into a file."""
         stmt = """
-        SELECT chunk_num, chunk
+        SELECT chunk
         FROM blob_chunk
         WHERE zoid = %s
             AND tid = %s
         ORDER BY chunk_num
         """
         # Beginning in RelStorage 3, we no longer chunk blobs.
-        # But there may be older blobs already chunked.
-        # TODO: Write a migration to combine chunked blobs.
-        f = None
+        # All chunks were collapsed into one as part of the migration.
         bytecount = 0
-        read_chunk_size = self.blob_chunk_size
+        cursor.execute(stmt, (oid, tid))
+        rows = cursor.fetchall()
+        assert len(rows) == 1
+        loid, = rows[0]
 
-        try:
-            cursor.execute(stmt, (oid, tid))
-            for chunk_num, loid in cursor.fetchall():
-
-                blob = cursor.connection.lobject(loid, 'rb')
-
-                if chunk_num == 0:
-                    # Use the native psycopg2 blob export functionality
-                    blob.export(filename)
-                    blob.close()
-                    bytecount = os.path.getsize(filename)
-                    continue
-
-                if f is None:
-                    f = open(filename, 'ab') # Append, chunk 0 was an export
-
-                reader = iter(functools.partial(blob.read, read_chunk_size), b'')
-                for read_chunk in reader:
-                    f.write(read_chunk)
-                    bytecount += len(read_chunk)
-                blob.close()
-        except:
-            if f is not None:
-                f.close()
-                os.remove(filename)
-            raise
-
-        if f is not None:
-            f.close()
+        blob = cursor.connection.lobject(loid, 'rb')
+        # Use the native psycopg2 blob export functionality
+        blob.export(filename)
+        blob.close()
+        bytecount = os.path.getsize(filename)
         return bytecount
 
     @metricmethod_sampled

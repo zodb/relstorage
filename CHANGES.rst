@@ -17,6 +17,20 @@
   already chunking the blobs for storage, so our layer of extra chunking was
   unnecessary.
 
+  .. important::
+
+     The first time a storage is opened with this version,
+     blobs that have multiple chunks will be collapsed into a single
+     chunk. If there are many blobs larger than 2GB, this could take
+     some time.
+
+     It is recommended you have a backup before installing this
+     version.
+
+     To verify that the blobs were correctly migrated, you should
+     clean or remove your configured blob-cache directory, forcing new
+     blobs to be downloaded.
+
 - Fix a bug that left large objects behind if a PostgreSQL database
   containing any blobs was ever zapped (with ``storage.zap_all()``).
   The ``zodbconvert`` command, the ``zodbshootout`` command, and the

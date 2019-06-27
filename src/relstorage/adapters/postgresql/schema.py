@@ -23,9 +23,11 @@ from zope.interface import implementer
 from ..interfaces import ISchemaInstaller
 from ..schema import AbstractSchemaInstaller
 
+logger = __import__('logging').getLogger(__name__)
+
 # Versions of the installed stored procedures. Change these when
 # the corresponding code changes.
-postgresql_proc_version = '1.5B'
+postgresql_proc_version = '3.0B'
 
 
 postgresql_procedures = [
@@ -63,6 +65,63 @@ AS $temp_blob_chunk_delete_trigger$
     END;
 $temp_blob_chunk_delete_trigger$ LANGUAGE plpgsql;
 """ % globals(),
+    """
+CREATE OR REPLACE FUNCTION merge_blob_chunks()
+  RETURNS VOID
+AS $$
+    -- Version: %(postgresql_proc_version)s
+    -- Merge blob chunks into one entirely on the server.
+DECLARE
+  masterfd integer;
+  masterloid oid;
+  chunkfd integer;
+  rec record;
+  buf bytea;
+BEGIN
+  -- In history-free mode, zoid and chunk_num is the key.
+  -- in history-preserving mode, zoid/tid/chunk_num is the key.
+  -- for chunks, zoid and tid must always be used to look up the master.
+  FOR rec IN SELECT zoid, tid, chunk_num, chunk
+    FROM blob_chunk WHERE chunk_num > 0
+    ORDER BY zoid, chunk_num LOOP
+    -- Find the master and open it.
+    SELECT chunk
+    INTO STRICT masterloid
+    FROM blob_chunk
+    WHERE zoid = rec.zoid and tid = rec.tid AND chunk_num = 0;
+
+    -- open master for writing
+    SELECT lo_open(masterloid, 131072) -- 0x20000, AKA INV_WRITE
+    INTO STRICT masterfd;
+
+    -- position at the end
+    PERFORM lo_lseek(masterfd, 0, 2);
+    -- open the child for reading
+    SELECT lo_open(rec.chunk, 262144) -- 0x40000 AKA INV_READ
+    INTO STRICT chunkfd;
+    -- copy the data
+    LOOP
+      SELECT loread(chunkfd, 8192)
+      INTO buf;
+
+      EXIT WHEN LENGTH(buf) = 0;
+
+      PERFORM lowrite(masterfd, buf);
+    END LOOP;
+    -- close the files
+    PERFORM lo_close(chunkfd);
+    PERFORM lo_close(masterfd);
+
+  END LOOP;
+
+  -- Finally, remove the redundant chunks. Our trigger
+  -- takes care of removing the large objects.
+  DELETE FROM blob_chunk WHERE chunk_num > 0;
+
+END;
+$$
+LANGUAGE plpgsql;
+    """ % globals()
 ]
 
 
@@ -71,9 +130,10 @@ class PostgreSQLSchemaInstaller(AbstractSchemaInstaller):
 
     database_type = 'postgresql'
 
-    def __init__(self, connmanager, runner, locker, keep_history):
+    def __init__(self, options, connmanager, runner, locker):
+        self.options = options
         super(PostgreSQLSchemaInstaller, self).__init__(
-            connmanager, runner, keep_history)
+            connmanager, runner, options.keep_history)
         self.locker = locker
 
     def get_database_name(self, cursor):
@@ -109,6 +169,15 @@ class PostgreSQLSchemaInstaller(AbstractSchemaInstaller):
             triggers = self.list_triggers(cursor)
             if 'blob_chunk_delete' not in triggers:
                 self.install_triggers(cursor)
+
+            # Do we need to merge blob chunks?
+            if not self.options.shared_blob_dir:
+                cursor.execute('SELECT chunk_num FROM blob_chunk WHERE chunk_num > 0 LIMIT 1')
+                if cursor.fetchone():
+                    logger.info("Merging blob chunks on the server.")
+                    cursor.execute("SELECT merge_blob_chunks()")
+                    # If we've done our job right, any blobs cached on
+                    # disk are still perfectly valid.
 
         self.connmanager.open_and_call(callback)
 
@@ -157,6 +226,7 @@ class PostgreSQLSchemaInstaller(AbstractSchemaInstaller):
         expect = [
             'blob_chunk_delete_trigger',
             'temp_blob_chunk_delete_trigger',
+            'merge_blob_chunks',
         ]
         current_procs = self.list_procedures(cursor)
         for proc in expect:

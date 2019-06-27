@@ -95,7 +95,7 @@ class AbstractTestSuiteBuilder(ABC):
 
     __name__ = None # PostgreSQL, MySQL, Oracle
 
-    def __init__(self, driver_options, use_adapter):
+    def __init__(self, driver_options, use_adapter, extra_test_classes=()):
         """
         :param driver_options: The ``IDBDriverOptions``
         :param use_adapter: A mixin class implementing the abstract methods
@@ -103,6 +103,7 @@ class AbstractTestSuiteBuilder(ABC):
         """
 
         self.drivers = driver_options
+        self.extra_test_classes = extra_test_classes
         self.base_dbname = os.environ.get('RELSTORAGETEST_DBNAME', 'relstoragetest')
         self.db_names = {
             'data': self.base_dbname,
@@ -245,6 +246,12 @@ class AbstractTestSuiteBuilder(ABC):
             suite.addTest(unittest.makeSuite(klass, "check"))
 
         for klass in self._make_zodbconvert_classes():
+            suite.addTest(unittest.makeSuite(
+                self._new_class_for_driver(driver_name,
+                                           klass,
+                                           is_available)))
+
+        for klass in self.extra_test_classes:
             suite.addTest(unittest.makeSuite(
                 self._new_class_for_driver(driver_name,
                                            klass,
