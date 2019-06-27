@@ -163,16 +163,30 @@ setup(
         ],
         'all_tested_drivers': [
             # Install all the supported drivers for the platform.
-            # first, mysql
-            'PyMySQL >= 0.6.6; python_version == "3.7" or platform_python_implementation == "PyPy" or sys_platform == "win32"',
+            # Spread them out across the versions to not load any one
+            # up too heavy for better parallelism.
+
+            # First, mysql
+            # pymysql on 3.6 on all platforms. We get coverage data from Travis,
+            # and we get 2.7 from PyPy and Windows.
+            'PyMySQL >= 0.6.6; python_version == "3.6" or platform_python_implementation == "PyPy" or sys_platform == "win32"',
+            # mysqlclient (binary) on all CPythons. It's the default,
+            # except on Windows. We get coverage from Travis.
             'mysqlclient >= 1.4;platform_python_implementation=="CPython" and sys_platform != "win32"',
+            # mysql-connector-python on Python 3.7 for coverage on Travis and ensuring it works
+            # on Windows, and PyPy for testing there, since it's one of two pure-python versions.
             'mysql-connector-python >= 8.0.16; python_version == "3.7" or platform_python_implementation == "PyPy"',
 
             # postgresql
             # pure-python
+            # pg8000 on Python 2.7 or PyPy. We get coverage from Travis, and we also
+            # get Windows.
             'pg8000 >= 1.11.0; python_version == "2.7" or platform_python_implementation == "PyPy"',
             # CFFI, runs on all implementations.
-            'psycopg2cffi >= 2.7.4; python_version == "2.7" or platform_python_implementation == "PyPy"',
+            # We get coverage from 3.5 on Travis and verification it works on Windows from Travis.
+            # We get 2.7 testing from PyPy on Travis.
+            'psycopg2cffi >= 2.7.4; python_version == "3.5" or platform_python_implementation == "PyPy"',
+            # Psycopg2 on all CPython, it's the default
             'psycopg2 >= 2.6.1; platform_python_implementation == "CPython"',
         ],
     },
