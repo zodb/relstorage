@@ -51,6 +51,10 @@ class Client(object):
             self.min_compress_len = 1000
 
     @_catching
+    def delete(self, key):
+        return self._client.delete(key)
+
+    @_catching
     def get(self, key):
         return self._client.get(key)
 

@@ -49,7 +49,7 @@ class IStateCache(Interface):
         Given an (oid, tid) pair, return the cache data (state_bytes,
         tid_int) for that object.
 
-        The returned *tid_int* must match the tid in the key.
+        The returned *tid_int* must match the requested tid.
 
         If the (oid, tid) pair isn't in the cache, return None.
         """
@@ -69,6 +69,13 @@ class IStateCache(Interface):
 
         Note that it does not necessarily mean that the key tid
         matches the value tid.
+        """
+
+    def __delitem__(oid_tid):
+        """
+        Remove the data cached for the oid/tid pair.
+
+        If no data is cached, this should do nothing.
         """
 
     def set_all_for_tid(tid_int, state_oid_iter):

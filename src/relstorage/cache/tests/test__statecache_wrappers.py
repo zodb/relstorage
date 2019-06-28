@@ -26,12 +26,16 @@ from relstorage.cache import _statecache_wrappers as wrappers
 
 class TestMultiStateCache(TestCase):
 
-    def _makeOne(self):
-        return wrappers.MultiStateCache(None, None)
+    def _makeOne(self, l=None, g=None):
+        return wrappers.MultiStateCache(l, g)
 
     def test_provides(self):
         assert_that(self._makeOne(),
                     verifiably_provides(interfaces.IStateCache))
+
+    def test_delitem_found(self):
+        c = self._makeOne({(1, 1): None}, {(1, 1): None})
+        del c[(1, 1)]
 
 class MockTracer(object):
     def __init__(self):

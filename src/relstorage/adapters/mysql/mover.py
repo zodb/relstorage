@@ -101,6 +101,9 @@ class MySQLObjectMover(AbstractObjectMover):
 
     @metricmethod_sampled
     def store_temp(self, cursor, batcher, oid, prev_tid, data):
+        # TODO: Instead of 'REPLACE', which deletes then adds rows,
+        # and probably causes index and undo churn (? -- verify)
+        # consider the PostgreSQL-like 'INSERT ... ON DUPLICATE KEY UPDATE'
         self._generic_store_temp(batcher, oid, prev_tid, data, 'REPLACE')
 
     @metricmethod_sampled

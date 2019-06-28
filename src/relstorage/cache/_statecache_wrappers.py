@@ -64,6 +64,10 @@ class MultiStateCache(object):
         self.l[key] = value
         self.g[key] = value
 
+    def __delitem__(self, key):
+        del self.l[key]
+        del self.g[key]
+
     def __call__(self, oid, tid1, tid2):
         result = self.l(oid, tid1, tid2)
         if not result:
@@ -143,6 +147,10 @@ class TracingStateCache(object):
         else:
             self._trace(0x20, oid_int)
         return response
+
+    def __delitem__(self, key):
+        # TODO: Figure out an event for an explicit invalidation
+        pass
 
     def set_all_for_tid(self, tid_int, state_oid_iter):
         self._trace_store_current(tid_int, state_oid_iter)

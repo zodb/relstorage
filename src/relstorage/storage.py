@@ -53,6 +53,7 @@ from relstorage._compat import base64_encodebytes
 from relstorage._compat import dumps
 from relstorage._compat import loads
 from relstorage._compat import OID_TID_MAP_TYPE
+from relstorage._compat import OID_SET_TYPE
 from relstorage.blobhelper import BlobHelper
 from relstorage.cache import StorageCache
 from relstorage.cache.interfaces import CacheConsistencyError
@@ -615,6 +616,20 @@ class RelStorage(UndoLogCompatible,
         oid_int = bytes8_to_int64(oid)
         tid_int = bytes8_to_int64(serial)
 
+        # If we've got this state cached exactly,
+        # use it. No need to poll or anything like that first;
+        # polling is unlikely to get us the state we want.
+        # If the data happens to have been removed from the database,
+        # due to a pack, this won't detect it if it was already cached
+        # and the pack happened somewhere else. This method is
+        # only used for conflict resolution, though, and we
+        # shouldn't be able to get to that point if the root revision
+        # went missing, right? Packing periodically takes the same locks we
+        # want to take for committing.
+        state = self._cache.loadSerial(oid_int, tid_int)
+        if state:
+            return state
+
         with self._lock:
             self._before_load()
             state = self._adapter.mover.load_revision(
@@ -671,7 +686,8 @@ class RelStorage(UndoLogCompatible,
             return state, int64_to_8bytes(start_tid), end
 
     @Metric(method=True, rate=0.1)
-    def store(self, oid, serial, data, version, transaction):
+    def store(self, oid, previous_tid, data, version, transaction):
+        # Called by Connection.commit(), after tpc_begin has been called.
         if self._stale_error is not None:
             raise self._stale_error
         if self._is_read_only:
@@ -691,12 +707,15 @@ class RelStorage(UndoLogCompatible,
         cursor = self._store_cursor
         assert cursor is not None
         oid_int = bytes8_to_int64(oid)
-        if serial:
+        if previous_tid:
+            # previous_tid is the tid of the state that the
+            # object was loaded from.
+
             # XXX PY3: ZODB.tests.IteratorStorage passes a str (non-bytes) value for oid
             prev_tid_int = bytes8_to_int64(
-                serial
-                if isinstance(serial, bytes)
-                else serial.encode('ascii')
+                previous_tid
+                if isinstance(previous_tid, bytes)
+                else previous_tid.encode('ascii')
             )
         else:
             prev_tid_int = 0
@@ -863,38 +882,6 @@ class RelStorage(UndoLogCompatible,
     def tpc_transaction(self):
         return self._transaction
 
-    def _prepare_tid(self):
-        """
-        Choose a tid for the current transaction, and exclusively lock
-        the database commit lock.
-
-        This should be done as late in the commit as possible, since
-        it must hold an exclusive commit lock.
-        """
-        if self._tid is not None:
-            return
-        if self._transaction is None:
-            raise StorageError("No transaction in progress")
-
-        adapter = self._adapter
-        cursor = self._store_cursor
-        adapter.locker.hold_commit_lock(cursor, ensure_current=True)
-        user, desc, ext = self._ude
-
-        # Choose a transaction ID.
-        # Base the transaction ID on the current time,
-        # but ensure that the tid of this transaction
-        # is greater than any existing tid.
-        last_tid = adapter.txncontrol.get_tid(cursor)
-        now = time.time()
-        stamp = TimeStamp(*(time.gmtime(now)[:5] + (now % 60,)))
-        stamp = stamp.laterThan(TimeStamp(int64_to_8bytes(last_tid)))
-        tid = stamp.raw()
-
-        tid_int = bytes8_to_int64(tid)
-        adapter.txncontrol.add_transaction(cursor, tid_int, user, desc, ext)
-        self._tid = tid
-
     def _clear_temp(self):
         # Clear all attributes used for transaction commit.
         # It is assumed that self._lock.acquire was called before this
@@ -910,63 +897,6 @@ class RelStorage(UndoLogCompatible,
         blobhelper = self.blobhelper
         if blobhelper is not None:
             blobhelper.clear_temp()
-
-    def _finish_store(self):
-        """Move stored objects from the temporary table to final storage.
-
-        Returns a sequence of OIDs that were resolved to be received by
-        Connection._handle_serial().
-        """
-        # pylint:disable=too-many-locals
-        assert self._tid is not None
-        cursor = self._store_cursor
-        adapter = self._adapter
-        cache = self._cache
-
-        # Detect conflicting changes.
-        # Try to resolve the conflicts.
-        resolved = set()  # a set of OIDs
-        # In the past, we didn't load all conflicts from the DB at once,
-        # just one at a time. This was because we also fetched the state data
-        # from the DB, and it could be large. But now we use the state we have in
-        # our local temp cache, so memory concerns are gone.
-        conflicts = adapter.mover.detect_conflict(cursor)
-        if conflicts:
-            log.debug("Attempting to resolve %d conflicts", len(conflicts))
-
-        for conflict in conflicts:
-            oid_int, prev_tid_int, serial_int = conflict
-            data = self._cache.read_temp(oid_int)
-            oid = int64_to_8bytes(oid_int)
-            prev_tid = int64_to_8bytes(prev_tid_int)
-            serial = int64_to_8bytes(serial_int)
-
-            rdata = self.tryToResolveConflict(oid, prev_tid, serial, data)
-            if rdata is None:
-                # unresolvable; kill the whole transaction
-                raise ConflictError(
-                    oid=oid, serials=(prev_tid, serial), data=data)
-
-            # resolved
-            data = rdata
-            # TODO: Make this use the bulk methods so we can use COPY.
-            self._adapter.mover.replace_temp(
-                cursor, oid_int, prev_tid_int, data)
-            resolved.add(oid)
-            cache.store_temp(oid_int, data)
-
-        # Move the new states into the permanent table
-        tid_int = bytes8_to_int64(self._tid)
-
-        if self.blobhelper is not None:
-            txn_has_blobs = self.blobhelper.txn_has_blobs
-        else:
-            txn_has_blobs = False
-
-        # This returns the OID ints stored, but we don't use them here
-        adapter.mover.move_from_temp(cursor, tid_int, txn_has_blobs)
-
-        return resolved
 
     @metricmethod
     def tpc_vote(self, transaction):
@@ -1023,10 +953,21 @@ class RelStorage(UndoLogCompatible,
             adapter.oidallocator.set_min_oid(
                 cursor, self._max_stored_oid + 1)
 
-        self._prepare_tid() # Here's where we take the global commit lock.
+        # Here's where we take the global commit lock, and
+        # allocate the next available transaction id, storing it
+        # into history-preserving DBs.
+        self._prepare_tid()
+        # XXX: When we stop allocating the TID early, we need to move
+        # 'move_from_temp' (hf and hp) and 'update_current' (hp only)
+        # later, down to tpc_finish. With everything safely locked,
+        # that shouldn't fail. But we still need to check serials and
+        # resolve conflicts here. When we do that, we need to lock all
+        # the rows involved for update, in order (to avoid deadlocks),
+        # including the prev_tid rows (hp only) and current committed
+        # rows (both) for everything that conflicts.
         tid_int = bytes8_to_int64(self._tid)
 
-        if self._txn_check_serials:
+        if self._txn_check_serials: # Connection.readCurrent()
             oid_ints = self._txn_check_serials.keys()
             current = mover.current_object_tids(cursor, oid_ints)
             for oid_int, expect_tid_int in self._txn_check_serials.items():
@@ -1047,6 +988,97 @@ class RelStorage(UndoLogCompatible,
 
         # New storage protocol
         return resolved_serials
+
+    def _prepare_tid(self):
+        """
+        Choose a tid for the current transaction, and exclusively lock
+        the database commit lock.
+
+        This should be done as late in the commit as possible, since
+        it must hold an exclusive commit lock.
+        """
+        if self._tid is not None:
+            return
+        if self._transaction is None:
+            raise StorageError("No transaction in progress")
+
+        adapter = self._adapter
+        cursor = self._store_cursor
+        # TODO: Stop doing this here; go to row-level locking.
+        adapter.locker.hold_commit_lock(cursor, ensure_current=True)
+        user, desc, ext = self._ude
+
+        # Choose a transaction ID.
+        # Base the transaction ID on the current time,
+        # but ensure that the tid of this transaction
+        # is greater than any existing tid.
+        # TODO: Stop allocating this here. Defer until tpc_finish.
+        last_tid = adapter.txncontrol.get_tid(cursor)
+        now = time.time()
+        stamp = TimeStamp(*(time.gmtime(now)[:5] + (now % 60,)))
+        stamp = stamp.laterThan(TimeStamp(int64_to_8bytes(last_tid)))
+        tid = stamp.raw()
+
+        tid_int = bytes8_to_int64(tid)
+        adapter.txncontrol.add_transaction(cursor, tid_int, user, desc, ext)
+        self._tid = tid
+
+    def _finish_store(self):
+        """Move stored objects from the temporary table to final storage.
+
+        Returns a sequence of OIDs that were resolved to be received by
+        Connection._handle_serial().
+        """
+        # pylint:disable=too-many-locals
+        assert self._tid is not None
+        cursor = self._store_cursor
+        adapter = self._adapter
+        cache = self._cache
+
+        # Detect conflicting changes.
+        # Try to resolve the conflicts.
+        resolved = set()  # a set of OIDs
+        # In the past, we didn't load all conflicts from the DB at once,
+        # just one at a time. This was because we also fetched the state data
+        # from the DB, and it could be large. But now we use the state we have in
+        # our local temp cache, so memory concerns are gone.
+        conflicts = adapter.mover.detect_conflict(cursor)
+        if conflicts:
+            log.debug("Attempting to resolve %d conflicts", len(conflicts))
+
+        for conflict in conflicts:
+            oid_int, committed_tid_int, tid_this_txn_saw_int = conflict
+            state_from_this_txn = self._cache.read_temp(oid_int)
+            oid = int64_to_8bytes(oid_int)
+            prev_tid = int64_to_8bytes(committed_tid_int)
+            serial = int64_to_8bytes(tid_this_txn_saw_int)
+
+            resolved_state = self.tryToResolveConflict(oid, prev_tid, serial, state_from_this_txn)
+            if resolved_state is None:
+                # unresolvable; kill the whole transaction
+                raise ConflictError(
+                    oid=oid, serials=(prev_tid, serial), data=state_from_this_txn)
+
+            # resolved
+            state_from_this_txn = resolved_state
+            # TODO: Make this use the bulk methods so we can use COPY.
+            self._adapter.mover.replace_temp(
+                cursor, oid_int, committed_tid_int, state_from_this_txn)
+            resolved.add(oid)
+            cache.store_temp(oid_int, state_from_this_txn)
+
+        # Move the new states into the permanent table
+        tid_int = bytes8_to_int64(self._tid)
+
+        if self.blobhelper is not None:
+            txn_has_blobs = self.blobhelper.txn_has_blobs
+        else:
+            txn_has_blobs = False
+
+        # This returns the OID ints stored, but we don't use them here
+        adapter.mover.move_from_temp(cursor, tid_int, txn_has_blobs)
+
+        return resolved
 
     @metricmethod
     def tpc_finish(self, transaction, f=None):
@@ -1369,13 +1401,49 @@ class RelStorage(UndoLogCompatible,
                 if prepack_only:
                     log.info("pack: pre-pack complete")
                 else:
-                    # Now pack.
-                    if self.blobhelper is not None:
-                        packed_func = self.blobhelper.after_pack
-                    else:
-                        packed_func = None
+                    # Now pack. We'll get a callback for every oid/tid removed,
+                    # and we'll use that to keep caches consistent.
+                    # In the common case of using zodbpack, this will rewrite the
+                    # persistent cache on the machine running zodbpack.
+                    oids_removed = OID_SET_TYPE()
+                    def invalidate_cached_data(
+                            oid_int, tid_int,
+                            cache=self._cache,
+                            blob_invalidate=getattr(self.blobhelper, 'after_pack', None),
+                            keep_history=self._options.keep_history,
+                            oids=oids_removed
+                    ):
+                        # pylint:disable=dangerous-default-value
+                        # Flush the data from the local/global cache. It's quite likely that
+                        # a fair amount if it is now useless. We almost certainly want to
+                        # establish new checkpoints. The alternative is to clear out
+                        # data that we know we removed in the pack; we *do* keep track
+                        # of that, it's what's passed to the `packed_func`, so we could probably
+                        # piggyback on that in some fashion.
+                        #
+                        # Having consistent cache data became especially important
+                        # when loadSerial() began using the cache: Since that function
+                        # is allowed to return non-transactional data, it wouldn't be
+                        # great for it to return data that is no longer in the DB,
+                        # only the cache. I *think* this is only an issue in the tests,
+                        # that use the storage in a non-conventional way after packing,
+                        # by directly verifying that loadSerial() doesn't return data,
+                        # when in a real use we could only get there through detecting a conflict
+                        # in the database at commit time, with locks involved.
+                        cache.invalidate(oid_int, tid_int)
+                        if blob_invalidate:
+                            # Clean up blob files. This currently does nothing
+                            # if we're a blob cache, but it could.
+                            blob_invalidate(oid_int, tid_int)
+                        # If we're not keeping history, we need to remove all the cached
+                        # data for a particular OID, no matter what key it was under:
+                        # there was only one way to access it.
+                        if not keep_history:
+                            oids.add(oid_int)
+
                     adapter.packundo.pack(tid_int, sleep=sleep,
-                                          packed_func=packed_func)
+                                          packed_func=invalidate_cached_data)
+                    self._cache.invalidate_all(oids_removed)
             finally:
                 adapter.locker.release_pack_lock(lock_cursor)
         finally:
@@ -1386,10 +1454,7 @@ class RelStorage(UndoLogCompatible,
         self._pack_finished()
 
     def _pack_finished(self):
-        if self.blobhelper is None or self._adapter.keep_history:
-            return
-
-        # TODO: Remove all old revisions of blobs in history-free mode.
+        "Hook for testing."
 
     def iterator(self, start=None, stop=None):
         # XXX: This is broken for purposes of copyTransactionsFrom() because

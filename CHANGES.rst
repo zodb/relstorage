@@ -39,6 +39,18 @@
   orphaned large objects, after which a regular ``vacuumdb`` command
   can be used to reclaim space. See :issue:`260`.
 
+- Conflict resolution can use data from the cache, thus potentially
+  eliminating a database hit during a very time-sensitive process.
+  Please file issues if you encounter any strange behaviour when
+  concurrently packing to the present time and also resolving
+  conflicts, in case there are corner cases.
+
+- Packing a storage now invalidates the cached values that were packed
+  away. For the global caches this helps reduce memory pressure; for
+  the local cache this helps reduce memory pressure and ensure a more
+  useful persistent cache (this probably matters most when running on
+  a single machine).
+
 3.0a3 (2019-06-26)
 ==================
 

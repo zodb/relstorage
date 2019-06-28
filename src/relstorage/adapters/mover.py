@@ -338,10 +338,12 @@ class AbstractObjectMover(ABC):
 
     @metricmethod_sampled
     def detect_conflict(self, cursor):
-        """Find all conflicts in the data about to be committed.
-
-        If there is a conflict, returns a sequence of (oid, prev_tid, attempted_prev_tid).
-        """
+        # TODO: We need to make sure these existing rows get or are locked.
+        # TODO: We should return the committed state so it can be passed to tryToResolveConflict
+        #lock = 'SELECT zoid FROM %s WHERE zoid IN (SELECT zoid FROM temp_store) FOR UPDATE'
+        #lock = lock % ('current_object' if self.keep_history else 'object_state')
+        #cursor.execute(lock)
+        #cursor.fetchall()
         stmt = self._detect_conflict_query
         cursor.execute(stmt)
         rows = cursor.fetchall()
@@ -465,7 +467,8 @@ class AbstractObjectMover(ABC):
 
         tid is the integer tid of the transaction being committed.
         """
-
+        # TODO: We should be able to use a single UPSERT
+        # query for these.
         stmt = self._update_current_insert_query
         cursor.execute(stmt, (tid,))
 

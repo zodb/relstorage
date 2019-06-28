@@ -265,7 +265,7 @@ class GenericRelStorageTests(
         finally:
             db.close()
 
-    def checkResolveConflictBetweenConnections(self):
+    def checkResolveConflictBetweenConnections(self, clear_cache=False):
         # Verify that conflict resolution works between storage instances
         # bound to connections.
         obj = ConflictResolution.PCounter()
@@ -275,10 +275,20 @@ class GenericRelStorageTests(
 
         revid1 = self._dostoreNP(oid, data=zodb_pickle(obj))
 
+        # These will both poll and get the state for (oid, revid1)
+        # cached at that location, where it will be found during conflict
+        # resolution.
         storage1 = self._storage.new_instance()
         storage1.load(oid, '')
         storage2 = self._storage.new_instance()
         storage2.load(oid, '')
+        # It's not there now, but root is. Clear those things
+        # Remember that the cache stats are shared between instances.
+        self.assertEqual(storage1._cache.stats()['hits'], 2)
+        storage1._cache.reset_stats()
+        if clear_cache:
+            storage1._cache.clear(load_persistent=False)
+            self.assertEqual(storage1._cache.stats()['hits'], 0)
 
         obj.inc()
         obj.inc()
@@ -292,6 +302,13 @@ class GenericRelStorageTests(
             self._storage = storage2
             _revid3 = self._dostoreNP(oid, revid=revid1, data=zodb_pickle(obj))
 
+            # Both of them needed to resolve conflicts, and both of them
+            # found the data in their cache (unless we cleared the cache;
+            # in which case, the first one resolved the state and saved it
+            # back to the database and cache, and the second one found it there)
+            self.assertEqual(storage1._cache.stats()['hits'],
+                             2 if not clear_cache else 1)
+
             data, _serialno = self._storage.load(oid, '')
             inst = zodb_unpickle(data)
             self.assertEqual(inst._value, 5)
@@ -299,6 +316,10 @@ class GenericRelStorageTests(
             storage1.close()
             storage2.close()
             self._storage = root_storage
+
+    def checkResolveConflictBetweenConnectionsNoCache(self):
+        # If we clear the cache, we can still loadSerial()
+        self.checkResolveConflictBetweenConnections(clear_cache=True)
 
     def check16KObject(self):
         # Store 16 * 1024 bytes in an object, then retrieve it
