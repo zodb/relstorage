@@ -58,6 +58,7 @@ from relstorage.options import Options
 
 from .transaction_iterator import TransactionIterator
 from .tpc import NotInTransaction
+from .tpc import Stale
 from .tpc.begin import HistoryFree
 from .tpc.begin import HistoryPreserving
 from .tpc.restore import Restore
@@ -663,8 +664,6 @@ class RelStorage(UndoLogCompatible,
     @Metric(method=True, rate=0.1)
     def store(self, oid, previous_tid, data, version, transaction):
         # Called by Connection.commit(), after tpc_begin has been called.
-        if self._stale_error is not None:
-            raise self._stale_error
         assert not version, "Versions aren't supported"
 
         # If we get here and we're read-only, our phase will report that.
@@ -675,16 +674,12 @@ class RelStorage(UndoLogCompatible,
         # comments in FileStorage.restore().  The prev_txn optimization
         # is not used.
         # pylint:disable=unused-argument
-        if self._stale_error is not None:
-            raise self._stale_error
         assert not version, "Versions aren't supported"
         # If we get here and we're read-only, our phase will report that.
 
         self._tpc_phase.restore(oid, serial, data, prev_txn, transaction)
 
     def checkCurrentSerialInTransaction(self, oid, serial, transaction):
-        if self._stale_error is not None:
-            raise self._stale_error
         self._tpc_phase.checkCurrentSerialInTransaction(oid, serial, transaction)
 
     def deleteObject(self, oid, oldserial, transaction):
@@ -694,6 +689,7 @@ class RelStorage(UndoLogCompatible,
 
     @metricmethod
     def tpc_begin(self, transaction, tid=None, status=' '):
+        # TODO: Make the current state object handle this whole method.
         if self._stale_error is not None:
             raise self._stale_error
         if self._is_read_only:
@@ -906,8 +902,6 @@ class RelStorage(UndoLogCompatible,
         #
         # During undo, we get a tpc_begin(), then a bunch of undo() from
         # ZODB.DB.TransactionalUndo.commit(), then tpc_vote() and tpc_finish().
-        if self._stale_error is not None:
-            raise self._stale_error
         self._tpc_phase.undo(transaction_id, transaction)
 
     @metricmethod
@@ -1068,9 +1062,11 @@ class RelStorage(UndoLogCompatible,
             # delta_after* maps/current_tid/checkpoints?
             log.error("ReadConflictError from polling invalidations; %s", e)
             self._stale_error = e
+            self._tpc_phase = Stale(self._tpc_phase, e)
             return (), prev
 
         self._stale_error = None
+        self._tpc_phase = self._tpc_phase.no_longer_stale()
 
         # Inform the cache of the changes.
         # It's not good if this raises a CacheConsistencyError, that should

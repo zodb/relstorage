@@ -101,6 +101,9 @@ class AbstractTPCState(object):
         if blobhelper is not None:
             blobhelper.clear_temp()
 
+    def no_longer_stale(self):
+        return self
+
 class NotInTransaction(AbstractTPCState):
     # The default state, when the storage is not attached to a
     # transaction.
@@ -130,3 +133,27 @@ class NotInTransaction(AbstractTPCState):
     def __bool__(self):
         return False
     __nonzero__ = __bool__
+
+class Stale(AbstractTPCState):
+    """
+    An error that lets us know we are stale
+    was encountered.
+
+    Just about all accesses to this object result in
+    re-raising that error.
+    """
+
+    def __init__(self, previous_state, stale_error):
+        self.previous_state = previous_state
+        if not isinstance(stale_error, type):
+            stale_error = type(stale_error)
+        self.stale_error = stale_error
+
+    def no_longer_stale(self):
+        return self.previous_state
+
+    def _stale(self, *args, **kwargs):
+        raise self.stale_error
+
+    store = restore = checkCurrentSerialInTransaction = _stale
+    undo = deleteObject = _stale

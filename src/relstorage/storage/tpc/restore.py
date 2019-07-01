@@ -46,6 +46,8 @@ class Restore(object):
         'deletObject',
         'undo',
         'tpc_vote',
+        'tpc_abort',
+        'no_longer_stale',
     )
 
     def __init__(self, begin_state, committing_tid, status):
