@@ -434,9 +434,11 @@ class IObjectMover(Interface):
         """
 
     def detect_conflict(cursor):
-        """Find all conflict in the data about to be committed.
+        """
+        Find all conflicts in the data about to be committed.
 
-        If there is a conflict, returns a sequence of (oid, prev_tid, attempted_prev_tid).
+        If there is a conflict, returns a sequence of
+        ``(oid, committed_tid, attempted_committed_tid)``.
         """
 
     def replace_temp(cursor, oid, prev_tid, data):

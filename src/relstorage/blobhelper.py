@@ -291,7 +291,7 @@ class BlobHelper(object):
         Removes the corresponding blob file.
         """
         if not self.shared_blob_dir:
-            # Not necessary
+            # Not necessary...but perhaps helpful, as a size control?
             return
 
         oid = p64(oid_int)
@@ -315,7 +315,14 @@ class BlobHelper(object):
     def vote(self, tid):
         if self._txn_blobs:
             # We now have a transaction ID, so rename all the blobs
-            # accordingly.
+            # accordingly. This is very unlikely to fail. If we're
+            # not using a shared blob-dir, it doesn't matter much if it fails;
+            # source data is safely in the database, we'd just have some extra temporary
+            # files. (Though we don't want that exception to populate from tpc_finish.)
+            #
+            # In fact, ClientStorage does this in tpc_finish for shared blob dirs.
+            # It's not been reported as a problem there, so probably it really does
+            # rarely fail. Exceptions from tpc_finish are a VERY BAD THING.
             for oid, sourcename in self._txn_blobs.items():
                 bytes = os.stat(sourcename).st_size
                 self.cache_checker.loaded(bytes, check=False)

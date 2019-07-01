@@ -190,7 +190,21 @@ class SizedLRUMapping(object):
         return key in self._cache
 
     def __delitem__(self, key):
-        del self._cache[key]
+        # The underlying bucket may or may not throw a key error
+        try:
+            del self._cache[key]
+        except KeyError:
+            pass
+
+    def invalidate_all(self, oids):
+        # The SQL mapping could do this much more efficiently
+        to_remove = [k for k in self.keys() if k[0] in oids]
+        for k in to_remove:
+            try:
+                del self._cache[k]
+            except KeyError:
+                pass
+        return to_remove
 
     def get_and_bubble_all(self, keys):
         # This is only used in testing now, the higher levels

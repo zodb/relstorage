@@ -263,6 +263,19 @@ class LocalClient(object):
         for state, oid_int, _ in state_oid_iter:
             self[(oid_int, tid_int)] = (state, tid_int)
 
+    def __delitem__(self, oid_tid):
+        with self._lock:
+            del self.__bucket[oid_tid]
+            if oid_tid[1] > self._min_allowed_writeback.get(oid_tid[0], MAX_TID):
+                self._min_allowed_writeback[oid_tid[0]] = oid_tid[1]
+
+    def invalidate_all(self, oids):
+        with self._lock:
+            min_allowed = self._min_allowed_writeback
+            for oid, tid in self.__bucket.invalidate_all(oids):
+                if tid > min_allowed.get(oid, MAX_TID):
+                    min_allowed[oid] = tid
+
     def store_checkpoints(self, cp0, cp1):
         # No lock, the assignment should be atomic
         # Both checkpoints should be None, or the same integer,

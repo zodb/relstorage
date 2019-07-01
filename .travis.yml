@@ -38,12 +38,13 @@ env:
         - CCACHE_SLOPPINESS=file_macro,time_macros,include_file_ctime,include_file_mtime
         - CCACHE_NOHASHDIR=true
         - CFLAGS="-g -pipe"
+        - RS_TEST_CMD="-m zope.testrunner --test-path=src --auto-color --auto-progress"
 
 script:
 # coverage slows PyPy down from 2minutes to 12+.
   - if [[ $TRAVIS_PYTHON_VERSION == 3.7 ]]; then pylint --rcfile=.pylintrc relstorage -f parseable -r n; fi
-  - if [[ $TRAVIS_PYTHON_VERSION == pypy* ]]; then python -m zope.testrunner --test-path=src --auto-color --auto-progress; fi
-  - if [[ $TRAVIS_PYTHON_VERSION != pypy* ]]; then coverage run -m zope.testrunner --test-path=src --auto-color --auto-progress; fi
+  - if [[ $TRAVIS_PYTHON_VERSION == pypy* ]]; then python $RS_TEST_CMD; fi
+  - if [[ $TRAVIS_PYTHON_VERSION != pypy* ]]; then coverage run $RS_TEST_CMD; fi
 after_success:
   - coveralls
 notifications:

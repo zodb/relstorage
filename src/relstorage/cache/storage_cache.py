@@ -50,7 +50,7 @@ class _UsedAfterRelease(object):
     size = limit = 0
     def __len__(self):
         return 0
-    close = lambda s: None
+    close = reset_stats = lambda s: None
     stats = lambda s: {}
 _UsedAfterRelease = _UsedAfterRelease()
 
@@ -164,6 +164,17 @@ class StorageCache(object):
         for human inspection only.
         """
         return self.local_client.stats()
+
+    def __repr__(self):
+        return "<%s at %x size=%d len=%d>" % (
+            self.__class__.__name__,
+            id(self),
+            self.size,
+            len(self)
+        )
+
+    def reset_stats(self):
+        self.local_client.reset_stats()
 
     def new_instance(self):
         """
@@ -404,6 +415,47 @@ class StorageCache(object):
             # error gets retried in a working, consistent view.
             self._reset(msg)
 
+    def loadSerial(self, oid_int, tid_int):
+        """
+        Return the locally cached state for the object *oid_int* as-of
+        exactly *tid_int*.
+
+        If that state is not available in the local cache, return
+        nothing.
+
+        If we're history free, and the tid_int doesn't match our
+        knowledge of what the latest tid for the object should be,
+        return nothing.
+        """
+        # We use only the local client because, for history-free storages,
+        # it's the only one we can be reasonably sure has been
+        # invalidated by a local pack. Also, our point here is to avoid
+        # network traffic, so it's no good going to memcache for what may be
+        # a stale answer.
+
+        if not self.options.keep_history:
+            # For history-free, we can only have one state. If we
+            # think we know what it is, but they ask for something different,
+            # then there's no way it can be found.
+            known_tid_int = self.delta_after0.get(oid_int)
+            if known_tid_int is not None and known_tid_int != tid_int:
+                return None
+
+        # If we've seen this object, it could be in a few places:
+        # (oid, tid) (if it was ever in a delta), or (oid, cp0)
+        # if it has fallen behind. Regardless, we can only use it if
+        # the tids match.
+        #
+        # We have a multi-query method, but we don't use it because we
+        # don't want to move keys around.
+        cache = self.local_client
+        for tid in (tid_int, self.checkpoints[0] if self.checkpoints else None):
+            if not tid:
+                break
+            cache_data = cache[(oid_int, tid)]
+            if cache_data and cache_data[1] == tid_int:
+                return cache_data[0]
+
     def load(self, cursor, oid_int):
         """
         Load the given object from cache if possible.
@@ -536,6 +588,16 @@ class StorageCache(object):
             # validating that part.
             self._check_tid_after_load(oid, tid_int)
             cache[key] = (state, tid_int)
+
+    def invalidate(self, oid_int, tid_int):
+        del self.cache[(oid_int, tid_int)]
+
+    def invalidate_all(self, oids):
+        """
+        In the local cache only, invalidate all cached data for the
+        given OIDs.
+        """
+        self.local_client.invalidate_all(oids)
 
     def tpc_begin(self):
         """Prepare temp space for objects to cache."""
@@ -689,10 +751,12 @@ class StorageCache(object):
             return self._suggest_shifted_checkpoints()
 
     def __poll_establish_global_checkpoints(self, new_tid_int):
-        # Because we *always* have checkpoints in our
-        # local_client, once we've set them, this also means that
-        # it was our first poll. Of course, with multi-threaded race conditions,
-        # that might not actually be the case.
+        # Because we *always* have checkpoints in our local_client,
+        # once we've set them, not being able to find them there also
+        # means that it was our first poll, and so we shouldn't have
+        # checkpoints ourself. Of course, with multi-threaded race
+        # conditions, that might not actually be the case.
+
         # assert not self.checkpoints
 
         # Initialize the checkpoints; we've never polled before.

@@ -45,6 +45,10 @@ class AbstractStateCacheTests(TestCase):
     def test_provides(self):
         assert_that(self._makeOne(), verifiably_provides(IStateCache))
 
+    def test_delitem_not_there(self):
+        c = self._makeOne()
+        del c[(1, 1)]
+
     def test_set_all_for_tid(self):
         c = self._makeOne()
 

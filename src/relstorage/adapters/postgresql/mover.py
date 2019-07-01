@@ -173,7 +173,10 @@ class PostgreSQLObjectMover(AbstractObjectMover):
             # is a common case, and we can workaround the test failure by
             # only prepping this in the store connection.
             # TODO: Is there a more general solution?
-            cursor.execute('SET lock_timeout = 100')
+            # We initially set this to 100, but under high concurrency (10 processes)
+            # that turned out to be laughably optimistic. We might actually need to go as high
+            # as the commit lock timeout.
+            cursor.execute('SET lock_timeout = 2000')
 
         for stmt in ddl_stmts:
             cursor.execute(stmt)

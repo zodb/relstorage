@@ -21,6 +21,9 @@ class Client(object):
     def __init__(self, servers):
         self.servers = servers
 
+    def delete(self, key):
+        data.pop(key, None)
+
     def get(self, key):
         return data.get(key)
 

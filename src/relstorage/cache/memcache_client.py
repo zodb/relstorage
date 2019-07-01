@@ -69,11 +69,13 @@ class MemcacheStateCache(object):
     def __getitem__(self, oid_tid):
         return self(*oid_tid)
 
+    def __oid_tid_to_key(self, oid, tid):
+        return '%s:state:%d:%d' % (self.prefix, tid, oid)
+
     def __call__(self, oid, tid1, tid2=None):
-        cachekeys = []
-        cachekeys.append('%s:state:%d:%d' % (self.prefix, tid1, oid))
+        cachekeys = [self.__oid_tid_to_key(oid, tid1)]
         if tid2 is not None:
-            cachekeys.append('%s:state:%d:%d' % (self.prefix, tid2, oid))
+            cachekeys.append(self.__oid_tid_to_key(oid, tid2))
         response = self.client.get_multi(cachekeys)
         preferred_data = response.get(cachekeys[0])
         if preferred_data and len(preferred_data) >= 8:
@@ -92,10 +94,13 @@ class MemcacheStateCache(object):
 
     def __setitem__(self, oid_tid, state_bytes_tid):
         oid, tid = oid_tid
-        key = '%s:state:%d:%d' % (self.prefix, tid, oid)
+        key = self.__oid_tid_to_key(oid, tid)
         state_bytes, actual_tid = state_bytes_tid
         cache_data = p64(actual_tid) + (state_bytes or b'')
         self.client.set(key, cache_data)
+
+    def __delitem__(self, oid_tid):
+        self.client.delete(self.__oid_tid_to_key(*oid_tid))
 
     def _set_multi(self, keys_and_values):
         formatted = {

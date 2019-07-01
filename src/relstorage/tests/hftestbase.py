@@ -13,6 +13,7 @@
 ##############################################################################
 """A foundation for history-free RelStorage tests"""
 from __future__ import absolute_import
+from __future__ import print_function
 
 import time
 
@@ -71,10 +72,12 @@ class HistoryFreeRelStorageTests(GenericRelStorageTests):
         self._storage.sync()
         # All revisions of the object should be gone, since there is no
         # reference from the root object to this object.
-        raises(KeyError, self._storage.loadSerial, oid, revid1)
-        raises(KeyError, self._storage.loadSerial, oid, revid2)
-        raises(KeyError, self._storage.loadSerial, oid, revid3)
-        raises(KeyError, self._storage.load, oid, '')
+        for revid in (revid1, revid2, revid3):
+            __traceback_info__ = oid, revid
+            with raises(KeyError):
+                self._storage.loadSerial(oid, revid)
+        with raises(KeyError):
+            self._storage.load(oid)
 
     def checkPackJustOldRevisions(self):
         eq = self.assertEqual
