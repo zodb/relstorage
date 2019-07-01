@@ -138,3 +138,8 @@ class Lazy(object):
         value = func(inst)
         inst.__dict__[name] = value
         return value
+
+def to_utf8(data):
+    if data is None or isinstance(data, bytes):
+        return data
+    return data.encode("utf-8")
