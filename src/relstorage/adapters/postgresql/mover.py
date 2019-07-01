@@ -204,7 +204,23 @@ class PostgreSQLObjectMover(AbstractObjectMover):
 
         Used for copying transactions into this database.
         """
-        self._generic_restore(batcher, oid, tid, data)
+        if self.keep_history:
+            suffix = """
+            ON CONFLICT (zoid, tid) DO UPDATE SET
+                tid = excluded.tid,
+                prev_tid = excluded.prev_tid,
+                md5 = excluded.md5,
+                state_size = excluded.state_size,
+                state = excluded.state
+            """
+        else:
+            suffix = """
+            ON CONFLICT (zoid) DO UPDATE SET
+                tid = excluded.tid,
+                state_size = excluded.state_size,
+                state = excluded.state
+            """
+        self._generic_restore(batcher, oid, tid, data, suffix=suffix)
 
     @metricmethod_sampled
     def download_blob(self, cursor, oid, tid, filename):

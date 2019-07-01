@@ -238,14 +238,17 @@ class AbstractObjectMover(ABC):
             for stmt_name in self.on_load_opened_statement_names:
                 cursor.execute(getattr(self, stmt_name))
 
+    # The _generic methods allow for UPSERTs, at least on MySQL
+    # and PostgreSQL. Previously, MySQL used `command='REPLACE'`
+    # for an UPSERT; now it uses a suffix 'ON DUPLICATE KEY UPDATE ...'.
+    # PostgreSQL uses a suffix 'ON CONFLICT (...) UPDATE ...'.
+
     def _generic_store_temp(self, batcher, oid, prev_tid, data,
                             command='INSERT', suffix=''):
         md5sum = self._compute_md5sum(data)
         # TODO: Now that we guarantee not to feed duplicates here, drop
         # the conflict handling.
         if command == 'INSERT' and not suffix:
-            # MySQL uses command=REPLACE for an UPSERT
-            # PostgreSQL 9.5+ uses a suffix='ON CONFLICT UPDATE...' for an UPSERT
             batcher.delete_from('temp_store', zoid=oid)
         batcher.insert_into(
             "temp_store (zoid, prev_tid, md5, state)",
@@ -270,7 +273,8 @@ class AbstractObjectMover(ABC):
         batcher.flush()
 
     @metricmethod_sampled
-    def _generic_restore(self, batcher, oid, tid, data, command='INSERT'):
+    def _generic_restore(self, batcher, oid, tid, data,
+                         command='INSERT', suffix=''):
         """Store an object directly, without conflict detection.
 
         Used for copying transactions into this database.
@@ -285,7 +289,7 @@ class AbstractObjectMover(ABC):
             size = 0
 
         if self.keep_history:
-            if command == 'INSERT':
+            if command == 'INSERT' and not suffix:
                 batcher.delete_from("object_state", zoid=oid, tid=tid)
             row_schema = """
                 %s, %s,
@@ -299,9 +303,10 @@ class AbstractObjectMover(ABC):
                 rowkey=(oid, tid),
                 size=size,
                 command=command,
+                suffix=suffix
             )
         elif data:
-            if command == 'INSERT':
+            if command == 'INSERT' and not suffix:
                 batcher.delete_from('object_state', zoid=oid)
             batcher.insert_into(
                 "object_state (zoid, tid, state_size, state)",
@@ -310,6 +315,7 @@ class AbstractObjectMover(ABC):
                 rowkey=oid,
                 size=size,
                 command=command,
+                suffix=suffix
             )
         else:
             batcher.delete_from('object_state', zoid=oid)

@@ -30,10 +30,7 @@ from perfmetrics import Metric
 from perfmetrics import metricmethod
 from persistent.timestamp import TimeStamp
 from ZODB import ConflictResolution
-from ZODB.BaseStorage import DataRecord
-from ZODB.BaseStorage import TransactionRecord
 from ZODB.blob import is_blob_record
-from ZODB.interfaces import StorageStopIteration
 from ZODB.mvccadapter import HistoricalStorageAdapter
 from ZODB.POSException import ConflictError
 from ZODB.POSException import POSKeyError
@@ -54,6 +51,7 @@ from relstorage._compat import dumps
 from relstorage._compat import loads
 from relstorage._compat import OID_TID_MAP_TYPE
 from relstorage._compat import OID_SET_TYPE
+from relstorage._transaction_iterator import TransactionIterator
 from relstorage.blobhelper import BlobHelper
 from relstorage.cache import StorageCache
 from relstorage.cache.interfaces import CacheConsistencyError
@@ -900,6 +898,10 @@ class RelStorage(UndoLogCompatible,
 
     @metricmethod
     def tpc_vote(self, transaction):
+        # Returns an iterable of OIDs; the storage will ghost all
+        # cached objects in that list. This is invalidation because
+        # the object has changed during the commit process, due to
+        # conflict resolution or undo.
         with self._lock:
             if transaction is not self._transaction:
                 raise StorageTransactionError(
@@ -1145,8 +1147,8 @@ class RelStorage(UndoLogCompatible,
     def afterCompletion(self):
         # Note that this method exists mainly to deal with read-only
         # transactions that don't go through 2-phase commit (although
-        # it's called for all transactions).  For this reason, we only
-        # have to roll back the load connection.  The store connection
+        # it's called for all transactions). For this reason, we only
+        # have to roll back the load connection. The store connection
         # is completed during normal write-transaction commit or
         # abort.
         self._rollback_load_connection()
@@ -1283,11 +1285,12 @@ class RelStorage(UndoLogCompatible,
 
     @metricmethod
     def undo(self, transaction_id, transaction):
-        """Undo a transaction identified by transaction_id.
+        """
+        Undo a transaction identified by transaction_id.
 
-        transaction_id is the base 64 encoding of an 8 byte tid.
-        Undo by writing new data that reverses the action taken by
-        the transaction.
+        transaction_id is the base 64 encoding of an 8 byte tid. Undo
+        by writing new data that reverses the action taken by the
+        transaction.
         """
 
         # This is called directly from code in DB.py on a new instance
@@ -1297,6 +1300,13 @@ class RelStorage(UndoLogCompatible,
         # (unless we had loaded persistent state files)
         #
         # TODO: Implement 'undo_instance' to make this clear.
+        #
+        # A regular Connection going through two-phase commit will
+        # call tpc_begin(), do a bunch of store() from its commit(),
+        # then tpc_vote(), tpc_finish().
+        #
+        # During undo, we get a tpc_begin(), then a bunch of undo() from
+        # ZODB.DB.TransactionalUndo.commit(), then tpc_vote() and tpc_finish().
 
         if self._stale_error is not None:
             raise self._stale_error
@@ -1672,124 +1682,6 @@ class RelStorage(UndoLogCompatible,
         log.info(
             "All %d transactions copied successfully in %4.1f minutes.",
             txnum, elapsed / 60.0)
-
-
-class TransactionIterator(object):
-    """Iterate over the transactions in a RelStorage instance."""
-
-    def __init__(self, adapter, start, stop):
-        self._adapter = adapter
-        self._conn, self._cursor = self._adapter.connmanager.open_for_load()
-        self._closed = False
-
-        if start is not None:
-            start_int = bytes8_to_int64(start)
-        else:
-            start_int = 1
-        if stop is not None:
-            stop_int = bytes8_to_int64(stop)
-        else:
-            stop_int = None
-
-        # _transactions: [(tid, username, description, extension, packed)]
-        self._transactions = list(adapter.dbiter.iter_transactions_range(
-            self._cursor, start_int, stop_int))
-        self._index = 0
-
-    def close(self):
-        if self._closed:
-            return
-        self._adapter.connmanager.close(self._conn, self._cursor)
-        self._closed = True
-        self._conn = None
-        self._cursor = None
-
-    def __del__(self):
-        # belt-and-suspenders, effective on CPython
-        self.close()
-
-    def iterator(self):
-        return self
-
-    def __iter__(self):
-        return self
-
-    def __len__(self):
-        return len(self._transactions)
-
-    def __getitem__(self, n):
-        self._index = n
-        return next(self)
-
-    def next(self):
-        if self._index >= len(self._transactions):
-            self.close() # Don't leak our connection
-            raise StorageStopIteration()
-        if self._closed:
-            raise IOError("TransactionIterator already closed")
-        params = self._transactions[self._index]
-        res = RelStorageTransactionRecord(self, *params)
-        self._index += 1
-        return res
-
-    __next__ = next
-
-class RelStorageTransactionRecord(TransactionRecord):
-
-    def __init__(self, trans_iter, tid_int, user, desc, ext, packed):
-        self._trans_iter = trans_iter
-        self._tid_int = tid_int
-        tid = int64_to_8bytes(tid_int)
-        status = 'p' if packed else ' '
-        user = user or b''
-        description = desc or b''
-        if ext:
-            extension = loads(ext)
-        else:
-            extension = {}
-
-        TransactionRecord.__init__(self, tid, status, user, description, extension)
-
-    def __iter__(self):
-        return RecordIterator(self)
-
-class RecordIterator(object):
-    """Iterate over the objects in a transaction."""
-    def __init__(self, record):
-        # record is a RelStorageTransactionRecord.
-        cursor = record._trans_iter._cursor
-        adapter = record._trans_iter._adapter
-        tid_int = record._tid_int
-        self.tid = record.tid
-        self._records = list(adapter.dbiter.iter_objects(cursor, tid_int))
-        self._index = 0
-
-    def __iter__(self):
-        return self
-
-    def __len__(self):
-        return len(self._records)
-
-    def __getitem__(self, n):
-        self._index = n
-        return next(self)
-
-    def next(self):
-        if self._index >= len(self._records):
-            raise StorageStopIteration()
-        params = self._records[self._index]
-        res = Record(self.tid, *params)
-        self._index += 1
-        return res
-
-    __next__ = next
-
-
-class Record(DataRecord):
-    """An object state in a transaction"""
-
-    def __init__(self, tid, oid_int, data):
-        DataRecord.__init__(self, int64_to_8bytes(oid_int), tid, data, None)
 
 def _zlibstorage_new_instance(self):
     new_self = type(self).__new__(type(self))
