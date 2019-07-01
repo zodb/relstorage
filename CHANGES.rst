@@ -51,6 +51,11 @@
   useful persistent cache (this probably matters most when running on
   a single machine).
 
+- Make MySQL use ``ON DUPLICATE KEY UPDATE`` rather than ``REPLACE``.
+  This can be friendlier to the storage engine as it performs an
+  in-place ``UPDATE`` rather than a ``DELETE`` followed by an
+  ``INSERT``. See :issue:`189`.
+
 3.0a3 (2019-06-26)
 ==================
 

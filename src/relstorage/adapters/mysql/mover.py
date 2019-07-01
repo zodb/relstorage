@@ -99,12 +99,25 @@ class MySQLObjectMover(AbstractObjectMover):
 
         AbstractObjectMover.on_store_opened(self, cursor, restart=restart)
 
+    # Upserts: It's a good idea to use `ON DUPLICATE KEY UPDATE`
+    # instead of REPLACE because `ON DUPLICATE` updates rows in place
+    # instead of performing a DELETE followed by an INSERT; that might
+    # matter for row locking or MVCC, depending on isolation level and
+    # locking strategies, and it's been said that it matters for
+    # backend IO, especially on things like a large distributed SAN
+    # (https://github.com/zodb/relstorage/issues/189). This is also
+    # more similar to what PostgreSQL uses, possibly allowing more
+    # query sharing (with a smarter query runner/interpreter).
+
     @metricmethod_sampled
     def store_temp(self, cursor, batcher, oid, prev_tid, data):
-        # TODO: Instead of 'REPLACE', which deletes then adds rows,
-        # and probably causes index and undo churn (? -- verify)
-        # consider the PostgreSQL-like 'INSERT ... ON DUPLICATE KEY UPDATE'
-        self._generic_store_temp(batcher, oid, prev_tid, data, 'REPLACE')
+        suffix = """
+        ON DUPLICATE KEY UPDATE
+            state = VALUES(state),
+            prev_tid = VALUES(prev_tid),
+            md5 = VALUES(md5)
+        """
+        self._generic_store_temp(batcher, oid, prev_tid, data, suffix=suffix)
 
     @metricmethod_sampled
     def restore(self, cursor, batcher, oid, tid, data):
@@ -112,7 +125,23 @@ class MySQLObjectMover(AbstractObjectMover):
 
         Used for copying transactions into this database.
         """
-        self._generic_restore(batcher, oid, tid, data, 'REPLACE')
+        if self.keep_history:
+            suffix = """
+            ON DUPLICATE KEY UPDATE
+                tid = VALUES(tid),
+                prev_tid = VALUES(prev_tid),
+                md5 = VALUES(md5),
+                state_size = VALUES(state_size),
+                state = VALUES(state)
+            """
+        else:
+            suffix = """
+            ON DUPLICATE KEY UPDATE
+                tid = VALUES(tid),
+                state_size = VALUES(state_size),
+                state = VALUES(state)
+            """
+        self._generic_restore(batcher, oid, tid, data, suffix=suffix)
 
     # Override this query from the superclass. The MySQL optimizer, up
     # through at least 5.7.17 doesn't like actual subqueries in a DELETE
@@ -126,9 +155,13 @@ class MySQLObjectMover(AbstractObjectMover):
 
     def _move_from_temp_object_state(self, cursor, tid):
         stmt = """
-        REPLACE INTO object_state (zoid, tid, state_size, state)
-        SELECT zoid, %s, COALESCE(LENGTH(state), 0), state
-        FROM temp_store
+        INSERT INTO object_state (zoid, tid, state_size, state)
+            SELECT zoid, %s, COALESCE(LENGTH(state), 0), state
+            FROM temp_store
+        ON DUPLICATE KEY UPDATE
+            tid = VALUES(tid),
+            state_size = VALUES(state_size),
+            state = VALUES(state)
         """
         cursor.execute(stmt, (tid,))
 
@@ -141,9 +174,11 @@ class MySQLObjectMover(AbstractObjectMover):
         tid is the integer tid of the transaction being committed.
         """
         cursor.execute("""
-        REPLACE INTO current_object (zoid, tid)
-        SELECT zoid, tid FROM object_state
-        WHERE tid = %s
+        INSERT INTO current_object (zoid, tid)
+            SELECT zoid, tid FROM object_state
+            WHERE tid = %s
+        ON DUPLICATE KEY UPDATE
+            tid = VALUES(tid)
         """, (tid,))
 
     @metricmethod_sampled
