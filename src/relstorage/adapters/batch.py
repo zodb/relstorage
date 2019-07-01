@@ -55,6 +55,15 @@ class RowBatcher(object):
         self.deletes = defaultdict(set)   # {(table, columns_tuple): set([(column_value,)])}
         self.inserts = defaultdict(dict)  # {(command, header, row_schema, suffix): {rowkey: [row]}}
 
+    def __repr__(self):
+        return "<%s at %x tins=%d tdel=%d prows=%d>" % (
+            self.__class__.__name__,
+            id(self),
+            self.total_rows_inserted,
+            self.total_rows_deleted,
+            self.rows_added,
+        )
+
     def delete_from(self, table, **kw):
         if not kw:
             raise AssertionError("Need at least one column value")

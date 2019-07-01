@@ -19,26 +19,7 @@ from functools import wraps
 
 from .._compat import intern
 
-
-class Lazy(object):
-    "Property-like descriptor that calls func only once per instance."
-
-    # Derived from zope.cachedescriptors.property.Lazy
-
-    def __init__(self, func, name=None):
-        if name is None:
-            name = func.__name__
-        self.data = (func, name)
-        update_wrapper(self, func)
-
-    def __get__(self, inst, class_):
-        if inst is None:
-            return self
-
-        func, name = self.data
-        value = func(inst)
-        inst.__dict__[name] = value
-        return value
+from .._util import Lazy
 
 def query_property(base_name,
                    extension='',

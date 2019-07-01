@@ -117,3 +117,24 @@ def byte_display(size):
     if size > 1048576:
         return '%0.02f MB' % (size / 1048576.0)
     return '%d KB' % (size / 1024.0)
+
+
+class Lazy(object):
+    "Property-like descriptor that calls func only once per instance."
+
+    # Derived from zope.cachedescriptors.property.Lazy
+
+    def __init__(self, func, name=None):
+        if name is None:
+            name = func.__name__
+        self.data = (func, name)
+        functools.update_wrapper(self, func)
+
+    def __get__(self, inst, class_):
+        if inst is None:
+            return self
+
+        func, name = self.data
+        value = func(inst)
+        inst.__dict__[name] = value
+        return value

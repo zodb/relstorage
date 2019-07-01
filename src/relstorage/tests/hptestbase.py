@@ -20,6 +20,7 @@ from persistent.mapping import PersistentMapping
 
 from ZODB.DB import DB
 from ZODB.serialize import referencesf
+from ZODB.POSException import StorageTransactionError
 from ZODB.tests import HistoryStorage
 from ZODB.tests import IteratorStorage
 from ZODB.tests import PackableStorage
@@ -300,7 +301,8 @@ class HistoryPreservingRelStorageTests(GenericRelStorageTests,
     def checkImplementsExternalGC(self):
         import ZODB.interfaces
         self.assertFalse(ZODB.interfaces.IExternalGC.providedBy(self._storage))
-        self.assertRaises(AttributeError, self._storage.deleteObject)
+        with self.assertRaises(StorageTransactionError):
+            self._storage.deleteObject(None, None, None)
 
     def checkMigrateTransactionEmpty(self):
         # The transaction.empty column gets renamed in 'prepare'

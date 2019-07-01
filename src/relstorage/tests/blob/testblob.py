@@ -46,10 +46,11 @@ from relstorage.tests.blob.blob_transaction import TestBlobTransactionMixin
 from relstorage.tests.blob.blob_cache import TestBlobCacheMixin
 from relstorage.tests.blob import TestBlobMixin
 
-class BlobTestBase(ZODB.tests.StorageTestBase.StorageTestBase):
+class BlobTestBase(TestCase,
+                   ZODB.tests.StorageTestBase.StorageTestBase):
 
     def setUp(self):
-        ZODB.tests.StorageTestBase.StorageTestBase.setUp(self)
+        super(BlobTestBase, self).setUp()
         self._storage = self.create_storage() # pylint:disable=no-member
 
 
@@ -221,7 +222,9 @@ class RecoveryBlobStorage(BlobTestBase,
         with root[2].open('w') as f:
             f.write(b'some other data')
         transaction.commit()
+        __traceback_info__ = self._storage, self._dst
         self._dst.copyTransactionsFrom(self._storage)
+
         self.compare(self._storage, self._dst)
 
         conn.close()

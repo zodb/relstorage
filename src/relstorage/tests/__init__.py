@@ -117,7 +117,6 @@ class StorageCreatingMixin(ABC):
         options = Options(keep_history=self.keep_history, driver=self.driver_name, **kw)
         adapter = self.make_adapter(options)
         storage = RelStorage(adapter, options=options)
-        storage._batcher_row_limit = 1
         if zap:
             # XXX: Some ZODB tests, possibly check4ExtStorageThread
             # and check7StorageThreads don't close storages when done

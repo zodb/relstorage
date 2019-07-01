@@ -47,8 +47,9 @@ class IteratorDeepCompare(object):
         """Confirm that storage1 and storage2 contain equivalent data"""
         eq = self.assertEqual
         missing = object()
-        iter1 = storage1.iterator()
-        iter2 = storage2.iterator()
+        self.assertEqual(len(storage1), len(storage2))
+        iter1 = self._closing(storage1.iterator())
+        iter2 = self._closing(storage2.iterator())
         for txn1, txn2 in zip(iter1, iter2):
             eq(txn1.tid, txn2.tid)
             eq(txn1.status, txn2.status)
@@ -92,7 +93,7 @@ class IteratorDeepCompare(object):
                         with open(fn1, 'rb') as f1, open(fn2, 'rb') as f2:
                             eq(f1.read(), f2.read())
 
-        # Make sure ther are no more records left in txn1 and txn2, meaning
+        # Make sure there are no more records left in txn1 and txn2, meaning
         # they were the same length
         try:
             next(iter1)
@@ -102,7 +103,7 @@ class IteratorDeepCompare(object):
             self.fail("storage1 has more records")
 
         try:
-            next(iter2)
+            __traceback_info__ = next(iter2)
         except (IndexError, StopIteration):
             pass
         else:
