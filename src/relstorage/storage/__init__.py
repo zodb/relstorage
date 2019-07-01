@@ -1354,7 +1354,6 @@ class _AbstractBeginTPCState(_AbstractTPCState):
     # have not changed at commit. May be a BTree
     required_tids = ()
 
-
     def __init__(self, storage, transaction):
         self.storage = storage
         self.transaction = transaction
