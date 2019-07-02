@@ -76,7 +76,6 @@ class AbstractTPCState(object):
     def tpc_abort(self, transaction):
         if transaction is not self.transaction:
             return self
-
         # the lock is held here
         try:
             try:

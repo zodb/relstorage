@@ -100,6 +100,16 @@ class PostgreSQLObjectMover(AbstractObjectMover):
             state = excluded.state
     """
 
+    _update_current_insert_query = """
+        INSERT INTO current_object (zoid, tid)
+            SELECT zoid, tid FROM object_state
+            WHERE tid = %s
+            ORDER BY zoid
+        ON CONFLICT (zoid) DO UPDATE SET
+            tid = excluded.tid
+    """
+    _update_current_update_query = None
+
     _move_from_temp_hf_insert_raw_queries = (
         Unsupported("States accumulate in history-preserving mode"),
         _move_from_temp_hf_insert_query_raw,
@@ -322,6 +332,10 @@ class PostgreSQLObjectMover(AbstractObjectMover):
                                       self._compute_md5sum if self.keep_history else None)
             cursor.copy_expert(buf.COPY_COMMAND, buf)
 
+
+    def _debug_my_locks(self, cursor):
+        from . import debug_my_locks
+        return debug_my_locks(cursor)
 
 class PG8000ObjectMover(PostgreSQLObjectMover):
     # Delete the statements that need paramaters.

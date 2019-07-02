@@ -245,7 +245,6 @@ def implement_db_driver_options(name, *driver_modules):
     module.select_driver = lambda driver_name=None: _select_driver_by_name(driver_name,
                                                                            sys.modules[name])
 
-
 class _ConnWrapper(object): # pragma: no cover
     def __init__(self, conn):
         self.__conn = conn
@@ -265,10 +264,17 @@ class _ConnWrapper(object): # pragma: no cover
         return _ConnWrapper(self.__conn.cursor(*args, **kwargs))
 
     def execute(self, op, args=None):
-        #print(op, args)
-        self.__conn.connection.handle_unread_result()
+        # with l:
+        #     print(threading.current_thread(), self, op, args)
+        #     self.__conn.execute("SELECT * from information_schema.innodb_locks;")
+        #     print("\tLocks in", threading.current_thread(), op)
+        #     for row in self.__conn:
+        #         print("\t", *row)
+        #     self.__conn.execute("select * from sys.innodb_lock_waits;")
+        #     for row in self.__conn:
+        #         print("\t", *row)
+        #self.__conn.connection.handle_unread_result()
         return self.__conn.execute(op, args)
-
 
     def __iter__(self):
         return self.__conn.__iter__()

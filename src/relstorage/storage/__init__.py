@@ -718,7 +718,7 @@ class RelStorage(UndoLogCompatible,
             raise
         else:
             self._tpc_phase = next_phase
-            return self._tpc_phase.resolved_oids
+            return self._tpc_phase.invalidated_oids
 
     @metricmethod
     def tpc_finish(self, transaction, f=None):

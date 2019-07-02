@@ -312,29 +312,41 @@ class BlobHelper(object):
                     ZODB.blob.remove_committed(os.path.join(dirname, name))
                 ZODB.blob.remove_committed_dir(dirname)
 
+    def _move_blobs_into_place(self, tid):
+        if not self._txn_blobs:
+            return
+        if not tid:
+            raise POSException.StorageTransactionError("No TID for blobs")
+
+        # We now have a transaction ID, so rename all the blobs
+        # accordingly. This is very unlikely to fail. If we're
+        # not using a shared blob-dir, it doesn't matter much if it fails;
+        # source data is safely in the database, we'd just have some extra temporary
+        # files. (Though we don't want that exception to populate from tpc_finish.)
+        #
+        # In fact, ClientStorage does this in tpc_finish for blob cache dirs.
+        # It's not been reported as a problem there, so probably it really does
+        # rarely fail. Exceptions from tpc_finish are a VERY BAD THING.
+        for oid, sourcename in self._txn_blobs.items():
+            bytes = os.stat(sourcename).st_size
+            self.cache_checker.loaded(bytes, check=False)
+            targetname = self.fshelper.getBlobFilename(oid, tid)
+            if sourcename != targetname:
+                lock = _lock_blob(targetname)
+                try:
+                    ZODB.blob.rename_or_copy_blob(sourcename, targetname)
+                finally:
+                    lock.close()
+                self._txn_blobs[oid] = targetname
+        self.cache_checker.check(True)
+
     def vote(self, tid):
-        if self._txn_blobs:
-            # We now have a transaction ID, so rename all the blobs
-            # accordingly. This is very unlikely to fail. If we're
-            # not using a shared blob-dir, it doesn't matter much if it fails;
-            # source data is safely in the database, we'd just have some extra temporary
-            # files. (Though we don't want that exception to populate from tpc_finish.)
-            #
-            # In fact, ClientStorage does this in tpc_finish for shared blob dirs.
-            # It's not been reported as a problem there, so probably it really does
-            # rarely fail. Exceptions from tpc_finish are a VERY BAD THING.
-            for oid, sourcename in self._txn_blobs.items():
-                bytes = os.stat(sourcename).st_size
-                self.cache_checker.loaded(bytes, check=False)
-                targetname = self.fshelper.getBlobFilename(oid, tid)
-                if sourcename != targetname:
-                    lock = _lock_blob(targetname)
-                    try:
-                        ZODB.blob.rename_or_copy_blob(sourcename, targetname)
-                    finally:
-                        lock.close()
-                    self._txn_blobs[oid] = targetname
-            self.cache_checker.check(True)
+        if self.shared_blob_dir:
+            self._move_blobs_into_place(tid)
+
+    def finish(self, tid):
+        if not self.shared_blob_dir:
+            self._move_blobs_into_place(tid)
 
     def abort(self):
         if self._txn_blobs:

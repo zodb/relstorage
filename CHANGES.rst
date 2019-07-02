@@ -56,6 +56,9 @@
   in-place ``UPDATE`` rather than a ``DELETE`` followed by an
   ``INSERT``. See :issue:`189`.
 
+- Make PostgreSQL use an upsert query for moving rows into place on
+  history-preserving databases.
+
 3.0a3 (2019-06-26)
 ==================
 

@@ -26,6 +26,7 @@ from .._compat import OID_TID_MAP_TYPE
 from ..iter import fetchmany
 from ._util import noop_when_history_free
 from ._util import query_property as _query_property
+from .._util import consume
 from .._compat import ABC
 from .batch import RowBatcher
 from .interfaces import IObjectMover
@@ -48,6 +49,12 @@ class AbstractObjectMover(ABC):
 
         self.version_detector = version_detector
         self.make_batcher = batcher_factory
+
+    def _debug_my_locks(self, cursor): # pylint:disable=unused-argument
+        """
+        Return a string describing locks held by the cursor's connection.
+        """
+        return ''
 
     @noop_when_history_free
     def _compute_md5sum(self, data):
@@ -208,7 +215,98 @@ class AbstractObjectMover(ABC):
         batcher = self.make_batcher(cursor, row_limit=1000)
         rows = batcher.select_from(columns, table, **{filter_column: oids})
         res = self._current_object_tids_map_type(list(rows))
+        # if 0: # with l
+        #     print(threading.current_thread(), 'current tids', res)
+        #     subprocess.check_call(
+        #         'mysql -uroot -e "select * from performance_schema.data_locks"',
+        #         shell=True
+        #     )
+        #     print(threading.current_thread(), "Done checking current")
+
         return res
+
+    _lock_current_clause = 'FOR UPDATE'
+
+    def lock_current_objects(self, cursor, current_oids):
+        # We need to be sure to take the locks in a deterministic
+        # order; the easiest way to do that is to order them by OID.
+        # But we have two separate sets of OIDs we need to lock: the
+        # ones we're finding the current data for, and the ones that
+        # we're going to check for conflicts. The ones we're checking
+        # for conflicts are already in the database in `temp_store`
+        # (and partly in the storage cache's temporary storage and/or
+        # the row batcher); the current oids are only in memory.
+        # So we have a few choices: either put the current oids into
+        # a database table and do a UNION query with temp_store,
+        # or pull the temp_store data into memory, union it with
+        # current_oids and issue a single big query.
+        #
+        # Our strategy could even vary depending on the size of current_oids;
+        # in the usual case, it will be small or empty, and an in-database
+        # big UNION query is probably workable (in the empty case, we can
+        # elide this part altogether)
+        #        import threading, subprocess
+        # TODO: make this more useful so we can do fewer overall queries.
+        # right now the typical call sequence will take three queries:
+        # This one, the one to get current, and the one to detect conflicts.
+        _, table, filter_column = self._current_object_tids_query
+
+        # In history free mode, *table* will be `object_state`, which
+        # has ZOID as its primary key. In history preserving mode,
+        # *table* will be `current_object`, where ZOID is also the primary
+        # key (and `object_state` is immutable).
+        # if 0:
+        #     print(threading.current_thread(), "Finding to lock before", cid)
+        #     subprocess.check_call(
+        #         'mysql -uroot -e "select * from performance_schema.data_locks"',
+        #         shell=True
+        #     )
+        # If we also include the objects being added,
+        # mysql takes out gap locks, and we can deadlock?
+        # TODO: Confirm.
+        objects_being_updated_stmt = """
+        SELECT zoid FROM %s WHERE zoid IN (
+            SELECT zoid FROM temp_store
+        )
+        """ % (table, )
+
+        cursor.execute(objects_being_updated_stmt)
+
+        oids_being_updated = [row[0] for row in cursor]
+        # if 0:
+        #     print(threading.current_thread(), "Finding to lock after", cid)
+        #     subprocess.check_call(
+        #         'mysql -uroot -e "select * from performance_schema.data_locks"',
+        #         shell=True
+        #     )
+
+        oids_to_lock = set(oids_being_updated) | set(current_oids)
+        oids_to_lock = sorted(oids_to_lock)
+
+        batcher = self.make_batcher(cursor, row_limit=1000)
+        # MySQL 8 allows NOWAIT and SKIP LOCKED; earlier versions do not
+        # have that.
+        # PostgreSQL allows both.
+        # There is no timeout here; but we could implement that with
+        # repeated queries and SKIP LOCKED
+
+        cols_to_lock = ('zoid',) if table == 'current_object' else ('zoid', 'tid')
+        consume(batcher.select_from(
+            cols_to_lock, table,
+            suffix='  %s ' % self._lock_current_clause,
+            **{filter_column: oids_to_lock}
+        ))
+
+        # if 0:
+        #     print(threading.current_thread(), 'locked', locked)
+        #     subprocess.check_call(
+        #         'mysql -uroot -e "select * from performance_schema.data_locks"',
+        #         shell=True
+        #     )
+        #     print(threading.current_thread(), "Done checking locks")
+
+        return self.current_object_tids(cursor, current_oids)
+
 
     #: A sequence of *names* of attributes on this object that are statements to be
     #: executed by ``on_store_opened`` when ``restart`` is False.
@@ -329,14 +427,16 @@ class AbstractObjectMover(ABC):
         """
         SELECT zoid, current_object.tid, temp_store.prev_tid
         FROM temp_store
-                JOIN current_object USING (zoid)
+        JOIN current_object USING (zoid)
         WHERE temp_store.prev_tid != current_object.tid
+        ORDER BY zoid
         """,
         """
         SELECT zoid, object_state.tid, temp_store.prev_tid
         FROM temp_store
-                JOIN object_state USING (zoid)
+        JOIN object_state USING (zoid)
         WHERE temp_store.prev_tid != object_state.tid
+        ORDER BY zoid
         """
     )
 
@@ -344,15 +444,30 @@ class AbstractObjectMover(ABC):
 
     @metricmethod_sampled
     def detect_conflict(self, cursor):
-        # TODO: We need to make sure these existing rows get or are locked.
         # TODO: We should return the committed state so it can be passed to tryToResolveConflict
-        #lock = 'SELECT zoid FROM %s WHERE zoid IN (SELECT zoid FROM temp_store) FOR UPDATE'
-        #lock = lock % ('current_object' if self.keep_history else 'object_state')
-        #cursor.execute(lock)
-        #cursor.fetchall()
+
+        # cursor.execute('select connection_id(), ps_thread_id(null)')
+        # cid, th_id = cursor.fetchall()[0]
+        # if 0: #with l:
+        #     print(threading.current_thread(), "Will detect conflicts", "cid", cid, "th_id", th_id)
+        #     subprocess.check_call(
+        #         ['mysql', '-uroot', '-e',
+        #          "select *, connection_id() from performance_schema.data_locks"
+        #         ],
+        #     )
+        # cursor.execute('select zoid from temp_store')
+        # print(threading.current_thread(), "possible conflicts", cursor.fetchall())
         stmt = self._detect_conflict_query
         cursor.execute(stmt)
         rows = cursor.fetchall()
+        # if 0:
+        #     print(threading.current_thread(), "DID detect conflicts", cid)
+        #     subprocess.check_call(
+        #         ['mysql', '-uroot', '-e',
+        #          "select *, connection_id() from performance_schema.data_locks"
+        #         ],
+        #     )
+        #     print(threading.current_thread(), "done detect conflicts")
         return rows
 
     @metricmethod_sampled
@@ -380,7 +495,8 @@ class AbstractObjectMover(ABC):
       (zoid, tid, prev_tid, md5, state_size, state)
     SELECT zoid, %s, prev_tid, md5,
       COALESCE(LENGTH(state), 0), state
-    FROM temp_store
+      FROM temp_store
+      ORDER BY zoid
     """
 
     _move_from_temp_hf_insert_query = """
@@ -430,6 +546,18 @@ class AbstractObjectMover(ABC):
 
         Returns the list of oids stored.
         """
+        stmt = """
+        SELECT zoid FROM temp_store
+        """
+        cursor.execute(stmt)
+        affected_oids = [oid for (oid,) in fetchmany(cursor)]
+        # if 0: #with l:
+        #     print(threading.current_thread(), "Will store", affected_oids, tid)
+        #     subprocess.check_call(
+        #         ['mysql', '-uroot', '-e',
+        #          "select * from performance_schema.data_locks"
+        #         ],
+        #     )
 
         if self.keep_history:
             stmt = self._move_from_temp_hp_insert_query
@@ -443,27 +571,41 @@ class AbstractObjectMover(ABC):
         if txn_has_blobs:
             stmt = self._move_from_temp_copy_blob_query
             cursor.execute(stmt, (tid,))
+        # if 0: #with l:
+        #     print(threading.current_thread(), "Did store", affected_oids)
 
-        stmt = """
-        SELECT zoid FROM temp_store
-        """
-        cursor.execute(stmt)
-        return [oid for (oid,) in fetchmany(cursor)]
+        #     subprocess.check_call(
+        #         ['mysql', '-uroot', '-e',
+        #          "select * from performance_schema.data_locks"
+        #         ],
+        #     )
+        #     print(threading.current_thread(), "Done store")
+        return affected_oids
 
+    # Insert and update current objects. The trivial
+    # implementation does a two-part query; if you
+    # have an UPSERT statement that can do it in one query,
+    # then put that in `_update_current_insert_query`
+    # and set `_update_current_update_query` to None.
+    # Note that to avoid deadlocks, it is incredibly important
+    # to order the updates in OID order.
     _update_current_insert_query = """
         INSERT INTO current_object (zoid, tid)
         SELECT zoid, tid FROM object_state
         WHERE tid = %s
-            AND prev_tid = 0"""
+            AND prev_tid = 0
+    """
 
     _update_current_update_query = """
-        UPDATE current_object SET tid = %s
+        UPDATE current_object
+        SET tid = %s
         WHERE zoid IN (
             SELECT zoid FROM object_state
             WHERE tid = %s
                 AND prev_tid != 0
-            ORDER BY zoid)
-        """
+            ORDER BY zoid
+        )
+    """
 
     @noop_when_history_free
     @metricmethod_sampled
@@ -473,15 +615,12 @@ class AbstractObjectMover(ABC):
 
         tid is the integer tid of the transaction being committed.
         """
-        # TODO: We should be able to use a single UPSERT
-        # query for these.
         stmt = self._update_current_insert_query
         cursor.execute(stmt, (tid,))
 
-        # Change existing objects.  To avoid deadlocks,
-        # update in OID order.
-        stmt = self._update_current_update_query
-        cursor.execute(stmt, (tid, tid))
+        if self._update_current_update_query:
+            stmt = self._update_current_update_query
+            cursor.execute(stmt, (tid, tid))
 
     @metricmethod_sampled
     def download_blob(self, cursor, oid, tid, filename):

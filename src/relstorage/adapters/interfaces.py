@@ -397,6 +397,22 @@ class IObjectMover(Interface):
         Note that this may be a BTree mapping, not a dictionary.
         """
 
+    def lock_current_objects(cursor, oids):
+        """
+        Lock the objects involved in the current transaction, which
+        must have been moved into the temporary tables.
+
+        In addition to those, lock the oids contained in *oids*.
+
+        Returns the same thing as :meth:`current_object_tids`.
+
+        Typically this will be followed by a call to
+        :meth:`detect_conflict`.
+
+        TODO: Currently this call sequence requires three queries.
+        Figure out a way to reduce that to 1.
+        """
+
     def on_store_opened(cursor, restart=False):
         """Create the temporary table for storing objects.
 

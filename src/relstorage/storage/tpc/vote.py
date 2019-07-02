@@ -41,6 +41,7 @@ class DatabaseLockedForTid(object):
     @classmethod
     def lock_database_for_next_tid(cls, cursor, adapter, ude):
         # TODO: Stop doing this here; go to row-level locking.
+
         adapter.locker.hold_commit_lock(cursor, ensure_current=True)
         user, desc, ext = ude
 
@@ -68,6 +69,12 @@ class DatabaseLockedForTid(object):
         adapter.txncontrol.add_transaction(
             cursor, tid_int, user, desc, ext, tid_is_packed)
         return cls(tid, tid_int, adapter)
+
+    __slots__ = (
+        'tid',
+        'tid_int',
+        'release_commit_lock',
+    )
 
     def __init__(self, tid, tid_int, adapter):
         self.tid = tid
@@ -97,7 +104,7 @@ class AbstractVote(AbstractTPCState):
         'committing_tid_lock',
         # {oid_bytes}: Things that get changed as part of the vote process
         # and thus need to be invalidated.
-        'resolved_oids',
+        'invalidated_oids',
     )
 
     def __init__(self, begin_state, committing_tid_lock=None):
@@ -106,15 +113,15 @@ class AbstractVote(AbstractTPCState):
         # locked in.
         super(AbstractVote, self).__init__(begin_state.storage, begin_state.transaction)
 
-        self.required_tids = begin_state.required_tids
+        self.required_tids = begin_state.required_tids or {}
         self.max_stored_oid = begin_state.max_stored_oid
         self.ude = begin_state.ude
         self.committing_tid_lock = committing_tid_lock
-        self.resolved_oids = set()
+        self.invalidated_oids = set()
 
     def enter(self):
         resolved_in_vote = self.__vote()
-        self.resolved_oids.update(resolved_in_vote)
+        self.invalidated_oids.update(resolved_in_vote)
 
     def _flush_temps_to_db(self, cursor):
         mover = self.storage._adapter.mover
@@ -133,7 +140,6 @@ class AbstractVote(AbstractTPCState):
         # method was called.
         cursor = self.storage._store_cursor
         assert cursor is not None
-        conn = self.storage._store_conn
         adapter = self.storage._adapter
         mover = adapter.mover
 
@@ -145,15 +151,6 @@ class AbstractVote(AbstractTPCState):
             adapter.oidallocator.set_min_oid(
                 cursor, self.max_stored_oid + 1)
 
-        # Here's where we take the global commit lock, and
-        # allocate the next available transaction id, storing it
-        # into history-preserving DBs. But if someone passed us
-        # one, then it must already be in the DB, and the lock must
-        # already be held.
-        if not self.committing_tid_lock:
-            self.__prepare_tid()
-
-        committing_tid_int = self.committing_tid_lock.tid_int
 
         # XXX: When we stop allocating the TID early, we need to move
         # 'move_from_temp' (hf and hp) and 'update_current' (hp only)
@@ -163,31 +160,32 @@ class AbstractVote(AbstractTPCState):
         # the rows involved for update, in order (to avoid deadlocks),
         # including the prev_tid rows (hp only) and current committed
         # rows (both) for everything that conflicts.
+        #
+        # The above is now partway done.
 
-        # Check the things registered by Connection.readCurrent()
-        if self.required_tids:
-            oid_ints = self.required_tids.keys()
-            current = mover.current_object_tids(cursor, oid_ints)
-            for oid_int, expect_tid_int in self.required_tids.items():
-                actual_tid_int = current.get(oid_int, 0)
-                if actual_tid_int != expect_tid_int:
-                    raise ReadConflictError(
-                        oid=int64_to_8bytes(oid_int),
-                        serials=(int64_to_8bytes(actual_tid_int),
-                                 int64_to_8bytes(expect_tid_int)))
+        # Check the things registered by Connection.readCurrent(),
+        # while simeoutaneously taking out update locks on both those rows,
+        # and the rows we might conflict with or will be replacing.
+        oid_ints = self.required_tids.keys()
+        current = mover.lock_current_objects(cursor, oid_ints)
+        for oid_int, expect_tid_int in self.required_tids.items():
+            actual_tid_int = current.get(oid_int, 0)
+            if actual_tid_int != expect_tid_int:
+                raise ReadConflictError(
+                    oid=int64_to_8bytes(oid_int),
+                    serials=(int64_to_8bytes(actual_tid_int),
+                             int64_to_8bytes(expect_tid_int)))
 
-        resolved_serials = self.__finish_store(committing_tid_int)
-        self.storage._adapter.mover.update_current(cursor, committing_tid_int)
-        self.prepared_txn = self.storage._adapter.txncontrol.commit_phase1(
-            conn, cursor, committing_tid_int)
+        invalidated_oids = self.__check_and_resolve_conflicts()
 
-        if self.storage.blobhelper is not None:
-            self.storage.blobhelper.vote(self.committing_tid_lock.tid)
+
+        if self.storage.blobhelper is not None and self.storage.blobhelper.shared_blob_dir:
+            self.__lock_and_move('vote')
 
         # New storage protocol
-        return resolved_serials
+        return invalidated_oids
 
-    def __prepare_tid(self):
+    def __choose_tid_and_lock(self):
         """
         Choose a tid for the current transaction, and exclusively lock
         the database commit lock.
@@ -202,14 +200,15 @@ class AbstractVote(AbstractTPCState):
         self.committing_tid_lock = lock
         return lock
 
-    def __finish_store(self, committing_tid_int):
+    def __check_and_resolve_conflicts(self):
         """
-        Move stored objects from the temporary table to final storage.
+        Either raises an `ConflictError`, or successfully resolves
+        all conflicts.
 
-        Returns a sequence of OIDs that were resolved to be received
-        by Connection._handle_serial().
+        Returns a set of byte OIDs for objects modified in this transaction
+        but which were then updated by conflict resolution and so must
+        be invalidated.
         """
-        # pylint:disable=too-many-locals
         cursor = self.storage._store_cursor
         adapter = self.storage._adapter
         cache = self.storage._cache
@@ -217,7 +216,7 @@ class AbstractVote(AbstractTPCState):
 
         # Detect conflicting changes.
         # Try to resolve the conflicts.
-        resolved = set()  # a set of OIDs
+        invalidated = set()  # a set of OIDs
         # In the past, we didn't load all conflicts from the DB at once,
         # just one at a time. This was because we also fetched the state data
         # from the DB, and it could be large. But now we use the state we have in
@@ -237,32 +236,77 @@ class AbstractVote(AbstractTPCState):
             if resolved_state is None:
                 # unresolvable; kill the whole transaction
                 raise ConflictError(
-                    oid=oid, serials=(prev_tid, serial), data=state_from_this_txn)
+                    oid=oid,
+                    serials=(prev_tid, serial),
+                    data=state_from_this_txn
+                )
 
             # resolved
             state_from_this_txn = resolved_state
             # TODO: Make this use the bulk methods so we can use COPY.
             adapter.mover.replace_temp(
                 cursor, oid_int, committed_tid_int, state_from_this_txn)
-            resolved.add(oid)
+            invalidated.add(oid)
             cache.store_temp(oid_int, state_from_this_txn)
 
+        return invalidated
+
+    def __finish_store(self, committing_tid_int):
+        """
+        Move stored objects from the temporary table to final storage.
+
+        Returns a sequence of OIDs that were resolved to be received
+        by Connection._handle_serial().
+        """
         # Move the new states into the permanent table
         if self.storage.blobhelper is not None:
             txn_has_blobs = self.storage.blobhelper.txn_has_blobs
         else:
             txn_has_blobs = False
 
+        cursor = self.storage._store_cursor
+        adapter = self.storage._adapter
+
         # This returns the OID ints stored, but we don't use them here
         adapter.mover.move_from_temp(cursor, committing_tid_int, txn_has_blobs)
 
-        return resolved
+    def __lock_and_move(self, method='finish'):
+        # Here's where we take the global commit lock, and
+        # allocate the next available transaction id, storing it
+        # into history-preserving DBs. But if someone passed us
+        # a TID, then it must already be in the DB, and the lock must
+        # already be held.
+        #
+        # If we've prepared the transaction, then the TID must be in the
+        # db, the lock must be held, and we must have finished all of our
+        # storage actions. This is only expected to be the case when we have
+        # a shared blob dir.
+        if self.prepared_txn:
+            # Already done.
+            assert self.committing_tid_lock
+            return
+
+        if not self.committing_tid_lock:
+            self.__choose_tid_and_lock()
+        committing_tid_int = self.committing_tid_lock.tid_int
+        self.__finish_store(committing_tid_int)
+
+        if self.storage.blobhelper is not None:
+            meth = getattr(self.storage.blobhelper, method)
+            meth(committing_tid_int)
+        cursor = self.storage._store_cursor
+        self.storage._adapter.mover.update_current(cursor, committing_tid_int)
+        conn = self.storage._store_conn
+        self.prepared_txn = self.storage._adapter.txncontrol.commit_phase1(
+            conn, cursor, committing_tid_int)
 
     def tpc_finish(self, transaction, f=None):
         with self.storage._lock:
             if transaction is not self.transaction:
                 raise StorageTransactionError(
                     "tpc_finish called with wrong transaction")
+            # Handle the finishing. We cannot/must not fail now.
+            self.__lock_and_move()
             assert self.committing_tid_lock is not None, self
             try:
                 try:
@@ -288,4 +332,5 @@ class HistoryPreserving(AbstractVote):
         # we must preserve that.
         super(HistoryPreserving, self).__init__(begin_state,
                                                 begin_state.committing_tid_lock)
-        self.resolved_oids.update(begin_state.undone_oids)
+        # Anything that we've undone is also invalidated.
+        self.invalidated_oids.update(begin_state.undone_oids)

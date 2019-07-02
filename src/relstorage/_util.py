@@ -17,7 +17,9 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import collections
 import functools
+import itertools
 import time
 
 logger = __import__('logging').getLogger(__name__)
@@ -143,3 +145,14 @@ def to_utf8(data):
     if data is None or isinstance(data, bytes):
         return data
     return data.encode("utf-8")
+
+def consume(iterator, n=None):
+    "Advance the iterator n-steps ahead. If n is none, consume entirely."
+    # From the itertools documentation.
+    # Use functions that consume iterators at C speed.
+    if n is None:
+        # feed the entire iterator into a zero-length deque
+        collections.deque(iterator, maxlen=0)
+    else:
+        # advance to the empty slice starting at position n
+        next(itertools.islice(iterator, n, n), None)
