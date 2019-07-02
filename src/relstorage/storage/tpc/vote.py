@@ -293,7 +293,7 @@ class AbstractVote(AbstractTPCState):
 
         if self.storage.blobhelper is not None:
             meth = getattr(self.storage.blobhelper, method)
-            meth(committing_tid_int)
+            meth(self.committing_tid_lock.tid)
         cursor = self.storage._store_cursor
         self.storage._adapter.mover.update_current(cursor, committing_tid_int)
         conn = self.storage._store_conn

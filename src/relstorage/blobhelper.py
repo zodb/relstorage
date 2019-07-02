@@ -317,7 +317,7 @@ class BlobHelper(object):
             return
         if not tid:
             raise POSException.StorageTransactionError("No TID for blobs")
-
+        assert isinstance(tid, bytes)
         # We now have a transaction ID, so rename all the blobs
         # accordingly. This is very unlikely to fail. If we're
         # not using a shared blob-dir, it doesn't matter much if it fails;
@@ -328,8 +328,8 @@ class BlobHelper(object):
         # It's not been reported as a problem there, so probably it really does
         # rarely fail. Exceptions from tpc_finish are a VERY BAD THING.
         for oid, sourcename in self._txn_blobs.items():
-            bytes = os.stat(sourcename).st_size
-            self.cache_checker.loaded(bytes, check=False)
+            size = os.stat(sourcename).st_size
+            self.cache_checker.loaded(size, check=False)
             targetname = self.fshelper.getBlobFilename(oid, tid)
             if sourcename != targetname:
                 lock = _lock_blob(targetname)
