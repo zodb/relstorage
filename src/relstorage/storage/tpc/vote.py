@@ -84,17 +84,28 @@ class AbstractVote(AbstractTPCState):
 
     """
 
-    # The byte representation of the TID we've picked to commit.
-    committing_tid_lock = None
-
-    prepared_txn = None
+    __slots__ = (
+        # (user, description, extension) from the transaction.
+        'ude',
+        # max_stored_oid is the highest OID stored by the current
+        # transaction
+        'max_stored_oid',
+        # required_tids: {oid_int: tid_int}; confirms that certain objects
+        # have not changed at commit. May be a BTree
+        'required_tids',
+        # The DatabaseLockedForTid object
+        'committing_tid_lock',
+        # {oid_bytes}: Things that get changed as part of the vote process
+        # and thus need to be invalidated.
+        'resolved_oids',
+    )
 
     def __init__(self, begin_state, committing_tid_lock=None):
         # If committing_tid is passed to this method, it means
         # the database has already been locked and the TID is
         # locked in.
-        self.storage = begin_state.storage
-        self.transaction = begin_state.transaction
+        super(AbstractVote, self).__init__(begin_state.storage, begin_state.transaction)
+
         self.required_tids = begin_state.required_tids
         self.max_stored_oid = begin_state.max_stored_oid
         self.ude = begin_state.ude

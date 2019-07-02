@@ -35,21 +35,23 @@ class AbstractBegin(AbstractTPCState):
     """
     The phase we enter after ``tpc_begin`` has been called.
     """
-
-    # (user, description, extension) from the transaction.
-    ude = None
-
-    # max_stored_oid is the highest OID stored by the current
-    # transaction
-    max_stored_oid = 0
-
-    # required_tids: {oid_int: tid_int}; confirms that certain objects
-    # have not changed at commit. May be a BTree
-    required_tids = ()
+    __slots__ = (
+        # (user, description, extension) from the transaction.
+        'ude',
+        # max_stored_oid is the highest OID stored by the current
+        # transaction
+        'max_stored_oid',
+        # required_tids: {oid_int: tid_int}; confirms that certain objects
+        # have not changed at commit. May be a BTree
+        'required_tids',
+    )
 
     def __init__(self, storage, transaction):
-        self.storage = storage
-        self.transaction = transaction
+        super(AbstractBegin, self).__init__(storage, transaction)
+        self.ude = None
+        self.max_stored_oid = 0
+        self.required_tids = ()
+
         storage._lock.acquire()
         try:
             storage._lock.release()

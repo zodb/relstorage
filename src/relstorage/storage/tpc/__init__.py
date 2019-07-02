@@ -41,12 +41,11 @@ abort_early = os.environ.get('RELSTORAGE_ABORT_EARLY')
 
 class AbstractTPCState(object):
 
-    # The transaction
-    transaction = None
-    prepared_txn = None
-
-    aborted = False
-    storage = None
+    __slots__ = (
+        'storage',
+        'transaction',
+        'prepared_txn',
+    )
 
     # - store
     # - restore/restoreBlob
@@ -60,6 +59,11 @@ class AbstractTPCState(object):
     # Because entering tpc_begin wasn't allowed if the storage was
     # read only, this needs to happen in the "not in transaction"
     # state.
+
+    def __init__(self, storage, transaction=None):
+        self.storage = storage         # XXX: This introduces a cycle.
+        self.transaction = transaction
+        self.prepared_txn = None
 
     def tpc_finish(self, transaction, f=None):
         # For the sake of some ZODB tests, we need to implement this everywhere,
@@ -88,7 +92,6 @@ class AbstractTPCState(object):
             finally:
                 self._clear_temp()
         finally:
-            self.aborted = True
             self.storage._commit_lock.release()
         return NotInTransaction(self.storage)
 
@@ -101,17 +104,22 @@ class AbstractTPCState(object):
         if blobhelper is not None:
             blobhelper.clear_temp()
 
+    def tpc_begin(self, transaction):
+        if transaction is self.transaction:
+            raise StorageTransactionError("Duplicate tpc_begin calls for same transaction.")
+        # XXX: Shouldn't we tpc_abort() first? The original storage
+        # code didn't do that, but it seems like it should.
+        return self.storage._tpc_begin_factory(self.storage, transaction)
+
     def no_longer_stale(self):
         return self
+
+    def stale(self, e):
+        return Stale(self, e)
 
 class NotInTransaction(AbstractTPCState):
     # The default state, when the storage is not attached to a
     # transaction.
-
-    __slots__ = ('is_read_only',)
-
-    def __init__(self, storage):
-        self.is_read_only = storage._is_read_only
 
     def tpc_abort(self, *args, **kwargs): # pylint:disable=arguments-differ,unused-argument
         # Nothing to do
@@ -123,11 +131,16 @@ class NotInTransaction(AbstractTPCState):
     tpc_finish = tpc_vote = _no_transaction
 
     def store(self, *_args, **_kwargs):
-        if self.is_read_only:
+        if self.storage._is_read_only:
             raise ReadOnlyError()
         self._no_transaction()
 
     restore = deleteObject = undo = restoreBlob = store
+
+    def tpc_begin(self, transaction):
+        if self.storage._is_read_only:
+            raise ReadOnlyError()
+        return super(NotInTransaction, self).tpc_begin(transaction)
 
     # This object appears to be false.
     def __bool__(self):
@@ -144,16 +157,21 @@ class Stale(AbstractTPCState):
     """
 
     def __init__(self, previous_state, stale_error):
+        super(Stale, self).__init__(None, None)
         self.previous_state = previous_state
         if not isinstance(stale_error, type):
             stale_error = type(stale_error)
         self.stale_error = stale_error
-
-    def no_longer_stale(self):
-        return self.previous_state
 
     def _stale(self, *args, **kwargs):
         raise self.stale_error
 
     store = restore = checkCurrentSerialInTransaction = _stale
     undo = deleteObject = _stale
+    tpc_begin = _stale
+
+    def no_longer_stale(self):
+        return self.previous_state
+
+    def stale(self, e):
+        return self

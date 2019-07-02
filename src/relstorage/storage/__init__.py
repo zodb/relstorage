@@ -36,7 +36,6 @@ from ZODB.mvccadapter import HistoricalStorageAdapter
 from ZODB.POSException import POSKeyError
 from ZODB.POSException import ReadConflictError
 from ZODB.POSException import ReadOnlyError
-from ZODB.POSException import StorageTransactionError
 from ZODB.POSException import Unsupported
 
 from ZODB.UndoLogCompatible import UndoLogCompatible
@@ -58,7 +57,6 @@ from relstorage.options import Options
 
 from .transaction_iterator import TransactionIterator
 from .tpc import NotInTransaction
-from .tpc import Stale
 from .tpc.begin import HistoryFree
 from .tpc.begin import HistoryPreserving
 from .tpc.restore import Restore
@@ -321,6 +319,8 @@ class RelStorage(UndoLogCompatible,
             except:
                 self._drop_load_connection()
                 raise
+            finally:
+                self._tpc_phase = self._tpc_phase.no_longer_stale()
             self._load_transaction_open = ''
 
     def _restart_load_and_call(self, f, *args, **kw):
@@ -426,6 +426,7 @@ class RelStorage(UndoLogCompatible,
             self._drop_load_connection()
             self._drop_store_connection()
         self._cache.release()
+        self._tpc_phase = None
 
     def close(self):
         """Close the storage and all instances."""
@@ -445,6 +446,7 @@ class RelStorage(UndoLogCompatible,
                     instance.close()
             self._instances = []
             self._cache.close()
+            self._tpc_phase = None
 
     def __len__(self):
         return self._adapter.stats.get_object_count()
@@ -689,17 +691,7 @@ class RelStorage(UndoLogCompatible,
 
     @metricmethod
     def tpc_begin(self, transaction, tid=None, status=' '):
-        # TODO: Make the current state object handle this whole method.
-        if self._stale_error is not None:
-            raise self._stale_error
-        if self._is_read_only:
-            raise ReadOnlyError()
-
-        if self._tpc_phase and self._tpc_phase.transaction is transaction:
-            raise StorageTransactionError(
-                "Duplicate tpc_begin calls for same transaction")
-
-        self._tpc_phase = self._tpc_begin_factory(self, transaction)
+        self._tpc_phase = self._tpc_phase.tpc_begin(transaction)
         if tid is not None:
             # tid is a committed transaction we will restore.
             # The allowed actions are carefully prescribed.
@@ -1062,7 +1054,7 @@ class RelStorage(UndoLogCompatible,
             # delta_after* maps/current_tid/checkpoints?
             log.error("ReadConflictError from polling invalidations; %s", e)
             self._stale_error = e
-            self._tpc_phase = Stale(self._tpc_phase, e)
+            self._tpc_phase = self._tpc_phase.stale(e)
             return (), prev
 
         self._stale_error = None
