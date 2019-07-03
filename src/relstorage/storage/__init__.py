@@ -102,7 +102,8 @@ class _DummyLock(object):
              ZODB.interfaces.IStorageUndoable,
              ZODB.interfaces.IBlobStorage,
              ZODB.interfaces.IBlobStorageRestoreable,
-             ZODB.interfaces.IMVCCAfterCompletionStorage)
+             ZODB.interfaces.IMVCCAfterCompletionStorage,
+             ZODB.interfaces.ReadVerifyingStorage,)
 class RelStorage(UndoLogCompatible,
                  ConflictResolution.ConflictResolvingStorage):
     """Storage to a relational database, based on invalidation polling"""

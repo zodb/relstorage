@@ -154,25 +154,15 @@ class MySQLObjectMover(AbstractObjectMover):
     ON bc.zoid = sq.zoid
     """
 
-    # The queries that touch current_object and object_state
-    # need to be certain the order they use to avoid deadlocks.
+    # We UPSERT for hf movement; no need to do a delete.
+    _move_from_temp_hf_delete_query = ''
 
-    def _move_from_temp_object_state(self, cursor, tid):
-        stmt = """
-        INSERT INTO object_state (zoid, tid, state_size, state)
-            SELECT zoid, %s, COALESCE(LENGTH(state), 0), state
-            FROM temp_store
-            ORDER BY zoid
-        ON DUPLICATE KEY UPDATE
-            tid = VALUES(tid),
-            state_size = VALUES(state_size),
-            state = VALUES(state)
-        """
-        # cursor.execute("SELECT zoid from temp_store order by zoid")
-        # rows = cursor.fetchall()
-        # import threading
-        # print(threading.current_thread(), "Storing", rows)
-        cursor.execute(stmt, (tid,))
+    _move_from_temp_hf_insert_query = AbstractObjectMover._move_from_temp_hf_insert_query + """
+    ON DUPLICATE KEY UPDATE
+        tid = VALUES(tid),
+        state_size = VALUES(state_size),
+        state = VALUES(state)
+    """
 
     # UPSERT for current_object: no need for separate update.
     _update_current_insert_query = """

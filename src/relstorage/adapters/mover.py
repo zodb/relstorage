@@ -499,10 +499,16 @@ class AbstractObjectMover(ABC):
       ORDER BY zoid
     """
 
+    _move_from_temp_hf_delete_query = """
+    DELETE FROM object_state
+    WHERE zoid IN (SELECT zoid FROM temp_store)
+    """
+
     _move_from_temp_hf_insert_query = """
     INSERT INTO object_state (zoid, tid, state_size, state)
-    SELECT zoid, %s, COALESCE(LENGTH(state), 0), state
-    FROM temp_store
+        SELECT zoid, %s, COALESCE(LENGTH(state), 0), state
+        FROM temp_store
+        ORDER BY zoid
     """
 
     _move_from_temp_copy_blob_query = """
@@ -516,25 +522,32 @@ class AbstractObjectMover(ABC):
     WHERE zoid IN (SELECT zoid FROM temp_store)
     """
 
+
     def _move_from_temp_object_state(self, cursor, tid):
         """
         Called for history-free databases.
 
-        Should replace all entries in object_state with the
-        same zoid from temp_store.
+        Should replace all entries in object_state with the same zoid
+        from temp_store.
 
         This implementation is in two steps, first deleting from
-        ``object_state``, and then copying from ``temp_store`` using
+        ``object_state`` with :attr:`_move_from_temp_hf_delete_query`,
+        and then copying from ``temp_store`` using
         :attr:`_move_from_temp_hf_insert_query`.
+
+        If a subclass can do this in a single step with an ``UPSERT``,
+        it should set :attr:`_move_from_temp_hf_delete_query` to a
+        false value.
+
+        Recall that the queries that touch ``current_object`` and
+        ``object_state`` need to be certain the order they use (by
+        ``zoid``) to avoid deadlocks.
 
         Blobs are handled separately.
         """
-
-        stmt = """
-        DELETE FROM object_state
-        WHERE zoid IN (SELECT zoid FROM temp_store)
-        """
-        cursor.execute(stmt)
+        stmt = self._move_from_temp_hf_delete_query
+        if stmt:
+            cursor.execute(stmt)
 
         stmt = self._move_from_temp_hf_insert_query
         cursor.execute(stmt, (tid,))
