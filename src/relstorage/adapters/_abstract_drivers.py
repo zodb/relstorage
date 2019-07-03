@@ -108,9 +108,14 @@ class AbstractModuleDriver(ABC):
                                         ReplicaClosedException)
         self.close_exceptions = self.disconnected_exceptions + (mod.ProgrammingError,)
         self.lock_exceptions = (mod.DatabaseError,)
+        # If we try to do something very wrong, a bug in our code,
+        # we *should* get a ProgrammingError. Unfortunately, some drivers
+        # raise ProgrammingError for other things, such as failing to get a lock.
+        self.illegal_operation_exceptions = (mod.ProgrammingError,)
         self.use_replica_exceptions = (mod.OperationalError,)
         self.Binary = mod.Binary
         self._connect = mod.connect
+        self.priority = self.PRIORITY if not PYPY else self.PRIORITY_PYPY
 
     def connect(self, *args, **kwargs):
         return self._connect(*args, **kwargs)

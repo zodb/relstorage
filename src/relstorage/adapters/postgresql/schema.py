@@ -149,37 +149,28 @@ class PostgreSQLSchemaInstaller(AbstractSchemaInstaller):
             assert isinstance(name, bytes)
             return name.decode('ascii')
 
-    def prepare(self):
-        """Create the database schema if it does not already exist."""
-        def callback(_conn, cursor):
-            tables = self.list_tables(cursor)
-            if 'object_state' not in tables:
-                self.create(cursor)
-            else:
-                self.check_compatibility(cursor, tables)
-                self.update_schema(cursor, tables)
+    def _prepare_with_connection(self, conn, cursor):
+        super(PostgreSQLSchemaInstaller, self)._prepare_with_connection(conn, cursor)
 
+        if not self.all_procedures_installed(cursor):
+            self.install_procedures(cursor)
             if not self.all_procedures_installed(cursor):
-                self.install_procedures(cursor)
-                if not self.all_procedures_installed(cursor):
-                    raise AssertionError(
-                        "Could not get version information after "
-                        "installing the stored procedures.")
+                raise AssertionError(
+                    "Could not get version information after "
+                    "installing the stored procedures.")
 
-            triggers = self.list_triggers(cursor)
-            if 'blob_chunk_delete' not in triggers:
-                self.install_triggers(cursor)
+        triggers = self.list_triggers(cursor)
+        if 'blob_chunk_delete' not in triggers:
+            self.install_triggers(cursor)
 
-            # Do we need to merge blob chunks?
-            if not self.options.shared_blob_dir:
-                cursor.execute('SELECT chunk_num FROM blob_chunk WHERE chunk_num > 0 LIMIT 1')
-                if cursor.fetchone():
-                    logger.info("Merging blob chunks on the server.")
-                    cursor.execute("SELECT merge_blob_chunks()")
-                    # If we've done our job right, any blobs cached on
-                    # disk are still perfectly valid.
-
-        self.connmanager.open_and_call(callback)
+        # Do we need to merge blob chunks?
+        if not self.options.shared_blob_dir:
+            cursor.execute('SELECT chunk_num FROM blob_chunk WHERE chunk_num > 0 LIMIT 1')
+            if cursor.fetchone():
+                logger.info("Merging blob chunks on the server.")
+                cursor.execute("SELECT merge_blob_chunks()")
+                # If we've done our job right, any blobs cached on
+                # disk are still perfectly valid.
 
     def list_tables(self, cursor):
         cursor.execute("SELECT tablename FROM pg_tables")
@@ -261,19 +252,14 @@ class PostgreSQLSchemaInstaller(AbstractSchemaInstaller):
         self.connmanager.open_and_call(callback)
         super(PostgreSQLSchemaInstaller, self).drop_all()
 
-    def _create_commit_lock(self, cursor):
-        stmt = "CREATE TABLE commit_lock ();"
-        self.runner.run_script(cursor, stmt)
-
     def _create_pack_lock(self, cursor):
         return
 
     def _create_new_oid(self, cursor):
         stmt = """
-        CREATE SEQUENCE zoid_seq;
+        CREATE SEQUENCE IF NOT EXISTS zoid_seq;
         """
         self.runner.run_script(cursor, stmt)
-
 
     def _create_object_state(self, cursor):
         if self.keep_history:

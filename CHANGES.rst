@@ -128,7 +128,7 @@
 
 - Drop support for ZODB 4 and ZEO 4.
 
-- Officially drop support for versions of MySQL before 5.7. We haven't
+- Officially drop support for versions of MySQL before 5.7.9. We haven't
   been testing on anything older than that for some time, and older
   than 5.6 for some time before that.
 
@@ -138,7 +138,9 @@
 - Drop support for pg8000 older than 1.11.0.
 
 - Drop support for MySQL Connector/Python older than 8.0.16. Many
-  older versions are known to be broken. See :issue:`228`.
+  older versions are known to be broken. Note that the C extension,
+  while available, is not currently recommended due to internal
+  errors. See :issue:`228`.
 
 - Test support for MySQL Connector/Python on PyPy. See :issue:`228`.
 

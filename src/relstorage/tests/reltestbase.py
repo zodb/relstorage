@@ -592,7 +592,7 @@ class GenericRelStorageTests(
         self._storage = self.make_storage(pack_batch_timeout=0)
 
         adapter = self._storage._adapter
-        test_conn, test_cursor = adapter.connmanager.open()
+        test_conn, test_cursor = adapter.connmanager.open_for_store()
 
         slept = []
         def sim_sleep(seconds):

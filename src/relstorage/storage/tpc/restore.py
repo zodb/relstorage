@@ -56,7 +56,11 @@ class Restore(object):
         assert committing_tid is not None
         self.wrapping = begin_state
 
-        # hold the commit lock and add the transaction now
+        # hold the commit lock and add the transaction now.
+        # This will prevent anyone else from modifying rows
+        # other than this transaction. We currently avoid the temp tables,
+        # though, so if we do multiple things in a restore transaction,
+        # we could still wind up with locking issues (I think?)
         storage = begin_state.storage
         adapter = storage._adapter
         cursor = storage._store_cursor

@@ -134,6 +134,10 @@ class PG8000Driver(AbstractModuleDriver):
         # XXX: Testing. Can we remove?
         self.disconnected_exceptions += (AttributeError,)
 
+        # Sadly, pg8000 raises ProgrammingError when it can't
+        # obtain a lock, making it hard to distinguish. We'll let other
+        # clauses catch such exceptions.
+        self.illegal_operation_exceptions = ()
         Binary = self.Binary
 
         class Cursor(self.driver_module.Cursor):

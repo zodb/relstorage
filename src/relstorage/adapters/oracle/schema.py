@@ -214,7 +214,7 @@ class OracleSchemaInstaller(AbstractSchemaInstaller):
             res[name.lower()] = version
         return res
 
-    def _create_commit_lock(self, cursor):
+    def _create_commit_row_lock(self, cursor):
         return
 
     def _create_pack_lock(self, cursor):

@@ -664,7 +664,7 @@ class HistoryPreservingPackUndo(PackUndo):
         # pylint:disable=too-many-locals
         # Read committed mode is sufficient.
 
-        conn, cursor = self.connmanager.open()
+        conn, cursor = self.connmanager.open_for_store()
         try: # pylint:disable=too-many-nested-blocks
             try:
                 stmt = """
@@ -1074,7 +1074,7 @@ class HistoryFreePackUndo(PackUndo):
         """
         # pylint:disable=too-many-locals
         # Read committed mode is sufficient.
-        conn, cursor = self.connmanager.open()
+        conn, cursor = self.connmanager.open_for_store()
         try: # pylint:disable=too-many-nested-blocks
             try:
                 stmt = """
@@ -1099,6 +1099,7 @@ class HistoryFreePackUndo(PackUndo):
 
                 self._pause_pack_until_lock(conn, cursor, sleep)
                 while to_remove:
+                    # TODO: Use the row batcher for this.
                     items = to_remove[:100]
                     del to_remove[:100]
                     stmt = """

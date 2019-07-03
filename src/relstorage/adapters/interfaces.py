@@ -322,7 +322,24 @@ class IDatabaseIterator(Interface):
 class ILocker(Interface):
     """Acquire and release the commit and pack locks."""
 
-    def hold_commit_lock(cursor, ensure_current=False, nowait=False):
+    def lock_current_objects(cursor, oids):
+        """
+        Lock the objects involved in the current transaction, which
+        must have been moved into the temporary tables.
+
+        In addition to those, lock the relevant rows for the objects
+        whose OIDS are contained in *oids*.
+
+        This should be done as part of the voting phase of TPC, before
+        taking out the final commit lock.
+
+        Returns nothing.
+
+        Typically this will be followed by a call to
+        :meth:`detect_conflict`.
+        """
+
+    def hold_commit_lock(cursor, ensure_current=True, nowait=False):
         """Acquire the commit lock.
 
         If ensure_current is True, other tables may be locked as well, to
@@ -395,22 +412,6 @@ class IObjectMover(Interface):
         Returns the current {oid_int: tid_int} for specified object ids.
 
         Note that this may be a BTree mapping, not a dictionary.
-        """
-
-    def lock_current_objects(cursor, oids):
-        """
-        Lock the objects involved in the current transaction, which
-        must have been moved into the temporary tables.
-
-        In addition to those, lock the oids contained in *oids*.
-
-        Returns the same thing as :meth:`current_object_tids`.
-
-        Typically this will be followed by a call to
-        :meth:`detect_conflict`.
-
-        TODO: Currently this call sequence requires three queries.
-        Figure out a way to reduce that to 1.
         """
 
     def on_store_opened(cursor, restart=False):

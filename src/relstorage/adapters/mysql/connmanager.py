@@ -75,6 +75,8 @@ class MySQLdbConnectionManager(AbstractConnectionManager):
                 cursor.arraysize = 64
                 if transaction_mode:
                     self._db_driver.set_autocommit(conn, True)
+                    # Transaction isolation cannot be changed inside a
+                    # transaction.
                     cursor.execute(
                         "SET SESSION TRANSACTION %s" % transaction_mode)
                     self._db_driver.set_autocommit(conn, False)
@@ -102,7 +104,7 @@ class MySQLdbConnectionManager(AbstractConnectionManager):
 
         This overrides a method.
         """
-        conn, cursor = self.open()
+        conn, cursor = self.open_for_store()
         try:
             # This phase of packing works best with transactions
             # disabled.  It changes no user-facing data.

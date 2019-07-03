@@ -54,7 +54,7 @@ class MySQLSchemaInstaller(AbstractSchemaInstaller):
                     "The object_state table must use the InnoDB "
                     "engine, but it is using the %s engine." % engine)
 
-    def _create_commit_lock(self, cursor):
+    def _create_commit_row_lock(self, cursor):
         return
 
     def _create_pack_lock(self, cursor):

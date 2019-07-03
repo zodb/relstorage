@@ -17,7 +17,6 @@ Locker implementations.
 
 from __future__ import absolute_import
 
-from perfmetrics import metricmethod
 from zope.interface import implementer
 
 from ..interfaces import ILocker
@@ -34,47 +33,88 @@ class MySQLLocker(AbstractLocker):
     """
     MySQL locks.
 
-    Unlike PostgreSQL and Oracle locks which are implicitly released
-    at the end of a transaction, MySQL locks **must** be released explicitly.
+    Two types of locks are used. The ordinary commit lock is a
+    standard InnoDB row-level lock; this brings the benefits of being
+    lightweight and automatically being released if the transaction
+    aborts or commits, plus instant deadlock detection. Prior to MySQL
+    8.0, these don't support `NOWAIT` syntax, so we synthesize that by
+    setting the session variable `innodb_lock_wait_timeout
+    <https://dev.mysql.com/doc/refman/5.7/en/innodb-parameters.html#sysvar_innodb_lock_wait_timeout>`_.
 
-    .. caution::
-       Prior to MySQL 5.7.5, it is not possible to hold more
-       than one lock in a single session. Thus, the pack lock must be
-       held by a different connection than the commit lock during the
-       packing process (otherwise when
-       :meth:`relstorage.adapters.packundo.HistoryFreePackUndo.fill_object_refs`
-       acquires the commit lock, the pack lock held by :meth:`relstorage.storage.RelStorage.pack`
-       would be dropped).
+    Note that this lock cannot be against the ``object_state`` or
+    ``current_object`` tables: arbitrary rows in those tables may have
+    been locked by other transactions, and we risk deadlock.
 
-       http://dev.mysql.com/doc/refman/5.7/en/miscellaneous-functions.html#function_get-lock
+    The ``ensure_current`` argument is essentially ignored; the locks
+    taken out by ``lock_current_objects`` take care of that.
+
+    The second type of lock, an advisory lock, is used for pack locks.
+    This lock uses the `GET_LOCK
+    <https://dev.mysql.com/doc/refman/5.7/en/locking-functions.html#function_get-lock>`_
+    and ``RELEASE_LOCK`` functions. These locks persist for the
+    duration of a session, and *must* be explicitly released. They do
+    not participate in deadlock detection.
+
+    Prior to MySQL 5.7.5, it is not possible to hold more than one
+    advisory lock in a single session. In the past we used advisory
+    locks for the commit lock, and that meant we had to use multiple
+    sessions (connections) to be able to hold both the commit lock and
+    the pack lock. Fortunately, that limitation has been lifted: we no
+    longer support older versions of MySQL, and we don't need multiple
+    advisory locks anyway.
     """
 
-    @metricmethod
-    def hold_commit_lock(self, cursor, ensure_current=False, nowait=False):
-        timeout = self.commit_lock_timeout if not nowait else 0
-        stmt = "SELECT GET_LOCK(CONCAT(DATABASE(), '.commit'), %s)"
-        cursor.execute(stmt, (timeout,))
-        try:
-            locked = cursor.fetchone()[0]
-        except TypeError as e: # pragma: no cover
-            # This has been observed under certain database drivers and concurrency loads,
-            # specifically gevent with umysqldb and high concurrency. It's not clear what the cause
-            # is, so lets at least raise a specific message.
-            # It's often TypeError("'NoneType' object has no attribute '__getitem__'",),
-            # meaning that cursor.fetchone() returned nothing. This may be related to
-            # cursor.lastrowid being None in OID allocator sometimes.
-            raise CommitLockQueryFailedError("The commit lock query failed: %s" % repr(e))
+    def __init__(self, options, driver, batcher_factory):
+        super(MySQLLocker, self).__init__(options, driver, batcher_factory)
+        # TODO: Back to needing a proper prepare registry.
+        lock_stmt_raw = self._commit_lock_query
+        lock_stmt_nowait_raw = self._commit_lock_nowait_query
 
-        if nowait and locked in (0, 1):
-            return bool(locked)
-        if not locked:
-            raise UnableToAcquireCommitLockError("Unable to acquire commit lock")
+        self._prepare_lock_stmt = 'PREPARE hold_commit_lock FROM "%s"' % (
+            lock_stmt_raw)
+        self._prepare_lock_stmt_nowait = 'PREPARE hold_commit_lock_nowait FROM "%s"' % (
+            lock_stmt_nowait_raw)
+        self._supports_row_lock_nowait = None
+
+        self._commit_lock_query = 'EXECUTE hold_commit_lock'
+        self._commit_lock_nowait_query = 'EXECUTE hold_commit_lock_nowait'
+
+        # No good preparing this, mysql can't take parameters in EXECUTE,
+        # they have to be user variables, which defeats most of the point.
+        self.set_timeout_stmt = 'SET SESSION innodb_lock_wait_timeout = %s'
+
+    def on_store_opened(self, cursor, restart=False):
+        super(MySQLLocker, self).on_store_opened(cursor, restart=restart)
+        if restart:
+            return
+
+        # MySQL 8 and above support NOWAIT on row locks.
+        # sys.version_major() is 5.7.9+
+        if self._supports_row_lock_nowait is None:
+            cursor.execute('SELECT sys.version_major()')
+            major = cursor.fetchone()[0]
+            self._supports_row_lock_nowait = major >= 8
+
+        cursor.execute(self._prepare_lock_stmt)
+        if self._supports_row_lock_nowait:
+            cursor.execute(self._prepare_lock_stmt_nowait)
+
+    def _on_store_opened_set_row_lock_timeout(self, cursor, restart=False):
+        if restart:
+            return
+
+        self._set_row_lock_timeout(cursor, self.commit_lock_timeout)
+
+    def _set_row_lock_timeout(self, cursor, timeout):
+        cursor.execute(self.set_timeout_stmt, (timeout,))
+        # It's INCREDIBLY important to fetch a row after we execute the SET statement;
+        # otherwise, the binary drivers that use libmysqlclient tend to crash,
+        # usually with a 'malloc: freeing not allocated data' or 'malloc:
+        # corrupted data, written after free?' or something like that.
+        cursor.fetchone()
 
     def release_commit_lock(self, cursor):
-        stmt = "SELECT RELEASE_LOCK(CONCAT(DATABASE(), '.commit'))"
-        cursor.execute(stmt)
-        row = cursor.fetchone() # stay in sync
-        assert row
+        "Auto-released by transaction end."
 
     def hold_pack_lock(self, cursor):
         """Try to acquire the pack lock.

@@ -34,9 +34,13 @@ ResultDescription = namedtuple(
 
 class AbstractSchemaInstaller(ABC):
 
-    # Keep this list in the same order as the schema scripts
+    # Keep this list in the same order as the schema scripts,
+    # for dependency (Foreign Key) purposes.
     all_tables = (
-        'commit_lock',
+        # History-free row lock table for commits.
+        # The alternative is to also create the transaction table
+        # in HF mode.
+        'commit_row_lock',
         'pack_lock',
         'transaction',
         'new_oid',
@@ -52,6 +56,12 @@ class AbstractSchemaInstaller(ABC):
         'temp_blob_chunk',
         'temp_pack_visit',
         'temp_undo',
+    )
+
+    # Tables that might exist, but which are unused and obsolete.
+    # These can/should be dropped, and names shouldn't be reused.
+    obsolete_tables = (
+        'commit_lock',
     )
 
     database_type = None  # provided by a subclass
@@ -110,14 +120,14 @@ class AbstractSchemaInstaller(ABC):
             }
             yield result
 
-    @abc.abstractmethod
-    def _create_commit_lock(self, cursor):
+    def _create_commit_row_lock(self, cursor):
         """
         Create the global lock held during commit.
 
         (MySQL and PostgreSQL do this differently.)
         """
-        raise NotImplementedError()
+        stmt = "CREATE TABLE commit_row_lock (tid BIGINT NOT NULL PRIMARY KEY);"
+        self.runner.run_script(cursor, stmt)
 
     @abc.abstractmethod
     def _create_pack_lock(self, cursor):
@@ -281,16 +291,22 @@ class AbstractSchemaInstaller(ABC):
         """
         Create a special '0' transaction to represent object creation. The
         '0' transaction is often referenced by object_state.prev_tid, but
-        never by object_state.tid.
+        never by object_state.tid. (Only in history-preserving databases.)
 
-        Only in history-preserving databases.
+        In history free databases, populates the ``commit_row_lock`` table
+        with a single row to use as a global lock at commit time.
         """
         if self.keep_history:
             stmt = """
             INSERT INTO transaction (tid, username, description)
             VALUES (0, 'system', 'special transaction for object creation');
             """
-            self.runner.run_script(cursor, stmt)
+        else:
+            stmt = """
+            INSERT INTO commit_row_lock (tid)
+            VALUES (0);
+            """
+        self.runner.run_script(cursor, stmt)
 
     @abc.abstractmethod
     def _reset_oid(self, cursor):
@@ -303,22 +319,25 @@ class AbstractSchemaInstaller(ABC):
                 meth = getattr(self, '_create_' + table)
                 meth(cursor)
 
-        if 'transaction' not in existing_tables:
+        if self.keep_history and 'transaction' not in existing_tables:
+            self._init_after_create(cursor)
+        elif not self.keep_history and 'commit_row_lock' not in existing_tables:
             self._init_after_create(cursor)
 
         tables = self.list_tables(cursor)
         self.check_compatibility(cursor, tables)
 
-    def prepare(self):
-        """Create the database schema if it does not already exist."""
+    def _prepare_with_connection(self, conn, cursor): # pylint:disable=unused-argument
         # XXX: We can generalize this to handle triggers, procs, etc,
         # to make subclasses have easier time.
-        def callback(_conn, cursor):
-            tables = self.list_tables(cursor)
-            self.create(cursor, tables)
-            if 'transaction' in tables:
-                self.update_schema(cursor, tables)
-        self.connmanager.open_and_call(callback)
+        tables = self.list_tables(cursor)
+        self.create(cursor, tables)
+        if 'transaction' in tables:
+            self.update_schema(cursor, tables)
+
+    def prepare(self):
+        """Create the database schema if it does not already exist."""
+        self.connmanager.open_and_call(self._prepare_with_connection)
 
     def check_compatibility(self, cursor, tables): # pylint:disable=unused-argument
         if self.keep_history:

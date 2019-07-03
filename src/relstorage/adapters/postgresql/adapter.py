@@ -73,7 +73,8 @@ class PostgreSQLAdapter(object):
         self.runner = ScriptRunner()
         self.locker = PostgreSQLLocker(
             options,
-            driver.lock_exceptions,
+            driver,
+            PostgreSQLRowBatcher,
         )
         self.schema = PostgreSQLSchemaInstaller(
             options=options,

@@ -94,6 +94,9 @@ class MinimalTestLayer(object):
 class AbstractTestSuiteBuilder(ABC):
 
     __name__ = None # PostgreSQL, MySQL, Oracle
+    # Drivers with a priority over this amount won't be part of the
+    # test run even if installed.
+    MAX_PRIORITY = int(os.environ.get('RS_MAX_TEST_PRIORITY', '100'))
 
     def __init__(self, driver_options, use_adapter, extra_test_classes=()):
         """
@@ -136,7 +139,7 @@ class AbstractTestSuiteBuilder(ABC):
             except DriverNotAvailableError:
                 driver = None
 
-            available = driver is not None
+            available = driver is not None and driver.priority <= self.MAX_PRIORITY
 
             # On CI, we don't even add tests for unavailable drivers to the
             # list of tests; this makes the output much shorter and easier to read,

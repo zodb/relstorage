@@ -80,6 +80,8 @@ dsn
 MySQL Adapter Options
 =====================
 
+RelStorage 3.0 requires MySQL 5.7.9 or above.
+
 The MySQL adapter accepts most parameters supported by the mysqlclient
 library (the maintained version of MySQL-python), including:
 
@@ -153,14 +155,19 @@ driver
       The same as above, but RelStorage will only use the C extension.
       This is not compatible with gevent.
 
-      .. note::
+      .. caution::
 
-         At least through version 8.0.16, this is not compatible with
-         `CPython 3.7's development mode
+         At least through version 8.0.16, this driver is not
+         recommended.
+
+         It fails the checks established by `CPython 3.7's development
+         mode
          <https://docs.python.org/3/using/cmdline.html#envvar-PYTHONDEVMODE>`_;
          trying to use it with development mode enabled will crash the
          interpreter with "Fatal Python error: Python memory allocator
-         called without holding the GIL."
+         called without holding the GIL." This signals potentially
+         serious internal problems.
+
 
 host
     string, host to connect

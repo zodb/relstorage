@@ -141,6 +141,7 @@ class AbstractVote(AbstractTPCState):
         cursor = self.storage._store_cursor
         assert cursor is not None
         adapter = self.storage._adapter
+        locker = adapter.locker
         mover = adapter.mover
 
         # execute all remaining batch store operations
@@ -167,7 +168,14 @@ class AbstractVote(AbstractTPCState):
         # while simeoutaneously taking out update locks on both those rows,
         # and the rows we might conflict with or will be replacing.
         oid_ints = self.required_tids.keys()
-        current = mover.lock_current_objects(cursor, oid_ints)
+
+        # TODO: make this (the locking query?) more useful so we can
+        # do fewer overall queries. right now the typical call
+        # sequence will take three queries: This one, the one to get
+        # current, and the one to detect conflicts.
+        locker.lock_current_objects(cursor, oid_ints)
+
+        current = mover.current_object_tids(cursor, oid_ints)
         for oid_int, expect_tid_int in self.required_tids.items():
             actual_tid_int = current.get(oid_int, 0)
             if actual_tid_int != expect_tid_int:
@@ -185,21 +193,6 @@ class AbstractVote(AbstractTPCState):
         # New storage protocol
         return invalidated_oids
 
-    def __choose_tid_and_lock(self):
-        """
-        Choose a tid for the current transaction, and exclusively lock
-        the database commit lock.
-
-        This should be done as late in the commit as possible, since
-        it must hold an exclusive commit lock.
-        """
-        adapter = self.storage._adapter
-        cursor = self.storage._store_cursor
-        # TODO: Stop doing this here; go to row-level locking.
-        lock = DatabaseLockedForTid.lock_database_for_next_tid(cursor, adapter, self.ude)
-        self.committing_tid_lock = lock
-        return lock
-
     def __check_and_resolve_conflicts(self):
         """
         Either raises an `ConflictError`, or successfully resolves
@@ -208,6 +201,9 @@ class AbstractVote(AbstractTPCState):
         Returns a set of byte OIDs for objects modified in this transaction
         but which were then updated by conflict resolution and so must
         be invalidated.
+
+        All the rows needed for detecting conflicts should be locked against
+        concurrent changes.
         """
         cursor = self.storage._store_cursor
         adapter = self.storage._adapter
@@ -269,6 +265,21 @@ class AbstractVote(AbstractTPCState):
 
         # This returns the OID ints stored, but we don't use them here
         adapter.mover.move_from_temp(cursor, committing_tid_int, txn_has_blobs)
+
+    def __choose_tid_and_lock(self):
+        """
+        Choose a tid for the current transaction, and exclusively lock
+        the database commit lock.
+
+        This should be done as late in the commit as possible, since
+        it must hold an exclusive commit lock.
+        """
+        adapter = self.storage._adapter
+        cursor = self.storage._store_cursor
+        # TODO: Stop doing this here; go to row-level locking.
+        lock = DatabaseLockedForTid.lock_database_for_next_tid(cursor, adapter, self.ude)
+        self.committing_tid_lock = lock
+        return lock
 
     def __lock_and_move(self, method='finish'):
         # Here's where we take the global commit lock, and
