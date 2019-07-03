@@ -130,7 +130,7 @@ class AbstractLocker(ABC):
         # MySQL allows aggregates in the top level to use FOR UPDATE,
         # but PostgreSQL does not.
         # 'SELECT MAX(tid) FROM transaction FOR UPDATE',
-        'SELECT tid FROM transaction WHERE tid = (SELECT MAX(tid) FROM TRANSACTION) FOR UPDATE',
+        'SELECT tid FROM transaction WHERE tid = (SELECT MAX(tid) FROM transaction) FOR UPDATE',
         'SELECT tid FROM commit_row_lock FOR UPDATE'
     )
 
@@ -157,6 +157,9 @@ class AbstractLocker(ABC):
             else:
                 # TODO: Do we need to roll this back for any reason?
                 # Probably not since we only use nowait during pack.
+                # If we did, PostgreSQL could use a 'SET LOCAL', and
+                # MySQL could use the optimizer hint SET_VAR() in the lock
+                # statement --- but only in 8+.
                 self._set_row_lock_timeout(cursor, 0)
         __traceback_info__ = lock_stmt
         try:
