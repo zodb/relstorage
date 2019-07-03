@@ -89,10 +89,13 @@ class MySQLLocker(AbstractLocker):
             return
 
         # MySQL 8 and above support NOWAIT on row locks.
-        # sys.version_major() is 5.7.9+
+        # sys.version_major() is 5.7.9+, but we don't have execute
+        # permissions on that function by default, so we do it the old fashioned
+        # way with version()
         if self._supports_row_lock_nowait is None:
-            cursor.execute('SELECT sys.version_major()')
-            major = cursor.fetchone()[0]
+            cursor.execute('SELECT version()')
+            ver = cursor.fetchone()[0]
+            major = int(ver[0])
             self._supports_row_lock_nowait = major >= 8
 
         cursor.execute(self._prepare_lock_stmt)
