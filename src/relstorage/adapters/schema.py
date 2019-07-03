@@ -16,23 +16,16 @@ Database schema installers
 """
 import abc
 import logging
-from collections import namedtuple
 
 from ZODB.POSException import StorageError
 
 from .._compat import ABC
+from ._util import DatabaseHelpersMixin
 
 log = logging.getLogger("relstorage")
 
-ResultDescription = namedtuple(
-    'ResultDescription',
-    # First two are mandatory, remaining five may be None
-    # Example:
-    # ('Name', 253, 17, 192, 192, 0, 0),
-    ('name', 'type_code', 'display_size',
-     'internal_size', 'precision', 'scale', 'null_ok'))
-
-class AbstractSchemaInstaller(ABC):
+class AbstractSchemaInstaller(DatabaseHelpersMixin,
+                              ABC):
 
     # Keep this list in the same order as the schema scripts,
     # for dependency (Foreign Key) purposes.
@@ -82,43 +75,6 @@ class AbstractSchemaInstaller(ABC):
     @abc.abstractmethod
     def get_database_name(self, cursor):
         raise NotImplementedError()
-
-    def _metadata_to_native_str(self, value):
-        # Some drivers, in some configurations, notably older versions
-        # of MySQLdb (mysqlclient) on Python 3 in 'NAMES binary' mode,
-        # can return column names and the like as bytes when we want str.
-        if not isinstance(value, str):
-            value = value.decode('ascii')
-        return value
-
-    def _column_descriptions(self, cursor):
-        __traceback_info__ = cursor.description
-        return [ResultDescription(self._metadata_to_native_str(r[0]),
-                                  # Not all drivers return lists or tuples
-                                  # or things that can be sliced; psycopg2/cffi returns
-                                  # an arbitrary sequence.
-                                  # MySqlConnector-Python has been observed to provide
-                                  # extra attributes.
-                                  *list(r)[1:7])
-                for r in cursor.description]
-
-    def _rows_as_dicts(self, cursor):
-        """
-        An iterator of the rows as dictionaries, named by the
-        lower-case column name.
-
-        Some drivers offer the ability to do this directly when
-        the statement is executed or the cursor is created;
-        this is a lowest-common denominator way to do it utilizing
-        DB-API 2.0 attributes.
-        """
-        column_descrs = self._column_descriptions(cursor)
-        for row in cursor:
-            result = {
-                column_descr.name.lower(): column_value
-                for column_descr, column_value in zip(column_descrs, row)
-            }
-            yield result
 
     CREATE_COMMIT_ROW_LOCK_TMPL = """
     CREATE TABLE commit_row_lock (

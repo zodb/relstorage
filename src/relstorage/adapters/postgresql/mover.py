@@ -327,10 +327,6 @@ class PostgreSQLObjectMover(AbstractObjectMover):
             cursor.copy_expert(buf.COPY_COMMAND, buf)
 
 
-    def _debug_my_locks(self, cursor):
-        from . import debug_my_locks
-        return debug_my_locks(cursor)
-
 class PG8000ObjectMover(PostgreSQLObjectMover):
     # Delete the statements that need paramaters.
     on_load_opened_statement_names = ()

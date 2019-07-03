@@ -732,7 +732,13 @@ class RelStorage(UndoLogCompatible,
 
     @metricmethod
     def tpc_finish(self, transaction, f=None):
-        next_phase, committed_tid = self._tpc_phase.tpc_finish(transaction, f)
+        try:
+            next_phase, committed_tid = self._tpc_phase.tpc_finish(transaction, f)
+        except:
+            # OH NO! This isn't supposed to happen!
+            # It's unlikely tpc_abort will get called...
+            self.tpc_abort(transaction)
+            raise
         self._tpc_phase = next_phase
         self._ltid = committed_tid
         return committed_tid

@@ -76,6 +76,12 @@ See the RelStorage option ``blob-chunk-size`` for information on
 configuring the server's ``max_allowed_packet`` value for optimal
 performance.
 
+.. note::
+
+   Granting ``SELECT`` access to the ``performance_schema`` to this
+   user is highly recommended. This will allow RelStorage to present
+   helpful information when it detects a lock failure.
+
 Oracle
 ======
 

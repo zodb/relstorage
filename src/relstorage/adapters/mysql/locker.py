@@ -101,6 +101,9 @@ class MySQLLocker(AbstractLocker):
         if self._supports_row_lock_nowait is None:
             cursor.execute('SELECT version()')
             ver = cursor.fetchone()[0]
+            # PyMySQL on Win/Py3 returns this as a byte string; everywhere
+            # else it's native.
+            ver = self._metadata_to_native_str(ver)
             major = int(ver[0])
             __traceback_info__ = ver, major
             self._supports_row_lock_nowait = (major >= 8)
@@ -127,6 +130,20 @@ class MySQLLocker(AbstractLocker):
 
     def release_commit_lock(self, cursor):
         "Auto-released by transaction end."
+
+    def _get_commit_lock_debug_info(self, cursor):
+        try:
+            # MySQL 8
+            cursor.execute('SELECT * FROM performance_schema.data_wait_locks')
+            return self._rows_as_pretty_string(cursor)
+        except self.driver.driver_module.Error:
+            # MySQL 5, or no permissions
+            cursor.execute('SELECT * from sys.innodb_lock_waits')
+            rows = self._rows_as_pretty_string(cursor)
+            if self._supports_row_lock_nowait:
+                # No permissions
+                rows = "(Please provide access to the performance_schema for more info.)\n" + rows
+            return rows
 
     def hold_pack_lock(self, cursor):
         """Try to acquire the pack lock.

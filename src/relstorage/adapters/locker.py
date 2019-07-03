@@ -27,9 +27,13 @@ from relstorage._compat import ABC
 from relstorage._util import consume
 
 from ._util import query_property as _query_property
+from ._util import DatabaseHelpersMixin
 from .interfaces import UnableToAcquireCommitLockError
 
-class AbstractLocker(ABC):
+logger = __import__('logging').getLogger(__name__)
+
+class AbstractLocker(DatabaseHelpersMixin,
+                     ABC):
 
     def __init__(self, options, driver, batcher_factory):
         self.keep_history = options.keep_history
@@ -171,11 +175,33 @@ class AbstractLocker(ABC):
         except self.lock_exceptions as e:
             if nowait:
                 return False
+            try:
+                debug_info = self._get_commit_lock_debug_info(cursor)
+            except Exception: # pylint:disable=broad-except
+                logger.exception("Failed to get lock debug info")
+                debug_info = ''
+            __traceback_info__ = lock_stmt, debug_info
+            if debug_info:
+                logger.debug("Failed to acquire commit lock:\n%s", debug_info)
+            message = "Acquiring a commit lock failed: %s%s" % (
+                e,
+                '\n' + debug_info if debug_info else ''
+            )
+            print(message)
             six.reraise(
                 UnableToAcquireCommitLockError,
-                UnableToAcquireCommitLockError('Acquiring a commit lock failed: %s' % (e,)),
+                UnableToAcquireCommitLockError(message),
                 sys.exc_info()[2])
         return True
+
+    def _get_commit_lock_debug_info(self, cursor): # pylint:disable=unused-argument
+        """
+        Subclasses can implement this to return a string
+        that will be added to the exception message when a commit lock cannot
+        be acquired. For example, it might list other connections that
+        have conflicting locks.
+        """
+        return ''
 
     @abc.abstractmethod
     def release_commit_lock(self, cursor):

@@ -43,6 +43,13 @@ class PostgreSQLLocker(AbstractLocker):
         # no action needed, locks released with transaction.
         pass
 
+    def _get_commit_lock_debug_info(self, cursor):
+        # XXX: When we're called, the transaction is probably aborted, this
+        # probably doesn't work?
+        from . import debug_locks
+        debug_locks(cursor)
+        return self._rows_as_pretty_string(cursor)
+
     def hold_pack_lock(self, cursor):
         """Try to acquire the pack lock.
 
