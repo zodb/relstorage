@@ -140,6 +140,8 @@ class OracleSchemaInstaller(AbstractSchemaInstaller):
 
     database_type = 'oracle'
 
+    COLTYPE_OID_TID = 'NUMBER(20)'
+
     def get_database_name(self, cursor):
         cursor.execute("SELECT ora_database_name FROM DUAL")
         for (name,) in cursor:
@@ -213,9 +215,6 @@ class OracleSchemaInstaller(AbstractSchemaInstaller):
                     break
             res[name.lower()] = version
         return res
-
-    def _create_commit_row_lock(self, cursor):
-        return
 
     def _create_pack_lock(self, cursor):
         stmt = "CREATE TABLE pack_lock (dummy CHAR);"

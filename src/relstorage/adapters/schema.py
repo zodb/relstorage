@@ -120,13 +120,22 @@ class AbstractSchemaInstaller(ABC):
             }
             yield result
 
+    CREATE_COMMIT_ROW_LOCK_TMPL = """
+    CREATE TABLE commit_row_lock (
+      tid {tid_type} NOT NULL PRIMARY KEY
+    ) {transactional_suffix};
+    """
+
     def _create_commit_row_lock(self, cursor):
         """
         Create the global lock held during commit.
 
         (MySQL and PostgreSQL do this differently.)
         """
-        stmt = "CREATE TABLE commit_row_lock (tid BIGINT NOT NULL PRIMARY KEY);"
+        stmt = self.CREATE_COMMIT_ROW_LOCK_TMPL.format(
+            tid_type=self.COLTYPE_OID_TID,
+            transactional_suffix=self.TRANSACTIONAL_TABLE_SUFFIX,
+        )
         self.runner.run_script(cursor, stmt)
 
     @abc.abstractmethod
@@ -138,6 +147,9 @@ class AbstractSchemaInstaller(ABC):
         """
         raise NotImplementedError()
 
+    #: The type of the column used to hold transaction IDs
+    #: and object IDs (64-bit integers).
+    COLTYPE_OID_TID = 'BIGINT'
     #: The type of the column used to hold binary strings.
     #: Our default is appropriate for PostgreSQL.
     COLTYPE_BINARY_STRING = 'BYTEA'
@@ -148,7 +160,7 @@ class AbstractSchemaInstaller(ABC):
 
     CREATE_TRANSACTION_STMT_TMPL = """
     CREATE TABLE transaction (
-        tid         BIGINT NOT NULL PRIMARY KEY,
+        tid         {tid_type} NOT NULL PRIMARY KEY,
         packed      BOOLEAN NOT NULL DEFAULT FALSE,
         is_empty    BOOLEAN NOT NULL DEFAULT FALSE,
         username    {binary_string_type} NOT NULL,
@@ -165,6 +177,7 @@ class AbstractSchemaInstaller(ABC):
         """
         if self.keep_history:
             stmt = self.CREATE_TRANSACTION_STMT_TMPL.format(
+                tid_type=self.COLTYPE_OID_TID,
                 binary_string_type=self.COLTYPE_BINARY_STRING,
                 transactional_suffix=self.TRANSACTIONAL_TABLE_SUFFIX,
             )
