@@ -692,7 +692,16 @@ class RelStorage(UndoLogCompatible,
 
     @metricmethod
     def tpc_begin(self, transaction, tid=None, status=' '):
-        self._tpc_phase = self._tpc_phase.tpc_begin(transaction)
+        try:
+            self._tpc_phase = self._tpc_phase.tpc_begin(transaction)
+        except:
+            # Could be a database (connection) error, could be a programming
+            # bug. Either way, we're fine to roll everything back and hope
+            # for the best on a retry.
+            self._drop_load_connection()
+            self._drop_store_connection()
+            raise
+
         if tid is not None:
             # tid is a committed transaction we will restore.
             # The allowed actions are carefully prescribed.

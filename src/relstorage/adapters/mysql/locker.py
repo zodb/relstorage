@@ -45,6 +45,12 @@ class MySQLLocker(AbstractLocker):
     ``current_object`` tables: arbitrary rows in those tables may have
     been locked by other transactions, and we risk deadlock.
 
+    Also note that by default, a lock timeout will only rollback the
+    current *statement*, not the whole session, as in most databases
+    (this doesn't apply to NOWAIT in MySQL 8). Fortunately, a lock timeout
+    only rolling back the single statement is exactly what we want to implement
+    NOWAIT on earlier databases.
+
     The ``ensure_current`` argument is essentially ignored; the locks
     taken out by ``lock_current_objects`` take care of that.
 
@@ -96,7 +102,8 @@ class MySQLLocker(AbstractLocker):
             cursor.execute('SELECT version()')
             ver = cursor.fetchone()[0]
             major = int(ver[0])
-            self._supports_row_lock_nowait = major >= 8
+            __traceback_info__ = ver, major
+            self._supports_row_lock_nowait = (major >= 8)
 
         cursor.execute(self._prepare_lock_stmt)
         if self._supports_row_lock_nowait:
@@ -109,6 +116,8 @@ class MySQLLocker(AbstractLocker):
         self._set_row_lock_timeout(cursor, self.commit_lock_timeout)
 
     def _set_row_lock_timeout(self, cursor, timeout):
+        # Min value of timeout is 1
+        timeout = timeout if timeout >= 1 else 1
         cursor.execute(self.set_timeout_stmt, (timeout,))
         # It's INCREDIBLY important to fetch a row after we execute the SET statement;
         # otherwise, the binary drivers that use libmysqlclient tend to crash,

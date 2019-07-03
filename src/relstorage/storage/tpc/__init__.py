@@ -106,7 +106,8 @@ class AbstractTPCState(object):
     def tpc_begin(self, transaction):
         if transaction is self.transaction:
             raise StorageTransactionError("Duplicate tpc_begin calls for same transaction.")
-        # XXX: Shouldn't we tpc_abort() first? The original storage
+        # XXX: Shouldn't we tpc_abort() first (well, not that exactly, because
+        # the transaction won't match, but logically)? The original storage
         # code didn't do that, but it seems like it should.
         return self.storage._tpc_begin_factory(self.storage, transaction)
 
