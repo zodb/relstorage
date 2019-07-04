@@ -14,8 +14,6 @@
 """
 MySQL adapter for RelStorage.
 """
-
-
 from __future__ import absolute_import
 from __future__ import print_function
 
@@ -86,9 +84,9 @@ class MySQLdbConnectionManager(AbstractConnectionManager):
                     # Transaction isolation cannot be changed inside a
                     # transaction. 'SET SESSION' changes it for all
                     # upcoming sessions.
-                    __traceback_info__ = transaction_mode
-                    cursor.execute(
-                        "SET SESSION TRANSACTION %s" % transaction_mode)
+                    stmt = "SET SESSION TRANSACTION %s" % transaction_mode
+                    __traceback_info__ = stmt
+                    cursor.execute(stmt)
                     self._db_driver.set_autocommit(conn, False)
                 conn.replica = replica
                 return conn, cursor
@@ -106,7 +104,6 @@ class MySQLdbConnectionManager(AbstractConnectionManager):
 
     def _do_open_for_load(self):
         return self.open(
-
             self.isolation_repeatable_read_ro,
             replica_selector=self.ro_replica_selector)
 

@@ -116,10 +116,10 @@ class MySQLLocker(AbstractLocker):
     def _on_store_opened_set_row_lock_timeout(self, cursor, restart=False):
         if restart:
             return
-
         self._set_row_lock_timeout(cursor, self.commit_lock_timeout)
 
     def _set_row_lock_timeout(self, cursor, timeout):
+
         # Min value of timeout is 1
         timeout = timeout if timeout >= 1 else 1
         cursor.execute(self.set_timeout_stmt, (timeout,))
@@ -133,27 +133,18 @@ class MySQLLocker(AbstractLocker):
         "Auto-released by transaction end."
 
     def _get_commit_lock_debug_info(self, cursor):
+        cursor.execute('SELECT connection_id()')
+        conn_id = cursor.fetchone()[0]
+
         try:
             # MySQL 8
             cursor.execute('SELECT * FROM performance_schema.data_wait_locks')
-            return self._rows_as_pretty_string(cursor)
-        except self.driver.driver_module.Error as ex:
+            return 'Connection: ' + conn_id + '\n' + self._rows_as_pretty_string(cursor)
+        except self.driver.driver_module.Error:
             # MySQL 5, or no permissions
-            print("First error", ex)
-            try:
-                cursor.execute('SELECT * from sys.innodb_lock_waits')
-                rows = self._rows_as_pretty_string(cursor)
-                return rows
-            except self.driver.driver_module.Error as e:
-                print("Second error", e)
-                import subprocess
-                output = subprocess.check_output(
-                    ['mysql', '-uroot', '-e', 'SELECT * FROM sys.innodb_lock_waits']
-                )
-                print("Output", output)
-                if not isinstance(output, str):
-                    output = output.decode('ascii')
-                return "%r\n%s" % (e, output)
+            cursor.execute('SELECT * from information_schema.innodb_locks')
+            rows = self._rows_as_pretty_string(cursor)
+            return 'Connection: ' + conn_id + '\n' + rows
 
     def hold_pack_lock(self, cursor):
         """Try to acquire the pack lock.

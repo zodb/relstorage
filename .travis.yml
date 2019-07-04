@@ -54,7 +54,6 @@ before_install:
   - python --version
 before_script:
   - ccache -s
-  - mysql -uroot -e 'select version()'
   - python -c 'import sqlite3; print(sqlite3.sqlite_version)'
 
 install:

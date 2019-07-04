@@ -201,7 +201,11 @@ class umysqldbDriver(PyMySQLDriver):
 
     AVAILABLE_ON_PYPY = False
     MODULE_NAME = __name__
-    PRIORITY = PRIORITY_PYPY = 100 # Last of the list.
+    # Last of the list, and not tested on CI.
+    # It appears that the 'SET innodb_lock_wait_timeout' is not
+    # doing anything; our nowait=True, which set the timeout to 1, still
+    # wait indefinitely. This driver will be removed soon.
+    PRIORITY = PRIORITY_PYPY = 5000
 
     def __init__(self):
         super(umysqldbDriver, self).__init__()

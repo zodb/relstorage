@@ -16,6 +16,7 @@ Locker implementations.
 """
 
 from __future__ import absolute_import
+from __future__ import print_function
 
 import abc
 import sys
@@ -192,7 +193,6 @@ class AbstractLocker(DatabaseHelpersMixin,
                 e,
                 '\n' + debug_info if debug_info else ''
             )
-            print(message)
             six.reraise(
                 UnableToAcquireCommitLockError,
                 UnableToAcquireCommitLockError(message),

@@ -112,11 +112,16 @@ driver
       monkey-patching is used.
 
     umysqldb
-      A C-based driver that builds on PyMySQL. It is compatible with
+      Deprecated. A C-based driver that builds on PyMySQL. It is compatible with
       gevent if monkey-patching is used, but only works on CPython 2.
       It does not require the MySQL client development libraries but
       uses a project called ``umysql`` to communicate with the server
       using only sockets.
+
+      .. caution::
+
+         This driver contains many known bugs and will be removed
+         for RelStorage 3.0.
 
       .. note:: Make sure the server has a
           ``max_allowed_packet`` setting no larger than 16MB. Also
