@@ -190,7 +190,9 @@ class AbstractLocker(DatabaseHelpersMixin,
         __traceback_info__ = lock_stmt
         try:
             cursor.execute(lock_stmt)
-            cursor.fetchone()
+            rows = cursor.fetchall()
+            if not rows or not rows[0]:
+                raise UnableToAcquireCommitLockError("No row returned from commit_row_lock")
         except self.illegal_operation_exceptions as e:
             # Bug in our code.
             raise

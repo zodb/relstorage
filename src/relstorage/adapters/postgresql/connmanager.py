@@ -32,6 +32,7 @@ class Psycopg2ConnectionManager(AbstractConnectionManager):
         self.use_replica_exceptions = driver.use_replica_exceptions
         self.isolation_read_committed = driver.ISOLATION_LEVEL_READ_COMMITTED
         self.isolation_serializable = driver.ISOLATION_LEVEL_SERIALIZABLE
+        self.isolation_repeatable_read = driver.ISOLATION_LEVEL_REPEATABLE_READ
         self.keep_history = options.keep_history
         self._db_connect_with_isolation = driver.connect_with_isolation
         super(Psycopg2ConnectionManager, self).__init__(options)
@@ -118,3 +119,6 @@ class Psycopg2ConnectionManager(AbstractConnectionManager):
     # that way (see locker.py).
     # def _do_open_for_store(self):
     #    return self.open('REPEATABLE READ')
+
+    def open_for_pre_pack(self):
+        return self.open(self.isolation_read_committed)

@@ -113,13 +113,5 @@ class MySQLdbConnectionManager(AbstractConnectionManager):
 
         This overrides a method.
         """
-        conn, cursor = self.open_for_store()
-        try:
-            # This phase of packing changes no user-facing data.
-            # However it does modify the pack tables. So there's no need to
-            # keep from committing that state as we go.
-            self._db_driver.set_autocommit(conn, True)
-            return conn, cursor
-        except:
-            self.close(conn, cursor)
-            raise
+        conn, cursor = self.open(self.isolation_repeatable_read)
+        return conn, cursor

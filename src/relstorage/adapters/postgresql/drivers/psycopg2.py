@@ -52,6 +52,7 @@ class Psycopg2Driver(AbstractModuleDriver):
         # extensions
         self.ISOLATION_LEVEL_READ_COMMITTED = psycopg2.extensions.ISOLATION_LEVEL_READ_COMMITTED
         self.ISOLATION_LEVEL_SERIALIZABLE = psycopg2.extensions.ISOLATION_LEVEL_SERIALIZABLE
+        self.ISOLATION_LEVEL_REPEATABLE_READ = psycopg2.extensions.ISOLATION_LEVEL_REPEATABLE_READ
 
     def _create_connection(self, mod):
         class Psycopg2Connection(mod.extensions.connection):

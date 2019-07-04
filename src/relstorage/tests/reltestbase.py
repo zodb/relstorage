@@ -589,6 +589,10 @@ class GenericRelStorageTests(
     def checkPackBatchLockNoWait(self):
         # Exercise the code in the pack algorithm that attempts to get the
         # commit lock but will sleep if the lock is busy.
+        #
+        # This no longer happens, sleep is unused.
+        #
+        # TODO: A new test with rows locked.
         self._storage = self.make_storage(pack_batch_timeout=0)
 
         adapter = self._storage._adapter
@@ -601,10 +605,10 @@ class GenericRelStorageTests(
             test_conn.rollback()
             adapter.connmanager.close(test_conn, test_cursor)
 
-        db = DB(self._storage)
+        db = self._closing(DB(self._storage))
         try:
             # add some data to be packed
-            c = db.open()
+            c = self._closing(db.open())
             r = c.root()
             r['alpha'] = PersistentMapping()
             transaction.commit()
@@ -617,10 +621,10 @@ class GenericRelStorageTests(
                 packtime = time.time()
             adapter.locker.hold_commit_lock(test_cursor)
             self._storage.pack(packtime, referencesf, sleep=sim_sleep)
-
-            self.assertTrue(len(slept) > 0)
+            adapter.locker.release_commit_lock(test_cursor)
         finally:
             db.close()
+            adapter.connmanager.close(test_conn, test_cursor)
 
     def checkPackKeepNewObjects(self):
         # Packing should not remove objects created or modified after
@@ -664,10 +668,10 @@ class GenericRelStorageTests(
     def checkPackWhileReferringObjectChanges(self):
         # Packing should not remove objects referenced by an
         # object that changes during packing.
-        db = DB(self._storage)
+        db = self._closing(DB(self._storage))
         try:
             # add some data to be packed
-            c = db.open()
+            c = self._closing(db.open())
             root = c.root()
             child = PersistentMapping()
             root['child'] = child

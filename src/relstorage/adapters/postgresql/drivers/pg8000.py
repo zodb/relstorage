@@ -213,6 +213,7 @@ class PG8000Driver(AbstractModuleDriver):
 
     ISOLATION_LEVEL_READ_COMMITTED = 'ISOLATION LEVEL READ COMMITTED'
     ISOLATION_LEVEL_SERIALIZABLE = 'ISOLATION LEVEL SERIALIZABLE'
+    ISOLATION_LEVEL_REPEATABLE_READ = 'ISOLATION LEVEL REPEATABLE READ'
 
     def connect_with_isolation(self, dsn,
                                isolation=None,

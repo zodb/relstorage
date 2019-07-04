@@ -219,37 +219,54 @@ class IConnectionManager(Interface):
         """
 
     def open_for_load():
-        """Open a connection for loading objects.
+        """
+        Open a connection for loading objects.
 
         Returns (conn, cursor).
+
+        This connection is read only.
         """
 
     def restart_load(conn, cursor):
-        """Reinitialize a connection for loading objects.
+        """
+        Reinitialize a connection for loading objects.
 
-        This gets called when polling the database, so it needs to be quick.
+        This gets called when polling the database, so it needs to be
+        quick.
 
         Raise one of self.disconnected_exceptions if the database has
         disconnected.
         """
 
     def open_for_store():
-        """Open and initialize a connection for storing objects.
+        """
+        Open and initialize a connection for storing objects.
 
         Returns (conn, cursor).
+
+        A connection opened by this method is the only type of connection
+        that can hold the commit lock.
         """
 
     def restart_store(conn, cursor):
-        """Rollback and reuse a store connection.
+        """
+        Rollback and reuse a store connection.
 
         Raise one of self.disconnected_exceptions if the database
         has disconnected.
         """
 
     def open_for_pre_pack():
-        """Open a connection to be used for the pre-pack phase.
+        """
+        Open a connection to be used for the pre-pack phase.
 
         Returns (conn, cursor).
+
+        This connection will make many different queries; each one
+        must be consistent unto itself, but they do not all have to
+        be consistent with each other. This is because the *first* query
+        this object makes establishes a base state, and we will manually
+        discard later changes seen in future queries.
         """
 
     def add_on_store_opened(f):
