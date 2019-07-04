@@ -16,6 +16,7 @@ Locker implementations.
 """
 
 from __future__ import absolute_import
+from __future__ import print_function
 
 from zope.interface import implementer
 
@@ -136,14 +137,23 @@ class MySQLLocker(AbstractLocker):
             # MySQL 8
             cursor.execute('SELECT * FROM performance_schema.data_wait_locks')
             return self._rows_as_pretty_string(cursor)
-        except self.driver.driver_module.Error:
+        except self.driver.driver_module.Error as ex:
             # MySQL 5, or no permissions
-            cursor.execute('SELECT * from sys.innodb_lock_waits')
-            rows = self._rows_as_pretty_string(cursor)
-            if self._supports_row_lock_nowait:
-                # No permissions
-                rows = "(Please provide access to the performance_schema for more info.)\n" + rows
-            return rows
+            print("First error", ex)
+            try:
+                cursor.execute('SELECT * from sys.innodb_lock_waits')
+                rows = self._rows_as_pretty_string(cursor)
+                return rows
+            except self.driver.driver_module.Error as e:
+                print("Second error", e)
+                import subprocess
+                output = subprocess.check_output(
+                    ['mysql', '-uroot', '-e', 'SELECT * FROM sys.innodb_lock_waits']
+                )
+                print("Output", output)
+                if not isinstance(output, str):
+                    output = output.decode('ascii')
+                return "%r\n%s" % (e, output)
 
     def hold_pack_lock(self, cursor):
         """Try to acquire the pack lock.

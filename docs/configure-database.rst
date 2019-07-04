@@ -80,7 +80,8 @@ performance.
 
    Granting ``SELECT`` access to the ``performance_schema`` to this
    user is highly recommended. This will allow RelStorage to present
-   helpful information when it detects a lock failure.
+   helpful information when it detects a lock failure in MySQL 8. In
+   earlier versions, access to ``sys.innodb_lock_waits`` is suggested.
 
 Oracle
 ======

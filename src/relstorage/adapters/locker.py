@@ -39,6 +39,7 @@ class AbstractLocker(DatabaseHelpersMixin,
         self.keep_history = options.keep_history
         self.commit_lock_timeout = options.commit_lock_timeout
         self.commit_lock_id = options.commit_lock_id
+        self.driver = driver
         self.lock_exceptions = driver.lock_exceptions
         self.illegal_operation_exceptions = driver.illegal_operation_exceptions
         self.make_batcher = batcher_factory
@@ -124,6 +125,10 @@ class AbstractLocker(DatabaseHelpersMixin,
         # There is no specific timeout here. Instead, the global
         # database "row lock timeout" applies.
 
+        # In all databases, the locks we get depend on the indexing.
+        # We must be searching on the primary key to get the smallest, most
+        # specific row locks.
+
         consume(batcher.select_from(
             cols_to_select, table,
             suffix='  %s ' % self._lock_current_clause,
@@ -177,9 +182,9 @@ class AbstractLocker(DatabaseHelpersMixin,
                 return False
             try:
                 debug_info = self._get_commit_lock_debug_info(cursor)
-            except Exception: # pylint:disable=broad-except
+            except Exception as nested: # pylint:disable=broad-except
                 logger.exception("Failed to get lock debug info")
-                debug_info = ''
+                debug_info = "%r(%r)" % (type(nested), nested)
             __traceback_info__ = lock_stmt, debug_info
             if debug_info:
                 logger.debug("Failed to acquire commit lock:\n%s", debug_info)

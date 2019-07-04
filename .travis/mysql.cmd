@@ -8,4 +8,6 @@ mysql -uroot -e "GRANT ALL ON relstoragetest_hf.* TO 'relstoragetest'@'localhost
 mysql -uroot -e "CREATE DATABASE relstoragetest2_hf;"
 mysql -uroot -e "GRANT ALL ON relstoragetest2_hf.* TO 'relstoragetest'@'localhost';"
 mysql -uroot -e "GRANT SELECT ON performance_schema.* TO 'relstoragetest'@'localhost';"
+mysql -uroot -e "GRANT SELECT ON sys.* TO 'relstoragetest'"
+mysql -uroot -e "GRANT PROCESS ON *.* TO 'relstoragetest'"
 mysql -uroot -e "FLUSH PRIVILEGES;"

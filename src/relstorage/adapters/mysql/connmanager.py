@@ -27,8 +27,16 @@ log = logging.getLogger(__name__)
 
 class MySQLdbConnectionManager(AbstractConnectionManager):
 
+    # https://dev.mysql.com/doc/refman/5.7/en/innodb-transaction-isolation-levels.html
+
+    # Each statement gets its own snapshot. Locking is minimized to
+    # the exact index records found.
     isolation_read_committed = "ISOLATION LEVEL READ COMMITTED"
+    # (DEFAULT) A snapshot is taken when the first statement is executed.
+    # All reads are from that snapshot.
     isolation_repeatable_read = "ISOLATION LEVEL REPEATABLE READ"
+    # READ ONLY was new in 5.6
+    isolation_repeatable_read_ro = isolation_repeatable_read + ' , READ ONLY'
 
     def __init__(self, driver, params, options):
         self._params = params.copy()
@@ -76,7 +84,9 @@ class MySQLdbConnectionManager(AbstractConnectionManager):
                 if transaction_mode:
                     self._db_driver.set_autocommit(conn, True)
                     # Transaction isolation cannot be changed inside a
-                    # transaction.
+                    # transaction. 'SET SESSION' changes it for all
+                    # upcoming sessions.
+                    __traceback_info__ = transaction_mode
                     cursor.execute(
                         "SET SESSION TRANSACTION %s" % transaction_mode)
                     self._db_driver.set_autocommit(conn, False)
@@ -95,8 +105,10 @@ class MySQLdbConnectionManager(AbstractConnectionManager):
                 raise
 
     def _do_open_for_load(self):
-        return self.open(self.isolation_repeatable_read,
-                         replica_selector=self.ro_replica_selector)
+        return self.open(
+
+            self.isolation_repeatable_read_ro,
+            replica_selector=self.ro_replica_selector)
 
     def open_for_pre_pack(self):
         """Open a connection to be used for the pre-pack phase.
@@ -106,8 +118,9 @@ class MySQLdbConnectionManager(AbstractConnectionManager):
         """
         conn, cursor = self.open_for_store()
         try:
-            # This phase of packing works best with transactions
-            # disabled.  It changes no user-facing data.
+            # This phase of packing changes no user-facing data.
+            # However it does modify the pack tables. So there's no need to
+            # keep from committing that state as we go.
             self._db_driver.set_autocommit(conn, True)
             return conn, cursor
         except:

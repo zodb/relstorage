@@ -51,6 +51,7 @@ class ScriptRunner(object):
         into a database-specific statement.
         """
         stmt = generic_stmt % self.script_vars
+        __traceback_info__ = stmt
         try:
             cursor.execute(stmt, generic_params)
         except:

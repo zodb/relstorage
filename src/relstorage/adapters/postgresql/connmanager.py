@@ -49,7 +49,8 @@ class Psycopg2ConnectionManager(AbstractConnectionManager):
         return dsn
 
     @metricmethod
-    def open(self, isolation=None, replica_selector=None, **kwargs):
+    def open(self, isolation=None, deferrable=False, read_only=False,
+             replica_selector=None, **kwargs):
         """Open a database connection and return (conn, cursor)."""
         # pylint:disable=arguments-differ
         if isolation is None:
@@ -67,7 +68,12 @@ class Psycopg2ConnectionManager(AbstractConnectionManager):
 
         while True:
             try:
-                conn, cursor = self._db_connect_with_isolation(isolation, dsn)
+                conn, cursor = self._db_connect_with_isolation(
+                    dsn,
+                    isolation=isolation,
+                    deferrable=deferrable,
+                    read_only=read_only
+                )
                 cursor.arraysize = 64
                 conn.replica = replica
                 return conn, cursor
@@ -91,15 +97,16 @@ class Psycopg2ConnectionManager(AbstractConnectionManager):
         # XXX: SERIALIZABLE isn't allowed on streaming replicas
         # (https://www.enterprisedb.com/blog/serializable-postgresql-11-and-beyond)
         # Do we really need SERIALIZABLE? Wouldn't REPEATABLE READ be
-        # sufficient?
-        #
-        # TODO: Set the transaction to READ ONLY mode. This can be done with
-        # a SET TRANSACTION command, or psycopg2 likes the 'conn.readonly' property
-        # (2.7+) or conn.set_session().
+        # sufficient? That's what we use on MySQL.
+
+        # Set the transaction to READ ONLY mode. This lets
+        # transactions (especially SERIALIZABLE) elide some locks.
+
         # TODO: Enable deferrable transactions if we stay in serializable, read only
         # mode. This should generally be faster, as the *only* serializable transactions
         # we have should be READ ONLY.
         return self.open(self.isolation_serializable,
+                         read_only=True,
                          replica_selector=self.ro_replica_selector)
 
     # TODO: Define _do_open_for_store to change the default isolation
