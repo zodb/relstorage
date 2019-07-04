@@ -140,7 +140,23 @@ class AbstractLocker(DatabaseHelpersMixin,
         # MySQL allows aggregates in the top level to use FOR UPDATE,
         # but PostgreSQL does not.
         # 'SELECT MAX(tid) FROM transaction FOR UPDATE',
-        'SELECT tid FROM transaction WHERE tid = (SELECT MAX(tid) FROM transaction) FOR UPDATE',
+        #
+        # Note that using transaction in history-preserving databases
+        # can still lead to deadlock in older versions of MySQL (test
+        # checkPackWhileWriting), and the following lock statement can
+        # lead to duplicate transaction ids being inserted on older
+        # versions (5.7.12, PyMySQL:
+        # https://ci.appveyor.com/project/jamadden/relstorage/builds/25748619/job/cyio3w54uqi026lr#L923).
+        # So both HF and HP use an artificial lock row.
+        #
+        # TODO: Figure out exactly the best way to lock just the rows
+        # in the transaction table we care about that works
+        # everywhere, or a better way to choose the next TID.
+        # gap/intention locks might be a clue. 'SELECT tid FROM
+        # transaction WHERE tid = (SELECT MAX(tid) FROM transaction)
+        # FOR UPDATE',
+
+        'SELECT tid FROM commit_row_lock FOR UPDATE',
         'SELECT tid FROM commit_row_lock FOR UPDATE'
     )
 

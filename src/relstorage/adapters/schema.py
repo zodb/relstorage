@@ -262,7 +262,7 @@ class AbstractSchemaInstaller(DatabaseHelpersMixin,
         '0' transaction is often referenced by object_state.prev_tid, but
         never by object_state.tid. (Only in history-preserving databases.)
 
-        In history free databases, populates the ``commit_row_lock`` table
+        In all databases, populates the ``commit_row_lock`` table
         with a single row to use as a global lock at commit time.
         """
         if self.keep_history:
@@ -270,11 +270,12 @@ class AbstractSchemaInstaller(DatabaseHelpersMixin,
             INSERT INTO transaction (tid, username, description)
             VALUES (0, 'system', 'special transaction for object creation');
             """
-        else:
-            stmt = """
-            INSERT INTO commit_row_lock (tid)
-            VALUES (0);
-            """
+            self.runner.run_script(cursor, stmt)
+
+        stmt = """
+        INSERT INTO commit_row_lock (tid)
+        VALUES (0);
+        """
         self.runner.run_script(cursor, stmt)
 
     @abc.abstractmethod

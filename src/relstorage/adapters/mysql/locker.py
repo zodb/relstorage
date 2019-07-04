@@ -134,7 +134,7 @@ class MySQLLocker(AbstractLocker):
 
     def _get_commit_lock_debug_info(self, cursor):
         cursor.execute('SELECT connection_id()')
-        conn_id = cursor.fetchone()[0]
+        conn_id = str(cursor.fetchone()[0])
 
         try:
             # MySQL 8
