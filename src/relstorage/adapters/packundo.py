@@ -135,10 +135,15 @@ class PackUndo(object):
         batch = []
 
         def upload_batch():
+            # XXX: No, this is very wrong. Use the RowBatcher
+            # Alternately, flush to a table and then join
+            # against that at the end.
             oids_str = ','.join(str(oid) for oid in batch)
             del batch[:]
             stmt = """
-            UPDATE pack_object SET keep = %%(TRUE)s, visited = %%(TRUE)s
+            UPDATE pack_object
+            SET keep = %%(TRUE)s,
+                visited = %%(TRUE)s
             WHERE zoid IN (%s)
             """ % oids_str
             self.runner.run_script_stmt(cursor, stmt)
@@ -161,14 +166,14 @@ class HistoryPreservingPackUndo(PackUndo):
     keep_history = True
 
     _script_choose_pack_transaction = """
-        SELECT tid
-        FROM transaction
-        WHERE tid > 0
-            AND tid <= %(tid)s
-            AND packed = FALSE
-        ORDER BY tid DESC
-        LIMIT 1
-        """
+    SELECT tid
+    FROM transaction
+    WHERE tid > 0
+      AND tid <= %(tid)s
+      AND packed = FALSE
+    ORDER BY tid DESC
+    LIMIT 1
+    """
 
     _script_create_temp_pack_visit = """
     CREATE TEMPORARY TABLE temp_pack_visit (
@@ -189,18 +194,18 @@ class HistoryPreservingPackUndo(PackUndo):
     _script_reset_temp_undo = "DROP TABLE temp_undo"
 
     _script_find_pack_tid = """
-        SELECT keep_tid
-        FROM pack_object
-        ORDER BY keep_tid DESC
-        LIMIT 1
-        """
+    SELECT keep_tid
+    FROM pack_object
+    ORDER BY keep_tid DESC
+    LIMIT 1
+    """
 
     _script_transaction_has_data = """
-        SELECT tid
-        FROM object_state
-        WHERE tid = %(tid)s
-        LIMIT 1
-        """
+    SELECT 1
+    FROM object_state
+    WHERE tid = %(tid)s
+    LIMIT 1
+    """
 
     _script_pack_current_object = """
     DELETE FROM current_object
@@ -211,7 +216,7 @@ class HistoryPreservingPackUndo(PackUndo):
         WHERE pack_state.tid = %(tid)s
         ORDER BY pack_state.zoid
     )
-        """
+    """
 
     _script_pack_object_state = """
     DELETE FROM object_state
@@ -225,18 +230,19 @@ class HistoryPreservingPackUndo(PackUndo):
     """
 
     _script_pack_object_ref = """
-        DELETE FROM object_refs_added
-        WHERE tid IN (
-            SELECT tid
-            FROM transaction
-            WHERE is_empty = %(TRUE)s
-            );
-        DELETE FROM object_ref
-        WHERE tid IN (
-            SELECT tid
-            FROM transaction
-            WHERE is_empty = %(TRUE)s
-            )
+    DELETE FROM object_refs_added
+    WHERE tid IN (
+        SELECT tid
+        FROM transaction
+        WHERE is_empty = %(TRUE)s
+    );
+
+    DELETE FROM object_ref
+    WHERE tid IN (
+        SELECT tid
+        FROM transaction
+        WHERE is_empty = %(TRUE)s
+    );
         """
 
     # Previously we used `= ANY(ARRAY(...))`, as was once recommended,
@@ -259,7 +265,8 @@ class HistoryPreservingPackUndo(PackUndo):
     def verify_undoable(self, cursor, undo_tid):
         """Raise UndoError if it is not safe to undo the specified txn."""
         stmt = """
-        SELECT 1 FROM transaction
+        SELECT 1
+        FROM transaction
         WHERE tid = %(undo_tid)s
             AND packed = %(FALSE)s
         """
@@ -278,11 +285,14 @@ class HistoryPreservingPackUndo(PackUndo):
         stmt = """
         SELECT prev_os.zoid, current_object.tid
         FROM object_state prev_os
-            JOIN object_state cur_os ON (prev_os.zoid = cur_os.zoid)
-            JOIN current_object ON (cur_os.zoid = current_object.zoid
+        INNER JOIN object_state cur_os
+            ON (prev_os.zoid = cur_os.zoid)
+        INNER JOIN current_object
+            ON (cur_os.zoid = current_object.zoid
                 AND cur_os.tid = current_object.tid)
         WHERE prev_os.tid = %(undo_tid)s
             AND cur_os.md5 != prev_os.md5
+        ORDER BY prev_os.zoid
         """
         self.runner.run_script_stmt(cursor, stmt, {'undo_tid': undo_tid})
         if cursor.fetchmany():
@@ -325,23 +335,24 @@ class HistoryPreservingPackUndo(PackUndo):
         INSERT INTO temp_undo (zoid, prev_tid)
         SELECT zoid, prev_tid
         FROM object_state
-        WHERE tid = %(undo_tid)s;
+        WHERE tid = %(undo_tid)s
+        ORDER BY zoid;
 
         -- Override previous undo operations within this transaction
         -- by resetting the current_object pointer and deleting
         -- copied states from object_state.
         UPDATE current_object
         SET tid = (
-                SELECT prev_tid
-                FROM object_state
-                WHERE zoid = current_object.zoid
-                    AND tid = %(self_tid)s
-            )
-        WHERE zoid IN (SELECT zoid FROM temp_undo)
-            AND tid = %(self_tid)s;
+            SELECT prev_tid
+            FROM object_state
+            WHERE zoid = current_object.zoid
+              AND tid = %(self_tid)s
+        )
+        WHERE zoid IN (SELECT zoid FROM temp_undo ORDER BY zoid)
+        AND tid = %(self_tid)s;
 
         DELETE FROM object_state
-        WHERE zoid IN (SELECT zoid FROM temp_undo)
+        WHERE zoid IN (SELECT zoid FROM temp_undo ORDER BY zoid)
             AND tid = %(self_tid)s;
 
         -- Copy old states forward.
@@ -349,10 +360,11 @@ class HistoryPreservingPackUndo(PackUndo):
         SELECT temp_undo.zoid, %(self_tid)s, current_object.tid,
             md5, COALESCE(state_size, 0), state
         FROM temp_undo
-            JOIN current_object ON (temp_undo.zoid = current_object.zoid)
-            LEFT JOIN object_state
-                ON (object_state.zoid = temp_undo.zoid
-                    AND object_state.tid = temp_undo.prev_tid);
+        INNER JOIN current_object ON (temp_undo.zoid = current_object.zoid)
+        LEFT OUTER JOIN object_state
+            ON (object_state.zoid = temp_undo.zoid
+                AND object_state.tid = temp_undo.prev_tid)
+        ORDER BY current_object.zoid;
 
         -- Copy old blob chunks forward.
         INSERT INTO blob_chunk (zoid, tid, chunk_num, chunk)
@@ -363,7 +375,8 @@ class HistoryPreservingPackUndo(PackUndo):
                     AND blob_chunk.tid = temp_undo.prev_tid);
 
         -- List the copied states.
-        SELECT zoid, prev_tid FROM temp_undo
+        SELECT zoid, prev_tid
+        FROM temp_undo;
         """
         self.runner.run_script(cursor, stmt,
                                {'undo_tid': undo_tid, 'self_tid': self_tid})
@@ -383,18 +396,18 @@ class HistoryPreservingPackUndo(PackUndo):
         stmt = """
         SELECT transaction.tid
         FROM transaction
-            LEFT JOIN object_refs_added
-                ON (transaction.tid = object_refs_added.tid)
+        LEFT OUTER JOIN object_refs_added
+            ON (transaction.tid = object_refs_added.tid)
         WHERE object_refs_added.tid IS NULL
         ORDER BY transaction.tid
         """
         self.runner.run_script_stmt(cursor, stmt)
         tids = [tid for (tid,) in cursor]
         log_at = time.time() + 60
+        tid_count = len(tids)
+        txns_done = 0
         if tids:
             self.on_filling_object_refs()
-            tid_count = len(tids)
-            txns_done = 0
             log.info(
                 "pre_pack: analyzing references from objects in %d new "
                 "transaction(s)", tid_count)
@@ -409,9 +422,8 @@ class HistoryPreservingPackUndo(PackUndo):
                     log.info(
                         "pre_pack: transactions analyzed: %d/%d",
                         txns_done, tid_count)
-            conn.commit()
-            log.info(
-                "pre_pack: transactions analyzed: %d/%d", txns_done, tid_count)
+        conn.commit()
+        log.info("pre_pack: transactions analyzed: %d/%d", txns_done, tid_count)
 
     def _add_refs_for_tid(self, cursor, tid, get_references):
         """Fill object_refs with all states for a transaction.
@@ -421,10 +433,11 @@ class HistoryPreservingPackUndo(PackUndo):
         log.debug("pre_pack: transaction %d: computing references ", tid)
         from_count = 0
         stmt = """
-            SELECT zoid, state
-            FROM object_state
-            WHERE tid = %(tid)s
-            """
+        SELECT zoid, state
+        FROM object_state
+        WHERE tid = %(tid)s
+        ORDER BY zoid
+        """
         self.runner.run_script_stmt(cursor, stmt, {'tid': tid})
 
         add_rows = []  # [(from_oid, tid, to_oid)]
@@ -450,6 +463,7 @@ class HistoryPreservingPackUndo(PackUndo):
         self.runner.run_script_stmt(cursor, stmt, {'tid': tid})
 
         # Add the new references.
+        # TODO: Use RowBatcher
         stmt = """
         INSERT INTO object_ref (zoid, tid, to_zoid)
         VALUES (%s, %s, %s)
@@ -485,72 +499,72 @@ class HistoryPreservingPackUndo(PackUndo):
         """
         conn, cursor = self.connmanager.open_for_pre_pack()
         try:
-            try:
-                if self.options.pack_gc:
-                    log.info("pre_pack: start with gc enabled")
-                    self._pre_pack_with_gc(
-                        conn, cursor, pack_tid, get_references)
-                else:
-                    log.info("pre_pack: start without gc")
-                    self._pre_pack_without_gc(
-                        conn, cursor, pack_tid)
-                conn.commit()
+            # The pre-pack functions are responsible for managing their
+            # own commits; when they return, the transaction should be committed.
+            if self.options.pack_gc:
+                log.info("pre_pack: start with gc enabled")
+                self._pre_pack_with_gc(
+                    conn, cursor, pack_tid, get_references)
+            else:
+                log.info("pre_pack: start without gc")
+                self._pre_pack_without_gc(
+                    conn, cursor, pack_tid)
 
-                log.info("pre_pack: enumerating states to pack")
-                stmt = "%(TRUNCATE)s pack_state"
-                self.runner.run_script_stmt(cursor, stmt)
-                to_remove = 0
+            log.info("pre_pack: enumerating states to pack")
+            stmt = "%(TRUNCATE)s pack_state"
+            self.runner.run_script_stmt(cursor, stmt)
+            to_remove = 0
 
-                if self.options.pack_gc:
-                    # Pack objects with the keep flag set to false.
-                    stmt = """
-                    INSERT INTO pack_state (tid, zoid)
-                    SELECT tid, zoid
-                    FROM object_state
-                        JOIN pack_object USING (zoid)
-                    WHERE keep = %(FALSE)s
-                        AND tid > 0
-                        AND tid <= %(pack_tid)s
-                    """
-                    self.runner.run_script_stmt(
-                        cursor, stmt, {'pack_tid': pack_tid})
-                    to_remove += cursor.rowcount
-
-                # Pack object states with the keep flag set to true.
+            if self.options.pack_gc:
+                # Pack objects with the keep flag set to false.
                 stmt = """
                 INSERT INTO pack_state (tid, zoid)
                 SELECT tid, zoid
                 FROM object_state
-                    JOIN pack_object USING (zoid)
-                WHERE keep = %(TRUE)s
+                INNER JOIN pack_object USING (zoid)
+                WHERE keep = %(FALSE)s
                     AND tid > 0
-                    AND tid != keep_tid
                     AND tid <= %(pack_tid)s
+                ORDER BY zoid
                 """
                 self.runner.run_script_stmt(
                     cursor, stmt, {'pack_tid': pack_tid})
                 to_remove += cursor.rowcount
 
-                log.info("pre_pack: enumerating transactions to pack")
-                stmt = "%(TRUNCATE)s pack_state_tid"
-                self.runner.run_script_stmt(cursor, stmt)
-                stmt = """
-                INSERT INTO pack_state_tid (tid)
-                SELECT DISTINCT tid
-                FROM pack_state
-                """
-                cursor.execute(stmt)
+            # Pack object states with the keep flag set to true.
+            stmt = """
+            INSERT INTO pack_state (tid, zoid)
+            SELECT tid, zoid
+            FROM object_state
+            INNER JOIN pack_object USING (zoid)
+            WHERE keep = %(TRUE)s
+                AND tid > 0
+                AND tid != keep_tid
+                AND tid <= %(pack_tid)s
+            ORDER BY zoid
+            """
+            self.runner.run_script_stmt(
+                cursor, stmt, {'pack_tid': pack_tid})
+            to_remove += cursor.rowcount
 
-                log.info("pre_pack: will remove %d object state(s)",
-                         to_remove)
+            log.info("pre_pack: enumerating transactions to pack")
+            stmt = "%(TRUNCATE)s pack_state_tid"
+            self.runner.run_script_stmt(cursor, stmt)
+            stmt = """
+            INSERT INTO pack_state_tid (tid)
+            SELECT DISTINCT tid
+            FROM pack_state
+            """
+            cursor.execute(stmt)
 
-            except:
-                log.exception("pre_pack: failed")
-                conn.rollback()
-                raise
-            else:
-                log.info("pre_pack: finished successfully")
-                conn.commit()
+            log.info("pre_pack: will remove %d object state(s)",
+                     to_remove)
+
+            log.info("pre_pack: finished successfully")
+            conn.commit()
+        except:
+            conn.rollback()
+            raise
         finally:
             self.connmanager.close(conn, cursor)
 
@@ -575,7 +589,7 @@ class HistoryPreservingPackUndo(PackUndo):
         ORDER BY zoid
         """
         self.runner.run_script(cursor, stmt, {'pack_tid': pack_tid})
-
+        conn.commit()
 
     def _pre_pack_with_gc(self, conn, cursor, pack_tid, get_references):
         """Determine what to pack, with garbage collection.
@@ -590,6 +604,9 @@ class HistoryPreservingPackUndo(PackUndo):
         # Fill the pack_object table with OIDs that either will be
         # removed (if nothing references the OID) or whose history will
         # be cut.
+        # Access the tables that are used by online transactions
+        # in a short transaction and immediately commit to release any
+        # locks.
         stmt = """
         %(TRUNCATE)s pack_object;
 
@@ -601,9 +618,14 @@ class HistoryPreservingPackUndo(PackUndo):
         ORDER BY zoid;
 
         -- Keep the root object.
-        UPDATE pack_object SET keep = %(TRUE)s
+        UPDATE pack_object
+        SET keep = %(TRUE)s
         WHERE zoid = 0;
+        """
+        self.runner.run_script(cursor, stmt, {'pack_tid': pack_tid})
+        conn.commit()
 
+        stmt = """
         -- Keep objects that have been revised since pack_tid.
         -- Use temp_pack_visit for temporary state; otherwise MySQL 5 chokes.
         INSERT INTO temp_pack_visit (zoid, keep_tid)
@@ -612,7 +634,8 @@ class HistoryPreservingPackUndo(PackUndo):
         WHERE tid > %(pack_tid)s
         ORDER BY zoid;
 
-        UPDATE pack_object SET keep = %(TRUE)s
+        UPDATE pack_object
+        SET keep = %(TRUE)s
         WHERE zoid IN (
             SELECT zoid
             FROM temp_pack_visit
@@ -628,7 +651,8 @@ class HistoryPreservingPackUndo(PackUndo):
         FROM object_ref
         WHERE tid > %(pack_tid)s;
 
-        UPDATE pack_object SET keep = %(TRUE)s
+        UPDATE pack_object
+        SET keep = %(TRUE)s
         WHERE zoid IN (
             SELECT zoid
             FROM temp_pack_visit
@@ -640,7 +664,7 @@ class HistoryPreservingPackUndo(PackUndo):
 
         # Traverse the graph, setting the 'keep' flags in pack_object
         self._traverse_graph(cursor)
-
+        conn.commit()
 
     def _find_pack_tid(self):
         """If pack was not completed, find our pack tid again"""

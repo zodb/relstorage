@@ -120,6 +120,28 @@ class GenericRelStorageTests(
         ReadOnlyStorage.ReadOnlyStorage,
     ):
 
+    def setUp(self):
+        super(GenericRelStorageTests, self).setUp()
+        # PackableStorage is particularly bad about leaving things
+        # dangling. For example, if the ClientThread runs into
+        # problems, it doesn't close its connection, which can leave
+        # locks dangling until GC happens and break other threads and even
+        # other tests.
+        #
+        # Patch around that.
+        def db_factory(storage, *args, **kwargs):
+            db = self._closing(DB(storage, *args, **kwargs))
+            db_open = db.open
+            def o(*args, **kwargs):
+                return self._closing(db_open(*args, **kwargs))
+            db.open = o
+            return db
+        PackableStorage.DB = db_factory
+
+    def tearDown(self):
+        PackableStorage.DB = DB
+        super(GenericRelStorageTests, self).tearDown()
+
     def checkCurrentObjectTidsRoot(self):
         # Get the root object in place
         db = self._closing(DB(self._storage))
@@ -719,23 +741,6 @@ class GenericRelStorageTests(
         self._dostoreNP(self._storage.new_oid(), data=b'brokenpickle')
         self.assertRaises(unpick_errs, self._storage.pack,
                           time.time() + 10000, referencesf)
-
-    def checkPackLotsWhileWriting(self):
-        def db_factory(storage):
-            # If the ClientThread runs into problems, it doesn't close its connection,
-            # which can leave locks dangling until GC happens.
-            db = self._closing(DB(storage))
-            db_open = db.open
-            def o():
-                return self._closing(db_open())
-            db.open = o
-            return db
-        PackableStorage.DB = db_factory
-        try:
-            super(GenericRelStorageTests, self).checkPackLotsWhileWriting()
-        finally:
-            PackableStorage.DB = DB
-
 
     def checkBackwardTimeTravelWithoutRevertWhenStale(self):
         # If revert_when_stale is false (the default), when the database
