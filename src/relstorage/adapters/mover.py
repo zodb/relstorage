@@ -23,7 +23,6 @@ from zope.interface import implementer
 from ZODB.POSException import Unsupported
 
 from .._compat import OID_TID_MAP_TYPE
-from ..iter import fetchmany
 from ._util import noop_when_history_free
 from ._util import query_property as _query_property
 from .._compat import ABC
@@ -467,45 +466,27 @@ class AbstractObjectMover(ABC):
     def move_from_temp(self, cursor, tid, txn_has_blobs):
         """
         Move the temporarily stored objects to permanent storage.
-
-        Returns the list of oids stored.
         """
-        stmt = """
-        SELECT zoid FROM temp_store
-        """
-        cursor.execute(stmt)
-        affected_oids = [oid for (oid,) in fetchmany(cursor)]
-        # if 0: #with l:
-        #     print(threading.current_thread(), "Will store", affected_oids, tid)
-        #     subprocess.check_call(
-        #         ['mysql', '-uroot', '-e',
-        #          "select * from performance_schema.data_locks"
-        #         ],
-        #     )
-
         if self.keep_history:
             stmt = self._move_from_temp_hp_insert_query
+            __traceback_info__ = stmt
             cursor.execute(stmt, (tid,))
         else:
+            # If we can require storages to have an UPSERT (mysql and
+            # postgres do), then we can remove the DELETE.
             self._move_from_temp_object_state(cursor, tid)
 
             if txn_has_blobs:
-                cursor.execute(self._move_from_temp_hf_delete_blob_chunk_query)
+                stmt = self._move_from_temp_hf_delete_blob_chunk_query
+                cursor.execute(stmt)
 
         # TODO: Make this an UPSERT for history free storages.
+        # This would obviate the need for the above delete query.
         if txn_has_blobs:
             stmt = self._move_from_temp_copy_blob_query
+            __traceabck_info__ = stmt
             cursor.execute(stmt, (tid,))
-        # if 0: #with l:
-        #     print(threading.current_thread(), "Did store", affected_oids)
 
-        #     subprocess.check_call(
-        #         ['mysql', '-uroot', '-e',
-        #          "select * from performance_schema.data_locks"
-        #         ],
-        #     )
-        #     print(threading.current_thread(), "Done store")
-        return affected_oids
 
     # Insert and update current objects. The trivial
     # implementation does a two-part query; if you

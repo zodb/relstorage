@@ -482,9 +482,8 @@ class IObjectMover(Interface):
         """
 
     def move_from_temp(cursor, tid, txn_has_blobs):
-        """Moved the temporarily stored objects to permanent storage.
-
-        Returns the list of oids stored.
+        """
+        Move the temporarily stored objects to permanent storage.
         """
 
     def update_current(cursor, tid):

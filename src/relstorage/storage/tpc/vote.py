@@ -263,8 +263,28 @@ class AbstractVote(AbstractTPCState):
         cursor = self.storage._store_cursor
         adapter = self.storage._adapter
 
-        # This returns the OID ints stored, but we don't use them here
-        adapter.mover.move_from_temp(cursor, committing_tid_int, txn_has_blobs)
+        try:
+            adapter.mover.move_from_temp(cursor, committing_tid_int, txn_has_blobs)
+        except:
+            # This could be bad, we're probably already in ``tpc_finish``.
+
+            # XXX: On MySQL, a deadlock here only rolled back that one
+            # *statement*, whereas on PostgreSQL it aborted the entire
+            # transaction. On MySQL, this means we continue to hold
+            # the locks we already took out, and our temporary tables
+            # remain valid; thus we should be able to try again to
+            # commit (after short sleep).
+
+            # Deadlocks here have been observed during concurrent
+            # heavy packing in HP databases (``checkPackLotsWhileWriting``,
+            # https://travis-ci.org/zodb/relstorage/jobs/555024285#L476),
+            # though it's not entirely clear why.
+            # For debugging, lets print what everything is doing.
+            import traceback; traceback.print_exc()
+            import gevent.util
+            gevent.util.print_run_info()
+            raise
+
 
     def __choose_tid_and_lock(self):
         """
@@ -285,7 +305,7 @@ class AbstractVote(AbstractTPCState):
         # Here's where we take the global commit lock, and
         # allocate the next available transaction id, storing it
         # into history-preserving DBs. But if someone passed us
-        # a TID, then it must already be in the DB, and the lock must
+        # a TID (``restore``), then it must already be in the DB, and the lock must
         # already be held.
         #
         # If we've prepared the transaction, then the TID must be in the

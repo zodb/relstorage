@@ -12,10 +12,10 @@
   cache and so may be useful for more than one thread. This can be
   3x or more faster than loading objects on-demand. See :issue:`239`.
 
-- Stop chunking blob uploads on PostgreSQL. All supported versions
-  natively handle blobs greater than 2GB in size, and the server was
-  already chunking the blobs for storage, so our layer of extra chunking was
-  unnecessary.
+- Stop chunking blob uploads on PostgreSQL. All supported PostgreSQL
+  versions natively handle blobs greater than 2GB in size, and the
+  server was already chunking the blobs for storage, so our layer of
+  extra chunking has become unnecessary.
 
   .. important::
 
@@ -58,6 +58,46 @@
 
 - Make PostgreSQL use an upsert query for moving rows into place on
   history-preserving databases.
+
+- Support ZODB 5's parallel commit feature. This means that the
+  database-wide commit lock is taken much later in the process, and
+  held for a much shorter time than before.
+
+  Previously, the commit lock was taken during the ``tpc_vote`` phase,
+  and held while we checked ``Connection.readCurrent`` values, and
+  checked for (and hopefully resolved) conflicts. Other transaction
+  resources (such as other ZODB databases in a multi-db setup) then
+  got to vote while we held this lock. Finally, in ``tpc_finally``,
+  objects were moved into place and the lock was released. This
+  prevented any other storage instances from checking for
+  ``readCurrent`` or conflicts while we were doing that.
+
+  Now, ``tpc_vote`` is (usually) able to check
+  ``Connection.readCurrent`` and check and resolve conflicts without
+  taking the commit lock. Only in ``tpc_finish``, when we need to
+  finally allocate the transaction ID, is the commit lock taken, and
+  only held for the duration needed to finally move objects into
+  place. This allows other storages for this database, and other
+  transaction resources for this transaction, to proceed with voting,
+  conflict resolution, etc, in parallel.
+
+  Consistent results are maintained by use of object-level row
+  locking. Thus, two transactions that attempt to modify the same
+  object will now only block each other.
+
+  There are two exceptions. First, if the ``storage.restore()`` method
+  is used, the commit lock must be taken early. This is usually only
+  done as part of copying one database to another. Second, if the
+  storage is configured with a shared blob directory instead of a blob
+  cache (meaning that blobs are *only* stored on the filesystem) and
+  the transaction has added or mutated blobs, the commit lock must be
+  taken early to ensure blobs can be saved. It is recommended to store
+  blobs on the RDBMS server and use a blob cache.
+
+  In addition, the new locking scheme means that packing no longer
+  needs to acquire a commit lock and more work can proceed in parallel
+  with regular commits. There may have been some regressions in
+  packing speed on MySQL.
 
 3.0a3 (2019-06-26)
 ==================
