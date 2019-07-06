@@ -572,6 +572,7 @@ class HistoryPreservingPackUndo(PackUndo):
         FROM object_state
         WHERE tid > 0 AND tid <= %(pack_tid)s
         GROUP BY zoid
+        ORDER BY zoid
         """
         self.runner.run_script(cursor, stmt, {'pack_tid': pack_tid})
 
@@ -596,7 +597,8 @@ class HistoryPreservingPackUndo(PackUndo):
         SELECT zoid, %(FALSE)s, MAX(tid)
         FROM object_state
         WHERE tid > 0 AND tid <= %(pack_tid)s
-        GROUP BY zoid;
+        GROUP BY zoid
+        ORDER BY zoid;
 
         -- Keep the root object.
         UPDATE pack_object SET keep = %(TRUE)s
@@ -607,7 +609,8 @@ class HistoryPreservingPackUndo(PackUndo):
         INSERT INTO temp_pack_visit (zoid, keep_tid)
         SELECT zoid, 0
         FROM current_object
-        WHERE tid > %(pack_tid)s;
+        WHERE tid > %(pack_tid)s
+        ORDER BY zoid;
 
         UPDATE pack_object SET keep = %(TRUE)s
         WHERE zoid IN (
@@ -662,19 +665,18 @@ class HistoryPreservingPackUndo(PackUndo):
             try:
                 stmt = """
                 SELECT transaction.tid,
-                    CASE WHEN packed = %(TRUE)s THEN 1 ELSE 0 END,
-                    CASE WHEN pack_state_tid.tid IS NOT NULL THEN 1 ELSE 0 END
+                       CASE WHEN packed = %(TRUE)s THEN 1 ELSE 0 END,
+                       CASE WHEN pack_state_tid.tid IS NOT NULL THEN 1 ELSE 0 END
                 FROM transaction
-                    LEFT JOIN pack_state_tid ON (
-                        transaction.tid = pack_state_tid.tid)
+                LEFT OUTER JOIN pack_state_tid ON (transaction.tid = pack_state_tid.tid)
                 WHERE transaction.tid > 0
                     AND transaction.tid <= %(pack_tid)s
                     AND (packed = %(FALSE)s OR pack_state_tid.tid IS NOT NULL)
+                ORDER BY transaction.tid
                 """
                 self.runner.run_script_stmt(
                     cursor, stmt, {'pack_tid': pack_tid})
-                tid_rows = list(self._fetchmany(cursor))
-                tid_rows.sort()  # oldest first
+                tid_rows = list(self._fetchmany(cursor)) # oldest first, sorted in SQL
 
                 total = len(tid_rows)
                 log.info("pack: will pack %d transaction(s)", total)
@@ -839,10 +841,9 @@ class HistoryFreePackUndo(PackUndo):
 
     _script_create_temp_pack_visit = """
         CREATE TEMPORARY TABLE temp_pack_visit (
-            zoid BIGINT NOT NULL,
+            zoid BIGINT NOT NULL PRIMARY KEY,
             keep_tid BIGINT NOT NULL
         );
-        CREATE UNIQUE INDEX temp_pack_visit_zoid ON temp_pack_visit (zoid);
         CREATE INDEX temp_pack_keep_tid ON temp_pack_visit (keep_tid)
         """
 
@@ -939,6 +940,7 @@ class HistoryFreePackUndo(PackUndo):
             SELECT zoid, tid, state
             FROM object_state
             WHERE zoid IN (%s)
+            ORDER BY zoid
             """ % oid_list
         self.runner.run_script_stmt(cursor, stmt)
 
@@ -1031,14 +1033,17 @@ class HistoryFreePackUndo(PackUndo):
 
         INSERT INTO pack_object (zoid, keep, keep_tid)
         SELECT zoid, %(FALSE)s, tid
-        FROM object_state;
+        FROM object_state
+        ORDER BY zoid;
 
         -- Keep the root object.
-        UPDATE pack_object SET keep = %(TRUE)s
+        UPDATE pack_object
+        SET keep = %(TRUE)s
         WHERE zoid = 0;
 
         -- Keep objects that have been revised since pack_tid.
-        UPDATE pack_object SET keep = %(TRUE)s
+        UPDATE pack_object
+        SET keep = %(TRUE)s
         WHERE keep_tid > %(pack_tid)s;
         """
         self.runner.run_script(cursor, stmt, {'pack_tid': pack_tid})
@@ -1070,6 +1075,7 @@ class HistoryFreePackUndo(PackUndo):
                 SELECT zoid, keep_tid
                 FROM pack_object
                 WHERE keep = %(FALSE)s
+                ORDER BY zoid
                 """
                 self.runner.run_script_stmt(cursor, stmt)
                 to_remove = list(self._fetchmany(cursor))
@@ -1087,7 +1093,8 @@ class HistoryFreePackUndo(PackUndo):
                 lastreport, reportstep = 0, max(total / 1000, 1)
 
                 while to_remove:
-                    # TODO: Use the row batcher for this.
+                    # TODO: Use the row batcher for this,
+                    # or simply do a join against the table.
                     items = to_remove[:100]
                     del to_remove[:100]
                     stmt = """
