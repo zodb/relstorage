@@ -720,6 +720,23 @@ class GenericRelStorageTests(
         self.assertRaises(unpick_errs, self._storage.pack,
                           time.time() + 10000, referencesf)
 
+    def checkPackLotsWhileWriting(self):
+        def db_factory(storage):
+            # If the ClientThread runs into problems, it doesn't close its connection,
+            # which can leave locks dangling until GC happens.
+            db = self._closing(DB(storage))
+            db_open = db.open
+            def o():
+                return self._closing(db_open())
+            db.open = o
+            return db
+        PackableStorage.DB = db_factory
+        try:
+            super(GenericRelStorageTests, self).checkPackLotsWhileWriting()
+        finally:
+            PackableStorage.DB = DB
+
+
     def checkBackwardTimeTravelWithoutRevertWhenStale(self):
         # If revert_when_stale is false (the default), when the database
         # connection is stale (such as through failover to an

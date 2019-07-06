@@ -282,7 +282,7 @@ class AbstractVote(AbstractTPCState):
             # For debugging, lets print what everything is doing.
             import traceback; traceback.print_exc()
             import gevent.util
-            gevent.util.print_run_info()
+            gevent.util.print_run_info(greenlet_stacks=False)
             raise
 
 
