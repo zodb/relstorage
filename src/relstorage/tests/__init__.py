@@ -6,6 +6,8 @@ import unittest
 
 import transaction
 
+from ZODB.Connection import Connection
+
 from relstorage._compat import ABC
 from relstorage.options import Options
 
@@ -25,29 +27,47 @@ class TestCase(unittest.TestCase):
         None
     ) or getattr(unittest.TestCase, 'assertRaisesRegexp')
 
-    __to_close = ()
+    def __close_connection(self, connection):
+        if connection.opened:
+            try:
+                connection.close()
+            except KeyError:
+                # From the transaction manager's list of syncs.
+                # Somehow this happens if we get closed multiple times.
+                pass
+            connection.close = lambda *_, **__: None
 
-    def setUp(self):
-        # This sets up a temporary directory for each test and
-        # changes to it.
-        super(TestCase, self).setUp()
-        self.__to_close = []
+    def __close(self, thing):
+        thing.close()
 
     def _closing(self, o):
         """
-        Close the object before tearDown (opposite of addCleanup
-        so that exceptions will propagate).
+        Close the object using its 'close' method *after* invoking
+        all of the `tearDown` stack, and even running if `setUp`
+        fails.
+
+        This is just a convenience wrapper around `addCleanup`. This
+        exists to make it easier to call.
+
+        Failures (exceptions) in your cleanup function will still
+        result in the test failing, but all registered cleanups will
+        still be run.
 
         Returns the given object.
         """
-        self.__to_close.append(o)
+        __traceback_info__ = o
+        # Don't capture o.close now, it could get swizzled later to prevent it
+        # from doing things. For example, DB.close() sets self.close to a no-op
+
+        if isinstance(o, Connection):
+            meth = self.__close_connection
+        else:
+            meth = self.__close
+        self.addCleanup(meth, o)
         return o
 
     def tearDown(self):
         transaction.abort()
-        for x in reversed(self.__to_close):
-            x.close()
-        self.__to_close = ()
         super(TestCase, self).tearDown()
 
     def assertIsEmpty(self, container):

@@ -128,12 +128,23 @@ class GenericRelStorageTests(
         # locks dangling until GC happens and break other threads and even
         # other tests.
         #
-        # Patch around that.
+        # Patch around that. Be sure to only close a given connection once,
+        # though.
         def db_factory(storage, *args, **kwargs):
             db = self._closing(DB(storage, *args, **kwargs))
             db_open = db.open
-            def o(*args, **kwargs):
-                return self._closing(db_open(*args, **kwargs))
+            def o(transaction_manager=None, at=None, before=None):
+                conn = db_open(transaction_manager=transaction_manager,
+                               at=at,
+                               before=before)
+
+                self._closing(conn)
+                if transaction_manager is not None:
+                    # If we're using an independent transaction, abort it *before*
+                    # attempting to close the connection; that means it must be registered
+                    # after the connection.
+                    self.addCleanup(transaction_manager.abort)
+                return conn
             db.open = o
             return db
         PackableStorage.DB = db_factory

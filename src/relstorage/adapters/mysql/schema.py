@@ -29,6 +29,18 @@ class MySQLSchemaInstaller(AbstractSchemaInstaller):
 
     database_type = 'mysql'
 
+    # The names of tables that in the past were explicitly declared as
+    # MyISAM but which should now be InnoDB to work with transactions.
+    # TODO: Add a migration check for this.
+    tables_that_used_to_be_myisam_should_be_innodb = (
+        # new_oid, # (This needs to be done, but we're not quite there yet)
+        'object_ref',
+        'object_refs_added',
+        'pack_object',
+        'pack_state',
+        'pack_state_tid',
+    )
+
     def get_database_name(self, cursor):
         cursor.execute("SELECT DATABASE()")
         for (name,) in cursor:
@@ -163,7 +175,7 @@ class MySQLSchemaInstaller(AbstractSchemaInstaller):
                 tid         BIGINT NOT NULL,
                 to_zoid     BIGINT NOT NULL,
                 PRIMARY KEY (tid, zoid, to_zoid)
-            ) ENGINE = MyISAM;
+            ) ENGINE = InnoDB;
             """
         else:
             stmt = """
@@ -172,7 +184,7 @@ class MySQLSchemaInstaller(AbstractSchemaInstaller):
                 to_zoid     BIGINT NOT NULL,
                 tid         BIGINT NOT NULL,
                 PRIMARY KEY (zoid, to_zoid)
-            ) ENGINE = MyISAM;
+            ) ENGINE = InnoDB;
             """
 
         self.runner.run_script(cursor, stmt)
@@ -182,14 +194,14 @@ class MySQLSchemaInstaller(AbstractSchemaInstaller):
             stmt = """
             CREATE TABLE object_refs_added (
                 tid         BIGINT NOT NULL PRIMARY KEY
-            ) ENGINE = MyISAM;
+            ) ENGINE = InnoDB;
             """
         else:
             stmt = """
             CREATE TABLE object_refs_added (
                 zoid        BIGINT NOT NULL PRIMARY KEY,
                 tid         BIGINT NOT NULL
-            ) ENGINE = MyISAM;
+            ) ENGINE = InnoDB;
             """
         self.runner.run_script(cursor, stmt)
 
@@ -200,7 +212,7 @@ class MySQLSchemaInstaller(AbstractSchemaInstaller):
             keep        BOOLEAN NOT NULL,
             keep_tid    BIGINT NOT NULL,
             visited     BOOLEAN NOT NULL DEFAULT FALSE
-        ) ENGINE = MyISAM;
+        ) ENGINE = InnoDB;
         CREATE INDEX pack_object_keep_zoid ON pack_object (keep, zoid);
         """
         self.runner.run_script(cursor, stmt)
@@ -212,7 +224,8 @@ class MySQLSchemaInstaller(AbstractSchemaInstaller):
                 tid         BIGINT NOT NULL,
                 zoid        BIGINT NOT NULL,
                 PRIMARY KEY (tid, zoid)
-            ) ENGINE = MyISAM;"""
+            ) ENGINE = InnoDB;
+            """
             self.runner.run_script(cursor, stmt)
 
     def _create_pack_state_tid(self, cursor):
@@ -220,7 +233,7 @@ class MySQLSchemaInstaller(AbstractSchemaInstaller):
             stmt = """
             CREATE TABLE pack_state_tid (
                 tid         BIGINT NOT NULL PRIMARY KEY
-            ) ENGINE = MyISAM;
+            ) ENGINE = InnoDB;
             """
             self.runner.run_script(cursor, stmt)
 
