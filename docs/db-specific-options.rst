@@ -66,6 +66,11 @@ driver
      A pure-Python driver suitable for use with gevent. Works on all
      supported platforms.
 
+     This driver makes use of ``SET SESSION CHARACTERISTICS`` and thus
+     `may not work well
+     <http://initd.org/psycopg/docs/connection.html#connection.set_session>`_
+     with certain configurations of connection load balancers.
+
 dsn
     Specifies the data source name for connecting to PostgreSQL.
     A PostgreSQL DSN is a list of parameters separated with

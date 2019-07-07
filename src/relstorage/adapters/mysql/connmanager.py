@@ -83,7 +83,7 @@ class MySQLdbConnectionManager(AbstractConnectionManager):
                     self._db_driver.set_autocommit(conn, True)
                     # Transaction isolation cannot be changed inside a
                     # transaction. 'SET SESSION' changes it for all
-                    # upcoming sessions.
+                    # upcoming transactions.
                     stmt = "SET SESSION TRANSACTION %s" % transaction_mode
                     __traceback_info__ = stmt
                     cursor.execute(stmt)

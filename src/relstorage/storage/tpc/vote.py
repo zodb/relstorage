@@ -30,7 +30,7 @@ from ZODB.POSException import StorageTransactionError
 from ZODB.utils import p64 as int64_to_8bytes
 from ZODB.utils import u64 as bytes8_to_int64
 
-
+from . import LOCK_EARLY
 from . import AbstractTPCState
 from .finish import Finish
 
@@ -40,16 +40,21 @@ class DatabaseLockedForTid(object):
 
     @classmethod
     def lock_database_for_next_tid(cls, cursor, adapter, ude):
-        # TODO: Stop doing this here; go to row-level locking.
+        # We're midway between the state of a database-wide lock
+        # and consistent row-level locking. The lock here is now
+        # a row-level artificial lock on COMMIT_ROW_LOCK, and we then
+        # read TRANSACTION (or OBJECT_STATE in HF).
+        # TODO: Continue working to remove the need for the artificial
+        # lock.
 
         adapter.locker.hold_commit_lock(cursor, ensure_current=True)
         user, desc, ext = ude
 
         # Choose a transaction ID.
-        # Base the transaction ID on the current time,
-        # but ensure that the tid of this transaction
-        # is greater than any existing tid.
-        # TODO: Stop allocating this here. Defer until tpc_finish.
+        #
+        # Base the transaction ID on the current time, but ensure that
+        # the tid of this transaction is greater than any existing
+        # tid.
         last_tid = adapter.txncontrol.get_tid(cursor)
         now = time.time()
         stamp = TimeStamp(*(time.gmtime(now)[:5] + (now % 60,)))
@@ -92,7 +97,7 @@ class AbstractVote(AbstractTPCState):
     """
 
     __slots__ = (
-        # (user, description, extension) from the transaction.
+        # (user, description, extension) from the transaction. byte objects.
         'ude',
         # max_stored_oid is the highest OID stored by the current
         # transaction
@@ -131,11 +136,16 @@ class AbstractVote(AbstractTPCState):
         """
         Prepare the transaction for final commit.
 
-        Takes the exclusive database commit lock.
-        """
-        # This method initiates a two-phase commit process,
-        # saving the name of the prepared transaction in self._prepared_txn.
+        Locks (only!) the rows that will be updated or were marked as
+        explicit dependencies through
+        `checkCurrentSerialInTransaction`, and then verfies those
+        dependencies and resolves conflicts.
 
+        If we're using a shared blob dir, we then take out the commit
+        lock, in order to move blobs into final position. (TODO: That
+        might not be fully necessary, so long as we can properly roll
+        back blobs.) Otherwise, this only locks the rows we will impact.
+        """
         # It is assumed that self._lock.acquire was called before this
         # method was called.
         cursor = self.storage._store_cursor
@@ -144,7 +154,8 @@ class AbstractVote(AbstractTPCState):
         locker = adapter.locker
         mover = adapter.mover
 
-        # execute all remaining batch store operations
+        # execute all remaining batch store operations.
+        # This exists as an extension point.
         self._flush_temps_to_db(cursor)
 
         # Reserve all OIDs used by this transaction
@@ -152,20 +163,8 @@ class AbstractVote(AbstractTPCState):
             adapter.oidallocator.set_min_oid(
                 cursor, self.max_stored_oid + 1)
 
-
-        # XXX: When we stop allocating the TID early, we need to move
-        # 'move_from_temp' (hf and hp) and 'update_current' (hp only)
-        # later, down to tpc_finish. With everything safely locked,
-        # that shouldn't fail. But we still need to check serials and
-        # resolve conflicts here. When we do that, we need to lock all
-        # the rows involved for update, in order (to avoid deadlocks),
-        # including the prev_tid rows (hp only) and current committed
-        # rows (both) for everything that conflicts.
-        #
-        # The above is now partway done.
-
         # Check the things registered by Connection.readCurrent(),
-        # while simeoutaneously taking out update locks on both those rows,
+        # while at the same time taking out update locks on both those rows,
         # and the rows we might conflict with or will be replacing.
         oid_ints = self.required_tids.keys()
 
@@ -187,7 +186,13 @@ class AbstractVote(AbstractTPCState):
         invalidated_oids = self.__check_and_resolve_conflicts()
 
 
-        if self.storage.blobhelper is not None and self.storage.blobhelper.shared_blob_dir:
+        blobhelper = self.storage.blobhelper
+        blobs_must_be_moved_now = blobhelper is not None and blobhelper.shared_blob_dir
+
+        if blobs_must_be_moved_now or LOCK_EARLY:
+            # It is crucial to do this only after locking the current
+            # object rows in order to prevent deadlock. (The same order as a regular
+            # transaction, just slightly sooner.)
             self.__lock_and_move('vote')
 
         # New storage protocol
@@ -212,7 +217,7 @@ class AbstractVote(AbstractTPCState):
 
         # Detect conflicting changes.
         # Try to resolve the conflicts.
-        invalidated = set()  # a set of OIDs
+        invalidated = set()  # a set of OIDs (bytes)
         # In the past, we didn't load all conflicts from the DB at once,
         # just one at a time. This was because we also fetched the state data
         # from the DB, and it could be large. But now we use the state we have in
@@ -250,9 +255,6 @@ class AbstractVote(AbstractTPCState):
     def __finish_store(self, committing_tid_int):
         """
         Move stored objects from the temporary table to final storage.
-
-        Returns a sequence of OIDs that were resolved to be received
-        by Connection._handle_serial().
         """
         # Move the new states into the permanent table
         if self.storage.blobhelper is not None:
@@ -263,28 +265,7 @@ class AbstractVote(AbstractTPCState):
         cursor = self.storage._store_cursor
         adapter = self.storage._adapter
 
-        try:
-            adapter.mover.move_from_temp(cursor, committing_tid_int, txn_has_blobs)
-        except:
-            # This could be bad, we're probably already in ``tpc_finish``.
-
-            # XXX: On MySQL, a deadlock here only rolled back that one
-            # *statement*, whereas on PostgreSQL it aborted the entire
-            # transaction. On MySQL, this means we continue to hold
-            # the locks we already took out, and our temporary tables
-            # remain valid; thus we should be able to try again to
-            # commit (after short sleep).
-
-            # Deadlocks here have been observed during concurrent
-            # heavy packing in HP databases (``checkPackLotsWhileWriting``,
-            # https://travis-ci.org/zodb/relstorage/jobs/555024285#L476),
-            # though it's not entirely clear why.
-            # For debugging, lets print what everything is doing.
-            import traceback; traceback.print_exc()
-            import gevent.util
-            gevent.util.print_run_info(greenlet_stacks=False)
-            raise
-
+        adapter.mover.move_from_temp(cursor, committing_tid_int, txn_has_blobs)
 
     def __choose_tid_and_lock(self):
         """
@@ -296,7 +277,6 @@ class AbstractVote(AbstractTPCState):
         """
         adapter = self.storage._adapter
         cursor = self.storage._store_cursor
-        # TODO: Stop doing this here; go to row-level locking.
         lock = DatabaseLockedForTid.lock_database_for_next_tid(cursor, adapter, self.ude)
         self.committing_tid_lock = lock
         return lock
@@ -337,6 +317,7 @@ class AbstractVote(AbstractTPCState):
                 raise StorageTransactionError(
                     "tpc_finish called with wrong transaction")
             # Handle the finishing. We cannot/must not fail now.
+            # TODO: Move most of this into the Finish class/module.
             self.__lock_and_move()
             assert self.committing_tid_lock is not None, self
             try:
@@ -352,10 +333,11 @@ class AbstractVote(AbstractTPCState):
 
 
 class HistoryFree(AbstractVote):
-    pass
+    __slots__ = ()
 
 
 class HistoryPreserving(AbstractVote):
+    __slots__ = ()
 
     def __init__(self, begin_state):
          # Using undo() requires a new TID, so if we had already begun

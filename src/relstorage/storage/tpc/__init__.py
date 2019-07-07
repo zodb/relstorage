@@ -32,12 +32,24 @@ from ZODB.POSException import StorageTransactionError
 
 log = logging.getLogger("relstorage")
 
-# Set the RELSTORAGE_ABORT_EARLY environment variable when debugging
-# a failure revealed by the ZODB test suite.  The test suite often fails
-# to call tpc_abort in the event of an error, leading to deadlocks.
-# This variable causes RelStorage to abort failed transactions
-# early rather than wait for an explicit abort.
-abort_early = os.environ.get('RELSTORAGE_ABORT_EARLY')
+#: Set the ``RELSTORAGE_ABORT_EARLY`` environment variable when debugging
+#: a failure revealed by the ZODB test suite.  The test suite often fails
+#: to call tpc_abort in the event of an error, leading to deadlocks.
+#: This variable causes RelStorage to abort failed transactions
+#: early rather than wait for an explicit abort.
+#:
+#: TODO: Now that we lock rows explicitly, maybe this should now be the default?
+ABORT_EARLY = os.environ.get('RELSTORAGE_ABORT_EARLY')
+
+#: Set the ``RELSTORAGE_LOCK_EARLY`` environment variable if you
+#: experience deadlocks or failures to commit (``tpc_finish``). This
+#: will cause the commit lock to be taken as part of ``tpc_vote``
+#: (similar to RelStorage 2.x) instead of deferring it until
+#: ``tpc_finish``.
+#:
+#: If this is necessary, this is probably a bug in RelStorage; please report
+#: it.
+LOCK_EARLY = os.environ.get('RELSTORAGE_LOCK_EARLY')
 
 class AbstractTPCState(object):
 
@@ -76,7 +88,7 @@ class AbstractTPCState(object):
     def tpc_abort(self, transaction):
         if transaction is not self.transaction:
             return self
-        # the lock is held here
+
         try:
             try:
                 self.storage._rollback_load_connection()
@@ -159,8 +171,6 @@ class Stale(AbstractTPCState):
     def __init__(self, previous_state, stale_error):
         super(Stale, self).__init__(None, None)
         self.previous_state = previous_state
-        if not isinstance(stale_error, type):
-            stale_error = type(stale_error)
         self.stale_error = stale_error
 
     def _stale(self, *args, **kwargs):

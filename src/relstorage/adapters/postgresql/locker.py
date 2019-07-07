@@ -44,9 +44,14 @@ class PostgreSQLLocker(AbstractLocker):
         pass
 
     def _get_commit_lock_debug_info(self, cursor):
-        # When we're called, the transaction is guaranteed to be aborted, so
-        # to do anything we need to rollback. Unfortunately, that would release
-        # the locks that we're holding (which may already have been released? Unclear.)
+        # When we're called, the transaction is guaranteed to be
+        # aborted, so to be able to execute any queries we need to
+        # rollback. Unfortunately, that would release the locks that
+        # we're holding (which may already have been released?
+        # Unclear.)
+        #
+        # This method isn't specifically tested under those failures
+        # circumstances, and probably doesn't work.
         from . import debug_locks
         debug_locks(cursor)
         return self._rows_as_pretty_string(cursor)

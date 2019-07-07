@@ -30,6 +30,14 @@ from relstorage._util import to_utf8
 
 from . import AbstractTPCState
 from .vote import DatabaseLockedForTid
+from .vote import HistoryFree as HFVoteFactory
+from .vote import HistoryPreserving as HPVoteFactory
+
+class _BadFactory(object):
+    "Marker."
+
+    def enter(self):
+        raise NotImplementedError
 
 class AbstractBegin(AbstractTPCState):
     """
@@ -37,6 +45,7 @@ class AbstractBegin(AbstractTPCState):
     """
     __slots__ = (
         # (user, description, extension) from the transaction.
+        # byte objects.
         'ude',
         # max_stored_oid is the highest OID stored by the current
         # transaction
@@ -44,13 +53,20 @@ class AbstractBegin(AbstractTPCState):
         # required_tids: {oid_int: tid_int}; confirms that certain objects
         # have not changed at commit. May be a BTree
         'required_tids',
+
+        # The factory we call to produce a voting state. Must return
+        # an object with an enter() method.
+        'tpc_vote_factory',
     )
+
+    _DEFAULT_TPC_VOTE_FACTORY = _BadFactory
 
     def __init__(self, storage, transaction):
         super(AbstractBegin, self).__init__(storage, transaction)
         self.ude = None
         self.max_stored_oid = 0
         self.required_tids = ()
+        self.tpc_vote_factory = self._DEFAULT_TPC_VOTE_FACTORY
 
         storage._lock.acquire()
         try:
@@ -74,17 +90,13 @@ class AbstractBegin(AbstractTPCState):
         finally:
             storage._lock.release()
 
-    def _tpc_vote_factory(self, state):
-        "Return the object with the enter() method."
-        raise NotImplementedError
-
     def tpc_vote(self, transaction):
         with self.storage._lock:
             if transaction is not self.transaction:
                 raise StorageTransactionError(
                     "tpc_vote called with wrong transaction")
 
-            next_phase = self._tpc_vote_factory(self)
+            next_phase = self.tpc_vote_factory(self)
             next_phase.enter()
             return next_phase
 
@@ -147,7 +159,9 @@ class AbstractBegin(AbstractTPCState):
 
 class HistoryFree(AbstractBegin):
 
-    from .vote import HistoryFree as _tpc_vote_factory
+    __slots__ = ()
+
+    _DEFAULT_TPC_VOTE_FACTORY = HFVoteFactory
 
     def deleteObject(self, oid, oldserial, transaction):
         # This method is only expected to be called from zc.zodbdgc
@@ -179,14 +193,21 @@ class HistoryFree(AbstractBegin):
 
 class HistoryPreserving(AbstractBegin):
 
-    from .vote import HistoryPreserving as _tpc_vote_factory
+    __slots__ = (
+        # Stored in their 8 byte form
+        'undone_oids',
 
-    # Stored in their 8 byte form
-    undone_oids = ()
+        # If we use undo(), we have to allocate a TID, which means
+        # we have to lock the database. Not cool.
+        'committing_tid_lock',
+    )
 
-    # If we use undo(), we have to allocate a TID, which means
-    # we have to lock the database. Not cool.
-    committing_tid_lock = None
+    _DEFAULT_TPC_VOTE_FACTORY = HPVoteFactory
+
+    def __init__(self, storage, transaction):
+        AbstractBegin.__init__(self, storage, transaction)
+        self.undone_oids = ()
+        self.committing_tid_lock = None
 
     def undo(self, transaction_id, transaction):
         # Typically if this is called, the store/restore methods will *not* be

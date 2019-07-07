@@ -269,16 +269,6 @@ class _ConnWrapper(object): # pragma: no cover
         return _ConnWrapper(self.__conn.cursor(*args, **kwargs))
 
     def execute(self, op, args=None):
-        # with l:
-        #     print(threading.current_thread(), self, op, args)
-        #     self.__conn.execute("SELECT * from information_schema.innodb_locks;")
-        #     print("\tLocks in", threading.current_thread(), op)
-        #     for row in self.__conn:
-        #         print("\t", *row)
-        #     self.__conn.execute("select * from sys.innodb_lock_waits;")
-        #     for row in self.__conn:
-        #         print("\t", *row)
-        #self.__conn.connection.handle_unread_result()
         return self.__conn.execute(op, args)
 
     def __iter__(self):

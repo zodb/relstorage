@@ -609,23 +609,14 @@ class GenericRelStorageTests(
             db.close()
 
     def checkPackBatchLockNoWait(self):
-        # Exercise the code in the pack algorithm that attempts to get the
-        # commit lock but will sleep if the lock is busy.
+        # Holding the commit lock doesn't interfere with packing.
         #
-        # This no longer happens, sleep is unused.
-        #
-        # TODO: A new test with rows locked.
+        # TODO: But what about row locking? Let's add a test
+        # that begins a commit and locks some rows and then packs.
         self._storage = self.make_storage(pack_batch_timeout=0)
 
         adapter = self._storage._adapter
         test_conn, test_cursor = adapter.connmanager.open_for_store()
-
-        slept = []
-        def sim_sleep(seconds):
-            slept.append(seconds)
-            adapter.locker.release_commit_lock(test_cursor)
-            test_conn.rollback()
-            adapter.connmanager.close(test_conn, test_cursor)
 
         db = self._closing(DB(self._storage))
         try:
@@ -642,7 +633,7 @@ class GenericRelStorageTests(
             while packtime <= now:
                 packtime = time.time()
             adapter.locker.hold_commit_lock(test_cursor)
-            self._storage.pack(packtime, referencesf, sleep=sim_sleep)
+            self._storage.pack(packtime, referencesf)
             adapter.locker.release_commit_lock(test_cursor)
         finally:
             db.close()

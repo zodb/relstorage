@@ -23,6 +23,8 @@ from ZODB.POSException import StorageTransactionError
 from ZODB.utils import u64 as bytes8_to_int64
 
 from .vote import DatabaseLockedForTid
+from .vote import HistoryFree as HFVoteFactory
+from .vote import HistoryPreserving as HPVoteFactory
 
 class Restore(object):
     """
@@ -75,7 +77,7 @@ class Restore(object):
             raise
 
         # This is now only used for restore()
-        self.batcher = adapter.mover.make_batcher(
+        self.batcher = batcher = adapter.mover.make_batcher(
             storage._store_cursor,
             self.batcher_row_limit)
 
@@ -89,20 +91,14 @@ class Restore(object):
 
         # Arrange for voting to store our batch too, since
         # the mover is unaware of it.
-        # XXX: This isn't especially pretty.
-        orig_factory = begin_state._tpc_vote_factory
-        def tpc_vote_factory(state):
-            vote_state = orig_factory(state)
-            vote_state.committing_tid_lock = committing_tid_lock
-
-            orig_flush = vote_state._flush_temps_to_db
-            def flush(cursor):
-                orig_flush(cursor)
-                self.batcher.flush()
-            vote_state._flush_temps_to_db = flush
-            return vote_state
-
-        begin_state._tpc_vote_factory = tpc_vote_factory
+        factory = begin_state.tpc_vote_factory
+        assert factory is HFVoteFactory or factory is HPVoteFactory
+        def tpc_vote_factory(state,
+                             _f=_HFVoteFactory if factory is HFVoteFactory else _HPVoteFactory,
+                             _c=committing_tid_lock,
+                             _b=batcher):
+            return _f(state, _c, _b)
+        begin_state.tpc_vote_factory = tpc_vote_factory
 
     def restore(self, oid, this_tid, data, prev_txn, transaction):
         # Similar to store() (see comments in FileStorage.restore for
@@ -145,3 +141,25 @@ class Restore(object):
             self.batcher.flush()
             cursor = state.storage._store_cursor
             state.storage.blobhelper.restoreBlob(cursor, oid, serial, blobfilename)
+
+
+class _VoteFactoryMixin(object):
+    __slots__ = ()
+
+    def __init__(self, state, committing_tid_lock, batcher):
+        super(_VoteFactoryMixin, self).__init__(state)
+        # pylint:disable=assigning-non-slot
+        self.committing_tid_lock = committing_tid_lock
+        self.batcher = batcher
+
+    def _flush_temps_to_db(self, cursor):
+        super(_VoteFactoryMixin, self)._flush_temps_to_db(cursor)
+        self.batcher.flush()
+
+
+class _HFVoteFactory(_VoteFactoryMixin, HFVoteFactory):
+    __slots__ = ('batcher',)
+
+
+class _HPVoteFactory(_VoteFactoryMixin, HPVoteFactory):
+    __slots__ = ('batcher',)

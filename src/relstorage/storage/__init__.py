@@ -20,6 +20,7 @@ from __future__ import print_function
 
 import logging
 import os
+import sys
 import tempfile
 import threading
 import time
@@ -48,6 +49,7 @@ from zope.interface import implementer
 from relstorage._compat import base64_encodebytes
 from relstorage._compat import loads
 from relstorage._compat import OID_SET_TYPE
+from relstorage._compat import clear_frames
 
 
 from relstorage.blobhelper import BlobHelper
@@ -56,6 +58,7 @@ from relstorage.cache.interfaces import CacheConsistencyError
 from relstorage.options import Options
 
 from .transaction_iterator import TransactionIterator
+from .tpc import ABORT_EARLY
 from .tpc import NotInTransaction
 from .tpc.begin import HistoryFree
 from .tpc.begin import HistoryPreserving
@@ -67,12 +70,6 @@ __all__ = [
 
 log = logging.getLogger("relstorage")
 
-# Set the RELSTORAGE_ABORT_EARLY environment variable when debugging
-# a failure revealed by the ZODB test suite.  The test suite often fails
-# to call tpc_abort in the event of an error, leading to deadlocks.
-# This variable causes RelStorage to abort failed transactions
-# early rather than wait for an explicit abort.
-abort_early = os.environ.get('RELSTORAGE_ABORT_EARLY')
 
 z64 = b'\0' * 8
 
@@ -151,6 +148,8 @@ class RelStorage(UndoLogCompatible,
     # (pylint likes to complain about raising None even if we have a 'not None'
     # check).
     #
+    # TODO: Move the loading methods to state objects too, like the TPC methods;
+    # that way we can have a Stale state for them.
     # pylint:disable=raising-bad-type
     _stale_error = None
 
@@ -723,7 +722,7 @@ class RelStorage(UndoLogCompatible,
         try:
             next_phase = self._tpc_phase.tpc_vote(transaction)
         except:
-            if abort_early:
+            if ABORT_EARLY:
                 self._tpc_phase = self.tpc_abort(transaction)
             raise
         else:
@@ -916,7 +915,8 @@ class RelStorage(UndoLogCompatible,
     def pack(self, t, referencesf, prepack_only=False, skip_prepack=False,
              sleep=None):
         """Pack the storage. Holds the pack lock for the duration."""
-        # pylint:disable=too-many-branches
+        # pylint:disable=too-many-branches,unused-argument
+        # 'sleep' is a legacy argument, no longer used.
         if self._is_read_only:
             raise ReadOnlyError()
 
@@ -1010,7 +1010,7 @@ class RelStorage(UndoLogCompatible,
                         if not keep_history:
                             oids.add(oid_int)
 
-                    adapter.packundo.pack(tid_int, sleep=sleep,
+                    adapter.packundo.pack(tid_int,
                                           packed_func=invalidate_cached_data)
                     self._cache.invalidate_all(oids_removed)
             finally:
@@ -1069,6 +1069,8 @@ class RelStorage(UndoLogCompatible,
             # XXX: We probably need to drop our pickle cache? At least the local
             # delta_after* maps/current_tid/checkpoints?
             log.error("ReadConflictError from polling invalidations; %s", e)
+            # Allow GC to do its thing with the locals
+            clear_frames(sys.exc_info()[2])
             self._stale_error = e
             self._tpc_phase = self._tpc_phase.stale(e)
             return (), prev

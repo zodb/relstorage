@@ -38,7 +38,7 @@ class MySQLLocker(AbstractLocker):
     standard InnoDB row-level lock; this brings the benefits of being
     lightweight and automatically being released if the transaction
     aborts or commits, plus instant deadlock detection. Prior to MySQL
-    8.0, these don't support `NOWAIT` syntax, so we synthesize that by
+    8.0, these don't support ``NOWAIT`` syntax, so we synthesize that by
     setting the session variable `innodb_lock_wait_timeout
     <https://dev.mysql.com/doc/refman/5.7/en/innodb-parameters.html#sysvar_innodb_lock_wait_timeout>`_.
 
@@ -48,9 +48,9 @@ class MySQLLocker(AbstractLocker):
 
     Also note that by default, a lock timeout will only rollback the
     current *statement*, not the whole session, as in most databases
-    (this doesn't apply to NOWAIT in MySQL 8). Fortunately, a lock timeout
+    (this doesn't apply to ``NOWAIT`` in MySQL 8). Fortunately, a lock timeout
     only rolling back the single statement is exactly what we want to implement
-    NOWAIT on earlier databases.
+    ``NOWAIT`` on earlier databases.
 
     The ``ensure_current`` argument is essentially ignored; the locks
     taken out by ``lock_current_objects`` take care of that.
@@ -60,7 +60,7 @@ class MySQLLocker(AbstractLocker):
     <https://dev.mysql.com/doc/refman/5.7/en/locking-functions.html#function_get-lock>`_
     and ``RELEASE_LOCK`` functions. These locks persist for the
     duration of a session, and *must* be explicitly released. They do
-    not participate in deadlock detection.
+    *not* participate in deadlock detection.
 
     Prior to MySQL 5.7.5, it is not possible to hold more than one
     advisory lock in a single session. In the past we used advisory
@@ -87,7 +87,9 @@ class MySQLLocker(AbstractLocker):
         self._commit_lock_nowait_query = 'EXECUTE hold_commit_lock_nowait'
 
         # No good preparing this, mysql can't take parameters in EXECUTE,
-        # they have to be user variables, which defeats most of the point.
+        # they have to be user variables, which defeats most of the point
+        # (Although in this case, because it's a static value, maybe not;
+        # it could be set once and re-used.)
         self.set_timeout_stmt = 'SET SESSION innodb_lock_wait_timeout = %s'
 
     def on_store_opened(self, cursor, restart=False):
@@ -100,6 +102,7 @@ class MySQLLocker(AbstractLocker):
         # permissions on that function by default, so we do it the old fashioned
         # way with version()
         if self._supports_row_lock_nowait is None:
+            # TODO: Move this to a supporting MySQLVersionDetector.
             cursor.execute('SELECT version()')
             ver = cursor.fetchone()[0]
             # PyMySQL on Win/Py3 returns this as a byte string; everywhere
@@ -119,7 +122,6 @@ class MySQLLocker(AbstractLocker):
         self._set_row_lock_timeout(cursor, self.commit_lock_timeout)
 
     def _set_row_lock_timeout(self, cursor, timeout):
-
         # Min value of timeout is 1
         timeout = timeout if timeout >= 1 else 1
         cursor.execute(self.set_timeout_stmt, (timeout,))

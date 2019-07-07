@@ -150,8 +150,6 @@ class RowBatcher(object):
             if these_params_need_flattened:
                 params = self._flatten_params(params)
             stmt += suffix
-            #import threading
-            #print(threading.current_thread(), stmt)
             __traceback_info__ = params
             self.cursor.execute(stmt, params)
         return count

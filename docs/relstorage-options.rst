@@ -50,13 +50,27 @@ commit-lock-timeout
         option specifies how long to wait for the lock before
         failing the attempt to commit. The default is 30 seconds.
 
-        The MySQL and Oracle adapters support this option. The
-        PostgreSQL adapter supports this when the PostgreSQL server is
-        at least version 9.3; otherwise it is ignored.
-
         .. versionchanged:: 2.0.0b1
            Add support for lock timeouts on PostgreSQL 9.3 and above.
            Previously no PostgreSQL version supported timeouts.
+
+        .. versionchanged:: 3.0a5
+           With the implementation of ZODB 5's parallel commit
+           feature, this option has changed slightly. Now, individual
+           rows will be locked instead of locking entire tables or
+           using advisory locks. This timeout now controls the locking
+           of individual rows. Because rows are locked in specific
+           orders, in extreme cases of overlapping transactions,
+           a transaction might wait *almost* this length of time
+           multiple times. However, it will always be making forward
+           progress and will still raise an exception if it cannot
+           make forward progress after this amount of time.
+
+           There is still a single row locked by all transactions, but
+           that is done after most commit work has been accomplished
+           and is hopefully fast. The exception is if
+           ``shared-blob-dir`` is true (deprecated), in which case the
+           single row is locked much earlier.
 
 commit-lock-id
         During commit, RelStorage acquires a database-wide lock. This
@@ -83,14 +97,26 @@ blob-dir
         support will be provided*.
 
 shared-blob-dir
-        If true (the default), the blob directory is assumed to be
-        shared among all clients using NFS or similar; blob data will
-        be stored only on the filesystem and not in the database. If
-        false, blob data is stored in the relational database and the
-        blob directory holds a cache of blobs.
+        If true (the default, but **not** recommended), the blob directory
+        is assumed to be shared among all clients using NFS or
+        similar; blob data will be stored only on the filesystem and
+        not in the database. If false, blob data is stored in the
+        relational database and the blob directory holds a cache of
+        blobs.
 
-        When this option is false, the blob directory should not be
-        shared among clients.
+        When this option is false (recommended), the blob directory is
+        treated as a cache. It should be on a local filesystem that
+        properly supports file locks. It may be shared among clients
+        on that same machine.
+
+        .. warning::
+
+           When this option is true, the ability to do parallel
+           commits is reduced. It is highly recommended to set this
+           value to false.
+
+           In the future, the default value for this option will
+           change.
 
 blob-cache-size
         Maximum size of the blob cache, in bytes. If empty (the
@@ -263,6 +289,13 @@ pack-batch-timeout
         The default timeout is 1.0 seconds.
 
 pack-commit-busy-delay
+        .. versionchanged:: 3.0a5
+
+           This option is now deprecated and does nothing. The commit
+           lock is not held during packing anymore. The remainder of
+           the documentation for this option only applies to older
+           versions.
+
         Before each pack batch, the commit lock is requested. If the lock is
         already held by for a regular commit, packing is paused for a short
         while. This option specifies how long the pack process should be

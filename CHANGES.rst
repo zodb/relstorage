@@ -99,6 +99,9 @@
   with regular commits. There may have been some regressions in
   packing speed on MySQL.
 
+- Deprecate the option ``shared-blob-dir``. This prevents using
+  parallel commits when blobs are part of a transaction.
+
 3.0a3 (2019-06-26)
 ==================
 

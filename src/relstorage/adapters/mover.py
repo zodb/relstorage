@@ -48,12 +48,6 @@ class AbstractObjectMover(ABC):
         self.version_detector = version_detector
         self.make_batcher = batcher_factory
 
-    def _debug_my_locks(self, cursor): # pylint:disable=unused-argument
-        """
-        Return a string describing locks held by the cursor's connection.
-        """
-        return ''
-
     @noop_when_history_free
     def _compute_md5sum(self, data):
         if data is None:
@@ -353,30 +347,12 @@ class AbstractObjectMover(ABC):
 
     @metricmethod_sampled
     def detect_conflict(self, cursor):
-        # TODO: We should return the committed state so it can be passed to tryToResolveConflict
-
-        # cursor.execute('select connection_id(), ps_thread_id(null)')
-        # cid, th_id = cursor.fetchall()[0]
-        # if 0: #with l:
-        #     print(threading.current_thread(), "Will detect conflicts", "cid", cid, "th_id", th_id)
-        #     subprocess.check_call(
-        #         ['mysql', '-uroot', '-e',
-        #          "select *, connection_id() from performance_schema.data_locks"
-        #         ],
-        #     )
-        # cursor.execute('select zoid from temp_store')
-        # print(threading.current_thread(), "possible conflicts", cursor.fetchall())
+        # TODO: We should return the committed state so it can be
+        # passed to tryToResolveConflict, saving extra queries.
+        # OTOH, using extra memory.
         stmt = self._detect_conflict_query
         cursor.execute(stmt)
         rows = cursor.fetchall()
-        # if 0:
-        #     print(threading.current_thread(), "DID detect conflicts", cid)
-        #     subprocess.check_call(
-        #         ['mysql', '-uroot', '-e',
-        #          "select *, connection_id() from performance_schema.data_locks"
-        #         ],
-        #     )
-        #     print(threading.current_thread(), "done detect conflicts")
         return rows
 
     @metricmethod_sampled
@@ -472,11 +448,11 @@ class AbstractObjectMover(ABC):
             __traceback_info__ = stmt
             cursor.execute(stmt, (tid,))
         else:
-            # If we can require storages to have an UPSERT (mysql and
-            # postgres do), then we can remove the DELETE.
             self._move_from_temp_object_state(cursor, tid)
 
             if txn_has_blobs:
+                # If we can require storages to have an UPSERT (mysql and
+                # postgres do), then we can remove the DELETE.
                 stmt = self._move_from_temp_hf_delete_blob_chunk_query
                 cursor.execute(stmt)
 

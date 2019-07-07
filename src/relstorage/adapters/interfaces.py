@@ -222,9 +222,12 @@ class IConnectionManager(Interface):
         """
         Open a connection for loading objects.
 
-        Returns (conn, cursor).
+        This connection is read only, and presents a consistent view
+        of the database as of the time the first statement is
+        executed. It should be opened in ``REPEATABLE READ`` or higher
+        isolation level. It must not be in autocommit.
 
-        This connection is read only.
+        :return: ``(conn, cursor)``
         """
 
     def restart_load(conn, cursor):
@@ -242,10 +245,26 @@ class IConnectionManager(Interface):
         """
         Open and initialize a connection for storing objects.
 
-        Returns (conn, cursor).
+        This connection is read/write, and its view of the database
+        needs to be consistent for each statement, but should read a
+        fresh snapshot on each statement for purposes of conflict
+        resolution and cooperation with other store connections. It
+        should be opened in ``READ COMMITTED`` isolation level,
+        without autocommit. (Opening in ``REPEATABLE READ`` or higher,
+        with a single snapshot, could reduce the use of locks, but
+        increases the risk of serialization errors and having
+        transactions rollback; we could handle that by raising
+        ``ConflictError`` and letting the application retry, but only
+        if we did that before ``tpc_finish``, and not all test cases
+        can handle that either.)
 
-        A connection opened by this method is the only type of connection
-        that can hold the commit lock.
+        This connection will take locks on rows in the state tables,
+        and hold them during the commit process.
+
+        A connection opened by this method is the only type of
+        connection that can hold the commit lock.
+
+        :return: ``(conn, cursor)``
         """
 
     def restart_store(conn, cursor):
@@ -260,13 +279,23 @@ class IConnectionManager(Interface):
         """
         Open a connection to be used for the pre-pack phase.
 
-        Returns (conn, cursor).
-
         This connection will make many different queries; each one
-        must be consistent unto itself, but they do not all have to
-        be consistent with each other. This is because the *first* query
-        this object makes establishes a base state, and we will manually
-        discard later changes seen in future queries.
+        must be consistent unto itself, but they do not all have to be
+        consistent with each other. This is because the *first* query
+        this object makes establishes a base state, and we will
+        manually discard later changes seen in future queries.
+
+        It will read from the state tables and write to the pack tables;
+        it will not write to the state tables, nor hold the commit lock.
+        It may hold share locks on state rows temporarily.
+
+        This connection may be open for a long period of time, and
+        will be committed as appropriate between queries. It is
+        acceptable for this connection to be in autocommit mode, if
+        required, but it is preferred for it not to be. This should be
+        opened in ``READ COMMITTED`` isolation level.
+
+        :return: ``(conn, cursor)``
         """
 
     def add_on_store_opened(f):
@@ -357,17 +386,21 @@ class ILocker(Interface):
         """
 
     def hold_commit_lock(cursor, ensure_current=True, nowait=False):
-        """Acquire the commit lock.
+        """
+        Acquire the commit lock.
 
-        If ensure_current is True, other tables may be locked as well, to
-        ensure the most current data is available.
+        If *ensure_current* is True (the default), other tables may be
+        locked as well, to ensure the most current data is available.
+        When using row level locks, *ensure_current* is always
+        implicit.
 
-        May raise UnableToAcquireCommitLockError if the lock can not be acquired before
-        some timeout.
+        With *nowait* set to True, only try to obtain the lock without
+        waiting and return a boolean indicating if the lock was
+        successful. **Note:** this parameter is deprecated and will be removed
+        in the future; it is not currently used.
 
-        With nowait set to True, only try to obtain the lock without waiting
-        and return a boolean indicating if the lock was successful.
-
+        Should raise `UnableToAcquireCommitLockError` if the lock can not
+        be acquired before a configured timeout.
         """
 
     def release_commit_lock(cursor):
@@ -473,17 +506,26 @@ class IObjectMover(Interface):
 
         If there is a conflict, returns a sequence of
         ``(oid, committed_tid, attempted_committed_tid)``.
+
+        This method should be called during the ``tpc_vote`` phase of a transaction,
+        with :meth:`ILocker.lock_current_objects` held.
         """
 
     def replace_temp(cursor, oid, prev_tid, data):
-        """Replace an object in the temporary table.
+        """
+        Replace an object in the temporary table.
 
         This happens after conflict resolution.
+
+        TODO: This method needs to go away and use the regular
+        row batcher, so we can take advantage of bulk optimizations.
         """
 
     def move_from_temp(cursor, tid, txn_has_blobs):
         """
         Move the temporarily stored objects to permanent storage.
+
+        Returns nothing.
         """
 
     def update_current(cursor, tid):

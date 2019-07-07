@@ -679,7 +679,7 @@ class HistoryPreservingPackUndo(PackUndo):
 
 
     @metricmethod
-    def pack(self, pack_tid, sleep=None, packed_func=None):
+    def pack(self, pack_tid, packed_func=None):
         """Pack.  Requires the information provided by pre_pack."""
         # pylint:disable=too-many-locals
         # Read committed mode is sufficient.
@@ -744,7 +744,7 @@ class HistoryPreservingPackUndo(PackUndo):
                         packed_func(oid, tid)
                 packed_list = None
 
-                self._pack_cleanup(conn, cursor, sleep)
+                self._pack_cleanup(conn, cursor)
 
             except:
                 log.exception("pack: failed")
@@ -814,7 +814,7 @@ class HistoryPreservingPackUndo(PackUndo):
             tid, state, removed_objects, removed_states)
 
 
-    def _pack_cleanup(self, conn, cursor, sleep=None):
+    def _pack_cleanup(self, conn, cursor):
         """Remove unneeded table rows after packing"""
         # commit the work done so far, releasing row-level locks.
         conn.commit()
@@ -900,10 +900,11 @@ class HistoryFreePackUndo(PackUndo):
         # a stronger isolation mode? Is the share lock even needed? We just
         # need to be consistent with a single point in time
         #
-        # Also, even before we used shared locks, we would occasionally
-        # use the commit lock (relying on the database being quiet otherwise);
-        # but we'd still release the commit lock at the end of this method, so they'd
-        # be free to mutate again.
+        # Before we used shared locks, we would repeat the query a few
+        # times, watching for changes, and if we kept getting changes,
+        # we would hold the commit lock for an iteration; but we'd
+        # still release the commit lock at the end of this method, so
+        # they'd be free to mutate again.
         #
         # TODO: Maybe use 'SKIP LOCKED' here? As it stands, the shared
         # locks are still going to prevent modifications to existing objects,
@@ -1085,7 +1086,7 @@ class HistoryFreePackUndo(PackUndo):
 
 
     @metricmethod
-    def pack(self, pack_tid, sleep=None, packed_func=None):
+    def pack(self, pack_tid, packed_func=None):
         """Run garbage collection.
 
         Requires the information provided by pre_pack.
