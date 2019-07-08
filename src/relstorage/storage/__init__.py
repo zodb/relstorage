@@ -421,6 +421,10 @@ class RelStorage(UndoLogCompatible,
 
         This includes the database sessions (connections) and any memcache
         connections.
+
+        Does *not* affect any other instances created by this instance. This object
+        should still be :meth:`close` (but note that might have global affects
+        on other instances of the same base object).
         """
         with self._lock:
             self._drop_load_connection()

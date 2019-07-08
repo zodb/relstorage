@@ -161,6 +161,9 @@ class StorageCreatingMixin(ABC):
             # These tests run in a temporary directory that gets cleaned up, so the CWD is
             # appropriate.
             kw['cache_local_dir'] = '.'
+        if 'commit_lock_timeout' not in kw:
+            # Cut this way down so we get better feedback.
+            kw['commit_lock_timeout'] = 10
 
         assert self.driver_name
         options = Options(keep_history=self.keep_history, driver=self.driver_name, **kw)

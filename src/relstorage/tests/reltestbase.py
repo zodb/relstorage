@@ -29,11 +29,14 @@ from persistent.mapping import PersistentMapping
 from zc.zlibstorage import ZlibStorage
 
 import ZODB.tests.util
-from ZODB.utils import z64
+
+from ZODB.Connection import TransactionMetaData
 from ZODB.DB import DB
 from ZODB.FileStorage import FileStorage
 from ZODB.POSException import ReadConflictError
 from ZODB.serialize import referencesf
+from ZODB.utils import z64
+
 from ZODB.tests import BasicStorage
 from ZODB.tests import ConflictResolution
 from ZODB.tests import MTStorage
@@ -44,6 +47,7 @@ from ZODB.tests import StorageTestBase
 from ZODB.tests import Synchronization
 from ZODB.tests.StorageTestBase import zodb_pickle
 from ZODB.tests.StorageTestBase import zodb_unpickle
+from ZODB.tests.MinPO import MinPO
 
 from . import fakecache
 from . import util
@@ -1004,6 +1008,10 @@ class GenericRelStorageTests(
         with assert_switches():
             self.open()
 
+    #####
+    # Prefetch Tests
+    #####
+
     def checkPrefetch(self):
         db = DB(self._storage)
         conn = db.open()
@@ -1023,6 +1031,80 @@ class GenericRelStorageTests(
         # second time is a no-op
         conn.prefetch(z64, mapping)
         self.assertEqual(2, len(self._storage._cache))
+
+    ######
+    # Parallel Commit Tests
+    ######
+
+    def checkCanVoteAndCommitWhileOtherStorageVotes(self):
+        storage1 = self._closing(self._storage.new_instance())
+        storage2 = self._closing(self._storage.new_instance())
+
+        # Bring them both into tpc_vote phase. Before parallel commit,
+        # this would have blocked as the first storage took the commit lock
+        # in tpc_vote.
+        txs = {}
+        for storage in (storage1, storage2):
+            data = zodb_pickle(MinPO(str(storage)))
+            t = TransactionMetaData()
+            txs[storage] = t
+            storage.tpc_begin(t)
+            oid = storage.new_oid()
+
+            storage.store(oid, None, data, '', t)
+            storage.tpc_vote(t)
+
+        # The order we choose to finish is the order of the returned
+        # tids.
+        tid1 = storage2.tpc_finish(txs[storage2])
+        tid2 = storage1.tpc_finish(txs[storage1])
+
+        self.assertGreater(tid2, tid1)
+
+        storage1.close()
+        storage2.close()
+
+    def checkCanLoadObjectStateWhileBeingModified(self):
+        # Get us an object in the database
+        storage1 = self._storage.new_instance()
+        data = zodb_pickle(MinPO(str(storage1)))
+        t = TransactionMetaData()
+        storage1.tpc_begin(t)
+        oid = storage1.new_oid()
+
+        storage1.store(oid, None, data, '', t)
+        storage1.tpc_vote(t)
+        initial_tid = storage1.tpc_finish(t)
+
+        storage1.release()
+        del storage1
+
+        self._storage._cache.clear(load_persistent=False)
+
+        storage1 = self._storage.new_instance()
+
+        # Get a completely independent storage, not sharing a cache
+        storage2 = self._closing(self.make_storage(zap=False))
+
+        # First storage attempts to modify the oid.
+        t = TransactionMetaData()
+        storage1.tpc_begin(t)
+        storage1.store(oid, initial_tid, data, '', t)
+        # And locks the row.
+        storage1.tpc_vote(t)
+
+        # storage2 would like to read the old row.
+        loaded_data, loaded_tid = storage2.load(oid)
+
+        self.assertEqual(loaded_data, data)
+        self.assertEqual(loaded_tid, initial_tid)
+
+        # Commit can now happen.
+        tid2 = storage1.tpc_finish(t)
+        self.assertGreater(tid2, initial_tid)
+
+        storage1.close()
+        storage2.close()
 
 
 class AbstractRSZodbConvertTests(StorageCreatingMixin,
