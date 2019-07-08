@@ -86,21 +86,38 @@
   object will now only block each other.
 
   There are two exceptions. First, if the ``storage.restore()`` method
-  is used, the commit lock must be taken early. This is usually only
-  done as part of copying one database to another. Second, if the
-  storage is configured with a shared blob directory instead of a blob
-  cache (meaning that blobs are *only* stored on the filesystem) and
-  the transaction has added or mutated blobs, the commit lock must be
-  taken early to ensure blobs can be saved. It is recommended to store
-  blobs on the RDBMS server and use a blob cache.
+  is used, the commit lock must be taken very early (before
+  ``tpc_vote``). This is usually only done as part of copying one
+  database to another. Second, if the storage is configured with a
+  shared blob directory instead of a blob cache (meaning that blobs
+  are *only* stored on the filesystem) and the transaction has added
+  or mutated blobs, the commit lock must be taken somewhat early to
+  ensure blobs can be saved (after conflict resolution, etc, but
+  before the end of ``tpc_vote``). It is recommended to store blobs on
+  the RDBMS server and use a blob cache. The shared blob layout can be
+  considered deprecated for this reason).
 
   In addition, the new locking scheme means that packing no longer
   needs to acquire a commit lock and more work can proceed in parallel
-  with regular commits. There may have been some regressions in
-  packing speed on MySQL.
+  with regular commits. (Though, there may have been some regressions
+  in the deletion phase of packing speed MySQL; this has not been
+  benchmarked.)
 
-- Deprecate the option ``shared-blob-dir``. This prevents using
-  parallel commits when blobs are part of a transaction.
+  .. note::
+
+     If the environment variable ``RELSTORAGE_LOCK_EARLY`` is
+     set when RelStorage is imported, then parallel commit will not be
+     enabled, and the commit lock will be taken at the beginning of
+     the tpc_vote phase, just like before: conflict resolution and
+     readCurrent will all be handled with the lock held.
+
+     This is intended for use diagnosing and temporarily working
+     around bugs, such as the database driver reporting a deadlock
+     error. If you find it necessary to use this setting, please
+     report an issue at https://github.com/zodb/relstorage/issues.
+
+- Deprecate the option ``shared-blob-dir``. Shared blob dirs prevent
+  using parallel commits when blobs are part of a transaction.
 
 3.0a3 (2019-06-26)
 ==================
