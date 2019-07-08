@@ -782,6 +782,10 @@ class RelStorage(UndoLogCompatible,
             # (starting its own long-running transaction). The
             # DB.new_oid() method still exists, so we still need to
             # support that usage, hence `with_store`.
+            #
+            # Also, there are tests (ZODB.tests.MTStorage) that directly call
+            # this *outside of any transaction*. That doesn't make any sense, but
+            # that's what they do.
             if not self._preallocated_oids:
                 preallocated = self.__with_store(self._adapter.oidallocator.new_oids)
                 self._preallocated_oids = preallocated

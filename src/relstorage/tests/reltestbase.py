@@ -108,6 +108,29 @@ class RelStorageTestBase(StorageCreatingMixin,
         return storage
 
 
+class StorageClientThread(MTStorage.StorageClientThread):
+    # MTStorage assumes that the storage object is thread safe.
+    # This doesn't make any sense for an MVCC Storage like RelStorage;
+    # don't try to use a single instance in multiple threads.
+    #
+    # This patch makes it respect that.
+
+    def __init__(self, storage, *args, **kwargs):
+        storage = storage.new_instance()
+        super(StorageClientThread, self).__init__(storage, *args, **kwargs)
+
+    def runtest(self):
+        try:
+            super(StorageClientThread, self).runtest()
+        finally:
+            self.storage.release()
+            self.storage = None
+
+
+class ExtStorageClientThread(StorageClientThread, MTStorage.ExtStorageClientThread):
+    "Same as above."
+
+
 class GenericRelStorageTests(
         RelStorageTestBase,
         PersistentCacheStorageTests,
@@ -130,15 +153,16 @@ class GenericRelStorageTests(
         #
         # Patch around that. Be sure to only close a given connection once,
         # though.
+        _closing = self._closing
         def db_factory(storage, *args, **kwargs):
-            db = self._closing(DB(storage, *args, **kwargs))
+            db = _closing(DB(storage, *args, **kwargs))
             db_open = db.open
             def o(transaction_manager=None, at=None, before=None):
                 conn = db_open(transaction_manager=transaction_manager,
                                at=at,
                                before=before)
 
-                self._closing(conn)
+                _closing(conn)
                 if transaction_manager is not None:
                     # If we're using an independent transaction, abort it *before*
                     # attempting to close the connection; that means it must be registered
@@ -148,6 +172,14 @@ class GenericRelStorageTests(
             db.open = o
             return db
         PackableStorage.DB = db_factory
+
+        self.addCleanup(setattr, MTStorage,
+                        'StorageClientThread', MTStorage.StorageClientThread)
+        MTStorage.StorageClientThread = StorageClientThread
+
+        self.addCleanup(setattr, MTStorage,
+                        'ExtStorageClientThread', MTStorage.ExtStorageClientThread)
+        MTStorage.ExtStorageClientThread = ExtStorageClientThread
 
     def tearDown(self):
         PackableStorage.DB = DB
