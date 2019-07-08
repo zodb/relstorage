@@ -39,6 +39,9 @@ class PackUndo(object):
 
     _script_choose_pack_transaction = None
 
+    _lock_for_share = 'FOR SHARE'
+    _lock_for_update = 'FOR UPDATE'
+
     def __init__(self, database_driver, connmanager, runner, locker, options):
         self.driver = database_driver
         self.connmanager = connmanager
@@ -568,6 +571,53 @@ class HistoryPreservingPackUndo(PackUndo):
         finally:
             self.connmanager.close(conn, cursor)
 
+    def __initial_populate_pack_object(self, conn, cursor, pack_tid, keep):
+        # Access the tables that are used by online transactions
+        # in a short transaction and immediately commit to release any
+        # locks.
+
+        # TRUNCATE may or may not cause implicit commits. (MySQL: Yes,
+        # PostgreSQL: No)
+        self.runner.run_script(cursor, "%(TRUNCATE)s pack_object;")
+
+        affected_objects = """
+        SELECT zoid, tid
+        FROM object_state
+        WHERE tid > 0 AND tid <= %(pack_tid)s
+        ORDER BY zoid
+        """
+
+        # Take the locks we need up front, in order, because
+        # locking in a subquery doing an INSERT isn't guaranteed to use that
+        # order (deadlocks seen with commits on MySQL 5.7 without this,
+        # when using REPEATABLE READ.)
+        #
+        # We must do this on its own, because some drivers (notably
+        # mysql-connector-python) get very upset
+        # ("mysql.connector.errors.InternalError: Unread result
+        # found") if you issue a SELECT that you don't then consume.
+        #
+        # Since we switched MySQL back to READ COMMITTED (what PostgreSQL uses)
+        # I haven't been able to produce the error anymore. So don't explicitly lock.
+
+        # lock_affected_objects = affected_objects + '\n' + self._lock_for_update + ';\n'
+
+        # self.runner.run_script(cursor, lock_subquery, {'pack_tid': pack_tid})
+        # cursor.fetchall() # Consume but discard.
+
+        stmt = """
+        INSERT INTO pack_object (zoid, keep, keep_tid)
+        SELECT zoid, """ + keep + """, MAX(tid)
+        FROM ( """ + affected_objects + """ ) t
+        GROUP BY zoid;
+
+        -- Keep the root object.
+        UPDATE pack_object
+        SET keep = %(TRUE)s
+        WHERE zoid = 0;
+        """
+        self.runner.run_script(cursor, stmt, {'pack_tid': pack_tid})
+        conn.commit()
 
     def _pre_pack_without_gc(self, conn, cursor, pack_tid):
         """Determine what to pack, without garbage collection.
@@ -578,18 +628,7 @@ class HistoryPreservingPackUndo(PackUndo):
         # Fill the pack_object table with OIDs, but configure them
         # all to be kept by setting keep to true.
         log.debug("pre_pack: populating pack_object")
-        stmt = """
-        %(TRUNCATE)s pack_object;
-
-        INSERT INTO pack_object (zoid, keep, keep_tid)
-        SELECT zoid, %(TRUE)s, MAX(tid)
-        FROM object_state
-        WHERE tid > 0 AND tid <= %(pack_tid)s
-        GROUP BY zoid
-        ORDER BY zoid
-        """
-        self.runner.run_script(cursor, stmt, {'pack_tid': pack_tid})
-        conn.commit()
+        self.__initial_populate_pack_object(conn, cursor, pack_tid, '%(TRUE)s')
 
     def _pre_pack_with_gc(self, conn, cursor, pack_tid, get_references):
         """Determine what to pack, with garbage collection.
@@ -604,26 +643,7 @@ class HistoryPreservingPackUndo(PackUndo):
         # Fill the pack_object table with OIDs that either will be
         # removed (if nothing references the OID) or whose history will
         # be cut.
-        # Access the tables that are used by online transactions
-        # in a short transaction and immediately commit to release any
-        # locks.
-        stmt = """
-        %(TRUNCATE)s pack_object;
-
-        INSERT INTO pack_object (zoid, keep, keep_tid)
-        SELECT zoid, %(FALSE)s, MAX(tid)
-        FROM object_state
-        WHERE tid > 0 AND tid <= %(pack_tid)s
-        GROUP BY zoid
-        ORDER BY zoid;
-
-        -- Keep the root object.
-        UPDATE pack_object
-        SET keep = %(TRUE)s
-        WHERE zoid = 0;
-        """
-        self.runner.run_script(cursor, stmt, {'pack_tid': pack_tid})
-        conn.commit()
+        self.__initial_populate_pack_object(conn, cursor, pack_tid, '%(FALSE)s')
 
         stmt = """
         -- Keep objects that have been revised since pack_tid.
@@ -887,8 +907,6 @@ class HistoryFreePackUndo(PackUndo):
 
     def on_filling_object_refs(self):
         """Test injection point"""
-
-    _lock_for_share = 'FOR SHARE'
 
     def fill_object_refs(self, conn, cursor, get_references):
         """

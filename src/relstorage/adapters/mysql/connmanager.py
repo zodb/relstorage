@@ -113,5 +113,5 @@ class MySQLdbConnectionManager(AbstractConnectionManager):
 
         This overrides a method.
         """
-        conn, cursor = self.open(self.isolation_repeatable_read)
+        conn, cursor = self.open(self.isolation_read_committed)
         return conn, cursor

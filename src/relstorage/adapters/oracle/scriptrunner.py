@@ -46,10 +46,9 @@ def format_to_named(stmt):
 
 class OracleScriptRunner(ScriptRunner):
 
-    script_vars = {
+    script_vars = dict(ScriptRunner.script_vars).update({
         'TRUE':         "'Y'",
         'FALSE':        "'N'",
-        'TRUNCATE':     'TRUNCATE TABLE',
         'oid':          ':oid',
         'tid':          ':tid',
         'pack_tid':     ':pack_tid',
@@ -57,7 +56,7 @@ class OracleScriptRunner(ScriptRunner):
         'self_tid':     ':self_tid',
         'min_tid':      ':min_tid',
         'max_tid':      ':max_tid',
-    }
+    })
 
     def run_script_stmt(self, cursor, generic_stmt, generic_params=()):
         """Execute a statement from a script with the given parameters.

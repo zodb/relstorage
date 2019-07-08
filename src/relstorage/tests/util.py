@@ -174,17 +174,21 @@ class AbstractTestSuiteBuilder(ABC):
     def __escape_driver_name(self, driver_name):
         return driver_name.replace(' ', '').replace('/', '_')
 
-    def _default_make_check_class(self, base, name):
+    def _default_make_check_class(self, bases, name, klass_dict=None):
         klass = type(
             name,
-            (self.use_adapter, base, ),
-            {}
+            (self.use_adapter,) + bases,
+            klass_dict or {}
         )
 
         return klass
 
     def _make_check_classes(self):
         # The classes that inherit from ZODB tests and use 'check' instead of 'test_'
+
+        # This class  is sadly not super() cooperative, so we must
+        # try to explicitly put it last in the MRO.
+        from ZODB.tests.util import TestCase as ZODBTestCase
         from .hftestbase import HistoryFreeFromFileStorage
         from .hftestbase import HistoryFreeToFileStorage
         from .hftestbase import HistoryFreeRelStorageTests
@@ -207,7 +211,8 @@ class AbstractTestSuiteBuilder(ABC):
                 name = self.__name__ + base.__name__
                 maker = getattr(self, '_make_check_class_' + base.__name__,
                                 self._default_make_check_class)
-                klass = maker(base, name)
+                __traceback_info__ = maker, base
+                klass = maker((base, ZODBTestCase), name)
                 klass.__module__ = self.__module__
                 klass.__name__ = name
                 classes.append(klass)

@@ -19,8 +19,12 @@ from __future__ import absolute_import
 from ..packundo import HistoryFreePackUndo
 from ..packundo import HistoryPreservingPackUndo
 
+class _LockStmt(object):
+    # 8.0 supports 'FOR SHARE' but before that we have
+    # this.
+    _lock_for_share = 'LOCK IN SHARE MODE'
 
-class MySQLHistoryPreservingPackUndo(HistoryPreservingPackUndo):
+class MySQLHistoryPreservingPackUndo(_LockStmt, HistoryPreservingPackUndo):
 
     # Previously we needed to work around a MySQL performance bug by
     # avoiding an expensive subquery.
@@ -105,11 +109,7 @@ class MySQLHistoryPreservingPackUndo(HistoryPreservingPackUndo):
         LIMIT 1000
         """
 
-class MySQLHistoryFreePackUndo(HistoryFreePackUndo):
-
-    # 8.0 supports 'FOR SHARE' but before that we have
-    # this.
-    _lock_for_share = 'LOCK IN SHARE MODE'
+class MySQLHistoryFreePackUndo(_LockStmt, HistoryFreePackUndo):
 
     _script_create_temp_pack_visit = """
         CREATE TEMPORARY TABLE temp_pack_visit (

@@ -25,6 +25,9 @@ from ZODB.tests.PackableStorage import dumps
 from ZODB.tests.PackableStorage import pdumps
 from ZODB.tests.StorageTestBase import zodb_pickle
 from ZODB.tests.StorageTestBase import zodb_unpickle
+# This class is sadly not cooperative with its superclass,
+# so we need to explicitly place it at the back of the MRO.
+from ZODB.tests.util import TestCase as ZODBTestCase
 
 from relstorage.tests.RecoveryStorage import BasicRecoveryStorage
 from relstorage.tests.RecoveryStorage import UndoableRecoveryStorage
@@ -33,7 +36,7 @@ from relstorage.tests.reltestbase import AbstractFromFileStorage
 from relstorage.tests.reltestbase import AbstractToFileStorage
 
 
-class HistoryFreeRelStorageTests(GenericRelStorageTests):
+class HistoryFreeRelStorageTests(GenericRelStorageTests, ZODBTestCase):
     # pylint:disable=too-many-ancestors,abstract-method,too-many-locals,too-many-statements
 
     keep_history = False
@@ -289,13 +292,15 @@ class HistoryFreeRelStorageTests(GenericRelStorageTests):
 
 
 class HistoryFreeToFileStorage(AbstractToFileStorage,
-                               BasicRecoveryStorage):
+                               BasicRecoveryStorage,
+                               ZODBTestCase):
     # pylint:disable=abstract-method,too-many-ancestors
     keep_history = False
 
 
 class HistoryFreeFromFileStorage(AbstractFromFileStorage,
-                                 UndoableRecoveryStorage):
+                                 UndoableRecoveryStorage,
+                                 ZODBTestCase):
     # pylint:disable=abstract-method,too-many-ancestors
     keep_history = False
 

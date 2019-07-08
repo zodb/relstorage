@@ -31,7 +31,7 @@ class ScriptRunner(object):
     script_vars = {
         'TRUE':         'TRUE',
         'FALSE':        'FALSE',
-        'TRUNCATE':     'TRUNCATE',
+        'TRUNCATE':     'TRUNCATE TABLE',
         'oid':          '%(oid)s',
         'tid':          '%(tid)s',
         'pack_tid':     '%(pack_tid)s',

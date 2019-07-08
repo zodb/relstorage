@@ -1123,7 +1123,11 @@ class AbstractToFileStorage(RelStorageTestBase):
 
     def setUp(self):
         super(AbstractToFileStorage, self).setUp()
-        self._dst_path = 'Dest.fs'
+        # Use the abspath so that even if we close it after
+        # we've returned to our original directory (e.g.,
+        # close is run as part of addCleanup(), which happens after
+        # tearDown) we don't write index files into the original directory.
+        self._dst_path = os.path.abspath(self.rs_temp_prefix + 'Dest.fs')
         self.__dst = None
 
     @property
@@ -1136,7 +1140,7 @@ class AbstractToFileStorage(RelStorageTestBase):
         if self.__dst is not None:
             self.__dst.close()
             self.__dst.cleanup()
-        self.__dst = None
+        self.__dst = 42 # Not none so we don't try to create.
         super(AbstractToFileStorage, self).tearDown()
 
     def new_dest(self):
@@ -1148,7 +1152,7 @@ class AbstractFromFileStorage(RelStorageTestBase):
 
     def setUp(self):
         super(AbstractFromFileStorage, self).setUp()
-        self._src_path = 'Source.fs'
+        self._src_path = os.path.abspath(self.rs_temp_prefix + 'Source.fs')
         self.__dst = None
 
     def make_storage_to_cache(self):
@@ -1164,7 +1168,7 @@ class AbstractFromFileStorage(RelStorageTestBase):
         if self.__dst is not None:
             self.__dst.close()
             self.__dst.cleanup()
-            self.__dst = None
+        self.__dst = 42 # Not none so we don't try to create.
         super(AbstractFromFileStorage, self).tearDown()
 
     def new_dest(self):

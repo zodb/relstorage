@@ -265,7 +265,15 @@ class AbstractVote(AbstractTPCState):
         cursor = self.storage._store_cursor
         adapter = self.storage._adapter
 
-        adapter.mover.move_from_temp(cursor, committing_tid_int, txn_has_blobs)
+        try:
+            adapter.mover.move_from_temp(cursor, committing_tid_int, txn_has_blobs)
+        except:
+            if 0: # pylint:disable=using-constant-test
+                # CPython's compiler will completely elide from bytecode
+                # a `if 0` block.
+                import gevent.util
+                gevent.util.print_run_info(greenlet_stacks=False)
+            raise
 
     def __choose_tid_and_lock(self):
         """

@@ -7,6 +7,7 @@ import unittest
 import transaction
 
 from ZODB.Connection import Connection
+from ZODB.tests.util import clear_transaction_syncs
 
 from relstorage._compat import ABC
 from relstorage.options import Options
@@ -19,6 +20,14 @@ except ImportError: # Python 2
 mock = mock
 
 class TestCase(unittest.TestCase):
+    """
+    General tests that may use databases, connections and
+    transactions, but don't have any specific requirements or
+    framework to do so.
+
+    This class supplies some supporting help for assertions and
+    cleanups.
+    """
     # Avoid deprecation warnings; 2.7 doesn't have
     # assertRaisesRegex
     assertRaisesRegex = getattr(
@@ -27,14 +36,34 @@ class TestCase(unittest.TestCase):
         None
     ) or getattr(unittest.TestCase, 'assertRaisesRegexp')
 
+    def setUp(self):
+        super(TestCase, self).setUp()
+        # This is done by ZODB.tests.util.TestCase, but
+        # not stored anywhere.
+        # XXX: As of ZODB 5.5.1, that class also doesn't handle
+        # Python 3 correctly either. File a bug about this.
+        name = self.__class__.__name__
+
+        # Python 2
+        mname = getattr(self, '_TestCase__testMethodName', '')
+        if not mname:
+            # Python 3
+            mname = getattr(self, '_testMethodName', '')
+        if mname:
+            name += '-' + mname
+        self.rs_temp_prefix = name
+        self.addCleanup(clear_transaction_syncs)
+
     def __close_connection(self, connection):
         if connection.opened:
             try:
                 connection.close()
             except KeyError:
                 # From the transaction manager's list of syncs.
-                # Somehow this happens if we get closed multiple times.
+                # This can happen if clear_transaction_syncs()
+                # has already been called.
                 pass
+
             connection.close = lambda *_, **__: None
 
     def __close(self, thing):
