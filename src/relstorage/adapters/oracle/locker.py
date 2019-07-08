@@ -25,13 +25,17 @@ from ..interfaces import UnableToAcquireCommitLockError
 from ..interfaces import UnableToAcquirePackUndoLockError
 from ..locker import AbstractLocker
 
+from .batch import OracleRowBatcher
 
 @implementer(ILocker)
 class OracleLocker(AbstractLocker):
 
-    def __init__(self, options, lock_exceptions, inputsize_NUMBER):
+    def __init__(self, options, driver, inputsize_NUMBER):
         super(OracleLocker, self).__init__(
-            options=options, lock_exceptions=lock_exceptions)
+            options=options,
+            driver=driver,
+            batcher_factory=OracleRowBatcher
+        )
         self.inputsize_NUMBER = inputsize_NUMBER
 
     @metricmethod

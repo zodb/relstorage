@@ -83,9 +83,13 @@ if PY3:
     from base64 import encodebytes as base64_encodebytes
     from base64 import decodebytes as base64_decodebytes
     casefold = str.casefold
+    from traceback import clear_frames
+    clear_frames = clear_frames
 else:
     xrange = xrange
     intern = intern
     from base64 import encodestring as base64_encodebytes
     from base64 import decodestring as base64_decodebytes
     casefold = str.lower
+    def clear_frames(tb): # pylint:disable=unused-argument
+        "Does nothing on Py2."

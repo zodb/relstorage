@@ -32,6 +32,7 @@ class Psycopg2ConnectionManager(AbstractConnectionManager):
         self.use_replica_exceptions = driver.use_replica_exceptions
         self.isolation_read_committed = driver.ISOLATION_LEVEL_READ_COMMITTED
         self.isolation_serializable = driver.ISOLATION_LEVEL_SERIALIZABLE
+        self.isolation_repeatable_read = driver.ISOLATION_LEVEL_REPEATABLE_READ
         self.keep_history = options.keep_history
         self._db_connect_with_isolation = driver.connect_with_isolation
         super(Psycopg2ConnectionManager, self).__init__(options)
@@ -49,7 +50,8 @@ class Psycopg2ConnectionManager(AbstractConnectionManager):
         return dsn
 
     @metricmethod
-    def open(self, isolation=None, replica_selector=None, **kwargs):
+    def open(self, isolation=None, deferrable=False, read_only=False,
+             replica_selector=None, **kwargs):
         """Open a database connection and return (conn, cursor)."""
         # pylint:disable=arguments-differ
         if isolation is None:
@@ -67,7 +69,12 @@ class Psycopg2ConnectionManager(AbstractConnectionManager):
 
         while True:
             try:
-                conn, cursor = self._db_connect_with_isolation(isolation, dsn)
+                conn, cursor = self._db_connect_with_isolation(
+                    dsn,
+                    isolation=isolation,
+                    deferrable=deferrable,
+                    read_only=read_only
+                )
                 cursor.arraysize = 64
                 conn.replica = replica
                 return conn, cursor
@@ -84,30 +91,21 @@ class Psycopg2ConnectionManager(AbstractConnectionManager):
                 raise
 
     def _do_open_for_load(self):
-        """Open and initialize a connection for loading objects.
-
-        Returns (conn, cursor).
-        """
         # XXX: SERIALIZABLE isn't allowed on streaming replicas
         # (https://www.enterprisedb.com/blog/serializable-postgresql-11-and-beyond)
         # Do we really need SERIALIZABLE? Wouldn't REPEATABLE READ be
-        # sufficient?
-        #
-        # TODO: Set the transaction to READ ONLY mode. This can be done with
-        # a SET TRANSACTION command, or psycopg2 likes the 'conn.readonly' property
-        # (2.7+) or conn.set_session().
-        # TODO: Enable deferrable transactions if we stay in serializable, read only
-        # mode. This should generally be faster, as the *only* serializable transactions
-        # we have should be READ ONLY.
+        # sufficient? That's what we use on MySQL.
+
+        # Set the transaction to READ ONLY mode. This lets
+        # transactions (especially SERIALIZABLE) elide some locks.
+
+        # TODO: Enable deferrable transactions if we stay in
+        # serializable, read only mode. This should generally be
+        # faster, as the *only* serializable transactions we have
+        # should be READ ONLY.
         return self.open(self.isolation_serializable,
+                         read_only=True,
                          replica_selector=self.ro_replica_selector)
 
-    # TODO: Define _do_open_for_store to change the default isolation
-    # level from READ COMMITTED to REPEATABLE READ? READ COMMITTED
-    # takes a MVCC snapshot for every individual *statement* in the
-    # transaction; REPEATABLE READ takes a snapshot for the whole
-    # duration of the transaction, beginning at the first
-    # SELECT/UPDATE/INSERT statement. We could get by with fewer locks
-    # that way (see locker.py).
-    # def _do_open_for_store(self):
-    #    return self.open('REPEATABLE READ')
+    def open_for_pre_pack(self):
+        return self.open(self.isolation_read_committed)

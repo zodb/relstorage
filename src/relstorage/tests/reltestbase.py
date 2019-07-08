@@ -29,11 +29,14 @@ from persistent.mapping import PersistentMapping
 from zc.zlibstorage import ZlibStorage
 
 import ZODB.tests.util
-from ZODB.utils import z64
+
+from ZODB.Connection import TransactionMetaData
 from ZODB.DB import DB
 from ZODB.FileStorage import FileStorage
 from ZODB.POSException import ReadConflictError
 from ZODB.serialize import referencesf
+from ZODB.utils import z64
+
 from ZODB.tests import BasicStorage
 from ZODB.tests import ConflictResolution
 from ZODB.tests import MTStorage
@@ -44,6 +47,7 @@ from ZODB.tests import StorageTestBase
 from ZODB.tests import Synchronization
 from ZODB.tests.StorageTestBase import zodb_pickle
 from ZODB.tests.StorageTestBase import zodb_unpickle
+from ZODB.tests.MinPO import MinPO
 
 from . import fakecache
 from . import util
@@ -108,6 +112,29 @@ class RelStorageTestBase(StorageCreatingMixin,
         return storage
 
 
+class StorageClientThread(MTStorage.StorageClientThread):
+    # MTStorage assumes that the storage object is thread safe.
+    # This doesn't make any sense for an MVCC Storage like RelStorage;
+    # don't try to use a single instance in multiple threads.
+    #
+    # This patch makes it respect that.
+
+    def __init__(self, storage, *args, **kwargs):
+        storage = storage.new_instance()
+        super(StorageClientThread, self).__init__(storage, *args, **kwargs)
+
+    def runtest(self):
+        try:
+            super(StorageClientThread, self).runtest()
+        finally:
+            self.storage.release()
+            self.storage = None
+
+
+class ExtStorageClientThread(StorageClientThread, MTStorage.ExtStorageClientThread):
+    "Same as above."
+
+
 class GenericRelStorageTests(
         RelStorageTestBase,
         PersistentCacheStorageTests,
@@ -119,6 +146,48 @@ class GenericRelStorageTests(
         MTStorage.MTStorage,
         ReadOnlyStorage.ReadOnlyStorage,
     ):
+
+    def setUp(self):
+        super(GenericRelStorageTests, self).setUp()
+        # PackableStorage is particularly bad about leaving things
+        # dangling. For example, if the ClientThread runs into
+        # problems, it doesn't close its connection, which can leave
+        # locks dangling until GC happens and break other threads and even
+        # other tests.
+        #
+        # Patch around that. Be sure to only close a given connection once,
+        # though.
+        _closing = self._closing
+        def db_factory(storage, *args, **kwargs):
+            db = _closing(DB(storage, *args, **kwargs))
+            db_open = db.open
+            def o(transaction_manager=None, at=None, before=None):
+                conn = db_open(transaction_manager=transaction_manager,
+                               at=at,
+                               before=before)
+
+                _closing(conn)
+                if transaction_manager is not None:
+                    # If we're using an independent transaction, abort it *before*
+                    # attempting to close the connection; that means it must be registered
+                    # after the connection.
+                    self.addCleanup(transaction_manager.abort)
+                return conn
+            db.open = o
+            return db
+        PackableStorage.DB = db_factory
+
+        self.addCleanup(setattr, MTStorage,
+                        'StorageClientThread', MTStorage.StorageClientThread)
+        MTStorage.StorageClientThread = StorageClientThread
+
+        self.addCleanup(setattr, MTStorage,
+                        'ExtStorageClientThread', MTStorage.ExtStorageClientThread)
+        MTStorage.ExtStorageClientThread = ExtStorageClientThread
+
+    def tearDown(self):
+        PackableStorage.DB = DB
+        super(GenericRelStorageTests, self).tearDown()
 
     def checkCurrentObjectTidsRoot(self):
         # Get the root object in place
@@ -587,24 +656,19 @@ class GenericRelStorageTests(
             db.close()
 
     def checkPackBatchLockNoWait(self):
-        # Exercise the code in the pack algorithm that attempts to get the
-        # commit lock but will sleep if the lock is busy.
+        # Holding the commit lock doesn't interfere with packing.
+        #
+        # TODO: But what about row locking? Let's add a test
+        # that begins a commit and locks some rows and then packs.
         self._storage = self.make_storage(pack_batch_timeout=0)
 
         adapter = self._storage._adapter
-        test_conn, test_cursor = adapter.connmanager.open()
+        test_conn, test_cursor = adapter.connmanager.open_for_store()
 
-        slept = []
-        def sim_sleep(seconds):
-            slept.append(seconds)
-            adapter.locker.release_commit_lock(test_cursor)
-            test_conn.rollback()
-            adapter.connmanager.close(test_conn, test_cursor)
-
-        db = DB(self._storage)
+        db = self._closing(DB(self._storage))
         try:
             # add some data to be packed
-            c = db.open()
+            c = self._closing(db.open())
             r = c.root()
             r['alpha'] = PersistentMapping()
             transaction.commit()
@@ -616,11 +680,11 @@ class GenericRelStorageTests(
             while packtime <= now:
                 packtime = time.time()
             adapter.locker.hold_commit_lock(test_cursor)
-            self._storage.pack(packtime, referencesf, sleep=sim_sleep)
-
-            self.assertTrue(len(slept) > 0)
+            self._storage.pack(packtime, referencesf)
+            adapter.locker.release_commit_lock(test_cursor)
         finally:
             db.close()
+            adapter.connmanager.close(test_conn, test_cursor)
 
     def checkPackKeepNewObjects(self):
         # Packing should not remove objects created or modified after
@@ -664,10 +728,10 @@ class GenericRelStorageTests(
     def checkPackWhileReferringObjectChanges(self):
         # Packing should not remove objects referenced by an
         # object that changes during packing.
-        db = DB(self._storage)
+        db = self._closing(DB(self._storage))
         try:
             # add some data to be packed
-            c = db.open()
+            c = self._closing(db.open())
             root = c.root()
             child = PersistentMapping()
             root['child'] = child
@@ -944,6 +1008,10 @@ class GenericRelStorageTests(
         with assert_switches():
             self.open()
 
+    #####
+    # Prefetch Tests
+    #####
+
     def checkPrefetch(self):
         db = DB(self._storage)
         conn = db.open()
@@ -963,6 +1031,89 @@ class GenericRelStorageTests(
         # second time is a no-op
         conn.prefetch(z64, mapping)
         self.assertEqual(2, len(self._storage._cache))
+
+    ######
+    # Parallel Commit Tests
+    ######
+
+    def checkCanVoteAndCommitWhileOtherStorageVotes(self):
+        storage1 = self._closing(self._storage.new_instance())
+        storage2 = self._closing(self._storage.new_instance())
+
+        # Bring them both into tpc_vote phase. Before parallel commit,
+        # this would have blocked as the first storage took the commit lock
+        # in tpc_vote.
+        txs = {}
+        for storage in (storage1, storage2):
+            data = zodb_pickle(MinPO(str(storage)))
+            t = TransactionMetaData()
+            txs[storage] = t
+            storage.tpc_begin(t)
+            oid = storage.new_oid()
+
+            storage.store(oid, None, data, '', t)
+            storage.tpc_vote(t)
+
+        # The order we choose to finish is the order of the returned
+        # tids.
+        tid1 = storage2.tpc_finish(txs[storage2])
+        tid2 = storage1.tpc_finish(txs[storage1])
+
+        self.assertGreater(tid2, tid1)
+
+        storage1.close()
+        storage2.close()
+
+    def checkCanLoadObjectStateWhileBeingModified(self):
+        # Get us an object in the database
+        storage1 = self._storage.new_instance()
+        data = zodb_pickle(MinPO(str(storage1)))
+        t = TransactionMetaData()
+        storage1.tpc_begin(t)
+        oid = storage1.new_oid()
+
+        storage1.store(oid, None, data, '', t)
+        storage1.tpc_vote(t)
+        initial_tid = storage1.tpc_finish(t)
+
+        storage1.release()
+        del storage1
+
+        self._storage._cache.clear(load_persistent=False)
+
+        storage1 = self._storage.new_instance()
+
+        # Get a completely independent storage, not sharing a cache
+        storage2 = self._closing(self.make_storage(zap=False))
+
+        # First storage attempts to modify the oid.
+        t = TransactionMetaData()
+        storage1.tpc_begin(t)
+        storage1.store(oid, initial_tid, data, '', t)
+        # And locks the row.
+        storage1.tpc_vote(t)
+
+        # storage2 would like to read the old row.
+        loaded_data, loaded_tid = storage2.load(oid)
+
+        self.assertEqual(loaded_data, data)
+        self.assertEqual(loaded_tid, initial_tid)
+
+        # Commit can now happen.
+        tid2 = storage1.tpc_finish(t)
+        self.assertGreater(tid2, initial_tid)
+
+        storage1.close()
+        storage2.close()
+
+    def check_tid_ordering_w_commit(self):
+        # The implementation in BasicStorage.BasicStorage is
+        # racy: it uses multiple threads to access a single
+        # RelStorage instance, which doesn't make sense.
+        try:
+            super(GenericRelStorageTests, self).check_tid_ordering_w_commit()
+        except AssertionError as e:
+            raise unittest.SkipTest("Test hit race condition", e)
 
 
 class AbstractRSZodbConvertTests(StorageCreatingMixin,
@@ -1095,7 +1246,11 @@ class AbstractToFileStorage(RelStorageTestBase):
 
     def setUp(self):
         super(AbstractToFileStorage, self).setUp()
-        self._dst_path = 'Dest.fs'
+        # Use the abspath so that even if we close it after
+        # we've returned to our original directory (e.g.,
+        # close is run as part of addCleanup(), which happens after
+        # tearDown) we don't write index files into the original directory.
+        self._dst_path = os.path.abspath(self.rs_temp_prefix + 'Dest.fs')
         self.__dst = None
 
     @property
@@ -1108,7 +1263,7 @@ class AbstractToFileStorage(RelStorageTestBase):
         if self.__dst is not None:
             self.__dst.close()
             self.__dst.cleanup()
-        self.__dst = None
+        self.__dst = 42 # Not none so we don't try to create.
         super(AbstractToFileStorage, self).tearDown()
 
     def new_dest(self):
@@ -1120,7 +1275,7 @@ class AbstractFromFileStorage(RelStorageTestBase):
 
     def setUp(self):
         super(AbstractFromFileStorage, self).setUp()
-        self._src_path = 'Source.fs'
+        self._src_path = os.path.abspath(self.rs_temp_prefix + 'Source.fs')
         self.__dst = None
 
     def make_storage_to_cache(self):
@@ -1136,7 +1291,7 @@ class AbstractFromFileStorage(RelStorageTestBase):
         if self.__dst is not None:
             self.__dst.close()
             self.__dst.cleanup()
-            self.__dst = None
+        self.__dst = 42 # Not none so we don't try to create.
         super(AbstractFromFileStorage, self).tearDown()
 
     def new_dest(self):

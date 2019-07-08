@@ -22,10 +22,25 @@ assert PostgreSQLAdapter
 assert select_driver
 
 
-def debug_my_locks(cursor): # pragma: no cover
-    conn = cursor.connection
-    pid = conn.info.backend_pid
-    cursor.execute("""
+def debug_locks(cursor, me_only=False, exclusive_only=False): # pragma: no cover
+    if me_only:
+        conn = cursor.connection
+        try:
+            pid = conn.info.backend_pid
+        except AttributeError:
+            # connection.info was added to psycopg2 in 2.8.0
+            cursor.execute("SELECT pg_backend_pid()")
+            pid = cursor.fetchall()[0][0]
+        params = (pid,)
+        pid_clause = ' AND a.pid = %s '
+    else:
+        pid_clause = ''
+        params = ()
+    excl_clause = ''
+    if exclusive_only:
+        excl_clause = """ AND l.mode like '%%Exclu%%' """
+
+    stmt = """
     SELECT
          a.datname,
          l.relation::regclass,
@@ -38,15 +53,19 @@ def debug_my_locks(cursor): # pragma: no cover
          l.granted
     FROM pg_stat_activity a
     JOIN pg_locks l ON l.pid = a.pid
-    WHERE a.pid = %s and l.mode like '%%Exclu%%'
-    AND l.locktype <> 'virtualxid'
+    WHERE l.locktype <> 'virtualxid'
+    {pid_clause}
+    {excl_clause}
     ORDER BY a.pid
-    """, (pid,))
-    rows = cursor.fetchall()
-    rows = '\n'.join('\t'.join((str(i) for i in r)) for r in rows)
-    header = '*Locks for %s isomode %s\n' % (pid, conn.isolation_level)
-    return header + rows
+    """.format(
+        pid_clause=pid_clause,
+        excl_clause=excl_clause
+    )
+    cursor.execute(stmt, params)
+    return cursor
 
+def debug_my_locks(cursor, exclusive_only=False): # pragma: no cover
+    return debug_locks(cursor, me_only=True, exclusive_only=exclusive_only)
 
 def print_size_report(cursor): # pragma: no cover
     extra_query = ''

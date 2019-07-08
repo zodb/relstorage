@@ -22,7 +22,6 @@ from zope.interface import implementer
 
 from relstorage.adapters.interfaces import IObjectMover
 
-from .._util import noop_when_history_free
 from .._util import query_property
 from ..mover import AbstractObjectMover
 from ..mover import metricmethod_sampled
@@ -41,7 +40,9 @@ class MySQLObjectMover(AbstractObjectMover):
     _prepare_detect_conflict_queries = to_prepared_queries(
         'detect_conflicts',
         AbstractObjectMover._detect_conflict_queries,
-        ' LOCK IN SHARE MODE')
+        # Now that we explicitly lock the rows before we begin,
+        # no sense applying a locking clause here too.
+    )
 
     _prepare_detect_conflict_query = query_property('_prepare_detect_conflict')
 
@@ -153,33 +154,27 @@ class MySQLObjectMover(AbstractObjectMover):
     ON bc.zoid = sq.zoid
     """
 
-    def _move_from_temp_object_state(self, cursor, tid):
-        stmt = """
-        INSERT INTO object_state (zoid, tid, state_size, state)
-            SELECT zoid, %s, COALESCE(LENGTH(state), 0), state
-            FROM temp_store
-        ON DUPLICATE KEY UPDATE
-            tid = VALUES(tid),
-            state_size = VALUES(state_size),
-            state = VALUES(state)
-        """
-        cursor.execute(stmt, (tid,))
+    # We UPSERT for hf movement; no need to do a delete.
+    _move_from_temp_hf_delete_query = ''
 
-    @noop_when_history_free
-    @metricmethod_sampled
-    def update_current(self, cursor, tid):  # pylint:disable=method-hidden
-        """
-        Update the current object pointers.
+    _move_from_temp_hf_insert_query = AbstractObjectMover._move_from_temp_hf_insert_query + """
+    ON DUPLICATE KEY UPDATE
+        tid = VALUES(tid),
+        state_size = VALUES(state_size),
+        state = VALUES(state)
+    """
 
-        tid is the integer tid of the transaction being committed.
-        """
-        cursor.execute("""
+    # UPSERT for current_object: no need for separate update.
+    _update_current_insert_query = """
         INSERT INTO current_object (zoid, tid)
             SELECT zoid, tid FROM object_state
             WHERE tid = %s
+            ORDER BY zoid
         ON DUPLICATE KEY UPDATE
             tid = VALUES(tid)
-        """, (tid,))
+    """
+
+    _update_current_update_query = None
 
     @metricmethod_sampled
     def download_blob(self, cursor, oid, tid, filename):

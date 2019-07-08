@@ -20,6 +20,7 @@ from persistent.mapping import PersistentMapping
 
 from ZODB.DB import DB
 from ZODB.serialize import referencesf
+from ZODB.POSException import StorageTransactionError
 from ZODB.tests import HistoryStorage
 from ZODB.tests import IteratorStorage
 from ZODB.tests import PackableStorage
@@ -27,6 +28,10 @@ from ZODB.tests import RevisionStorage
 from ZODB.tests import TransactionalUndoStorage
 from ZODB.tests.MinPO import MinPO
 from ZODB.tests.StorageTestBase import zodb_pickle
+# This class is sadly not cooperative with its superclass,
+# so we need to explicitly place it at the back of the MRO.
+from ZODB.tests.util import TestCase as ZODBTestCase
+
 from ZODB.utils import p64
 
 from relstorage.tests.RecoveryStorage import UndoableRecoveryStorage
@@ -41,7 +46,8 @@ class HistoryPreservingRelStorageTests(GenericRelStorageTests,
                                        IteratorStorage.ExtendedIteratorStorage,
                                        RevisionStorage.RevisionStorage,
                                        PackableStorage.PackableUndoStorage,
-                                       HistoryStorage.HistoryStorage):
+                                       HistoryStorage.HistoryStorage,
+                                       ZODBTestCase):
     # pylint:disable=too-many-ancestors,abstract-method,too-many-locals
     keep_history = True
 
@@ -300,7 +306,8 @@ class HistoryPreservingRelStorageTests(GenericRelStorageTests,
     def checkImplementsExternalGC(self):
         import ZODB.interfaces
         self.assertFalse(ZODB.interfaces.IExternalGC.providedBy(self._storage))
-        self.assertRaises(AttributeError, self._storage.deleteObject)
+        with self.assertRaises(StorageTransactionError):
+            self._storage.deleteObject(None, None, None)
 
     def checkMigrateTransactionEmpty(self):
         # The transaction.empty column gets renamed in 'prepare'
@@ -335,12 +342,14 @@ class HistoryPreservingRelStorageTests(GenericRelStorageTests,
 
 
 class HistoryPreservingToFileStorage(AbstractToFileStorage,
-                                     UndoableRecoveryStorage):
+                                     UndoableRecoveryStorage,
+                                     ZODBTestCase):
     # pylint:disable=too-many-ancestors,abstract-method,too-many-locals
     keep_history = True
 
 
 class HistoryPreservingFromFileStorage(AbstractFromFileStorage,
-                                       UndoableRecoveryStorage):
+                                       UndoableRecoveryStorage,
+                                       ZODBTestCase):
     # pylint:disable=too-many-ancestors,abstract-method,too-many-locals
     keep_history = True

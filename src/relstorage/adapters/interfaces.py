@@ -219,37 +219,83 @@ class IConnectionManager(Interface):
         """
 
     def open_for_load():
-        """Open a connection for loading objects.
+        """
+        Open a connection for loading objects.
 
-        Returns (conn, cursor).
+        This connection is read only, and presents a consistent view
+        of the database as of the time the first statement is
+        executed. It should be opened in ``REPEATABLE READ`` or higher
+        isolation level. It must not be in autocommit.
+
+        :return: ``(conn, cursor)``
         """
 
     def restart_load(conn, cursor):
-        """Reinitialize a connection for loading objects.
+        """
+        Reinitialize a connection for loading objects.
 
-        This gets called when polling the database, so it needs to be quick.
+        This gets called when polling the database, so it needs to be
+        quick.
 
         Raise one of self.disconnected_exceptions if the database has
         disconnected.
         """
 
     def open_for_store():
-        """Open and initialize a connection for storing objects.
+        """
+        Open and initialize a connection for storing objects.
 
-        Returns (conn, cursor).
+        This connection is read/write, and its view of the database
+        needs to be consistent for each statement, but should read a
+        fresh snapshot on each statement for purposes of conflict
+        resolution and cooperation with other store connections. It
+        should be opened in ``READ COMMITTED`` isolation level,
+        without autocommit. (Opening in ``REPEATABLE READ`` or higher,
+        with a single snapshot, could reduce the use of locks, but
+        increases the risk of serialization errors and having
+        transactions rollback; we could handle that by raising
+        ``ConflictError`` and letting the application retry, but only
+        if we did that before ``tpc_finish``, and not all test cases
+        can handle that either.)
+
+        This connection will take locks on rows in the state tables,
+        and hold them during the commit process.
+
+        A connection opened by this method is the only type of
+        connection that can hold the commit lock.
+
+        :return: ``(conn, cursor)``
         """
 
     def restart_store(conn, cursor):
-        """Rollback and reuse a store connection.
+        """
+        Rollback and reuse a store connection.
 
         Raise one of self.disconnected_exceptions if the database
         has disconnected.
         """
 
     def open_for_pre_pack():
-        """Open a connection to be used for the pre-pack phase.
+        """
+        Open a connection to be used for the pre-pack phase.
 
-        Returns (conn, cursor).
+        This connection will make many different queries; each one
+        must be consistent unto itself, but they do not all have to be
+        consistent with each other. This is because the *first* query
+        this object makes establishes a base state, and we will
+        manually discard later changes seen in future queries.
+
+        It will read from the state tables and write to the pack tables;
+        it will not write to the state tables, nor hold the commit lock.
+        It may hold share locks on state rows temporarily.
+
+        This connection may be open for a long period of time, and
+        will be committed as appropriate between queries. It is
+        acceptable for this connection to be in autocommit mode, if
+        required, but it is preferred for it not to be. This should be
+        opened in ``READ COMMITTED`` isolation level.
+
+        :return: ``(conn, cursor)``
         """
 
     def add_on_store_opened(f):
@@ -322,18 +368,39 @@ class IDatabaseIterator(Interface):
 class ILocker(Interface):
     """Acquire and release the commit and pack locks."""
 
-    def hold_commit_lock(cursor, ensure_current=False, nowait=False):
-        """Acquire the commit lock.
+    def lock_current_objects(cursor, oids):
+        """
+        Lock the objects involved in the current transaction, which
+        must have been moved into the temporary tables.
 
-        If ensure_current is True, other tables may be locked as well, to
-        ensure the most current data is available.
+        In addition to those, lock the relevant rows for the objects
+        whose OIDS are contained in *oids*.
 
-        May raise UnableToAcquireCommitLockError if the lock can not be acquired before
-        some timeout.
+        This should be done as part of the voting phase of TPC, before
+        taking out the final commit lock.
 
-        With nowait set to True, only try to obtain the lock without waiting
-        and return a boolean indicating if the lock was successful.
+        Returns nothing.
 
+        Typically this will be followed by a call to
+        :meth:`detect_conflict`.
+        """
+
+    def hold_commit_lock(cursor, ensure_current=True, nowait=False):
+        """
+        Acquire the commit lock.
+
+        If *ensure_current* is True (the default), other tables may be
+        locked as well, to ensure the most current data is available.
+        When using row level locks, *ensure_current* is always
+        implicit.
+
+        With *nowait* set to True, only try to obtain the lock without
+        waiting and return a boolean indicating if the lock was
+        successful. **Note:** this parameter is deprecated and will be removed
+        in the future; it is not currently used.
+
+        Should raise `UnableToAcquireCommitLockError` if the lock can not
+        be acquired before a configured timeout.
         """
 
     def release_commit_lock(cursor):
@@ -439,18 +506,26 @@ class IObjectMover(Interface):
 
         If there is a conflict, returns a sequence of
         ``(oid, committed_tid, attempted_committed_tid)``.
+
+        This method should be called during the ``tpc_vote`` phase of a transaction,
+        with :meth:`ILocker.lock_current_objects` held.
         """
 
     def replace_temp(cursor, oid, prev_tid, data):
-        """Replace an object in the temporary table.
+        """
+        Replace an object in the temporary table.
 
         This happens after conflict resolution.
+
+        TODO: This method needs to go away and use the regular
+        row batcher, so we can take advantage of bulk optimizations.
         """
 
     def move_from_temp(cursor, tid, txn_has_blobs):
-        """Moved the temporarily stored objects to permanent storage.
+        """
+        Move the temporarily stored objects to permanent storage.
 
-        Returns the list of oids stored.
+        Returns nothing.
         """
 
     def update_current(cursor, tid):

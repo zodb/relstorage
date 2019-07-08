@@ -55,6 +55,15 @@ class RowBatcher(object):
         self.deletes = defaultdict(set)   # {(table, columns_tuple): set([(column_value,)])}
         self.inserts = defaultdict(dict)  # {(command, header, row_schema, suffix): {rowkey: [row]}}
 
+    def __repr__(self):
+        return "<%s at %x tins=%d tdel=%d prows=%d>" % (
+            self.__class__.__name__,
+            id(self),
+            self.total_rows_inserted,
+            self.total_rows_deleted,
+            self.rows_added,
+        )
+
     def delete_from(self, table, **kw):
         if not kw:
             raise AssertionError("Need at least one column value")
@@ -79,7 +88,7 @@ class RowBatcher(object):
                 or self.size_added >= self.size_limit):
             self.flush()
 
-    def select_from(self, columns, table, **kw):
+    def select_from(self, columns, table, suffix='', **kw):
         """
         Handles a query of the ``WHERE col IN (?, ?,)`` type.
 
@@ -96,7 +105,7 @@ class RowBatcher(object):
             filter_subset = filter_values[:self.row_limit]
             del filter_values[:self.row_limit]
             descriptor = [[(table, (filter_column,)), filter_subset]]
-            self._do_batch(command, descriptor, rows_need_flattened=False)
+            self._do_batch(command, descriptor, rows_need_flattened=False, suffix=suffix)
             for row in self.cursor.fetchall():
                 yield row
 
@@ -114,7 +123,7 @@ class RowBatcher(object):
     def _do_deletes(self):
         return self._do_batch('DELETE', sorted(iteritems(self.deletes)))
 
-    def _do_batch(self, command, descriptors, rows_need_flattened=True):
+    def _do_batch(self, command, descriptors, rows_need_flattened=True, suffix=''):
         count = 0
         for (table, columns), rows in descriptors:
             count += len(rows)
@@ -124,7 +133,8 @@ class RowBatcher(object):
             if len(columns) == 1:
                 stmt, params, these_params_need_flattened = self._make_single_column_query(
                     command, table,
-                    columns[0], rows, rows_need_flattened)
+                    columns[0], rows, rows_need_flattened
+                )
             else:
                 row_template = " AND ".join(
                     ("%s=" % (column,)) + self.delete_placeholder
@@ -139,6 +149,7 @@ class RowBatcher(object):
 
             if these_params_need_flattened:
                 params = self._flatten_params(params)
+            stmt += suffix
             __traceback_info__ = params
             self.cursor.execute(stmt, params)
         return count

@@ -64,6 +64,7 @@ from ..dbiter import HistoryPreservingDatabaseIterator
 from ..interfaces import IRelStorageAdapter
 from ..poller import Poller
 from ..scriptrunner import ScriptRunner
+from ..batch import RowBatcher
 from . import drivers
 from .connmanager import MySQLdbConnectionManager
 from .locker import MySQLLocker
@@ -104,8 +105,10 @@ class MySQLAdapter(object):
         self.runner = ScriptRunner()
         self.locker = MySQLLocker(
             options=options,
-            lock_exceptions=driver.lock_exceptions,
+            driver=driver,
+            batcher_factory=RowBatcher,
         )
+        self.connmanager.add_on_store_opened(self.locker.on_store_opened)
         self.schema = MySQLSchemaInstaller(
             connmanager=self.connmanager,
             runner=self.runner,

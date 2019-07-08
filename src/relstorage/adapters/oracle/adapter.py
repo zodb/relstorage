@@ -81,7 +81,7 @@ class OracleAdapter(object):
         self.runner = CXOracleScriptRunner(driver)
         self.locker = OracleLocker(
             options=self.options,
-            lock_exceptions=driver.lock_exceptions,
+            driver=driver,
             inputsize_NUMBER=driver.NUMBER,
         )
         self.schema = OracleSchemaInstaller(

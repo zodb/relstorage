@@ -31,7 +31,7 @@ class ScriptRunner(object):
     script_vars = {
         'TRUE':         'TRUE',
         'FALSE':        'FALSE',
-        'TRUNCATE':     'TRUNCATE',
+        'TRUNCATE':     'TRUNCATE TABLE',
         'oid':          '%(oid)s',
         'tid':          '%(tid)s',
         'pack_tid':     '%(pack_tid)s',
@@ -51,6 +51,7 @@ class ScriptRunner(object):
         into a database-specific statement.
         """
         stmt = generic_stmt % self.script_vars
+        __traceback_info__ = stmt
         try:
             cursor.execute(stmt, generic_params)
         except:

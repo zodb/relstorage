@@ -165,8 +165,13 @@ class CMySQLConnectorDriver(PyMySQLConnectorDriver):
     __name__ = 'C ' + _base_name
 
     AVAILABLE_ON_PYPY = False
-    PRIORITY = 3
-    PRIORITY_PYPY = 4
+    # Values this high won't usually be automatically tested.
+    # This driver (as of 8.0.16) fails to run under Python 3.7's development
+    # mode, with assertion failures about doing things without the GIL
+    # that crash the interpreter. That's pretty risky, so we don't currently
+    # recommend it.
+    PRIORITY = 1000
+    PRIORITY_PYPY = 4000
 
     USE_PURE = False
     _GEVENT_CAPABLE = False

@@ -13,32 +13,14 @@
 ##############################################################################
 "Internal helper utilities."
 
+from collections import namedtuple
 from functools import partial
 from functools import update_wrapper
 from functools import wraps
 
 from .._compat import intern
 
-
-class Lazy(object):
-    "Property-like descriptor that calls func only once per instance."
-
-    # Derived from zope.cachedescriptors.property.Lazy
-
-    def __init__(self, func, name=None):
-        if name is None:
-            name = func.__name__
-        self.data = (func, name)
-        update_wrapper(self, func)
-
-    def __get__(self, inst, class_):
-        if inst is None:
-            return self
-
-        func, name = self.data
-        value = func(inst)
-        inst.__dict__[name] = value
-        return value
+from .._util import Lazy
 
 def query_property(base_name,
                    extension='',
@@ -143,3 +125,61 @@ def noop_when_history_free(meth):
         no_op.__wrapped__ = meth
 
     return swizzler
+
+
+ResultDescription = namedtuple(
+    'ResultDescription',
+    # First two are mandatory, remaining five may be None
+    # Example:
+    # ('Name', 253, 17, 192, 192, 0, 0),
+    ('name', 'type_code', 'display_size',
+     'internal_size', 'precision', 'scale', 'null_ok'))
+
+
+class DatabaseHelpersMixin(object):
+
+    def _metadata_to_native_str(self, value):
+        # Some drivers, in some configurations, notably older versions
+        # of MySQLdb (mysqlclient) on Python 3 in 'NAMES binary' mode,
+        # can return column names and the like as bytes when we want str.
+        if not isinstance(value, str):
+            value = value.decode('ascii')
+        return value
+
+    def _column_descriptions(self, cursor):
+        __traceback_info__ = cursor.description
+        return [ResultDescription(self._metadata_to_native_str(r[0]),
+                                  # Not all drivers return lists or tuples
+                                  # or things that can be sliced; psycopg2/cffi returns
+                                  # an arbitrary sequence.
+                                  # MySqlConnector-Python has been observed to provide
+                                  # extra attributes.
+                                  *list(r)[1:7])
+                for r in cursor.description]
+
+    def _rows_as_dicts(self, cursor):
+        """
+        An iterator of the rows as dictionaries, named by the
+        lower-case column name.
+
+        Some drivers offer the ability to do this directly when
+        the statement is executed or the cursor is created;
+        this is a lowest-common denominator way to do it utilizing
+        DB-API 2.0 attributes.
+        """
+        column_descrs = self._column_descriptions(cursor)
+        for row in cursor:
+            result = {
+                column_descr.name.lower(): column_value
+                for column_descr, column_value in zip(column_descrs, row)
+            }
+            yield result
+
+    def _rows_as_pretty_string(self, cursor):
+        """
+        Return the rows formatted in a way for easy human consumption.
+        """
+        # This could be tabular, but its easiest just to use pprint
+        import pprint
+        rows = list(self._rows_as_dicts(cursor))
+        return pprint.pformat(rows)

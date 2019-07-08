@@ -204,4 +204,4 @@ class AbstractConnectionManager(object):
         """Open a connection to be used for the pre-pack phase.
         Returns (conn, cursor).
         """
-        return self.open()
+        return self.open_for_store()

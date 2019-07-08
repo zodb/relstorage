@@ -89,16 +89,23 @@ class PostgreSQLObjectMover(AbstractObjectMover):
 
     _detect_conflict_query = 'EXECUTE detect_conflicts'
 
-    _move_from_temp_hf_insert_query_raw = """
-        INSERT INTO object_state (zoid, tid, state_size, state)
-        SELECT zoid, %s, COALESCE(LENGTH(state), 0), state
-        FROM temp_store
+    _move_from_temp_hf_insert_query_raw = AbstractObjectMover._move_from_temp_hf_insert_query + """
         ON CONFLICT (zoid)
         DO UPDATE
         SET state_size = COALESCE(LENGTH(excluded.state), 0),
             tid = excluded.tid,
             state = excluded.state
     """
+
+    _update_current_insert_query = """
+        INSERT INTO current_object (zoid, tid)
+            SELECT zoid, tid FROM object_state
+            WHERE tid = %s
+            ORDER BY zoid
+        ON CONFLICT (zoid) DO UPDATE SET
+            tid = excluded.tid
+    """
+    _update_current_update_query = None
 
     _move_from_temp_hf_insert_raw_queries = (
         Unsupported("States accumulate in history-preserving mode"),
@@ -120,6 +127,9 @@ class PostgreSQLObjectMover(AbstractObjectMover):
     )
 
     _move_from_temp_hf_insert_query = query_property('_move_from_temp_hf_insert')
+
+    # We upsert, no need
+    _move_from_temp_hf_delete_query = ''
 
     on_load_opened_statement_names = ('_prepare_load_current_query',)
     on_store_opened_statement_names = on_load_opened_statement_names + (
@@ -182,12 +192,6 @@ class PostgreSQLObjectMover(AbstractObjectMover):
             cursor.execute(stmt)
 
         AbstractObjectMover.on_store_opened(self, cursor, restart)
-
-    def _move_from_temp_object_state(self, cursor, tid):
-        # Override the history-free version of moving from
-        # temp_store to do it in one step.
-        stmt = self._move_from_temp_hf_insert_query
-        cursor.execute(stmt, (tid,))
 
     @metricmethod_sampled
     def store_temp(self, _cursor, batcher, oid, prev_tid, data):

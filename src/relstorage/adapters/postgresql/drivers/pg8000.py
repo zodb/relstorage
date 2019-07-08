@@ -134,6 +134,10 @@ class PG8000Driver(AbstractModuleDriver):
         # XXX: Testing. Can we remove?
         self.disconnected_exceptions += (AttributeError,)
 
+        # Sadly, pg8000 raises ProgrammingError when it can't
+        # obtain a lock, making it hard to distinguish. We'll let other
+        # clauses catch such exceptions.
+        self.illegal_operation_exceptions = ()
         Binary = self.Binary
 
         class Cursor(self.driver_module.Cursor):
@@ -209,13 +213,24 @@ class PG8000Driver(AbstractModuleDriver):
 
     ISOLATION_LEVEL_READ_COMMITTED = 'ISOLATION LEVEL READ COMMITTED'
     ISOLATION_LEVEL_SERIALIZABLE = 'ISOLATION LEVEL SERIALIZABLE'
+    ISOLATION_LEVEL_REPEATABLE_READ = 'ISOLATION LEVEL REPEATABLE READ'
 
-    def connect_with_isolation(self, isolation, dsn):
+    def connect_with_isolation(self, dsn,
+                               isolation=None,
+                               read_only=False,
+                               deferrable=False):
         conn = self.connect(dsn)
         cursor = conn.cursor()
         # For the current transaction
-        cursor.execute('SET TRANSACTION %s' % isolation)
+        transaction_stmt = 'TRANSACTION %s %s %s' % (
+            isolation,
+            ', READ ONLY' if read_only else '',
+            ', DEFERRABLE' if deferrable else ''
+        )
+        cursor.execute('SET ' + transaction_stmt)
         # For future transactions on this same connection.
-        cursor.execute("SET SESSION CHARACTERISTICS AS TRANSACTION %s" % isolation)
+        # NOTE: This will probably not play will with things like pgbouncer.
+        # See http://initd.org/psycopg/docs/connection.html#connection.set_session
+        cursor.execute('SET SESSION CHARACTERISTICS AS ' + transaction_stmt)
         conn.commit()
         return conn, cursor

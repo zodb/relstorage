@@ -23,7 +23,6 @@ from zope.interface import implementer
 from ZODB.POSException import Unsupported
 
 from .._compat import OID_TID_MAP_TYPE
-from ..iter import fetchmany
 from ._util import noop_when_history_free
 from ._util import query_property as _query_property
 from .._compat import ABC
@@ -208,7 +207,9 @@ class AbstractObjectMover(ABC):
         batcher = self.make_batcher(cursor, row_limit=1000)
         rows = batcher.select_from(columns, table, **{filter_column: oids})
         res = self._current_object_tids_map_type(list(rows))
+
         return res
+
 
     #: A sequence of *names* of attributes on this object that are statements to be
     #: executed by ``on_store_opened`` when ``restart`` is False.
@@ -329,14 +330,16 @@ class AbstractObjectMover(ABC):
         """
         SELECT zoid, current_object.tid, temp_store.prev_tid
         FROM temp_store
-                JOIN current_object USING (zoid)
+        JOIN current_object USING (zoid)
         WHERE temp_store.prev_tid != current_object.tid
+        ORDER BY zoid
         """,
         """
         SELECT zoid, object_state.tid, temp_store.prev_tid
         FROM temp_store
-                JOIN object_state USING (zoid)
+        JOIN object_state USING (zoid)
         WHERE temp_store.prev_tid != object_state.tid
+        ORDER BY zoid
         """
     )
 
@@ -344,12 +347,9 @@ class AbstractObjectMover(ABC):
 
     @metricmethod_sampled
     def detect_conflict(self, cursor):
-        # TODO: We need to make sure these existing rows get or are locked.
-        # TODO: We should return the committed state so it can be passed to tryToResolveConflict
-        #lock = 'SELECT zoid FROM %s WHERE zoid IN (SELECT zoid FROM temp_store) FOR UPDATE'
-        #lock = lock % ('current_object' if self.keep_history else 'object_state')
-        #cursor.execute(lock)
-        #cursor.fetchall()
+        # TODO: We should return the committed state so it can be
+        # passed to tryToResolveConflict, saving extra queries.
+        # OTOH, using extra memory.
         stmt = self._detect_conflict_query
         cursor.execute(stmt)
         rows = cursor.fetchall()
@@ -380,13 +380,20 @@ class AbstractObjectMover(ABC):
       (zoid, tid, prev_tid, md5, state_size, state)
     SELECT zoid, %s, prev_tid, md5,
       COALESCE(LENGTH(state), 0), state
-    FROM temp_store
+      FROM temp_store
+      ORDER BY zoid
+    """
+
+    _move_from_temp_hf_delete_query = """
+    DELETE FROM object_state
+    WHERE zoid IN (SELECT zoid FROM temp_store)
     """
 
     _move_from_temp_hf_insert_query = """
     INSERT INTO object_state (zoid, tid, state_size, state)
-    SELECT zoid, %s, COALESCE(LENGTH(state), 0), state
-    FROM temp_store
+        SELECT zoid, %s, COALESCE(LENGTH(state), 0), state
+        FROM temp_store
+        ORDER BY zoid
     """
 
     _move_from_temp_copy_blob_query = """
@@ -400,25 +407,32 @@ class AbstractObjectMover(ABC):
     WHERE zoid IN (SELECT zoid FROM temp_store)
     """
 
+
     def _move_from_temp_object_state(self, cursor, tid):
         """
         Called for history-free databases.
 
-        Should replace all entries in object_state with the
-        same zoid from temp_store.
+        Should replace all entries in object_state with the same zoid
+        from temp_store.
 
         This implementation is in two steps, first deleting from
-        ``object_state``, and then copying from ``temp_store`` using
+        ``object_state`` with :attr:`_move_from_temp_hf_delete_query`,
+        and then copying from ``temp_store`` using
         :attr:`_move_from_temp_hf_insert_query`.
+
+        If a subclass can do this in a single step with an ``UPSERT``,
+        it should set :attr:`_move_from_temp_hf_delete_query` to a
+        false value.
+
+        Recall that the queries that touch ``current_object`` and
+        ``object_state`` need to be certain the order they use (by
+        ``zoid``) to avoid deadlocks.
 
         Blobs are handled separately.
         """
-
-        stmt = """
-        DELETE FROM object_state
-        WHERE zoid IN (SELECT zoid FROM temp_store)
-        """
-        cursor.execute(stmt)
+        stmt = self._move_from_temp_hf_delete_query
+        if stmt:
+            cursor.execute(stmt)
 
         stmt = self._move_from_temp_hf_insert_query
         cursor.execute(stmt, (tid,))
@@ -426,44 +440,54 @@ class AbstractObjectMover(ABC):
 
     @metricmethod_sampled
     def move_from_temp(self, cursor, tid, txn_has_blobs):
-        """Moved the temporarily stored objects to permanent storage.
-
-        Returns the list of oids stored.
         """
-
+        Move the temporarily stored objects to permanent storage.
+        """
         if self.keep_history:
             stmt = self._move_from_temp_hp_insert_query
+            __traceback_info__ = stmt
             cursor.execute(stmt, (tid,))
         else:
             self._move_from_temp_object_state(cursor, tid)
 
             if txn_has_blobs:
-                cursor.execute(self._move_from_temp_hf_delete_blob_chunk_query)
+                # If we can require storages to have an UPSERT (mysql and
+                # postgres do), then we can remove the DELETE.
+                stmt = self._move_from_temp_hf_delete_blob_chunk_query
+                cursor.execute(stmt)
 
+        # TODO: Make this an UPSERT for history free storages.
+        # This would obviate the need for the above delete query.
         if txn_has_blobs:
             stmt = self._move_from_temp_copy_blob_query
+            __traceabck_info__ = stmt
             cursor.execute(stmt, (tid,))
 
-        stmt = """
-        SELECT zoid FROM temp_store
-        """
-        cursor.execute(stmt)
-        return [oid for (oid,) in fetchmany(cursor)]
 
+    # Insert and update current objects. The trivial
+    # implementation does a two-part query; if you
+    # have an UPSERT statement that can do it in one query,
+    # then put that in `_update_current_insert_query`
+    # and set `_update_current_update_query` to None.
+    # Note that to avoid deadlocks, it is incredibly important
+    # to order the updates in OID order.
     _update_current_insert_query = """
         INSERT INTO current_object (zoid, tid)
         SELECT zoid, tid FROM object_state
         WHERE tid = %s
-            AND prev_tid = 0"""
+            AND prev_tid = 0
+    """
 
     _update_current_update_query = """
-        UPDATE current_object SET tid = %s
+        UPDATE current_object
+        SET tid = %s
         WHERE zoid IN (
             SELECT zoid FROM object_state
             WHERE tid = %s
                 AND prev_tid != 0
-            ORDER BY zoid)
-        """
+            ORDER BY zoid
+        )
+    """
 
     @noop_when_history_free
     @metricmethod_sampled
@@ -473,15 +497,12 @@ class AbstractObjectMover(ABC):
 
         tid is the integer tid of the transaction being committed.
         """
-        # TODO: We should be able to use a single UPSERT
-        # query for these.
         stmt = self._update_current_insert_query
         cursor.execute(stmt, (tid,))
 
-        # Change existing objects.  To avoid deadlocks,
-        # update in OID order.
-        stmt = self._update_current_update_query
-        cursor.execute(stmt, (tid, tid))
+        if self._update_current_update_query:
+            stmt = self._update_current_update_query
+            cursor.execute(stmt, (tid, tid))
 
     @metricmethod_sampled
     def download_blob(self, cursor, oid, tid, filename):

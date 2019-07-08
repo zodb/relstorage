@@ -112,6 +112,15 @@ class RelStorageTransactionRecord(TransactionRecord):
     def __iter__(self):
         return RecordIterator(self)
 
+    def __repr__(self):
+        return '<%s at %x tid=%d status=%r user=%r description=%r>' % (
+            self.__class__.__name__,
+            id(self),
+            self._tid_int,
+            self.status,
+            self.user,
+            self.description
+        )
 
 class RecordIterator(object):
     """Iterate over the objects in a transaction."""

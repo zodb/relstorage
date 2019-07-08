@@ -52,6 +52,7 @@ class Psycopg2Driver(AbstractModuleDriver):
         # extensions
         self.ISOLATION_LEVEL_READ_COMMITTED = psycopg2.extensions.ISOLATION_LEVEL_READ_COMMITTED
         self.ISOLATION_LEVEL_SERIALIZABLE = psycopg2.extensions.ISOLATION_LEVEL_SERIALIZABLE
+        self.ISOLATION_LEVEL_REPEATABLE_READ = psycopg2.extensions.ISOLATION_LEVEL_REPEATABLE_READ
 
     def _create_connection(self, mod):
         class Psycopg2Connection(mod.extensions.connection):
@@ -61,11 +62,14 @@ class Psycopg2Driver(AbstractModuleDriver):
 
         return Psycopg2Connection
 
-    def connect_with_isolation(self, isolation, *args, **kwargs):
-        conn = self.connect(*args, **kwargs)
-        # XXX: `set_isolation_level` is deprecated and doesn't handle
-        # many cases; assigning to the property is preferred in 2.7+.
-        conn.set_isolation_level(isolation)
+    def connect_with_isolation(self, dsn,
+                               isolation=None,
+                               read_only=False,
+                               deferrable=False):
+        conn = self.connect(dsn)
+        if isolation or deferrable or read_only:
+            conn.set_session(isolation_level=isolation, readonly=read_only,
+                             deferrable=deferrable)
         return conn, conn.cursor()
 
     # psycopg2 is smart enough to return memoryview or buffer on

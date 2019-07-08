@@ -66,6 +66,11 @@ driver
      A pure-Python driver suitable for use with gevent. Works on all
      supported platforms.
 
+     This driver makes use of ``SET SESSION CHARACTERISTICS`` and thus
+     `may not work well
+     <http://initd.org/psycopg/docs/connection.html#connection.set_session>`_
+     with certain configurations of connection load balancers.
+
 dsn
     Specifies the data source name for connecting to PostgreSQL.
     A PostgreSQL DSN is a list of parameters separated with
@@ -79,6 +84,8 @@ dsn
 
 MySQL Adapter Options
 =====================
+
+RelStorage 3.0 requires MySQL 5.7.9 or above.
 
 The MySQL adapter accepts most parameters supported by the mysqlclient
 library (the maintained version of MySQL-python), including:
@@ -110,11 +117,16 @@ driver
       monkey-patching is used.
 
     umysqldb
-      A C-based driver that builds on PyMySQL. It is compatible with
+      Deprecated. A C-based driver that builds on PyMySQL. It is compatible with
       gevent if monkey-patching is used, but only works on CPython 2.
       It does not require the MySQL client development libraries but
       uses a project called ``umysql`` to communicate with the server
       using only sockets.
+
+      .. caution::
+
+         This driver contains many known bugs and will be removed
+         for RelStorage 3.0.
 
       .. note:: Make sure the server has a
           ``max_allowed_packet`` setting no larger than 16MB. Also
@@ -153,14 +165,19 @@ driver
       The same as above, but RelStorage will only use the C extension.
       This is not compatible with gevent.
 
-      .. note::
+      .. caution::
 
-         At least through version 8.0.16, this is not compatible with
-         `CPython 3.7's development mode
+         At least through version 8.0.16, this driver is not
+         recommended.
+
+         It fails the checks established by `CPython 3.7's development
+         mode
          <https://docs.python.org/3/using/cmdline.html#envvar-PYTHONDEVMODE>`_;
          trying to use it with development mode enabled will crash the
          interpreter with "Fatal Python error: Python memory allocator
-         called without holding the GIL."
+         called without holding the GIL." This signals potentially
+         serious internal problems.
+
 
 host
     string, host to connect

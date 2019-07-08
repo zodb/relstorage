@@ -104,24 +104,24 @@ class MySQLTestSuiteBuilder(AbstractTestSuiteBuilder):
         # to send multiple 1MB chunks. So keep it small.)
         return Options().blob_chunk_size
 
-    def _make_check_class_HistoryFreeRelStorageTests(self, base, _):
-        class Tests(MySQLAdapterMixin,
-                    base):
-            @skipOnCI("Travis MySQL goes away error 2006")
-            def check16MObject(self):
-                # NOTE: If your mySQL goes away, check the server's value for
-                # `max_allowed_packet`, you probably need to increase it.
-                # JAM uses 64M.
-                # http://dev.mysql.com/doc/refman/5.7/en/packet-too-large.html
+    def _make_check_class_HistoryFreeRelStorageTests(self, bases, name):
+        @skipOnCI("Travis MySQL goes away error 2006")
+        def check16MObject(self):
+            # NOTE: If your mySQL goes away, check the server's value for
+            # `max_allowed_packet`, you probably need to increase it.
+            # JAM uses 64M.
+            # http://dev.mysql.com/doc/refman/5.7/en/packet-too-large.html
 
-                # This fails if the driver is umysqldb.
-                try:
-                    base.check16MObject(self)
-                except Exception as e:
-                    if e.args == (0, 'Query too big'):
-                        raise unittest.SkipTest("Fails with umysqldb")
-                    raise
-        return Tests
+            # This fails if the driver is umysqldb.
+            try:
+                bases[0].check16MObject(self)
+            except Exception as e:
+                if e.args == (0, 'Query too big'):
+                    raise unittest.SkipTest("Fails with umysqldb")
+                raise
+        return self._default_make_check_class(bases, name, klass_dict={
+            check16MObject.__name__: check16MObject
+        })
 
     # pylint:disable=line-too-long
     _make_check_class_HistoryPreservingRelStorageTests = _make_check_class_HistoryFreeRelStorageTests

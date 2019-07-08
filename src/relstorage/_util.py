@@ -17,7 +17,9 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import collections
 import functools
+import itertools
 import time
 
 logger = __import__('logging').getLogger(__name__)
@@ -117,3 +119,40 @@ def byte_display(size):
     if size > 1048576:
         return '%0.02f MB' % (size / 1048576.0)
     return '%d KB' % (size / 1024.0)
+
+
+class Lazy(object):
+    "Property-like descriptor that calls func only once per instance."
+
+    # Derived from zope.cachedescriptors.property.Lazy
+
+    def __init__(self, func, name=None):
+        if name is None:
+            name = func.__name__
+        self.data = (func, name)
+        functools.update_wrapper(self, func)
+
+    def __get__(self, inst, class_):
+        if inst is None:
+            return self
+
+        func, name = self.data
+        value = func(inst)
+        inst.__dict__[name] = value
+        return value
+
+def to_utf8(data):
+    if data is None or isinstance(data, bytes):
+        return data
+    return data.encode("utf-8")
+
+def consume(iterator, n=None):
+    "Advance the iterator n-steps ahead. If n is none, consume entirely."
+    # From the itertools documentation.
+    # Use functions that consume iterators at C speed.
+    if n is None:
+        # feed the entire iterator into a zero-length deque
+        collections.deque(iterator, maxlen=0)
+    else:
+        # advance to the empty slice starting at position n
+        next(itertools.islice(iterator, n, n), None)

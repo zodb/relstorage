@@ -71,8 +71,6 @@ class Options(object):
     pack_skip_prepack = False
     #: Length of time to hold a lock.
     pack_batch_timeout = 1.0
-    #: How long to pause if we can't get the lock
-    pack_commit_busy_delay = 5.0
 
     #: List of memcache servers
     cache_servers = ()  # ['127.0.0.1:11211']
@@ -119,12 +117,19 @@ class Options(object):
     cache_local_dir_write_max_size = None
     #: Compress the cache files?
     cache_local_dir_compress = None
+    #: How long to pause if we can't get the lock.
+    #:
+    #: ..versionchanged:: 3.0a5
+    #:    Deprecated and unused.
+    pack_commit_busy_delay = 5.0
 
+    # We'll emit a warning for each option seen in here.
     _deprecated_options = (
         'cache_local_dir_count',
         'cache_local_dir_read_count',
         'cache_local_dir_write_max_size',
         'cache_local_dir_compress',
+        'pack_commit_busy_delay',
     )
 
 

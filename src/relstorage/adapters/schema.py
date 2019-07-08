@@ -16,27 +16,24 @@ Database schema installers
 """
 import abc
 import logging
-from collections import namedtuple
 
 from ZODB.POSException import StorageError
 
 from .._compat import ABC
+from ._util import DatabaseHelpersMixin
 
 log = logging.getLogger("relstorage")
 
-ResultDescription = namedtuple(
-    'ResultDescription',
-    # First two are mandatory, remaining five may be None
-    # Example:
-    # ('Name', 253, 17, 192, 192, 0, 0),
-    ('name', 'type_code', 'display_size',
-     'internal_size', 'precision', 'scale', 'null_ok'))
+class AbstractSchemaInstaller(DatabaseHelpersMixin,
+                              ABC):
 
-class AbstractSchemaInstaller(ABC):
-
-    # Keep this list in the same order as the schema scripts
+    # Keep this list in the same order as the schema scripts,
+    # for dependency (Foreign Key) purposes.
     all_tables = (
-        'commit_lock',
+        # History-free row lock table for commits.
+        # The alternative is to also create the transaction table
+        # in HF mode.
+        'commit_row_lock',
         'pack_lock',
         'transaction',
         'new_oid',
@@ -52,6 +49,12 @@ class AbstractSchemaInstaller(ABC):
         'temp_blob_chunk',
         'temp_pack_visit',
         'temp_undo',
+    )
+
+    # Tables that might exist, but which are unused and obsolete.
+    # These can/should be dropped, and names shouldn't be reused.
+    obsolete_tables = (
+        'commit_lock',
     )
 
     database_type = None  # provided by a subclass
@@ -73,51 +76,23 @@ class AbstractSchemaInstaller(ABC):
     def get_database_name(self, cursor):
         raise NotImplementedError()
 
-    def _metadata_to_native_str(self, value):
-        # Some drivers, in some configurations, notably older versions
-        # of MySQLdb (mysqlclient) on Python 3 in 'NAMES binary' mode,
-        # can return column names and the like as bytes when we want str.
-        if not isinstance(value, str):
-            value = value.decode('ascii')
-        return value
+    CREATE_COMMIT_ROW_LOCK_TMPL = """
+    CREATE TABLE commit_row_lock (
+      tid {tid_type} NOT NULL PRIMARY KEY
+    ) {transactional_suffix};
+    """
 
-    def _column_descriptions(self, cursor):
-        __traceback_info__ = cursor.description
-        return [ResultDescription(self._metadata_to_native_str(r[0]),
-                                  # Not all drivers return lists or tuples
-                                  # or things that can be sliced; psycopg2/cffi returns
-                                  # an arbitrary sequence.
-                                  # MySqlConnector-Python has been observed to provide
-                                  # extra attributes.
-                                  *list(r)[1:7])
-                for r in cursor.description]
-
-    def _rows_as_dicts(self, cursor):
-        """
-        An iterator of the rows as dictionaries, named by the
-        lower-case column name.
-
-        Some drivers offer the ability to do this directly when
-        the statement is executed or the cursor is created;
-        this is a lowest-common denominator way to do it utilizing
-        DB-API 2.0 attributes.
-        """
-        column_descrs = self._column_descriptions(cursor)
-        for row in cursor:
-            result = {
-                column_descr.name.lower(): column_value
-                for column_descr, column_value in zip(column_descrs, row)
-            }
-            yield result
-
-    @abc.abstractmethod
-    def _create_commit_lock(self, cursor):
+    def _create_commit_row_lock(self, cursor):
         """
         Create the global lock held during commit.
 
         (MySQL and PostgreSQL do this differently.)
         """
-        raise NotImplementedError()
+        stmt = self.CREATE_COMMIT_ROW_LOCK_TMPL.format(
+            tid_type=self.COLTYPE_OID_TID,
+            transactional_suffix=self.TRANSACTIONAL_TABLE_SUFFIX,
+        )
+        self.runner.run_script(cursor, stmt)
 
     @abc.abstractmethod
     def _create_pack_lock(self, cursor):
@@ -128,6 +103,9 @@ class AbstractSchemaInstaller(ABC):
         """
         raise NotImplementedError()
 
+    #: The type of the column used to hold transaction IDs
+    #: and object IDs (64-bit integers).
+    COLTYPE_OID_TID = 'BIGINT'
     #: The type of the column used to hold binary strings.
     #: Our default is appropriate for PostgreSQL.
     COLTYPE_BINARY_STRING = 'BYTEA'
@@ -138,7 +116,7 @@ class AbstractSchemaInstaller(ABC):
 
     CREATE_TRANSACTION_STMT_TMPL = """
     CREATE TABLE transaction (
-        tid         BIGINT NOT NULL PRIMARY KEY,
+        tid         {tid_type} NOT NULL PRIMARY KEY,
         packed      BOOLEAN NOT NULL DEFAULT FALSE,
         is_empty    BOOLEAN NOT NULL DEFAULT FALSE,
         username    {binary_string_type} NOT NULL,
@@ -155,6 +133,7 @@ class AbstractSchemaInstaller(ABC):
         """
         if self.keep_history:
             stmt = self.CREATE_TRANSACTION_STMT_TMPL.format(
+                tid_type=self.COLTYPE_OID_TID,
                 binary_string_type=self.COLTYPE_BINARY_STRING,
                 transactional_suffix=self.TRANSACTIONAL_TABLE_SUFFIX,
             )
@@ -281,9 +260,10 @@ class AbstractSchemaInstaller(ABC):
         """
         Create a special '0' transaction to represent object creation. The
         '0' transaction is often referenced by object_state.prev_tid, but
-        never by object_state.tid.
+        never by object_state.tid. (Only in history-preserving databases.)
 
-        Only in history-preserving databases.
+        In all databases, populates the ``commit_row_lock`` table
+        with a single row to use as a global lock at commit time.
         """
         if self.keep_history:
             stmt = """
@@ -291,6 +271,12 @@ class AbstractSchemaInstaller(ABC):
             VALUES (0, 'system', 'special transaction for object creation');
             """
             self.runner.run_script(cursor, stmt)
+
+        stmt = """
+        INSERT INTO commit_row_lock (tid)
+        VALUES (0);
+        """
+        self.runner.run_script(cursor, stmt)
 
     @abc.abstractmethod
     def _reset_oid(self, cursor):
@@ -303,22 +289,25 @@ class AbstractSchemaInstaller(ABC):
                 meth = getattr(self, '_create_' + table)
                 meth(cursor)
 
-        if 'transaction' not in existing_tables:
+        if self.keep_history and 'transaction' not in existing_tables:
+            self._init_after_create(cursor)
+        elif not self.keep_history and 'commit_row_lock' not in existing_tables:
             self._init_after_create(cursor)
 
         tables = self.list_tables(cursor)
         self.check_compatibility(cursor, tables)
 
-    def prepare(self):
-        """Create the database schema if it does not already exist."""
+    def _prepare_with_connection(self, conn, cursor): # pylint:disable=unused-argument
         # XXX: We can generalize this to handle triggers, procs, etc,
         # to make subclasses have easier time.
-        def callback(_conn, cursor):
-            tables = self.list_tables(cursor)
-            self.create(cursor, tables)
-            if 'transaction' in tables:
-                self.update_schema(cursor, tables)
-        self.connmanager.open_and_call(callback)
+        tables = self.list_tables(cursor)
+        self.create(cursor, tables)
+        if 'transaction' in tables:
+            self.update_schema(cursor, tables)
+
+    def prepare(self):
+        """Create the database schema if it does not already exist."""
+        self.connmanager.open_and_call(self._prepare_with_connection)
 
     def check_compatibility(self, cursor, tables): # pylint:disable=unused-argument
         if self.keep_history:
