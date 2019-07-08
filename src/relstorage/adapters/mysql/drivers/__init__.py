@@ -43,5 +43,5 @@ class AbstractMySQLDriver(AbstractModuleDriver):
 
 implement_db_driver_options(
     __name__,
-    'mysqlconnector', 'mysqldb', 'pymysql', 'umysqldb'
+    'mysqlconnector', 'mysqldb', 'pymysql',
 )

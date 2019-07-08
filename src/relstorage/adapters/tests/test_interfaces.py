@@ -38,7 +38,7 @@ class TestExceptions(unittest.TestCase):
                 s
             )
             self.assertIn(
-                " 'umysqldb' (Module: 'umysqldb'; Available:",
+                " 'MySQLdb' (Module: 'MySQLdb'; Available:",
                 s
             )
 

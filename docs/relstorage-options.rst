@@ -155,9 +155,7 @@ blob-chunk-size
            then that value is later reduced, it won't be possible to
            download blobs that exceed that value.
 
-           The driver may also influence this. For example, umysqldb
-           needs a 1.3MB ``max_allowed_packet`` to send multiple 1MB
-           chunks.
+           The driver may also influence this.
 
         On PostgreSQL and Oracle, this value is used as the memory
         buffer size for blob upload and download operations.

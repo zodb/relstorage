@@ -119,6 +119,9 @@
 - Deprecate the option ``shared-blob-dir``. Shared blob dirs prevent
   using parallel commits when blobs are part of a transaction.
 
+- Remove the 'umysqldb' driver option. This driver exhibited failures
+  with row-level locking used for parallel commits. See :issue:`264`.
+
 3.0a3 (2019-06-26)
 ==================
 

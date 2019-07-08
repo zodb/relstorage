@@ -30,10 +30,10 @@ database.
 
 On CPython2, install psycopg2 2.8+, mysqlclient 1.4+, or cx_Oracle
 5.2+ (but use caution with 5.2.1+); PyMySQL 0.7, MySQL
-Connector/Python 8.0.16 and umysql are also tested to work as is
-pg8000.
+Connector/Python 8.0.16 is also tested to work as is pg8000.
 
-.. note:: umysql support is deprecated and will be removed.
+.. note:: umysql support was removed in RelStorage 3.0. Use 'gevent
+          MySQLdb' instead.
 
 For CPython3, install psycopg2, mysqlclient 1.4+, or cx_Oracle;
 PyMySQL, MySQL Connector/Python  and pg8000 are also known to work.
@@ -74,8 +74,7 @@ bold** are the recommended adapter installed with the extra.
    +==========+=====================+=====================+==============+
    | CPython2 | 1. **mysqlclient**  |  1. **psycopg2**    | **cx_Oracle**|
    |          | 2. PyMySQL          |  2. pg8000          |              |
-   |          | 3. umysqldb         |                     |              |
-   |          | 4. MySQL Connector  |                     |              |
+   |          | 3. MySQL Connector  |                     |              |
    |          |                     |                     |              |
    +----------+---------------------+---------------------+--------------+
    | CPython3 | 1. **mysqlclient**  |  1. **psycopg2**    | **cx_Oracle**|
@@ -89,7 +88,7 @@ bold** are the recommended adapter installed with the extra.
 
 mysqlclient can be used with gevent by explicitly choosing a
 gevent-aware driver. PyMySQL, MySQL Connector/Python (without its C
-extension), pg8000 and umysql are compatible (cooperative) with gevent
+extension), and pg8000 are compatible (cooperative) with gevent
 when the system is monkey-patched.
 
 For additional details and warnings, see the "driver" section for each database in

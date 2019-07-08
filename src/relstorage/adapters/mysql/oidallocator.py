@@ -61,6 +61,12 @@ class MySQLOIDAllocator(AbstractOIDAllocator):
     # FROM tbl_name (without a WHERE clause) in autocommit mode, the
     # sequence starts over for all storage engines except InnoDB and
     # MyISAM."
+    #
+    # Regarding `TRUNCATE TABLE`:
+    #
+    # "Any AUTO_INCREMENT value is reset to its start value. This is
+    # true even for MyISAM and InnoDB, which normally do not reuse
+    # sequence values."
     def set_min_oid(self, cursor, oid):
         """Ensure the next OID is at least the given OID."""
         n = (oid + 15) // 16
@@ -76,10 +82,14 @@ class MySQLOIDAllocator(AbstractOIDAllocator):
         # cursor.connection.insert_id(), which was specific to MySQLdb)
         n = cursor.lastrowid
 
-        # At least in one setup (gevent/umysqldb/pymysql/mysql 5.5)
-        # we have observed cursor.lastrowid to be None.
         if n is None:
-            raise self.disconnected_exception("Invalid return for lastrowid")
+            # In the past, in one setup (gevent/umysqldb/pymysql/mysql 5.5)
+            # we have observed cursor.lastrowid to be None. We don't support that
+            # driver anymore, but we leave this here just in case.
+            raise self.disconnected_exception(
+                "Invalid return for lastrowid. "
+                "Please report this to RelStorage."
+            )
 
         if n % 1000 == 0:
             # Clean out previously generated OIDs.

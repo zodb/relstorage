@@ -98,10 +98,9 @@ class MySQLTestSuiteBuilder(AbstractTestSuiteBuilder):
 
     def _compute_large_blob_size(self, use_small_blobs):
         # MySQL is limited to the blob_chunk_size as there is no
-        # native blob streaming support. (Note: this depends on
-        # the max_allowed_packet size on the server as well as the driver; both
-        # values default to 1MB. But umysqldb needs 1.3MB max_allowed_packet size
-        # to send multiple 1MB chunks. So keep it small.)
+        # native blob streaming support. (Note: this depends on the
+        # max_allowed_packet size on the server as well as the driver;
+        # both values default to 1MB. So keep it small.)
         return Options().blob_chunk_size
 
     def _make_check_class_HistoryFreeRelStorageTests(self, bases, name):
@@ -111,14 +110,8 @@ class MySQLTestSuiteBuilder(AbstractTestSuiteBuilder):
             # `max_allowed_packet`, you probably need to increase it.
             # JAM uses 64M.
             # http://dev.mysql.com/doc/refman/5.7/en/packet-too-large.html
+            bases[0].check16MObject(self)
 
-            # This fails if the driver is umysqldb.
-            try:
-                bases[0].check16MObject(self)
-            except Exception as e:
-                if e.args == (0, 'Query too big'):
-                    raise unittest.SkipTest("Fails with umysqldb")
-                raise
         return self._default_make_check_class(bases, name, klass_dict={
             check16MObject.__name__: check16MObject
         })

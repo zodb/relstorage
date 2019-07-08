@@ -116,32 +116,6 @@ driver
       preferred). It is compatible with gevent if gevent's
       monkey-patching is used.
 
-    umysqldb
-      Deprecated. A C-based driver that builds on PyMySQL. It is compatible with
-      gevent if monkey-patching is used, but only works on CPython 2.
-      It does not require the MySQL client development libraries but
-      uses a project called ``umysql`` to communicate with the server
-      using only sockets.
-
-      .. caution::
-
-         This driver contains many known bugs and will be removed
-         for RelStorage 3.0.
-
-      .. note:: Make sure the server has a
-          ``max_allowed_packet`` setting no larger than 16MB. Also
-          make sure that RelStorage's ``blob-chunk-size`` is less than
-          16MB as well.
-
-      .. note:: `This fork of umysqldb
-           <https://github.com/NextThought/umysqldb.git>`_ is
-           recommended. The ``full-buffer`` branch of `this ultramysql
-           fork
-           <https://github.com/NextThought/ultramysql/tree/full-buffer>`_
-           is also recommended if you encounter strange MySQL packet
-           errors.
-
-
     Py MySQL Connector/Python
       This is the `official client
       <https://dev.mysql.com/doc/connector-python/en/>`_ provided by
