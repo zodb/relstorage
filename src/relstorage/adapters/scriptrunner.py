@@ -28,6 +28,14 @@ class ScriptRunner(object):
 
     # script_vars contains replacements for parts of scripts.
     # These are correct for PostgreSQL and MySQL but not for Oracle.
+    # The primary purpose of this originally was to compensate for different
+    # parameter passing styles in the DB-API. It has also been used for some
+    # SQL syntax/datatype differences.
+    #
+    # TODO: Make a clean separation between syntax, and DB-API substitutions.
+    # Use `script_vars` (or a better name) for parameters, and
+    # `format_vars` (or a better name) for syntax? Or just wrap this up in a
+    # query_property(..., formatted=True)?
     script_vars = {
         'TRUE':         'TRUE',
         'FALSE':        'FALSE',
@@ -41,6 +49,15 @@ class ScriptRunner(object):
         'max_tid':      '%(max_tid)s',
     }
 
+    format_vars = {
+    }
+
+    def with_format_vars(self, **new_vars):
+        inst = type(self)()
+        inst.format_vars = dict(self.format_vars)
+        inst.format_vars.update(new_vars)
+        return inst
+
     def run_script_stmt(self, cursor, generic_stmt, generic_params=()):
         """Execute a statement from a script with the given parameters.
 
@@ -50,7 +67,10 @@ class ScriptRunner(object):
         The input statement is generic and needs to be transformed
         into a database-specific statement.
         """
-        stmt = generic_stmt % self.script_vars
+        __traceback_info__ = generic_stmt, self.format_vars
+        stmt = generic_stmt.format(**self.format_vars)
+        __traceback_info__ = stmt, self.script_vars
+        stmt = stmt % self.script_vars
         __traceback_info__ = stmt
         try:
             cursor.execute(stmt, generic_params)

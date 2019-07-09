@@ -28,12 +28,17 @@ logger = __import__('logging').getLogger(__name__)
 class MySQLSchemaInstaller(AbstractSchemaInstaller):
 
     database_type = 'mysql'
+    COLTYPE_BINARY_STRING = 'BLOB'
+    TRANSACTIONAL_TABLE_SUFFIX = 'ENGINE = InnoDB'
+    COLTYPE_MD5 = 'CHAR(32) CHARACTER SET ascii'
+    COLTYPE_STATE = 'LONGBLOB'
+    COLTYPE_BLOB_CHUNK = 'LONGBLOB'
+
 
     # The names of tables that in the past were explicitly declared as
     # MyISAM but which should now be InnoDB to work with transactions.
-    # TODO: Add a migration check for this.
     tables_that_used_to_be_myisam_should_be_innodb = (
-        # new_oid, # (This needs to be done, but we're not quite there yet)
+        'new_oid',
         'object_ref',
         'object_refs_added',
         'pack_object',
@@ -47,30 +52,39 @@ class MySQLSchemaInstaller(AbstractSchemaInstaller):
             return self._metadata_to_native_str(name)
 
     def list_tables(self, cursor):
-        cursor.execute("SHOW TABLES")
-        return [self._metadata_to_native_str(name)
-                for (name,) in cursor.fetchall()]
+        return list(self.__list_tables_and_engines(cursor))
+
+    def __list_tables_and_engines(self, cursor):
+        # {table_name: engine}, all in lower case.
+        cursor.execute('SHOW TABLE STATUS')
+        native = self._metadata_to_native_str
+        result = {
+            native(row['name']): native(row['engine']).lower()
+            for row in self._rows_as_dicts(cursor)
+        }
+        return result
+
+    def __list_tables_not_innodb(self, cursor):
+        return {
+            k: v
+            for k, v in self.__list_tables_and_engines(cursor).items()
+            if k in self.all_tables and v != 'innodb'
+        }
 
     def list_sequences(self, cursor):
         return []
 
     def check_compatibility(self, cursor, tables):
         super(MySQLSchemaInstaller, self).check_compatibility(cursor, tables)
-        # TODO: Check more tables, like `transaction`
-        stmt = "SHOW TABLE STATUS LIKE 'object_state'"
-        cursor.execute(stmt)
-        for row in self._rows_as_dicts(cursor):
-            engine = self._metadata_to_native_str(row['engine'])
-            if engine.lower() != 'innodb':
-                raise StorageError(
-                    "The object_state table must use the InnoDB "
-                    "engine, but it is using the %s engine." % engine)
+        tables_that_are_not_innodb = self.__list_tables_not_innodb(cursor)
+        if tables_that_are_not_innodb:
+            raise StorageError(
+                "All RelStorage tables should be InnoDB; MyISAM is no longer supported. "
+                "These tables are not using InnoDB: %r" % (tables_that_are_not_innodb,)
+            )
 
     def _create_pack_lock(self, cursor):
         return
-
-    COLTYPE_BINARY_STRING = 'BLOB'
-    TRANSACTIONAL_TABLE_SUFFIX = 'ENGINE = InnoDB'
 
     # As usual, MySQL has a quirky implementation of this feature and we
     # have to re-specify *everything* about the column. MySQL 8 supports the
@@ -80,162 +94,13 @@ class MySQLSchemaInstaller(AbstractSchemaInstaller):
         "BOOLEAN NOT NULL DEFAULT FALSE"
     )
 
-
     def _create_new_oid(self, cursor):
         stmt = """
         CREATE TABLE new_oid (
-            zoid        BIGINT NOT NULL PRIMARY KEY AUTO_INCREMENT
-        ) ENGINE = MyISAM;
+            zoid        {oid_type} NOT NULL PRIMARY KEY AUTO_INCREMENT
+        ) {transactional_suffix};
         """
         self.runner.run_script(cursor, stmt)
-
-
-    def _create_object_state(self, cursor):
-        if self.keep_history:
-            stmt = """
-            CREATE TABLE object_state (
-                zoid        BIGINT NOT NULL,
-                tid         BIGINT NOT NULL REFERENCES transaction,
-                            PRIMARY KEY (zoid, tid),
-                            CHECK (tid > 0),
-                prev_tid    BIGINT NOT NULL REFERENCES transaction,
-                md5         CHAR(32) CHARACTER SET ascii,
-                state_size  BIGINT NOT NULL,
-                state       LONGBLOB
-            ) ENGINE = InnoDB;
-            CREATE INDEX object_state_tid ON object_state (tid);
-            CREATE INDEX object_state_prev_tid ON object_state (prev_tid);
-            """
-        else:
-            stmt = """
-            CREATE TABLE object_state (
-                zoid        BIGINT NOT NULL PRIMARY KEY,
-                tid         BIGINT NOT NULL,
-                            CHECK (tid > 0),
-                state_size  BIGINT NOT NULL,
-                state       LONGBLOB
-            ) ENGINE = InnoDB;
-            CREATE INDEX object_state_tid ON object_state (tid);
-            """
-
-        self.runner.run_script(cursor, stmt)
-
-    def _create_blob_chunk(self, cursor):
-        if self.keep_history:
-            stmt = """
-            CREATE TABLE blob_chunk (
-                zoid        BIGINT NOT NULL,
-                tid         BIGINT NOT NULL,
-                chunk_num   BIGINT NOT NULL,
-                            PRIMARY KEY (zoid, tid, chunk_num),
-                chunk       LONGBLOB NOT NULL
-            ) ENGINE = InnoDB;
-            CREATE INDEX blob_chunk_lookup ON blob_chunk (zoid, tid);
-            ALTER TABLE blob_chunk ADD CONSTRAINT blob_chunk_fk
-                FOREIGN KEY (zoid, tid)
-                REFERENCES object_state (zoid, tid)
-                ON DELETE CASCADE;
-            """
-        else:
-            stmt = """
-            CREATE TABLE blob_chunk (
-                zoid        BIGINT NOT NULL,
-                chunk_num   BIGINT NOT NULL,
-                            PRIMARY KEY (zoid, chunk_num),
-                tid         BIGINT NOT NULL,
-                chunk       LONGBLOB NOT NULL
-            ) ENGINE = InnoDB;
-            CREATE INDEX blob_chunk_lookup ON blob_chunk (zoid);
-            ALTER TABLE blob_chunk ADD CONSTRAINT blob_chunk_fk
-                FOREIGN KEY (zoid)
-                REFERENCES object_state (zoid)
-                ON DELETE CASCADE;
-            """
-
-        self.runner.run_script(cursor, stmt)
-
-    def _create_current_object(self, cursor):
-        if self.keep_history:
-            stmt = """
-            CREATE TABLE current_object (
-                zoid        BIGINT NOT NULL PRIMARY KEY,
-                tid         BIGINT NOT NULL,
-                            FOREIGN KEY (zoid, tid)
-                                REFERENCES object_state (zoid, tid)
-            ) ENGINE = InnoDB;
-            CREATE INDEX current_object_tid ON current_object (tid);
-            """
-            self.runner.run_script(cursor, stmt)
-
-    def _create_object_ref(self, cursor):
-        if self.keep_history:
-            stmt = """
-            CREATE TABLE object_ref (
-                zoid        BIGINT NOT NULL,
-                tid         BIGINT NOT NULL,
-                to_zoid     BIGINT NOT NULL,
-                PRIMARY KEY (tid, zoid, to_zoid)
-            ) ENGINE = InnoDB;
-            """
-        else:
-            stmt = """
-            CREATE TABLE object_ref (
-                zoid        BIGINT NOT NULL,
-                to_zoid     BIGINT NOT NULL,
-                tid         BIGINT NOT NULL,
-                PRIMARY KEY (zoid, to_zoid)
-            ) ENGINE = InnoDB;
-            """
-
-        self.runner.run_script(cursor, stmt)
-
-    def _create_object_refs_added(self, cursor):
-        if self.keep_history:
-            stmt = """
-            CREATE TABLE object_refs_added (
-                tid         BIGINT NOT NULL PRIMARY KEY
-            ) ENGINE = InnoDB;
-            """
-        else:
-            stmt = """
-            CREATE TABLE object_refs_added (
-                zoid        BIGINT NOT NULL PRIMARY KEY,
-                tid         BIGINT NOT NULL
-            ) ENGINE = InnoDB;
-            """
-        self.runner.run_script(cursor, stmt)
-
-    def _create_pack_object(self, cursor):
-        stmt = """
-        CREATE TABLE pack_object (
-            zoid        BIGINT NOT NULL PRIMARY KEY,
-            keep        BOOLEAN NOT NULL,
-            keep_tid    BIGINT NOT NULL,
-            visited     BOOLEAN NOT NULL DEFAULT FALSE
-        ) ENGINE = InnoDB;
-        CREATE INDEX pack_object_keep_zoid ON pack_object (keep, zoid);
-        """
-        self.runner.run_script(cursor, stmt)
-
-    def _create_pack_state(self, cursor):
-        if self.keep_history:
-            stmt = """
-            CREATE TABLE pack_state (
-                tid         BIGINT NOT NULL,
-                zoid        BIGINT NOT NULL,
-                PRIMARY KEY (tid, zoid)
-            ) ENGINE = InnoDB;
-            """
-            self.runner.run_script(cursor, stmt)
-
-    def _create_pack_state_tid(self, cursor):
-        if self.keep_history:
-            stmt = """
-            CREATE TABLE pack_state_tid (
-                tid         BIGINT NOT NULL PRIMARY KEY
-            ) ENGINE = InnoDB;
-            """
-            self.runner.run_script(cursor, stmt)
 
     # Temp tables are created in a session-by-session basis
     def _create_temp_store(self, _cursor):
@@ -251,8 +116,22 @@ class MySQLSchemaInstaller(AbstractSchemaInstaller):
         return
 
     def _reset_oid(self, cursor):
-        stmt = "TRUNCATE new_oid;"
-        self.runner.run_script(cursor, stmt)
+        from .oidallocator import MySQLOIDAllocator
+        MySQLOIDAllocator().reset_oid(cursor)
+
+    def __convert_all_tables_to_innodb(self, cursor):
+        tables = self.__list_tables_not_innodb(cursor)
+        logger.info("Converting tables to InnoDB: %s", tables)
+        for table in tables:
+            logger.info("Converting table %s to Innodb", table)
+            cursor.execute("ALTER TABLE %s ENGINE=Innodb" % (table,))
+        logger.info("Done converting tables to InnoDB: %s", tables)
+
+    def _prepare_with_connection(self, conn, cursor):
+        from .oidallocator import MySQLOIDAllocator
+        self.__convert_all_tables_to_innodb(cursor)
+        super(MySQLSchemaInstaller, self)._prepare_with_connection(conn, cursor)
+        MySQLOIDAllocator().garbage_collect_oids(cursor)
 
     # We can't TRUNCATE tables that have foreign-key relationships
     # with other tables, but we can drop them. This has to be followed up by

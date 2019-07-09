@@ -122,6 +122,42 @@
 - Remove the 'umysqldb' driver option. This driver exhibited failures
   with row-level locking used for parallel commits. See :issue:`264`.
 
+- Migrate all remaining MySQL tables to InnoDB. This is primarily the
+  tables used during packing, but also the table used for allocating
+  new OIDs.
+
+  Tables will be converted the first time a storage is opened that is
+  allowed to create the schema (``create-schema`` in the
+  configuration; default is true). For large tables, this may take
+  some time, so it is recommended to finish any outstanding packs
+  before upgrading RelStorage.
+
+  If schema creation is not allowed, and required tables are not using
+  InnoDB, an exception will be raised. Please contact the RelStorage
+  maintainers on GitHub if you have a need to use a storage engine
+  besides InnoDB.
+
+  This allows for better error detection during packing with parallel
+  commits. It is also required for `MySQL Group Replication
+  <https://dev.mysql.com/doc/refman/8.0/en/group-replication-requirements.html>`_.
+  Benchmarking also shows that creating new objects can be up to 15%
+  faster due to faster OID allocation.
+
+  Things to be aware of:
+
+    - MySQL's `general conversion notes
+      <https://dev.mysql.com/doc/refman/8.0/en/converting-tables-to-innodb.html>`_
+      suggest that if you had tuned certain server parameters for
+      MyISAM tables (which RelStorage only used during packing) it
+      might be good to evaluate those parameters again.
+    - InnoDB tables may take more disk space than MyISAM tables.
+    - The ``new_oid`` table may temporarily have more rows in it at one
+      time than before. They will still be garbage collected
+      eventually. The change in strategy was necessary to handle
+      concurrent transactions better.
+
+  See :issue:`188`.
+
 3.0a3 (2019-06-26)
 ==================
 
