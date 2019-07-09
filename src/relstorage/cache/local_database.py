@@ -146,8 +146,7 @@ class Database(ABC):
         self.cursor.execute("SELECT cp0, cp1 FROM checkpoints")
         return self.cursor.fetchone()
 
-    def remove_invalid_persistent_oids(self, bad_oids):
-        cur = self.cursor
+    def _remove_invalid_persistent_oids(self, bad_oids, cur):
         cur.execute("BEGIN")
         batch = RowBatcher(cur,
                            row_limit=999 // 1,
@@ -157,6 +156,30 @@ class Database(ABC):
         batch.flush()
         cur.execute("COMMIT")
         return batch.total_rows_deleted
+
+    def remove_invalid_persistent_oids(self, bad_oids):
+        # The database might be locked by others, either someone in
+        # this method or someone actually closing the cache and
+        # writing to the database, a situation we won't detect until
+        # we try to actually remove a row (it's entirely possible the
+        # rows we want to remove are already gone, so we don't BEGIN
+        # IMMEDIATE to force the issue.)
+        #
+        # Our workaround is to try a few times and then give up. Longer timeouts
+        # make it less likely we need to do this.
+        tries = 3
+        cur = self.cursor
+        while tries:
+            tries -= 1
+            try:
+                return self._remove_invalid_persistent_oids(bad_oids, cur)
+            except sqlite3.OperationalError:
+                # If we don't rollback, we get 'cannot BEGIN inside a transaction'
+                cur.execute('ROLLBACK')
+                # No need to sleep, that's built in to the timeout parameter
+                # when we connect.
+                logger.debug("Failed to lock database to remove OIDs; tries left: %d", tries)
+        return -1
 
     def fetch_rows_by_priority(self):
         """

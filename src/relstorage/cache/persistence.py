@@ -198,8 +198,12 @@ DEFAULT_PAGE_SIZE = 4096
 # bother to change from the default.
 DEFAULT_TEMP_STORE = None
 
+# How long before we get 'OperationalError: database is locked'
+DEFAULT_TIMEOUT = 15
+
 def _connect_to_file(fname, factory=Connection,
                      close_async=DEFAULT_CLOSE_ASYNC,
+                     timeout=DEFAULT_TIMEOUT,
                      pragmas=None):
 
     connection = sqlite3.connect(
@@ -211,7 +215,7 @@ def _connect_to_file(fname, factory=Connection,
         factory=factory,
         # We explicitly push closing off to a new thread.
         check_same_thread=False,
-        timeout=10)
+        timeout=timeout)
     if isinstance(connection, Connection):
         connection.rs_db_filename = fname
         connection.rs_close_async = close_async
@@ -283,7 +287,8 @@ def sqlite_connect(options, prefix,
                    close_async=DEFAULT_CLOSE_ASYNC,
                    mmap_size=DEFAULT_MMAP_SIZE,
                    page_size=DEFAULT_PAGE_SIZE,
-                   temp_store=DEFAULT_TEMP_STORE):
+                   temp_store=DEFAULT_TEMP_STORE,
+                   timeout=DEFAULT_TIMEOUT):
     """
     Return a DB-API Connection object.
 
@@ -327,8 +332,12 @@ def sqlite_connect(options, prefix,
     }
 
     try:
-        connection = _connect_to_file(fname, close_async=close_async,
-                                      pragmas=pragmas)
+        connection = _connect_to_file(
+            fname,
+            close_async=close_async,
+            pragmas=pragmas,
+            timeout=timeout,
+        )
     except corrupt_db_ex:
         logger.exception("Corrupt cache database at %s; replacing", fname)
         destroy()

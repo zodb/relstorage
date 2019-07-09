@@ -104,6 +104,7 @@ class UpdateTests(TestCase):
             (0, 1, b'0', 0),
             (1, 1, b'0', 0),
         ]
+
         self.db.store_temp(rows)
         self.db.move_from_temp()
 
@@ -190,3 +191,59 @@ class UpsertUpdateTests(UpdateTests):
                  "Requires paren updates")
 class ParenUpdateTests(UpdateTests):
     USE_PAREN_UPDATE = True
+
+
+class MultiConnectionTests(TestCase):
+
+    timeout = 0
+
+    def setUp(self):
+        import tempfile
+        import shutil
+        self.options = MockOptionsWithMemoryDB()
+        tempdir = tempfile.mkdtemp('.rstest')
+        self.addCleanup(shutil.rmtree, tempdir, True)
+        self.options.cache_local_dir = tempdir
+        self.connection = self.connect()
+        self.addCleanup(self.connection.close)
+        self.db = self._makeOne()
+        self.addCleanup(self.db.close)
+
+    def connect(self):
+        return sqlite_connect(
+            self.options, "pfx-ignored",
+            close_async=False,
+            timeout=self.timeout
+        )
+
+    def tearDown(self):
+        # Be sure we can commit; this can be an issue on PyPy
+        self.connection.commit()
+        self.db.close()
+
+    def _makeOne(self, conn=None):
+        return Database.from_connection(
+            conn or self.connection,
+        )
+
+    def test_delete_oids_other_open_transaction(self):
+        rows = [
+            (0, 1, b'0', 0),
+            (1, 1, b'0', 0),
+        ]
+        self.db.store_temp(rows)
+        self.db.move_from_temp()
+
+        invalid_oids = range(1, 5000)
+
+        conn2 = self.connect()
+        try:
+            cur2 = conn2.cursor()
+            cur2.execute("BEGIN")
+            cur2.execute('DELETE FROM object_state WHERE zoid = 0')
+
+            count = self.db.remove_invalid_persistent_oids(invalid_oids)
+            self.assertEqual(count, -1)
+            cur2.close()
+        finally:
+            conn2.close()
