@@ -24,35 +24,37 @@ from .._util import Lazy
 
 def query_property(base_name,
                    extension='',
-                   formatted=False):
+                   formatted=False,
+                   property_suffix='_queries',
+                   lazy_suffix='_query'):
     """
     Defines a property that adapts to preserving or dropping history.
 
-    To use, define a property ending in `_queries` that is a
-    two-tuple, where the preserving query comes first and the dropping
-    query comes second. This indirection lets subclasses override
-    these queries.
+    To use, define a property ending in ``_queries``
+    *property_suffix*) that is a two-tuple, where the preserving query
+    comes first and the dropping query comes second. This indirection
+    lets subclasses override these queries.
 
-    Then define a property, passing the base name (without _queries)
-    to this function.
+    Then define a property, passing the base name (without
+    ``_queries``) to this function.
 
     The correct query will be lazily picked at runtime. The instance
     must have the ``keep_history`` attribute.
 
-    If the chosen query is an exception instance or class, it will be raised
-    instead of returned. This allows defining a query that is only
-    supported in one of the two modes. Usually, this exception should be
-    :class:`ZODB.POSException.Unsupported`.
+    If the chosen query is an exception instance or class, it will be
+    raised instead of returned. This allows defining a query that is
+    only supported in one of the two modes. Usually, this exception
+    should be :class:`ZODB.POSException.Unsupported`.
 
     :keyword str extension: This string will be appended to whatever
         query is chosen before it is formatted and before it is returned.
     :keyword bool formatted: If True (*not* the default), then the
         chosen query will be formatted using the
-    ``self.runner.script_vars``.
+        ``self.runner.script_vars``.
     """
 
     def prop(inst):
-        queries = getattr(inst, base_name + '_queries')
+        queries = getattr(inst, base_name + property_suffix)
         query = queries[0] if inst.keep_history else queries[1]
         if isinstance(query, Exception) or (
                 isinstance(query, type)
@@ -68,7 +70,7 @@ def query_property(base_name,
 
     prop.__doc__ = "Query for " + base_name
 
-    return Lazy(prop, base_name + '_query')
+    return Lazy(prop, base_name + lazy_suffix)
 
 formatted_query_property = partial(query_property, formatted=True)
 
