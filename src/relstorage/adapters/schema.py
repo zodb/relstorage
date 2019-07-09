@@ -36,6 +36,9 @@ class AbstractSchemaInstaller(DatabaseHelpersMixin,
 
     # Keep this list in the same order as the schema scripts,
     # for dependency (Foreign Key) purposes.
+    # These must be lower case, and all queries we write must
+    # use lower case table names (MySQL has weird casing rules,
+    # but this is also how we do comparisons in Python on table metadata.)
     all_tables = (
         # History-free row lock table for commits.
         # The alternative is to also create the transaction table
@@ -467,8 +470,14 @@ class AbstractSchemaInstaller(DatabaseHelpersMixin,
             self.update_schema(cursor, tables)
 
     def prepare(self):
-        """Create the database schema if it does not already exist."""
         self.connmanager.open_and_call(self._prepare_with_connection)
+
+    def verify(self):
+        self.connmanager.open_and_call(self._verify)
+
+    def _verify(self, conn, cursor): # pylint:disable=unused-argument
+        tables = self.list_tables(cursor)
+        self.check_compatibility(cursor, tables)
 
     def check_compatibility(self, cursor, tables): # pylint:disable=unused-argument
         if self.keep_history:

@@ -548,14 +548,19 @@ class IObjectMover(Interface):
 
 
 class IOIDAllocator(Interface):
-    """Allocate OIDs and control future allocation"""
+    """
+    Allocate OIDs and control future allocation.
+
+    The cursor passed here must be from a
+    :meth:`store connection <IConnectionManager.open_for_store>`.
+    """
 
     def new_oids(cursor):
         """
-        Return a new ``list`` of new, unused integer OIDs.
+        Return a new :class:`list` of new, unused integer OIDs.
 
-        The list should be contiguous and must
-        be in sorted order from highest to lowest.
+        The list should be contiguous and must be in sorted order from
+        highest to lowest.
         """
 
     def set_min_oid(cursor, oid):
@@ -662,7 +667,21 @@ class ISchemaInstaller(Interface):
         """Create the database tables, sequences, etc."""
 
     def prepare():
-        """Create the database schema if it does not already exist."""
+        """
+        Create the database schema if it does not already exist.
+
+        Perform any migration steps needed, and call :meth:`verify`
+        before returning.
+        """
+
+    def verify():
+        """
+        Ensure that the schema that's installed can be used by this
+        RelStorage.
+
+        If it cannot, for example it's history-preserving and we were configured
+        to be history-free, raise an exception.
+        """
 
     def zap_all():
         """Clear all data out of the database."""

@@ -159,6 +159,9 @@ class AbstractVote(AbstractTPCState):
         self._flush_temps_to_db(cursor)
 
         # Reserve all OIDs used by this transaction
+        # TODO: Is this really necessary in the common case? Maybe just in the
+        # restore case or the copyTransactionsFrom case? Testing shows that the common case
+        # never makes this True.
         if self.max_stored_oid > self.storage._max_new_oid:
             adapter.oidallocator.set_min_oid(
                 cursor, self.max_stored_oid + 1)

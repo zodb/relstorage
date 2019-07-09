@@ -72,19 +72,6 @@ class MySQLAdapterMixin(object):
         self.assertEqual(adapter._params, self.__get_adapter_options())
 
 
-class TestOIDAllocator(unittest.TestCase):
-
-    def test_bad_rowid(self):
-        from relstorage.adapters.mysql.oidallocator import MySQLOIDAllocator
-        class Cursor(object):
-            def execute(self, s):
-                pass
-            lastrowid = None
-
-        oids = MySQLOIDAllocator(KeyError)
-        self.assertRaises(KeyError, oids.new_oids, Cursor())
-
-
 class MySQLTestSuiteBuilder(AbstractTestSuiteBuilder):
 
     __name__ = 'MySQL'
@@ -112,17 +99,41 @@ class MySQLTestSuiteBuilder(AbstractTestSuiteBuilder):
             # http://dev.mysql.com/doc/refman/5.7/en/packet-too-large.html
             bases[0].check16MObject(self)
 
-        return self._default_make_check_class(bases, name, klass_dict={
-            check16MObject.__name__: check16MObject
-        })
+        def checkMyISAMTablesProduceErrorWhenNoCreate(self):
+            from ZODB.POSException import StorageError
+            def cb(_conn, cursor):
+                cursor.execute('ALTER TABLE new_oid ENGINE=MyISAM;')
+            self._storage._adapter.connmanager.open_and_call(cb)
+            # Now open a new storage that's not allowed to create
+            with self.assertRaisesRegex(
+                    StorageError,
+                    'MyISAM is no longer supported.*new_oid'
+            ):
+                self.open(create_schema=False)
+
+        def checkMyISAMTablesAutoMigrate(self):
+            # Verify we have a broken state.
+            self.checkMyISAMTablesProduceErrorWhenNoCreate()
+            # Now a storage that can alter a table will do so.
+            storage = self.open()
+            storage.close()
+            storage = self.open(create_schema=False)
+            storage.close()
+
+        klass_dict = {
+            f.__name__: f
+            for f in (
+                check16MObject,
+                checkMyISAMTablesProduceErrorWhenNoCreate,
+                checkMyISAMTablesAutoMigrate,
+            )
+        }
+
+        return self._default_make_check_class(bases, name, klass_dict=klass_dict)
 
     # pylint:disable=line-too-long
     _make_check_class_HistoryPreservingRelStorageTests = _make_check_class_HistoryFreeRelStorageTests
 
-    def test_suite(self):
-        suite = super(MySQLTestSuiteBuilder, self).test_suite()
-        suite.addTest(unittest.makeSuite(TestOIDAllocator))
-        return suite
 
 def test_suite():
     return MySQLTestSuiteBuilder().test_suite()
