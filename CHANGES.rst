@@ -116,6 +116,8 @@
      error. If you find it necessary to use this setting, please
      report an issue at https://github.com/zodb/relstorage/issues.
 
+  See :issue:`125`.
+
 - Deprecate the option ``shared-blob-dir``. Shared blob dirs prevent
   using parallel commits when blobs are part of a transaction.
 
