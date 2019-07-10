@@ -26,6 +26,7 @@ from .vote import DatabaseLockedForTid
 from .vote import HistoryFree as HFVoteFactory
 from .vote import HistoryPreserving as HPVoteFactory
 
+
 class Restore(object):
     """
     A type of begin state that wraps another begin state and adds the methods needed to
@@ -53,6 +54,7 @@ class Restore(object):
     )
 
     def __init__(self, begin_state, committing_tid, status):
+        # type: (AbstractBegin, DatabaseLockedForTid, str) -> None
         # This is an extension we use for copyTransactionsFrom;
         # it is not part of the IStorage API.
         assert committing_tid is not None
@@ -117,36 +119,35 @@ class Restore(object):
         oid_int = bytes8_to_int64(oid)
         tid_int = bytes8_to_int64(this_tid)
 
-        with state.storage._lock:
-            state.max_stored_oid = max(state.max_stored_oid, oid_int)
-            # Save the `data`.  Note that `data` can be None.
-            # Note also that this doesn't go through the cache.
+        state.max_stored_oid = max(state.max_stored_oid, oid_int)
+        # Save the `data`.  Note that `data` can be None.
+        # Note also that this doesn't go through the cache.
 
-            # TODO: Make it go through the cache, or at least the same
-            # sort of queing thing, so that we can do a bulk COPY?
-            # This complicates restoreBlob() and it complicates voting.
-            adapter.mover.restore(
-                cursor, self.batcher, oid_int, tid_int, data)
+        # TODO: Make it go through the cache, or at least the same
+        # sort of queing thing, so that we can do a bulk COPY?
+        # This complicates restoreBlob() and it complicates voting.
+        adapter.mover.restore(
+            cursor, self.batcher, oid_int, tid_int, data)
 
     def restoreBlob(self, oid, serial, data, blobfilename, prev_txn, txn):
         self.restore(oid, serial, data, prev_txn, txn)
         state = self.wrapping
-        with state.storage._lock:
-            # Restoring the entry for the blob MAY have used the batcher, and
-            # we're going to want to foreign-key off of that data when
-            # we add blob chunks (since we skip the temp tables).
-            # Ideally, we wouldn't need to flush the batcher here
-            # (we'd prefer having DEFERRABLE INITIALLY DEFERRED FK
-            # constraints, but as-of 8.0 MySQL doesn't support that.)
-            self.batcher.flush()
-            cursor = state.storage._store_cursor
-            state.storage.blobhelper.restoreBlob(cursor, oid, serial, blobfilename)
+        # Restoring the entry for the blob MAY have used the batcher, and
+        # we're going to want to foreign-key off of that data when
+        # we add blob chunks (since we skip the temp tables).
+        # Ideally, we wouldn't need to flush the batcher here
+        # (we'd prefer having DEFERRABLE INITIALLY DEFERRED FK
+        # constraints, but as-of 8.0 MySQL doesn't support that.)
+        self.batcher.flush()
+        cursor = state.storage._store_cursor
+        state.storage.blobhelper.restoreBlob(cursor, oid, serial, blobfilename)
 
 
 class _VoteFactoryMixin(object):
     __slots__ = ()
 
     def __init__(self, state, committing_tid_lock, batcher):
+        # type: (Restore, Optional[DatabaseLockedForTid], Any) -> None
         super(_VoteFactoryMixin, self).__init__(state)
         # pylint:disable=assigning-non-slot
         self.committing_tid_lock = committing_tid_lock

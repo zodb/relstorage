@@ -22,7 +22,6 @@ import logging
 import os
 import sys
 import tempfile
-import threading
 import time
 import weakref
 
@@ -41,6 +40,7 @@ from ZODB.POSException import ReadOnlyError
 from ZODB.UndoLogCompatible import UndoLogCompatible
 from ZODB.utils import p64 as int64_to_8bytes
 from ZODB.utils import u64 as bytes8_to_int64
+from ZODB.utils import z64
 from zope import interface
 from zope.interface import implementer
 
@@ -70,26 +70,7 @@ __all__ = [
 
 log = logging.getLogger("relstorage")
 
-
-z64 = b'\0' * 8
-
 # pylint:disable=too-many-lines
-
-class _DummyLock(object):
-    # Enough like a lock for our purposes so we can switch
-    # it in and out for tests.
-    def __enter__(self):
-        return
-
-    def __exit__(self, t, v, tb):
-        return
-
-    def acquire(self):
-        return
-
-    def release(self):
-        return
-
 
 @implementer(ZODB.interfaces.IStorage,
              ZODB.interfaces.IMVCCStorage,
@@ -97,6 +78,7 @@ class _DummyLock(object):
              ZODB.interfaces.IStorageRestoreable,
              ZODB.interfaces.IStorageIteration,
              ZODB.interfaces.IStorageUndoable,
+             # XXX: BlobStorage is conditional, should be dynamic
              ZODB.interfaces.IBlobStorage,
              ZODB.interfaces.IBlobStorageRestoreable,
              ZODB.interfaces.IMVCCAfterCompletionStorage,
@@ -134,7 +116,7 @@ class RelStorage(UndoLogCompatible,
     _max_new_oid = 0
 
     # _cache, if set, is a StorageCache object.
-    _cache = None
+    _cache = None # type: StorageCache
 
     # _prev_polled_tid contains the tid at the previous poll
     _prev_polled_tid = None
@@ -159,10 +141,6 @@ class RelStorage(UndoLogCompatible,
 
     def __init__(self, adapter, name=None, create=None,
                  options=None, cache=None, blobhelper=None,
-                 # The top-level storage should use locks because
-                 # new_oid is (potentially) shared among all connections. But the new_instance
-                 # objects don't need to.
-                 _use_locks=True,
                  **kwoptions):
         # pylint:disable=too-many-branches
         self._adapter = adapter
@@ -199,20 +177,11 @@ class RelStorage(UndoLogCompatible,
         # object is used only by a single thread. So there's really
         # not much point in RelStorage keeping thread locks around its
         # methods.
-        # There are a small handful of ZODB tests that assume the storage is thread
-        # safe (but they know nothing about IMVCC) so we allow our tests to force us to
-        # use locks.
-        self._lock = _DummyLock() if not _use_locks else threading.RLock()
-        self._commit_lock = _DummyLock() if not _use_locks else threading.Lock()
-        # XXX: We don't use these attributes but some existing wrappers
-        # might rely on them? They used to be a documented part of the FileStorage
-        # interface prior to ZODB5. In ZODB5, _lock and _commit_lock are documented
-        # attributes. (We used to have them as __lock, etc, so risk of breakage
-        # in a rename is small.)
-        self._lock_acquire = self._lock.acquire
-        self._lock_release = self._lock.release
-        self._commit_lock_acquire = self._commit_lock.acquire
-        self._commit_lock_release = self._commit_lock.release
+
+        # There are a small handful of ZODB tests that assume the
+        # storage is thread safe (but they know nothing about IMVCC);
+        # for those tests we use a custom wrapper storage that makes
+        # a single instance appear thread safe.
 
         # _instances is a list of weak references to storage instances bound
         # to the same database.
@@ -271,8 +240,9 @@ class RelStorage(UndoLogCompatible,
         blobhelper = self.blobhelper.new_instance(adapter=adapter)
         other = type(self)(adapter=adapter, name=self.__name__,
                            create=False, options=self._options, cache=cache,
-                           _use_locks=False,
                            blobhelper=blobhelper)
+        # NOTE: We're depending on the GIL (or list implementation)
+        # for thread safety here.
         self._instances.append(weakref.ref(other, self._instances.remove))
 
         if '_crs_transform_record_data' in self.__dict__:
@@ -366,36 +336,41 @@ class RelStorage(UndoLogCompatible,
         self._store_conn, self._store_cursor = None, None
         self._adapter.connmanager.rollback_and_close(conn, cursor)
 
+    def __restart_store_callback(self, store_conn, store_cursor, fresh_connection):
+        if fresh_connection:
+            return
+        self._adapter.connmanager.restart_store(store_conn, store_cursor)
+
     def _restart_store(self):
-        """Restart the store connection, creating a new connection if needed"""
+        """
+        Restart the store connection, creating a new connection if
+        needed.
+        """
+        self.__with_store(self.__restart_store_callback)
+
+    def __with_store(self, f):
+        """
+        Call a function with the store cursor.
+
+        :param callable f: Function to call ``f(store_conn, store_cursor, fresh_connection)``.
+            The function may be called up to twice, if the *fresh_connection* is false
+            on the first call and a disconnected exception is raised.
+        """
+        # If transaction commit is in progress, it's too late
+        # to reconnect.
+        can_reconnect = not self._tpc_phase
+        fresh_connection = False
         if self._store_cursor is None:
             assert self._store_conn is None
             self._open_store_connection()
-            return
-        try:
-            self._adapter.connmanager.restart_store(
-                self._store_conn, self._store_cursor)
-        except self._adapter.connmanager.disconnected_exceptions as e:
-            log.warning("Reconnecting store_conn: %s", e)
-            self._drop_store_connection()
-            try:
-                self._open_store_connection()
-            except:
-                log.exception("Reconnect failed.")
-                raise
-            else:
-                log.info("Reconnected.")
+            fresh_connection = True
+            # If we just connected no point in trying again.
+            can_reconnect = False
 
-    def __with_store(self, f):
-        """Call a function with the store cursor."""
-        if self._store_cursor is None:
-            self._open_store_connection()
         try:
-            return f(self._store_cursor)
+            return f(self._store_conn, self._store_cursor, fresh_connection)
         except self._adapter.connmanager.disconnected_exceptions as e:
-            if self._tpc_phase:
-                # If transaction commit is in progress, it's too late
-                # to reconnect.
+            if not can_reconnect:
                 raise
             log.warning("Reconnecting store_conn: %s", e)
             self._drop_store_connection()
@@ -405,7 +380,7 @@ class RelStorage(UndoLogCompatible,
                 log.exception("Reconnect failed.")
                 raise
             log.info("Reconnected.")
-            return f(self._store_cursor)
+            return f(self._store_conn, self._store_cursor, True)
 
     def zap_all(self, **kwargs):
         """Clear all objects and transactions out of the database.
@@ -428,30 +403,27 @@ class RelStorage(UndoLogCompatible,
         should still be :meth:`close` (but note that might have global affects
         on other instances of the same base object).
         """
-        with self._lock:
-            self._drop_load_connection()
-            self._drop_store_connection()
+        self._drop_load_connection()
+        self._drop_store_connection()
         self._cache.release()
         self._tpc_phase = None
 
     def close(self):
         """Close the storage and all instances."""
+        if self._closed:
+            return
 
-        with self._lock:
-            if self._closed:
-                return
-
-            self._closed = True
-            self._drop_load_connection()
-            self._drop_store_connection()
-            self.blobhelper.close()
-            for wref in self._instances:
-                instance = wref()
-                if instance is not None:
-                    instance.close()
-            self._instances = []
-            self._cache.close()
-            self._tpc_phase = None
+        self._closed = True
+        self._drop_load_connection()
+        self._drop_store_connection()
+        self.blobhelper.close()
+        for wref in self._instances:
+            instance = wref()
+            if instance is not None:
+                instance.close()
+        self._instances = []
+        self._cache.close()
+        self._tpc_phase = None
 
     def __len__(self):
         return self._adapter.stats.get_object_count()
@@ -543,15 +515,14 @@ class RelStorage(UndoLogCompatible,
         if self._stale_error is not None:
             raise self._stale_error
 
-        with self._lock:
-            self._before_load()
-            cursor = self._load_cursor
-            try:
-                return meth(cursor, argument)
-            except CacheConsistencyError:
-                log.exception("Cache consistency error; restarting load")
-                self._drop_load_connection()
-                raise
+        self._before_load()
+        cursor = self._load_cursor
+        try:
+            return meth(cursor, argument)
+        except CacheConsistencyError:
+            log.exception("Cache consistency error; restarting load")
+            self._drop_load_connection()
+            raise
 
     @Metric(method=True, rate=0.1)
     def load(self, oid, version=''):
@@ -613,15 +584,14 @@ class RelStorage(UndoLogCompatible,
         if state:
             return state
 
-        with self._lock:
-            self._before_load()
+        self._before_load()
+        state = self._adapter.mover.load_revision(
+            self._load_cursor, oid_int, tid_int)
+        if state is None and self._store_cursor is not None:
+            # Allow loading data from later transactions
+            # for conflict resolution.
             state = self._adapter.mover.load_revision(
-                self._load_cursor, oid_int, tid_int)
-            if state is None and self._store_cursor is not None:
-                # Allow loading data from later transactions
-                # for conflict resolution.
-                state = self._adapter.mover.load_revision(
-                    self._store_cursor, oid_int, tid_int)
+                self._store_cursor, oid_int, tid_int)
 
         if state is None or not state:
             raise POSKeyError(oid)
@@ -635,38 +605,37 @@ class RelStorage(UndoLogCompatible,
 
         oid_int = bytes8_to_int64(oid)
 
-        with self._lock:
-            if self._store_cursor is not None:
-                # Allow loading data from later transactions
-                # for conflict resolution.
-                cursor = self._store_cursor
-            else:
-                self._before_load()
-                cursor = self._load_cursor
-            if not self._adapter.mover.exists(cursor, oid_int):
-                raise POSKeyError(oid)
+        if self._store_cursor is not None:
+            # Allow loading data from later transactions
+            # for conflict resolution.
+            cursor = self._store_cursor
+        else:
+            self._before_load()
+            cursor = self._load_cursor
+        if not self._adapter.mover.exists(cursor, oid_int):
+            raise POSKeyError(oid)
 
-            state, start_tid = self._adapter.mover.load_before(
-                cursor, oid_int, bytes8_to_int64(tid))
+        state, start_tid = self._adapter.mover.load_before(
+            cursor, oid_int, bytes8_to_int64(tid))
 
-            if start_tid is None:
-                return None
+        if start_tid is None:
+            return None
 
-            if state is None:
-                # This can happen if something attempts to load
-                # an object whose creation has been undone, see load()
-                # This change fixes the test in
-                # TransactionalUndoStorage.checkUndoCreationBranch1
-                # self._log_keyerror doesn't work here, only in certain states.
-                raise POSKeyError(oid)
-            end_int = self._adapter.mover.get_object_tid_after(
-                cursor, oid_int, start_tid)
-            if end_int is not None:
-                end = int64_to_8bytes(end_int)
-            else:
-                end = None
+        if state is None:
+            # This can happen if something attempts to load
+            # an object whose creation has been undone, see load()
+            # This change fixes the test in
+            # TransactionalUndoStorage.checkUndoCreationBranch1
+            # self._log_keyerror doesn't work here, only in certain states.
+            raise POSKeyError(oid)
+        end_int = self._adapter.mover.get_object_tid_after(
+            cursor, oid_int, start_tid)
+        if end_int is not None:
+            end = int64_to_8bytes(end_int)
+        else:
+            end = None
 
-            return state, int64_to_8bytes(start_tid), end
+        return state, int64_to_8bytes(start_tid), end
 
     @Metric(method=True, rate=0.1)
     def store(self, oid, previous_tid, data, version, transaction):
@@ -749,8 +718,7 @@ class RelStorage(UndoLogCompatible,
 
     @metricmethod
     def tpc_abort(self, transaction):
-        with self._lock:
-            self._tpc_phase = self._tpc_phase.tpc_abort(transaction)
+        self._tpc_phase = self._tpc_phase.tpc_abort(transaction)
 
     def afterCompletion(self):
         # Note that this method exists mainly to deal with read-only
@@ -762,42 +730,49 @@ class RelStorage(UndoLogCompatible,
         self._rollback_load_connection()
 
     def lastTransaction(self):
-        with self._lock:
-            if self._ltid == z64 and self._prev_polled_tid is None:
-                # We haven't committed *or* polled for transactions,
-                # so our MVCC state is "floating".
-                # Read directly from the database to get the latest value,
-                self._before_load() # connect if needed
-                return int64_to_8bytes(self._adapter.txncontrol.get_tid(self._load_cursor))
+        if self._ltid == z64 and self._prev_polled_tid is None:
+            # We haven't committed *or* polled for transactions,
+            # so our MVCC state is "floating".
+            # Read directly from the database to get the latest value,
+            self._before_load() # connect if needed
+            return int64_to_8bytes(self._adapter.txncontrol.get_tid(self._load_cursor))
 
-            return max(self._ltid, int64_to_8bytes(self._prev_polled_tid or 0))
+        return max(self._ltid, int64_to_8bytes(self._prev_polled_tid or 0))
 
     def new_oid(self):
         if self._stale_error is not None:
             raise self._stale_error
         if self._is_read_only:
             raise ReadOnlyError()
-        with self._lock:
-            # See comments in __init__.py. Prior to that patch and
-            # ZODB 5.1.2, this method was actually called on the
-            # storage object of the DB, not the storage object of a
-            # connection for some reason. This meant that this method
-            # (and the oid cache) was shared among all connections
-            # using a database and was called outside of a transaction
-            # (starting its own long-running transaction). The
-            # DB.new_oid() method still exists, so we still need to
-            # support that usage, hence `with_store`.
-            #
-            # Also, there are tests (ZODB.tests.MTStorage) that directly call
-            # this *outside of any transaction*. That doesn't make any sense, but
-            # that's what they do.
-            if not self._preallocated_oids:
-                preallocated = self.__with_store(self._adapter.oidallocator.new_oids)
-                self._preallocated_oids = preallocated
 
-            oid_int = self._preallocated_oids.pop()
-            self._max_new_oid = max(self._max_new_oid, oid_int)
-            return int64_to_8bytes(oid_int)
+        # Prior to ZODB 5.1.2, this method was actually called on the
+        # storage object of the DB, not the instance storage object of
+        # a Connection. This meant that this method (and the oid
+        # cache) was shared among all connections using a database and
+        # was called outside of a transaction (starting its own
+        # long-running transaction).
+
+        # The DB.new_oid() method still exists, but shouldn't be used;
+        # if it is, we'll open a database connection and transaction that's
+        # going to sit there idle, possibly holding row locks. That's bad.
+        # But we don't take any counter measures.
+
+        # Connection.new_oid() can be called at just about any time
+        # thanks to the Connection.add() API, which clients can use
+        # at any time (typically before commit begins, but it's possible to
+        # add() objects from a ``__getstate__`` method).
+        #
+        # Thus we may or may not have a store connection already open;
+        # if we do, we can't restart it or drop it.
+        if not self._preallocated_oids:
+            self._preallocated_oids = self.__with_store(self.__new_oid_callback)
+
+        oid_int = self._preallocated_oids.pop()
+        self._max_new_oid = max(self._max_new_oid, oid_int)
+        return int64_to_8bytes(oid_int)
+
+    def __new_oid_callback(self, _store_conn, store_cursor, _fresh_connection):
+        return self._adapter.oidallocator.new_oids(store_cursor)
 
     def cleanup(self):
         pass
@@ -864,36 +839,36 @@ class RelStorage(UndoLogCompatible,
         # pylint:disable=unused-argument,too-many-locals
         if self._stale_error is not None:
             raise self._stale_error
-        with self._lock:
-            self._before_load()
-            cursor = self._load_cursor
-            oid_int = bytes8_to_int64(oid)
-            try:
-                rows = self._adapter.dbiter.iter_object_history(
-                    cursor, oid_int)
-            except KeyError:
-                raise POSKeyError(oid)
 
-            res = []
-            for tid_int, username, description, extension, length in rows:
-                tid = int64_to_8bytes(tid_int)
-                if extension:
-                    d = loads(extension)
-                else:
-                    d = {}
-                d.update({
-                    "time": TimeStamp(tid).timeTime(),
-                    "user_name": username or b'',
-                    "description": description or b'',
-                    "tid": tid,
-                    "version": '',
-                    "size": length,
-                })
-                if filter is None or filter(d):
-                    res.append(d)
-                    if size is not None and len(res) >= size:
-                        break
-            return res
+        self._before_load()
+        cursor = self._load_cursor
+        oid_int = bytes8_to_int64(oid)
+        try:
+            rows = self._adapter.dbiter.iter_object_history(
+                cursor, oid_int)
+        except KeyError:
+            raise POSKeyError(oid)
+
+        res = []
+        for tid_int, username, description, extension, length in rows:
+            tid = int64_to_8bytes(tid_int)
+            if extension:
+                d = loads(extension)
+            else:
+                d = {}
+            d.update({
+                "time": TimeStamp(tid).timeTime(),
+                "user_name": username or b'',
+                "description": description or b'',
+                "tid": tid,
+                "version": '',
+                "size": length,
+            })
+            if filter is None or filter(d):
+                res.append(d)
+                if size is not None and len(res) >= size:
+                    break
+        return res
 
     @metricmethod
     def undo(self, transaction_id, transaction):
@@ -1043,17 +1018,16 @@ class RelStorage(UndoLogCompatible,
         This is implemented by rolling back the relational database
         transaction.
         """
-        with self._lock:
-            if not self._load_transaction_open:
-                return
+        if not self._load_transaction_open:
+            return
 
-            try:
-                self._rollback_load_connection()
-            except self._adapter.connmanager.disconnected_exceptions:
-                # disconnected. Well, the rollback happens automatically in that case.
-                self._drop_load_connection()
-                if self._tpc_phase:
-                    raise
+        try:
+            self._rollback_load_connection()
+        except self._adapter.connmanager.disconnected_exceptions:
+            # disconnected. Well, the rollback happens automatically in that case.
+            self._drop_load_connection()
+            if self._tpc_phase:
+                raise
 
     def _restart_load_and_poll(self):
         """Call _restart_load, poll for changes, and update self._cache.
@@ -1101,20 +1075,19 @@ class RelStorage(UndoLogCompatible,
         because prev_polled_tid is not in the database (presumably it
         has been packed).
         """
-        with self._lock:
-            if self._closed:
-                return {}
+        if self._closed:
+            return {}
 
-            changes, new_polled_tid = self._restart_load_and_poll()
+        changes, new_polled_tid = self._restart_load_and_poll()
 
-            self._prev_polled_tid = new_polled_tid
+        self._prev_polled_tid = new_polled_tid
 
-            if changes is None:
-                oids = None
-            else:
-                # The value is ignored, only key matters
-                oids = {int64_to_8bytes(oid_int): 1 for oid_int, _tid_int in changes}
-            return oids
+        if changes is None:
+            oids = None
+        else:
+            # The value is ignored, only key matters
+            oids = {int64_to_8bytes(oid_int): 1 for oid_int, _tid_int in changes}
+        return oids
 
     @metricmethod
     def loadBlob(self, oid, serial):
@@ -1124,10 +1097,9 @@ class RelStorage(UndoLogCompatible,
 
         Raises POSKeyError if the blobfile cannot be found.
         """
-        with self._lock:
-            self._before_load()
-            cursor = self._load_cursor
-            return self.blobhelper.loadBlob(cursor, oid, serial)
+        self._before_load()
+        cursor = self._load_cursor
+        return self.blobhelper.loadBlob(cursor, oid, serial)
 
     @metricmethod
     def openCommittedBlobFile(self, oid, serial, blob=None):
@@ -1142,11 +1114,10 @@ class RelStorage(UndoLogCompatible,
         make sure that data are available at least long enough for the
         file to be opened.
         """
-        with self._lock:
-            self._before_load()
-            cursor = self._load_cursor
-            return self.blobhelper.openCommittedBlobFile(
-                cursor, oid, serial, blob=blob)
+        self._before_load()
+        cursor = self._load_cursor
+        return self.blobhelper.openCommittedBlobFile(
+            cursor, oid, serial, blob=blob)
 
     def temporaryDirectory(self):
         """Return a directory that should be used for uncommitted blob data.
@@ -1167,11 +1138,10 @@ class RelStorage(UndoLogCompatible,
         Returns nothing.
         """
         assert not version
-        with self._lock:
-            # We used to flush the batcher here, for some reason.
-            cursor = self._store_cursor
-            self.blobhelper.storeBlob(cursor, self.store,
-                                      oid, serial, data, blobfilename, version, txn)
+        # We used to flush the batcher here, for some reason.
+        cursor = self._store_cursor
+        self.blobhelper.storeBlob(cursor, self.store,
+                                  oid, serial, data, blobfilename, version, txn)
 
     def restoreBlob(self, oid, serial, data, blobfilename, prev_txn, txn):
         """

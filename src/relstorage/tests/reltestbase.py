@@ -13,14 +13,17 @@
 ##############################################################################
 """A foundation for RelStorage tests"""
 from __future__ import absolute_import
+from __future__ import print_function
 
 # pylint:disable=too-many-ancestors,abstract-method,too-many-public-methods,too-many-lines
 # pylint:disable=too-many-statements,too-many-locals
+import contextlib
 import os
 import random
 import shutil
 import tempfile
 import time
+import threading
 import unittest
 
 import transaction
@@ -135,8 +138,89 @@ class StorageClientThread(MTStorage.StorageClientThread):
 class ExtStorageClientThread(StorageClientThread, MTStorage.ExtStorageClientThread):
     "Same as above."
 
+class ThreadWrapper(object):
+
+    def __init__(self, storage):
+        self.__storage = storage
+        # We can't use an RLock, which verifies that the thread that
+        # acquired is the one that releases; check_tid_ordering_w_commit
+        # deliberately spreads these actions across threads (for same reason).
+        self.__commit_lock = threading.Lock()
+        self.__read_lock = threading.Lock()
+        self.__txn = None
+
+    def __getattr__(self, name):
+        return getattr(self.__storage, name)
+
+    def loadBefore(self, *args, **kwargs):
+        with self.__read_lock:
+            return self.__storage.loadBefore(*args, **kwargs)
+
+    def load(self, *args, **kwargs):
+        with self.__read_lock:
+            return self.__storage.load(*args, **kwargs)
+
+    def tpc_begin(self, txn):
+        self.__commit_lock.acquire()
+        assert not self.__txn
+        self.__txn = txn
+
+        return self.__storage.tpc_begin(txn)
+
+    def tpc_finish(self, txn, callback=None):
+        assert txn is self.__txn
+        try:
+            return self.__storage.tpc_finish(txn, callback)
+        finally:
+            self.__txn = None
+            self.__commit_lock.release()
+
+    def tpc_abort(self, txn):
+        assert txn is self.__txn
+        try:
+            return self.__storage.tpc_abort(txn)
+        finally:
+            self.__txn = None
+            self.__commit_lock.release()
+
+class UsesThreadsOnASingleStorageMixin(object):
+    # These tests attempt to use threads on a single storage object.
+    # That doesn't make sense with MVCC, where every instance is its
+    # own connection and doesn't need to do any locking. This mixin makes
+    # those tests use a special storage that locks.
+
+    @contextlib.contextmanager
+    def __thread_safe_wrapper(self):
+        orig_storage = self._storage
+        wrapped = self._storage = ThreadWrapper(orig_storage)
+        try:
+            yield
+        finally:
+            if self._storage is wrapped:
+                self._storage = orig_storage
+
+    def __generic_wrapped_test(self, meth_name):
+        meth = getattr(
+            super(UsesThreadsOnASingleStorageMixin, self),
+            meth_name)
+        with self.__thread_safe_wrapper():
+            meth()
+
+    def make_func(name): # pylint:disable=no-self-argument
+        return lambda self: self.__generic_wrapped_test(name)
+
+    for bad_test in (
+            'check_checkCurrentSerialInTransaction',
+            'check_tid_ordering_w_commit',
+    ):
+        locals()[bad_test] = make_func(bad_test)
+
+    del make_func
+    del bad_test
+
 
 class GenericRelStorageTests(
+        UsesThreadsOnASingleStorageMixin,
         RelStorageTestBase,
         PersistentCacheStorageTests,
         BasicStorage.BasicStorage,
@@ -911,7 +995,6 @@ class GenericRelStorageTests(
                     finally:
                         thread_c.close()
 
-            import threading
             threads = []
             for _ in range(thread_count):
                 t = threading.Thread(target=updater)
@@ -1115,6 +1198,10 @@ class GenericRelStorageTests(
         # The implementation in BasicStorage.BasicStorage is
         # racy: it uses multiple threads to access a single
         # RelStorage instance, which doesn't make sense.
+        #
+        # Even when we wrap this with a ThreadWrapper,
+        # it doesn't prevent the races (indeed, we had the races
+        # when RelStorage itself natively used thread locks).
         try:
             super(GenericRelStorageTests, self).check_tid_ordering_w_commit()
         except AssertionError as e:

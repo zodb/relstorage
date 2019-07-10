@@ -5,7 +5,30 @@
 3.0a6 (unreleased)
 ==================
 
-- Nothing changed yet.
+- Remove vestigial top-level thread locks. No instance of RelStorage
+  is thread safe.
+
+  RelStorage is an ``IMVCCStorage``, which means that each ZODB
+  ``Connection`` gets its own new storage object. No visible storage
+  state is shared among Connections. Connections are explicitly
+  documented as not being thread safe. Since 2.0, RelStorage's
+  Connection instances have taken advantage of that fact to be a
+  little lighter weight through not being thread safe. However, they
+  still paid the overhead of locking method calls and code complexity.
+
+  The top-level storage (the one belonging to a ``ZODB.DB``) still
+  used heavyweight locks. ``ZODB.DB.storage`` is documented as being
+  only useful for tests, and the ``DB`` object itself does not expose
+  any operations that use the storage in a way that would require
+  thread safety.
+
+  The remaining thread safety support has been removed. This
+  simplifies the code and reduces overhead.
+
+  If you were previously using the ``ZODB.DB.storage`` object, or a
+  ``RelStorage`` instance you constructed manually, from multiple
+  threads, instead make sure each thread has a distinct
+  ``RelStorage.new_instance()`` object.
 
 
 3.0a5 (2019-07-11)
