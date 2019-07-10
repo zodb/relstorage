@@ -23,20 +23,24 @@ import time
 
 import zc.lockfile
 import ZODB.blob
+
 from ZEO.ClientStorage import BlobCacheLayout
 from ZEO.ClientStorage import _check_blob_cache_size
 from ZODB import POSException
 from ZODB.utils import p64
 from ZODB.utils import u64
+from zope.interface import implementer
 
 from relstorage._compat import iteritems
 from relstorage._compat import MAC
+from relstorage.interfaces import IBlobHelper
 
-
+@implementer(IBlobHelper)
 class BlobHelper(object):
-    """Blob support for RelStorage.
+    """
+    Blob support for RelStorage.
 
-    There is one BlobHelper per storage instance.  Each BlobHelper
+    There is one BlobHelper per storage instance. Each BlobHelper
     instance has access to the associated adapter as well as shared
     instances of fshelper (a ZODB.blob.FilesystemHelper) and
     cache_checker (a BlobCacheChecker).
