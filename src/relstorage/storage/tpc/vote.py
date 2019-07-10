@@ -189,8 +189,12 @@ class AbstractVote(AbstractTPCState):
         invalidated_oids = self.__check_and_resolve_conflicts()
 
 
+        blobs_must_be_moved_now = False
         blobhelper = self.storage.blobhelper
-        blobs_must_be_moved_now = blobhelper is not None and blobhelper.shared_blob_dir
+        try:
+            blobhelper.vote(None)
+        except StorageTransactionError:
+            blobs_must_be_moved_now = True
 
         if blobs_must_be_moved_now or LOCK_EARLY:
             # It is crucial to do this only after locking the current
@@ -267,10 +271,7 @@ class AbstractVote(AbstractTPCState):
         Move stored objects from the temporary table to final storage.
         """
         # Move the new states into the permanent table
-        if self.storage.blobhelper is not None:
-            txn_has_blobs = self.storage.blobhelper.txn_has_blobs
-        else:
-            txn_has_blobs = False
+        txn_has_blobs = self.storage.blobhelper.txn_has_blobs
 
         cursor = self.storage._store_cursor
         adapter = self.storage._adapter
@@ -320,9 +321,9 @@ class AbstractVote(AbstractTPCState):
         committing_tid_int = self.committing_tid_lock.tid_int
         self.__finish_store(committing_tid_int)
 
-        if self.storage.blobhelper is not None:
-            meth = getattr(self.storage.blobhelper, method)
-            meth(self.committing_tid_lock.tid)
+        blobhelper_meth = getattr(self.storage.blobhelper, method)
+        blobhelper_meth(self.committing_tid_lock.tid)
+
         cursor = self.storage._store_cursor
         self.storage._adapter.mover.update_current(cursor, committing_tid_int)
         conn = self.storage._store_conn
@@ -338,6 +339,7 @@ class AbstractVote(AbstractTPCState):
             # TODO: Move most of this into the Finish class/module.
             self.__lock_and_move()
             assert self.committing_tid_lock is not None, self
+            self.storage.blobhelper.finish(self.committing_tid_lock.tid)
             try:
                 try:
                     if f is not None:

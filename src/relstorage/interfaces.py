@@ -39,8 +39,6 @@ class IBlobHelper(Interface):
     BlobCacheChecker).
     """
 
-    shared_blob_dir = Attribute("Is the blob helper the canonical storage location?")
-
     def new_instance(adapter):
         """
         Create a new instance for use in a new MVCC storage.
@@ -57,7 +55,9 @@ class IBlobHelper(Interface):
         pass
 
     ###
-    # Writing
+    # Writing.
+    #
+    # This is only valid to do after a call to :meth:`begin`.
     ###
 
     def temporaryDirectory():
@@ -74,12 +74,19 @@ class IBlobHelper(Interface):
 
     txn_has_blobs = Attribute("Does the transaction this object is joined to include blobs?")
 
-    def clear_temp():
-        pass
+    def begin():
+        """
+        Start a new transaction.
+        """
 
-    def vote(tid):
+    def vote(tid=None):
         """
         Check the transaction can be committed.
+
+        If the *tid* is None, meaning it hasn't been allocated yet,
+        then, if this implementation requires a TID in order to vote,
+        it may raise an `StorageTransactionError`. If that happens,
+        lock the database, allocated a TId, and try again.
 
         As an implementation note, does nothing *unless* we have a
         shared blob dir.
@@ -113,6 +120,16 @@ class IBlobHelper(Interface):
 
     def restoreBlob(cursor, oid, serial, blobfilename):
         pass
+
+    ###
+    # Misc
+    ###
+    def after_pack(oid_int, tid_int):
+        """
+        Called after an object state has been removed by packing.
+
+        Removes the corresponding blob file.
+        """
 
     def close():
         pass

@@ -37,7 +37,6 @@ from ZODB.mvccadapter import HistoricalStorageAdapter
 from ZODB.POSException import POSKeyError
 from ZODB.POSException import ReadConflictError
 from ZODB.POSException import ReadOnlyError
-from ZODB.POSException import Unsupported
 
 from ZODB.UndoLogCompatible import UndoLogCompatible
 from ZODB.utils import p64 as int64_to_8bytes
@@ -53,6 +52,7 @@ from relstorage._compat import clear_frames
 
 
 from relstorage.blobhelper import BlobHelper
+from relstorage.blobhelper import NoBlobHelper
 from relstorage.cache import StorageCache
 from relstorage.cache.interfaces import CacheConsistencyError
 from relstorage.options import Options
@@ -140,8 +140,7 @@ class RelStorage(UndoLogCompatible,
     _prev_polled_tid = None
 
     # If the blob directory is set, blobhelper is a BlobHelper.
-    # Otherwise, blobhelper is None.
-    blobhelper = None
+    blobhelper = NoBlobHelper()
 
     # _stale_error is None most of the time.  It's a ReadConflictError
     # when the database connection is stale (due to async replication).
@@ -243,7 +242,7 @@ class RelStorage(UndoLogCompatible,
 
         if blobhelper is not None:
             self.blobhelper = blobhelper
-        elif options.blob_dir:
+        else:
             self.blobhelper = BlobHelper(options=options, adapter=adapter)
 
         self._tpc_begin_factory = HistoryPreserving if self._options.keep_history else HistoryFree
@@ -269,10 +268,7 @@ class RelStorage(UndoLogCompatible,
         """
         adapter = self._adapter.new_instance()
         cache = self._cache.new_instance()
-        if self.blobhelper is not None:
-            blobhelper = self.blobhelper.new_instance(adapter=adapter)
-        else:
-            blobhelper = None
+        blobhelper = self.blobhelper.new_instance(adapter=adapter)
         other = type(self)(adapter=adapter, name=self.__name__,
                            create=False, options=self._options, cache=cache,
                            _use_locks=False,
@@ -448,8 +444,7 @@ class RelStorage(UndoLogCompatible,
             self._closed = True
             self._drop_load_connection()
             self._drop_store_connection()
-            if self.blobhelper is not None:
-                self.blobhelper.close()
+            self.blobhelper.close()
             for wref in self._instances:
                 instance = wref()
                 if instance is not None:
@@ -992,7 +987,7 @@ class RelStorage(UndoLogCompatible,
                     def invalidate_cached_data(
                             oid_int, tid_int,
                             cache=self._cache,
-                            blob_invalidate=getattr(self.blobhelper, 'after_pack', None),
+                            blob_invalidate=self.blobhelper.after_pack,
                             keep_history=self._options.keep_history,
                             oids=oids_removed
                     ):
@@ -1014,10 +1009,9 @@ class RelStorage(UndoLogCompatible,
                         # when in a real use we could only get there through detecting a conflict
                         # in the database at commit time, with locks involved.
                         cache.invalidate(oid_int, tid_int)
-                        if blob_invalidate:
-                            # Clean up blob files. This currently does nothing
-                            # if we're a blob cache, but it could.
-                            blob_invalidate(oid_int, tid_int)
+                        # Clean up blob files. This currently does nothing
+                        # if we're a blob cache, but it could.
+                        blob_invalidate(oid_int, tid_int)
                         # If we're not keeping history, we need to remove all the cached
                         # data for a particular OID, no matter what key it was under:
                         # there was only one way to access it.
@@ -1131,9 +1125,6 @@ class RelStorage(UndoLogCompatible,
 
         Raises POSKeyError if the blobfile cannot be found.
         """
-        if self.blobhelper is None:
-            raise Unsupported("No blob directory is configured.")
-
         with self._lock:
             self._before_load()
             cursor = self._load_cursor
@@ -1141,10 +1132,11 @@ class RelStorage(UndoLogCompatible,
 
     @metricmethod
     def openCommittedBlobFile(self, oid, serial, blob=None):
-        """Return a file for committed data for the given object id and serial
+        """
+        Return a file for committed data for the given object id and serial
 
         If a blob is provided, then a BlobFile object is returned,
-        otherwise, an ordinary file is returned.  In either case, the
+        otherwise, an ordinary file is returned. In either case, the
         file is opened for binary reading.
 
         This method is used to allow storages that cache blob data to
@@ -1209,13 +1201,12 @@ class RelStorage(UndoLogCompatible,
             self.tpc_begin(trans, trans.tid, trans.status)
             for record in trans:
                 blobfile = None
-                if self.blobhelper is not None:
-                    if is_blob_record(record.data):
-                        try:
-                            blobfile = other.openCommittedBlobFile(
-                                record.oid, record.tid)
-                        except POSKeyError:
-                            pass
+                if is_blob_record(record.data):
+                    try:
+                        blobfile = other.openCommittedBlobFile(
+                            record.oid, record.tid)
+                    except POSKeyError:
+                        pass
                 if blobfile is not None:
                     fd, name = tempfile.mkstemp(
                         suffix='.tmp',

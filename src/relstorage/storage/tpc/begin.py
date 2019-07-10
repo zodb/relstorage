@@ -90,6 +90,8 @@ class AbstractBegin(AbstractTPCState):
         finally:
             storage._lock.release()
 
+        storage.blobhelper.begin()
+
     def tpc_vote(self, transaction):
         with self.storage._lock:
             if transaction is not self.transaction:
@@ -251,9 +253,8 @@ class HistoryPreserving(AbstractBegin):
                 # the new current objects.
                 adapter.mover.update_current(cursor, self_tid_int)
 
-                if self.storage.blobhelper is not None:
-                    self.storage.blobhelper.copy_undone(copied,
-                                                        self.committing_tid_lock.tid)
+                self.storage.blobhelper.copy_undone(copied,
+                                                    self.committing_tid_lock.tid)
 
                 if not self.undone_oids:
                     self.undone_oids = set()

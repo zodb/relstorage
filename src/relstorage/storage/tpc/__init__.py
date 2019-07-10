@@ -98,8 +98,7 @@ class AbstractTPCState(object):
                         self.storage._store_cursor,
                         self.prepared_txn)
                     self.storage._adapter.locker.release_commit_lock(self.storage._store_cursor)
-                if self.storage.blobhelper is not None:
-                    self.storage.blobhelper.abort()
+                self.storage.blobhelper.abort()
             finally:
                 self._clear_temp()
         finally:
@@ -111,9 +110,6 @@ class AbstractTPCState(object):
         # It is assumed that self._lock.acquire was called before this
         # method was called.
         self.storage._cache.clear_temp()
-        blobhelper = self.storage.blobhelper
-        if blobhelper is not None:
-            blobhelper.clear_temp()
 
     def tpc_begin(self, transaction):
         if transaction is self.transaction:
