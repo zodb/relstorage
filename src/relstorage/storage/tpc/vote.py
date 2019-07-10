@@ -271,6 +271,9 @@ class AbstractVote(AbstractTPCState):
         Move stored objects from the temporary table to final storage.
         """
         # Move the new states into the permanent table
+        # TODO: Figure out how to do as much as possible of this before holding
+        # the commit lock. For example, use a dummy TID that we later replace.
+        # (This has FK issues in HP dbs).
         txn_has_blobs = self.storage.blobhelper.txn_has_blobs
 
         cursor = self.storage._store_cursor
@@ -321,6 +324,9 @@ class AbstractVote(AbstractTPCState):
         committing_tid_int = self.committing_tid_lock.tid_int
         self.__finish_store(committing_tid_int)
 
+        # TODO: If this is a non-shared blobhelper, then we don't need to do
+        # this with the database commit lock held.
+        # Under gevent, this doesn't yield, though.
         blobhelper_meth = getattr(self.storage.blobhelper, method)
         blobhelper_meth(self.committing_tid_lock.tid)
 
