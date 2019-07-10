@@ -70,13 +70,4 @@ monitor test coverage.
 .. image:: https://coveralls.io/repos/zodb/relstorage/badge.svg?branch=master&service=github
    :target: https://coveralls.io/github/zodb/relstorage?branch=master
 
-Likewise, builds on Travis CI will automatically submit updates to
-`landscape.io`_ to monitor code health (adherence to PEP8, absence of
-common code smells, etc).
-
-.. image:: https://landscape.io/github/zodb/relstorage/master/landscape.svg?style=flat
-   :target: https://landscape.io/github/zodb/relstorage/master
-   :alt: Code Health
-
 .. _coveralls.io: https://coveralls.io/github/zodb/relstorage
-.. _landscape.io: https://landscape.io/github/zodb/relstorage
