@@ -2,7 +2,7 @@
  Changes
 =========
 
-3.0a4 (unreleased)
+3.0a4 (2019-07-10)
 ==================
 
 - Add support for the ZODB 5 ``connection.prefetch(*args)`` API. This
