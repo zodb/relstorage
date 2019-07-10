@@ -20,6 +20,10 @@ from relstorage.tests import TestCase
 from relstorage.tests import MockConnection
 from relstorage.tests import MockCursor
 
+class MockConnmanager(object):
+
+    def rollback(self, conn, _cursor):
+        conn.rollback()
 
 class TestTransactionControl(TestCase):
 
@@ -33,7 +37,7 @@ class TestTransactionControl(TestCase):
         return arg
 
     def _makeOne(self, keep_history=True, binary=None):
-        return self._getClass()(keep_history, binary or self.Binary)
+        return self._getClass()(MockConnmanager(), keep_history, binary or self.Binary)
 
     def _get_hf_tid_query(self):
         return self._getClass()._get_tid_queries[1]

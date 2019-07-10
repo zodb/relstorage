@@ -111,6 +111,7 @@ class OracleAdapter(object):
             connmanager=self.connmanager,
         )
         self.txncontrol = OracleTransactionControl(
+            connmanager=self.connmanager,
             keep_history=self.keep_history,
             Binary=driver.Binary,
             twophase=twophase,

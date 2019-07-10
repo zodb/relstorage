@@ -30,6 +30,9 @@ class AbstractTransactionControl(ABC):
 
     # pylint:disable=unused-argument
 
+    def __init__(self, connmanager):
+        self.connmanager = connmanager
+
     def commit_phase1(self, conn, cursor, tid):
         """Begin a commit.  Returns the transaction name.
 
@@ -50,7 +53,7 @@ class AbstractTransactionControl(ABC):
 
     def abort(self, conn, cursor, txn=None):
         """Abort the commit.  If txn is not None, phase 1 is also aborted."""
-        conn.rollback()
+        self.connmanager.rollback(conn, cursor)
 
     @abc.abstractmethod
     def get_tid(self, cursor):
@@ -76,7 +79,8 @@ class GenericTransactionControl(AbstractTransactionControl):
     )
     _get_tid_query = query_property('_get_tid')
 
-    def __init__(self, keep_history, Binary): # noqa
+    def __init__(self, connmanager, keep_history, Binary):
+        super(GenericTransactionControl, self).__init__(connmanager)
         self.keep_history = keep_history
         self.Binary = Binary
 

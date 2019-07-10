@@ -5,8 +5,22 @@
 3.0a5 (unreleased)
 ==================
 
-- Nothing changed yet.
+- Reduce the time that MySQL will wait to perform OID garbage
+  collection on startup. See :issue:`271`.
 
+- Fix several instances where RelStorage could attempt to perform
+  operations on a database connection with outstanding results on a
+  cursor. Some database drivers can react badly to this, depending on
+  the exact circumstances. For example, mysqlclient can raise
+  ``ProgrammingError: (2014, "Commands out of sync; you can't run this
+  command now")``. See :issue:`270`.
+
+- Fix the "gevent MySQLdb" driver to be cooperative during ``commit``
+  and ``rollback`` operations. Previously, it would block the event
+  loop for the entire time it took to send the commit or rollback
+  request, the server to perform the request, and the result to be
+  returned. Now, it frees the event loop after sending the request.
+  See :issue:`272`.
 
 3.0a4 (2019-07-10)
 ==================

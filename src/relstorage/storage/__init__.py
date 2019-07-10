@@ -311,13 +311,13 @@ class RelStorage(UndoLogCompatible,
         """Unconditionally drop the load connection"""
         conn, cursor = self._load_conn, self._load_cursor
         self._load_conn, self._load_cursor = None, None
-        self._adapter.connmanager.close(conn, cursor)
+        self._adapter.connmanager.rollback_and_close(conn, cursor)
         self._load_transaction_open = ''
 
     def _rollback_load_connection(self):
         if self._load_conn is not None:
             try:
-                self._load_conn.rollback()
+                self._adapter.connmanager.rollback(self._load_conn, self._load_cursor)
             except:
                 self._drop_load_connection()
                 raise
@@ -364,7 +364,7 @@ class RelStorage(UndoLogCompatible,
         """Unconditionally drop the store connection"""
         conn, cursor = self._store_conn, self._store_cursor
         self._store_conn, self._store_cursor = None, None
-        self._adapter.connmanager.close(conn, cursor)
+        self._adapter.connmanager.rollback_and_close(conn, cursor)
 
     def _restart_store(self):
         """Restart the store connection, creating a new connection if needed"""
@@ -1024,8 +1024,7 @@ class RelStorage(UndoLogCompatible,
             finally:
                 adapter.locker.release_pack_lock(lock_cursor)
         finally:
-            lock_conn.rollback()
-            adapter.connmanager.close(lock_conn, lock_cursor)
+            adapter.connmanager.rollback_and_close(lock_conn, lock_cursor)
         self.sync()
 
         self._pack_finished()

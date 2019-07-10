@@ -27,8 +27,12 @@ class _PostgreSQLTransactionControl(GenericTransactionControl):
     _get_tid_query = 'EXECUTE get_latest_tid'
 
 
-    def __init__(self, keep_history, driver):
-        GenericTransactionControl.__init__(self, keep_history, driver.Binary)
+    def __init__(self, connmanager, keep_history, driver):
+        super(_PostgreSQLTransactionControl, self).__init__(
+            connmanager,
+            keep_history,
+            driver.Binary
+        )
 
 
 class PostgreSQLTransactionControl(_PostgreSQLTransactionControl):

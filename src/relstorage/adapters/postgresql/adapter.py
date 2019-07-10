@@ -98,6 +98,7 @@ class PostgreSQLAdapter(object):
         )
         self.oidallocator = PostgreSQLOIDAllocator()
         self.txncontrol = txn_type(
+            connmanager=self.connmanager,
             keep_history=self.keep_history,
             driver=driver,
         )

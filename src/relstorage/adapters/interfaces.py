@@ -205,8 +205,24 @@ class IConnectionManager(Interface):
     def open():
         """Open a database connection and return (conn, cursor)."""
 
-    def close(conn, cursor):
-        """Close a connection and cursor, ignoring certain errors.
+    def close(conn=None, cursor=None):
+        """
+        Close a connection and cursor, ignoring certain errors.
+        """
+
+    def rollback_and_close(conn, cursor):
+        """
+        Rollback the connection and close it.
+
+        Certain database drivers, such as MySQLdb using the SSCursor, require
+        all cursors to be closed before rolling back (otherwise it generates a
+        ProgrammingError: 2014 "Commands out of sync").
+        This method abstracts that.
+        """
+
+    def rollback(conn, cursor):
+        """
+        Like `rollback_and_close`, but without the close.
         """
 
     def open_and_call(callback):

@@ -43,6 +43,7 @@ class MySQLdbConnectionManager(AbstractConnectionManager):
         self.use_replica_exceptions = driver.use_replica_exceptions
         self._db_connect = driver.connect
         self._db_driver = driver
+        self._fetchall_on_rollback = driver.fetchall_on_rollback
         super(MySQLdbConnectionManager, self).__init__(options)
 
     def _alter_params(self, replica):

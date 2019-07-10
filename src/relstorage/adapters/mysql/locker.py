@@ -18,6 +18,8 @@ Locker implementations.
 from __future__ import absolute_import
 from __future__ import print_function
 
+from contextlib import contextmanager
+
 from zope.interface import implementer
 
 from ..interfaces import ILocker
@@ -25,9 +27,31 @@ from ..interfaces import UnableToAcquireCommitLockError
 from ..interfaces import UnableToAcquirePackUndoLockError
 from ..locker import AbstractLocker
 
-
 class CommitLockQueryFailedError(UnableToAcquireCommitLockError):
     pass
+
+_SET_TIMEOUT_STMT = 'SET SESSION innodb_lock_wait_timeout = %s'
+# DEFAULT is a literal, not a param, so cursor.execute(stmt, ('DEFAULT',))
+# does not work.
+_SET_TIMEOUT_DEFAULT_STMT = _SET_TIMEOUT_STMT % ('DEFAULT',)
+
+@contextmanager
+def lock_timeout(cursor, timeout):
+    """
+    ContextManager that sets the lock timeout to the given value,
+    and returns it to the DEFAULT when done.
+
+    If *timeout* is ``None``, makes no changes to the connection.
+    """
+    if timeout is not None: # 0 is valid
+        cursor.execute(_SET_TIMEOUT_STMT, (timeout,))
+        try:
+            yield
+        finally:
+            cursor.execute(_SET_TIMEOUT_DEFAULT_STMT)
+    else:
+        yield
+
 
 @implementer(ILocker)
 class MySQLLocker(AbstractLocker):
@@ -90,7 +114,7 @@ class MySQLLocker(AbstractLocker):
         # they have to be user variables, which defeats most of the point
         # (Although in this case, because it's a static value, maybe not;
         # it could be set once and re-used.)
-        self.set_timeout_stmt = 'SET SESSION innodb_lock_wait_timeout = %s'
+        self.set_timeout_stmt = _SET_TIMEOUT_STMT
 
     def on_store_opened(self, cursor, restart=False):
         super(MySQLLocker, self).on_store_opened(cursor, restart=restart)
@@ -163,5 +187,5 @@ class MySQLLocker(AbstractLocker):
         """Release the pack lock."""
         stmt = "SELECT RELEASE_LOCK(CONCAT(DATABASE(), '.pack'))"
         cursor.execute(stmt)
-        row = cursor.fetchone() # stay in sync
-        assert row
+        rows = cursor.fetchall() # stay in sync
+        assert rows
