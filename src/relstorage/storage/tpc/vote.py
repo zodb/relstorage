@@ -221,10 +221,17 @@ class AbstractVote(AbstractTPCState):
         # Detect conflicting changes.
         # Try to resolve the conflicts.
         invalidated = set()  # a set of OIDs (bytes)
-        # In the past, we didn't load all conflicts from the DB at once,
-        # just one at a time. This was because we also fetched the state data
-        # from the DB, and it could be large. But now we use the state we have in
-        # our local temp cache, so memory concerns are gone.
+
+        # In the past, we didn't load all conflicts from the DB at
+        # once, just one at a time. This was because we also fetched
+        # the new state data from the DB, and it could be large (if
+        # lots of conflicts). But now we use the state we have in our
+        # local temp cache for the new state, so we don't need to
+        # fetch it, meaning this result will be small.
+        #
+        # We *probably* have the previous state already in our storage
+        # cache already so we're not returning that from the database
+        # either.
         conflicts = adapter.mover.detect_conflict(cursor)
         if conflicts:
             logger.debug("Attempting to resolve %d conflicts", len(conflicts))

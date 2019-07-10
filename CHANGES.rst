@@ -158,6 +158,11 @@
 
   See :issue:`188`.
 
+- Fix an ``OperationalError: database is locked`` that could occur on
+  startup if multiple processes were reading or writing the cache
+  database. See :issue:`266`.
+
+
 3.0a3 (2019-06-26)
 ==================
 
