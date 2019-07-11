@@ -25,7 +25,8 @@
 - Call ``set_min_oid`` less often if a storage is just updating
   existing objects, not creating its own.
 
-- Fix an occasional possible deadlock in MySQL's ``set_min_oid``.
+- Fix an occasional possible deadlock in MySQL's ``set_min_oid``. See
+  :pr:`276`.
 
 3.0a4 (2019-07-10)
 ==================
