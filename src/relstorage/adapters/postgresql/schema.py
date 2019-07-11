@@ -201,6 +201,9 @@ class PostgreSQLSchemaInstaller(AbstractSchemaInstaller):
         cursor.execute(stmt)
         res = {}
         for (name, text) in cursor.fetchall():
+            name = self._metadata_to_native_str(name)
+            text = self._metadata_to_native_str(text)
+
             version = None
             match = re.search(r'Version:\s*([0-9a-zA-Z.]+)', text)
             if match is not None:

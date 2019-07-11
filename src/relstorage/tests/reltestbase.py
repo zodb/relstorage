@@ -1237,6 +1237,7 @@ class DoubleCommitter(Persistent):
         return Persistent.__getstate__(self)
 
 
+
 class AbstractToFileStorage(RelStorageTestBase):
     # Subclass this and set:
     # - keep_history = True; and
@@ -1262,12 +1263,13 @@ class AbstractToFileStorage(RelStorageTestBase):
     def _dst(self):
         if self.__dst is None:
             self.__dst = FileStorage(self._dst_path, create=True)
+            def clean(dst):
+                dst.close()
+                dst.cleanup()
+            self.addCleanup(clean, self.__dst)
         return self.__dst
 
     def tearDown(self):
-        if self.__dst is not None:
-            self.__dst.close()
-            self.__dst.cleanup()
         self.__dst = 42 # Not none so we don't try to create.
         super(AbstractToFileStorage, self).tearDown()
 
@@ -1290,12 +1292,13 @@ class AbstractFromFileStorage(RelStorageTestBase):
     def _dst(self):
         if self.__dst is None:
             self.__dst = self.make_storage()
+            def clean(dst):
+                dst.close()
+                dst.cleanup()
+            self.addCleanup(clean, self.__dst)
         return self.__dst
 
     def tearDown(self):
-        if self.__dst is not None:
-            self.__dst.close()
-            self.__dst.cleanup()
         self.__dst = 42 # Not none so we don't try to create.
         super(AbstractFromFileStorage, self).tearDown()
 

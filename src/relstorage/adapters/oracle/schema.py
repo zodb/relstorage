@@ -152,7 +152,7 @@ class OracleSchemaInstaller(AbstractSchemaInstaller):
         def callback(_conn, cursor):
             tables = self.list_tables(cursor)
             if 'object_state' not in tables:
-                self.create(cursor)
+                self.create_tables(cursor)
             else:
                 self.check_compatibility(cursor, tables)
                 self.update_schema(cursor, tables)
@@ -215,6 +215,8 @@ class OracleSchemaInstaller(AbstractSchemaInstaller):
                     break
             res[name.lower()] = version
         return res
+
+    list_procedures = list_packages
 
     def _create_pack_lock(self, cursor):
         stmt = "CREATE TABLE pack_lock (dummy CHAR);"

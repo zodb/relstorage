@@ -85,15 +85,19 @@ class AbstractSchemaInstaller(DatabaseHelpersMixin,
 
     @abc.abstractmethod
     def list_tables(self, cursor):
-        raise NotImplementedError()
+        raise NotImplementedError
 
     @abc.abstractmethod
     def list_sequences(self, cursor):
-        raise NotImplementedError()
+        raise NotImplementedError
+
+    @abc.abstractmethod
+    def list_procedures(self, cursor):
+        raise NotImplementedError
 
     @abc.abstractmethod
     def get_database_name(self, cursor):
-        raise NotImplementedError()
+        raise NotImplementedError
 
     CREATE_COMMIT_ROW_LOCK_TMPL = """
     CREATE TABLE commit_row_lock (
@@ -446,7 +450,7 @@ class AbstractSchemaInstaller(DatabaseHelpersMixin,
     def _reset_oid(self, cursor):
         raise NotImplementedError()
 
-    def create(self, cursor, existing_tables=()):
+    def create_tables(self, cursor, existing_tables=()):
         """Create the database tables."""
         for table in self.all_tables:
             if table not in existing_tables:
@@ -461,13 +465,22 @@ class AbstractSchemaInstaller(DatabaseHelpersMixin,
         tables = self.list_tables(cursor)
         self.check_compatibility(cursor, tables)
 
+    def create_procedures(self, cursor):
+        "Subclasses should override"
+
+    def create_triggers(self, cursor):
+        "Subclasses should override"
+
     def _prepare_with_connection(self, conn, cursor): # pylint:disable=unused-argument
         # XXX: We can generalize this to handle triggers, procs, etc,
         # to make subclasses have easier time.
         tables = self.list_tables(cursor)
-        self.create(cursor, tables)
+        self.create_tables(cursor, tables)
         if 'transaction' in tables:
             self.update_schema(cursor, tables)
+
+        self.create_procedures(cursor)
+        self.create_triggers(cursor)
 
     def prepare(self):
         self.connmanager.open_and_call(self._prepare_with_connection)

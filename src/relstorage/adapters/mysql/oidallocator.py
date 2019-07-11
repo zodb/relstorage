@@ -33,7 +33,7 @@ class MySQLOIDAllocator(AbstractOIDAllocator):
     # After this many allocated OIDs should the (unlucky) thread that
     # allocated the one evenly divisible by this number attempt to remove
     # old OIDs.
-    garbage_collect_interval = 10001
+    garbage_collect_interval = 100001
 
     # How many OIDs to attempt to delete at any one request. Keeping
     # this on the small side relative to the interval limits the
@@ -49,12 +49,15 @@ class MySQLOIDAllocator(AbstractOIDAllocator):
     # already has a custom timeout.
     garbage_collect_batch_timeout = 5
 
-    def __init__(self):
+    _cached_next_n = 0
+
+    def __init__(self, driver):
         """
         :param type disconnected_exception: The exception to raise when
            we get an invalid value for ``lastrowid``.
         """
         AbstractOIDAllocator.__init__(self)
+        self.driver = driver
 
     # https://dev.mysql.com/doc/refman/5.7/en/example-auto-increment.html
     # "Updating an existing AUTO_INCREMENT column value in an InnoDB
@@ -88,16 +91,35 @@ class MySQLOIDAllocator(AbstractOIDAllocator):
     # true even for MyISAM and InnoDB, which normally do not reuse
     # sequence values."
     def set_min_oid(self, cursor, oid):
-        """Ensure the next OID is at least the given OID."""
-        n = (oid + 15) // 16
-        # If the table is empty, MAX(zoid) returns NULL, which
-        # of course fails the comparison and so nothing gets inserted.
-        stmt = """
-        INSERT INTO new_oid (zoid)
-        SELECT %s
-        WHERE %s > (SELECT COALESCE(MAX(zoid), 0) FROM new_oid)
         """
-        cursor.execute(stmt, (n, n))
+        Ensure the next OID is at least the given OID.
+        """
+        # A simple statement like the following can easily deadlock:
+        #
+        # INSERT INTO new_oid (zoid)
+        # SELECT %s
+        # WHERE %s > (SELECT COALESCE(MAX(zoid), 0) FROM new_oid)
+        #
+        #
+        # Session A: new_oid() -> Lock 1
+        # Session B: new_oid() -> Lock 2 (row 1 is invisible)
+        # Session A: new_oid() -> Lock 3 (row 2 is invisible)
+        # Session B: set_min_oid(2) -> Hang waiting for lock
+        # Session A: new_oid() -> Lock 4: Deadlock, Session B rolls back.
+        #
+        # Partly this is because MAX() is local to the current session.
+        # We deal with this by using a stored procedure to efficiently make
+        # multiple queries.
+
+        n = (oid + 15) // 16
+        multi_results = self.driver.callproc_multi_result(cursor, 'set_min_oid(%s)', (n,))
+        next_n, = multi_results[0][0]
+
+        # A side effect of checking may be allocating from the sequence.
+        # If it increased, we have a value we can use, because no one else can
+        # use that same value.
+        if next_n and next_n > n:
+            self._cached_next_n = max(next_n, self._cached_next_n)
 
     @metricmethod
     def new_oids(self, cursor):
@@ -123,15 +145,19 @@ class MySQLOIDAllocator(AbstractOIDAllocator):
         #
         # Our solution is to just let rows build up if the delete fails. Eventually
         # a GC, which happens at startup, will occur and hopefully get most of them.
-        stmt = "INSERT INTO new_oid VALUES ()"
-        cursor.execute(stmt)
+        if self._cached_next_n:
+            n = self._cached_next_n
+            self._cached_next_n = 0
+        else:
+            stmt = "INSERT INTO new_oid VALUES ()"
+            cursor.execute(stmt)
 
-        # This is a DB-API extension. Fortunately, all
-        # supported drivers implement it. (In the past we used
-        # cursor.connection.insert_id(), which was specific to MySQLdb
-        # and PyMySQL.)
-        # 'SELECT LAST_INSERT_ID()' is the pure-SQL way to do this.
-        n = cursor.lastrowid
+            # This is a DB-API extension. Fortunately, all
+            # supported drivers implement it. (In the past we used
+            # cursor.connection.insert_id(), which was specific to MySQLdb
+            # and PyMySQL.)
+            # 'SELECT LAST_INSERT_ID()' is the pure-SQL way to do this.
+            n = cursor.lastrowid
 
         if n % self.garbage_collect_interval == 0:
             self.garbage_collect_oids(cursor, n)
@@ -166,8 +192,19 @@ class MySQLOIDAllocator(AbstractOIDAllocator):
                 try:
                     cursor.execute(stmt, params)
                 except Exception: # pylint:disable=broad-except
-                    # Luckily, a deadlock only rolls back the previous statement, not the
-                    # whole transaction.
+                    # Luckily, a deadlock only rolls back the previous
+                    # statement, not the whole transaction.
+                    #
+                    # XXX: No, that's not true. A general error, like
+                    # a lock timeout, will roll back the previous
+                    # statement. A deadlock rolls back the whole
+                    # transaction. We're lucky the difference here
+                    # doesn't make any difference: we don't actually
+                    # write anything to the database temp tables, etc,
+                    # until the storage enters commit(), at which
+                    # point we shouldn't need to allocate any more new
+                    # oids.
+                    #
                     # TODO: We'd prefer to only do this for errcode 1213: Deadlock.
                     # MySQLdb raises this as an OperationalError; what do all the other
                     # drivers do?

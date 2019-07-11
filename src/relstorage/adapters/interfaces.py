@@ -679,9 +679,6 @@ class IPoller(Interface):
 class ISchemaInstaller(Interface):
     """Install the schema in the database, clear it, or uninstall it"""
 
-    def create(cursor):
-        """Create the database tables, sequences, etc."""
-
     def prepare():
         """
         Create the database schema if it does not already exist.

@@ -51,9 +51,12 @@ class PyMySQLConnectorDriver(AbstractMySQLDriver):
     _GEVENT_CAPABLE = True
     _GEVENT_NEEDS_SOCKET_PATCH = True
 
-    if PYPY:
-        def __init__(self):
-            super(PyMySQLConnectorDriver, self).__init__()
+    def __init__(self):
+        super(PyMySQLConnectorDriver, self).__init__()
+        # conn.close() -> InternalError: Unread result found
+        # By the time we get to a close(), it's too late to do anything about it.
+        self.close_exceptions += (self.driver_module.InternalError,)
+        if PYPY:
             # Patch to work around JIT bug found in (at least) 7.1.1
             # https://bitbucket.org/pypy/pypy/issues/3014/jit-issue-inlining-structunpack-hh
             try:
@@ -160,6 +163,18 @@ class PyMySQLConnectorDriver(AbstractMySQLDriver):
         # This implementation uses a property instead of a method.
         conn.autocommit = value
 
+    def callproc_multi_result(self, cursor, proc, args=()):
+        # This driver is weird, wants multi=True, returns an iterator of cursors
+        # instead of using nextset()
+        resultsets = cursor.execute("CALL " + proc, args, multi=True)
+        multi_results = []
+        for resultset in resultsets:
+            try:
+                multi_results.append(resultset.fetchall())
+            except self.driver_module.InterfaceError:
+                # This gets raised on the empty set at the end, for some reason.
+                break
+        return multi_results
 
 class CMySQLConnectorDriver(PyMySQLConnectorDriver):
     __name__ = 'C ' + _base_name

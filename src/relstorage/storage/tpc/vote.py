@@ -158,13 +158,26 @@ class AbstractVote(AbstractTPCState):
         # This exists as an extension point.
         self._flush_temps_to_db(cursor)
 
-        # Reserve all OIDs used by this transaction
-        # TODO: Is this really necessary in the common case? Maybe just in the
-        # restore case or the copyTransactionsFrom case? Testing shows that the common case
-        # never makes this True.
+        # Reserve all OIDs used by this transaction.
+
+        # TODO: Is this really necessary in the common case? Maybe
+        # just in the restore case or the copyTransactionsFrom case?
+        # In the common case where we allocated OIDs for new objects,
+        # this won't be true. In the uncommon case where we've *never* allocated
+        # objects and we're just updating older objects, this will frequently
+        # be true. At the very least, we need to update the storage's 'max_new_oid'
+        # property to reduce the need for this.
         if self.max_stored_oid > self.storage._max_new_oid:
-            adapter.oidallocator.set_min_oid(
-                cursor, self.max_stored_oid + 1)
+            # First, set it in the database for everyone.
+            next_oid = self.max_stored_oid + 1
+            adapter.oidallocator.set_min_oid(cursor, next_oid)
+            # Then, as per above, set it in the storage for this thread
+            # so we don't have to keep doing this if it only ever
+            # updates existing objects.
+            # NOTE: This is a non-transactional change to the storage's state.
+            # That's OK, though, as the underlying sequence for OIDs we allocate
+            # is also non-transactional.
+            self.storage._max_new_oid = next_oid
 
         # Check the things registered by Connection.readCurrent(),
         # while at the same time taking out update locks on both those rows,
