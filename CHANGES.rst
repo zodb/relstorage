@@ -2,7 +2,7 @@
  Changes
 =========
 
-3.0a5 (unreleased)
+3.0a5 (2019-07-11)
 ==================
 
 - Reduce the time that MySQL will wait to perform OID garbage
