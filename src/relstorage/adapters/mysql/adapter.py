@@ -110,6 +110,7 @@ class MySQLAdapter(object):
         )
         self.connmanager.add_on_store_opened(self.locker.on_store_opened)
         self.schema = MySQLSchemaInstaller(
+            driver=driver,
             connmanager=self.connmanager,
             runner=self.runner,
             keep_history=self.keep_history,
@@ -120,7 +121,7 @@ class MySQLAdapter(object):
         )
         self.connmanager.add_on_store_opened(self.mover.on_store_opened)
         self.connmanager.add_on_load_opened(self.mover.on_load_opened)
-        self.oidallocator = MySQLOIDAllocator()
+        self.oidallocator = MySQLOIDAllocator(driver)
         self.txncontrol = MySQLTransactionControl(
             connmanager=self.connmanager,
             keep_history=self.keep_history,
@@ -185,7 +186,7 @@ class MySQLAdapter(object):
         cursor.execute(stmt)
 
     def new_instance(self):
-        return MySQLAdapter(options=self.options, **self._params)
+        return type(self)(options=self.options, **self._params)
 
     def __str__(self):
         parts = [self.__class__.__name__]

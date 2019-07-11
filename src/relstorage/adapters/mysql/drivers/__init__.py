@@ -43,6 +43,25 @@ class AbstractMySQLDriver(AbstractModuleDriver):
         cursor.execute(self.MY_CHARSET_STMT)
         return cursor
 
+    def callproc_multi_result(self, cursor, proc, args=()):
+        """
+        Some drivers need extra arguments to execute a statement that
+        returns multiple results, and they don't all use the standard
+        way to retrieve them, so use this.
+
+        Returns a list of lists of rows: [
+         [[row in first], ...],
+         [[row in second], ...],
+         ...
+        ]
+        """
+        cursor.execute('CALL ' + proc, args)
+
+        multi_results = [cursor.fetchall()]
+        while cursor.nextset():
+            multi_results.append(cursor.fetchall())
+        return multi_results
+
 
 implement_db_driver_options(
     __name__,

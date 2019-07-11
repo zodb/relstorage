@@ -159,8 +159,8 @@ class StorageCreatingMixin(ABC):
             # Always use a persistent cache. This helps discover errors in
             # the persistent cache.
             # These tests run in a temporary directory that gets cleaned up, so the CWD is
-            # appropriate.
-            kw['cache_local_dir'] = '.'
+            # appropriate. BUT: it should be an abspath just in case we change directories
+            kw['cache_local_dir'] = os.path.abspath('.')
         if 'commit_lock_timeout' not in kw:
             # Cut this way down so we get better feedback.
             kw['commit_lock_timeout'] = 10
