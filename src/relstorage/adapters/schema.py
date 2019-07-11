@@ -523,7 +523,6 @@ class AbstractSchemaInstaller(DatabaseHelpersMixin,
             return False
 
         cursor.execute('SELECT * FROM transaction WHERE tid < 0')
-
         columns = self._column_descriptions(cursor)
         # Make sure to read the (empty) result, some drivers (CMySQLConnector)
         # are picky about that and won't let you close a cursor without reading

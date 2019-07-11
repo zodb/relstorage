@@ -35,6 +35,9 @@ class AbstractMySQLDriver(AbstractModuleDriver):
     # https://github.com/zodb/relstorage/issues/213)
     MY_CHARSET_STMT = 'SET names binary'
 
+    # Does this driver need cursor.fetchall() called before a rollback?
+    fetchall_on_rollback = False
+
     def cursor(self, conn):
         cursor = AbstractModuleDriver.cursor(self, conn)
         cursor.execute(self.MY_CHARSET_STMT)

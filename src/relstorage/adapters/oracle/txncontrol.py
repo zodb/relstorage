@@ -25,8 +25,8 @@ log = logging.getLogger(__name__)
 
 class OracleTransactionControl(GenericTransactionControl):
 
-    def __init__(self, keep_history, Binary, twophase):
-        GenericTransactionControl.__init__(self, keep_history, Binary)
+    def __init__(self, connmanager, keep_history, Binary, twophase):
+        GenericTransactionControl.__init__(self, connmanager, keep_history, Binary)
         self.twophase = twophase
 
     def commit_phase1(self, conn, cursor, tid):

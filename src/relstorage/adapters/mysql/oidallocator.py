@@ -23,6 +23,7 @@ from zope.interface import implementer
 
 from ..interfaces import IOIDAllocator
 from ..oidallocator import AbstractOIDAllocator
+from .locker import lock_timeout
 
 logger = __import__('logging').getLogger(__name__)
 
@@ -42,6 +43,11 @@ class MySQLOIDAllocator(AbstractOIDAllocator):
     # How many OIDs to attempt to delete if we're not allocating, only
     # garbage collecting.
     garbage_collect_batch_size = 3000
+
+    # How long to wait in seconds before timing out when batch deleting locks.
+    # Note that we don't do this interactively because our connection
+    # already has a custom timeout.
+    garbage_collect_batch_timeout = 5
 
     def __init__(self):
         """
@@ -134,8 +140,10 @@ class MySQLOIDAllocator(AbstractOIDAllocator):
     def garbage_collect_oids(self, cursor, max_value=None):
         # Clean out previously generated OIDs.
         batch_size = self.garbage_collect_interactive_size
+        batch_timeout = None
         if not max_value:
             batch_size = self.garbage_collect_batch_size
+            batch_timeout = self.garbage_collect_batch_timeout
             cursor.execute('SELECT MAX(zoid) FROM new_oid')
             row = cursor.fetchone()
             if row:
@@ -153,20 +161,21 @@ class MySQLOIDAllocator(AbstractOIDAllocator):
         params = (max_value, batch_size)
         __traceback_info__ = stmt, params
         rowcount = True
-        while rowcount:
-            try:
-                cursor.execute(stmt, params)
-            except Exception: # pylint:disable=broad-except
-                # Luckily, a deadlock only rolls back the previous statement, not the
-                # whole transaction.
-                # TODO: We'd prefer to only do this for errcode 1213: Deadlock.
-                # MySQLdb raises this as an OperationalError; what do all the other
-                # drivers do?
-                logger.debug("Failed to garbage collect allocated OIDs", exc_info=True)
-                break
-            else:
-                rowcount = cursor.rowcount
-                logger.debug("Garbage collected %s old OIDs less than", rowcount, max_value)
+        with lock_timeout(cursor, batch_timeout):
+            while rowcount:
+                try:
+                    cursor.execute(stmt, params)
+                except Exception: # pylint:disable=broad-except
+                    # Luckily, a deadlock only rolls back the previous statement, not the
+                    # whole transaction.
+                    # TODO: We'd prefer to only do this for errcode 1213: Deadlock.
+                    # MySQLdb raises this as an OperationalError; what do all the other
+                    # drivers do?
+                    logger.debug("Failed to garbage collect allocated OIDs", exc_info=True)
+                    break
+                else:
+                    rowcount = cursor.rowcount
+                    logger.debug("Garbage collected %s old OIDs less than", rowcount, max_value)
 
     def reset_oid(self, cursor):
         cursor.execute("TRUNCATE TABLE new_oid")

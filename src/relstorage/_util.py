@@ -20,7 +20,9 @@ from __future__ import print_function
 import collections
 import functools
 import itertools
+import sys
 import time
+import traceback
 
 logger = __import__('logging').getLogger(__name__)
 
@@ -156,3 +158,91 @@ def consume(iterator, n=None):
     else:
         # advance to the empty slice starting at position n
         next(itertools.islice(iterator, n, n), None)
+
+class CloseTracker(object): # pragma: no cover
+    __slots__ = ('_tracked', '_type', '_at')
+
+    def __init__(self, conn):
+        self._tracked = conn
+        self._type = type(conn)
+        self._at = ''.join(traceback.format_stack())
+
+    def __getattr__(self, name):
+        return getattr(self._tracked, name)
+
+    def __setattr__(self, name, value):
+        if name in CloseTracker.__slots__:
+            object.__setattr__(self, name, value)
+            return
+        return setattr(self._tracked, name, value)
+
+    def close(self):
+        if self._tracked is None:
+            return
+        try:
+            self._tracked.close()
+        finally:
+            self._tracked = None
+
+    def __del__(self):
+        if self._tracked is not None:
+            print("Failed to close", self, self._type, " from:", self._at, file=sys.stderr)
+            print("Deleted at", ''.join(traceback.format_stack()))
+
+
+class CloseTrackedConnection(CloseTracker): # pragma: no cover
+    __slots__ = ()
+
+    def cursor(self, *args, **kwargs):
+        return CloseTrackerCursor(self._tracked.cursor(*args, **kwargs))
+
+
+class CloseTrackerCursor(CloseTracker):
+    __slots__ = ()
+
+    def execute(self, stmt, args=None):
+        return self._tracked.execute(stmt, args)
+
+    def __iter__(self):
+        return self._tracked.__iter__()
+
+
+class NeedsFetchallBeforeCloseCursor(CloseTrackerCursor): # pragma: no cover
+    needs_fetchall = False
+    verbose = False
+    last_stmt = None
+
+    def close(self):
+        if self.needs_fetchall:
+            raise AssertionError("Forgot to fetchall")
+        super(NeedsFetchallBeforeCloseCursor, self).close()
+
+    def execute(self, stmt, args=None):
+        if self.needs_fetchall:
+            raise AssertionError("Forgot to fetchall")
+        self.last_stmt = stmt
+        if stmt.strip().startswith('SELECT'):
+            self.needs_fetchall = True
+        if self.verbose:
+            print(stmt, end=' -> ')
+            result = self._tracked.execute(stmt, args)
+            print(result)
+            return result
+        return self._tracked.execute(stmt, args)
+
+    def fetchone(self):
+        r = self._tracked.fetchone()
+        if r is None:
+            self.needs_fetchall = False
+        return r
+
+    def fetchall(self):
+        self.needs_fetchall = False
+        return self._tracked.fetchall()
+
+    def __repr__(self):
+        return "<%r need_fetch=%s last=%r>" % (
+            self._tracked,
+            self.needs_fetchall,
+            self.last_stmt,
+        )

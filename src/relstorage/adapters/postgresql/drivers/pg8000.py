@@ -24,7 +24,6 @@ from collections import deque
 from zope.interface import implementer
 
 from ..._abstract_drivers import AbstractModuleDriver
-from ..._abstract_drivers import _ConnWrapper
 from ...interfaces import IDBDriver
 
 __all__ = [
@@ -190,9 +189,6 @@ class PG8000Driver(AbstractModuleDriver):
 
         self._connect = Connection
 
-    # For debugging
-    _wrap = False
-
     def connect(self, dsn): # pylint:disable=arguments-differ
         # Parse the DSN into parts to pass as keywords.
         # We don't do this psycopg2 because a real DSN supports more options than
@@ -206,8 +202,7 @@ class PG8000Driver(AbstractModuleDriver):
                 key = 'database'
             kwds[key] = value
         conn = self._connect(**kwds)
-
-        return _ConnWrapper(conn) if self._wrap else conn
+        return conn
 
     # Extensions
 

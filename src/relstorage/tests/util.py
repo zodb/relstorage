@@ -98,6 +98,9 @@ class AbstractTestSuiteBuilder(ABC):
     # test run even if installed.
     MAX_PRIORITY = int(os.environ.get('RS_MAX_TEST_PRIORITY', '100'))
 
+    # Ask the drivers to be in their strictest possible mode.
+    STRICT_DRIVER = True
+
     def __init__(self, driver_options, use_adapter, extra_test_classes=()):
         """
         :param driver_options: The ``IDBDriverOptions``
@@ -145,6 +148,8 @@ class AbstractTestSuiteBuilder(ABC):
             # list of tests; this makes the output much shorter and easier to read,
             # but it does make zope-testrunner's discovery options less useful.
             if available or TEST_UNAVAILABLE_DRIVERS:
+                if driver is not None:
+                    type(driver).STRICT = True
                 # Checking the driver is just a unit test, it doesn't connect or
                 # need a layer
                 suite.addTest(unittest.makeSuite(

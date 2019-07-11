@@ -19,7 +19,6 @@ from __future__ import print_function
 
 import importlib
 import sys
-import traceback
 
 from zope.interface import directlyProvides
 from zope.interface import implementer
@@ -87,6 +86,14 @@ class AbstractModuleDriver(ABC):
 
     #: Priority of this driver when running on PyPy. Lower is better.
     PRIORITY_PYPY = 100
+
+    #: Class attribute. If set to a true value (not the default),
+    #: ask the underlying driver to work in as strict a mode as possible
+    #: when it comes to detecting programming errors.
+    #:
+    #: Typically set by tests. Most drivers do not have a stricter mode
+    #: that can be enabled.
+    STRICT = False
 
     # Can this driver work with gevent?
     _GEVENT_CAPABLE = False
@@ -249,40 +256,3 @@ def implement_db_driver_options(name, *driver_modules):
 
     module.select_driver = lambda driver_name=None: _select_driver_by_name(driver_name,
                                                                            sys.modules[name])
-
-class _ConnWrapper(object): # pragma: no cover
-    def __init__(self, conn):
-        self.__conn = conn
-        self.__type = type(conn)
-        self.__at = ''.join(traceback.format_stack())
-
-    def __getattr__(self, name):
-        return getattr(self.__conn, name)
-
-    def __setattr__(self, name, value):
-        if name in ('_ConnWrapper__conn', '_ConnWrapper__at', '_ConnWrapper__type'):
-            object.__setattr__(self, name, value)
-            return
-        return setattr(self.__conn, name, value)
-
-    def cursor(self, *args, **kwargs):
-        return _ConnWrapper(self.__conn.cursor(*args, **kwargs))
-
-    def execute(self, op, args=None):
-        return self.__conn.execute(op, args)
-
-    def __iter__(self):
-        return self.__conn.__iter__()
-
-    def close(self):
-        if self.__conn is None:
-            return
-        try:
-            self.__conn.close()
-        finally:
-            self.__conn = None
-
-    def __del__(self):
-        if self.__conn is not None:
-            print("Failed to close", self, self.__type, " from:", self.__at, file=sys.stderr)
-            print("Deleted at", ''.join(traceback.format_stack()))

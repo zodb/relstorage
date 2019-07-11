@@ -122,6 +122,7 @@ class MySQLAdapter(object):
         self.connmanager.add_on_load_opened(self.mover.on_load_opened)
         self.oidallocator = MySQLOIDAllocator()
         self.txncontrol = MySQLTransactionControl(
+            connmanager=self.connmanager,
             keep_history=self.keep_history,
             Binary=driver.Binary,
         )

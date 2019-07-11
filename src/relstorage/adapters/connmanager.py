@@ -44,6 +44,11 @@ class AbstractConnectionManager(object):
     # when a load connection is opened
     _on_load_opened = ()
 
+    # psycopg2 raises ProgrammingError if we rollback when nothing is present.
+    # mysql-connector-python raises InterfaceError.
+    # OTOH, mysqlclient raises nothing and even wants it.
+    _fetchall_on_rollback = True
+
     def __init__(self, options):
         # options is a relstorage.options.Options instance
         if options.replica_conf:
@@ -86,7 +91,7 @@ class AbstractConnectionManager(object):
         raise NotImplementedError()
 
     @metricmethod
-    def close(self, conn, cursor):
+    def close(self, conn=None, cursor=None):
         """
         Close a connection and cursor, ignoring certain errors.
         """
@@ -96,6 +101,33 @@ class AbstractConnectionManager(object):
                     obj.close()
                 except self.close_exceptions:
                     pass
+
+    def rollback_and_close(self, conn, cursor):
+        # Some drivers require the cursor to be closed first.
+
+        # Some drivers also don't allow you to close without fetching
+        # all rows.
+        if cursor is not None and self._fetchall_on_rollback:
+            try:
+                cursor.fetchall()
+            except Exception: # pylint:disable=broad-except
+                pass
+        self.close(cursor)
+
+        if conn is not None:
+            assert cursor is not None
+            try:
+                conn.rollback()
+            except self.close_exceptions:
+                pass
+            finally:
+                self.close(conn)
+
+    def rollback(self, conn, cursor):
+        # Like rollback and close, but doesn't bury exceptions.
+        if self._fetchall_on_rollback:
+            cursor.fetchall()
+        conn.rollback()
 
     def open_and_call(self, callback):
         """Call a function with an open connection and cursor.
@@ -110,9 +142,11 @@ class AbstractConnectionManager(object):
             try:
                 res = callback(conn, cursor)
             except:
-                conn.rollback()
+                self.rollback_and_close(conn, cursor)
+                conn, cursor = None, None
                 raise
             else:
+                self.close(cursor)
                 conn.commit()
                 return res
         finally:
@@ -140,7 +174,7 @@ class AbstractConnectionManager(object):
         """Reinitialize a connection for loading objects."""
         self.check_replica(conn, cursor,
                            replica_selector=self.ro_replica_selector)
-        conn.rollback()
+        self.rollback(conn, cursor)
         self._call_hooks(self._on_load_opened, conn, cursor,
                          cursor, restart=True)
 
@@ -194,7 +228,7 @@ class AbstractConnectionManager(object):
     def restart_store(self, conn, cursor):
         """Reuse a store connection."""
         self.check_replica(conn, cursor)
-        conn.rollback()
+        self.rollback(conn, cursor)
         self._after_opened_for_store(conn, cursor)
         self._call_hooks(self._on_store_opened, conn, cursor,
                          cursor, restart=True)
