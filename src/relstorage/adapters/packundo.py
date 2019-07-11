@@ -1140,6 +1140,7 @@ class HistoryFreePackUndo(PackUndo):
                     # or simply do a join against the table.
                     items = to_remove[:100]
                     del to_remove[:100]
+                    # XXX: History free. We shouldn't need to include the TID.
                     stmt = """
                     DELETE FROM object_state
                     WHERE zoid = %s AND tid = %s
