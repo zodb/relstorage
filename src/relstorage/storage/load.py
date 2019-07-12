@@ -77,58 +77,58 @@ def _log_keyerror(cursor, adapter, oid_int, reason):
     logfunc('; '.join(msg))
 
 
-class LoadMethodsMixin(object):
+class Loader(object):
 
-    _cache = None
-    _adapter = None
-    _stale_error = None
-    _load_cursor = None
-    _store_cursor = None
+    STORAGE_METHODS = (
+        'load',
+        'loadBefore',
+        'loadSerial',
+        'prefetch',
+        'getTid',
+    )
 
-    _load_transaction_open = None
+    __slots__ = (
+        'adapter',
+        'load_connection',
+        'store_connection',
+        'cache',
+    )
 
-    def _restart_load_and_poll(self):
-        raise NotImplementedError
-
-    _drop_load_connection = _restart_load_and_poll
-
-    def _before_load(self):
-        # This doesn't really belong here.
-        # TODO: Better encapsulate load connection state management.
-        if not self._load_transaction_open:
-            self._restart_load_and_poll()
-        assert self._load_transaction_open == 'active'
+    def __init__(self, adapter, load_connection, store_connection, cache):
+        self.adapter = adapter
+        self.load_connection = load_connection
+        self.store_connection = store_connection
+        self.cache = cache
 
     def __load_using_method(self, meth, argument):
-        if self._stale_error is not None:
-            raise self._stale_error # pylint:disable=raising-bad-type
-
-        self._before_load()
-        cursor = self._load_cursor
+        cursor = self.load_connection.cursor
         try:
             return meth(cursor, argument)
         except CacheConsistencyError:
             logger.exception("Cache consistency error; restarting load")
-            self._drop_load_connection()
+            self.load_connection.drop()
             raise
 
     @Metric(method=True, rate=0.1)
     def load(self, oid, version=''):
         # pylint:disable=unused-argument
-
         oid_int = bytes8_to_int64(oid)
-
-        state, tid_int = self.__load_using_method(self._cache.load, oid_int)
+        state, tid_int = self.__load_using_method(self.cache.load, oid_int)
 
         if tid_int is None:
-            _log_keyerror(self._load_cursor, self._adapter, oid_int, "no tid found")
+            _log_keyerror(self.load_connection.cursor,
+                          self.adapter,
+                          oid_int,
+                          "no tid found")
             raise POSKeyError(oid)
 
         if not state:
             # This can happen if something attempts to load
             # an object whose creation has been undone.
-            _log_keyerror(self._load_cursor, self._adapter,
-                          oid_int, "creation has been undone")
+            _log_keyerror(self.load_connection.cursor,
+                          self.adapter,
+                          oid_int,
+                          "creation has been undone")
             raise POSKeyError(oid)
         return state, int64_to_8bytes(tid_int)
 
@@ -137,7 +137,7 @@ class LoadMethodsMixin(object):
         return serial
 
     def prefetch(self, oids):
-        prefetch = self._cache.prefetch
+        prefetch = self.cache.prefetch
         oid_ints = [bytes8_to_int64(oid) for oid in oids]
         try:
             self.__load_using_method(prefetch, oid_ints)
@@ -164,18 +164,17 @@ class LoadMethodsMixin(object):
         # shouldn't be able to get to that point if the root revision
         # went missing, right? Packing periodically takes the same locks we
         # want to take for committing.
-        state = self._cache.loadSerial(oid_int, tid_int)
+        state = self.cache.loadSerial(oid_int, tid_int)
         if state:
             return state
 
-        self._before_load()
-        state = self._adapter.mover.load_revision(
-            self._load_cursor, oid_int, tid_int)
-        if state is None and self._store_cursor is not None:
+        state = self.adapter.mover.load_revision(
+            self.load_connection.cursor, oid_int, tid_int)
+        if state is None and self.store_connection:
             # Allow loading data from later transactions
             # for conflict resolution.
-            state = self._adapter.mover.load_revision(
-                self._store_cursor, oid_int, tid_int)
+            state = self.adapter.mover.load_revision(
+                self.store_connection.cursor, oid_int, tid_int)
 
         if state is None or not state:
             raise POSKeyError(oid)
@@ -184,22 +183,18 @@ class LoadMethodsMixin(object):
     @Metric(method=True, rate=0.1)
     def loadBefore(self, oid, tid):
         """Return the most recent revision of oid before tid committed."""
-        if self._stale_error is not None:
-            raise self._stale_error # pylint:disable=raising-bad-type
-
         oid_int = bytes8_to_int64(oid)
 
-        if self._store_cursor is not None:
+        if self.store_connection:
             # Allow loading data from later transactions
             # for conflict resolution.
-            cursor = self._store_cursor
+            cursor = self.store_connection.cursor
         else:
-            self._before_load()
-            cursor = self._load_cursor
-        if not self._adapter.mover.exists(cursor, oid_int):
+            cursor = self.load_connection.cursor
+        if not self.adapter.mover.exists(cursor, oid_int):
             raise POSKeyError(oid)
 
-        state, start_tid = self._adapter.mover.load_before(
+        state, start_tid = self.adapter.mover.load_before(
             cursor, oid_int, bytes8_to_int64(tid))
 
         if start_tid is None:
@@ -212,7 +207,7 @@ class LoadMethodsMixin(object):
             # TransactionalUndoStorage.checkUndoCreationBranch1
             # self._log_keyerror doesn't work here, only in certain states.
             raise POSKeyError(oid)
-        end_int = self._adapter.mover.get_object_tid_after(
+        end_int = self.adapter.mover.get_object_tid_after(
             cursor, oid_int, start_tid)
         if end_int is not None:
             end = int64_to_8bytes(end_int)
@@ -222,10 +217,16 @@ class LoadMethodsMixin(object):
         return state, int64_to_8bytes(start_tid), end
 
 
-class BlobLoadMethodsMixin(LoadMethodsMixin):
-    # pylint:disable=abstract-method
+class BlobLoader(object):
 
-    blobhelper = None
+    STORAGE_METHODS = (
+        'loadBlob',
+        'openCommittedBlobFile',
+    )
+
+    def __init__(self, load_connection, blobhelper):
+        self.load_connection = load_connection
+        self.blobhelper = blobhelper
 
     @metricmethod
     def loadBlob(self, oid, serial):
@@ -235,8 +236,7 @@ class BlobLoadMethodsMixin(LoadMethodsMixin):
 
         Raises POSKeyError if the blobfile cannot be found.
         """
-        self._before_load()
-        cursor = self._load_cursor
+        cursor = self.load_connection.cursor
         return self.blobhelper.loadBlob(cursor, oid, serial)
 
     @metricmethod
@@ -252,7 +252,6 @@ class BlobLoadMethodsMixin(LoadMethodsMixin):
         make sure that data are available at least long enough for the
         file to be opened.
         """
-        self._before_load()
-        cursor = self._load_cursor
+        cursor = self.load_connection.cursor
         return self.blobhelper.openCommittedBlobFile(
             cursor, oid, serial, blob=blob)

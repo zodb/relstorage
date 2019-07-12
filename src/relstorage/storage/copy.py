@@ -32,7 +32,13 @@ from ZODB.POSException import POSKeyError
 
 logger = __import__('logging').getLogger(__name__)
 
-class CopyMethods(object):
+class Copy(object):
+
+    __slots__ = (
+        'blobhelper',
+        'tpc',
+        'restore',
+    )
 
     def __init__(self, blobhelper, tpc, restore):
         self.blobhelper = blobhelper

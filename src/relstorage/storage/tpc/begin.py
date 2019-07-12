@@ -34,10 +34,11 @@ from .vote import DatabaseLockedForTid
 from .vote import HistoryFree as HFVoteFactory
 from .vote import HistoryPreserving as HPVoteFactory
 
+from ..load import Loader
 
 class _BadFactory(object):
 
-    def enter(self):
+    def enter(self, storage):
         raise NotImplementedError
 
 class AbstractBegin(AbstractTPCState):
@@ -58,13 +59,15 @@ class AbstractBegin(AbstractTPCState):
         # The factory we call to produce a voting state. Must return
         # an object with an enter() method.
         'tpc_vote_factory',
+
+        'getTid',
     )
 
     _DEFAULT_TPC_VOTE_FACTORY = _BadFactory # type: Callable[..., AbstractTPCState]
 
-    def __init__(self, storage, transaction):
-        # type: (RelStorage, TransactionMetaData) -> None
-        super(AbstractBegin, self).__init__(storage, transaction)
+    def __init__(self, previous_state, transaction):
+        super(AbstractBegin, self).__init__(previous_state, transaction)
+        self.getTid = None
         self.max_stored_oid = 0 # type: int
         # We'll replace this later with the right type when it's needed.
         self.required_tids = {} # type: Dict[int, int]
@@ -80,18 +83,18 @@ class AbstractBegin(AbstractTPCState):
             ext = b""
         self.ude = user, desc, ext
 
-        storage._restart_store()
-        storage._cache.tpc_begin()
+        self.store_connection.restart()
+        self.cache.tpc_begin()
 
-        storage.blobhelper.begin()
+        self.blobhelper.begin()
 
-    def tpc_vote(self, transaction):
+    def tpc_vote(self, transaction, storage):
         if transaction is not self.transaction:
             raise StorageTransactionError(
                 "tpc_vote called with wrong transaction")
 
         next_phase = self.tpc_vote_factory(self)
-        next_phase.enter()
+        next_phase.enter(storage)
         return next_phase
 
     def store(self, oid, previous_tid, data, transaction):
@@ -99,9 +102,8 @@ class AbstractBegin(AbstractTPCState):
         if transaction is not self.transaction:
             raise StorageTransactionError(self, transaction)
 
-        #adapter = self._adapter
-        cache = self.storage._cache
-        cursor = self.storage._store_cursor
+        cache = self.cache
+        cursor = self.store_connection.cursor
         assert cursor is not None
         oid_int = bytes8_to_int64(oid)
         if previous_tid:
@@ -123,12 +125,15 @@ class AbstractBegin(AbstractTPCState):
         # COPY in postgres.
         cache.store_temp(oid_int, data, prev_tid_int)
 
-
     def checkCurrentSerialInTransaction(self, oid, required_tid, transaction):
         if transaction is not self.transaction:
             raise StorageTransactionError(self, transaction)
 
-        _, committed_tid = self.storage.load(oid)
+        if self.getTid is None:
+            loader = Loader(self.adapter, self.load_connection, self.store_connection, self.cache)
+            self.getTid = loader.getTid
+
+        committed_tid = self.getTid(oid)
         if committed_tid != required_tid:
             raise ReadConflictError(
                 oid=oid, serials=(committed_tid, required_tid))
@@ -176,13 +181,13 @@ class HistoryFree(AbstractBegin):
 
         # We delegate the actual operation to the adapter's packundo,
         # just like native pack
-        cursor = self.storage._store_cursor
+        cursor = self.store_connection.cursor
         assert cursor is not None
         # When this is done, we get a tpc_vote,
         # and a tpc_finish.
         # The interface doesn't specify a return value, so for testing
         # we return the count of rows deleted (should be 1 if successful)
-        return self.storage._adapter.packundo.deleteObject(cursor, oid, oldserial)
+        return self.adapter.packundo.deleteObject(cursor, oid, oldserial)
 
 class HistoryPreserving(AbstractBegin):
 
@@ -215,8 +220,8 @@ class HistoryPreserving(AbstractBegin):
         assert len(undo_tid) == 8
         undo_tid_int = bytes8_to_int64(undo_tid)
 
-        adapter = self.storage._adapter
-        cursor = self.storage._store_cursor
+        adapter = self.adapter
+        cursor = self.store_connection.cursor
         assert cursor is not None
 
         adapter.locker.hold_pack_lock(cursor)
@@ -227,8 +232,6 @@ class HistoryPreserving(AbstractBegin):
                 # The commit lock must be acquired after the pack lock
                 # because the database adapters also acquire in that
                 # order during packing.
-                adapter = self.storage._adapter
-                cursor = self.storage._store_cursor
                 tid_lock = DatabaseLockedForTid.lock_database_for_next_tid(
                     cursor, adapter, self.ude)
                 self.committing_tid_lock = tid_lock
@@ -243,8 +246,8 @@ class HistoryPreserving(AbstractBegin):
             # the new current objects.
             adapter.mover.update_current(cursor, self_tid_int)
 
-            self.storage.blobhelper.copy_undone(copied,
-                                                self.committing_tid_lock.tid)
+            self.blobhelper.copy_undone(copied,
+                                        self.committing_tid_lock.tid)
 
             if not self.undone_oids:
                 self.undone_oids = set()

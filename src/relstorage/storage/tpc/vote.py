@@ -118,7 +118,7 @@ class AbstractVote(AbstractTPCState):
         # If committing_tid is passed to this method, it means
         # the database has already been locked and the TID is
         # locked in.
-        super(AbstractVote, self).__init__(begin_state.storage, begin_state.transaction)
+        super(AbstractVote, self).__init__(begin_state, begin_state.transaction)
 
         self.required_tids = begin_state.required_tids or {} # type: Dict[int, int]
         self.max_stored_oid = begin_state.max_stored_oid
@@ -126,15 +126,15 @@ class AbstractVote(AbstractTPCState):
         self.committing_tid_lock = committing_tid_lock # type: Optional[DatabaseLockedForTid]
         self.invalidated_oids = set() # type: Set[bytes]
 
-    def enter(self):
-        resolved_in_vote = self.__vote()
+    def enter(self, storage):
+        resolved_in_vote = self.__vote(storage)
         self.invalidated_oids.update(resolved_in_vote)
 
     def _flush_temps_to_db(self, cursor):
-        mover = self.storage._adapter.mover
-        mover.store_temps(cursor, self.storage._cache.temp_objects)
+        mover = self.adapter.mover
+        mover.store_temps(cursor, self.cache.temp_objects)
 
-    def __vote(self):
+    def __vote(self, storage):
         """
         Prepare the transaction for final commit.
 
@@ -150,9 +150,9 @@ class AbstractVote(AbstractTPCState):
         """
         # It is assumed that self._lock.acquire was called before this
         # method was called.
-        cursor = self.storage._store_cursor
+        cursor = self.store_connection.cursor
         assert cursor is not None
-        adapter = self.storage._adapter
+        adapter = self.adapter
         locker = adapter.locker
         mover = adapter.mover
 
@@ -169,7 +169,7 @@ class AbstractVote(AbstractTPCState):
         # objects and we're just updating older objects, this will frequently
         # be true. At the very least, we need to update the storage's 'max_new_oid'
         # property to reduce the need for this.
-        if self.max_stored_oid > self.storage._max_new_oid:
+        if self.max_stored_oid > storage._max_new_oid:
             # First, set it in the database for everyone.
             next_oid = self.max_stored_oid + 1
             adapter.oidallocator.set_min_oid(cursor, next_oid)
@@ -179,7 +179,7 @@ class AbstractVote(AbstractTPCState):
             # NOTE: This is a non-transactional change to the storage's state.
             # That's OK, though, as the underlying sequence for OIDs we allocate
             # is also non-transactional.
-            self.storage._max_new_oid = next_oid
+            storage._max_new_oid = next_oid
 
         # Check the things registered by Connection.readCurrent(),
         # while at the same time taking out update locks on both those rows,
@@ -201,11 +201,11 @@ class AbstractVote(AbstractTPCState):
                     serials=(int64_to_8bytes(actual_tid_int),
                              int64_to_8bytes(expect_tid_int)))
 
-        invalidated_oids = self.__check_and_resolve_conflicts()
+        invalidated_oids = self.__check_and_resolve_conflicts(storage)
 
 
         blobs_must_be_moved_now = False
-        blobhelper = self.storage.blobhelper
+        blobhelper = self.blobhelper
         try:
             blobhelper.vote(None)
         except StorageTransactionError:
@@ -220,7 +220,7 @@ class AbstractVote(AbstractTPCState):
         # New storage protocol
         return invalidated_oids
 
-    def __check_and_resolve_conflicts(self):
+    def __check_and_resolve_conflicts(self, storage):
         """
         Either raises an `ConflictError`, or successfully resolves
         all conflicts.
@@ -232,10 +232,10 @@ class AbstractVote(AbstractTPCState):
         All the rows needed for detecting conflicts should be locked against
         concurrent changes.
         """
-        cursor = self.storage._store_cursor
-        adapter = self.storage._adapter
-        cache = self.storage._cache
-        tryToResolveConflict = self.storage.tryToResolveConflict
+        cursor = self.store_connection.cursor
+        adapter = self.adapter
+        cache = self.cache
+        tryToResolveConflict = storage.tryToResolveConflict
 
         # Detect conflicting changes.
         # Try to resolve the conflicts.
@@ -289,10 +289,10 @@ class AbstractVote(AbstractTPCState):
         # TODO: Figure out how to do as much as possible of this before holding
         # the commit lock. For example, use a dummy TID that we later replace.
         # (This has FK issues in HP dbs).
-        txn_has_blobs = self.storage.blobhelper.txn_has_blobs
+        txn_has_blobs = self.blobhelper.txn_has_blobs
 
-        cursor = self.storage._store_cursor
-        adapter = self.storage._adapter
+        cursor = self.store_connection.cursor
+        adapter = self.adapter
 
         try:
             adapter.mover.move_from_temp(cursor, committing_tid_int, txn_has_blobs)
@@ -312,8 +312,8 @@ class AbstractVote(AbstractTPCState):
         This should be done as late in the commit as possible, since
         it must hold an exclusive commit lock.
         """
-        adapter = self.storage._adapter
-        cursor = self.storage._store_cursor
+        adapter = self.adapter
+        cursor = self.store_connection.cursor
         lock = DatabaseLockedForTid.lock_database_for_next_tid(cursor, adapter, self.ude)
         self.committing_tid_lock = lock
         return lock
@@ -331,7 +331,7 @@ class AbstractVote(AbstractTPCState):
         # a shared blob dir.
         if self.prepared_txn:
             # Already done.
-            assert self.committing_tid_lock
+            assert self.committing_tid_lock, (self.prepared_txn, self.committing_tid_lock)
             return
 
         if not self.committing_tid_lock:
@@ -342,13 +342,13 @@ class AbstractVote(AbstractTPCState):
         # TODO: If this is a non-shared blobhelper, then we don't need to do
         # this with the database commit lock held.
         # Under gevent, this doesn't yield, though.
-        blobhelper_meth = getattr(self.storage.blobhelper, method)
+        blobhelper_meth = getattr(self.blobhelper, method)
         blobhelper_meth(self.committing_tid_lock.tid)
 
-        cursor = self.storage._store_cursor
-        self.storage._adapter.mover.update_current(cursor, committing_tid_int)
-        conn = self.storage._store_conn
-        self.prepared_txn = self.storage._adapter.txncontrol.commit_phase1(
+        cursor = self.store_connection.cursor
+        self.adapter.mover.update_current(cursor, committing_tid_int)
+        conn = self.store_connection.connection
+        self.prepared_txn = self.adapter.txncontrol.commit_phase1(
             conn, cursor, committing_tid_int)
 
     def tpc_finish(self, transaction, f=None):
@@ -359,7 +359,7 @@ class AbstractVote(AbstractTPCState):
         # TODO: Move most of this into the Finish class/module.
         self.__lock_and_move()
         assert self.committing_tid_lock is not None, self
-        self.storage.blobhelper.finish(self.committing_tid_lock.tid)
+        self.blobhelper.finish(self.committing_tid_lock.tid)
 
         try:
             if f is not None:

@@ -58,16 +58,15 @@ class Restore(object):
         # This is an extension we use for copyTransactionsFrom;
         # it is not part of the IStorage API.
         assert committing_tid is not None
-        self.wrapping = begin_state
+        self.wrapping = begin_state # type: AbstractTPCState
 
         # hold the commit lock and add the transaction now.
         # This will prevent anyone else from modifying rows
         # other than this transaction. We currently avoid the temp tables,
         # though, so if we do multiple things in a restore transaction,
         # we could still wind up with locking issues (I think?)
-        storage = begin_state.storage
-        adapter = storage._adapter
-        cursor = storage._store_cursor
+        adapter = begin_state.adapter
+        cursor = begin_state.store_connection.cursor
         packed = (status == 'p')
         try:
             committing_tid_lock = DatabaseLockedForTid.lock_database_for_given_tid(
@@ -75,12 +74,12 @@ class Restore(object):
                 cursor, adapter, begin_state.ude
             )
         except:
-            storage._drop_store_connection()
+            begin_state.store_connection.drop()
             raise
 
         # This is now only used for restore()
         self.batcher = batcher = adapter.mover.make_batcher(
-            storage._store_cursor,
+            cursor,
             self.batcher_row_limit)
 
         for name in self._COPY_ATTRS:
@@ -113,8 +112,8 @@ class Restore(object):
         if transaction is not state.transaction:
             raise StorageTransactionError(self, transaction)
 
-        adapter = state.storage._adapter
-        cursor = state.storage._store_cursor
+        adapter = state.adapter
+        cursor = state.store_connection.cursor
         assert cursor is not None
         oid_int = bytes8_to_int64(oid)
         tid_int = bytes8_to_int64(this_tid)
@@ -139,8 +138,8 @@ class Restore(object):
         # (we'd prefer having DEFERRABLE INITIALLY DEFERRED FK
         # constraints, but as-of 8.0 MySQL doesn't support that.)
         self.batcher.flush()
-        cursor = state.storage._store_cursor
-        state.storage.blobhelper.restoreBlob(cursor, oid, serial, blobfilename)
+        cursor = state.store_connection.cursor
+        state.blobhelper.restoreBlob(cursor, oid, serial, blobfilename)
 
 
 class _VoteFactoryMixin(object):

@@ -247,6 +247,13 @@ class GenericRelStorageTests(
     ):
 
     def setUp(self):
+        # ZODB.tests.util.TestCase likes to change directories
+        # It tries to change back in tearDown(), but if there's an error,
+        # we may not get to tearDown. addCleanup() always runs, though.
+        # do that as the very last thing that happens (except for subclasses, they
+        # could add things first)
+        self.addCleanup(os.chdir, os.getcwd())
+
         super(GenericRelStorageTests, self).setUp()
         # PackableStorage is particularly bad about leaving things
         # dangling. For example, if the ClientThread runs into
@@ -1037,8 +1044,8 @@ class GenericRelStorageTests(
         from ZODB.interfaces import IMVCCAfterCompletionStorage
         self._storage = self.make_storage(revert_when_stale=False)
 
-        with mock.patch.object(self._storage,
-                               '_rollback_load_connection') as rb:
+        with mock.patch.object(self._storage._load_connection,
+                               'rollback') as rb:
             self._storage.afterCompletion()
             rb.assert_called_with()
 

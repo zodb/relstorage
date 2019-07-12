@@ -22,6 +22,7 @@ This keeps the main code uncluttered.
 from __future__ import absolute_import
 from __future__ import print_function
 
+import warnings
 
 class LegacyMethodsMixin(object):
 
@@ -49,3 +50,38 @@ class LegacyMethodsMixin(object):
     def modifiedInVersion(self, oid):
         # pylint:disable=unused-argument
         return ''
+
+    @property
+    def _load_cursor(self):
+        warnings.warn("_load_cursor is deprecated", FutureWarning, stacklevel=2)
+        return self._load_connection.cursor
+
+    @property
+    def _load_conn(self):
+        warnings.warn("_load_conn is deprecated", FutureWarning, stacklevel=2)
+        return self._load_connection.connection
+
+    @property
+    def _load_transaction_open(self):
+        warnings.warn("_load_transaction_open is deprecated", FutureWarning, stacklevel=2)
+        return bool(self._load_connection)
+
+    @property
+    def _store_cursor(self):
+        warnings.warn("_store_cursor is deprecated", FutureWarning, stacklevel=2)
+        return self._store_connection.cursor
+
+    @property
+    def _store_conn(self):
+        warnings.warn("_store_conn is deprecated", FutureWarning, stacklevel=2)
+        return self._store_connection.connection
+
+    def _drop_load_connection(self):
+        warnings.warn("_drop_load_connection is deprecated", FutureWarning, stacklevel=2)
+        self._load_connection.drop()
+
+
+    @property
+    def fshelper(self):
+        warnings.warn("fshelper is deprecated", FutureWarning, stacklevel=2)
+        return self.blobhelper.fshelper

@@ -26,9 +26,20 @@ from perfmetrics import metricmethod
 
 logger = __import__('logging').getLogger(__name__)
 
-class StoreMethodsMixin(object):
+class Storer(object):
 
-    _tpc_phase = None
+    STORAGE_METHODS = (
+        'store',
+        'restore',
+        'deleteObject',
+    )
+
+    __slots__ = (
+        'tpc_phase',
+    )
+
+    def __init__(self, tpc_phase):
+        self.tpc_phase = tpc_phase
 
     @Metric(method=True, rate=0.1)
     def store(self, oid, previous_tid, data, version, transaction):
@@ -36,7 +47,7 @@ class StoreMethodsMixin(object):
         assert not version, "Versions aren't supported"
 
         # If we get here and we're read-only, our phase will report that.
-        self._tpc_phase.store(oid, previous_tid, data, transaction)
+        self.tpc_phase.store(oid, previous_tid, data, transaction)
 
     def restore(self, oid, serial, data, version, prev_txn, transaction):
         # Like store(), but used for importing transactions.  See the
@@ -46,22 +57,36 @@ class StoreMethodsMixin(object):
         assert not version, "Versions aren't supported"
         # If we get here and we're read-only, our phase will report that.
 
-        self._tpc_phase.restore(oid, serial, data, prev_txn, transaction)
+        self.tpc_phase.restore(oid, serial, data, prev_txn, transaction)
 
     def deleteObject(self, oid, oldserial, transaction):
         # This method is only expected to be called from zc.zodbdgc
         # currently.
-        return self._tpc_phase.deleteObject(oid, oldserial, transaction)
+        return self.tpc_phase.deleteObject(oid, oldserial, transaction)
 
 
-class BlobStoreMethodsMixin(StoreMethodsMixin):
+class BlobStorer(object):
 
-    blobhelper = None
-    _store_cursor = None
+    STORAGE_METHODS = (
+        'storeBlob',
+        'restoreBlob',
+    )
+
+    __slots__ = (
+        'store',
+        'blobhelper',
+        'store_connection',
+    )
+
+    def __init__(self, store, blobhelper, store_connection):
+        self.store = store
+        self.blobhelper = blobhelper
+        self.store_connection = store_connection
 
     @metricmethod
     def storeBlob(self, oid, serial, data, blobfilename, version, txn):
-        """Stores data that has a BLOB attached.
+        """
+        Stores data that has a BLOB attached.
 
         The blobfilename argument names a file containing blob data.
         The storage will take ownership of the file and will rename it
@@ -72,8 +97,8 @@ class BlobStoreMethodsMixin(StoreMethodsMixin):
         """
         assert not version
         # We used to flush the batcher here, for some reason.
-        cursor = self._store_cursor
-        self.blobhelper.storeBlob(cursor, self.store,
+        cursor = self.store_connection.cursor
+        self.blobhelper.storeBlob(cursor, self.store.store,
                                   oid, serial, data, blobfilename, version, txn)
 
     def restoreBlob(self, oid, serial, data, blobfilename, prev_txn, txn):
@@ -82,4 +107,4 @@ class BlobStoreMethodsMixin(StoreMethodsMixin):
 
         See the restore and storeBlob methods.
         """
-        self._tpc_phase.restoreBlob(oid, serial, data, blobfilename, prev_txn, txn)
+        self.store.tpc_phase.restoreBlob(oid, serial, data, blobfilename, prev_txn, txn)

@@ -24,28 +24,36 @@ from __future__ import print_function
 from ZODB.POSException import ReadOnlyError
 from ZODB.utils import p64 as int64_to_8bytes
 
-class OIDs(object):
+class AbstractOIDs(object):
+
+    def stale(self, ex):
+        raise NotImplementedError
+
+    def no_longer_stale(self):
+        return self
+
+    def new_oid(self, commit_in_progress):
+        raise NotImplementedError
+
+class OIDs(AbstractOIDs):
 
     __slots__ = (
         'preallocated_oids',
         'max_new_oid',
         'oidallocator',
-        '_with_store',
+        'store_connection',
     )
 
-    def __init__(self, oidallocator, with_store):
+    def __init__(self, oidallocator, store_connection):
         self.preallocated_oids = None
         self.max_new_oid = 0
         self.oidallocator = oidallocator
-        self._with_store = with_store
+        self.store_connection = store_connection # type: StoreConnection
 
-    def stale(self, e):
-        return StaleOIDs(e, self)
+    def stale(self, ex):
+        return StaleOIDs(ex, self)
 
-    def no_longer_stale(self):
-        return self
-
-    def new_oid(self):
+    def new_oid(self, commit_in_progress):
         # Prior to ZODB 5.1.2, this method was actually called on the
         # storage object of the DB, not the instance storage object of
         # a Connection. This meant that this method (and the oid
@@ -66,7 +74,10 @@ class OIDs(object):
         # Thus we may or may not have a store connection already open;
         # if we do, we can't restart it or drop it.
         if not self.preallocated_oids:
-            self.preallocated_oids = self._with_store(self.__new_oid_callback)
+            self.preallocated_oids = self.store_connection.call(
+                self.__new_oid_callback,
+                can_reconnect=not commit_in_progress
+            )
 
         oid_int = self.preallocated_oids.pop()
         self.max_new_oid = max(self.max_new_oid, oid_int)
@@ -76,18 +87,18 @@ class OIDs(object):
         return self.oidallocator.new_oids(store_cursor)
 
 
-class ReadOnlyOIDs(object):
+class ReadOnlyOIDs(AbstractOIDs):
 
-    def stale(self, e):
-        return StaleOIDs(e, self)
+    def stale(self, ex):
+        return StaleOIDs(ex, self)
 
     def no_longer_stale(self):
         return self
 
-    def new_oid(self):
+    def new_oid(self, commit_in_progress):
         raise ReadOnlyError
 
-class StaleOIDs(object):
+class StaleOIDs(AbstractOIDs):
 
     __slots__ = (
         'stale_error',
@@ -100,3 +111,9 @@ class StaleOIDs(object):
 
     def no_longer_stale(self):
         return self.previous
+
+    def stale(self, ex):
+        return self
+
+    def new_oid(self, commit_in_progress):
+        raise self.stale_error

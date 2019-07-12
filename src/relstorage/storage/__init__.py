@@ -22,6 +22,7 @@ import logging
 import sys
 import weakref
 
+
 import ZODB.interfaces
 
 from perfmetrics import metricmethod
@@ -49,14 +50,21 @@ from relstorage.options import Options
 
 from .transaction_iterator import TransactionIterator
 
-from .copy import CopyMethods
-from .history import HistoryMethodsMixin
+from .copy import Copy
+from .history import History
 from .legacy import LegacyMethodsMixin
-from .load import BlobLoadMethodsMixin
+from .load import Loader
+from .load import BlobLoader
 from .oid import OIDs
 from .oid import ReadOnlyOIDs
 from .pack import PackMethodsMixin
-from .store import BlobStoreMethodsMixin
+from .store import Storer
+from .store import BlobStorer
+
+from .connections import EventedConnectionWrapper
+from .connections import LoadConnection
+from .connections import StoreConnection
+from .connections import ClosedConnection
 
 from .tpc import ABORT_EARLY
 from .tpc import NotInTransaction
@@ -72,6 +80,52 @@ log = logging.getLogger("relstorage")
 
 # pylint:disable=too-many-lines
 
+def _copy_methods(storage, delegate):
+    # type: (RelStorage, Any) -> None
+
+    # TODO: Drive both this, and the stale methods,
+    # off decorators applied to the methods.
+    for method_name in delegate.STORAGE_METHODS:
+        method = getattr(delegate, method_name)
+        setattr(storage, method_name, method)
+
+class _TPCProxy(object):
+    # TODO: This part here could still use some refactoring; this is a
+    # reference cycle, but it is also ugly. Maybe, since these methods
+    # (in Storer and History) are only available between tpc_begin()
+    # and tpc_vote(), we should swizzle them out at tpc_begin time?
+    # Construct the Storer/History objects at that time?
+    __slots__ = ('_storage',)
+
+    def __init__(self, storage):
+        self._storage = storage
+
+    def __getattr__(self, name):
+        return getattr(self._storage._tpc_phase, name)
+
+class _StaleMethodWrapper(object):
+
+    __slots__ = (
+        'orig_method',
+        'stale_error',
+    )
+
+    def __init__(self, orig_method, stale_error):
+        self.orig_method = orig_method
+        self.stale_error = stale_error
+
+    def __call__(self, *args, **kwargs):
+        raise self.stale_error
+
+    def no_longer_stale(self):
+        return self.orig_method
+
+class _ClosedCache(object):
+    __slots__ = ()
+
+    def close(self):
+        "does nothing"
+
 @implementer(ZODB.interfaces.IStorage,
              ZODB.interfaces.IMVCCStorage,
              ZODB.interfaces.IMultiCommitStorage,
@@ -83,33 +137,17 @@ log = logging.getLogger("relstorage")
              ZODB.interfaces.IStorageUndoable,
              # XXX: BlobStorage is conditional, should be dynamic
              ZODB.interfaces.IBlobStorage,
+             # XXX: This extends IBlobStorage.
              ZODB.interfaces.IBlobStorageRestoreable,
              ZODB.interfaces.IMVCCAfterCompletionStorage,
              ZODB.interfaces.ReadVerifyingStorage,)
 class RelStorage(LegacyMethodsMixin,
-                 HistoryMethodsMixin,
                  PackMethodsMixin,
-                 BlobLoadMethodsMixin,
-                 BlobStoreMethodsMixin,
                  ConflictResolution.ConflictResolvingStorage):
     """Storage to a relational database, based on invalidation polling"""
 
     # pylint:disable=too-many-public-methods,too-many-instance-attributes,too-many-ancestors
     _is_read_only = False
-
-    # load_conn and load_cursor are open most of the time.
-    _load_conn = None
-    _load_cursor = None
-
-    # _load_transaction_open is:
-    # - an empty string when the load transaction is not open.
-    # - 'active' when the load connection has begun a read-only transaction.
-    _load_transaction_open = ''
-
-    # store_conn and store_cursor are open during commit,
-    # but not necessarily open at other times.
-    _store_conn = None
-    _store_cursor = None
 
     # _ltid is the ID of the last transaction committed by this instance.
     _ltid = z64
@@ -131,25 +169,35 @@ class RelStorage(LegacyMethodsMixin,
     # If the blob directory is set, blobhelper is a BlobHelper.
     blobhelper = NoBlobHelper()
 
-    # _stale_error is None most of the time.  It's a ReadConflictError
-    # when the database connection is stale (due to async replication).
-    # (pylint likes to complain about raising None even if we have a 'not None'
-    # check).
-    #
-    # TODO: Move the loading methods to state objects too, like the TPC methods;
-    # that way we can have a Stale state for them.
-    # pylint:disable=raising-bad-type
-    _stale_error = None
-
     # The state of committing that we're in. Certain operations are
     # only available in certain states; certain information is only needed
     # in certain states.
     _tpc_phase = None
 
+    _oids = ReadOnlyOIDs()
+
+    # Methods that should check for and raise the ReadConflictError
+    # when we detect a stale connection.
+    _STALE_SENSITIVE_METHODS = (
+        'getTid',
+        'history',
+        'load',
+        'loadBefore',
+        # But NOT loadSerial
+        'prefetch',
+        'undoLog',
+    )
+
+    # Attributes in our dictionary that shouldn't have stale()/no_longer_stale()
+    # called on them. At this writing, it's just the type object.
+    _STALE_IGNORED_ATTRS = (
+        '_tpc_begin_factory',
+    )
+
     def __init__(self, adapter, name=None, create=None,
                  options=None, cache=None, blobhelper=None,
                  **kwoptions):
-        # pylint:disable=too-many-branches
+        # pylint:disable=too-many-branches, too-many-statements
         self._adapter = adapter
 
         if options is None:
@@ -194,9 +242,11 @@ class RelStorage(LegacyMethodsMixin,
         # to the same database.
         self._instances = []
 
-        # _preallocated_oids contains OIDs provided by the database
-        # but not yet used.
-        self._preallocated_oids = []
+
+        self._load_connection = EventedConnectionWrapper(LoadConnection(self._adapter.connmanager))
+        self._load_connection.activated = self.__on_load_activated
+        self._load_connection.rolledback = self.__no_longer_stale
+        self._store_connection = StoreConnection(self._adapter.connmanager)
 
         if cache is not None:
             self._cache = cache
@@ -204,17 +254,17 @@ class RelStorage(LegacyMethodsMixin,
             prefix = options.cache_prefix
             if not prefix:
                 # Use the database name as the cache prefix.
-                self._open_load_connection()
-                prefix = adapter.schema.get_database_name(self._load_cursor)
-                self._drop_load_connection()
+                with self._load_connection.isolated_connection() as cur:
+                    prefix = adapter.schema.get_database_name(cur)
+
                 prefix = prefix.replace(' ', '_')
+                options.cache_prefix = prefix
             self._cache = StorageCache(adapter, options, prefix)
 
         # Creating the storage cache may have loaded cache files, and if so,
         # we have a previous tid state.
         if self._cache.current_tid is not None:
             self._prev_polled_tid = self._cache.current_tid
-
 
         if blobhelper is not None:
             self.blobhelper = blobhelper
@@ -226,11 +276,24 @@ class RelStorage(LegacyMethodsMixin,
         if hasattr(self._adapter.packundo, 'deleteObject'):
             interface.alsoProvides(self, ZODB.interfaces.IExternalGC)
 
-        self._tpc_phase = NotInTransaction(self)
-        if self._is_read_only:
-            self._oids = ReadOnlyOIDs()
-        else:
-            self._oids = OIDs(self._adapter.oidallocator, self.__with_store)
+        self._tpc_phase = NotInTransaction.from_storage(self)
+        if not self._is_read_only:
+            self._oids = OIDs(self._adapter.oidallocator, self._store_connection)
+
+        loader = Loader(self._adapter, self._load_connection, self._store_connection, self._cache)
+        _copy_methods(self, loader)
+
+        loader = BlobLoader(self._load_connection, self.blobhelper)
+        _copy_methods(self, loader)
+
+        storer = Storer(_TPCProxy(self))
+        _copy_methods(self, storer)
+
+        storer = BlobStorer(storer, self.blobhelper, self._store_connection)
+        _copy_methods(self, storer)
+
+        history = History(self._adapter, self._load_connection, _TPCProxy(self))
+        _copy_methods(self, history)
 
     def __repr__(self):
         return "<%s at %x keep_history=%s phase=%r cache=%r>" % (
@@ -276,132 +339,14 @@ class RelStorage(LegacyMethodsMixin,
         x.release = i.release
         return x
 
-    @property
-    def fshelper(self):
-        """Used in tests"""
-        return self.blobhelper.fshelper
-
-    def _open_load_connection(self):
-        """Open the load connection to the database.  Return nothing."""
-        conn, cursor = self._adapter.connmanager.open_for_load()
-        self._drop_load_connection()
-        self._load_conn, self._load_cursor = conn, cursor
-        self._load_transaction_open = 'active'
-
-    def _drop_load_connection(self):
-        """Unconditionally drop the load connection"""
-        conn, cursor = self._load_conn, self._load_cursor
-        self._load_conn, self._load_cursor = None, None
-        self._adapter.connmanager.rollback_and_close(conn, cursor)
-        self._load_transaction_open = ''
-
-    def _rollback_load_connection(self):
-        if self._load_conn is not None:
-            try:
-                self._adapter.connmanager.rollback(self._load_conn, self._load_cursor)
-            except:
-                self._drop_load_connection()
-                raise
-            finally:
-                self._tpc_phase = self._tpc_phase.no_longer_stale()
-                self._oids = self._oids.no_longer_stale()
-            self._load_transaction_open = ''
-
-    def _restart_load_and_call(self, f, *args, **kw):
-        """Restart the load connection and call a function.
-
-        The first two function parameters are the load connection and cursor.
-        """
-        if self._load_cursor is None:
-            assert self._load_conn is None
-            need_restart = False
-            self._open_load_connection()
-        else:
-            need_restart = True
-        try:
-            if need_restart:
-                self._adapter.connmanager.restart_load(
-                    self._load_conn, self._load_cursor)
-                self._load_transaction_open = 'active'
-            return f(self._load_conn, self._load_cursor, *args, **kw)
-        except self._adapter.connmanager.disconnected_exceptions as e:
-            log.warning("Reconnecting load_conn: %s", e)
-            self._drop_load_connection()
-            try:
-                self._open_load_connection()
-            except:
-                log.exception("Reconnect failed.")
-                raise
-            log.info("Reconnected.")
-            return f(self._load_conn, self._load_cursor, *args, **kw)
-
-    def _open_store_connection(self):
-        """Open the store connection to the database.  Return nothing."""
-        assert self._store_conn is None
-        conn, cursor = self._adapter.connmanager.open_for_store()
-        self._drop_store_connection()
-        self._store_conn, self._store_cursor = conn, cursor
-
-    def _drop_store_connection(self):
-        """Unconditionally drop the store connection"""
-        conn, cursor = self._store_conn, self._store_cursor
-        self._store_conn, self._store_cursor = None, None
-        self._adapter.connmanager.rollback_and_close(conn, cursor)
-
-    def __restart_store_callback(self, store_conn, store_cursor, fresh_connection):
-        if fresh_connection:
-            return
-        self._adapter.connmanager.restart_store(store_conn, store_cursor)
-
-    def _restart_store(self):
-        """
-        Restart the store connection, creating a new connection if
-        needed.
-        """
-        self.__with_store(self.__restart_store_callback)
-
-    def __with_store(self, f):
-        """
-        Call a function with the store cursor.
-
-        :param callable f: Function to call ``f(store_conn, store_cursor, fresh_connection)``.
-            The function may be called up to twice, if the *fresh_connection* is false
-            on the first call and a disconnected exception is raised.
-        """
-        # If transaction commit is in progress, it's too late
-        # to reconnect.
-        can_reconnect = not self._tpc_phase
-        fresh_connection = False
-        if self._store_cursor is None:
-            assert self._store_conn is None
-            self._open_store_connection()
-            fresh_connection = True
-            # If we just connected no point in trying again.
-            can_reconnect = False
-
-        try:
-            return f(self._store_conn, self._store_cursor, fresh_connection)
-        except self._adapter.connmanager.disconnected_exceptions as e:
-            if not can_reconnect:
-                raise
-            log.warning("Reconnecting store_conn: %s", e)
-            self._drop_store_connection()
-            try:
-                self._open_store_connection()
-            except:
-                log.exception("Reconnect failed.")
-                raise
-            log.info("Reconnected.")
-            return f(self._store_conn, self._store_cursor, True)
-
     def zap_all(self, **kwargs):
         """Clear all objects and transactions out of the database.
 
         Used by the test suite and the ZODBConvert script.
         """
         self._adapter.schema.zap_all(**kwargs)
-        self._drop_load_connection()
-        self._drop_store_connection()
+        self._load_connection.drop()
+        self._store_connection.drop()
         self._cache.zap_all()
 
     def release(self):
@@ -415,11 +360,15 @@ class RelStorage(LegacyMethodsMixin,
         should still be :meth:`close` (but note that might have global affects
         on other instances of the same base object).
         """
-        self._drop_load_connection()
-        self._drop_store_connection()
+        self._load_connection.drop()
+        self._store_connection.drop()
+
         self._cache.release()
+        self._cache = _ClosedCache()
         self._tpc_phase = None
         self._oids = None
+        self._load_connection = ClosedConnection()
+        self._store_connection = ClosedConnection()
 
     def close(self):
         """Close the storage and all instances."""
@@ -427,14 +376,17 @@ class RelStorage(LegacyMethodsMixin,
             return
 
         self._closed = True
-        self._drop_load_connection()
-        self._drop_store_connection()
+        self._load_connection.drop()
+        self._store_connection.drop()
+        self._load_connection = ClosedConnection()
+        self._store_connection = ClosedConnection()
+
         self.blobhelper.close()
         for wref in self._instances:
             instance = wref()
             if instance is not None:
                 instance.close()
-        self._instances = []
+        self._instances = ()
         self._cache.close()
         self._tpc_phase = None
         self._oids = None
@@ -482,13 +434,13 @@ class RelStorage(LegacyMethodsMixin,
     @metricmethod
     def tpc_begin(self, transaction, tid=None, status=' '):
         try:
-            self._tpc_phase = self._tpc_phase.tpc_begin(transaction)
+            self._tpc_phase = self._tpc_phase.tpc_begin(transaction, self._tpc_begin_factory)
         except:
             # Could be a database (connection) error, could be a programming
             # bug. Either way, we're fine to roll everything back and hope
             # for the best on a retry.
-            self._drop_load_connection()
-            self._drop_store_connection()
+            self._load_connection.drop()
+            self._store_connection.drop()
             raise
 
         if tid is not None:
@@ -504,7 +456,7 @@ class RelStorage(LegacyMethodsMixin,
         # the object has changed during the commit process, due to
         # conflict resolution or undo.
         try:
-            next_phase = self._tpc_phase.tpc_vote(transaction)
+            next_phase = self._tpc_phase.tpc_vote(transaction, self)
         except:
             if ABORT_EARLY:
                 self._tpc_phase = self.tpc_abort(transaction)
@@ -537,20 +489,27 @@ class RelStorage(LegacyMethodsMixin,
         # have to roll back the load connection. The store connection
         # is completed during normal write-transaction commit or
         # abort.
-        self._rollback_load_connection()
+
+        # The next time we use the load connection, it will need to poll
+        # and will call our _on_load_activated.
+
+        # TODO: Why doesn't this use connmanager.restart_load()?
+        # They both rollback; the difference is that restart_load checks for replicas,
+        # and calls any hooks needed.
+        self._load_connection.rollback()
 
     def lastTransaction(self):
         if self._ltid == z64 and self._prev_polled_tid is None:
             # We haven't committed *or* polled for transactions,
             # so our MVCC state is "floating".
             # Read directly from the database to get the latest value,
-            self._before_load() # connect if needed
-            return int64_to_8bytes(self._adapter.txncontrol.get_tid(self._load_cursor))
+            return int64_to_8bytes(self._adapter.txncontrol.get_tid(self._load_connection.cursor))
 
         return max(self._ltid, int64_to_8bytes(self._prev_polled_tid or 0))
 
     def new_oid(self):
-        return self._oids.new_oid()
+        # If we're committing, we can't restart the connection.
+        return self._oids.new_oid(bool(self._tpc_phase))
 
     def iterator(self, start=None, stop=None):
         # XXX: This is broken for purposes of copyTransactionsFrom() because
@@ -558,24 +517,80 @@ class RelStorage(LegacyMethodsMixin,
         return TransactionIterator(self._adapter, start, stop)
 
     def sync(self, force=True): # pylint:disable=unused-argument
-        """Updates to a current view of the database.
+        """
+        Updates to a current view of the database.
 
         This is implemented by rolling back the relational database
         transaction.
         """
-        if not self._load_transaction_open:
-            return
 
         try:
-            self._rollback_load_connection()
+            self._load_connection.rollback()
         except self._adapter.connmanager.disconnected_exceptions:
-            # disconnected. Well, the rollback happens automatically in that case.
-            self._drop_load_connection()
+            # Disconnected. Well, the rollback happens automatically
+            # in that case. No big deal, ignore it.
+            #
+            # However, if we happened to be in the middle of committing and were
+            # asked to sync (XXX: why would we?) then that's probably a problem that
+            # needs to be handled and the commit rolled back too.
             if self._tpc_phase:
                 raise
 
-    def _restart_load_and_poll(self):
-        """Call _restart_load, poll for changes, and update self._cache.
+    def __stale(self, stale_error):
+        # Allow GC to do its thing with the locals
+        clear_frames(sys.exc_info()[2])
+        replacements = {}
+        deletes = []
+        my_ns = vars(self)
+        for k, v in my_ns.items():
+            if k in self._STALE_IGNORED_ATTRS:
+                continue
+            if callable(getattr(v, 'stale', None)):
+                new_v = v.stale(stale_error)
+            elif k in self._STALE_SENSITIVE_METHODS:
+                # We'd like to add a `stale` attribute to the methods, but
+                # `<method>` is an immutable object, and we don't want to pay the
+                # cost of an extra function call wrapper, since these are
+                # common methods.
+                new_v = _StaleMethodWrapper(v, stale_error)
+            else:
+                continue
+
+            if new_v is not None:
+                replacements[k] = new_v
+            else:
+                # None is a signal to delete the attribute.
+                deletes.append(k)
+        my_ns.update(replacements)
+        for k in deletes:
+            delattr(self, k)
+
+    def __no_longer_stale(self):
+        # TODO: Optimize this. It's called at the end of every
+        # transaction, and most won't be stale. We should put an
+        # object in the dict that does nothing.
+        my_ns = vars(self)
+
+        replacements = {
+            k: v.no_longer_stale()
+            for k, v in my_ns.items()
+            if k not in self._STALE_IGNORED_ATTRS
+            and callable(getattr(v, 'no_longer_stale', None))
+        }
+
+        my_ns.update(replacements)
+
+        # This function is called whenever the load connection is
+        # rolled back, which happens at the end of every transaction,
+        # so we overwrite it with a function that does nothing.
+    __no_longer_stale.no_longer_stale = lambda: (lambda: None)
+    __no_longer_stale.stale = lambda _: None
+
+    def __on_load_activated(self, conn, cursor):
+        """
+        Poll for invalidations, update our cache.
+
+        Move objects into our out of the stale state as appropriate.
         """
         # Ignore changes made by the last transaction committed
         # by this connection.
@@ -587,31 +602,30 @@ class RelStorage(LegacyMethodsMixin,
 
         # get a list of changed OIDs and the most recent tid
         try:
-            changes, new_polled_tid = self._restart_load_and_call(
-                self._adapter.poller.poll_invalidations, prev, ignore_tid)
+            changes, new_polled_tid = self._adapter.poller.poll_invalidations(
+                conn, cursor,
+                prev, ignore_tid
+            )
         except ReadConflictError as e:
             # The database connection is stale, but postpone this
             # error until the application tries to read or write something.
             # XXX: We probably need to drop our pickle cache? At least the local
             # delta_after* maps/current_tid/checkpoints?
             log.error("ReadConflictError from polling invalidations; %s", e)
-            # Allow GC to do its thing with the locals
-            clear_frames(sys.exc_info()[2])
-            self._stale_error = e
-            self._tpc_phase = self._tpc_phase.stale(e)
-            self._oids = self._oids.stale(e)
+            self.__stale(e)
             return (), prev
 
-        self._stale_error = None
-        self._tpc_phase = self._tpc_phase.no_longer_stale()
-        self._oids = self._oids.no_longer_stale()
+        self.__no_longer_stale()
 
         # Inform the cache of the changes.
         # It's not good if this raises a CacheConsistencyError, that should
         # be a fresh connection. It's not clear that we can take any steps to
         # recover that the cache hasn't already taken.
         self._cache.after_poll(
-            self._load_cursor, prev, new_polled_tid, changes)
+            cursor,
+            prev,
+            new_polled_tid, changes
+        )
 
         return changes, new_polled_tid
 
@@ -625,7 +639,9 @@ class RelStorage(LegacyMethodsMixin,
         if self._closed:
             return {}
 
-        changes, new_polled_tid = self._restart_load_and_poll()
+        changes, new_polled_tid = self._load_connection.restart_and_call(
+            self.__on_load_activated
+        )
 
         self._prev_polled_tid = new_polled_tid
 
@@ -636,7 +652,6 @@ class RelStorage(LegacyMethodsMixin,
             oids = {int64_to_8bytes(oid_int): 1 for oid_int, _tid_int in changes}
         return oids
 
-
     def temporaryDirectory(self):
         """Return a directory that should be used for uncommitted blob data.
 
@@ -645,7 +660,8 @@ class RelStorage(LegacyMethodsMixin,
         return self.blobhelper.temporaryDirectory()
 
     def copyTransactionsFrom(self, other):
-        CopyMethods(self.blobhelper, self, self).copyTransactionsFrom(other)
+        Copy(self.blobhelper, self, self).copyTransactionsFrom(other)
+
 
 def _zlibstorage_new_instance(self):
     new_self = type(self).__new__(type(self))

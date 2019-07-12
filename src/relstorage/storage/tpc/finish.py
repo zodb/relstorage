@@ -28,14 +28,14 @@ def Finish(vote_state):
     """
     # It is assumed that self._lock.acquire was called before this
     # method was called.
-    vote_state.storage._rollback_load_connection()
+    vote_state.load_connection.rollback()
     txn = vote_state.prepared_txn
     assert txn is not None
-    vote_state.storage._adapter.txncontrol.commit_phase2(
-        vote_state.storage._store_conn,
-        vote_state.storage._store_cursor,
+    vote_state.adapter.txncontrol.commit_phase2(
+        vote_state.store_connection.connection,
+        vote_state.store_connection.cursor,
         txn)
-    vote_state.committing_tid_lock.release_commit_lock(vote_state.storage._store_cursor)
-    vote_state.storage._cache.after_tpc_finish(vote_state.committing_tid_lock.tid)
+    vote_state.committing_tid_lock.release_commit_lock(vote_state.store_connection.cursor)
+    vote_state.cache.after_tpc_finish(vote_state.committing_tid_lock.tid)
 
-    return NotInTransaction(vote_state.storage)
+    return NotInTransaction(vote_state)

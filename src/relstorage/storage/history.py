@@ -32,11 +32,31 @@ from ZODB.utils import u64 as bytes8_to_int64
 from relstorage._compat import base64_encodebytes
 from relstorage._compat import loads
 
-class HistoryMethodsMixin(object):
+class History(object):
     """
     Provides the implementation of the unique methods
     defined in :class:`ZODB.interfaces.IStorageUndoable`.
     """
+
+    STORAGE_METHODS = (
+        'undoInfo',
+        'supportsUndo',
+        'supportsTransactionalUndo',
+        'undoLog',
+        'undo',
+        'history',
+    )
+
+    __slots__ = (
+        'adapter',
+        'load_connection',
+        'tpc_phase',
+    )
+
+    def __init__(self, adapter, load_connection, tpc_phase):
+        self.adapter = adapter
+        self.load_connection = load_connection
+        self.tpc_phase = tpc_phase
 
     def undoInfo(self, *args, **kwargs):
         # UndoLogCompatible provides the
@@ -46,20 +66,17 @@ class HistoryMethodsMixin(object):
         return log.undoInfo(*args, **kwargs)
 
     def supportsUndo(self):
-        return self._adapter.keep_history
+        return self.adapter.keep_history
 
-    def supportsTransactionalUndo(self):
-        return self._adapter.keep_history
+    supportsTransactionalUndo = supportsUndo
 
     def undoLog(self, first=0, last=-20, filter=None):
         # pylint:disable=too-many-locals
-        if self._stale_error is not None:
-            raise self._stale_error
         if last < 0:
             last = first - last
 
         # use a private connection to ensure the most current results
-        adapter = self._adapter
+        adapter = self.adapter
         conn, cursor = adapter.connmanager.open()
         try:
             rows = adapter.dbiter.iter_transactions(cursor)
@@ -116,18 +133,14 @@ class HistoryMethodsMixin(object):
         #
         # During undo, we get a tpc_begin(), then a bunch of undo() from
         # ZODB.DB.TransactionalUndo.commit(), then tpc_vote() and tpc_finish().
-        self._tpc_phase.undo(transaction_id, transaction)
+        self.tpc_phase.undo(transaction_id, transaction)
 
     def history(self, oid, version=None, size=1, filter=None):
         # pylint:disable=unused-argument,too-many-locals
-        if self._stale_error is not None:
-            raise self._stale_error
-
-        self._before_load()
-        cursor = self._load_cursor
+        cursor = self.load_connection.cursor
         oid_int = bytes8_to_int64(oid)
         try:
-            rows = self._adapter.dbiter.iter_object_history(
+            rows = self.adapter.dbiter.iter_object_history(
                 cursor, oid_int)
         except KeyError:
             raise POSKeyError(oid)
