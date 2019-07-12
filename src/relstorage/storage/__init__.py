@@ -19,45 +19,45 @@ from __future__ import absolute_import
 from __future__ import print_function
 
 import logging
-import os
 import sys
-import tempfile
-import time
 import weakref
 
 import ZODB.interfaces
-from perfmetrics import Metric
+
 from perfmetrics import metricmethod
-from persistent.timestamp import TimeStamp
+
 from ZODB import ConflictResolution
-from ZODB.blob import is_blob_record
+
 from ZODB.mvccadapter import HistoricalStorageAdapter
 
-from ZODB.POSException import POSKeyError
 from ZODB.POSException import ReadConflictError
-from ZODB.POSException import ReadOnlyError
 
-from ZODB.UndoLogCompatible import UndoLogCompatible
 from ZODB.utils import p64 as int64_to_8bytes
 from ZODB.utils import u64 as bytes8_to_int64
 from ZODB.utils import z64
 from zope import interface
 from zope.interface import implementer
 
-
-from relstorage._compat import base64_encodebytes
-from relstorage._compat import loads
-from relstorage._compat import OID_SET_TYPE
 from relstorage._compat import clear_frames
 
 
 from relstorage.blobhelper import BlobHelper
 from relstorage.blobhelper import NoBlobHelper
 from relstorage.cache import StorageCache
-from relstorage.cache.interfaces import CacheConsistencyError
+
 from relstorage.options import Options
 
 from .transaction_iterator import TransactionIterator
+
+from .copy import CopyMethods
+from .history import HistoryMethodsMixin
+from .legacy import LegacyMethodsMixin
+from .load import BlobLoadMethodsMixin
+from .oid import OIDs
+from .oid import ReadOnlyOIDs
+from .pack import PackMethodsMixin
+from .store import BlobStoreMethodsMixin
+
 from .tpc import ABORT_EARLY
 from .tpc import NotInTransaction
 from .tpc.begin import HistoryFree
@@ -77,17 +77,24 @@ log = logging.getLogger("relstorage")
              ZODB.interfaces.IMultiCommitStorage,
              ZODB.interfaces.IStorageRestoreable,
              ZODB.interfaces.IStorageIteration,
+             # Perhaps this should be conditional on whether
+             # supportsUndo actually returns True, as documented
+             # in this interface.
              ZODB.interfaces.IStorageUndoable,
              # XXX: BlobStorage is conditional, should be dynamic
              ZODB.interfaces.IBlobStorage,
              ZODB.interfaces.IBlobStorageRestoreable,
              ZODB.interfaces.IMVCCAfterCompletionStorage,
              ZODB.interfaces.ReadVerifyingStorage,)
-class RelStorage(UndoLogCompatible,
+class RelStorage(LegacyMethodsMixin,
+                 HistoryMethodsMixin,
+                 PackMethodsMixin,
+                 BlobLoadMethodsMixin,
+                 BlobStoreMethodsMixin,
                  ConflictResolution.ConflictResolvingStorage):
     """Storage to a relational database, based on invalidation polling"""
 
-    # pylint:disable=too-many-public-methods,too-many-instance-attributes
+    # pylint:disable=too-many-public-methods,too-many-instance-attributes,too-many-ancestors
     _is_read_only = False
 
     # load_conn and load_cursor are open most of the time.
@@ -220,6 +227,10 @@ class RelStorage(UndoLogCompatible,
             interface.alsoProvides(self, ZODB.interfaces.IExternalGC)
 
         self._tpc_phase = NotInTransaction(self)
+        if self._is_read_only:
+            self._oids = ReadOnlyOIDs()
+        else:
+            self._oids = OIDs(self._adapter.oidallocator, self.__with_store)
 
     def __repr__(self):
         return "<%s at %x keep_history=%s phase=%r cache=%r>" % (
@@ -293,6 +304,7 @@ class RelStorage(UndoLogCompatible,
                 raise
             finally:
                 self._tpc_phase = self._tpc_phase.no_longer_stale()
+                self._oids = self._oids.no_longer_stale()
             self._load_transaction_open = ''
 
     def _restart_load_and_call(self, f, *args, **kw):
@@ -407,6 +419,7 @@ class RelStorage(UndoLogCompatible,
         self._drop_store_connection()
         self._cache.release()
         self._tpc_phase = None
+        self._oids = None
 
     def close(self):
         """Close the storage and all instances."""
@@ -424,6 +437,7 @@ class RelStorage(UndoLogCompatible,
         self._instances = []
         self._cache.close()
         self._tpc_phase = None
+        self._oids = None
 
     def __len__(self):
         return self._adapter.stats.get_object_count()
@@ -462,206 +476,8 @@ class RelStorage(UndoLogCompatible,
     def isReadOnly(self):
         return self._is_read_only
 
-    def _log_keyerror(self, oid_int, reason):
-        """Log just before raising POSKeyError in load().
-
-        KeyErrors in load() are generally not supposed to happen,
-        so this is a good place to gather information.
-        """
-        cursor = self._load_cursor
-        adapter = self._adapter
-        logfunc = log.warning
-        msg = ["POSKeyError on oid %d: %s" % (oid_int, reason)]
-
-        if adapter.keep_history:
-            tid = adapter.txncontrol.get_tid(cursor)
-            if not tid:
-                # This happens when initializing a new database or
-                # after packing, so it's not a warning.
-                logfunc = log.debug
-                msg.append("No previous transactions exist")
-            else:
-                msg.append("Current transaction is %d" % tid)
-
-            tids = []
-            try:
-                rows = adapter.dbiter.iter_object_history(cursor, oid_int)
-            except KeyError:
-                # The object has no history, at least from the point of view
-                # of the current database load connection.
-                pass
-            else:
-                for row in rows:
-                    tids.append(row[0])
-                    if len(tids) >= 10:
-                        break
-            msg.append("Recent object tids: %s" % repr(tids))
-
-        else:
-            if oid_int == 0:
-                # This happens when initializing a new database or
-                # after packing, so it's usually not a warning.
-                logfunc = log.debug
-            msg.append("history-free adapter")
-
-        logfunc('; '.join(msg))
-
-    def _before_load(self):
-        if not self._load_transaction_open:
-            self._restart_load_and_poll()
-        assert self._load_transaction_open == 'active'
-
-    def __load_using_method(self, meth, argument):
-        if self._stale_error is not None:
-            raise self._stale_error
-
-        self._before_load()
-        cursor = self._load_cursor
-        try:
-            return meth(cursor, argument)
-        except CacheConsistencyError:
-            log.exception("Cache consistency error; restarting load")
-            self._drop_load_connection()
-            raise
-
-    @Metric(method=True, rate=0.1)
-    def load(self, oid, version=''):
-        # pylint:disable=unused-argument
-
-        oid_int = bytes8_to_int64(oid)
-
-        state, tid_int = self.__load_using_method(self._cache.load, oid_int)
-
-        if tid_int is None:
-            self._log_keyerror(oid_int, "no tid found")
-            raise POSKeyError(oid)
-
-        if not state:
-            # This can happen if something attempts to load
-            # an object whose creation has been undone.
-            self._log_keyerror(oid_int, "creation has been undone")
-            raise POSKeyError(oid)
-        return state, int64_to_8bytes(tid_int)
-
-    def prefetch(self, oids):
-        prefetch = self._cache.prefetch
-        oid_ints = [bytes8_to_int64(oid) for oid in oids]
-        try:
-            self.__load_using_method(prefetch, oid_ints)
-        except Exception: # pylint:disable=broad-except
-            # This could raise self._stale_error, or
-            # CacheConsistencyError. Both of those mean that regular loads
-            # may fail too, but we don't know what our transaction state is
-            # at this time, so we don't want to raise it to the caller.
-            log.exception("Failed to prefetch")
-
-    def getTid(self, oid):
-        _state, serial = self.load(oid)
-        return serial
-
-    def loadEx(self, oid, version=''):
-        # Since we don't support versions, just tack the empty version
-        # string onto load's result.
-        return self.load(oid, version) + ("",)
-
-    @Metric(method=True, rate=0.1)
-    def loadSerial(self, oid, serial):
-        """Load a specific revision of an object"""
-        oid_int = bytes8_to_int64(oid)
-        tid_int = bytes8_to_int64(serial)
-
-        # If we've got this state cached exactly,
-        # use it. No need to poll or anything like that first;
-        # polling is unlikely to get us the state we want.
-        # If the data happens to have been removed from the database,
-        # due to a pack, this won't detect it if it was already cached
-        # and the pack happened somewhere else. This method is
-        # only used for conflict resolution, though, and we
-        # shouldn't be able to get to that point if the root revision
-        # went missing, right? Packing periodically takes the same locks we
-        # want to take for committing.
-        state = self._cache.loadSerial(oid_int, tid_int)
-        if state:
-            return state
-
-        self._before_load()
-        state = self._adapter.mover.load_revision(
-            self._load_cursor, oid_int, tid_int)
-        if state is None and self._store_cursor is not None:
-            # Allow loading data from later transactions
-            # for conflict resolution.
-            state = self._adapter.mover.load_revision(
-                self._store_cursor, oid_int, tid_int)
-
-        if state is None or not state:
-            raise POSKeyError(oid)
-        return state
-
-    @Metric(method=True, rate=0.1)
-    def loadBefore(self, oid, tid):
-        """Return the most recent revision of oid before tid committed."""
-        if self._stale_error is not None:
-            raise self._stale_error
-
-        oid_int = bytes8_to_int64(oid)
-
-        if self._store_cursor is not None:
-            # Allow loading data from later transactions
-            # for conflict resolution.
-            cursor = self._store_cursor
-        else:
-            self._before_load()
-            cursor = self._load_cursor
-        if not self._adapter.mover.exists(cursor, oid_int):
-            raise POSKeyError(oid)
-
-        state, start_tid = self._adapter.mover.load_before(
-            cursor, oid_int, bytes8_to_int64(tid))
-
-        if start_tid is None:
-            return None
-
-        if state is None:
-            # This can happen if something attempts to load
-            # an object whose creation has been undone, see load()
-            # This change fixes the test in
-            # TransactionalUndoStorage.checkUndoCreationBranch1
-            # self._log_keyerror doesn't work here, only in certain states.
-            raise POSKeyError(oid)
-        end_int = self._adapter.mover.get_object_tid_after(
-            cursor, oid_int, start_tid)
-        if end_int is not None:
-            end = int64_to_8bytes(end_int)
-        else:
-            end = None
-
-        return state, int64_to_8bytes(start_tid), end
-
-    @Metric(method=True, rate=0.1)
-    def store(self, oid, previous_tid, data, version, transaction):
-        # Called by Connection.commit(), after tpc_begin has been called.
-        assert not version, "Versions aren't supported"
-
-        # If we get here and we're read-only, our phase will report that.
-        self._tpc_phase.store(oid, previous_tid, data, transaction)
-
-    def restore(self, oid, serial, data, version, prev_txn, transaction):
-        # Like store(), but used for importing transactions.  See the
-        # comments in FileStorage.restore().  The prev_txn optimization
-        # is not used.
-        # pylint:disable=unused-argument
-        assert not version, "Versions aren't supported"
-        # If we get here and we're read-only, our phase will report that.
-
-        self._tpc_phase.restore(oid, serial, data, prev_txn, transaction)
-
     def checkCurrentSerialInTransaction(self, oid, serial, transaction):
         self._tpc_phase.checkCurrentSerialInTransaction(oid, serial, transaction)
-
-    def deleteObject(self, oid, oldserial, transaction):
-        # This method is only expected to be called from zc.zodbdgc
-        # currently.
-        return self._tpc_phase.deleteObject(oid, oldserial, transaction)
 
     @metricmethod
     def tpc_begin(self, transaction, tid=None, status=' '):
@@ -680,12 +496,6 @@ class RelStorage(UndoLogCompatible,
             # The allowed actions are carefully prescribed.
             # This argument is specified by IStorageRestoreable
             self._tpc_phase = Restore(self._tpc_phase, tid, status)
-
-    def tpc_transaction(self):
-        return self._tpc_phase.transaction
-
-    # For tests
-    _transaction = property(tpc_transaction)
 
     @metricmethod
     def tpc_vote(self, transaction):
@@ -740,272 +550,7 @@ class RelStorage(UndoLogCompatible,
         return max(self._ltid, int64_to_8bytes(self._prev_polled_tid or 0))
 
     def new_oid(self):
-        if self._stale_error is not None:
-            raise self._stale_error
-        if self._is_read_only:
-            raise ReadOnlyError()
-
-        # Prior to ZODB 5.1.2, this method was actually called on the
-        # storage object of the DB, not the instance storage object of
-        # a Connection. This meant that this method (and the oid
-        # cache) was shared among all connections using a database and
-        # was called outside of a transaction (starting its own
-        # long-running transaction).
-
-        # The DB.new_oid() method still exists, but shouldn't be used;
-        # if it is, we'll open a database connection and transaction that's
-        # going to sit there idle, possibly holding row locks. That's bad.
-        # But we don't take any counter measures.
-
-        # Connection.new_oid() can be called at just about any time
-        # thanks to the Connection.add() API, which clients can use
-        # at any time (typically before commit begins, but it's possible to
-        # add() objects from a ``__getstate__`` method).
-        #
-        # Thus we may or may not have a store connection already open;
-        # if we do, we can't restart it or drop it.
-        if not self._preallocated_oids:
-            self._preallocated_oids = self.__with_store(self.__new_oid_callback)
-
-        oid_int = self._preallocated_oids.pop()
-        self._max_new_oid = max(self._max_new_oid, oid_int)
-        return int64_to_8bytes(oid_int)
-
-    def __new_oid_callback(self, _store_conn, store_cursor, _fresh_connection):
-        return self._adapter.oidallocator.new_oids(store_cursor)
-
-    def cleanup(self):
-        pass
-
-    def supportsVersions(self):
-        return False
-
-    def modifiedInVersion(self, oid):
-        # pylint:disable=unused-argument
-        return ''
-
-    def supportsUndo(self):
-        return self._adapter.keep_history
-
-    def supportsTransactionalUndo(self):
-        return self._adapter.keep_history
-
-    @metricmethod
-    def undoLog(self, first=0, last=-20, filter=None):
-        # pylint:disable=too-many-locals
-        if self._stale_error is not None:
-            raise self._stale_error
-        if last < 0:
-            last = first - last
-
-        # use a private connection to ensure the most current results
-        adapter = self._adapter
-        conn, cursor = adapter.connmanager.open()
-        try:
-            rows = adapter.dbiter.iter_transactions(cursor)
-            i = 0
-            res = []
-            for tid_int, user, desc, ext in rows:
-                tid = int64_to_8bytes(tid_int)
-                # Note that user and desc are schizophrenic. The transaction
-                # interface specifies that they are a Python str, *probably*
-                # meaning bytes. But code in the wild and the ZODB test suite
-                # sets them as native strings, meaning unicode on Py3. OTOH, the
-                # test suite checks that this method *returns* them as bytes!
-                # This is largely cleaned up with transaction 2.0/ZODB 5, where the storage
-                # interface is defined in terms of bytes only.
-                d = {
-                    'id': base64_encodebytes(tid)[:-1],  # pylint:disable=deprecated-method
-                    'time': TimeStamp(tid).timeTime(),
-                    'user_name':  user or b'',
-                    'description': desc or b'',
-                }
-                if ext:
-                    d.update(loads(ext))
-
-                if filter is None or filter(d):
-                    if i >= first:
-                        res.append(d)
-                    i += 1
-                    if i >= last:
-                        break
-            return res
-
-        finally:
-            adapter.connmanager.close(conn, cursor)
-
-    @metricmethod
-    def history(self, oid, version=None, size=1, filter=None):
-        # pylint:disable=unused-argument,too-many-locals
-        if self._stale_error is not None:
-            raise self._stale_error
-
-        self._before_load()
-        cursor = self._load_cursor
-        oid_int = bytes8_to_int64(oid)
-        try:
-            rows = self._adapter.dbiter.iter_object_history(
-                cursor, oid_int)
-        except KeyError:
-            raise POSKeyError(oid)
-
-        res = []
-        for tid_int, username, description, extension, length in rows:
-            tid = int64_to_8bytes(tid_int)
-            if extension:
-                d = loads(extension)
-            else:
-                d = {}
-            d.update({
-                "time": TimeStamp(tid).timeTime(),
-                "user_name": username or b'',
-                "description": description or b'',
-                "tid": tid,
-                "version": '',
-                "size": length,
-            })
-            if filter is None or filter(d):
-                res.append(d)
-                if size is not None and len(res) >= size:
-                    break
-        return res
-
-    @metricmethod
-    def undo(self, transaction_id, transaction):
-        """
-        Undo a transaction identified by transaction_id.
-
-        transaction_id is the base 64 encoding of an 8 byte tid. Undo
-        by writing new data that reverses the action taken by the
-        transaction.
-        """
-        # This is called directly from code in DB.py on a new instance
-        # (created either by new_instance() or a special
-        # undo_instance()). That new instance is never asked to load
-        # anything, or poll invalidations, so our storage cache is ineffective
-        # (unless we had loaded persistent state files)
-        #
-        # TODO: Implement 'undo_instance' to make this clear.
-        #
-        # A regular Connection going through two-phase commit will
-        # call tpc_begin(), do a bunch of store() from its commit(),
-        # then tpc_vote(), tpc_finish().
-        #
-        # During undo, we get a tpc_begin(), then a bunch of undo() from
-        # ZODB.DB.TransactionalUndo.commit(), then tpc_vote() and tpc_finish().
-        self._tpc_phase.undo(transaction_id, transaction)
-
-    @metricmethod
-    def pack(self, t, referencesf, prepack_only=False, skip_prepack=False,
-             sleep=None):
-        """Pack the storage. Holds the pack lock for the duration."""
-        # pylint:disable=too-many-branches,unused-argument
-        # 'sleep' is a legacy argument, no longer used.
-        if self._is_read_only:
-            raise ReadOnlyError()
-
-        prepack_only = prepack_only or self._options.pack_prepack_only
-        skip_prepack = skip_prepack or self._options.pack_skip_prepack
-
-        if prepack_only and skip_prepack:
-            raise ValueError('Pick either prepack_only or skip_prepack.')
-
-        def get_references(state):
-            """Return an iterable of the set of OIDs the given state refers to."""
-            if not state:
-                return ()
-
-            return {bytes8_to_int64(oid) for oid in referencesf(state)}
-
-        # Use a private connection (lock_conn and lock_cursor) to
-        # hold the pack lock.  Have the adapter open temporary
-        # connections to do the actual work, allowing the adapter
-        # to use special transaction modes for packing.
-        adapter = self._adapter
-        lock_conn, lock_cursor = adapter.connmanager.open()
-        try:
-            adapter.locker.hold_pack_lock(lock_cursor)
-            try:
-                if not skip_prepack:
-                    # Find the latest commit before or at the pack time.
-                    pack_point = TimeStamp(*time.gmtime(t)[:5] + (t % 60,)).raw()
-                    tid_int = adapter.packundo.choose_pack_transaction(
-                        bytes8_to_int64(pack_point))
-                    if tid_int is None:
-                        log.debug("all transactions before %s have already "
-                                  "been packed", time.ctime(t))
-                        return
-
-                    if prepack_only:
-                        log.info("pack: beginning pre-pack")
-
-                    s = time.ctime(TimeStamp(int64_to_8bytes(tid_int)).timeTime())
-                    log.info("pack: analyzing transactions committed "
-                             "%s or before", s)
-
-                    # In pre_pack, the adapter fills tables with
-                    # information about what to pack.  The adapter
-                    # must not actually pack anything yet.
-                    adapter.packundo.pre_pack(tid_int, get_references)
-                else:
-                    # Need to determine the tid_int from the pack_object table
-                    tid_int = adapter.packundo._find_pack_tid()
-
-                if prepack_only:
-                    log.info("pack: pre-pack complete")
-                else:
-                    # Now pack. We'll get a callback for every oid/tid removed,
-                    # and we'll use that to keep caches consistent.
-                    # In the common case of using zodbpack, this will rewrite the
-                    # persistent cache on the machine running zodbpack.
-                    oids_removed = OID_SET_TYPE()
-                    def invalidate_cached_data(
-                            oid_int, tid_int,
-                            cache=self._cache,
-                            blob_invalidate=self.blobhelper.after_pack,
-                            keep_history=self._options.keep_history,
-                            oids=oids_removed
-                    ):
-                        # pylint:disable=dangerous-default-value
-                        # Flush the data from the local/global cache. It's quite likely that
-                        # a fair amount if it is now useless. We almost certainly want to
-                        # establish new checkpoints. The alternative is to clear out
-                        # data that we know we removed in the pack; we *do* keep track
-                        # of that, it's what's passed to the `packed_func`, so we could probably
-                        # piggyback on that in some fashion.
-                        #
-                        # Having consistent cache data became especially important
-                        # when loadSerial() began using the cache: Since that function
-                        # is allowed to return non-transactional data, it wouldn't be
-                        # great for it to return data that is no longer in the DB,
-                        # only the cache. I *think* this is only an issue in the tests,
-                        # that use the storage in a non-conventional way after packing,
-                        # by directly verifying that loadSerial() doesn't return data,
-                        # when in a real use we could only get there through detecting a conflict
-                        # in the database at commit time, with locks involved.
-                        cache.invalidate(oid_int, tid_int)
-                        # Clean up blob files. This currently does nothing
-                        # if we're a blob cache, but it could.
-                        blob_invalidate(oid_int, tid_int)
-                        # If we're not keeping history, we need to remove all the cached
-                        # data for a particular OID, no matter what key it was under:
-                        # there was only one way to access it.
-                        if not keep_history:
-                            oids.add(oid_int)
-
-                    adapter.packundo.pack(tid_int,
-                                          packed_func=invalidate_cached_data)
-                    self._cache.invalidate_all(oids_removed)
-            finally:
-                adapter.locker.release_pack_lock(lock_cursor)
-        finally:
-            adapter.connmanager.rollback_and_close(lock_conn, lock_cursor)
-        self.sync()
-
-        self._pack_finished()
-
-    def _pack_finished(self):
-        "Hook for testing."
+        return self._oids.new_oid()
 
     def iterator(self, start=None, stop=None):
         # XXX: This is broken for purposes of copyTransactionsFrom() because
@@ -1054,10 +599,12 @@ class RelStorage(UndoLogCompatible,
             clear_frames(sys.exc_info()[2])
             self._stale_error = e
             self._tpc_phase = self._tpc_phase.stale(e)
+            self._oids = self._oids.stale(e)
             return (), prev
 
         self._stale_error = None
         self._tpc_phase = self._tpc_phase.no_longer_stale()
+        self._oids = self._oids.no_longer_stale()
 
         # Inform the cache of the changes.
         # It's not good if this raises a CacheConsistencyError, that should
@@ -1089,35 +636,6 @@ class RelStorage(UndoLogCompatible,
             oids = {int64_to_8bytes(oid_int): 1 for oid_int, _tid_int in changes}
         return oids
 
-    @metricmethod
-    def loadBlob(self, oid, serial):
-        """Return the filename of the Blob data for this OID and serial.
-
-        Returns a filename.
-
-        Raises POSKeyError if the blobfile cannot be found.
-        """
-        self._before_load()
-        cursor = self._load_cursor
-        return self.blobhelper.loadBlob(cursor, oid, serial)
-
-    @metricmethod
-    def openCommittedBlobFile(self, oid, serial, blob=None):
-        """
-        Return a file for committed data for the given object id and serial
-
-        If a blob is provided, then a BlobFile object is returned,
-        otherwise, an ordinary file is returned. In either case, the
-        file is opened for binary reading.
-
-        This method is used to allow storages that cache blob data to
-        make sure that data are available at least long enough for the
-        file to be opened.
-        """
-        self._before_load()
-        cursor = self._load_cursor
-        return self.blobhelper.openCommittedBlobFile(
-            cursor, oid, serial, blob=blob)
 
     def temporaryDirectory(self):
         """Return a directory that should be used for uncommitted blob data.
@@ -1126,90 +644,8 @@ class RelStorage(UndoLogCompatible,
         """
         return self.blobhelper.temporaryDirectory()
 
-    @metricmethod
-    def storeBlob(self, oid, serial, data, blobfilename, version, txn):
-        """Stores data that has a BLOB attached.
-
-        The blobfilename argument names a file containing blob data.
-        The storage will take ownership of the file and will rename it
-        (or copy and remove it) immediately, or at transaction-commit
-        time.  The file must not be open.
-
-        Returns nothing.
-        """
-        assert not version
-        # We used to flush the batcher here, for some reason.
-        cursor = self._store_cursor
-        self.blobhelper.storeBlob(cursor, self.store,
-                                  oid, serial, data, blobfilename, version, txn)
-
-    def restoreBlob(self, oid, serial, data, blobfilename, prev_txn, txn):
-        """
-        Write blob data already committed in a separate database
-
-        See the restore and storeBlob methods.
-        """
-        self._tpc_phase.restoreBlob(oid, serial, data, blobfilename, prev_txn, txn)
-
     def copyTransactionsFrom(self, other):
-        # pylint:disable=too-many-locals
-        # adapted from ZODB.blob.BlobStorageMixin
-        begin_time = time.time()
-        txnum = 0
-        total_size = 0
-        log.info("Counting the transactions to copy.")
-        num_txns = 0
-        for _ in other.iterator():
-            num_txns += 1
-        log.info("Copying %d transactions", num_txns)
-
-        for trans in other.iterator():
-            txnum += 1
-            num_txn_records = 0
-
-            self.tpc_begin(trans, trans.tid, trans.status)
-            for record in trans:
-                blobfile = None
-                if is_blob_record(record.data):
-                    try:
-                        blobfile = other.openCommittedBlobFile(
-                            record.oid, record.tid)
-                    except POSKeyError:
-                        pass
-                if blobfile is not None:
-                    fd, name = tempfile.mkstemp(
-                        suffix='.tmp',
-                        dir=self.blobhelper.temporaryDirectory())
-                    os.close(fd)
-                    with open(name, 'wb') as target:
-                        ZODB.utils.cp(blobfile, target)
-                    blobfile.close()
-                    self.restoreBlob(record.oid, record.tid, record.data,
-                                     name, record.data_txn, trans)
-                else:
-                    self.restore(record.oid, record.tid, record.data,
-                                 '', record.data_txn, trans)
-                num_txn_records += 1
-                if record.data:
-                    total_size += len(record.data)
-            self.tpc_vote(trans)
-            self.tpc_finish(trans)
-
-            pct_complete = '%1.2f%%' % (txnum * 100.0 / num_txns)
-            elapsed = time.time() - begin_time
-            if elapsed:
-                rate = total_size / 1e6 / elapsed
-            else:
-                rate = 0.0
-            rate_str = '%1.3f' % rate
-            log.info("Copied tid %d,%5d records | %6s MB/s (%6d/%6d,%7s)",
-                     bytes8_to_int64(trans.tid), num_txn_records, rate_str,
-                     txnum, num_txns, pct_complete)
-
-        elapsed = time.time() - begin_time
-        log.info(
-            "All %d transactions copied successfully in %4.1f minutes.",
-            txnum, elapsed / 60.0)
+        CopyMethods(self.blobhelper, self, self).copyTransactionsFrom(other)
 
 def _zlibstorage_new_instance(self):
     new_self = type(self).__new__(type(self))

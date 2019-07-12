@@ -48,9 +48,10 @@ class DatabaseIterator(object):
 class HistoryPreservingDatabaseIterator(DatabaseIterator):
 
     def _transaction_iterator(self, cursor):
-        """Iterate over a list of transactions returned from the database.
+        """
+        Iterate over a list of transactions returned from the database.
 
-        Each row begins with (tid, username, description, extension)
+        Each row begins with ``(tid, username, description, extension)``
         and may have other columns.
         """
         # Iterating the cursor itself in a generator is not safe if
@@ -125,9 +126,7 @@ class HistoryPreservingDatabaseIterator(DatabaseIterator):
             raise KeyError(oid)
 
         stmt = """
-            SELECT tid, username, description, extension, state_size
-            """
-        stmt += """
+        SELECT tid, username, description, extension, state_size
         FROM transaction
             JOIN object_state USING (tid)
         WHERE zoid = %(oid)s
@@ -174,11 +173,12 @@ class HistoryFreeDatabaseIterator(DatabaseIterator):
         return ((tid, '', '', '', True) for (tid,) in cursor)
 
     def iter_object_history(self, cursor, oid):
-        """Iterate over an object's history.
+        """
+        Iterate over an object's history.
 
         Raises KeyError if the object does not exist.
-        Yields (tid, username, description, extension, pickle_size)
-        for each modification.
+        Yields a single row,
+        ``(tid, username, description, extension, pickle_size)``
         """
         stmt = """
         SELECT tid, state_size
@@ -186,4 +186,8 @@ class HistoryFreeDatabaseIterator(DatabaseIterator):
         WHERE zoid = %(oid)s
         """
         self.runner.run_script_stmt(cursor, stmt, {'oid': oid})
-        return ((tid, '', '', '', size) for (tid, size) in cursor)
+        rows = cursor.fetchall()
+        if not rows:
+            raise KeyError(oid)
+        assert len(rows) == 1
+        return [(tid, '', '', b'', size) for (tid, size) in rows]
