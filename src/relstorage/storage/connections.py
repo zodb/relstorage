@@ -257,3 +257,5 @@ class ClosedConnection(object):
 
     def drop(self):
         "Does nothing."
+
+    rollback = drop
