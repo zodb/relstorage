@@ -18,6 +18,7 @@ from __future__ import print_function
 # pylint:disable=too-many-ancestors,abstract-method,too-many-public-methods,too-many-lines
 # pylint:disable=too-many-statements,too-many-locals
 import contextlib
+import functools
 import os
 import random
 import shutil
@@ -60,7 +61,6 @@ from . import TestCase
 from . import StorageCreatingMixin
 from .persistentcache import PersistentCacheStorageTests
 from .test_zodbconvert import FSZODBConvertTests
-
 
 class RelStorageTestBase(StorageCreatingMixin,
                          TestCase,
@@ -146,42 +146,56 @@ class ThreadWrapper(object):
         # acquired is the one that releases; check_tid_ordering_w_commit
         # deliberately spreads these actions across threads (for same reason).
         self.__commit_lock = threading.Lock()
-        self.__read_lock = threading.Lock()
+        rl = self.__read_lock = threading.Lock()
         self.__txn = None
+
+        def make_locked(name):
+            meth = getattr(storage, name)
+            @functools.wraps(meth)
+            def func(*args, **kwargs):
+                with rl:
+                    return meth(*args, **kwargs)
+            return func
+
+        for name in (
+                'loadBefore',
+                'load',
+                'store',
+                'getTid',
+                'lastTransaction',
+        ):
+            setattr(self, name, make_locked(name))
 
     def __getattr__(self, name):
         return getattr(self.__storage, name)
 
-    def loadBefore(self, *args, **kwargs):
-        with self.__read_lock:
-            return self.__storage.loadBefore(*args, **kwargs)
-
-    def load(self, *args, **kwargs):
-        with self.__read_lock:
-            return self.__storage.load(*args, **kwargs)
-
     def tpc_begin(self, txn):
         self.__commit_lock.acquire()
+        self.__read_lock.acquire()
         assert not self.__txn
         self.__txn = txn
-
+        self.__read_lock.release()
         return self.__storage.tpc_begin(txn)
 
     def tpc_finish(self, txn, callback=None):
+        self.__read_lock.acquire()
         assert txn is self.__txn
         try:
             return self.__storage.tpc_finish(txn, callback)
         finally:
             self.__txn = None
             self.__commit_lock.release()
+            self.__read_lock.release()
 
     def tpc_abort(self, txn):
-        assert txn is self.__txn
+        self.__read_lock.acquire()
+        assert txn is self.__txn, (txn, self.__txn)
         try:
             return self.__storage.tpc_abort(txn)
         finally:
             self.__txn = None
             self.__commit_lock.release()
+            self.__read_lock.release()
 
 class UsesThreadsOnASingleStorageMixin(object):
     # These tests attempt to use threads on a single storage object.
@@ -1193,19 +1207,6 @@ class GenericRelStorageTests(
 
         storage1.close()
         storage2.close()
-
-    def check_tid_ordering_w_commit(self):
-        # The implementation in BasicStorage.BasicStorage is
-        # racy: it uses multiple threads to access a single
-        # RelStorage instance, which doesn't make sense.
-        #
-        # Even when we wrap this with a ThreadWrapper,
-        # it doesn't prevent the races (indeed, we had the races
-        # when RelStorage itself natively used thread locks).
-        try:
-            super(GenericRelStorageTests, self).check_tid_ordering_w_commit()
-        except AssertionError as e:
-            raise unittest.SkipTest("Test hit race condition", e)
 
 
 class AbstractRSZodbConvertTests(StorageCreatingMixin,
