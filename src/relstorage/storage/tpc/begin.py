@@ -23,6 +23,7 @@ from ZODB.POSException import StorageTransactionError
 from ZODB.utils import p64 as int64_to_8bytes
 from ZODB.utils import u64 as bytes8_to_int64
 
+
 from relstorage._compat import base64_decodebytes
 from relstorage._compat import dumps
 from relstorage._compat import OID_TID_MAP_TYPE
@@ -33,8 +34,8 @@ from .vote import DatabaseLockedForTid
 from .vote import HistoryFree as HFVoteFactory
 from .vote import HistoryPreserving as HPVoteFactory
 
+
 class _BadFactory(object):
-    "Marker."
 
     def enter(self):
         raise NotImplementedError
@@ -59,48 +60,39 @@ class AbstractBegin(AbstractTPCState):
         'tpc_vote_factory',
     )
 
-    _DEFAULT_TPC_VOTE_FACTORY = _BadFactory
+    _DEFAULT_TPC_VOTE_FACTORY = _BadFactory # type: Callable[..., AbstractTPCState]
 
     def __init__(self, storage, transaction):
+        # type: (RelStorage, TransactionMetaData) -> None
         super(AbstractBegin, self).__init__(storage, transaction)
-        self.ude = None
-        self.max_stored_oid = 0
-        self.required_tids = ()
-        self.tpc_vote_factory = self._DEFAULT_TPC_VOTE_FACTORY
+        self.max_stored_oid = 0 # type: int
+        # We'll replace this later with the right type when it's needed.
+        self.required_tids = {} # type: Dict[int, int]
+        self.tpc_vote_factory = self._DEFAULT_TPC_VOTE_FACTORY # type: ignore
 
-        storage._lock.acquire()
-        try:
-            storage._lock.release()
-            storage._commit_lock.acquire()
-            storage._lock.acquire()
-            storage.transaction = transaction
+        user = to_utf8(transaction.user)
+        desc = to_utf8(transaction.description)
+        ext = transaction.extension
 
-            user = to_utf8(transaction.user)
-            desc = to_utf8(transaction.description)
-            ext = transaction.extension
+        if ext:
+            ext = dumps(ext, 1)
+        else:
+            ext = b""
+        self.ude = user, desc, ext
 
-            if ext:
-                ext = dumps(ext, 1)
-            else:
-                ext = b""
-            self.ude = user, desc, ext
-
-            storage._restart_store()
-            storage._cache.tpc_begin()
-        finally:
-            storage._lock.release()
+        storage._restart_store()
+        storage._cache.tpc_begin()
 
         storage.blobhelper.begin()
 
     def tpc_vote(self, transaction):
-        with self.storage._lock:
-            if transaction is not self.transaction:
-                raise StorageTransactionError(
-                    "tpc_vote called with wrong transaction")
+        if transaction is not self.transaction:
+            raise StorageTransactionError(
+                "tpc_vote called with wrong transaction")
 
-            next_phase = self.tpc_vote_factory(self)
-            next_phase.enter()
-            return next_phase
+        next_phase = self.tpc_vote_factory(self)
+        next_phase.enter()
+        return next_phase
 
     def store(self, oid, previous_tid, data, transaction):
         # Called by Connection.commit(), after tpc_begin has been called.
@@ -125,13 +117,12 @@ class AbstractBegin(AbstractTPCState):
         else:
             prev_tid_int = 0
 
-        with self.storage._lock:
-            self.max_stored_oid = max(self.max_stored_oid, oid_int)
-            # Save the data locally in a temporary place. Later, closer to commit time,
-            # we'll send it all over at once. This lets us do things like use
-            # COPY in postgres.
-            cache.store_temp(oid_int, data, prev_tid_int)
-            return None
+        self.max_stored_oid = max(self.max_stored_oid, oid_int)
+        # Save the data locally in a temporary place. Later, closer to commit time,
+        # we'll send it all over at once. This lets us do things like use
+        # COPY in postgres.
+        cache.store_temp(oid_int, data, prev_tid_int)
+
 
     def checkCurrentSerialInTransaction(self, oid, required_tid, transaction):
         if transaction is not self.transaction:
@@ -224,40 +215,39 @@ class HistoryPreserving(AbstractBegin):
         assert len(undo_tid) == 8
         undo_tid_int = bytes8_to_int64(undo_tid)
 
-        with self.storage._lock:
-            adapter = self.storage._adapter
-            cursor = self.storage._store_cursor
-            assert cursor is not None
+        adapter = self.storage._adapter
+        cursor = self.storage._store_cursor
+        assert cursor is not None
 
-            adapter.locker.hold_pack_lock(cursor)
-            try:
-                adapter.packundo.verify_undoable(cursor, undo_tid_int)
-                if self.committing_tid_lock is None:
-                    # Note that _prepare_tid acquires the commit lock.
-                    # The commit lock must be acquired after the pack lock
-                    # because the database adapters also acquire in that
-                    # order during packing.
-                    adapter = self.storage._adapter
-                    cursor = self.storage._store_cursor
-                    tid_lock = DatabaseLockedForTid.lock_database_for_next_tid(
-                        cursor, adapter, self.ude)
-                    self.committing_tid_lock = tid_lock
+        adapter.locker.hold_pack_lock(cursor)
+        try:
+            adapter.packundo.verify_undoable(cursor, undo_tid_int)
+            if self.committing_tid_lock is None:
+                # Note that _prepare_tid acquires the commit lock.
+                # The commit lock must be acquired after the pack lock
+                # because the database adapters also acquire in that
+                # order during packing.
+                adapter = self.storage._adapter
+                cursor = self.storage._store_cursor
+                tid_lock = DatabaseLockedForTid.lock_database_for_next_tid(
+                    cursor, adapter, self.ude)
+                self.committing_tid_lock = tid_lock
 
-                self_tid_int = self.committing_tid_lock.tid_int
-                copied = adapter.packundo.undo(
-                    cursor, undo_tid_int, self_tid_int)
-                oids = [int64_to_8bytes(oid_int) for oid_int, _ in copied]
+            self_tid_int = self.committing_tid_lock.tid_int
+            copied = adapter.packundo.undo(
+                cursor, undo_tid_int, self_tid_int)
+            oids = [int64_to_8bytes(oid_int) for oid_int, _ in copied]
 
-                # Update the current object pointers immediately, so that
-                # subsequent undo operations within this transaction will see
-                # the new current objects.
-                adapter.mover.update_current(cursor, self_tid_int)
+            # Update the current object pointers immediately, so that
+            # subsequent undo operations within this transaction will see
+            # the new current objects.
+            adapter.mover.update_current(cursor, self_tid_int)
 
-                self.storage.blobhelper.copy_undone(copied,
-                                                    self.committing_tid_lock.tid)
+            self.storage.blobhelper.copy_undone(copied,
+                                                self.committing_tid_lock.tid)
 
-                if not self.undone_oids:
-                    self.undone_oids = set()
-                self.undone_oids.update(oids)
-            finally:
-                adapter.locker.release_pack_lock(cursor)
+            if not self.undone_oids:
+                self.undone_oids = set()
+            self.undone_oids.update(oids)
+        finally:
+            adapter.locker.release_pack_lock(cursor)

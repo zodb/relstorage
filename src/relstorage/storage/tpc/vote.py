@@ -113,16 +113,18 @@ class AbstractVote(AbstractTPCState):
     )
 
     def __init__(self, begin_state, committing_tid_lock=None):
+        # type: (AbstractBegin, DatabaseLockedForTid) -> None
+
         # If committing_tid is passed to this method, it means
         # the database has already been locked and the TID is
         # locked in.
         super(AbstractVote, self).__init__(begin_state.storage, begin_state.transaction)
 
-        self.required_tids = begin_state.required_tids or {}
+        self.required_tids = begin_state.required_tids or {} # type: Dict[int, int]
         self.max_stored_oid = begin_state.max_stored_oid
         self.ude = begin_state.ude
-        self.committing_tid_lock = committing_tid_lock
-        self.invalidated_oids = set()
+        self.committing_tid_lock = committing_tid_lock # type: Optional[DatabaseLockedForTid]
+        self.invalidated_oids = set() # type: Set[bytes]
 
     def enter(self):
         resolved_in_vote = self.__vote()
@@ -350,25 +352,22 @@ class AbstractVote(AbstractTPCState):
             conn, cursor, committing_tid_int)
 
     def tpc_finish(self, transaction, f=None):
-        with self.storage._lock:
-            if transaction is not self.transaction:
-                raise StorageTransactionError(
-                    "tpc_finish called with wrong transaction")
-            # Handle the finishing. We cannot/must not fail now.
-            # TODO: Move most of this into the Finish class/module.
-            self.__lock_and_move()
-            assert self.committing_tid_lock is not None, self
-            self.storage.blobhelper.finish(self.committing_tid_lock.tid)
-            try:
-                try:
-                    if f is not None:
-                        f(self.committing_tid_lock.tid)
-                    next_phase = Finish(self)
-                    return next_phase, self.committing_tid_lock.tid
-                finally:
-                    self._clear_temp()
-            finally:
-                self.storage._commit_lock.release()
+        if transaction is not self.transaction:
+            raise StorageTransactionError(
+                "tpc_finish called with wrong transaction")
+        # Handle the finishing. We cannot/must not fail now.
+        # TODO: Move most of this into the Finish class/module.
+        self.__lock_and_move()
+        assert self.committing_tid_lock is not None, self
+        self.storage.blobhelper.finish(self.committing_tid_lock.tid)
+
+        try:
+            if f is not None:
+                f(self.committing_tid_lock.tid)
+            next_phase = Finish(self)
+            return next_phase, self.committing_tid_lock.tid
+        finally:
+            self._clear_temp()
 
 
 class HistoryFree(AbstractVote):

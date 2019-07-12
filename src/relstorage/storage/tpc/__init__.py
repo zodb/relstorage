@@ -73,7 +73,9 @@ class AbstractTPCState(object):
     # state.
 
     def __init__(self, storage, transaction=None):
-        self.storage = storage         # XXX: This introduces a cycle.
+        # type: (RelStorage, TransactionMetaData) -> None
+        # XXX: This introduces a reference cycle.
+        self.storage = storage # type: RelStorage
         self.transaction = transaction
         self.prepared_txn = None
 
@@ -90,19 +92,16 @@ class AbstractTPCState(object):
             return self
 
         try:
-            try:
-                self.storage._rollback_load_connection()
-                if self.storage._store_cursor is not None:
-                    self.storage._adapter.txncontrol.abort(
-                        self.storage._store_conn,
-                        self.storage._store_cursor,
-                        self.prepared_txn)
-                    self.storage._adapter.locker.release_commit_lock(self.storage._store_cursor)
-                self.storage.blobhelper.abort()
-            finally:
-                self._clear_temp()
+            self.storage._rollback_load_connection()
+            if self.storage._store_cursor is not None:
+                self.storage._adapter.txncontrol.abort(
+                    self.storage._store_conn,
+                    self.storage._store_cursor,
+                    self.prepared_txn)
+                self.storage._adapter.locker.release_commit_lock(self.storage._store_cursor)
+            self.storage.blobhelper.abort()
         finally:
-            self.storage._commit_lock.release()
+            self._clear_temp()
         return NotInTransaction(self.storage)
 
     def _clear_temp(self):

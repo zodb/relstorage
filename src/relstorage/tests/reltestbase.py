@@ -13,14 +13,18 @@
 ##############################################################################
 """A foundation for RelStorage tests"""
 from __future__ import absolute_import
+from __future__ import print_function
 
 # pylint:disable=too-many-ancestors,abstract-method,too-many-public-methods,too-many-lines
 # pylint:disable=too-many-statements,too-many-locals
+import contextlib
+import functools
 import os
 import random
 import shutil
 import tempfile
 import time
+import threading
 import unittest
 
 import transaction
@@ -57,7 +61,6 @@ from . import TestCase
 from . import StorageCreatingMixin
 from .persistentcache import PersistentCacheStorageTests
 from .test_zodbconvert import FSZODBConvertTests
-
 
 class RelStorageTestBase(StorageCreatingMixin,
                          TestCase,
@@ -135,8 +138,103 @@ class StorageClientThread(MTStorage.StorageClientThread):
 class ExtStorageClientThread(StorageClientThread, MTStorage.ExtStorageClientThread):
     "Same as above."
 
+class ThreadWrapper(object):
+
+    def __init__(self, storage):
+        self.__storage = storage
+        # We can't use an RLock, which verifies that the thread that
+        # acquired is the one that releases; check_tid_ordering_w_commit
+        # deliberately spreads these actions across threads (for same reason).
+        self.__commit_lock = threading.Lock()
+        rl = self.__read_lock = threading.Lock()
+        self.__txn = None
+
+        def make_locked(name):
+            meth = getattr(storage, name)
+            @functools.wraps(meth)
+            def func(*args, **kwargs):
+                with rl:
+                    return meth(*args, **kwargs)
+            return func
+
+        for name in (
+                'loadBefore',
+                'load',
+                'store',
+                'getTid',
+                'lastTransaction',
+        ):
+            setattr(self, name, make_locked(name))
+
+    def __getattr__(self, name):
+        return getattr(self.__storage, name)
+
+    def tpc_begin(self, txn):
+        self.__commit_lock.acquire()
+        self.__read_lock.acquire()
+        assert not self.__txn
+        self.__txn = txn
+        self.__read_lock.release()
+        return self.__storage.tpc_begin(txn)
+
+    def tpc_finish(self, txn, callback=None):
+        self.__read_lock.acquire()
+        assert txn is self.__txn
+        try:
+            return self.__storage.tpc_finish(txn, callback)
+        finally:
+            self.__txn = None
+            self.__commit_lock.release()
+            self.__read_lock.release()
+
+    def tpc_abort(self, txn):
+        self.__read_lock.acquire()
+        assert txn is self.__txn, (txn, self.__txn)
+        try:
+            return self.__storage.tpc_abort(txn)
+        finally:
+            self.__txn = None
+            self.__commit_lock.release()
+            self.__read_lock.release()
+
+class UsesThreadsOnASingleStorageMixin(object):
+    # These tests attempt to use threads on a single storage object.
+    # That doesn't make sense with MVCC, where every instance is its
+    # own connection and doesn't need to do any locking. This mixin makes
+    # those tests use a special storage that locks.
+
+    @contextlib.contextmanager
+    def __thread_safe_wrapper(self):
+        orig_storage = self._storage
+        wrapped = self._storage = ThreadWrapper(orig_storage)
+        try:
+            yield
+        finally:
+            if self._storage is wrapped:
+                self._storage = orig_storage
+
+    def __generic_wrapped_test(self, meth_name):
+        meth = getattr(
+            super(UsesThreadsOnASingleStorageMixin, self),
+            meth_name)
+        with self.__thread_safe_wrapper():
+            meth()
+
+    def make_func(name): # pylint:disable=no-self-argument
+        return lambda self: self.__generic_wrapped_test(name)
+
+    for bad_test in (
+            'check_checkCurrentSerialInTransaction',
+            'check_tid_ordering_w_commit',
+    ):
+        locals()[bad_test] = make_func(bad_test)
+
+    del make_func
+    del bad_test
+
 
 class GenericRelStorageTests(
+        UsesThreadsOnASingleStorageMixin,
         RelStorageTestBase,
         PersistentCacheStorageTests,
         BasicStorage.BasicStorage,
@@ -911,7 +1009,6 @@ class GenericRelStorageTests(
                     finally:
                         thread_c.close()
 
-            import threading
             threads = []
             for _ in range(thread_count):
                 t = threading.Thread(target=updater)
@@ -1110,15 +1207,6 @@ class GenericRelStorageTests(
 
         storage1.close()
         storage2.close()
-
-    def check_tid_ordering_w_commit(self):
-        # The implementation in BasicStorage.BasicStorage is
-        # racy: it uses multiple threads to access a single
-        # RelStorage instance, which doesn't make sense.
-        try:
-            super(GenericRelStorageTests, self).check_tid_ordering_w_commit()
-        except AssertionError as e:
-            raise unittest.SkipTest("Test hit race condition", e)
 
 
 class AbstractRSZodbConvertTests(StorageCreatingMixin,
