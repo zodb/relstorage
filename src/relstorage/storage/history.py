@@ -32,6 +32,9 @@ from ZODB.utils import u64 as bytes8_to_int64
 from relstorage._compat import base64_encodebytes
 from relstorage._compat import loads
 
+from .util import phase_dependent
+from .util import storage_method
+
 class History(object):
     """
     Provides the implementation of ``history``
@@ -39,10 +42,6 @@ class History(object):
 
     This is available for all database types.
     """
-
-    STORAGE_METHODS = (
-        'history',
-    )
 
     __slots__ = (
         'adapter',
@@ -53,6 +52,7 @@ class History(object):
         self.adapter = adapter
         self.load_connection = load_connection
 
+    @storage_method
     def history(self, oid, version=None, size=1, filter=None):
         # pylint:disable=unused-argument,too-many-locals
         cursor = self.load_connection.cursor
@@ -91,23 +91,7 @@ class UndoableHistory(History):
     defined in :class:`ZODB.interfaces.IStorageUndoable`.
     """
 
-    STORAGE_METHODS = (
-        'undoInfo',
-        'supportsUndo',
-        'supportsTransactionalUndo',
-        'undoLog',
-        'undo',
-        'history',
-    )
-
-    __slots__ = (
-        'tpc_phase',
-    )
-
-    def __init__(self, adapter, load_connection, tpc_phase):
-        History.__init__(self, adapter, load_connection)
-        self.tpc_phase = tpc_phase
-
+    @storage_method
     def undoInfo(self, *args, **kwargs):
         # UndoLogCompatible provides the
         # implementation of undoInfo using self.undoLog
@@ -115,11 +99,13 @@ class UndoableHistory(History):
         log.undoLog = self.undoLog
         return log.undoInfo(*args, **kwargs)
 
+    @storage_method
     def supportsUndo(self):
         return self.adapter.keep_history
 
     supportsTransactionalUndo = supportsUndo
 
+    @storage_method
     def undoLog(self, first=0, last=-20, filter=None):
         # pylint:disable=too-many-locals
         if last < 0:
@@ -161,7 +147,9 @@ class UndoableHistory(History):
         finally:
             adapter.connmanager.close(conn, cursor)
 
-    def undo(self, transaction_id, transaction):
+    @phase_dependent
+    @storage_method
+    def undo(self, tpc_phase, transaction_id, transaction):
         """
         Undo a transaction identified by transaction_id.
 
@@ -183,4 +171,4 @@ class UndoableHistory(History):
         #
         # During undo, we get a tpc_begin(), then a bunch of undo() from
         # ZODB.DB.TransactionalUndo.commit(), then tpc_vote() and tpc_finish().
-        self.tpc_phase.undo(transaction_id, transaction)
+        tpc_phase.undo(transaction_id, transaction)

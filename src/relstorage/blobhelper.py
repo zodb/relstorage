@@ -241,7 +241,7 @@ class _AbstractBlobHelper(object):
         os.remove(temp_path[:-1])
         self._add_blob_to_transaction(oid, temp_path)
 
-        store_func(oid, serial, data, '', txn)
+        store_func(oid, serial, data, txn)
         return temp_path
 
     def _add_blob_to_transaction(self, oid, filename):

@@ -109,8 +109,8 @@ class BlobHelperTest(TestCase):
         called = []
         dummy_txn = object()
 
-        def store_func(oid, tid, data, version, txn):
-            called.append((oid, tid, data, version, txn))
+        def store_func(oid, tid, data, txn):
+            called.append((oid, tid, data, txn))
 
         fn1 = os.path.join(self.blob_dir, 'newblob')
         write_file(fn1, 'here a blob')
@@ -196,8 +196,8 @@ class SharedBlobHelperTest(BlobHelperTest):
         called = []
         dummy_txn = object()
 
-        def store_func(oid, tid, data, version, txn):
-            called.append((oid, tid, data, version, txn))
+        def store_func(oid, tid, data, txn):
+            called.append((oid, tid, data, txn))
 
         fn = os.path.join(self.blob_dir, 'newblob')
         write_file(fn, 'here a blob')
@@ -209,7 +209,7 @@ class SharedBlobHelperTest(BlobHelperTest):
         self.assertFalse(os.path.exists(fn))
         self.assertTrue(blobhelper.txn_has_blobs)
         self.assertEqual(called,
-                         [(test_oid, test_tid, 'blob pickle', '', dummy_txn)])
+                         [(test_oid, test_tid, 'blob pickle', dummy_txn)])
 
     def test_restoreBlob_shared(self):
         fn = os.path.join(self.blob_dir, 'newblob')
@@ -377,8 +377,8 @@ class CacheBlobHelperTest(BlobHelperTest):
         called = []
         dummy_txn = object()
 
-        def store_func(oid, tid, data, version, txn):
-            called.append((oid, tid, data, version, txn))
+        def store_func(oid, tid, data, txn):
+            called.append((oid, tid, data, txn))
 
         fn = os.path.join(self.blob_dir, 'newblob')
         write_file(fn, 'here a blob')
@@ -390,7 +390,7 @@ class CacheBlobHelperTest(BlobHelperTest):
         self.assertFalse(os.path.exists(fn))
         self.assertTrue(blobhelper.txn_has_blobs)
         self.assertEqual(called,
-                         [(test_oid, test_tid, 'blob pickle', '', dummy_txn)])
+                         [(test_oid, test_tid, 'blob pickle', dummy_txn)])
         self.assertEqual(self.uploaded[:2], (1, None))
         target_fn = self.uploaded[2]
         self.assertEqual(read_file(target_fn), 'here a blob')

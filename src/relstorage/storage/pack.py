@@ -32,21 +32,36 @@ from ZODB.utils import p64 as int64_to_8bytes
 from ZODB.utils import u64 as bytes8_to_int64
 
 from relstorage._compat import OID_SET_TYPE
+from .util import storage_method
 
 logger = __import__('logging').getLogger(__name__)
 
-class PackMethodsMixin(object):
+class Pack(object):
 
+    __slots__ = (
+        'options',
+        'adapter',
+        'blobhelper',
+        'cache',
+    )
+
+    def __init__(self, options, adapter, blobhelper, cache):
+        self.options = options
+        self.adapter = adapter
+        self.blobhelper = blobhelper
+        self.cache = cache
+
+    @storage_method
     @metricmethod
     def pack(self, t, referencesf, prepack_only=False, skip_prepack=False):
         """Pack the storage. Holds the pack lock for the duration."""
         # pylint:disable=too-many-branches,unused-argument
         # 'sleep' is a legacy argument, no longer used.
-        if self._is_read_only:
+        if self.options.read_only:
             raise ReadOnlyError()
 
-        prepack_only = prepack_only or self._options.pack_prepack_only
-        skip_prepack = skip_prepack or self._options.pack_skip_prepack
+        prepack_only = prepack_only or self.options.pack_prepack_only
+        skip_prepack = skip_prepack or self.options.pack_skip_prepack
 
         if prepack_only and skip_prepack:
             raise ValueError('Pick either prepack_only or skip_prepack.')
@@ -62,7 +77,7 @@ class PackMethodsMixin(object):
         # hold the pack lock.  Have the adapter open temporary
         # connections to do the actual work, allowing the adapter
         # to use special transaction modes for packing.
-        adapter = self._adapter
+        adapter = self.adapter
         lock_conn, lock_cursor = adapter.connmanager.open()
         try:
             adapter.locker.hold_pack_lock(lock_cursor)
@@ -102,9 +117,9 @@ class PackMethodsMixin(object):
                     oids_removed = OID_SET_TYPE()
                     def invalidate_cached_data(
                             oid_int, tid_int,
-                            cache=self._cache,
+                            cache=self.cache,
                             blob_invalidate=self.blobhelper.after_pack,
-                            keep_history=self._options.keep_history,
+                            keep_history=self.options.keep_history,
                             oids=oids_removed
                     ):
                         # pylint:disable=dangerous-default-value
@@ -136,14 +151,8 @@ class PackMethodsMixin(object):
 
                     adapter.packundo.pack(tid_int,
                                           packed_func=invalidate_cached_data)
-                    self._cache.invalidate_all(oids_removed)
+                    self.cache.invalidate_all(oids_removed)
             finally:
                 adapter.locker.release_pack_lock(lock_cursor)
         finally:
             adapter.connmanager.rollback_and_close(lock_conn, lock_cursor)
-        self.sync()
-
-        self._pack_finished()
-
-    def _pack_finished(self):
-        "Hook for testing."

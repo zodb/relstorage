@@ -60,7 +60,7 @@ from .load import Loader
 from .load import BlobLoader
 from .oid import OIDs
 from .oid import ReadOnlyOIDs
-from .pack import PackMethodsMixin
+from .pack import Pack
 from .store import Storer
 from .store import BlobStorer
 
@@ -75,36 +75,13 @@ from .tpc.begin import HistoryFree
 from .tpc.begin import HistoryPreserving
 from .tpc.restore import Restore
 
+from .util import copy_storage_methods
+
 __all__ = [
     'RelStorage',
 ]
 
 log = logging.getLogger("relstorage")
-
-# pylint:disable=too-many-lines
-
-def _copy_methods(storage, delegate):
-    # type: (RelStorage, Any) -> None
-
-    # TODO: Drive both this, and the stale methods,
-    # off decorators applied to the methods.
-    for method_name in delegate.STORAGE_METHODS:
-        method = getattr(delegate, method_name)
-        setattr(storage, method_name, method)
-
-class _TPCProxy(object):
-    # TODO: This part here could still use some refactoring; this is a
-    # reference cycle, but it is also ugly. Maybe, since these methods
-    # (in Storer and History) are only available between tpc_begin()
-    # and tpc_vote(), we should swizzle them out at tpc_begin time?
-    # Construct the Storer/History objects at that time?
-    __slots__ = ('_storage',)
-
-    def __init__(self, storage):
-        self._storage = storage
-
-    def __getattr__(self, name):
-        return getattr(self._storage._tpc_phase, name)
 
 class _StaleMethodWrapper(object):
 
@@ -131,11 +108,10 @@ class _ClosedCache(object):
 
 @implementer(IRelStorage)
 class RelStorage(LegacyMethodsMixin,
-                 PackMethodsMixin,
                  ConflictResolution.ConflictResolvingStorage):
     """Storage to a relational database, based on invalidation polling"""
 
-    # pylint:disable=too-many-public-methods,too-many-instance-attributes,too-many-ancestors
+    # pylint:disable=too-many-instance-attributes,too-many-public-methods
     _is_read_only = False
 
     # _ltid is the ID of the last transaction committed by this instance.
@@ -270,27 +246,26 @@ class RelStorage(LegacyMethodsMixin,
             self._oids = OIDs(self._adapter.oidallocator, self._store_connection)
 
         loader = Loader(self._adapter, self._load_connection, self._store_connection, self._cache)
-        _copy_methods(self, loader)
-        storer = Storer(_TPCProxy(self)) # XXX: Cycle
-        _copy_methods(self, storer)
+        copy_storage_methods(self, loader)
+        storer = Storer()
+        copy_storage_methods(self, storer)
 
         if options.keep_history:
             interface.alsoProvides(self, ZODB.interfaces.IStorageUndoable)
-            # XXX: Cycle with _TPCProxy
-            history = UndoableHistory(self._adapter, self._load_connection, _TPCProxy(self))
+            history = UndoableHistory(self._adapter, self._load_connection)
         else:
             history = History(self._adapter, self._load_connection)
-        _copy_methods(self, history)
+        copy_storage_methods(self, history)
 
         assert IBlobHelper.providedBy(self.blobhelper)
         if not INoBlobHelper.providedBy(self.blobhelper):
             interface.alsoProvides(self, ZODB.interfaces.IBlobStorageRestoreable)
 
             loader = BlobLoader(self._load_connection, self.blobhelper)
-            _copy_methods(self, loader)
+            copy_storage_methods(self, loader)
 
-            storer = BlobStorer(storer, self.blobhelper, self._store_connection)
-            _copy_methods(self, storer)
+            storer = BlobStorer(self.blobhelper, self._store_connection)
+            copy_storage_methods(self, storer)
 
 
     def __repr__(self):
@@ -659,6 +634,16 @@ class RelStorage(LegacyMethodsMixin,
 
     def copyTransactionsFrom(self, other):
         Copy(self.blobhelper, self, self).copyTransactionsFrom(other)
+
+    def pack(self, t, referencesf, prepack_only=False, skip_prepack=False):
+        pack = Pack(self._options, self._adapter, self.blobhelper, self._cache)
+        pack.pack(t, referencesf, prepack_only, skip_prepack)
+        self.sync()
+
+        self._pack_finished()
+
+    def _pack_finished(self):
+        "Hook for testing."
 
 
 def _zlibstorage_new_instance(self):

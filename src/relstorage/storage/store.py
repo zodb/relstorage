@@ -24,32 +24,26 @@ from __future__ import print_function
 from perfmetrics import Metric
 from perfmetrics import metricmethod
 
+from .util import storage_method
+from .util import phase_dependent
+
 logger = __import__('logging').getLogger(__name__)
 
 class Storer(object):
 
-    STORAGE_METHODS = (
-        'store',
-        'restore',
-        'deleteObject',
-    )
-
-    __slots__ = (
-        'tpc_phase',
-    )
-
-    def __init__(self, tpc_phase):
-        self.tpc_phase = tpc_phase
-
+    @phase_dependent
+    @storage_method
     @Metric(method=True, rate=0.1)
-    def store(self, oid, previous_tid, data, version, transaction):
+    def store(self, tpc_phase, oid, previous_tid, data, version, transaction):
         # Called by Connection.commit(), after tpc_begin has been called.
         assert not version, "Versions aren't supported"
 
         # If we get here and we're read-only, our phase will report that.
-        self.tpc_phase.store(oid, previous_tid, data, transaction)
+        tpc_phase.store(oid, previous_tid, data, transaction)
 
-    def restore(self, oid, serial, data, version, prev_txn, transaction):
+    @phase_dependent
+    @storage_method
+    def restore(self, tpc_phase, oid, serial, data, version, prev_txn, transaction):
         # Like store(), but used for importing transactions.  See the
         # comments in FileStorage.restore().  The prev_txn optimization
         # is not used.
@@ -57,34 +51,31 @@ class Storer(object):
         assert not version, "Versions aren't supported"
         # If we get here and we're read-only, our phase will report that.
 
-        self.tpc_phase.restore(oid, serial, data, prev_txn, transaction)
+        tpc_phase.restore(oid, serial, data, prev_txn, transaction)
 
-    def deleteObject(self, oid, oldserial, transaction):
+    @phase_dependent
+    @storage_method
+    def deleteObject(self, tpc_phase, oid, oldserial, transaction):
         # This method is only expected to be called from zc.zodbdgc
         # currently.
-        return self.tpc_phase.deleteObject(oid, oldserial, transaction)
+        return tpc_phase.deleteObject(oid, oldserial, transaction)
 
 
 class BlobStorer(object):
 
-    STORAGE_METHODS = (
-        'storeBlob',
-        'restoreBlob',
-    )
-
     __slots__ = (
-        'store',
         'blobhelper',
         'store_connection',
     )
 
-    def __init__(self, store, blobhelper, store_connection):
-        self.store = store
+    def __init__(self, blobhelper, store_connection):
         self.blobhelper = blobhelper
         self.store_connection = store_connection
 
+    @phase_dependent
+    @storage_method
     @metricmethod
-    def storeBlob(self, oid, serial, data, blobfilename, version, txn):
+    def storeBlob(self, tpc_phase, oid, serial, data, blobfilename, version, txn):
         """
         Stores data that has a BLOB attached.
 
@@ -97,14 +88,17 @@ class BlobStorer(object):
         """
         assert not version
         # We used to flush the batcher here, for some reason.
+        store_func = tpc_phase.store
         cursor = self.store_connection.cursor
-        self.blobhelper.storeBlob(cursor, self.store.store,
+        self.blobhelper.storeBlob(cursor, store_func,
                                   oid, serial, data, blobfilename, version, txn)
 
-    def restoreBlob(self, oid, serial, data, blobfilename, prev_txn, txn):
+    @phase_dependent
+    @storage_method
+    def restoreBlob(self, tpc_phase, oid, serial, data, blobfilename, prev_txn, txn):
         """
         Write blob data already committed in a separate database
 
         See the restore and storeBlob methods.
         """
-        self.store.tpc_phase.restoreBlob(oid, serial, data, blobfilename, prev_txn, txn)
+        tpc_phase.restoreBlob(oid, serial, data, blobfilename, prev_txn, txn)

@@ -30,6 +30,7 @@ from ZODB.utils import p64 as int64_to_8bytes
 from ZODB.utils import u64 as bytes8_to_int64
 
 from relstorage.cache.interfaces import CacheConsistencyError
+from .util import storage_method
 
 logger = __import__('logging').getLogger(__name__)
 
@@ -79,14 +80,6 @@ def _log_keyerror(cursor, adapter, oid_int, reason):
 
 class Loader(object):
 
-    STORAGE_METHODS = (
-        'load',
-        'loadBefore',
-        'loadSerial',
-        'prefetch',
-        'getTid',
-    )
-
     __slots__ = (
         'adapter',
         'load_connection',
@@ -109,6 +102,7 @@ class Loader(object):
             self.load_connection.drop()
             raise
 
+    @storage_method
     @Metric(method=True, rate=0.1)
     def load(self, oid, version=''):
         # pylint:disable=unused-argument
@@ -132,10 +126,12 @@ class Loader(object):
             raise POSKeyError(oid)
         return state, int64_to_8bytes(tid_int)
 
+    @storage_method
     def getTid(self, oid):
         _state, serial = self.load(oid)
         return serial
 
+    @storage_method
     def prefetch(self, oids):
         prefetch = self.cache.prefetch
         oid_ints = [bytes8_to_int64(oid) for oid in oids]
@@ -148,6 +144,7 @@ class Loader(object):
             # at this time, so we don't want to raise it to the caller.
             logger.exception("Failed to prefetch")
 
+    @storage_method
     @Metric(method=True, rate=0.1)
     def loadSerial(self, oid, serial):
         """Load a specific revision of an object"""
@@ -180,6 +177,7 @@ class Loader(object):
             raise POSKeyError(oid)
         return state
 
+    @storage_method
     @Metric(method=True, rate=0.1)
     def loadBefore(self, oid, tid):
         """Return the most recent revision of oid before tid committed."""
@@ -219,15 +217,11 @@ class Loader(object):
 
 class BlobLoader(object):
 
-    STORAGE_METHODS = (
-        'loadBlob',
-        'openCommittedBlobFile',
-    )
-
     def __init__(self, load_connection, blobhelper):
         self.load_connection = load_connection
         self.blobhelper = blobhelper
 
+    @storage_method
     @metricmethod
     def loadBlob(self, oid, serial):
         """Return the filename of the Blob data for this OID and serial.
@@ -239,6 +233,7 @@ class BlobLoader(object):
         cursor = self.load_connection.cursor
         return self.blobhelper.loadBlob(cursor, oid, serial)
 
+    @storage_method
     @metricmethod
     def openCommittedBlobFile(self, oid, serial, blob=None):
         """

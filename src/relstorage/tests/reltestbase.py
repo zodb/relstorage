@@ -38,6 +38,7 @@ from ZODB.Connection import TransactionMetaData
 from ZODB.DB import DB
 from ZODB.FileStorage import FileStorage
 from ZODB.POSException import ReadConflictError
+from ZODB.POSException import ReadOnlyError
 from ZODB.serialize import referencesf
 from ZODB.utils import z64
 from ZODB.utils import u64 as bytes8_to_int64
@@ -294,6 +295,18 @@ class GenericRelStorageTests(
     def tearDown(self):
         PackableStorage.DB = DB
         super(GenericRelStorageTests, self).tearDown()
+
+    def _make_readonly(self):
+        # checkWriteMethods in ReadOnlyStorage assumes that
+        # the object has an undo() method, even though that's only
+        # required if it's IStorageUndoable, aka history-preserving.
+        super(GenericRelStorageTests, self)._make_readonly()
+        storage = self._storage
+        if not hasattr(storage, 'undo'):
+            def undo(*args, **kwargs):
+                raise ReadOnlyError
+            storage.undo = undo
+        return storage
 
     def checkCurrentObjectTidsRoot(self):
         # Get the root object in place
