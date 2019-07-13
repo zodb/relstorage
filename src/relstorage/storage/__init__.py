@@ -45,8 +45,8 @@ from relstorage._compat import clear_frames
 from relstorage.blobhelper import BlobHelper
 from relstorage.blobhelper import NoBlobHelper
 from relstorage.cache import StorageCache
-
 from relstorage.options import Options
+from relstorage.interfaces import IRelStorage
 
 from .transaction_iterator import TransactionIterator
 
@@ -126,21 +126,7 @@ class _ClosedCache(object):
     def close(self):
         "does nothing"
 
-@implementer(ZODB.interfaces.IStorage,
-             ZODB.interfaces.IMVCCStorage,
-             ZODB.interfaces.IMultiCommitStorage,
-             ZODB.interfaces.IStorageRestoreable,
-             ZODB.interfaces.IStorageIteration,
-             # Perhaps this should be conditional on whether
-             # supportsUndo actually returns True, as documented
-             # in this interface.
-             ZODB.interfaces.IStorageUndoable,
-             # XXX: BlobStorage is conditional, should be dynamic
-             ZODB.interfaces.IBlobStorage,
-             # XXX: This extends IBlobStorage.
-             ZODB.interfaces.IBlobStorageRestoreable,
-             ZODB.interfaces.IMVCCAfterCompletionStorage,
-             ZODB.interfaces.ReadVerifyingStorage,)
+@implementer(IRelStorage)
 class RelStorage(LegacyMethodsMixin,
                  PackMethodsMixin,
                  ConflictResolution.ConflictResolvingStorage):

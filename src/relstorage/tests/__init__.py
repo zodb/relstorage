@@ -245,3 +245,19 @@ class MockOptions(Options):
         if name not in Options.valid_option_names():
             raise AttributeError("Invalid option", name) # pragma: no cover
         object.__setattr__(self, name, value)
+
+class MockConnectionManager(object):
+    pass
+
+class MockPackUndo(object):
+    pass
+
+class MockOIDAllocator(object):
+    pass
+
+class MockAdapter(object):
+
+    def __init__(self):
+        self.connmanager = MockConnectionManager()
+        self.packundo = MockPackUndo()
+        self.oidallocator = MockOIDAllocator()

@@ -26,7 +26,10 @@ from __future__ import print_function
 from zope.interface import Interface
 from zope.interface import Attribute
 
+import ZODB.interfaces
+
 # pylint:disable=inherit-non-class, no-self-argument, no-method-argument
+# pylint:disable=too-many-ancestors
 
 class IBlobHelper(Interface):
     """
@@ -133,3 +136,24 @@ class IBlobHelper(Interface):
 
     def close():
         pass
+
+
+class IRelStorage(
+        ZODB.interfaces.IMVCCAfterCompletionStorage, # IMVCCStorage <- IStorage
+        ZODB.interfaces.IMultiCommitStorage,
+        ZODB.interfaces.IStorageRestoreable,
+        ZODB.interfaces.IStorageIteration,
+        # Perhaps this should be conditional on whether
+        # supportsUndo actually returns True, as documented
+        # in this interface.
+        ZODB.interfaces.IStorageUndoable,
+        # XXX: BlobStorage is conditional, should be dynamic
+        # XXX: This extends IBlobStorage.
+        ZODB.interfaces.IBlobStorageRestoreable,
+        ZODB.interfaces.ReadVerifyingStorage, # checkCurrentSerialInTransaction
+):
+    """
+    The relational storage backend.
+
+    These objects are not thread-safe.
+    """
