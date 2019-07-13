@@ -34,6 +34,59 @@ from relstorage._compat import loads
 
 class History(object):
     """
+    Provides the implementation of ``history``
+    defined in :class:`ZODB.interfaces.IStorage`.
+
+    This is available for all database types.
+    """
+
+    STORAGE_METHODS = (
+        'history',
+    )
+
+    __slots__ = (
+        'adapter',
+        'load_connection',
+    )
+
+    def __init__(self, adapter, load_connection):
+        self.adapter = adapter
+        self.load_connection = load_connection
+
+    def history(self, oid, version=None, size=1, filter=None):
+        # pylint:disable=unused-argument,too-many-locals
+        cursor = self.load_connection.cursor
+        oid_int = bytes8_to_int64(oid)
+        try:
+            rows = self.adapter.dbiter.iter_object_history(
+                cursor, oid_int)
+        except KeyError:
+            raise POSKeyError(oid)
+
+        res = []
+        for tid_int, username, description, extension, length in rows:
+            tid = int64_to_8bytes(tid_int)
+            if extension:
+                d = loads(extension)
+            else:
+                d = {}
+            d.update({
+                "time": TimeStamp(tid).timeTime(),
+                "user_name": username or b'',
+                "description": description or b'',
+                "tid": tid,
+                "version": '',
+                "size": length,
+            })
+            if filter is None or filter(d):
+                res.append(d)
+                if size is not None and len(res) >= size:
+                    break
+        return res
+
+
+class UndoableHistory(History):
+    """
     Provides the implementation of the unique methods
     defined in :class:`ZODB.interfaces.IStorageUndoable`.
     """
@@ -48,14 +101,11 @@ class History(object):
     )
 
     __slots__ = (
-        'adapter',
-        'load_connection',
         'tpc_phase',
     )
 
     def __init__(self, adapter, load_connection, tpc_phase):
-        self.adapter = adapter
-        self.load_connection = load_connection
+        History.__init__(self, adapter, load_connection)
         self.tpc_phase = tpc_phase
 
     def undoInfo(self, *args, **kwargs):
@@ -134,34 +184,3 @@ class History(object):
         # During undo, we get a tpc_begin(), then a bunch of undo() from
         # ZODB.DB.TransactionalUndo.commit(), then tpc_vote() and tpc_finish().
         self.tpc_phase.undo(transaction_id, transaction)
-
-    def history(self, oid, version=None, size=1, filter=None):
-        # pylint:disable=unused-argument,too-many-locals
-        cursor = self.load_connection.cursor
-        oid_int = bytes8_to_int64(oid)
-        try:
-            rows = self.adapter.dbiter.iter_object_history(
-                cursor, oid_int)
-        except KeyError:
-            raise POSKeyError(oid)
-
-        res = []
-        for tid_int, username, description, extension, length in rows:
-            tid = int64_to_8bytes(tid_int)
-            if extension:
-                d = loads(extension)
-            else:
-                d = {}
-            d.update({
-                "time": TimeStamp(tid).timeTime(),
-                "user_name": username or b'',
-                "description": description or b'',
-                "tid": tid,
-                "version": '',
-                "size": length,
-            })
-            if filter is None or filter(d):
-                res.append(d)
-                if size is not None and len(res) >= size:
-                    break
-        return res

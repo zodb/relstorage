@@ -30,6 +30,11 @@
   threads, instead make sure each thread has a distinct
   ``RelStorage.new_instance()`` object.
 
+- A ``RelStorage`` instance now only implements the appropriate subset
+  of ZODB storage interfaces according to its configuration. For
+  example, if there is no configured ``blob-dir``, it won't implement
+  ``IBlobStorage``, and if ``keep-history`` is false, it won't
+  implement ``IStorageUndoable``.
 
 3.0a5 (2019-07-11)
 ==================

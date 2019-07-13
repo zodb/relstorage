@@ -137,23 +137,35 @@ class IBlobHelper(Interface):
     def close():
         pass
 
+class INoBlobHelper(IBlobHelper):
+    """
+    An object that does nothing with blobs.
+
+    Used to avoid conditional logic in the main code. Methods that
+    impact the use of the storage (user tries to store a blob but
+    that's not possible, etc) should raise an error. Methods that are
+    part of the internal workings of the storage and would have no
+    side-effects (because there cannot be blobs) should quietly do nothing.
+    """
+
 
 class IRelStorage(
         ZODB.interfaces.IMVCCAfterCompletionStorage, # IMVCCStorage <- IStorage
-        ZODB.interfaces.IMultiCommitStorage,
-        ZODB.interfaces.IStorageRestoreable,
-        ZODB.interfaces.IStorageIteration,
-        # Perhaps this should be conditional on whether
-        # supportsUndo actually returns True, as documented
-        # in this interface.
-        ZODB.interfaces.IStorageUndoable,
-        # XXX: BlobStorage is conditional, should be dynamic
-        # XXX: This extends IBlobStorage.
-        ZODB.interfaces.IBlobStorageRestoreable,
-        ZODB.interfaces.ReadVerifyingStorage, # checkCurrentSerialInTransaction
+        ZODB.interfaces.IMultiCommitStorage,  # mandatory in ZODB5, returns tid from tpc_finish.
+        ZODB.interfaces.IStorageRestoreable,  # tpc_begin(tid=) and restore()
+        ZODB.interfaces.IStorageIteration,    # iterator()
+        ZODB.interfaces.ReadVerifyingStorage, # checkCurrentSerialInTransaction()
 ):
     """
     The relational storage backend.
 
     These objects are not thread-safe.
+
+    Instances may optionally implement some other interfaces,
+    depending on their configuration. These include:
+
+    - :class:`ZODB.interfaces.IBlobStorage` and :class:`ZODB.interfaces.IBlobStorage`
+      if a ``blob-dir`` is configured.
+    - :class:`ZODB.interfaces.IStorageUndoable` if ``keep-history`` is true.
+
     """

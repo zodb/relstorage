@@ -36,22 +36,14 @@ from zope.interface import implementer
 from relstorage._compat import iteritems
 from relstorage._compat import MAC
 from relstorage.interfaces import IBlobHelper
+from relstorage.interfaces import INoBlobHelper
 
 __all__ = [
     'BlobHelper',
 ]
 
-@implementer(IBlobHelper)
+@implementer(INoBlobHelper)
 class NoBlobHelper(object):
-    """
-    An object that does nothing with blobs.
-
-    Used to avoid conditional logic in the main code. Methods that
-    impact the use of the storage (user tries to store a blob but
-    that's not possible, etc) should raise an error. Methods that are
-    part of the internal workings of the storage and would have no
-    side-effects (because there cannot be blobs) should quietly do nothing.
-    """
     # pylint:disable=unused-argument
 
     __slots__ = ()

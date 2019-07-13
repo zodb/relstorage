@@ -47,11 +47,14 @@ from relstorage.blobhelper import NoBlobHelper
 from relstorage.cache import StorageCache
 from relstorage.options import Options
 from relstorage.interfaces import IRelStorage
+from relstorage.interfaces import IBlobHelper
+from relstorage.interfaces import INoBlobHelper
 
 from .transaction_iterator import TransactionIterator
 
 from .copy import Copy
 from .history import History
+from .history import UndoableHistory
 from .legacy import LegacyMethodsMixin
 from .load import Loader
 from .load import BlobLoader
@@ -268,18 +271,27 @@ class RelStorage(LegacyMethodsMixin,
 
         loader = Loader(self._adapter, self._load_connection, self._store_connection, self._cache)
         _copy_methods(self, loader)
-
-        loader = BlobLoader(self._load_connection, self.blobhelper)
-        _copy_methods(self, loader)
-
-        storer = Storer(_TPCProxy(self))
+        storer = Storer(_TPCProxy(self)) # XXX: Cycle
         _copy_methods(self, storer)
 
-        storer = BlobStorer(storer, self.blobhelper, self._store_connection)
-        _copy_methods(self, storer)
-
-        history = History(self._adapter, self._load_connection, _TPCProxy(self))
+        if options.keep_history:
+            interface.alsoProvides(self, ZODB.interfaces.IStorageUndoable)
+            # XXX: Cycle with _TPCProxy
+            history = UndoableHistory(self._adapter, self._load_connection, _TPCProxy(self))
+        else:
+            history = History(self._adapter, self._load_connection)
         _copy_methods(self, history)
+
+        assert IBlobHelper.providedBy(self.blobhelper)
+        if not INoBlobHelper.providedBy(self.blobhelper):
+            interface.alsoProvides(self, ZODB.interfaces.IBlobStorageRestoreable)
+
+            loader = BlobLoader(self._load_connection, self.blobhelper)
+            _copy_methods(self, loader)
+
+            storer = BlobStorer(storer, self.blobhelper, self._store_connection)
+            _copy_methods(self, storer)
+
 
     def __repr__(self):
         return "<%s at %x keep_history=%s phase=%r cache=%r>" % (
