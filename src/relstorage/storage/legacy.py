@@ -26,6 +26,9 @@ import warnings
 
 class LegacyMethodsMixin(object):
 
+    __slots__ = (
+    )
+
     # BaseStorage (and thus FileStorage) and MappingStorage define
     # tpc_transaction and _transaction, even though that's not part of
     # the interface. We only keep them for compatibility with

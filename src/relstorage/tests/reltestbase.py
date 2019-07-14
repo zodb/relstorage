@@ -305,7 +305,7 @@ class GenericRelStorageTests(
         if not hasattr(storage, 'undo'):
             def undo(*args, **kwargs):
                 raise ReadOnlyError
-            storage.undo = undo
+            storage.undo = undo # pylint:disable=attribute-defined-outside-init
         return storage
 
     def checkCurrentObjectTidsRoot(self):

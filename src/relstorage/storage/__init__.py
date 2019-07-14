@@ -83,22 +83,6 @@ __all__ = [
 
 log = logging.getLogger("relstorage")
 
-class _StaleMethodWrapper(object):
-
-    __slots__ = (
-        'orig_method',
-        'stale_error',
-    )
-
-    def __init__(self, orig_method, stale_error):
-        self.orig_method = orig_method
-        self.stale_error = stale_error
-
-    def __call__(self, *args, **kwargs):
-        raise self.stale_error
-
-    def no_longer_stale(self):
-        return self.orig_method
 
 class _ClosedCache(object):
     __slots__ = ()
@@ -109,24 +93,24 @@ class _ClosedCache(object):
 @implementer(IRelStorage)
 class RelStorage(LegacyMethodsMixin,
                  ConflictResolution.ConflictResolvingStorage):
-    """Storage to a relational database, based on invalidation polling"""
+
+    """
+    Storage to a relational database, based on invalidation polling.
+    """
 
     # pylint:disable=too-many-instance-attributes,too-many-public-methods
-    _is_read_only = False
 
+    _adapter = None
+    _options = None
+    _is_read_only = False
     # _ltid is the ID of the last transaction committed by this instance.
     _ltid = z64
 
-    # _closed is True after self.close() is called.  Since close()
-    # can be called from another thread, access to self._closed should
-    # be inside a _lock_acquire()/_lock_release() block.
+    # _closed is True after self.close() is called.
     _closed = False
 
-    # _max_new_oid is the highest OID provided by new_oid()
-    _max_new_oid = 0
-
-    # _cache, if set, is a StorageCache object.
-    _cache = None # type: StorageCache
+    # _cache if set is a StorageCache object.
+    _cache = None
 
     # _prev_polled_tid contains the tid at the previous poll
     _prev_polled_tid = None
@@ -134,24 +118,25 @@ class RelStorage(LegacyMethodsMixin,
     # If the blob directory is set, blobhelper is a BlobHelper.
     blobhelper = NoBlobHelper()
 
-    # The state of committing that we're in. Certain operations are
+    # The state of committing that were in. Certain operations are
     # only available in certain states; certain information is only needed
     # in certain states.
     _tpc_phase = None
 
+    __name__ = None
+
+    # _instances is a list of weak references to storage instances bound
+    # to the same database.
+    _instances = ()
+
+    _load_connection = None
+    _store_connection = None
+    _tpc_begin_factory = None
+
     _oids = ReadOnlyOIDs()
 
-    # Methods that should check for and raise the ReadConflictError
-    # when we detect a stale connection.
-    _STALE_SENSITIVE_METHODS = (
-        'getTid',
-        'history',
-        'load',
-        'loadBefore',
-        # But NOT loadSerial
-        'prefetch',
-        'undoLog',
-    )
+
+    __initting = True
 
     # Attributes in our dictionary that shouldn't have stale()/no_longer_stale()
     # called on them. At this writing, it's just the type object.
@@ -163,13 +148,14 @@ class RelStorage(LegacyMethodsMixin,
                  options=None, cache=None, blobhelper=None,
                  **kwoptions):
         # pylint:disable=too-many-branches, too-many-statements
+        if options and kwoptions:
+            raise TypeError("The RelStorage constructor accepts either "
+                            "an options parameter or keyword arguments, not both")
+
         self._adapter = adapter
 
         if options is None:
             options = Options(**kwoptions)
-        elif kwoptions:
-            raise TypeError("The RelStorage constructor accepts either "
-                            "an options parameter or keyword arguments, not both")
         self._options = options
 
         if not name:
@@ -203,10 +189,7 @@ class RelStorage(LegacyMethodsMixin,
         # for those tests we use a custom wrapper storage that makes
         # a single instance appear thread safe.
 
-        # _instances is a list of weak references to storage instances bound
-        # to the same database.
         self._instances = []
-
 
         self._load_connection = EventedConnectionWrapper(LoadConnection(self._adapter.connmanager))
         self._load_connection.activated = self.__on_load_activated
@@ -267,6 +250,16 @@ class RelStorage(LegacyMethodsMixin,
             storer = BlobStorer(self.blobhelper, self._store_connection)
             copy_storage_methods(self, storer)
 
+        self.__initting = False
+
+    # __setattr__ is here during refactoring to help us make sure we're setting what we
+    # want to set.
+    # XXX: Remove before release.
+    def __setattr__(self, name, value):
+        # undo is special cased for reltestbase._make_readonly
+        if not self.__initting and name not in dir(self) and name != 'undo':
+            raise AttributeError("Cannot set %s" % name)
+        object.__setattr__(self, name, value)
 
     def __repr__(self):
         return "<%s at %x keep_history=%s phase=%r cache=%r>" % (
@@ -292,7 +285,7 @@ class RelStorage(LegacyMethodsMixin,
         # for thread safety here.
         self._instances.append(weakref.ref(other, self._instances.remove))
 
-        if '_crs_transform_record_data' in self.__dict__:
+        if self._crs_transform_record_data is not type(self)._crs_transform_record_data:
             # registerDB has been called on us but isn't called on
             # our children. Make sure any wrapper that needs to transform
             # records can do so.
@@ -520,12 +513,6 @@ class RelStorage(LegacyMethodsMixin,
                 continue
             if callable(getattr(v, 'stale', None)):
                 new_v = v.stale(stale_error)
-            elif k in self._STALE_SENSITIVE_METHODS:
-                # We'd like to add a `stale` attribute to the methods, but
-                # `<method>` is an immutable object, and we don't want to pay the
-                # cost of an extra function call wrapper, since these are
-                # common methods.
-                new_v = _StaleMethodWrapper(v, stale_error)
             else:
                 continue
 
@@ -542,8 +529,8 @@ class RelStorage(LegacyMethodsMixin,
         # TODO: Optimize this. It's called at the end of every
         # transaction, and most won't be stale. We should put an
         # object in the dict that does nothing.
-        my_ns = vars(self)
 
+        my_ns = vars(self)
         replacements = {
             k: v.no_longer_stale()
             for k, v in my_ns.items()

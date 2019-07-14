@@ -34,6 +34,7 @@ from relstorage._compat import loads
 
 from .util import phase_dependent
 from .util import storage_method
+from .util import stale_aware
 
 class History(object):
     """
@@ -52,6 +53,7 @@ class History(object):
         self.adapter = adapter
         self.load_connection = load_connection
 
+    @stale_aware
     @storage_method
     def history(self, oid, version=None, size=1, filter=None):
         # pylint:disable=unused-argument,too-many-locals
@@ -105,6 +107,7 @@ class UndoableHistory(History):
 
     supportsTransactionalUndo = supportsUndo
 
+    @stale_aware
     @storage_method
     def undoLog(self, first=0, last=-20, filter=None):
         # pylint:disable=too-many-locals

@@ -31,6 +31,7 @@ from ZODB.utils import u64 as bytes8_to_int64
 
 from relstorage.cache.interfaces import CacheConsistencyError
 from .util import storage_method
+from .util import stale_aware
 
 logger = __import__('logging').getLogger(__name__)
 
@@ -102,6 +103,7 @@ class Loader(object):
             self.load_connection.drop()
             raise
 
+    @stale_aware
     @storage_method
     @Metric(method=True, rate=0.1)
     def load(self, oid, version=''):
@@ -126,11 +128,13 @@ class Loader(object):
             raise POSKeyError(oid)
         return state, int64_to_8bytes(tid_int)
 
+    @stale_aware
     @storage_method
     def getTid(self, oid):
         _state, serial = self.load(oid)
         return serial
 
+    @stale_aware
     @storage_method
     def prefetch(self, oids):
         prefetch = self.cache.prefetch
@@ -144,6 +148,7 @@ class Loader(object):
             # at this time, so we don't want to raise it to the caller.
             logger.exception("Failed to prefetch")
 
+    # This is *NOT* stale aware for some reason (why?)
     @storage_method
     @Metric(method=True, rate=0.1)
     def loadSerial(self, oid, serial):
@@ -177,6 +182,7 @@ class Loader(object):
             raise POSKeyError(oid)
         return state
 
+    @stale_aware
     @storage_method
     @Metric(method=True, rate=0.1)
     def loadBefore(self, oid, tid):

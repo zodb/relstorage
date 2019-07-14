@@ -13,7 +13,7 @@
 #
 ##############################################################################
 """
-Interfaces for top-level RelStorage components..
+Interfaces for top-level RelStorage components.
 
 These interfaces aren't meant to be considered public, they exist to
 serve as documentation and for validation of RelStorage internals.

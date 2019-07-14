@@ -26,6 +26,9 @@ from ZODB.utils import p64 as int64_to_8bytes
 
 class AbstractOIDs(object):
 
+    __slots__ = (
+    )
+
     def stale(self, ex):
         raise NotImplementedError
 
@@ -88,6 +91,9 @@ class OIDs(AbstractOIDs):
 
 
 class ReadOnlyOIDs(AbstractOIDs):
+
+    __slots__ = (
+    )
 
     def stale(self, ex):
         return StaleOIDs(ex, self)

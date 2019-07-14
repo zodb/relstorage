@@ -57,7 +57,8 @@ class TestBlobPackHistoryPreservingMixin(TestBlobMixin):
         tids.append(blob._p_serial)
 
         self.oid = oid = root['blob']._p_oid
-        self.fns = [self.blob_storage.fshelper.getBlobFilename(oid, x) for x in tids]
+        fshelper = self.blob_storage.blobhelper.fshelper
+        self.fns = [fshelper.getBlobFilename(oid, x) for x in tids]
         connection1.close()
 
     def _checkFirstCountNotExist(self, count, fns):
