@@ -224,6 +224,11 @@ class EventedConnectionWrapper(object):
         self.isolated_connection = connection.isolated_connection
         self.restart_and_call = connection.restart_and_call
 
+    def __bool__(self):
+        return bool(self.__connection)
+
+    __nonzero__ = __bool__
+
     @property
     def connection(self):
         return self.__connection.connection
