@@ -26,13 +26,14 @@ from zope.interface import implementer
 from ..iter import fetchmany
 from ..treemark import TreeMarker
 from .interfaces import IPackUndo
+from ._util import DatabaseHelpersMixin
 
 # pylint:disable=too-many-lines,unused-argument
 
 
 log = logging.getLogger(__name__)
 
-class PackUndo(object):
+class PackUndo(DatabaseHelpersMixin):
     """Abstract base class for pack/undo"""
 
     verify_sane_database = False
@@ -51,6 +52,19 @@ class PackUndo(object):
 
     def _fetchmany(self, cursor):
         return fetchmany(cursor)
+
+    def with_options(self, options):
+        """
+        Return a new instance that will use the given options, instead
+        of the options originally constructed.
+        """
+        if options == self.options:
+            # If the options haven't changed, return ourself. This is
+            # for tests that make changes to the structure of this
+            # object not captured in the constructor or options.
+            # (checkPackWhileReferringObjectChanges)
+            return self
+        return self.__class__(self.driver, self.connmanager, self.runner, self.locker, options)
 
     def choose_pack_transaction(self, pack_point):
         """Return the transaction before or at the specified pack time.
@@ -159,6 +173,21 @@ class PackUndo(object):
         if batch:
             upload_batch()
 
+    # The only things to worry about are object_state and blob_chuck.
+    # blob chunks are deleted automatically by a foreign key.
+
+    # We shouldn't *have* to verify the oldserial in the delete statement,
+    # because our only consumer is zc.zodbdgc which only calls us for
+    # unreachable objects, so they shouldn't be modified and get a new
+    # TID. But it's safer to do so.
+    _delete_object_stmt = None
+
+    def deleteObject(self, cursor, oid, oldserial):
+        self.runner.run_script_stmt(
+            cursor,
+            self._delete_object_stmt,
+            {'oid': u64(oid), 'tid': u64(oldserial)})
+        return cursor.rowcount
 
 @implementer(IPackUndo)
 class HistoryPreservingPackUndo(PackUndo):
@@ -502,8 +531,13 @@ class HistoryPreservingPackUndo(PackUndo):
         """
         conn, cursor = self.connmanager.open_for_pre_pack()
         try:
-            # The pre-pack functions are responsible for managing their
-            # own commits; when they return, the transaction should be committed.
+            # The pre-pack functions are responsible for managing
+            # their own commits; when they return, the transaction
+            # should be committed.
+            #
+            # ``pack_object`` should be populated,
+            # essentially with the distinct list of all objects and their
+            # maximum (newest) transaction ids.
             if self.options.pack_gc:
                 log.info("pre_pack: start with gc enabled")
                 self._pre_pack_with_gc(
@@ -519,7 +553,8 @@ class HistoryPreservingPackUndo(PackUndo):
             to_remove = 0
 
             if self.options.pack_gc:
-                # Pack objects with the keep flag set to false.
+                # Mark all objects we said not to keep as something
+                # we should discard.
                 stmt = """
                 INSERT INTO pack_state (tid, zoid)
                 SELECT tid, zoid
@@ -533,8 +568,27 @@ class HistoryPreservingPackUndo(PackUndo):
                 self.runner.run_script_stmt(
                     cursor, stmt, {'pack_tid': pack_tid})
                 to_remove += cursor.rowcount
+            else:
+                # Support for IExternalGC. Also remove deleted objects.
+                stmt = """
+                INSERT INTO pack_state (tid, zoid)
+                SELECT t.tid, t.zoid
+                FROM (
+                    SELECT zoid, tid
+                    FROM object_state
+                    WHERE state IS NULL
+                    AND tid = (
+                        SELECT MAX(i.tid)
+                        FROM object_state i
+                        WHERE i.zoid = object_state.zoid
+                    )
+                ) t
+                """
+                self.runner.run_script_stmt(cursor, stmt)
+                to_remove += cursor.rowcount
 
-            # Pack object states with the keep flag set to true.
+            # Pack object states with the keep flag set to true,
+            # excluding their current TID.
             stmt = """
             INSERT INTO pack_state (tid, zoid)
             SELECT tid, zoid
@@ -550,6 +604,7 @@ class HistoryPreservingPackUndo(PackUndo):
                 cursor, stmt, {'pack_tid': pack_tid})
             to_remove += cursor.rowcount
 
+            # Make a simple summary of the transactions to examine.
             log.info("pre_pack: enumerating transactions to pack")
             stmt = "%(TRUNCATE)s pack_state_tid"
             self.runner.run_script_stmt(cursor, stmt)
@@ -572,6 +627,13 @@ class HistoryPreservingPackUndo(PackUndo):
             self.connmanager.close(conn, cursor)
 
     def __initial_populate_pack_object(self, conn, cursor, pack_tid, keep):
+        """
+        Put all objects into ``pack_object`` that have revisions equal
+        to or below *pack_tid*, setting their initial ``keep`` status
+        to *keep*.
+
+        Commits the transaction to release locks.
+        """
         # Access the tables that are used by online transactions
         # in a short transaction and immediately commit to release any
         # locks.
@@ -600,14 +662,9 @@ class HistoryPreservingPackUndo(PackUndo):
         # Since we switched MySQL back to READ COMMITTED (what PostgreSQL uses)
         # I haven't been able to produce the error anymore. So don't explicitly lock.
 
-        # lock_affected_objects = affected_objects + '\n' + self._lock_for_update + ';\n'
-
-        # self.runner.run_script(cursor, lock_subquery, {'pack_tid': pack_tid})
-        # cursor.fetchall() # Consume but discard.
-
         stmt = """
         INSERT INTO pack_object (zoid, keep, keep_tid)
-        SELECT zoid, """ + keep + """, MAX(tid)
+        SELECT zoid, """ + ('%(TRUE)s' if keep else '%(FALSE)s') + """, MAX(tid)
         FROM ( """ + affected_objects + """ ) t
         GROUP BY zoid;
 
@@ -620,7 +677,8 @@ class HistoryPreservingPackUndo(PackUndo):
         conn.commit()
 
     def _pre_pack_without_gc(self, conn, cursor, pack_tid):
-        """Determine what to pack, without garbage collection.
+        """
+        Determine what to pack, without garbage collection.
 
         With garbage collection disabled, there is no need to follow
         object references.
@@ -628,10 +686,11 @@ class HistoryPreservingPackUndo(PackUndo):
         # Fill the pack_object table with OIDs, but configure them
         # all to be kept by setting keep to true.
         log.debug("pre_pack: populating pack_object")
-        self.__initial_populate_pack_object(conn, cursor, pack_tid, '%(TRUE)s')
+        self.__initial_populate_pack_object(conn, cursor, pack_tid, keep=True)
 
     def _pre_pack_with_gc(self, conn, cursor, pack_tid, get_references):
-        """Determine what to pack, with garbage collection.
+        """
+        Determine what to pack, with garbage collection.
         """
         stmt = self._script_create_temp_pack_visit
         if stmt:
@@ -643,7 +702,7 @@ class HistoryPreservingPackUndo(PackUndo):
         # Fill the pack_object table with OIDs that either will be
         # removed (if nothing references the OID) or whose history will
         # be cut.
-        self.__initial_populate_pack_object(conn, cursor, pack_tid, '%(FALSE)s')
+        self.__initial_populate_pack_object(conn, cursor, pack_tid, keep=False)
 
         stmt = """
         -- Keep objects that have been revised since pack_tid.
@@ -707,6 +766,13 @@ class HistoryPreservingPackUndo(PackUndo):
         conn, cursor = self.connmanager.open_for_store()
         try: # pylint:disable=too-many-nested-blocks
             try:
+                # If we have a transaction entry in ``pack_state_tid`` (that is,
+                # we found a transaction with an object in the range of transactions
+                # we can pack away) that matches an actual transaction entry (XXX:
+                # How could we be in the state where the transaction row is gone but we still
+                # have object_state with that transaction id?), then we need to pack that
+                # transaction. The presence of an entry in ``pack_state_tid`` means that all
+                # object states from that transaction should be removed.
                 stmt = """
                 SELECT transaction.tid,
                        CASE WHEN packed = %(TRUE)s THEN 1 ELSE 0 END,
@@ -781,7 +847,12 @@ class HistoryPreservingPackUndo(PackUndo):
 
     def _pack_transaction(self, cursor, pack_tid, tid, packed,
                           has_removable, packed_list):
-        """Pack one transaction.  Requires populated pack tables."""
+        """
+        Pack one transaction. Requires populated pack tables.
+
+        If *has_removable* is true, then we have object states and current
+        object pointers to remove.
+        """
         log.debug("pack: transaction %d: packing", tid)
         removed_objects = 0
         removed_states = 0
@@ -864,6 +935,15 @@ class HistoryPreservingPackUndo(PackUndo):
         for _table in ('pack_object', 'pack_state', 'pack_state_tid'):
             stmt = '%(TRUNCATE)s ' + _table
             self.runner.run_script_stmt(cursor, stmt)
+
+    _delete_object_stmt = """
+    UPDATE object_state
+    SET state = NULL,
+        state_size = 0,
+        md5 = ''
+    WHERE zoid = %(oid)s
+    and tid = %(tid)s
+    """
 
 
 @implementer(IPackUndo)
@@ -1207,18 +1287,9 @@ class HistoryFreePackUndo(PackUndo):
         """
         self.runner.run_script(cursor, stmt)
 
-    def deleteObject(self, cursor, oid, oldserial):
-        # The only things to worry about are object_state and blob_chuck.
-        # blob chunks are deleted automatically by a foreign key.
 
-        # We shouldn't *have* to verify the oldserial in the delete statement,
-        # because our only consumer is zc.zodbdgc which only calls us for
-        # unreachable objects, so they shouldn't be modified and get a new
-        # TID. But this is safer.
-        state = """
-        DELETE FROM object_state
-        WHERE zoid = %(oid)s
-        and tid = %(tid)s
-        """
-        self.runner.run_script_stmt(cursor, state, {'oid': u64(oid), 'tid': u64(oldserial)})
-        return cursor.rowcount
+    _delete_object_stmt = """
+    DELETE FROM object_state
+    WHERE zoid = %(oid)s
+    and tid = %(tid)s
+    """

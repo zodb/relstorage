@@ -92,7 +92,7 @@ class TestBlobMerge(PostgreSQLAdapterMixin,
         # Insert some extra chunks. Get them big to be sure we loop
         # properly
         second_chunk = b'second chunk' * 800
-        cursor = conn._storage._store_cursor
+        cursor = conn._storage._store_connection.cursor
         cursor.execute("""
         INSERT INTO blob_chunk (zoid, chunk_num, tid, chunk)
         SELECT zoid, 1, tid, lo_from_bytea(0, %s)
@@ -124,7 +124,7 @@ class TestBlobMerge(PostgreSQLAdapterMixin,
         with blob.open('r') as f:
             data = f.read()
 
-        cursor = conn._storage._load_cursor
+        cursor = conn._storage._load_connection.cursor
         cursor.execute('SELECT COUNT(*) FROM blob_chunk')
         self.assertEqual(1, cursor.fetchone()[0])
 

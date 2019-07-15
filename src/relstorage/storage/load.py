@@ -120,7 +120,8 @@ class Loader(object):
 
         if not state:
             # This can happen if something attempts to load
-            # an object whose creation has been undone.
+            # an object whose creation has been undone or which was deleted
+            # by IExternalGC.deleteObject().
             _log_keyerror(self.load_connection.cursor,
                           self.adapter,
                           oid_int,

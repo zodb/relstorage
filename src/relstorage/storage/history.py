@@ -79,6 +79,8 @@ class History(object):
                 "tid": tid,
                 "version": '',
                 "size": length,
+                "rs_tid_int": tid_int,
+                "rs_oid_int": oid_int,
             })
             if filter is None or filter(d):
                 res.append(d)

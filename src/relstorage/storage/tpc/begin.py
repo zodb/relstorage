@@ -155,12 +155,6 @@ class AbstractBegin(AbstractTPCState):
                          required_tid))
         required_tids[oid_int] = required_tid_int
 
-class HistoryFree(AbstractBegin):
-
-    __slots__ = ()
-
-    _DEFAULT_TPC_VOTE_FACTORY = HFVoteFactory
-
     def deleteObject(self, oid, oldserial, transaction):
         # This method is only expected to be called from zc.zodbdgc
         # currently, or from ZODB/tests/IExternalGC.test
@@ -174,10 +168,18 @@ class HistoryFree(AbstractBegin):
         if transaction is not self.transaction: # pragma: no cover
             raise StorageTransactionError(self, transaction)
 
-        # We don't worry about anything in self._cache because
-        # by definition we are deleting objects that were
-        # not reachable and so shouldn't be in the cache (or if they
-        # were, we'll never ask for them anyway)
+        # We shouldn't have to worry about anything in self._cache
+        # because by definition we are deleting objects that were not
+        # reachable and so shouldn't be in the cache (or if they were,
+        # we'll never ask for them anyway). Most likely, this is running
+        # in a separate process anyway, not used for regular storage (
+        # an instance of multi-zodb-gc). However, in case it is in a regular
+        # process, and in case we do have other transactions that could theoretically
+        # see this state, and to relieve memory pressure on local/global caches,
+        # we do go ahead and invalidate a cached entry.
+        oid_int = bytes8_to_int64(oid)
+        tid_int = bytes8_to_int64(oldserial)
+        self.cache.invalidate(oid_int, tid_int)
 
         # We delegate the actual operation to the adapter's packundo,
         # just like native pack
@@ -188,6 +190,14 @@ class HistoryFree(AbstractBegin):
         # The interface doesn't specify a return value, so for testing
         # we return the count of rows deleted (should be 1 if successful)
         return self.adapter.packundo.deleteObject(cursor, oid, oldserial)
+
+
+class HistoryFree(AbstractBegin):
+
+    __slots__ = ()
+
+    _DEFAULT_TPC_VOTE_FACTORY = HFVoteFactory
+
 
 class HistoryPreserving(AbstractBegin):
 

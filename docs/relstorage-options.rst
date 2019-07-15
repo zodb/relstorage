@@ -244,17 +244,42 @@ GC and Packing
 ==============
 
 pack-gc
-        If pack-gc is false, pack operations do not perform
-        garbage collection.  Garbage collection is enabled by default.
+        If pack-gc is false, pack operations do not perform garbage
+        collection. Garbage collection is enabled by default.
 
-        If garbage collection is disabled, pack operations keep at least one
-        revision of every object.  With garbage collection disabled, the
-        pack code does not need to follow object references, making
-        packing conceivably much faster.  However, some of that benefit
-        may be lost due to an ever increasing number of unused objects.
+        If garbage collection is disabled, pack operations keep at
+        least one revision of every object that hasn't been deleted.
+        With garbage collection disabled, the pack code does not need
+        to follow object references, making packing conceivably much
+        faster. However, some of that benefit may be lost due to an
+        ever increasing number of unused objects.
 
-        Disabling garbage collection is also a hack that ensures
-        inter-database references never break.
+        Disabling garbage collection is **required** in a
+        multi-database to prevent breaking inter-database references.
+        The only safe way to collect and then pack databases in a
+        multi-database is to use `zc.zodbdgc
+        <https://pypi.org/project/zc.zodbdgc/>`_ and run
+        ``multi-zodb-gc``, and only then pack each individual
+        database.
+
+        .. note::
+
+           In history-free databases, packing after running
+           ``multi-zodb-gc`` is not necessary. The garbage collection
+           process itself handles the packing. Packing is only
+           required in history-preserving databases.
+
+        .. versionchanged:: 3.0
+
+           Add support for ``zc.zodbdgc`` to history-preserving
+           databases.
+
+           Objects that have been deleted will be removed during a
+           pack with ``pack-gc`` disabled.
+
+        .. versionchanged:: 2.0
+
+           Add support for ``zc.zodbdgc`` to history-free databases.
 
 pack-prepack-only
         If pack-prepack-only is true, pack operations perform a full analysis

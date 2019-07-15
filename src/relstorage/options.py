@@ -181,3 +181,11 @@ class Options(object):
             return NotImplemented
         return all(getattr(self, key) == getattr(other, key)
                    for key in self.valid_option_names())
+
+    def copy(self, **kw):
+        """
+        Produce a copy of these options, with keyword arguments overriding.
+        """
+        options = dict(self.__dict__)
+        options.update(kw)
+        return self.__class__(**options)

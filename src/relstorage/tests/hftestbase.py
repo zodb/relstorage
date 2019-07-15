@@ -17,7 +17,9 @@ from __future__ import print_function
 
 import time
 
+from ZODB.Connection import TransactionMetaData
 from ZODB.serialize import referencesf
+from ZODB.POSException import POSKeyError
 from ZODB.tests.ConflictResolution import PCounter
 from ZODB.tests.PackableStorage import ZERO
 from ZODB.tests.PackableStorage import Root
@@ -260,35 +262,37 @@ class HistoryFreeRelStorageTests(GenericRelStorageTests, ZODBTestCase):
         self.assertEqual(inst._value, 5)
 
 
-    def checkImplementsExternalGC(self):
+    def checkImplementsIExternalGC(self):
         from zope.interface.verify import verifyObject
         import ZODB.interfaces
         verifyObject(ZODB.interfaces.IExternalGC, self._storage)
 
         # Now do it.
         from ZODB.utils import z64
-        import transaction
-        db = ZODB.DB(self._storage) # create the root
-        conn = db.open()
+        db = self._closing(ZODB.DB(self._storage)) # create the root
+        conn = self._closing(db.open())
         storage = conn._storage
         _state, tid = storage.load(z64)
 
         # copied from zc.zodbdgc
-        t = transaction.begin()
+        t = TransactionMetaData()
         storage.tpc_begin(t)
-        try:
-            count = storage.deleteObject(z64, tid, t)
-            self.assertEqual(count, 1)
-            # Doing it again will do nothing because it's already
-            # gone.
-            count = storage.deleteObject(z64, tid, t)
-            self.assertEqual(count, 0)
-        finally:
-            transaction.abort()
-            conn.close()
-            db.close()
+        count = storage.deleteObject(z64, tid, t)
+        self.assertEqual(count, 1)
+        # Doing it again will do nothing because it's already
+        # gone.
+        count = storage.deleteObject(z64, tid, t)
+        self.assertEqual(count, 0)
+
+        storage.tpc_vote(t)
+        storage.tpc_finish(t)
 
 
+        with self.assertRaises(POSKeyError):
+            storage.load(z64)
+
+        conn.close()
+        db.close()
 
 
 class HistoryFreeToFileStorage(AbstractToFileStorage,

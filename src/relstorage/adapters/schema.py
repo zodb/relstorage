@@ -377,10 +377,14 @@ class AbstractSchemaInstaller(DatabaseHelpersMixin,
     @noop_when_history_free
     def _create_pack_state(self, cursor):
         """
-        Temporary state during packing: the list of object states
-        # to pack.
+        Temporary state populated during pre-packing.
 
         This is only used in history-preserving databases.
+
+        This table is poorly named. What it actually holds is the set
+        of objects, along with their maximum TID, that are potentially
+        eligible to be discarded because their most recent change
+        (maximum TID) is earlier than the pack time.
         """
         self.runner.run_script(cursor, self.CREATE_PACK_STATE_TMPL)
 
@@ -393,10 +397,14 @@ class AbstractSchemaInstaller(DatabaseHelpersMixin,
     @noop_when_history_free
     def _create_pack_state_tid(self, cursor):
         """
-        Temporary state during packing: the list of
-        transactions that have at least one object state to pack.
+        Temporary state during pre-packing:
 
         This is only used in history-preserving databases.
+
+        This table is poorly named. What it actually holds is simply a
+        summary of the distinct transaction IDs found in
+        ``pack_state``. In other words, it's the list of transaction
+        IDs that are eligible to be discarded.
         """
         self.runner.run_script(cursor, self.CREATE_PACK_STATE_TID_TMPL)
 
