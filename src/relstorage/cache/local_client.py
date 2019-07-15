@@ -232,10 +232,11 @@ class LocalClient(object):
                 backup_key = (oid, tid2) if tid2 is not None else None
                 res = get(key1, backup_key)
 
-        # Finally, while not holding the lock, decompress if needed
+        # Finally, while not holding the lock, decompress if needed.
+        # Recall that for deleted objects, `state` can be None.
         if res is not None:
             state, tid = res
-            return decompress(state), tid
+            return decompress(state) if state else state, tid
 
     def __setitem__(self, oid_tid, state_bytes_tid):
         if not self.limit:

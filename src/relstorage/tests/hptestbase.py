@@ -18,9 +18,10 @@ import unittest
 import transaction
 from persistent.mapping import PersistentMapping
 
+from ZODB.Connection import TransactionMetaData
 from ZODB.DB import DB
 from ZODB.serialize import referencesf
-from ZODB.POSException import StorageTransactionError
+from ZODB.POSException import POSKeyError
 from ZODB.tests import HistoryStorage
 from ZODB.tests import IteratorStorage
 from ZODB.tests import PackableStorage
@@ -303,12 +304,6 @@ class HistoryPreservingRelStorageTests(GenericRelStorageTests,
         conn.close()
         db.close()
 
-    def checkImplementsExternalGC(self):
-        import ZODB.interfaces
-        self.assertFalse(ZODB.interfaces.IExternalGC.providedBy(self._storage))
-        with self.assertRaises(StorageTransactionError):
-            self._storage.deleteObject(None, None, None)
-
     def checkMigrateTransactionEmpty(self):
         # The transaction.empty column gets renamed in 'prepare'
         adapter = self._storage._adapter
@@ -340,6 +335,90 @@ class HistoryPreservingRelStorageTests(GenericRelStorageTests,
         schema.update_schema(test_cursor, None)
         self.assertFalse(schema._needs_transaction_empty_update(test_cursor))
 
+    def __setup_checkImplementsIExternalGC(self):
+        from zope.interface.verify import verifyObject
+        import ZODB.interfaces
+        verifyObject(ZODB.interfaces.IExternalGC, self._storage)
+
+        # Now do it.
+        # We need to create a few different revisions of an object
+        # so that we can selectively remove old versions and check that
+        # when we remove the final version, the whole thing goes away.
+        db = self._closing(ZODB.DB(self._storage))
+        conn = self._closing(db.open())
+        root = conn.root()
+        root['key'] = PersistentMapping()
+        transaction.commit()
+
+        for i in range(5):
+            tx = transaction.begin()
+            tx.description = 'Revision %s' % i
+            root['key']['item'] = i
+            transaction.commit()
+
+        obj_oid = root['key']._p_oid
+
+        return db, conn, obj_oid
+
+    def checkImplementsIExternalGC(self):
+        db, conn, obj_oid = self.__setup_checkImplementsIExternalGC()
+
+        storage = conn._storage
+        history = storage.history(obj_oid, size=100)
+        self.assertEqual(6, len(history))
+        latest_tid = history[0]['tid']
+        # We can delete the latest TID for the OID, and the whole
+        # object goes away on a pack.
+        t = TransactionMetaData()
+        storage.tpc_begin(t)
+        count = storage.deleteObject(obj_oid, latest_tid, t)
+        self.assertEqual(count, 1)
+        # Doing it again will do nothing because it's already
+        # gone.
+        count = storage.deleteObject(obj_oid, latest_tid, t)
+        storage.tpc_vote(t)
+        storage.tpc_finish(t)
+
+        # Getting the most recent fails.
+        with self.assertRaises(POSKeyError):
+            storage.load(obj_oid)
+
+        # But we can load a state before then.
+        state = storage.loadSerial(obj_oid, history[1]['tid'])
+        self.assertEqual(len(state), history[1]['size'])
+
+        # Length is still 2
+        self.assertEqual(len(storage), 2)
+
+        # The most recent size is 0 too
+        history_after = storage.history(obj_oid)
+        self.assertEqual(0, history_after[0]['size'])
+
+
+        # Now if we proceed to pack it, *without* doing a GC...
+        from relstorage.storage.pack import Pack
+        options = storage._options.copy(pack_gc=False)
+        self.assertFalse(options.pack_gc)
+        packer = Pack(options, storage._adapter, storage.blobhelper, storage._cache)
+        self.assertFalse(packer.options.pack_gc)
+        packer.pack(time.time(), referencesf)
+
+        # ... and bring the storage into the current view...
+        storage.sync()
+
+        # ...then the object is gone in all revisions...
+        with self.assertRaises(POSKeyError):
+            storage.load(obj_oid)
+
+        for history_item in history:
+            tid = history_item['tid']
+            with self.assertRaises(POSKeyError):
+                storage.loadSerial(obj_oid, tid)
+
+        # ...and the size is smaller.
+        self.assertEqual(len(storage), 1)
+        conn.close()
+        db.close()
 
 class HistoryPreservingToFileStorage(AbstractToFileStorage,
                                      UndoableRecoveryStorage,

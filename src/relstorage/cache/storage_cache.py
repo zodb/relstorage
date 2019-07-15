@@ -509,12 +509,14 @@ class StorageCache(object):
             # Cache miss.
             state, actual_tid_int = self.adapter.mover.load_current(
                 cursor, oid_int)
-            self._check_tid_after_load(oid_int, actual_tid_int, tid_int)
+            if state and actual_tid_int:
+                # If either is None, the object was deleted.
+                self._check_tid_after_load(oid_int, actual_tid_int, tid_int)
 
-            # At this point we know that tid_int == actual_tid_int
-            # XXX: Previously, we did not trace this as a store into the cache.
-            # Why?
-            cache[key] = (state, actual_tid_int)
+                # At this point we know that tid_int == actual_tid_int
+                # XXX: Previously, we did not trace this as a store into the cache.
+                # Why?
+                cache[key] = (state, actual_tid_int)
             return state, tid_int
 
         # Make a list of cache keys to query. The list will have either
@@ -591,6 +593,8 @@ class StorageCache(object):
 
     def invalidate(self, oid_int, tid_int):
         del self.cache[(oid_int, tid_int)]
+        if self.delta_after0.get(oid_int) == tid_int:
+            del self.delta_after0[oid_int]
 
     def invalidate_all(self, oids):
         """
@@ -598,6 +602,13 @@ class StorageCache(object):
         given OIDs.
         """
         self.local_client.invalidate_all(oids)
+        deltas = self.delta_after0, self.delta_after1
+        for oid in oids:
+            for delta in deltas:
+                try:
+                    del delta[oid]
+                except KeyError:
+                    pass
 
     def tpc_begin(self):
         """Prepare temp space for objects to cache."""

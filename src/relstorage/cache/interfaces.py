@@ -65,10 +65,14 @@ class IStateCache(Interface):
 
     def __setitem__(oid_tid, state_bytes_tid):
         """
-        Store the *state_bytes* for the (oid, tid) pair.
+        Store the *state_bytes_tid* (``(state_bytes, tid_int)``) for
+        the ``(oid, tid)`` pair.
 
         Note that it does not necessarily mean that the key tid
         matches the value tid.
+
+        Also note that if the object has been deleted, ``state_bytes``
+        may be `None`.
         """
 
     def __delitem__(oid_tid):

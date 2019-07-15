@@ -36,6 +36,23 @@
   ``IBlobStorage``, and if ``keep-history`` is false, it won't
   implement ``IStorageUndoable``.
 
+- Fix a cache error ("TypeError: NoneType object is not
+  subscriptable") when an object had been deleted (such as through
+  undoing its creation transaction, or with ``multi-zodb-gc``).
+
+- Implement ``IExternalGC`` for history-preserving databases. This
+  lets them be used with `zc.zodbdgc
+  <https://pypi.org/project/zc.zodbdgc/>`_, allowing for
+  multi-database garbage collection (see :issue:`76`). Note that you
+  must pack the database after running ``multi-zodb-gc`` in order to
+  reclaim space.
+
+  .. caution::
+
+     It is critical that ``pack-gc`` be turned off (set to false) in a
+     multi-database and that only ``multi-zodb-gc`` be used to perform
+     garbage collection.
+
 3.0a5 (2019-07-11)
 ==================
 

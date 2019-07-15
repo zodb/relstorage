@@ -38,16 +38,94 @@ class Pack(object):
 
     __slots__ = (
         'options',
-        'adapter',
+        'locker',
+        'connmanager',
         'blobhelper',
         'cache',
+        'packundo',
     )
 
     def __init__(self, options, adapter, blobhelper, cache):
         self.options = options
-        self.adapter = adapter
+        self.locker = adapter.locker
+        self.connmanager = adapter.connmanager
+        self.packundo = adapter.packundo.with_options(options)
         self.blobhelper = blobhelper
         self.cache = cache
+
+    def __pre_pack(self, t, referencesf):
+        logger.info("pack: beginning pre-pack")
+
+        # Find the latest commit before or at the pack time.
+        pack_point = TimeStamp(*time.gmtime(t)[:5] + (t % 60,)).raw()
+        tid_int = self.packundo.choose_pack_transaction(
+            bytes8_to_int64(pack_point))
+        if tid_int is None:
+            logger.debug("all transactions before %s have already "
+                         "been packed", time.ctime(t))
+            return
+
+        s = time.ctime(TimeStamp(int64_to_8bytes(tid_int)).timeTime())
+        logger.info("pack: analyzing transactions committed "
+                    "%s or before", s)
+
+        # In pre_pack, the adapter fills tables with
+        # information about what to pack.  The adapter
+        # must not actually pack anything yet.
+        def get_references(state):
+            """Return an iterable of the set of OIDs the given state refers to."""
+            if not state:
+                return ()
+
+            return {bytes8_to_int64(oid) for oid in referencesf(state)}
+
+        self.packundo.pre_pack(tid_int, get_references)
+        logger.info("pack: pre-pack complete")
+        return tid_int
+
+    def __pack_to(self, tid_int):
+        # Now pack. We'll get a callback for every oid/tid removed,
+        # and we'll use that to keep caches consistent.
+        # In the common case of using zodbpack, this will rewrite the
+        # persistent cache on the machine running zodbpack.
+        oids_removed = OID_SET_TYPE()
+        def invalidate_cached_data(
+                oid_int, tid_int,
+                cache=self.cache,
+                blob_invalidate=self.blobhelper.after_pack,
+                keep_history=self.options.keep_history,
+                oids=oids_removed
+        ):
+            # pylint:disable=dangerous-default-value
+            # Flush the data from the local/global cache. It's quite likely that
+            # a fair amount if it is now useless. We almost certainly want to
+            # establish new checkpoints. The alternative is to clear out
+            # data that we know we removed in the pack; we *do* keep track
+            # of that, it's what's passed to the `packed_func`, so we could probably
+            # piggyback on that in some fashion.
+            #
+            # Having consistent cache data became especially important
+            # when loadSerial() began using the cache: Since that function
+            # is allowed to return non-transactional data, it wouldn't be
+            # great for it to return data that is no longer in the DB,
+            # only the cache. I *think* this is only an issue in the tests,
+            # that use the storage in a non-conventional way after packing,
+            # by directly verifying that loadSerial() doesn't return data,
+            # when in a real use we could only get there through detecting a conflict
+            # in the database at commit time, with locks involved.
+            cache.invalidate(oid_int, tid_int)
+            # Clean up blob files. This currently does nothing
+            # if we're a blob cache, but it could.
+            blob_invalidate(oid_int, tid_int)
+            # If we're not keeping history, we need to remove all the cached
+            # data for a particular OID, no matter what key it was under:
+            # there was only one way to access it.
+            if not keep_history:
+                oids.add(oid_int)
+
+        self.packundo.pack(tid_int,
+                           packed_func=invalidate_cached_data)
+        self.cache.invalidate_all(oids_removed)
 
     @writable_storage_method
     @metricmethod
@@ -61,93 +139,23 @@ class Pack(object):
         if prepack_only and skip_prepack:
             raise ValueError('Pick either prepack_only or skip_prepack.')
 
-        def get_references(state):
-            """Return an iterable of the set of OIDs the given state refers to."""
-            if not state:
-                return ()
-
-            return {bytes8_to_int64(oid) for oid in referencesf(state)}
-
         # Use a private connection (lock_conn and lock_cursor) to
         # hold the pack lock.  Have the adapter open temporary
         # connections to do the actual work, allowing the adapter
         # to use special transaction modes for packing.
-        adapter = self.adapter
-        lock_conn, lock_cursor = adapter.connmanager.open()
+        lock_conn, lock_cursor = self.connmanager.open()
         try:
-            adapter.locker.hold_pack_lock(lock_cursor)
+            self.locker.hold_pack_lock(lock_cursor)
             try:
                 if not skip_prepack:
-                    # Find the latest commit before or at the pack time.
-                    pack_point = TimeStamp(*time.gmtime(t)[:5] + (t % 60,)).raw()
-                    tid_int = adapter.packundo.choose_pack_transaction(
-                        bytes8_to_int64(pack_point))
-                    if tid_int is None:
-                        logger.debug("all transactions before %s have already "
-                                     "been packed", time.ctime(t))
-                        return
-
-                    if prepack_only:
-                        logger.info("pack: beginning pre-pack")
-
-                    s = time.ctime(TimeStamp(int64_to_8bytes(tid_int)).timeTime())
-                    logger.info("pack: analyzing transactions committed "
-                                "%s or before", s)
-
-                    # In pre_pack, the adapter fills tables with
-                    # information about what to pack.  The adapter
-                    # must not actually pack anything yet.
-                    adapter.packundo.pre_pack(tid_int, get_references)
+                    tid_int = self.__pre_pack(t, referencesf)
                 else:
                     # Need to determine the tid_int from the pack_object table
-                    tid_int = adapter.packundo._find_pack_tid()
+                    tid_int = self.packundo._find_pack_tid()
 
-                if prepack_only:
-                    logger.info("pack: pre-pack complete")
-                else:
-                    # Now pack. We'll get a callback for every oid/tid removed,
-                    # and we'll use that to keep caches consistent.
-                    # In the common case of using zodbpack, this will rewrite the
-                    # persistent cache on the machine running zodbpack.
-                    oids_removed = OID_SET_TYPE()
-                    def invalidate_cached_data(
-                            oid_int, tid_int,
-                            cache=self.cache,
-                            blob_invalidate=self.blobhelper.after_pack,
-                            keep_history=self.options.keep_history,
-                            oids=oids_removed
-                    ):
-                        # pylint:disable=dangerous-default-value
-                        # Flush the data from the local/global cache. It's quite likely that
-                        # a fair amount if it is now useless. We almost certainly want to
-                        # establish new checkpoints. The alternative is to clear out
-                        # data that we know we removed in the pack; we *do* keep track
-                        # of that, it's what's passed to the `packed_func`, so we could probably
-                        # piggyback on that in some fashion.
-                        #
-                        # Having consistent cache data became especially important
-                        # when loadSerial() began using the cache: Since that function
-                        # is allowed to return non-transactional data, it wouldn't be
-                        # great for it to return data that is no longer in the DB,
-                        # only the cache. I *think* this is only an issue in the tests,
-                        # that use the storage in a non-conventional way after packing,
-                        # by directly verifying that loadSerial() doesn't return data,
-                        # when in a real use we could only get there through detecting a conflict
-                        # in the database at commit time, with locks involved.
-                        cache.invalidate(oid_int, tid_int)
-                        # Clean up blob files. This currently does nothing
-                        # if we're a blob cache, but it could.
-                        blob_invalidate(oid_int, tid_int)
-                        # If we're not keeping history, we need to remove all the cached
-                        # data for a particular OID, no matter what key it was under:
-                        # there was only one way to access it.
-                        if not keep_history:
-                            oids.add(oid_int)
-
-                    adapter.packundo.pack(tid_int,
-                                          packed_func=invalidate_cached_data)
-                    self.cache.invalidate_all(oids_removed)
+                if not prepack_only:
+                    self.__pack_to(tid_int)
             finally:
-                adapter.locker.release_pack_lock(lock_cursor)
+                self.locker.release_pack_lock(lock_cursor)
         finally:
-            adapter.connmanager.rollback_and_close(lock_conn, lock_cursor)
+            self.connmanager.rollback_and_close(lock_conn, lock_cursor)

@@ -635,6 +635,32 @@ class IPackUndo(Interface):
         pauses.
         """
 
+    def deleteObject(cursor, oid_int, tid_int):
+        """
+        Delete the revision of *oid_int* in transaction *tid_int*.
+
+            This method marks an object as deleted via a new object
+            revision. Subsequent attempts to load current data for the
+            object will fail with a POSKeyError, but loads for
+            non-current data will suceed if there are previous
+            non-delete records. The object will be removed from the
+            storage when all not-delete records are removed.
+
+            The serial argument must match the most recently committed
+            serial for the object. This is a seat belt.
+
+            --- Documentation for ``IExternalGC``
+
+        In history-free databases there is no such thing as a delete record, so
+        this should remove the single
+        revision of *oid_int* (which *should* be checked to verify it
+        is at *tid_int*), leading all access to *oid_int* in the
+        future to throw ``POSKeyError``.
+
+        In history preserving databases, this means to set the state for the object
+        at the transaction to NULL, signifying that it's been deleted. A subsequent
+        pack operation is required to actually remove these deleted items.
+        """
 
 class IPoller(Interface):
     """Poll for new data"""
