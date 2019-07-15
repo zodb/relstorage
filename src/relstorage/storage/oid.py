@@ -24,6 +24,10 @@ from __future__ import print_function
 from ZODB.POSException import ReadOnlyError
 from ZODB.utils import p64 as int64_to_8bytes
 
+from zope.interface import implementer
+
+from .interfaces import IStaleAware
+
 class AbstractOIDs(object):
 
     __slots__ = (
@@ -90,6 +94,7 @@ class OIDs(AbstractOIDs):
         return self.oidallocator.new_oids(store_cursor)
 
 
+@implementer(IStaleAware)
 class ReadOnlyOIDs(AbstractOIDs):
 
     __slots__ = (
@@ -104,6 +109,7 @@ class ReadOnlyOIDs(AbstractOIDs):
     def new_oid(self, commit_in_progress):
         raise ReadOnlyError
 
+@implementer(IStaleAware)
 class StaleOIDs(AbstractOIDs):
 
     __slots__ = (

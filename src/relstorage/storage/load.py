@@ -223,6 +223,11 @@ class Loader(object):
 
 class BlobLoader(object):
 
+    __slots__ = (
+        'load_connection',
+        'blobhelper',
+    )
+
     def __init__(self, load_connection, blobhelper):
         self.load_connection = load_connection
         self.blobhelper = blobhelper

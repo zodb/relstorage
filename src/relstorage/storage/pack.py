@@ -26,13 +26,11 @@ import time
 from perfmetrics import metricmethod
 from persistent.timestamp import TimeStamp
 
-from ZODB.POSException import ReadOnlyError
-
 from ZODB.utils import p64 as int64_to_8bytes
 from ZODB.utils import u64 as bytes8_to_int64
 
 from relstorage._compat import OID_SET_TYPE
-from .util import storage_method
+from .util import writable_storage_method
 
 logger = __import__('logging').getLogger(__name__)
 
@@ -51,14 +49,11 @@ class Pack(object):
         self.blobhelper = blobhelper
         self.cache = cache
 
-    @storage_method
+    @writable_storage_method
     @metricmethod
     def pack(self, t, referencesf, prepack_only=False, skip_prepack=False):
         """Pack the storage. Holds the pack lock for the duration."""
         # pylint:disable=too-many-branches,unused-argument
-        # 'sleep' is a legacy argument, no longer used.
-        if self.options.read_only:
-            raise ReadOnlyError()
 
         prepack_only = prepack_only or self.options.pack_prepack_only
         skip_prepack = skip_prepack or self.options.pack_skip_prepack

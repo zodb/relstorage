@@ -34,6 +34,15 @@ logger = __import__('logging').getLogger(__name__)
 class TransactionIterator(object):
     """Iterate over the transactions in a RelStorage instance."""
 
+    __slots__ = (
+        '_adapter',
+        '_conn',
+        '_cursor',
+        '_closed',
+        '_transactions',
+        '_index',
+    )
+
     def __init__(self, adapter, start, stop):
         self._adapter = adapter
         self._conn, self._cursor = self._adapter.connmanager.open_for_load()
@@ -124,8 +133,16 @@ class RelStorageTransactionRecord(TransactionRecord):
 
 class RecordIterator(object):
     """Iterate over the objects in a transaction."""
+
+    __slots__ = (
+        'tid',
+        '_records',
+        '_index',
+    )
+
     def __init__(self, record):
-        # record is a RelStorageTransactionRecord.
+        # type: (RelStorageTransactionRecord) -> None
+
         cursor = record._trans_iter._cursor
         adapter = record._trans_iter._adapter
         tid_int = record._tid_int

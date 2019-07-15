@@ -24,15 +24,17 @@ from __future__ import print_function
 from perfmetrics import Metric
 from perfmetrics import metricmethod
 
-from .util import storage_method
+from .util import writable_storage_method
 from .util import phase_dependent
 
 logger = __import__('logging').getLogger(__name__)
 
 class Storer(object):
 
+    __slots__ = ()
+
     @phase_dependent
-    @storage_method
+    @writable_storage_method
     @Metric(method=True, rate=0.1)
     def store(self, tpc_phase, oid, previous_tid, data, version, transaction):
         # Called by Connection.commit(), after tpc_begin has been called.
@@ -42,7 +44,7 @@ class Storer(object):
         tpc_phase.store(oid, previous_tid, data, transaction)
 
     @phase_dependent
-    @storage_method
+    @writable_storage_method
     def restore(self, tpc_phase, oid, serial, data, version, prev_txn, transaction):
         # Like store(), but used for importing transactions.  See the
         # comments in FileStorage.restore().  The prev_txn optimization
@@ -54,7 +56,7 @@ class Storer(object):
         tpc_phase.restore(oid, serial, data, prev_txn, transaction)
 
     @phase_dependent
-    @storage_method
+    @writable_storage_method
     def deleteObject(self, tpc_phase, oid, oldserial, transaction):
         # This method is only expected to be called from zc.zodbdgc
         # currently.
@@ -73,7 +75,7 @@ class BlobStorer(object):
         self.store_connection = store_connection
 
     @phase_dependent
-    @storage_method
+    @writable_storage_method
     @metricmethod
     def storeBlob(self, tpc_phase, oid, serial, data, blobfilename, version, txn):
         """
@@ -94,7 +96,7 @@ class BlobStorer(object):
                                   oid, serial, data, blobfilename, version, txn)
 
     @phase_dependent
-    @storage_method
+    @writable_storage_method
     def restoreBlob(self, tpc_phase, oid, serial, data, blobfilename, prev_txn, txn):
         """
         Write blob data already committed in a separate database

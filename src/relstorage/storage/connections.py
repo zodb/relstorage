@@ -44,7 +44,8 @@ class AbstractConnection(object):
     )
 
     def __init__(self, connmanager):
-        self.connection = self.cursor = None
+        self.connection = None
+        self.cursor = None
         self.connmanager = connmanager
 
     def __bool__(self):
@@ -180,6 +181,8 @@ class AbstractConnection(object):
 
 class LoadConnection(AbstractConnection):
 
+    __slots__ = ()
+
     def _new_connection(self):
         return self.connmanager.open_for_load()
 
@@ -188,6 +191,8 @@ class LoadConnection(AbstractConnection):
 
 
 class StoreConnection(AbstractConnection):
+
+    __slots__ = ()
 
     def _new_connection(self):
         return self.connmanager.open_for_store()
@@ -201,7 +206,13 @@ class EventedConnectionWrapper(object):
     A facade around a connection that keeps track of certain
     events about the state of the connection and
     handles those events automatically.
+
+    Events are handled via callbacks on this object. You can subclass
+    or you can assign to them.
     """
+
+    # Assigning to hook attributes makes it more difficult to use
+    # __slots__ because the method and slot conflict.
 
     def __init__(self, connection):
         """

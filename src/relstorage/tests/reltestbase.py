@@ -314,7 +314,7 @@ class GenericRelStorageTests(
         conn = self._closing(db.open())
 
         storage = conn._storage
-        cursor = storage._load_cursor
+        cursor = storage._load_connection.cursor
         oid_to_tid = storage._adapter.mover.current_object_tids(cursor, [0])
         self.assertEqual(1, len(oid_to_tid))
         self.assertIn(0, oid_to_tid)
@@ -638,8 +638,9 @@ class GenericRelStorageTests(
             transaction.commit()
             c1.close()
 
-            c1._storage._load_conn.close()
-            c1._storage._store_conn.close()
+            # Going behind its back.
+            c1._storage._load_connection.connection.close()
+            c1._storage._store_connection.connection.close()
             # ZODB5 implicitly calls sync
             # immediately when a connection is opened;
             # fake that here for older releases.
@@ -662,7 +663,7 @@ class GenericRelStorageTests(
             c1 = db.open()
             r = c1.root()
 
-            c1._storage._load_conn.close()
+            c1._storage._load_connection.connection.close()
             c1._storage.sync()
             # ZODB5 calls sync when a connection is opened. Our monkey
             # patch on a Connection makes sure that works in earlier
@@ -675,8 +676,8 @@ class GenericRelStorageTests(
             transaction.commit()
             c1.close()
 
-            c1._storage._load_conn.close()
-            c1._storage._store_conn.close()
+            c1._storage._load_connection.connection.close()
+            c1._storage._store_connection.connection.close()
 
             c2 = db.open()
             self.assertIs(c2, c1)
@@ -718,11 +719,11 @@ class GenericRelStorageTests(
             tm1.commit()
 
             # Close the database connection to c2.
-            c2._storage._drop_load_connection()
-
+            c2._storage._load_connection.drop()
+            self.assertFalse(c2._storage._load_connection)
             # Make the database connection to c2 reopen without polling.
             c2._storage.load(b'\0' * 8, '')
-            self.assertTrue(c2._storage._load_transaction_open)
+            self.assertTrue(c2._storage._load_connection)
 
             # Open a connection, which should be the same connection
             # as c2.

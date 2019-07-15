@@ -93,6 +93,8 @@ class UndoableHistory(History):
     defined in :class:`ZODB.interfaces.IStorageUndoable`.
     """
 
+    __slots__ = ()
+
     @storage_method
     def undoInfo(self, *args, **kwargs):
         # UndoLogCompatible provides the
