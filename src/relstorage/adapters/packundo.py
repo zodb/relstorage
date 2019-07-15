@@ -108,8 +108,15 @@ class PackUndo(DatabaseHelpersMixin):
 
         marker = TreeMarker()
 
-        # Download the list of object references into the TreeMarker.
+        # Download the graph of object references into the TreeMarker.
+        # TODO: We can probably do much or most of this in SQL, at least
+        # in recent databases that support recursive WITH queries?
 
+        # XXX: In history-free mode, ``pack_object`` contains exactly
+        # the set of OIDs that are present in ``object_state`` and I
+        # *think* that ``pack_object.keep_tid`` is always going to be equal to
+        # ``object_ref.tid``. We may get better behaviour if we join
+        # against that table here
         stmt = """
         SELECT {}
             object_ref.zoid, object_ref.to_zoid
@@ -125,8 +132,22 @@ class PackUndo(DatabaseHelpersMixin):
                 break
             marker.add_refs(rows)
 
-        # Use the TreeMarker to find all reachable objects.
-
+        # Use the TreeMarker to find all reachable objects, starting
+        # with the ones that are known reachable. These are the roots:
+        #
+        # - ZOID 0 which is explicitly marked as such
+        #
+        # - In history preserving databases where we are not doing GC,
+        #   this includes all objects (except those explicitly
+        #   deleted) --- but we don't actually call this method for
+        #   the HP-no-gc case.
+        #
+        # - In history preserving *with* gc, this is all objects that
+        #   have been modified after the pack time or are referenced
+        #   from objects that have been modified after the pack time.
+        #
+        # - In history free *with* gc, this is all objects that have
+        #   been modified after the pack time.
         log.info("pre_pack: traversing the object graph "
                  "to find reachable objects.")
         stmt = """
@@ -1220,7 +1241,10 @@ class HistoryFreePackUndo(PackUndo):
                     # or simply do a join against the table.
                     items = to_remove[:100]
                     del to_remove[:100]
-                    # XXX: History free. We shouldn't need to include the TID.
+                    # XXX: History free. We shouldn't need to include the TID,
+                    # but that's probably there to protect against concurrent modification
+                    # of the object. With our row-level locking in 3.0 this may not strictly be
+                    # necessary?
                     stmt = """
                     DELETE FROM object_state
                     WHERE zoid = %s AND tid = %s
