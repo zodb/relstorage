@@ -49,11 +49,23 @@ class AbstractMySQLDriver(AbstractModuleDriver):
         returns multiple results, and they don't all use the standard
         way to retrieve them, so use this.
 
-        Returns a list of lists of rows: [
-         [[row in first], ...],
-         [[row in second], ...],
-         ...
-        ]
+        Returns a list of lists of rows: [ [[row in first], ...],
+        [[row in second], ...], ... ]
+
+        Note that, because 'CALL' potentially returns multiple result
+        sets, there is potentially at least one extra database round
+        trip involved when we call `cursor.nextset()`. If the
+        procedure being called is very short or returns only a single
+        very small result, this may add substantial overhead.
+
+        As of PyMySQL 0.9.3, mysql-connector-python 8.0.16 and MySQLdb
+        (mysqlclient) 1.4.2 using libmysqlclient.21.so (from mysql8)
+        or libmysqlclient.20 (mysql 5.7), all the drivers use the
+        flags from the server to detect that there are no more results
+        and turn nextset() into a simple flag check. So if the CALL
+        only returns one result set (because the CALLed object doesn't
+        return any of its own, i.e., it only has side-effects) there
+        shouldn't be any penalty.
         """
         cursor.execute('CALL ' + proc, args)
 

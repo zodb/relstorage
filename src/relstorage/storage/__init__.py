@@ -550,7 +550,8 @@ class RelStorage(LegacyMethodsMixin,
         """
         Poll for invalidations, update our cache.
 
-        Move objects into our out of the stale state as appropriate.
+        Move the component objects of this object into or out of the
+        stale state as appropriate.
         """
         # Ignore changes made by the last transaction committed
         # by this connection.
