@@ -212,7 +212,7 @@ class MySQLOIDAllocator(AbstractOIDAllocator):
                     break
                 else:
                     rowcount = cursor.rowcount
-                    logger.debug("Garbage collected %s old OIDs less than", rowcount, max_value)
+                    logger.debug("Garbage collected %s old OIDs less than %s", rowcount, max_value)
 
     def reset_oid(self, cursor):
         cursor.execute("TRUNCATE TABLE new_oid")
