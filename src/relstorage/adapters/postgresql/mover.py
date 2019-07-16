@@ -174,19 +174,26 @@ class PostgreSQLObjectMover(AbstractObjectMover):
                     EXECUTE PROCEDURE temp_blob_chunk_delete_trigger();
                 """,
             ]
-            # For some reason, preparing the INSERT statement also wants
-            # to acquire a lock. If we're committing is another
-            # transaction, this can block indefinitely (if that other transaction
-            # happens to be in this same thread!)
-            # checkIterationIntraTransaction (PostgreSQLHistoryPreservingRelStorageTests)
-            # easily triggers this. Fortunately, I don't think this
-            # is a common case, and we can workaround the test failure by
-            # only prepping this in the store connection.
-            # TODO: Is there a more general solution?
-            # We initially set this to 100, but under high concurrency (10 processes)
-            # that turned out to be laughably optimistic. We might actually need to go as high
-            # as the commit lock timeout.
-            cursor.execute('SET lock_timeout = 2000')
+
+            # For some reason, preparing the INSERT statement also
+            # wants to acquire a lock. If we're committing in another
+            # transaction, this can block indefinitely (if that other
+            # transaction happens to be in this same thread!)
+            # checkIterationIntraTransaction
+            # (PostgreSQLHistoryPreservingRelStorageTests) easily
+            # triggers this, and running zodbshootout with certain
+            # benchmarks and certain concurrency does as well.
+            # Fortunately, I don't think this is a common case, and we
+            # can workaround the test failure by only prepping this in
+            # the store connection. However, we do still need to
+            # increase the lock timeout (which is specified in
+            # milliseconds).
+            #
+            # TODO: Is there a more general solution? We initially set
+            # this to 100, but under high concurrency (10 processes)
+            # that turned out to be laughably optimistic. We might
+            # actually need to go as high as the commit lock timeout.
+            cursor.execute('SET lock_timeout = 10000')
 
         for stmt in ddl_stmts:
             cursor.execute(stmt)
