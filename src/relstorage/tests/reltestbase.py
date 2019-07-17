@@ -218,14 +218,20 @@ class UsesThreadsOnASingleStorageMixin(object):
         meth = getattr(
             super(UsesThreadsOnASingleStorageMixin, self),
             meth_name)
-        with self.__thread_safe_wrapper():
-            meth()
+        try:
+            with self.__thread_safe_wrapper():
+                meth()
+        finally:
+            self._storage.zap_all(slow=True)
 
     def make_func(name): # pylint:disable=no-self-argument
         return lambda self: self.__generic_wrapped_test(name)
 
     for bad_test in (
             'check_checkCurrentSerialInTransaction',
+            # This one stores a b'y' (invalid pickle) into the
+            # database as the root object, so if we don't get zapped
+            # afterwards, we can't open the database.
             'check_tid_ordering_w_commit',
     ):
         locals()[bad_test] = make_func(bad_test)

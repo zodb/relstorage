@@ -64,7 +64,6 @@ from .pack import Pack
 from .store import Storer
 from .store import BlobStorer
 
-from .connections import EventedConnectionWrapper
 from .connections import LoadConnection
 from .connections import StoreConnection
 from .connections import ClosedConnection
@@ -191,9 +190,10 @@ class RelStorage(LegacyMethodsMixin,
 
         self._instances = []
 
-        self._load_connection = EventedConnectionWrapper(LoadConnection(self._adapter.connmanager))
-        self._load_connection.activated = self.__on_load_activated
-        self._load_connection.rolledback = self.__no_longer_stale
+        self._load_connection = LoadConnection(self._adapter.connmanager)
+        # This creates a reference cycle that won't go away until we release()
+        # or close()
+        self._load_connection.on_first_use = self.__on_load_first_use
         self._store_connection = StoreConnection(self._adapter.connmanager)
 
         if cache is not None:
@@ -228,6 +228,17 @@ class RelStorage(LegacyMethodsMixin,
         if not self._is_read_only:
             self._oids = OIDs(self._adapter.oidallocator, self._store_connection)
 
+        # Now copy in a bunch of methods from our component objects.
+        # Many of these are 'stale_aware', meaning that we can ask
+        # them for a version of themselves that does something
+        # different when we go stale. When that happens, we *replace*
+        # the object in our __dict__ with the new one; and then
+        # reverse that when we're no longer stale.
+        #
+        # The storage wrapper zc.zlibstorage also copies methods into
+        # itself when it is created, from the storage it is wrapping.
+        # Because of this, stale aware methods like history() do not
+        # do the right thing when we're wrapped by zc.zlibstorage.
         loader = Loader(self._adapter, self._load_connection, self._store_connection, self._cache)
         copy_storage_methods(self, loader)
         storer = Storer()
@@ -377,6 +388,8 @@ class RelStorage(LegacyMethodsMixin,
 
     def registerDB(self, wrapper):
         if (ZODB.interfaces.IStorageWrapper.providedBy(wrapper)
+                # Prior to ZODB 5, this would be called by the database itself.
+                # (I wish it would still do that.)
                 and not ZODB.interfaces.IDatabase.providedBy(wrapper)
                 and not hasattr(type(wrapper), 'new_instance')):
             # Fixes for https://github.com/zopefoundation/zc.zlibstorage/issues/2
@@ -520,29 +533,30 @@ class RelStorage(LegacyMethodsMixin,
         # Allow GC to do its thing with the locals
         clear_frames(sys.exc_info()[2])
         replacements = {}
-        deletes = []
         my_ns = vars(self)
         for k, v in my_ns.items():
             if k in self._STALE_IGNORED_ATTRS:
                 continue
             if callable(getattr(v, 'stale', None)):
                 new_v = v.stale(stale_error)
-            else:
-                continue
-
-            if new_v is not None:
                 replacements[k] = new_v
-            else:
-                # None is a signal to delete the attribute.
-                deletes.append(k)
-        my_ns.update(replacements)
-        for k in deletes:
-            delattr(self, k)
 
-    def __no_longer_stale(self):
-        # TODO: Optimize this. It's called at the end of every
-        # transaction, and most won't be stale. We should put an
-        # object in the dict that does nothing.
+        my_ns.update(replacements)
+
+        # The next time we rollback or reopen, we're no longer stale
+        # Note that this creates a reference cycle, but it should only be
+        # temporary.
+        self._load_connection.on_rolledback = self.__no_longer_stale
+        self._load_connection.on_opened = self.__no_longer_stale
+
+    def __no_longer_stale(self, _conn, _cursor):
+        # This is called at the end of every transaction in
+        # afterCompletion(), and at the beginning of every transaction
+        # in sync() (called from Connection.newTransaction(), which is
+        # called automatically from Connection.afterCompletion when
+        # transactions are not explicit) Most of the time we won't be
+        # stale, which is why we only install these hooks when we are,
+        # and are careful to clean them up when we're not.
 
         my_ns = vars(self)
         replacements = {
@@ -554,13 +568,10 @@ class RelStorage(LegacyMethodsMixin,
 
         my_ns.update(replacements)
 
-        # This function is called whenever the load connection is
-        # rolled back, which happens at the end of every transaction,
-        # so we overwrite it with a function that does nothing.
-    __no_longer_stale.no_longer_stale = lambda: (lambda: None)
-    __no_longer_stale.stale = lambda _: None
+        del self._load_connection.on_rolledback
+        del self._load_connection.on_opened
 
-    def __on_load_activated(self, conn, cursor):
+    def __on_load_first_use(self, conn, cursor):
         """
         Poll for invalidations, update our cache.
 
@@ -590,9 +601,8 @@ class RelStorage(LegacyMethodsMixin,
             self.__stale(e)
             return (), prev
 
-        self.__no_longer_stale()
-
         # Inform the cache of the changes.
+        #
         # It's not good if this raises a CacheConsistencyError, that should
         # be a fresh connection. It's not clear that we can take any steps to
         # recover that the cache hasn't already taken.
@@ -615,8 +625,12 @@ class RelStorage(LegacyMethodsMixin,
             return {}
 
         changes, new_polled_tid = self._load_connection.restart_and_call(
-            self.__on_load_activated
+            self.__on_load_first_use
         )
+        # Now we're in a fully synced state, meaning
+        # we don't need to do anything fancy with the load connection
+        # anymore. Let it know that.
+        self._load_connection.active = True
 
         self._prev_polled_tid = new_polled_tid
 
