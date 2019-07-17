@@ -15,10 +15,12 @@
 from __future__ import absolute_import
 
 from ZODB.POSException import StorageError
+from ZODB.POSException import ReadConflictError
 from zope.interface import Attribute
 from zope.interface import Interface
 
-#pylint: disable=inherit-non-class,no-method-argument,no-self-argument
+# pylint:disable=inherit-non-class,no-method-argument,no-self-argument
+# pylint:disable=too-many-ancestors
 
 class IRelStorageAdapter(Interface):
     """A database adapter for RelStorage"""
@@ -662,30 +664,46 @@ class IPackUndo(Interface):
         pack operation is required to actually remove these deleted items.
         """
 
+class StaleConnectionError(ReadConflictError):
+    """
+    Raised by `IPoller.poll_invalidations` when a stale connection is
+    detected.
+    """
+
+    @classmethod
+    def from_prev_and_new_tid(cls, prev_polled_tid, new_polled_tid):
+        return cls(
+            "The database connection is stale: new_polled_tid=%d, "
+            "prev_polled_tid=%d." % (new_polled_tid, prev_polled_tid))
+
+
 class IPoller(Interface):
     """Poll for new data"""
 
     def poll_invalidations(conn, cursor, prev_polled_tid, ignore_tid):
         """Polls for new transactions.
 
-        conn and cursor must have been created previously by open_for_load().
-        prev_polled_tid is the tid returned at the last poll, or None
-        if this is the first poll.  If ignore_tid is not None, changes
-        committed in that transaction will not be included in the list
-        of changed OIDs.
+        conn and cursor must have been created previously by
+        open_for_load(). prev_polled_tid is the tid returned at the
+        last poll, or None if this is the first poll. If ignore_tid is
+        not None, changes committed in that transaction will not be
+        included in the list of changed OIDs.
 
         If the database has disconnected, this method should raise one
         of the exceptions listed in the disconnected_exceptions
         attribute of the associated IConnectionManager.
 
-        Returns (changes, new_polled_tid), where changes is either
-        a list of (oid, tid) that have changed, or None to indicate
-        that the changes are too complex to list.  new_polled_tid is
-        never None.
+        Returns (changes, new_polled_tid), where changes is either a
+        list of (oid, tid) that have changed, or None to indicate that
+        the changes are too complex to list. new_polled_tid is never
+        None.
 
-        This method may raise ReadConflictError if the database has
-        reverted to an earlier transaction, which can happen
-        in an asynchronously replicated database.
+        This method may raise :class:`StaleConnectionError` (a
+        ``ReadConflictError``) if the database has reverted to an
+        earlier transaction, which can happen in an asynchronously
+        replicated database. This exception is one that is transient
+        and most transaction middleware will catch it and retry the
+        transaction.
         """
 
     def list_changes(cursor, after_tid, last_tid):

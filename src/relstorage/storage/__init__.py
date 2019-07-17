@@ -482,13 +482,27 @@ class RelStorage(LegacyMethodsMixin,
         # it can only be iterated over once. zodbconvert works around this.
         return TransactionIterator(self._adapter, start, stop)
 
-    def sync(self, force=True): # pylint:disable=unused-argument
+    def sync(self, force=True):
         """
         Updates to a current view of the database.
 
         This is implemented by rolling back the relational database
         transaction.
+
+        .. versionchanged:: 3.0a6
+           This method now pays attention to the *force* argument. If it is
+           ``False``, this method does nothing. This prevents extra rollbacks
+           and network traffic in the common case of using the default implicit
+           transactions when this object is used by a ZODB ``Connection``.
+
         """
+        if not force:
+            # When we get a force=False, it's from Connection.afterCompletion()
+            # calling Connection.newTransaction() because the transaction manager is
+            # in implicit mode. Immediately after it does that, it will call
+            # poll_invalidations()...and in our implementation, that implies a sync.
+            # So we can avoid the overhead of the extra rollback.
+            return
 
         try:
             self._load_connection.rollback()
