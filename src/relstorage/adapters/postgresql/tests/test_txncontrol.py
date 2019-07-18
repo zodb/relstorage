@@ -18,21 +18,8 @@ from __future__ import print_function
 
 from relstorage.adapters.tests import test_txncontrol
 
-class MockDriver(object):
-    Binary = bytes
 
 class TestPostgreSQLTransactionControl(test_txncontrol.TestTransactionControl):
-
-    def setUp(self):
-        super(TestPostgreSQLTransactionControl, self).setUp()
-
-        driver = MockDriver()
-        driver.Binary = super(TestPostgreSQLTransactionControl, self).Binary
-        self.Binary = driver
-
-    def tearDown(self):
-        del self.Binary
-        super(TestPostgreSQLTransactionControl, self).tearDown()
 
     def _getClass(self):
         from ..txncontrol import PostgreSQLTransactionControl

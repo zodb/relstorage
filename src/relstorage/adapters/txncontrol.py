@@ -21,7 +21,8 @@ from zope.interface import implementer
 
 from .._compat import ABC
 from ._util import noop_when_history_free
-from ._util import query_property
+
+from .schema import Schema
 from .interfaces import ITransactionControl
 
 
@@ -73,19 +74,14 @@ class GenericTransactionControl(AbstractTransactionControl):
     and history-preserving storages that share a common syntax.
     """
 
-    _get_tid_queries = (
-        "SELECT MAX(tid) FROM transaction",
-        "SELECT MAX(tid) FROM object_state"
-    )
-    _get_tid_query = query_property('_get_tid')
-
-    def __init__(self, connmanager, keep_history, Binary):
+    def __init__(self, connmanager, poller, keep_history, Binary):
         super(GenericTransactionControl, self).__init__(connmanager)
+        self.poller = poller
         self.keep_history = keep_history
         self.Binary = Binary
 
     def get_tid(self, cursor):
-        cursor.execute(self._get_tid_query)
+        self.poller.poll_query.execute(cursor)
         row = cursor.fetchall()
         if not row:
             # nothing has been stored yet
@@ -94,15 +90,22 @@ class GenericTransactionControl(AbstractTransactionControl):
         tid = row[0][0]
         return tid if tid is not None else 0
 
-    _add_transaction_query = """
-    INSERT INTO transaction (tid, packed, username, description, extension)
-    VALUES (%s, %s, %s, %s, %s)
-    """
+    _add_transaction_query = Schema.transaction.insert(
+        Schema.transaction.c.tid,
+        Schema.transaction.c.packed,
+        Schema.transaction.c.username,
+        Schema.transaction.c.description,
+        Schema.transaction.c.extension
+    ).prepared()
 
     @noop_when_history_free
     def add_transaction(self, cursor, tid, username, description, extension,
                         packed=False):
         binary = self.Binary
-        cursor.execute(self._add_transaction_query, (
-            tid, packed, binary(username),
-            binary(description), binary(extension)))
+        self._add_transaction_query.execute(
+            cursor,
+            (
+                tid, packed, binary(username),
+                binary(description), binary(extension)
+            )
+        )

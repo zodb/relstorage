@@ -28,6 +28,10 @@ from ._util import query_property as _query_property
 from .._compat import ABC
 from .batch import RowBatcher
 from .interfaces import IObjectMover
+from .schema import Schema
+
+objects = Schema.all_current_object_state
+object_state = Schema.object_state
 
 metricmethod_sampled = Metric(method=True, rate=0.1)
 
@@ -54,20 +58,11 @@ class AbstractObjectMover(ABC):
             return None
         return md5(data).hexdigest()
 
-    _load_current_queries = (
-        """
-        SELECT state, tid
-        FROM current_object
-        JOIN object_state USING(zoid, tid)
-        WHERE zoid = %s
-        """,
-        """
-        SELECT state, tid
-        FROM object_state
-        WHERE zoid = %s
-        """)
-
-    _load_current_query = _query_property('_load_current')
+    _load_current_query = objects.select(
+        objects.c.state, objects.c.tid
+    ).where(
+        objects.c.zoid == objects.orderedbindparam()
+    ).prepared()
 
     @metricmethod_sampled
     def load_current(self, cursor, oid):
@@ -76,8 +71,7 @@ class AbstractObjectMover(ABC):
         oid is an integer.  Returns (None, None) if object does not exist.
         """
         stmt = self._load_current_query
-
-        cursor.execute(stmt, (oid,))
+        stmt.execute(cursor, (oid,))
         # Note that we cannot rely on cursor.rowcount being
         # a valid indicator. The DB-API doesn't require it, and
         # some implementations, like MySQL Connector/Python are
@@ -110,12 +104,13 @@ class AbstractObjectMover(ABC):
             oid, state, tid = row
             yield oid, binary_column_as_state_type(state), tid
 
-    _load_revision_query = """
-        SELECT state
-        FROM object_state
-        WHERE zoid = %s
-            AND tid = %s
-        """
+    _load_revision_query = object_state.select(
+        object_state.c.state
+    ).where(
+        object_state.c.zoid == object_state.orderedbindparam()
+    ).and_(
+        object_state.c.tid == object_state.orderedbindparam()
+    ).prepared()
 
     @metricmethod_sampled
     def load_revision(self, cursor, oid, tid):
@@ -124,25 +119,24 @@ class AbstractObjectMover(ABC):
         Returns None if no such state exists.
         """
         stmt = self._load_revision_query
-        cursor.execute(stmt, (oid, tid))
+        stmt.execute(cursor, (oid, tid))
         row = cursor.fetchone()
         if row:
             (state,) = row
             return self.driver.binary_column_as_state_type(state)
         return None
 
-    _exists_queries = (
-        "SELECT 1 FROM current_object WHERE zoid = %s",
-        "SELECT 1 FROM object_state WHERE zoid = %s"
+    _exists_query = Schema.all_current_object.select(
+        Schema.all_current_object.c.zoid
+    ).where(
+        Schema.all_current_object.c.zoid == Schema.all_current_object.orderedbindparam()
     )
-
-    _exists_query = _query_property('_exists')
 
     @metricmethod_sampled
     def exists(self, cursor, oid):
         """Returns a true value if the given object exists."""
         stmt = self._exists_query
-        cursor.execute(stmt, (oid,))
+        stmt.execute(cursor, (oid,))
         row = cursor.fetchone()
         return row
 
@@ -326,24 +320,15 @@ class AbstractObjectMover(ABC):
 
     # careful with USING clause in a join: Oracle doesn't allow such
     # columns to have a prefix.
-    _detect_conflict_queries = (
-        """
-        SELECT zoid, current_object.tid, temp_store.prev_tid
-        FROM temp_store
-        JOIN current_object USING (zoid)
-        WHERE temp_store.prev_tid != current_object.tid
-        ORDER BY zoid
-        """,
-        """
-        SELECT zoid, object_state.tid, temp_store.prev_tid
-        FROM temp_store
-        JOIN object_state USING (zoid)
-        WHERE temp_store.prev_tid != object_state.tid
-        ORDER BY zoid
-        """
-    )
-
-    _detect_conflict_query = _query_property('_detect_conflict')
+    _detect_conflict_query = Schema.temp_store.natural_join(
+        Schema.all_current_object
+    ).select(
+        Schema.temp_store.c.zoid, Schema.all_current_object.c.tid, Schema.temp_store.c.prev_tid
+    ).where(
+        Schema.temp_store.c.prev_tid != Schema.all_current_object.c.tid
+    ).order_by(
+        Schema.temp_store.c.zoid
+    ).prepared()
 
     @metricmethod_sampled
     def detect_conflict(self, cursor):
@@ -351,7 +336,7 @@ class AbstractObjectMover(ABC):
         # passed to tryToResolveConflict, saving extra queries.
         # OTOH, using extra memory.
         stmt = self._detect_conflict_query
-        cursor.execute(stmt)
+        stmt.execute(cursor)
         rows = cursor.fetchall()
         return rows
 
@@ -389,12 +374,21 @@ class AbstractObjectMover(ABC):
     WHERE zoid IN (SELECT zoid FROM temp_store)
     """
 
-    _move_from_temp_hf_insert_query = """
-    INSERT INTO object_state (zoid, tid, state_size, state)
-        SELECT zoid, %s, COALESCE(LENGTH(state), 0), state
-        FROM temp_store
-        ORDER BY zoid
-    """
+    _move_from_temp_hf_insert_query = Schema.object_state.insert(
+    ).from_select(
+        (Schema.object_state.c.zoid,
+         Schema.object_state.c.tid,
+         Schema.object_state.c.state_size,
+         Schema.object_state.c.state),
+        Schema.temp_store.select(
+            Schema.temp_store.c.zoid,
+            Schema.temp_store.orderedbindparam(),
+            'COALESCE(LENGTH(state), 0)',
+            Schema.temp_store.c.state
+        ).order_by(
+            Schema.temp_store.c.zoid
+        )
+    ).prepared()
 
     _move_from_temp_copy_blob_query = """
     INSERT INTO blob_chunk (zoid, tid, chunk_num, chunk)
@@ -435,7 +429,8 @@ class AbstractObjectMover(ABC):
             cursor.execute(stmt)
 
         stmt = self._move_from_temp_hf_insert_query
-        cursor.execute(stmt, (tid,))
+        __traceback_info__ = stmt
+        stmt.execute(cursor, (tid,))
 
 
     @metricmethod_sampled

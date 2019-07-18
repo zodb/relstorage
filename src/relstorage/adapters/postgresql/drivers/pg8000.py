@@ -25,6 +25,7 @@ from zope.interface import implementer
 
 from ..._abstract_drivers import AbstractModuleDriver
 from ...interfaces import IDBDriver
+from ..._sql import _Compiler
 
 __all__ = [
     'PG8000Driver',
@@ -114,6 +115,17 @@ class _tuple_deque(deque):
 
     def append(self, row): # pylint:disable=arguments-differ
         deque.append(self, tuple(row))
+
+class PG8000Compiler(_Compiler):
+
+    def can_prepare(self):
+        # Important: pg8000 1.10 - 1.13, at least, can't handle prepared
+        # statements that take parameters but it doesn't need to because it
+        # prepares every statement anyway. So you must have a backup that you use
+        # for that driver.
+        # https://github.com/mfenniak/pg8000/issues/132
+        return False
+
 
 @implementer(IDBDriver)
 class PG8000Driver(AbstractModuleDriver):
@@ -229,3 +241,5 @@ class PG8000Driver(AbstractModuleDriver):
         cursor.execute('SET SESSION CHARACTERISTICS AS ' + transaction_stmt)
         conn.commit()
         return conn, cursor
+
+    sql_compiler_class = PG8000Compiler

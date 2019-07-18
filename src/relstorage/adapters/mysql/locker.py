@@ -97,18 +97,7 @@ class MySQLLocker(AbstractLocker):
 
     def __init__(self, options, driver, batcher_factory):
         super(MySQLLocker, self).__init__(options, driver, batcher_factory)
-        # TODO: Back to needing a proper prepare registry.
-        lock_stmt_raw = self._commit_lock_query
-        lock_stmt_nowait_raw = self._commit_lock_nowait_query
-
-        self._prepare_lock_stmt = 'PREPARE hold_commit_lock FROM "%s"' % (
-            lock_stmt_raw)
-        self._prepare_lock_stmt_nowait = 'PREPARE hold_commit_lock_nowait FROM "%s"' % (
-            lock_stmt_nowait_raw)
         self._supports_row_lock_nowait = None
-
-        self._commit_lock_query = 'EXECUTE hold_commit_lock'
-        self._commit_lock_nowait_query = 'EXECUTE hold_commit_lock_nowait'
 
         # No good preparing this, mysql can't take parameters in EXECUTE,
         # they have to be user variables, which defeats most of the point
@@ -135,10 +124,6 @@ class MySQLLocker(AbstractLocker):
             major = int(ver[0])
             __traceback_info__ = ver, major
             self._supports_row_lock_nowait = (major >= 8)
-
-        cursor.execute(self._prepare_lock_stmt)
-        if self._supports_row_lock_nowait:
-            cursor.execute(self._prepare_lock_stmt_nowait)
 
     def _on_store_opened_set_row_lock_timeout(self, cursor, restart=False):
         if restart:

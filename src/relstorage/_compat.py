@@ -65,9 +65,11 @@ def iteroiditems(d):
 if PY3:
     string_types = (str,)
     unicode = str
+    from io import StringIO as NStringIO
 else:
     string_types = (basestring,)
     unicode = unicode
+    from io import BytesIO as NStringIO
 
 try:
     from abc import ABC

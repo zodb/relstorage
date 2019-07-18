@@ -46,7 +46,8 @@ class OracleObjectMover(AbstractObjectMover):
     _move_from_temp_copy_blob_query = format_to_named(
         AbstractObjectMover._move_from_temp_copy_blob_query)
 
-    _load_current_queries = _to_oracle_ordered(AbstractObjectMover._load_current_queries)
+    # XXX: This is definitely broken!
+    # _load_current_queries = _to_oracle_ordered(AbstractObjectMover._load_current_queries)
 
     @metricmethod_sampled
     def load_current(self, cursor, oid):
@@ -65,7 +66,8 @@ class OracleObjectMover(AbstractObjectMover):
         return state
 
 
-    _exists_queries = _to_oracle_ordered(AbstractObjectMover._exists_queries)
+    # XXX: Def broken.
+    #_exists_queries = _to_oracle_ordered(AbstractObjectMover._exists_queries)
 
     @metricmethod_sampled
     def exists(self, cursor, oid):

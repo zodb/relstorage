@@ -20,76 +20,17 @@ import os
 import struct
 
 from zope.interface import implementer
-from ZODB.POSException import Unsupported
 
-from .._util import query_property
+
 from ..interfaces import IObjectMover
 from ..mover import AbstractObjectMover
 from ..mover import metricmethod_sampled
-
-# Important: pg8000 1.10 - 1.13, at least, can't handle prepared
-# statements that take parameters but it doesn't need to because it
-# prepares every statement anyway. So you must have a backup that you use
-# for that driver.
-# https://github.com/mfenniak/pg8000/issues/132
-
-
-def to_prepared_queries(name, queries, datatypes=()):
-    # Give correct datatypes for the queries, wherever possible.
-    # The number of parameters should be the same or more than the
-    # number of datatypes.
-    # datatypes is a sequence of strings.
-
-    # Maybe instead of having the adapter have to know about all the
-    # statements that need prepared, we could keep a registry?
-    if datatypes:
-        assert isinstance(datatypes, (list, tuple))
-        datatypes = ', '.join(datatypes)
-        datatypes = ' (%s)' % (datatypes,)
-    else:
-        datatypes = ''
-
-    result = []
-    for q in queries:
-        if not isinstance(q, str):
-            # Unsupported marker
-            result.append(q)
-            continue
-
-        q = q.strip()
-        param_count = q.count('%s')
-        rep_count = 0
-        while rep_count < param_count:
-            rep_count += 1
-            q = q.replace('%s', '$' + str(rep_count), 1)
-        stmt = 'PREPARE {name}{datatypes} AS {query}'.format(
-            name=name, datatypes=datatypes, query=q
-        )
-        result.append(stmt)
-    return result
 
 
 @implementer(IObjectMover)
 class PostgreSQLObjectMover(AbstractObjectMover):
 
-    _prepare_load_current_queries = to_prepared_queries(
-        'load_current',
-        AbstractObjectMover._load_current_queries,
-        ['BIGINT'])
-
-    _prepare_load_current_query = query_property('_prepare_load_current')
-
-    _load_current_query = 'EXECUTE load_current(%s)'
-
-    _prepare_detect_conflict_queries = to_prepared_queries(
-        'detect_conflicts',
-        AbstractObjectMover._detect_conflict_queries)
-
-    _prepare_detect_conflict_query = query_property('_prepare_detect_conflict')
-
-    _detect_conflict_query = 'EXECUTE detect_conflicts'
-
-    _move_from_temp_hf_insert_query_raw = AbstractObjectMover._move_from_temp_hf_insert_query + """
+    _move_from_temp_hf_insert_query = AbstractObjectMover._move_from_temp_hf_insert_query + """
         ON CONFLICT (zoid)
         DO UPDATE
         SET state_size = COALESCE(LENGTH(excluded.state), 0),
@@ -107,35 +48,9 @@ class PostgreSQLObjectMover(AbstractObjectMover):
     """
     _update_current_update_query = None
 
-    _move_from_temp_hf_insert_raw_queries = (
-        Unsupported("States accumulate in history-preserving mode"),
-        _move_from_temp_hf_insert_query_raw,
-    )
-
-    _prepare_move_from_temp_hf_insert_queries = to_prepared_queries(
-        'move_from_temp',
-        _move_from_temp_hf_insert_raw_queries,
-        ('BIGINT',)
-    )
-
-    _prepare_move_from_temp_hf_insert_query = query_property(
-        '_prepare_move_from_temp_hf_insert')
-
-    _move_from_temp_hf_insert_queries = (
-        Unsupported("States accumulate in history-preserving mode"),
-        'EXECUTE move_from_temp(%s)'
-    )
-
-    _move_from_temp_hf_insert_query = query_property('_move_from_temp_hf_insert')
 
     # We upsert, no need
     _move_from_temp_hf_delete_query = ''
-
-    on_load_opened_statement_names = ('_prepare_load_current_query',)
-    on_store_opened_statement_names = on_load_opened_statement_names + (
-        '_prepare_detect_conflict_query',
-        '_prepare_move_from_temp_hf_insert_query',
-    )
 
 
     @metricmethod_sampled
@@ -175,6 +90,9 @@ class PostgreSQLObjectMover(AbstractObjectMover):
                 """,
             ]
 
+            # XXX: we're not preparing statements anymore until just
+            # before we want to use them, so this is no longer needed.
+
             # For some reason, preparing the INSERT statement also
             # wants to acquire a lock. If we're committing in another
             # transaction, this can block indefinitely (if that other
@@ -193,7 +111,7 @@ class PostgreSQLObjectMover(AbstractObjectMover):
             # this to 100, but under high concurrency (10 processes)
             # that turned out to be laughably optimistic. We might
             # actually need to go as high as the commit lock timeout.
-            cursor.execute('SET lock_timeout = 10000')
+            # cursor.execute('SET lock_timeout = 10000')
 
         for stmt in ddl_stmts:
             cursor.execute(stmt)
@@ -332,19 +250,6 @@ class PostgreSQLObjectMover(AbstractObjectMover):
             buf = TempStoreCopyBuffer(state_oid_tid_iter,
                                       self._compute_md5sum if self.keep_history else None)
             cursor.copy_expert(buf.COPY_COMMAND, buf)
-
-
-class PG8000ObjectMover(PostgreSQLObjectMover):
-    # Delete the statements that need paramaters.
-    on_load_opened_statement_names = ()
-    on_store_opened_statement_names = ('_prepare_detect_conflict_query',)
-
-    _load_current_query = AbstractObjectMover._load_current_query
-
-    _move_from_temp_hf_insert_queries = (
-        Unsupported("States accumulate in history-preserving mode"),
-        PostgreSQLObjectMover._move_from_temp_hf_insert_query_raw
-    )
 
 
 class TempStoreCopyBuffer(io.BufferedIOBase):

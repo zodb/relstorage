@@ -251,10 +251,12 @@ class MockConnectionManager(object):
     disconnected_exceptions = ()
 
 
-    def rollback(self, conn, cursor):
-        "Does nothing"
+    def rollback(self, conn, cursor): # pylint:disable=unused-argument
+        if hasattr(conn, 'rollback'):
+            conn.rollback()
 
     def rollback_and_close(self, conn, cursor):
+        self.rollback(conn, cursor)
         if conn:
             conn.close()
         if cursor:
@@ -283,3 +285,15 @@ class MockAdapter(object):
         self.connmanager = MockConnectionManager()
         self.packundo = MockPackUndo()
         self.oidallocator = MockOIDAllocator()
+
+class MockQuery(object):
+
+    def __init__(self, raw):
+        self.raw = raw
+
+    def execute(self, cursor, params=None):
+        cursor.execute(self.raw, params)
+
+class MockPoller(object):
+
+    poll_query = MockQuery('SELECT MAX(tid) FROM object_state')

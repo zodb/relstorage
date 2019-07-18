@@ -110,23 +110,24 @@ class OracleAdapter(object):
         self.oidallocator = OracleOIDAllocator(
             connmanager=self.connmanager,
         )
+
+
+        self.poller = Poller(
+            self.driver,
+            keep_history=self.keep_history,
+            runner=self.runner,
+            revert_when_stale=options.revert_when_stale,
+        )
+
         self.txncontrol = OracleTransactionControl(
             connmanager=self.connmanager,
+            poller=self.poller,
             keep_history=self.keep_history,
             Binary=driver.Binary,
             twophase=twophase,
         )
 
-        if self.keep_history:
-            poll_query = "SELECT MAX(tid) FROM transaction"
-        else:
-            poll_query = "SELECT MAX(tid) FROM object_state"
-        self.poller = Poller(
-            poll_query=poll_query,
-            keep_history=self.keep_history,
-            runner=self.runner,
-            revert_when_stale=options.revert_when_stale,
-        )
+
 
         if self.keep_history:
             self.packundo = OracleHistoryPreservingPackUndo(

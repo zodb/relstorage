@@ -15,9 +15,6 @@
 from __future__ import absolute_import
 
 import logging
-import re
-
-from relstorage._compat import intern
 from relstorage._compat import iteritems
 
 from ..scriptrunner import ScriptRunner
@@ -31,18 +28,24 @@ def format_to_named(stmt):
     Convert '%s' pyformat strings to :n numbered
     strings. Intended only for static strings.
     """
-    try:
-        return _stmt_cache[stmt]
-    except KeyError:
-        matches = []
+    # XXX: This should be part of the Compiler, as handled
+    # by the driver.
+    return stmt
+    # import re
+    # from relstorage._compat import intern
 
-        def replace(_match):
-            matches.append(None)
-            return ':%d' % len(matches)
-        new_stmt = intern(re.sub('%s', replace, stmt))
-        _stmt_cache[stmt] = new_stmt
+    # try:
+    #     return _stmt_cache[stmt]
+    # except KeyError:
+    #     matches = []
 
-        return new_stmt
+    #     def replace(_match):
+    #         matches.append(None)
+    #         return ':%d' % len(matches)
+    #     new_stmt = intern(re.sub('%s', replace, stmt))
+    #     _stmt_cache[stmt] = new_stmt
+
+    #     return new_stmt
 
 class OracleScriptRunner(ScriptRunner):
 

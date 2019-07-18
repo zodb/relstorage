@@ -470,7 +470,9 @@ class RelStorage(LegacyMethodsMixin,
         # abort.
 
         # The next time we use the load connection, it will need to poll
-        # and will call our _on_load_activated.
+        # and will call our __on_first_use.
+        # Typically our next call from the ZODB Connection will be from its
+        # `newTransaction` method, a forced `sync` followed by `poll_invalidations`.
 
         # TODO: Why doesn't this use connmanager.restart_load()?
         # They both rollback; the difference is that restart_load checks for replicas,
