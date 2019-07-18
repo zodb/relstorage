@@ -53,6 +53,11 @@
      multi-database and that only ``multi-zodb-gc`` be used to perform
      garbage collection.
 
+- Eliminate a few extra round trips to the database on transaction
+  completion: One extra ``ROLLBACK`` in all databases, and one query
+  against the ``transaction`` table in history-preserving databases.
+  See :issue:`159`.
+
 3.0a5 (2019-07-11)
 ==================
 

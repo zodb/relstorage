@@ -247,7 +247,29 @@ class MockOptions(Options):
         object.__setattr__(self, name, value)
 
 class MockConnectionManager(object):
-    pass
+
+    disconnected_exceptions = ()
+
+
+    def rollback(self, conn, cursor):
+        "Does nothing"
+
+    def rollback_and_close(self, conn, cursor):
+        if conn:
+            conn.close()
+        if cursor:
+            cursor.close()
+
+    def open_for_load(self):
+        conn = MockConnection()
+        return conn, conn.cursor()
+
+    open_for_store = open_for_load
+
+    def restart_load(self, conn, cursor):
+        pass
+
+    restart_store = restart_load
 
 class MockPackUndo(object):
     pass

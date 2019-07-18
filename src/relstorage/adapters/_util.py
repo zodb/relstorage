@@ -50,7 +50,8 @@ def query_property(base_name,
         query is chosen before it is formatted and before it is returned.
     :keyword bool formatted: If True (*not* the default), then the
         chosen query will be formatted using the
-        ``self.runner.script_vars``.
+        ``self.runner.script_vars``. This should produce a new
+        query that uses the correct parameter binding for the database.
     """
 
     def prop(inst):
