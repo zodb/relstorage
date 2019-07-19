@@ -147,7 +147,6 @@ class MySQLAdapter(object):
             )
             self.dbiter = HistoryPreservingDatabaseIterator(
                 driver,
-                runner=self.runner,
             )
         else:
             self.packundo = MySQLHistoryFreePackUndo(
@@ -159,7 +158,6 @@ class MySQLAdapter(object):
             )
             self.dbiter = HistoryFreeDatabaseIterator(
                 driver,
-                runner=self.runner,
             )
 
         self.stats = MySQLStats(

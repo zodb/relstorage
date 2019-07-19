@@ -26,6 +26,7 @@ from zope.interface import implementer
 from .._abstract_drivers import AbstractModuleDriver
 from .._abstract_drivers import implement_db_driver_options
 from ..interfaces import IDBDriver
+from .dialect import OracleDialect
 
 database_type = 'oracle'
 
@@ -37,6 +38,7 @@ __all__ = [
 class cx_OracleDriver(AbstractModuleDriver):
     __name__ = 'cx_Oracle'
     MODULE_NAME = __name__
+    dialect = OracleDialect()
 
     def __init__(self):
         super(cx_OracleDriver, self).__init__()

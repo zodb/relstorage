@@ -128,7 +128,6 @@ class PostgreSQLAdapter(object):
             )
             self.dbiter = HistoryPreservingDatabaseIterator(
                 driver,
-                runner=self.runner,
             )
         else:
             self.packundo = HistoryFreePackUndo(
@@ -142,7 +141,6 @@ class PostgreSQLAdapter(object):
             self.packundo._lock_for_share = 'FOR KEY SHARE OF object_state'
             self.dbiter = HistoryFreeDatabaseIterator(
                 driver,
-                runner=self.runner,
             )
 
         self.stats = PostgreSQLStats(

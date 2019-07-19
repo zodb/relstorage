@@ -23,29 +23,29 @@ log = logging.getLogger(__name__)
 
 _stmt_cache = {}
 
-def format_to_named(stmt):
+def _format_to_named(stmt):
     """
     Convert '%s' pyformat strings to :n numbered
     strings. Intended only for static strings.
+
+    This is legacy. Replace strings that use this with SQL statements
+    constructed from the schema.
     """
-    # XXX: This should be part of the Compiler, as handled
-    # by the driver.
-    return stmt
-    # import re
-    # from relstorage._compat import intern
+    import re
+    from relstorage._compat import intern
 
-    # try:
-    #     return _stmt_cache[stmt]
-    # except KeyError:
-    #     matches = []
+    try:
+        return _stmt_cache[stmt]
+    except KeyError:
+        matches = []
 
-    #     def replace(_match):
-    #         matches.append(None)
-    #         return ':%d' % len(matches)
-    #     new_stmt = intern(re.sub('%s', replace, stmt))
-    #     _stmt_cache[stmt] = new_stmt
+        def replace(_match):
+            matches.append(None)
+            return ':%d' % len(matches)
+        new_stmt = intern(re.sub('%s', replace, stmt))
+        _stmt_cache[stmt] = new_stmt
 
-    #     return new_stmt
+        return new_stmt
 
 class OracleScriptRunner(ScriptRunner):
 
@@ -93,7 +93,7 @@ class OracleScriptRunner(ScriptRunner):
 
         stmt should use '%s' parameter format.
         """
-        cursor.executemany(format_to_named(stmt), items)
+        cursor.executemany(_format_to_named(stmt), items)
 
 
 class TrackingMap(object):

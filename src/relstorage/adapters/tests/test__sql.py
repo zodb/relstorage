@@ -31,6 +31,8 @@ from .._sql import DefaultDialect
 from .._sql import OID
 from .._sql import TID
 from .._sql import State
+from .._sql import Boolean
+from .._sql import BinaryString
 
 current_object = Table(
     'current_object',
@@ -43,18 +45,28 @@ object_state = Table(
     Column('zoid', OID),
     Column('tid', TID),
     Column('state', State),
+    Column('state_size'),
 )
 
 hp_object_and_state = current_object.natural_join(object_state)
 
 objects = HistoryVariantTable(
     current_object,
-   object_state,
+    object_state,
 )
 
 object_and_state = HistoryVariantTable(
     hp_object_and_state,
     object_state
+)
+
+transaction = Table(
+    'transaction',
+    Column('tid', TID),
+    Column('packed', Boolean),
+    Column('username', BinaryString),
+    Column('description', BinaryString),
+    Column('extension', BinaryString),
 )
 
 class TestTableSelect(TestCase):
@@ -66,7 +78,15 @@ class TestTableSelect(TestCase):
 
         self.assertEqual(
             str(stmt),
-            'SELECT zoid, tid, state FROM object_state WHERE (zoid = tid)'
+            'SELECT zoid, tid, state, state_size FROM object_state WHERE (zoid = tid)'
+        )
+
+    def test_distinct(self):
+        table = object_state
+        stmt = table.select(table.c.zoid).where(table.c.tid == table.bindparam('tid')).distinct()
+        self.assertEqual(
+            str(stmt),
+            'SELECT DISTINCT zoid FROM object_state WHERE (tid = %(tid)s)'
         )
 
     def test_simple_eq_select_and(self):
@@ -77,13 +97,14 @@ class TestTableSelect(TestCase):
 
         self.assertEqual(
             str(stmt),
-            'SELECT zoid, tid, state FROM object_state WHERE (zoid = tid)'
+            'SELECT zoid, tid, state, state_size FROM object_state WHERE (zoid = tid)'
         )
 
         stmt = stmt.and_(table.c.zoid > 5)
         self.assertEqual(
             str(stmt),
-            'SELECT zoid, tid, state FROM object_state WHERE ((zoid = tid AND zoid > %(param_0)s))'
+            'SELECT zoid, tid, state, state_size '
+            'FROM object_state WHERE ((zoid = tid AND zoid > %(literal_0)s))'
         )
 
     def test_simple_eq_select_literal(self):
@@ -94,12 +115,12 @@ class TestTableSelect(TestCase):
 
         self.assertEqual(
             str(stmt),
-            'SELECT zoid, tid, state FROM object_state WHERE (zoid = %(param_0)s)'
+            'SELECT zoid, tid, state, state_size FROM object_state WHERE (zoid = %(literal_0)s)'
         )
 
         self.assertEqual(
             stmt.compiled().params,
-            {'param_0': 7})
+            {'literal_0': 7})
 
     def test_column_query_variant_table(self):
         stmt = objects.select(objects.c.tid, objects.c.zoid).where(
@@ -241,4 +262,89 @@ class TestTableSelect(TestCase):
         self.assertRegex(
             stmt._prepare_stmt,
             r"PREPARE rs_prep_stmt_[0-9]* \(BIGINT\) AS.*"
+        )
+
+    def test_it(self):
+        from .._sql import it
+        stmt = object_state.select(
+            it.c.zoid,
+            it.c.state
+        ).where(
+            it.c.tid == it.bindparam('tid')
+        ).order_by(
+            it.c.zoid
+        )
+
+        self.assertEqual(
+            str(stmt),
+            'SELECT zoid, state FROM object_state WHERE (tid = %(tid)s) ORDER BY zoid'
+        )
+
+        # Now something that won't resolve.
+        col_ref = it.c.dne
+
+        # In the column list
+        with self.assertRaisesRegex(AttributeError, 'does not include dne'):
+            object_state.select(col_ref)
+
+        stmt = object_state.select(it.c.zoid)
+
+        # In the where clause
+        with self.assertRaisesRegex(AttributeError, 'does not include dne'):
+            stmt.where(col_ref == object_state.c.state)
+
+        # In order by
+        with self.assertRaisesRegex(AttributeError, 'does not include dne'):
+            stmt.order_by(col_ref == object_state.c.state)
+
+    def test_boolean_literal(self):
+        from .._sql import it
+        stmt = transaction.select(
+            transaction.c.tid
+        ).where(
+            it.c.packed == False # pylint:disable=singleton-comparison
+        ).order_by(
+            transaction.c.tid, 'DESC'
+        )
+
+        self.assertEqual(
+            str(stmt),
+            'SELECT tid FROM transaction WHERE (packed = FALSE) ORDER BY tid DESC'
+        )
+
+    def test_literal_in_select(self):
+        stmt = current_object.select(
+            1
+        ).where(
+            current_object.c.zoid == current_object.bindparam('oid')
+        )
+
+        self.assertEqual(
+            str(stmt),
+            'SELECT 1 FROM current_object WHERE (zoid = %(oid)s)'
+        )
+
+    def test_boolean_literal_it_joined_table(self):
+        from .._sql import it
+        stmt = transaction.natural_join(
+            object_state
+        ).select(
+            it.c.tid, it.c.username, it.c.description, it.c.extension,
+            object_state.c.state_size
+        ).where(
+            it.c.zoid == it.bindparam("oid")
+        ).and_(
+            it.c.packed == False # pylint:disable=singleton-comparison
+        ).order_by(
+            it.c.tid, "DESC"
+        )
+
+        self.assertEqual(
+            str(stmt),
+            'SELECT tid, username, description, extension, state_size '
+            'FROM transaction '
+            'JOIN object_state '
+            'USING (tid) '
+            'WHERE ((zoid = %(oid)s AND packed = FALSE)) '
+            'ORDER BY tid DESC'
         )

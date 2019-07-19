@@ -55,6 +55,8 @@ else:
     OID_OBJECT_MAP_TYPE = dict
     OID_SET_TYPE = set
 
+MAX_TID = BTrees.family64.maxint
+
 def iteroiditems(d):
     # Could be either a BTree, which always has 'iteritems',
     # or a plain dict, which may or may not have iteritems.

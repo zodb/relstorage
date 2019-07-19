@@ -34,6 +34,8 @@ This is inspired by the SQLAlchemy Core, but we don't use it because
 we don't want to take a dependency that can conflict with applications
 using RelStorage.
 """
+# pylint:disable=too-many-lines
+
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
@@ -60,6 +62,9 @@ class Type(object):
     """
     A database type.
     """
+
+class _Unknown(Type):
+    "Unspecified."
 
 class Integer64(Type):
     """
@@ -91,16 +96,25 @@ class Boolean(Type):
     A two-value column.
     """
 
-class Column(object):
+class _Resolvable(object):
+
+    def resolve_against(self, table):
+        # pylint:disable=unused-argument
+        return self
+
+class Column(_Resolvable):
     """
     Defines a column in a table.
     """
 
-    def __init__(self, name, type_=None, primary_key=False, nullable=True):
+    def __init__(self, name, type_=_Unknown, primary_key=False, nullable=True):
         self.name = name
-        self.type_ = type_
+        self.type_ = type_ if isinstance(type_, Type) else type_()
         self.primary_key = primary_key
         self.nullable = False if primary_key else nullable
+
+    def is_type(self, type_):
+        return isinstance(self.type_, type_)
 
     def __str__(self):
         return self.name
@@ -121,15 +135,22 @@ class Column(object):
         return _LessEqualExpression(self, other)
 
     def __compile_visit__(self, compiler):
-        compiler.emit_identifier(self.name)
+        compiler.visit_column(self)
 
-class _TextNode(object):
 
+class _LiteralNode(_Resolvable):
     def __init__(self, raw):
         self.raw = raw
+        self.name = 'anon_%x' % (id(self),)
 
     def __compile_visit__(self, compiler):
-        compiler.emit(self.raw)
+        compiler.emit(str(self.raw))
+
+    def resolve_against(self, table):
+        return self
+
+class _TextNode(_LiteralNode):
+    pass
 
 class _Columns(object):
     """
@@ -139,11 +160,7 @@ class _Columns(object):
     def __init__(self, columns):
         cs = []
         for c in columns:
-            try:
-                setattr(self, c.name, c)
-            except AttributeError:
-                # Must be a string.
-                c = _TextNode(c)
+            setattr(self, c.name, c)
             cs.append(c)
         self._columns = tuple(cs)
 
@@ -175,7 +192,15 @@ class _Columns(object):
             for c in self._columns
         )
 
+    def as_select_list(self):
+        return _SelectColumns(self._columns)
+
 _ColumnList = _Columns
+
+class _SelectColumns(_Columns):
+
+    def __compile_visit__(self, compiler):
+        compiler.visit_select_list_csv(self._columns)
 
 class Table(object):
     """
@@ -258,7 +283,7 @@ class DefaultDialect(object):
         return new
 
     def compiler_class(self):
-        return _Compiler
+        return Compiler
 
     def compiler(self, root):
         return self.compiler_class()(root)
@@ -267,7 +292,7 @@ class DefaultDialect(object):
         columns = list(column_list)
         datatypes = []
         for column in columns:
-            datatype = self.datatype_map[column.type_]
+            datatype = self.datatype_map[type(column.type_)]
             datatypes.append(datatype)
         return datatypes
 
@@ -461,10 +486,15 @@ class _CompiledQuery(object):
         __traceback_info__ = stmt, params
         if params:
             cursor.execute(stmt, params)
+        elif self.params:
+            # XXX: This isn't really good.
+            # If there are both literals in the SQL and params,
+            # we don't handle that.
+            cursor.execute(stmt, self.params)
         else:
             cursor.execute(stmt)
 
-class _Compiler(object):
+class Compiler(object):
 
     def __init__(self, root):
         self.buf = NStringIO()
@@ -473,7 +503,8 @@ class _Compiler(object):
 
 
     def __repr__(self):
-        return "<Compiler %s %r>" % (
+        return "<%s %s %r>" % (
+            type(self).__name__,
             self.buf.getvalue(),
             self.placeholders
         )
@@ -627,11 +658,26 @@ class _Compiler(object):
         clist = column_list.c if hasattr(column_list, 'c') else column_list
         self.visit(clist)
 
+    def visit_select_list(self, column_list):
+        clist = column_list.c if hasattr(column_list, 'c') else column_list
+        self.visit(clist.as_select_list())
+
     def visit_csv(self, nodes):
         self.visit(nodes[0])
         for node in nodes[1:]:
             self.emit(', ')
             self.visit(node)
+
+    visit_select_expression = visit
+
+    def visit_select_list_csv(self, nodes):
+        self.visit_select_expression(nodes[0])
+        for node in nodes[1:]:
+            self.emit(', ')
+            self.visit_select_expression(node)
+
+    def visit_column(self, column_node):
+        self.emit_identifier(column_node.name)
 
     def visit_from(self, from_):
         self.emit_keyword('FROM')
@@ -645,8 +691,8 @@ class _Compiler(object):
     def visit_op(self, op):
         self.emit(' ' + op + ' ')
 
-    def _next_placeholder_name(self):
-        return 'param_%d' % (len(self.placeholders),)
+    def _next_placeholder_name(self, prefix='param'):
+        return '%s_%d' % (prefix, len(self.placeholders),)
 
     def _placeholder(self, key):
         # Write things in `pyformat` style by default, assuming a
@@ -658,14 +704,20 @@ class _Compiler(object):
     def _placeholder_for_literal_param_value(self, value):
         placeholder = self.placeholders.get(value)
         if not placeholder:
-            placeholder_name = self._next_placeholder_name()
+            placeholder_name = self._next_placeholder_name(prefix='literal')
             placeholder = self._placeholder(placeholder_name)
             self.placeholders[value] = placeholder_name
         return placeholder
 
-    def visit_literal_param(self, value):
+    def visit_literal_expression(self, value):
         placeholder = self._placeholder_for_literal_param_value(value)
         self.emit(placeholder)
+
+    def visit_boolean_literal_expression(self, value):
+        # In the oracle dialect, this needs to be
+        # either "'Y'" or "'N'"
+        assert isinstance(value, bool)
+        self.emit(str(value).upper())
 
     def visit_bind_param(self, bind_param):
         self.placeholders[bind_param] = bind_param.key
@@ -675,10 +727,14 @@ class _Compiler(object):
         self.placeholders[bind_param] = '%s'
         self.emit('%s')
 
-class _Expression(_Bindable):
+_Compiler = Compiler # BWC. Remove
+
+class _Expression(_Bindable,
+                  _Resolvable):
     """
     A SQL expression.
     """
+
 class _BindParam(_Expression):
 
     def __init__(self, key):
@@ -697,7 +753,12 @@ class _LiteralExpression(_Expression):
         self.value = value
 
     def __compile_visit__(self, compiler):
-        compiler.visit_literal_param(self.value)
+        compiler.visit_literal_expression(self.value)
+
+class _BooleanLiteralExpression(_LiteralExpression):
+
+    def __compile_visit__(self, compiler):
+        compiler.visit_boolean_literal_expression(self.value)
 
 class _OrderedBindParam(_Expression):
 
@@ -709,6 +770,26 @@ class _OrderedBindParam(_Expression):
 def orderedbindparam():
     return _OrderedBindParam()
 
+def _as_node(c):
+    if isinstance(c, int):
+        return _LiteralNode(c)
+    if isinstance(c, str):
+        return _TextNode(c)
+    return c
+
+def _as_expression(stmt):
+    if hasattr(stmt, '__compile_visit__'):
+        return stmt
+
+    if isinstance(stmt, bool):
+        # The values True and False are handled
+        # specially because their representation varies
+        # among databases (Oracle)
+        stmt = _BooleanLiteralExpression(stmt)
+    else:
+        stmt = _LiteralExpression(stmt)
+    return stmt
+
 class _BinaryExpression(_Expression):
     """
     Expresses a comparison.
@@ -717,9 +798,9 @@ class _BinaryExpression(_Expression):
     def __init__(self, op, lhs, rhs):
         self.op = op
         self.lhs = lhs # type: Column
-        # rhs is either a literal or a column
-        if not hasattr(rhs, '__compile_visit__'):
-            rhs = _LiteralExpression(rhs)
+        # rhs is either a literal or a column;
+        # certain literals are handled specially.
+        rhs = _as_expression(rhs)
         self.rhs = rhs
 
     def __str__(self):
@@ -734,6 +815,13 @@ class _BinaryExpression(_Expression):
         compiler.visit_op(self.op)
         compiler.visit(self.rhs)
 
+    def resolve_against(self, table):
+        lhs = self.lhs.resolve_against(table)
+        rhs = self.rhs.resolve_against(table)
+        new = copy(self)
+        new.rhs = rhs
+        new.lhs = lhs
+        return new
 
 class _EmptyExpression(_Expression):
     """
@@ -794,6 +882,10 @@ class _And(_Expression):
 
     def __compile_visit__(self, compiler):
         compiler.visit_grouped(_BinaryExpression('AND', self.lhs, self.rhs))
+
+    def resolve_against(self, table):
+        return type(self)(self.lhs.resolve_against(table),
+                          self.rhs.resolve_against(table))
 
 class _WhereClause(_Clause):
 
@@ -875,6 +967,36 @@ class _Query(_Bindable):
         s.prepare = True
         return s
 
+class _DeferredColumn(Column):
+
+    def resolve_against(self, table):
+        return getattr(table.c, self.name)
+
+class _DeferredColumns(object):
+
+    def __getattr__(self, name):
+        return _DeferredColumn(name)
+
+class _It(object):
+    """
+    A proxy that select can resolve to tables in the current table.
+    """
+
+    c = _DeferredColumns()
+
+    def bindparam(self, name):
+        return bindparam(name)
+
+it = _It()
+
+def _resolved_against(columns, table):
+    resolved = [
+        _as_node(c).resolve_against(table)
+        for c
+        in columns
+    ]
+    return resolved
+
 class Select(_Query):
     """
     A Select query.
@@ -885,6 +1007,7 @@ class Select(_Query):
     appropriate SQL syntax and compile themselves into a string.
     """
 
+    _distinct = _EmptyExpression()
     _where = _EmptyExpression()
     _order_by = _EmptyExpression()
     _limit = None
@@ -894,21 +1017,24 @@ class Select(_Query):
     def __init__(self, table, *columns):
         self.table = table
         if columns:
-            self.column_list = _ColumnList(columns)
+            self.column_list = _ColumnList(_resolved_against(columns, table))
         else:
             self.column_list = table
 
     def where(self, expression):
+        expression = expression.resolve_against(self.table)
         s = copy(self)
         s._where = _where(expression)
         return s
 
     def and_(self, expression):
+        expression = expression.resolve_against(self.table)
         s = copy(self)
         s._where = self._where.and_(expression)
         return s
 
     def order_by(self, expression, dir=None):
+        expression = expression.resolve_against(self.table)
         s = copy(self)
         s._order_by = _OrderBy(expression, dir)
         return s
@@ -928,9 +1054,15 @@ class Select(_Query):
         s._nowait = 'NOWAIT'
         return s
 
+    def distinct(self):
+        s = copy(self)
+        s._distinct = _TextNode('DISTINCT')
+        return s
+
     def __compile_visit__(self, compiler):
         compiler.emit_keyword('SELECT')
-        compiler.visit_column_list(self.column_list)
+        compiler.visit(self._distinct)
+        compiler.visit_select_list(self.column_list)
         compiler.visit_from(self.table)
         compiler.visit_clause(self._where)
         compiler.visit_clause(self._order_by)
@@ -969,7 +1101,7 @@ class Insert(_Query):
     def __init__(self, table, *columns):
         self.table = table
         if columns:
-            self.column_list = _Columns(columns)
+            self.column_list = _Columns(_resolved_against(columns, table))
             # TODO: Probably want a different type, like a ValuesList
             self.values = _Columns([orderedbindparam() for _ in columns])
 

@@ -139,7 +139,6 @@ class OracleAdapter(object):
             )
             self.dbiter = HistoryPreservingDatabaseIterator(
                 driver,
-                runner=self.runner,
             )
         else:
             self.packundo = OracleHistoryFreePackUndo(
@@ -151,7 +150,6 @@ class OracleAdapter(object):
             )
             self.dbiter = HistoryFreeDatabaseIterator(
                 driver,
-                runner=self.runner,
             )
 
         self.stats = OracleStats(
