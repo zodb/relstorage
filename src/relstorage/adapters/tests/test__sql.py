@@ -27,6 +27,7 @@ from .._sql import Table
 from .._sql import HistoryVariantTable
 from .._sql import Column
 from .._sql import bindparam
+from .._sql import DefaultDialect
 
 current_object = Table(
     'current_object',
@@ -108,7 +109,6 @@ class TestTableSelect(TestCase):
         )
 
     def test_natural_join(self):
-
         stmt = object_and_state.select(
             object_and_state.c.zoid, object_and_state.c.state
         ).where(
@@ -125,6 +125,7 @@ class TestTableSelect(TestCase):
 
         class H(object):
             keep_history = False
+            dialect = DefaultDialect()
 
         stmt = stmt.bind(H())
 
@@ -144,24 +145,28 @@ class TestTableSelect(TestCase):
             str(select),
             'SELECT tid, zoid FROM current_object WHERE (tid > %(tid)s)'
         )
-        from .._sql import _DefaultDialect
-        select = select.bind(42)
-        context = _DefaultDialect(42)
 
-        self.assertEqual(select.context, context)
-        self.assertEqual(select.table.context, context)
-        self.assertEqual(select._where.context, context)
-        self.assertEqual(select._where.expression.context, context)
-        # Bound to the wrong thing we assume history
+        class Context(object):
+            dialect = DefaultDialect()
+            keep_history = True
+
+        context = Context()
+        dialect = context.dialect
+        select = select.bind(context)
+
+        self.assertEqual(select.context, dialect)
+        self.assertEqual(select.table.context, dialect)
+        self.assertEqual(select._where.context, dialect)
+        self.assertEqual(select._where.expression.context, dialect)
+        # We take up its history setting
         self.assertEqual(
             str(select),
             'SELECT tid, zoid FROM current_object WHERE (tid > %(tid)s)'
         )
 
         # Bound to history-free we use history free
-        class H(object):
-            keep_history = False
-        select = select.bind(H())
+        context.keep_history = False
+        select = select.bind(context)
 
         self.assertEqual(
             str(select),
@@ -171,6 +176,7 @@ class TestTableSelect(TestCase):
     def test_bind_descriptor(self):
         class Context(object):
             keep_history = True
+            dialect = DefaultDialect()
             select = objects.select(objects.c.tid, objects.c.zoid).where(
                 objects.c.tid > bindparam('tid')
             )

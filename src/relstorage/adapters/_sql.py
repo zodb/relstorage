@@ -188,67 +188,75 @@ class _CompositeTableMixin(object):
     def orderedbindparam(self):
         return orderedbindparam()
 
-class _DefaultDialect(object):
+class DefaultDialect(object):
 
-    def __init__(self, base):
-        self._base = base
+    keep_history = True
 
-    def __getattr__(self, name):
-        return getattr(self._base, name)
-
-    def __bool__(self):
-        return False
-
-    __nonzero__ = __bool__
-
-    _driver_locations = (
-        attrgetter('_base.driver'),
-        attrgetter('_base.poller.driver'),
-        attrgetter('_base.connmanager.driver'),
-        attrgetter('_base.adapter.driver')
-    )
+    def bind(self, context):
+        # The context will reference us most likely
+        # (compiled statement in instance dictionary)
+        # so try to avoid reference cycles.
+        keep_history = context.keep_history
+        new = copy(self)
+        new.keep_history = keep_history
+        return new
 
     def compiler_class(self):
-        # We want to find *something* with a driver.
-        # Preferably the object we're attached to, but if not that,
-        # we'll look at some common attributes for adapter objects
-        # for it.
-        for getter in self._driver_locations:
-            try:
-                return getter(self).sql_compiler_class
-            except AttributeError:
-                pass
         return _Compiler
 
     def compiler(self, root):
         return self.compiler_class()(root)
 
     def __eq__(self, other):
-        if isinstance(other, _DefaultDialect):
-            return self._base == other._base
+        if isinstance(other, DefaultDialect):
+            return other.keep_history == self.keep_history
         return NotImplemented
 
-    def __repr__(self):
-        return '<%s at %x base=%r>' % (
-            type(self),
-            id(self),
-            self._base
-        )
+
+class _MissingDialect(DefaultDialect):
+    def __bool__(self):
+        return False
+
+    __nonzero__ = __bool__
+
 
 class _Bindable(object):
 
-    context = _DefaultDialect(None)
+    context = _MissingDialect()
+
+    _dialect_locations = (
+        attrgetter('dialect'),
+        attrgetter('driver.dialect'),
+        attrgetter('poller.driver.dialect'),
+        attrgetter('connmanager.driver.dialect'),
+        attrgetter('adapter.driver.dialect')
+    )
 
     def _find_dialect(self, context):
-        # Look up the database type, find the right dialect.
-        # Ordinarily we want to use the database driver.
-        if isinstance(context, _DefaultDialect):
+        # Find the dialect to use for the context. If it specifies
+        # one, then use it. Otherwise go hunting for the database
+        # driver and use *it*. Preferably the driver is attached to
+        # the object we're looking at, but if not that, we'll look at
+        # some common attributes for adapter objects for it.
+        if isinstance(context, DefaultDialect):
             return context
-        return _DefaultDialect(context)
+
+        for getter in self._dialect_locations:
+            try:
+                dialect = getter(context)
+            except AttributeError:
+                pass
+            else:
+                return dialect.bind(context)
+        __traceback_info__ = vars(context)
+        raise TypeError("Unable to bind to %s; no dialect found" % (context,))
 
     def bind(self, context):
-        new = copy(self)
         context = self._find_dialect(context)
+        if context is None:
+            return self
+
+        new = copy(self)
         new.context = context
         bound_replacements = {
             k: v.bind(context)
@@ -302,7 +310,7 @@ class HistoryVariantTable(_Bindable,
         return self.rhs
 
     def __compile_visit__(self, compiler):
-        keep_history = getattr(self.context, 'keep_history', True)
+        keep_history = self.context.keep_history
         node = self.history_preserving if keep_history else self.history_free
         return compiler.visit(node)
 

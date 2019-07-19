@@ -11,6 +11,7 @@ from ZODB.tests.util import clear_transaction_syncs
 
 from relstorage._compat import ABC
 from relstorage.options import Options
+from relstorage.adapters._sql import DefaultDialect
 
 try:
     from unittest import mock
@@ -279,13 +280,6 @@ class MockPackUndo(object):
 class MockOIDAllocator(object):
     pass
 
-class MockAdapter(object):
-
-    def __init__(self):
-        self.connmanager = MockConnectionManager()
-        self.packundo = MockPackUndo()
-        self.oidallocator = MockOIDAllocator()
-
 class MockQuery(object):
 
     def __init__(self, raw):
@@ -297,3 +291,19 @@ class MockQuery(object):
 class MockPoller(object):
 
     poll_query = MockQuery('SELECT MAX(tid) FROM object_state')
+
+    def __init__(self, driver=None):
+        self.driver = driver or MockDriver()
+
+class MockDriver(object):
+
+    dialect = DefaultDialect()
+
+class MockAdapter(object):
+
+    def __init__(self):
+        self.driver = MockDriver()
+        self.connmanager = MockConnectionManager()
+        self.packundo = MockPackUndo()
+        self.oidallocator = MockOIDAllocator()
+        self.poller = MockPoller(self.driver)

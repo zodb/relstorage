@@ -23,9 +23,11 @@ from collections import deque
 
 from zope.interface import implementer
 
-from ..._abstract_drivers import AbstractModuleDriver
 from ...interfaces import IDBDriver
 from ..._sql import _Compiler
+
+from . import AbstractPostgreSQLDriver
+from . import PostgreSQLDialect
 
 __all__ = [
     'PG8000Driver',
@@ -126,9 +128,14 @@ class PG8000Compiler(_Compiler):
         # https://github.com/mfenniak/pg8000/issues/132
         return False
 
+class PG8000Dialect(PostgreSQLDialect):
+
+    def compiler_class(self):
+        return PG8000Compiler
+
 
 @implementer(IDBDriver)
-class PG8000Driver(AbstractModuleDriver):
+class PG8000Driver(AbstractPostgreSQLDriver):
     __name__ = 'pg8000'
     MODULE_NAME = __name__
     PRIORITY = 3
@@ -136,6 +143,8 @@ class PG8000Driver(AbstractModuleDriver):
 
     _GEVENT_CAPABLE = True
     _GEVENT_NEEDS_SOCKET_PATCH = True
+
+    dialect = PG8000Dialect()
 
     def __init__(self):
         super(PG8000Driver, self).__init__()

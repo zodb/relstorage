@@ -50,6 +50,14 @@ class IRelStorageAdapter(Interface):
         """Return a short description of the adapter"""
 
 
+class IDBDialect(Interface):
+    """
+    Handles converting from our internal "standard" SQL queries to
+    something database specific.
+    """
+
+    # TODO: Fill this in.
+
 class IDBDriver(Interface):
     """
     An abstraction over the information needed for RelStorage to work
@@ -70,6 +78,8 @@ class IDBDriver(Interface):
                                        "that should cause us to try a replica.")
 
     Binary = Attribute("A callable.")
+
+    dialect = Attribute("The IDBDialect for this driver.")
 
     def binary_column_as_state_type(db_column_data):
         """

@@ -21,6 +21,7 @@ from __future__ import print_function
 from ..._abstract_drivers import AbstractModuleDriver
 from ..._abstract_drivers import implement_db_driver_options
 from ..._sql import _Compiler
+from ..._sql import DefaultDialect
 
 database_type = 'mysql'
 
@@ -39,6 +40,11 @@ class MySQLCompiler(_Compiler):
 
     def _quote_query_for_prepare(self, query):
         return '"{query}"'.format(query=query)
+
+class MySQLDialect(DefaultDialect):
+
+    def compiler_class(self):
+        return MySQLCompiler
 
 class AbstractMySQLDriver(AbstractModuleDriver):
 
@@ -92,7 +98,7 @@ class AbstractMySQLDriver(AbstractModuleDriver):
         return multi_results
 
 
-    sql_compiler_class = MySQLCompiler
+    dialect = MySQLDialect()
 
 
 implement_db_driver_options(

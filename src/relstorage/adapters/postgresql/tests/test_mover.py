@@ -20,11 +20,10 @@ import unittest
 
 from relstorage.tests import TestCase
 from relstorage.tests import MockOptions
+from relstorage.tests import MockDriver
 
 from .. import mover
 
-class MockDriver(object):
-    pass
 
 @unittest.skip("Needs moved to test__sql")
 class TestFunctions(TestCase):
