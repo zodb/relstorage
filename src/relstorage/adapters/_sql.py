@@ -522,9 +522,21 @@ class Compiler(object):
     _prepared_stmt_counter = 0
 
     @classmethod
-    def _next_prepared_stmt_name(cls):
+    def _next_prepared_stmt_name(cls, query):
+        # Even with the GIL, this isn't fully safe to do; two threads
+        # can still get the same value. We don't want to allocate a
+        # lock because we might be patched by gevent later. So that's
+        # where `query` comes in: we add the hash as a disambiguator.
+        # Of course, for there to be a duplicate prepared statement
+        # sent to the database, that would mean that we were somehow
+        # using the same cursor or connection in multiple threads at
+        # once (or perhaps we got more than one cursor from a
+        # connection? We should only have one.)
         cls._prepared_stmt_counter += 1
-        return 'rs_prep_stmt_%d' % (cls._prepared_stmt_counter,)
+        return 'rs_prep_stmt_%d_%d' % (
+            cls._prepared_stmt_counter,
+            abs(hash(query)),
+        )
 
     def _prepared_param(self, number):
         return '$' + str(number)
@@ -568,7 +580,7 @@ class Compiler(object):
 
         datatypes = self._find_datatypes_for_prepared_query()
         query = self.buf.getvalue()
-        name = self._next_prepared_stmt_name()
+        name = self._next_prepared_stmt_name(query)
 
         if datatypes:
             assert isinstance(datatypes, (list, tuple))

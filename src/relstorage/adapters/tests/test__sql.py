@@ -236,7 +236,7 @@ class TestTableSelect(TestCase):
         stmt = stmt.compiled()
         self.assertRegex(
             stmt._prepare_stmt,
-            r"PREPARE rs_prep_stmt_[0-9]* \(BIGINT\) AS.*"
+            r"PREPARE rs_prep_stmt_[0-9]*_[0-9]* \(BIGINT\) AS.*"
         )
 
     def test_prepared_insert_select_with_param(self):
@@ -261,7 +261,7 @@ class TestTableSelect(TestCase):
         stmt = stmt.compiled()
         self.assertRegex(
             stmt._prepare_stmt,
-            r"PREPARE rs_prep_stmt_[0-9]* \(BIGINT\) AS.*"
+            r"PREPARE rs_prep_stmt_[0-9]*_[0-9]* \(BIGINT\) AS.*"
         )
 
     def test_it(self):
