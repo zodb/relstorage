@@ -20,7 +20,7 @@ from relstorage._compat import MAX_TID
 
 from .interfaces import IDatabaseIterator
 from .schema import Schema
-from ._sql import it
+from .sql import it
 
 class DatabaseIterator(object):
     """

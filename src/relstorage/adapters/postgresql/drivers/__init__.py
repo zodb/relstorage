@@ -23,7 +23,7 @@ from __future__ import print_function
 
 from ..._abstract_drivers import implement_db_driver_options
 from ..._abstract_drivers import AbstractModuleDriver
-from ..._sql import DefaultDialect
+from ...sql import DefaultDialect
 
 class PostgreSQLDialect(DefaultDialect):
     """

@@ -12,7 +12,7 @@ from relstorage.tests import TestCase
 from relstorage.tests import MockCursor
 
 from ...schema import Schema
-from ..._sql import it
+from ...sql import it
 
 from ..dialect import OracleDialect
 

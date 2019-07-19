@@ -21,7 +21,7 @@ from .interfaces import IPoller
 from .interfaces import StaleConnectionError
 
 from .schema import Schema
-from ._sql import func
+from .sql import func
 
 log = logging.getLogger(__name__)
 

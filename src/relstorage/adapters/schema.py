@@ -25,15 +25,15 @@ from ._util import DatabaseHelpersMixin
 from ._util import query_property
 from ._util import noop_when_history_free
 
-from ._sql import Table
-from ._sql import TemporaryTable
-from ._sql import Column
-from ._sql import HistoryVariantTable
-from ._sql import OID
-from ._sql import TID
-from ._sql import State
-from ._sql import Boolean
-from ._sql import BinaryString
+from .sql import Table
+from .sql import TemporaryTable
+from .sql import Column
+from .sql import HistoryVariantTable
+from .sql import OID
+from .sql import TID
+from .sql import State
+from .sql import Boolean
+from .sql import BinaryString
 
 
 log = logging.getLogger("relstorage")

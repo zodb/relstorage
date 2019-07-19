@@ -11,7 +11,7 @@ from ZODB.tests.util import clear_transaction_syncs
 
 from relstorage._compat import ABC
 from relstorage.options import Options
-from relstorage.adapters._sql import DefaultDialect
+from relstorage.adapters.sql import DefaultDialect
 
 try:
     from unittest import mock

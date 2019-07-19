@@ -23,16 +23,16 @@ from __future__ import print_function
 
 from relstorage.tests import TestCase
 
-from .._sql import Table
-from .._sql import HistoryVariantTable
-from .._sql import Column
-from .._sql import bindparam
-from .._sql import DefaultDialect
-from .._sql import OID
-from .._sql import TID
-from .._sql import State
-from .._sql import Boolean
-from .._sql import BinaryString
+from .. import Table
+from .. import HistoryVariantTable
+from .. import Column
+from .. import bindparam
+from .. import DefaultDialect
+from .. import OID
+from .. import TID
+from .. import State
+from .. import Boolean
+from .. import BinaryString
 
 current_object = Table(
     'current_object',
@@ -265,7 +265,7 @@ class TestTableSelect(TestCase):
         )
 
     def test_it(self):
-        from .._sql import it
+        from .. import it
         stmt = object_state.select(
             it.c.zoid,
             it.c.state
@@ -298,7 +298,7 @@ class TestTableSelect(TestCase):
             stmt.order_by(col_ref == object_state.c.state)
 
     def test_boolean_literal(self):
-        from .._sql import it
+        from .. import it
         stmt = transaction.select(
             transaction.c.tid
         ).where(
@@ -325,7 +325,7 @@ class TestTableSelect(TestCase):
         )
 
     def test_boolean_literal_it_joined_table(self):
-        from .._sql import it
+        from .. import it
         stmt = transaction.natural_join(
             object_state
         ).select(

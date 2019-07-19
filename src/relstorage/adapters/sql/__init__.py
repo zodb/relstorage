@@ -49,7 +49,7 @@ from zope.interface import implementer
 from relstorage._compat import NStringIO
 from relstorage._compat import intern
 from relstorage._util import CachedIn
-from .interfaces import IDBDialect
+from ..interfaces import IDBDialect
 
 def copy(obj):
     new = stdlib_copy(obj)
@@ -532,6 +532,13 @@ class Compiler(object):
         # using the same cursor or connection in multiple threads at
         # once (or perhaps we got more than one cursor from a
         # connection? We should only have one.)
+        #
+        # TODO: Sidestep this problem by allocating this earlier;
+        # the SELECT or INSERT statement could pick it when it is created;
+        # that happens at the class level at import time, when we should be
+        # single-threaded.
+        #
+        # That may also help facilitate caching.
         cls._prepared_stmt_counter += 1
         return 'rs_prep_stmt_%d_%d' % (
             cls._prepared_stmt_counter,

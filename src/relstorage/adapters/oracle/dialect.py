@@ -7,10 +7,10 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-from .._sql import DefaultDialect
-from .._sql import Compiler
-from .._sql import Boolean
-from .._sql import Column
+from ..sql import DefaultDialect
+from ..sql import Compiler
+from ..sql import Boolean
+from ..sql import Column
 
 class OracleCompiler(Compiler):
 

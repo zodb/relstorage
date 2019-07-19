@@ -24,7 +24,7 @@ from collections import deque
 from zope.interface import implementer
 
 from ...interfaces import IDBDriver
-from ..._sql import _Compiler
+from ...sql import Compiler
 
 from . import AbstractPostgreSQLDriver
 from . import PostgreSQLDialect
@@ -118,7 +118,7 @@ class _tuple_deque(deque):
     def append(self, row): # pylint:disable=arguments-differ
         deque.append(self, tuple(row))
 
-class PG8000Compiler(_Compiler):
+class PG8000Compiler(Compiler):
 
     def can_prepare(self):
         # Important: pg8000 1.10 - 1.13, at least, can't handle prepared

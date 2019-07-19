@@ -20,12 +20,12 @@ from __future__ import print_function
 
 from ..._abstract_drivers import AbstractModuleDriver
 from ..._abstract_drivers import implement_db_driver_options
-from ..._sql import _Compiler
-from ..._sql import DefaultDialect
+from ...sql import Compiler
+from ...sql import DefaultDialect
 
 database_type = 'mysql'
 
-class MySQLCompiler(_Compiler):
+class MySQLCompiler(Compiler):
 
     def can_prepare(self):
         # If there are params, we can't prepare unless we're using
