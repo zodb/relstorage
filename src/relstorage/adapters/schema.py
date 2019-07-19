@@ -29,6 +29,11 @@ from ._sql import Table
 from ._sql import TemporaryTable
 from ._sql import Column
 from ._sql import HistoryVariantTable
+from ._sql import OID
+from ._sql import TID
+from ._sql import State
+from ._sql import Boolean
+from ._sql import BinaryString
 
 
 log = logging.getLogger("relstorage")
@@ -40,15 +45,15 @@ tmpl_property = partial(query_property,
 class Schema(object):
     current_object = Table(
         'current_object',
-        Column('zoid'),
-        Column('tid')
+        Column('zoid', OID),
+        Column('tid', TID)
     )
 
     object_state = Table(
         'object_state',
-        Column('zoid'),
-        Column('tid'),
-        Column('state'),
+        Column('zoid', OID),
+        Column('tid', TID),
+        Column('state', State),
         Column('state_size'),
     )
 
@@ -66,19 +71,19 @@ class Schema(object):
 
     temp_store = TemporaryTable(
         'temp_store',
-        Column('zoid'),
-        Column('prev_tid'),
+        Column('zoid', OID),
+        Column('prev_tid', TID),
         Column('md5'),
-        Column('state')
+        Column('state', State)
     )
 
     transaction = Table(
         'transaction',
-        Column('tid'),
-        Column('packed'),
-        Column('username'),
-        Column('description'),
-        Column('extension'),
+        Column('tid', TID),
+        Column('packed', Boolean),
+        Column('username', BinaryString),
+        Column('description', BinaryString),
+        Column('extension', BinaryString),
     )
 
     commit_row_lock = Table(

@@ -28,18 +28,21 @@ from .._sql import HistoryVariantTable
 from .._sql import Column
 from .._sql import bindparam
 from .._sql import DefaultDialect
+from .._sql import OID
+from .._sql import TID
+from .._sql import State
 
 current_object = Table(
     'current_object',
-    Column('zoid'),
-    Column('tid')
+    Column('zoid', OID),
+    Column('tid', TID)
 )
 
 object_state = Table(
     'object_state',
-    Column('zoid'),
-    Column('tid'),
-    Column('state'),
+    Column('zoid', OID),
+    Column('tid', TID),
+    Column('state', State),
 )
 
 hp_object_and_state = current_object.natural_join(object_state)
@@ -192,4 +195,25 @@ class TestTableSelect(TestCase):
         self.assertEqual(
             str(context.select),
             'SELECT tid, zoid FROM object_state WHERE (tid > %(tid)s)'
+        )
+
+    def test_prepared_insert_values(self):
+        stmt = current_object.insert(
+            current_object.c.zoid
+        )
+
+        self.assertEqual(
+            str(stmt),
+            'INSERT INTO current_object(zoid) VALUES (%s)'
+        )
+
+        stmt = stmt.prepared()
+        self.assertTrue(
+            str(stmt).startswith('EXECUTE rs_prep_stmt')
+        )
+
+        stmt = stmt.compiled()
+        self.assertRegex(
+            stmt._prepare_stmt,
+            r"PREPARE rs_prep_stmt_[0-9]* \(BIGINT\) AS.*"
         )

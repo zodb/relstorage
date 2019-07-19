@@ -22,8 +22,4 @@ class _PostgreSQLTransactionControl(GenericTransactionControl):
 
 
 class PostgreSQLTransactionControl(_PostgreSQLTransactionControl):
-    # TODO: Get the data types applied at compile time
-    # to add_transaction_query
-    # (tid, packed, username, description, extension)
-    # ('BIGINT', 'BOOLEAN', 'BYTEA', 'BYTEA', 'BYTEA')
     pass

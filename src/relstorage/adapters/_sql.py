@@ -42,8 +42,11 @@ from copy import copy as stdlib_copy
 from operator import attrgetter
 from weakref import WeakKeyDictionary
 
+from zope.interface import implementer
+
 from relstorage._compat import NStringIO
 from relstorage._util import CachedIn
+from .interfaces import IDBDialect
 
 def copy(obj):
     new = stdlib_copy(obj)
@@ -52,13 +55,51 @@ def copy(obj):
         delattr(new, k)
     return new
 
+class Type(object):
+    """
+    A database type.
+    """
+
+class Integer64(Type):
+    """
+    A 64-bit integer.
+    """
+
+class OID(Integer64):
+    """
+    Type of an OID.
+    """
+
+class TID(Integer64):
+    """
+    Type of a TID.
+    """
+
+class BinaryString(Type):
+    """
+    Arbitrary sized binary string.
+    """
+
+class State(Type):
+    """
+    Used for storing object state.
+    """
+
+class Boolean(Type):
+    """
+    A two-value column.
+    """
+
 class Column(object):
     """
     Defines a column in a table.
     """
 
-    def __init__(self, name):
+    def __init__(self, name, type_=None, primary_key=False, nullable=True):
         self.name = name
+        self.type_ = type_
+        self.primary_key = primary_key
+        self.nullable = False if primary_key else nullable
 
     def __str__(self):
         return self.name
@@ -188,9 +229,18 @@ class _CompositeTableMixin(object):
     def orderedbindparam(self):
         return orderedbindparam()
 
+@implementer(IDBDialect)
 class DefaultDialect(object):
 
     keep_history = True
+
+    datatype_map = {
+        OID: 'BIGINT',
+        TID: 'BIGINT',
+        BinaryString: 'BYTEA',
+        State: 'BYTEA',
+        Boolean: 'BOOLEAN',
+    }
 
     def bind(self, context):
         # The context will reference us most likely
@@ -206,6 +256,14 @@ class DefaultDialect(object):
 
     def compiler(self, root):
         return self.compiler_class()(root)
+
+    def datatypes_for_columns(self, column_list):
+        columns = list(column_list)
+        datatypes = []
+        for column in columns:
+            datatype = self.datatype_map[column.type_]
+            datatypes.append(datatype)
+        return datatypes
 
     def __eq__(self, other):
         if isinstance(other, DefaultDialect):
@@ -439,13 +497,27 @@ class _Compiler(object):
     def _quote_query_for_prepare(self, query):
         return query
 
+    def _find_datatypes_for_prepared_query(self):
+        # Deduce the datatypes based on the types of the columns
+        # we're sending as params.
+        if isinstance(self.root, Insert) and self.root.values and self.root.column_list:
+            # If we're sending in a list of values, those have to
+            # exactly match the columns, so we can easily get a list
+            # of datatypes.
+            #
+            # TODO: We should be able to do this for an `INSERT (col) SELECT $1` too,
+            # by matching the parameter to the column name.
+            # TODO: Should probably delegate this to the node.
+            column_list = self.root.column_list
+            datatypes = self.root.context.datatypes_for_columns(column_list)
+            return datatypes
+        return ()
+
     def prepare(self):
         # This is correct for PostgreSQL. This needs moved to a dialect specific
         # spot.
 
-        # TODO: Deduce the datatypes based on the types of the columns
-        # we're sending as params.
-        datatypes = {}
+        datatypes = self._find_datatypes_for_prepared_query()
         query = self.buf.getvalue()
         name = self._next_prepared_stmt_name()
 

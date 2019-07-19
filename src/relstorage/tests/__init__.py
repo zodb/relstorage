@@ -30,12 +30,17 @@ class TestCase(unittest.TestCase):
     cleanups.
     """
     # Avoid deprecation warnings; 2.7 doesn't have
-    # assertRaisesRegex
+    # assertRaisesRegex or assertRegex
     assertRaisesRegex = getattr(
         unittest.TestCase,
         'assertRaisesRegex',
         None
     ) or getattr(unittest.TestCase, 'assertRaisesRegexp')
+    assertRegex = getattr(
+        unittest.TestCase,
+        'assertRegex',
+        None
+    ) or getattr(unittest.TestCase, 'assertRegexpMatches')
 
     def setUp(self):
         super(TestCase, self).setUp()
