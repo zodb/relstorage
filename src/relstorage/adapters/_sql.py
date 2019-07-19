@@ -45,6 +45,7 @@ from weakref import WeakKeyDictionary
 from zope.interface import implementer
 
 from relstorage._compat import NStringIO
+from relstorage._compat import intern
 from relstorage._util import CachedIn
 from .interfaces import IDBDialect
 
@@ -168,6 +169,11 @@ class _Columns(object):
     def __compile_visit__(self, compiler):
         compiler.visit_csv(self._columns)
 
+    def has_bind_param(self):
+        return any(
+            isinstance(c, (_BindParam, _OrderedBindParam))
+            for c in self._columns
+        )
 
 _ColumnList = _Columns
 
@@ -344,11 +350,11 @@ class NaturalJoinedTable(_Bindable,
 
     def __compile_visit__(self, compiler):
         compiler.visit(self.lhs)
-        compiler.emit(' JOIN ')
+        compiler.emit_keyword('JOIN')
         compiler.visit(self.rhs)
         # careful with USING clause in a join: Oracle doesn't allow such
         # columns to have a prefix.
-        compiler.emit_keyword(' USING')
+        compiler.emit_keyword('USING')
         compiler.visit_grouped(self._join_columns)
 
 
@@ -500,16 +506,28 @@ class _Compiler(object):
     def _find_datatypes_for_prepared_query(self):
         # Deduce the datatypes based on the types of the columns
         # we're sending as params.
-        if isinstance(self.root, Insert) and self.root.values and self.root.column_list:
-            # If we're sending in a list of values, those have to
-            # exactly match the columns, so we can easily get a list
-            # of datatypes.
-            #
-            # TODO: We should be able to do this for an `INSERT (col) SELECT $1` too,
-            # by matching the parameter to the column name.
+        if isinstance(self.root, Insert):
+            root = self.root
+            dialect = root.context
             # TODO: Should probably delegate this to the node.
-            column_list = self.root.column_list
-            datatypes = self.root.context.datatypes_for_columns(column_list)
+            if root.values and root.column_list:
+                # If we're sending in a list of values, those have to
+                # exactly match the columns, so we can easily get a list
+                # of datatypes.
+                column_list = root.column_list
+                datatypes = dialect.datatypes_for_columns(column_list)
+            elif root.select and root.select.column_list.has_bind_param():
+                targets = root.column_list
+                sources = root.select.column_list
+                # TODO: This doesn't support bind params anywhere except the
+                # select list!
+                columns_with_params = [
+                    target
+                    for target, source in zip(targets, sources)
+                    if isinstance(source, _OrderedBindParam)
+                ]
+                assert len(self.placeholders) == len(columns_with_params)
+                datatypes = dialect.datatypes_for_columns(columns_with_params)
             return datatypes
         return ()
 
@@ -550,6 +568,7 @@ class _Compiler(object):
             conjunction=self._PREPARED_CONJUNCTION,
         )
 
+
         if placeholder_to_number:
             execute = 'EXECUTE {name}({params})'.format(
                 name=name,
@@ -574,10 +593,10 @@ class _Compiler(object):
                     params[ix - 1] = d[placeholder_name]
                 return params
 
-        return stmt, execute, convert
+        return intern(stmt), intern(execute), convert
 
     def finalize(self):
-        return self.buf.getvalue().strip(), {v: k for k, v in self.placeholders.items()}
+        return intern(self.buf.getvalue().strip()), {v: k for k, v in self.placeholders.items()}
 
     def visit(self, node):
         node.__compile_visit__(self)

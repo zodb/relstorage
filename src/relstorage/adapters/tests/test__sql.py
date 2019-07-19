@@ -49,7 +49,7 @@ hp_object_and_state = current_object.natural_join(object_state)
 
 objects = HistoryVariantTable(
     current_object,
-    object_state,
+   object_state,
 )
 
 object_and_state = HistoryVariantTable(
@@ -205,6 +205,31 @@ class TestTableSelect(TestCase):
         self.assertEqual(
             str(stmt),
             'INSERT INTO current_object(zoid) VALUES (%s)'
+        )
+
+        stmt = stmt.prepared()
+        self.assertTrue(
+            str(stmt).startswith('EXECUTE rs_prep_stmt')
+        )
+
+        stmt = stmt.compiled()
+        self.assertRegex(
+            stmt._prepare_stmt,
+            r"PREPARE rs_prep_stmt_[0-9]* \(BIGINT\) AS.*"
+        )
+
+    def test_prepared_insert_select_with_param(self):
+        stmt = current_object.insert().from_select(
+            (current_object.c.zoid,
+             current_object.c.tid),
+            object_state.select(
+                object_state.c.zoid,
+                object_state.orderedbindparam()
+            )
+        )
+        self.assertEqual(
+            str(stmt),
+            'INSERT INTO current_object(zoid, tid) SELECT zoid, %s FROM object_state'
         )
 
         stmt = stmt.prepared()
