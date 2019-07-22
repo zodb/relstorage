@@ -25,11 +25,76 @@ from ._util import DatabaseHelpersMixin
 from ._util import query_property
 from ._util import noop_when_history_free
 
+from .sql import Table
+from .sql import TemporaryTable
+from .sql import Column
+from .sql import HistoryVariantTable
+from .sql import OID
+from .sql import TID
+from .sql import State
+from .sql import Boolean
+from .sql import BinaryString
+
+
 log = logging.getLogger("relstorage")
 
 tmpl_property = partial(query_property,
                         property_suffix='_TMPLS',
                         lazy_suffix='_TMPL')
+
+class Schema(object):
+    current_object = Table(
+        'current_object',
+        Column('zoid', OID),
+        Column('tid', TID)
+    )
+
+    object_state = Table(
+        'object_state',
+        Column('zoid', OID),
+        Column('tid', TID),
+        Column('state', State),
+        Column('state_size'),
+    )
+
+    # Does the right thing whether history free or preserving
+    all_current_object = HistoryVariantTable(
+        current_object,
+        object_state,
+    )
+
+    # Does the right thing whether history free or preserving
+    all_current_object_state = HistoryVariantTable(
+        current_object.natural_join(object_state),
+        object_state
+    )
+
+    temp_store = TemporaryTable(
+        'temp_store',
+        Column('zoid', OID),
+        Column('prev_tid', TID),
+        Column('md5'),
+        Column('state', State)
+    )
+
+    transaction = Table(
+        'transaction',
+        Column('tid', TID),
+        Column('packed', Boolean),
+        Column('username', BinaryString),
+        Column('description', BinaryString),
+        Column('extension', BinaryString),
+    )
+
+    commit_row_lock = Table(
+        'commit_row_lock',
+        Column('tid'),
+    )
+
+    all_transaction = HistoryVariantTable(
+        transaction,
+        object_state,
+    )
 
 class AbstractSchemaInstaller(DatabaseHelpersMixin,
                               ABC):

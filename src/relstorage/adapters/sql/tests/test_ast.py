@@ -12,20 +12,23 @@
 # FOR A PARTICULAR PURPOSE.
 #
 ##############################################################################
+
+"""
+Tests for AST.
+
+"""
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-from relstorage.adapters.tests import test_txncontrol
+from relstorage.tests import TestCase
+
+from .. import ast
 
 
-class TestPostgreSQLTransactionControl(test_txncontrol.TestTransactionControl):
+class TestFuncs(TestCase):
 
-    def _getClass(self):
-        from ..txncontrol import PostgreSQLTransactionControl
-        return PostgreSQLTransactionControl
-
-    def _get_hf_tid_query(self):
-        return 'EXECUTE get_latest_tid'
-
-    _get_hp_tid_query = _get_hf_tid_query
+    def test_as_node_boolean(self):
+        node = ast.as_node(True)
+        self.assertIsInstance(node, ast.BooleanNode)
+        self.assertIs(node.raw, True)

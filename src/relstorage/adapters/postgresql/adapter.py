@@ -22,31 +22,43 @@ from ZODB.POSException import Unsupported
 
 from ...options import Options
 from .._abstract_drivers import _select_driver
-from .._util import query_property
+
 from ..dbiter import HistoryFreeDatabaseIterator
 from ..dbiter import HistoryPreservingDatabaseIterator
 from ..interfaces import IRelStorageAdapter
 from ..packundo import HistoryFreePackUndo
 from ..packundo import HistoryPreservingPackUndo
 from ..poller import Poller
+from ..schema import Schema
 from ..scriptrunner import ScriptRunner
 from . import drivers
 from .batch import PostgreSQLRowBatcher
 from .connmanager import Psycopg2ConnectionManager
 from .locker import PostgreSQLLocker
-from .mover import PG8000ObjectMover
 from .mover import PostgreSQLObjectMover
-from .mover import to_prepared_queries
+
 from .oidallocator import PostgreSQLOIDAllocator
 from .schema import PostgreSQLSchemaInstaller
 from .stats import PostgreSQLStats
 from .txncontrol import PostgreSQLTransactionControl
-from .txncontrol import PG8000TransactionControl
+
 
 log = logging.getLogger(__name__)
 
 def select_driver(options=None):
     return _select_driver(options or Options(), drivers)
+
+# TODO: Move to own file
+class PGPoller(Poller):
+
+    poll_query = Schema.all_transaction.select(
+        Schema.all_transaction.c.tid
+    ).order_by(
+        Schema.all_transaction.c.tid, dir='DESC'
+    ).limit(
+        1
+    ).prepared()
+
 
 @implementer(IRelStorageAdapter)
 class PostgreSQLAdapter(object):
@@ -83,13 +95,7 @@ class PostgreSQLAdapter(object):
             locker=self.locker,
         )
 
-        mover_type = PostgreSQLObjectMover
-        txn_type = PostgreSQLTransactionControl
-        if driver.__name__ == 'pg8000':
-            mover_type = PG8000ObjectMover
-            txn_type = PG8000TransactionControl
-
-        self.mover = mover_type(
+        self.mover = PostgreSQLObjectMover(
             driver,
             options=options,
             runner=self.runner,
@@ -97,17 +103,19 @@ class PostgreSQLAdapter(object):
             batcher_factory=PostgreSQLRowBatcher,
         )
         self.oidallocator = PostgreSQLOIDAllocator()
-        self.txncontrol = txn_type(
-            connmanager=self.connmanager,
-            keep_history=self.keep_history,
-            driver=driver,
-        )
 
-        self.poller = Poller(
-            poll_query="EXECUTE get_latest_tid",
+        self.poller = PGPoller(
+            self.driver,
             keep_history=self.keep_history,
             runner=self.runner,
             revert_when_stale=options.revert_when_stale,
+        )
+
+        self.txncontrol = PostgreSQLTransactionControl(
+            connmanager=self.connmanager,
+            poller=self.poller,
+            keep_history=self.keep_history,
+            Binary=driver.Binary,
         )
 
         if self.keep_history:
@@ -120,7 +128,6 @@ class PostgreSQLAdapter(object):
             )
             self.dbiter = HistoryPreservingDatabaseIterator(
                 driver,
-                runner=self.runner,
             )
         else:
             self.packundo = HistoryFreePackUndo(
@@ -134,7 +141,6 @@ class PostgreSQLAdapter(object):
             self.packundo._lock_for_share = 'FOR KEY SHARE OF object_state'
             self.dbiter = HistoryFreeDatabaseIterator(
                 driver,
-                runner=self.runner,
             )
 
         self.stats = PostgreSQLStats(
@@ -144,49 +150,11 @@ class PostgreSQLAdapter(object):
 
         self.connmanager.add_on_store_opened(self.mover.on_store_opened)
         self.connmanager.add_on_load_opened(self.mover.on_load_opened)
-        self.connmanager.add_on_load_opened(self.__prepare_statements)
         self.connmanager.add_on_store_opened(self.__prepare_store_statements)
 
 
-    _get_latest_tid_queries = (
-        """
-        SELECT tid
-        FROM transaction
-        ORDER BY tid DESC
-        LIMIT 1
-        """,
-        """
-        SELECT tid
-        FROM object_state
-        ORDER BY tid DESC
-        LIMIT 1
-        """
-    )
-
-    _prepare_get_latest_tid_queries = to_prepared_queries(
-        'get_latest_tid',
-        _get_latest_tid_queries)
-
-    _prepare_get_latest_tid_query = query_property('_prepare_get_latest_tid')
-
-    def __prepare_statements(self, cursor, restart=False):
-        if restart:
-            return
-
-        # TODO: Generalize all of this better. There should be a
-        # registry of things to prepare, or we should wrap cursors to
-        # detect and prepare when needed. Preparation and switching to
-        # EXECUTE should be automatic for drivers that don't already do that.
-
-        # A meta-class or base class __new__ could handle proper
-        # history/free query selection without this mass of tuples and
-        # manual properties and property names.
-        stmt = self._prepare_get_latest_tid_query
-        cursor.execute(stmt)
-
     def __prepare_store_statements(self, cursor, restart=False):
         if not restart:
-            self.__prepare_statements(cursor, restart)
             try:
                 stmt = self.txncontrol._prepare_add_transaction_query
             except (Unsupported, AttributeError):

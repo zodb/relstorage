@@ -11,6 +11,7 @@ from ZODB.tests.util import clear_transaction_syncs
 
 from relstorage._compat import ABC
 from relstorage.options import Options
+from relstorage.adapters.sql import DefaultDialect
 
 try:
     from unittest import mock
@@ -29,12 +30,17 @@ class TestCase(unittest.TestCase):
     cleanups.
     """
     # Avoid deprecation warnings; 2.7 doesn't have
-    # assertRaisesRegex
+    # assertRaisesRegex or assertRegex
     assertRaisesRegex = getattr(
         unittest.TestCase,
         'assertRaisesRegex',
         None
     ) or getattr(unittest.TestCase, 'assertRaisesRegexp')
+    assertRegex = getattr(
+        unittest.TestCase,
+        'assertRegex',
+        None
+    ) or getattr(unittest.TestCase, 'assertRegexpMatches')
 
     def setUp(self):
         super(TestCase, self).setUp()
@@ -100,9 +106,12 @@ class TestCase(unittest.TestCase):
         super(TestCase, self).tearDown()
 
     def assertIsEmpty(self, container):
-        self.assertEqual(len(container), 0)
+        self.assertLength(container, 0)
 
     assertEmpty = assertIsEmpty
+
+    def assertLength(self, container, length):
+        self.assertEqual(len(container), length, container)
 
 class StorageCreatingMixin(ABC):
 
@@ -228,6 +237,10 @@ class MockCursor(object):
     def close(self):
         self.closed = True
 
+    def __iter__(self):
+        for row in self.results:
+            yield row
+
 class MockOptions(Options):
     cache_module_name = '' # disable
     cache_servers = ''
@@ -251,10 +264,12 @@ class MockConnectionManager(object):
     disconnected_exceptions = ()
 
 
-    def rollback(self, conn, cursor):
-        "Does nothing"
+    def rollback(self, conn, cursor): # pylint:disable=unused-argument
+        if hasattr(conn, 'rollback'):
+            conn.rollback()
 
     def rollback_and_close(self, conn, cursor):
+        self.rollback(conn, cursor)
         if conn:
             conn.close()
         if cursor:
@@ -277,9 +292,30 @@ class MockPackUndo(object):
 class MockOIDAllocator(object):
     pass
 
+class MockQuery(object):
+
+    def __init__(self, raw):
+        self.raw = raw
+
+    def execute(self, cursor, params=None):
+        cursor.execute(self.raw, params)
+
+class MockPoller(object):
+
+    poll_query = MockQuery('SELECT MAX(tid) FROM object_state')
+
+    def __init__(self, driver=None):
+        self.driver = driver or MockDriver()
+
+class MockDriver(object):
+
+    dialect = DefaultDialect()
+
 class MockAdapter(object):
 
     def __init__(self):
+        self.driver = MockDriver()
         self.connmanager = MockConnectionManager()
         self.packundo = MockPackUndo()
         self.oidallocator = MockOIDAllocator()
+        self.poller = MockPoller(self.driver)

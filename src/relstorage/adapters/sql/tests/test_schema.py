@@ -12,20 +12,18 @@
 # FOR A PARTICULAR PURPOSE.
 #
 ##############################################################################
+
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-from relstorage.adapters.tests import test_txncontrol
+from relstorage.tests import TestCase
+
+from ..schema import Table
 
 
-class TestPostgreSQLTransactionControl(test_txncontrol.TestTransactionControl):
+class TestTable(TestCase):
 
-    def _getClass(self):
-        from ..txncontrol import PostgreSQLTransactionControl
-        return PostgreSQLTransactionControl
+    def test_str(self):
 
-    def _get_hf_tid_query(self):
-        return 'EXECUTE get_latest_tid'
-
-    _get_hp_tid_query = _get_hf_tid_query
+        self.assertEqual(str(Table("table")), "table")

@@ -19,7 +19,4 @@ from ..txncontrol import GenericTransactionControl
 
 
 class MySQLTransactionControl(GenericTransactionControl):
-
-    # See adapter.py for where this is prepared.
-    # Either history preserving or not, it's the same.
-    _get_tid_query = 'EXECUTE get_latest_tid'
+    pass

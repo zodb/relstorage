@@ -22,6 +22,16 @@ from __future__ import division
 from __future__ import print_function
 
 from ..._abstract_drivers import implement_db_driver_options
+from ..._abstract_drivers import AbstractModuleDriver
+from ...sql import DefaultDialect
+
+class PostgreSQLDialect(DefaultDialect):
+    """
+    The defaults are setup for PostgreSQL.
+    """
+
+class AbstractPostgreSQLDriver(AbstractModuleDriver):
+    dialect = PostgreSQLDialect()
 
 database_type = 'postgresql'
 

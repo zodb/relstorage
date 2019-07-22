@@ -18,17 +18,17 @@ from __future__ import print_function
 from zope.interface import Attribute
 from zope.interface import Interface
 
-import BTrees
+
 from transaction.interfaces import TransientError
 from ZODB.POSException import StorageError
+
+# Export
+from relstorage._compat import MAX_TID # pylint:disable=unused-import
 
 # pylint: disable=inherit-non-class,no-method-argument,no-self-argument
 # pylint:disable=unexpected-special-method-signature
 # pylint:disable=signature-differs
 
-# An LLBTree uses much less memory than a dict, and is still plenty fast on CPython;
-# it's just as big and slower on PyPy, though.
-MAX_TID = BTrees.family64.maxint
 
 class IStateCache(Interface):
     """

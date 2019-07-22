@@ -20,8 +20,31 @@ from __future__ import print_function
 
 from ..._abstract_drivers import AbstractModuleDriver
 from ..._abstract_drivers import implement_db_driver_options
+from ...sql import Compiler
+from ...sql import DefaultDialect
 
 database_type = 'mysql'
+
+class MySQLCompiler(Compiler):
+
+    def can_prepare(self):
+        # If there are params, we can't prepare unless we're using
+        # the binary protocol; otherwise we have to SET user variables
+        # with extra round trips, which is worse.
+        return not self.placeholders and super(MySQLCompiler, self).can_prepare()
+
+    _PREPARED_CONJUNCTION = 'FROM'
+
+    def _prepared_param(self, number):
+        return '?'
+
+    def _quote_query_for_prepare(self, query):
+        return '"{query}"'.format(query=query)
+
+class MySQLDialect(DefaultDialect):
+
+    def compiler_class(self):
+        return MySQLCompiler
 
 class AbstractMySQLDriver(AbstractModuleDriver):
 
@@ -73,6 +96,9 @@ class AbstractMySQLDriver(AbstractModuleDriver):
         while cursor.nextset():
             multi_results.append(cursor.fetchall())
         return multi_results
+
+
+    dialect = MySQLDialect()
 
 
 implement_db_driver_options(

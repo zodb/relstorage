@@ -17,12 +17,13 @@ import logging
 
 from zope.interface import implementer
 
-from ._util import formatted_query_property
 from .interfaces import IPoller
 from .interfaces import StaleConnectionError
 
-log = logging.getLogger(__name__)
+from .schema import Schema
+from .sql import func
 
+log = logging.getLogger(__name__)
 
 @implementer(IPoller)
 class Poller(object):
@@ -31,44 +32,30 @@ class Poller(object):
     # The zoid is the primary key on both ``current_object`` (history
     # preserving) and ``object_state`` (history free), so these
     # queries are guaranteed to only produce an OID once.
-    _list_changes_range_queries = (
-        """
-        SELECT zoid, tid
-        FROM current_object
-        WHERE tid > %(min_tid)s
-            AND tid <= %(max_tid)s
-        """,
-        """
-        SELECT zoid, tid
-        FROM object_state
-        WHERE tid > %(min_tid)s
-            AND tid <= %(max_tid)s
-        """
-    )
+    _list_changes_range_query = Schema.all_current_object.select(
+        Schema.all_current_object.c.zoid, Schema.all_current_object.c.tid
+    ).where(
+        Schema.all_current_object.c.tid > Schema.all_current_object.bindparam('min_tid')
+    ).and_(
+        Schema.all_current_object.c.tid <= Schema.all_current_object.bindparam('max_tid')
+    ).prepared()
 
-    _list_changes_range_query = formatted_query_property('_list_changes_range')
+    _poll_inv_query = Schema.all_current_object.select(
+        Schema.all_current_object.c.zoid, Schema.all_current_object.c.tid
+    ).where(
+        Schema.all_current_object.c.tid > Schema.all_current_object.bindparam('tid')
+    ).prepared()
 
-    _poll_inv_queries = (
-        """
-        SELECT zoid, tid
-        FROM current_object
-        WHERE tid > %(tid)s
-        """,
-        """
-        SELECT zoid, tid
-        FROM object_state
-        WHERE tid > %(tid)s
-        """
-    )
+    _poll_inv_exc_query = _poll_inv_query.and_(
+        Schema.all_current_object.c.tid != Schema.all_current_object.bindparam('self_tid')
+    ).prepared()
 
-    _poll_inv_query = formatted_query_property('_poll_inv')
+    poll_query = Schema.all_transaction.select(
+        func.max(Schema.all_transaction.c.tid)
+    ).prepared()
 
-    _poll_inv_exc_query = formatted_query_property('_poll_inv',
-                                                   extension=' AND tid != %(self_tid)s')
-
-
-    def __init__(self, poll_query, keep_history, runner, revert_when_stale):
-        self.poll_query = poll_query
+    def __init__(self, driver, keep_history, runner, revert_when_stale):
+        self.driver = driver
         self.keep_history = keep_history
         self.runner = runner
         self.revert_when_stale = revert_when_stale
@@ -92,7 +79,7 @@ class Poller(object):
         """
         # pylint:disable=unused-argument
         # find out the tid of the most recent transaction.
-        cursor.execute(self.poll_query)
+        self.poll_query.execute(cursor)
         rows = cursor.fetchall()
         if not rows or not rows[0][0]:
             # No data, must be fresh database, without even
@@ -148,8 +135,8 @@ class Poller(object):
         # all the unreachable objects will be garbage collected
         # anyway.
         #
-        # Thus we became convinced it was safe to remove the check in history-preserving
-        # databases.
+        # Thus we became convinced it was safe to remove the check in
+        # history-preserving databases.
 
         # Get the list of changed OIDs and return it.
         stmt = self._poll_inv_query
@@ -158,7 +145,7 @@ class Poller(object):
             stmt = self._poll_inv_exc_query
             params['self_tid'] = ignore_tid
 
-        cursor.execute(stmt, params)
+        stmt.execute(cursor, params)
         changes = cursor.fetchall()
         return changes, new_polled_tid
 
@@ -167,5 +154,5 @@ class Poller(object):
         See ``IPoller``.
         """
         params = {'min_tid': after_tid, 'max_tid': last_tid}
-        cursor.execute(self._list_changes_range_query, params)
+        self._list_changes_range_query.execute(cursor, params)
         return cursor.fetchall()

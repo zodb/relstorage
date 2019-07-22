@@ -24,13 +24,6 @@ from ..._compat import xrange
 from ..interfaces import IObjectMover
 from ..mover import AbstractObjectMover
 from ..mover import metricmethod_sampled
-from .scriptrunner import format_to_named
-
-
-def _to_oracle_ordered(query_tuple):
-    # Replace %s with :1, :2, etc
-    assert len(query_tuple) == 2
-    return format_to_named(query_tuple[0]), format_to_named(query_tuple[1])
 
 
 @implementer(IObjectMover)
@@ -39,23 +32,12 @@ class OracleObjectMover(AbstractObjectMover):
     # This is assigned to by the adapter.
     inputsizes = None
 
-    _move_from_temp_hp_insert_query = format_to_named(
-        AbstractObjectMover._move_from_temp_hp_insert_query)
-    _move_from_temp_hf_insert_query = format_to_named(
-        AbstractObjectMover._move_from_temp_hf_insert_query)
-    _move_from_temp_copy_blob_query = format_to_named(
-        AbstractObjectMover._move_from_temp_copy_blob_query)
-
-    _load_current_queries = _to_oracle_ordered(AbstractObjectMover._load_current_queries)
-
     @metricmethod_sampled
     def load_current(self, cursor, oid):
         stmt = self._load_current_query
         return self.runner.run_lob_stmt(
             cursor, stmt, (oid,), default=(None, None))
 
-
-    _load_revision_query = format_to_named(AbstractObjectMover._load_revision_query)
 
     @metricmethod_sampled
     def load_revision(self, cursor, oid, tid):
@@ -64,8 +46,6 @@ class OracleObjectMover(AbstractObjectMover):
             cursor, stmt, (oid, tid), default=(None,))
         return state
 
-
-    _exists_queries = _to_oracle_ordered(AbstractObjectMover._exists_queries)
 
     @metricmethod_sampled
     def exists(self, cursor, oid):
@@ -246,9 +226,7 @@ class OracleObjectMover(AbstractObjectMover):
 
 
 
-    _update_current_insert_query = format_to_named(AbstractObjectMover._update_current_insert_query)
-    _update_current_update_query = format_to_named(AbstractObjectMover._update_current_update_query)
-    _update_current_update_query = _update_current_update_query.replace('ORDER BY zoid', '')
+    # XXX: For _update_current_update_query we used to remove 'ORDER BY zoid'. Still needed?
 
     @metricmethod_sampled
     def download_blob(self, cursor, oid, tid, filename):

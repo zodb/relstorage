@@ -18,12 +18,9 @@ from __future__ import print_function
 
 from relstorage.tests import TestCase
 from relstorage.tests import MockConnection
+from relstorage.tests import MockConnectionManager
 from relstorage.tests import MockCursor
-
-class MockConnmanager(object):
-
-    def rollback(self, conn, _cursor):
-        conn.rollback()
+from relstorage.tests import MockPoller
 
 class TestTransactionControl(TestCase):
 
@@ -37,29 +34,8 @@ class TestTransactionControl(TestCase):
         return arg
 
     def _makeOne(self, keep_history=True, binary=None):
-        return self._getClass()(MockConnmanager(), keep_history, binary or self.Binary)
-
-    def _get_hf_tid_query(self):
-        return self._getClass()._get_tid_queries[1]
-
-    def _get_hp_tid_query(self):
-        return self._getClass()._get_tid_queries[0]
-
-    def _check_get_tid_query(self, keep_history, expected_query):
-        inst = self._makeOne(keep_history)
-        cur = MockCursor()
-        cur.results = [(1,)]
-
-        inst.get_tid(cur)
-
-        self.assertEqual(cur.executed.pop(),
-                         (expected_query, None))
-
-    def test_get_tid_hf(self):
-        self._check_get_tid_query(False, self._get_hf_tid_query())
-
-    def test_get_tid_hp(self):
-        self._check_get_tid_query(True, self._get_hp_tid_query())
+        return self._getClass()(MockConnectionManager(), MockPoller(),
+                                keep_history, binary or self.Binary)
 
     def test_get_tid_empty_db(self):
         inst = self._makeOne()
@@ -71,12 +47,11 @@ class TestTransactionControl(TestCase):
     def test_add_transaction_hp(self):
         inst = self._makeOne()
         cur = MockCursor()
-
+        __traceback_info__ = inst.__dict__
         inst.add_transaction(cur, 1, u'user', u'desc', u'ext')
-
         self.assertEqual(
             cur.executed.pop(),
-            (inst._add_transaction_query,
+            (str(inst._add_transaction_query),
              (1, False, b'user', b'desc', b'ext'))
         )
 
@@ -84,7 +59,7 @@ class TestTransactionControl(TestCase):
 
         self.assertEqual(
             cur.executed.pop(),
-            (inst._add_transaction_query,
+            (str(inst._add_transaction_query),
              (1, True, b'user', b'desc', b'ext'))
         )
 

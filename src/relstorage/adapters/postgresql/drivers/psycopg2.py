@@ -22,8 +22,8 @@ from __future__ import print_function
 from zope.interface import implementer
 
 from relstorage._compat import PY3
-from ..._abstract_drivers import AbstractModuleDriver
 from ...interfaces import IDBDriver
+from . import AbstractPostgreSQLDriver
 
 
 __all__ = [
@@ -32,7 +32,7 @@ __all__ = [
 
 
 @implementer(IDBDriver)
-class Psycopg2Driver(AbstractModuleDriver):
+class Psycopg2Driver(AbstractPostgreSQLDriver):
     __name__ = 'psycopg2'
     MODULE_NAME = __name__
 

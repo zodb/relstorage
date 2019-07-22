@@ -30,6 +30,7 @@ from relstorage._util import Lazy
 
 from ._util import query_property as _query_property
 from ._util import DatabaseHelpersMixin
+from .schema import Schema
 from .interfaces import UnableToAcquireCommitLockError
 
 logger = __import__('logging').getLogger(__name__)
@@ -198,39 +199,31 @@ class AbstractLocker(DatabaseHelpersMixin,
 
         consume(rows)
 
-    _commit_lock_queries = (
-        # MySQL allows aggregates in the top level to use FOR UPDATE,
-        # but PostgreSQL does not, so we have to use the second form.
-        #
-        # 'SELECT MAX(tid) FROM transaction FOR UPDATE',
-        # 'SELECT tid FROM transaction WHERE tid = (SELECT MAX(tid) FROM transaction)  FOR UPDATE',
+    # MySQL allows aggregates in the top level to use FOR UPDATE,
+    # but PostgreSQL does not, so we have to use the second form.
+    #
+    # 'SELECT MAX(tid) FROM transaction FOR UPDATE',
+    # 'SELECT tid FROM transaction WHERE tid = (SELECT MAX(tid) FROM transaction)  FOR UPDATE',
 
-        # Note that using transaction in history-preserving databases
-        # can still lead to deadlock in older versions of MySQL (test
-        # checkPackWhileWriting), and the above lock statement can
-        # lead to duplicate transaction ids being inserted on older
-        # versions (5.7.12, PyMySQL:
-        # https://ci.appveyor.com/project/jamadden/relstorage/builds/25748619/job/cyio3w54uqi026lr#L923).
-        # So both HF and HP use an artificial lock row.
-        #
-        # TODO: Figure out exactly the best way to lock just the rows
-        # in the transaction table we care about that works
-        # everywhere, or a better way to choose the next TID.
-        # gap/intention locks might be a clue.
-
-        'SELECT tid FROM commit_row_lock FOR UPDATE',
-        'SELECT tid FROM commit_row_lock FOR UPDATE'
+    # Note that using transaction in history-preserving databases
+    # can still lead to deadlock in older versions of MySQL (test
+    # checkPackWhileWriting), and the above lock statement can
+    # lead to duplicate transaction ids being inserted on older
+    # versions (5.7.12, PyMySQL:
+    # https://ci.appveyor.com/project/jamadden/relstorage/builds/25748619/job/cyio3w54uqi026lr#L923).
+    # So both HF and HP use an artificial lock row.
+    #
+    # TODO: Figure out exactly the best way to lock just the rows
+    # in the transaction table we care about that works
+    # everywhere, or a better way to choose the next TID.
+    # gap/intention locks might be a clue.
+    _commit_lock_query = Schema.commit_row_lock.select(
+        Schema.commit_row_lock.c.tid
+    ).for_update(
+    ).prepared(
     )
 
-    _commit_lock_query = _query_property('_commit_lock')
-
-    _commit_lock_nowait_queries = (
-        _commit_lock_queries[0] + ' NOWAIT',
-        _commit_lock_queries[1] + ' NOWAIT',
-    )
-
-    _commit_lock_nowait_query = _query_property('_commit_lock_nowait')
-
+    _commit_lock_nowait_query = _commit_lock_query.nowait()
 
     @metricmethod
     def hold_commit_lock(self, cursor, ensure_current=False, nowait=False):
@@ -241,9 +234,9 @@ class AbstractLocker(DatabaseHelpersMixin,
                 lock_stmt = self._commit_lock_nowait_query
             else:
                 self._set_row_lock_nowait(cursor)
-        __traceback_info__ = lock_stmt
+
         try:
-            cursor.execute(lock_stmt)
+            lock_stmt.execute(cursor)
             rows = cursor.fetchall()
             if not rows or not rows[0]:
                 raise UnableToAcquireCommitLockError("No row returned from commit_row_lock")

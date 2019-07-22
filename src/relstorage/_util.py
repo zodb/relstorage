@@ -143,6 +143,45 @@ class Lazy(object):
         inst.__dict__[name] = value
         return value
 
+class CachedIn(object):
+    """Cached method with given cache attribute."""
+
+    def __init__(self, attribute_name, factory=dict):
+        self.attribute_name = attribute_name
+        self.factory = factory
+
+    def __call__(self, func):
+
+        @functools.wraps(func)
+        def decorated(instance):
+            cache = self.cache(instance)
+            key = () # We don't support arguments right now, so only one key.
+            try:
+                v = cache[key]
+            except KeyError:
+                v = cache[key] = func(instance)
+            return v
+
+        decorated.invalidate = self.invalidate
+        return decorated
+
+    def invalidate(self, instance):
+        cache = self.cache(instance)
+        key = ()
+        try:
+            del cache[key]
+        except KeyError:
+            pass
+
+    def cache(self, instance):
+        try:
+            cache = getattr(instance, self.attribute_name)
+        except AttributeError:
+            cache = self.factory()
+            setattr(instance, self.attribute_name, cache)
+        return cache
+
+
 def to_utf8(data):
     if data is None or isinstance(data, bytes):
         return data
