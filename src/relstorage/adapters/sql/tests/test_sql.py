@@ -26,13 +26,16 @@ from relstorage.tests import TestCase
 from .. import Table
 from .. import HistoryVariantTable
 from .. import Column
-from .. import bindparam
+from .. import it
 from .. import DefaultDialect
 from .. import OID
 from .. import TID
 from .. import State
 from .. import Boolean
 from .. import BinaryString
+from .. import func
+
+from ..expressions import bindparam
 
 current_object = Table(
     'current_object',
@@ -79,6 +82,43 @@ class TestTableSelect(TestCase):
         self.assertEqual(
             str(stmt),
             'SELECT zoid, tid, state, state_size FROM object_state WHERE (zoid = tid)'
+        )
+
+    def test_simple_eq_limit(self):
+        table = object_state
+
+        stmt = table.select().where(table.c.zoid == table.c.tid).limit(1)
+
+        self.assertEqual(
+            str(stmt),
+            'SELECT zoid, tid, state, state_size FROM object_state WHERE (zoid = tid) LIMIT 1'
+        )
+
+    def test_simple_eq_for_update(self):
+        table = object_state
+
+        stmt = table.select().where(table.c.zoid == table.c.tid).for_update()
+
+        self.assertEqual(
+            str(stmt),
+            'SELECT zoid, tid, state, state_size FROM object_state WHERE (zoid = tid) FOR UPDATE'
+        )
+
+        stmt = stmt.nowait()
+        self.assertEqual(
+            str(stmt),
+            'SELECT zoid, tid, state, state_size FROM object_state WHERE (zoid = tid) FOR UPDATE '
+            'NOWAIT'
+        )
+
+    def test_max_select(self):
+        table = object_state
+
+        stmt = table.select(func.max(it.c.tid))
+
+        self.assertEqual(
+            str(stmt),
+            'SELECT max(tid) FROM object_state'
         )
 
     def test_distinct(self):
@@ -161,12 +201,13 @@ class TestTableSelect(TestCase):
         )
 
     def test_bind(self):
-        select = objects.select(objects.c.tid, objects.c.zoid).where(
+        from operator import attrgetter
+        query = objects.select(objects.c.tid, objects.c.zoid).where(
             objects.c.tid > bindparam('tid')
         )
         # Unbound we assume history
         self.assertEqual(
-            str(select),
+            str(query),
             'SELECT tid, zoid FROM current_object WHERE (tid > %(tid)s)'
         )
 
@@ -176,24 +217,39 @@ class TestTableSelect(TestCase):
 
         context = Context()
         dialect = context.dialect
-        select = select.bind(context)
+        query = query.bind(context)
 
-        self.assertEqual(select.context, dialect)
-        self.assertEqual(select.table.context, dialect)
-        self.assertEqual(select._where.context, dialect)
-        self.assertEqual(select._where.expression.context, dialect)
+        class Root(object):
+            select = query
+
+        for item_name in (
+                'select',
+                'select.table',
+                'select._where',
+                'select._where.expression',
+        ):
+            __traceback_info__ = item_name
+            item = attrgetter(item_name)(Root)
+            # The exact context is passed down the tree.
+            self.assertIs(item.context, context)
+            # The dialect is first bound, so it's *not* the same
+            # as the one we can reference (though it is equal)...
+            self.assertEqual(item.dialect, dialect)
+            # ...but it *is* the same throughout the tree
+            self.assertIs(query.dialect, item.dialect)
+
         # We take up its history setting
         self.assertEqual(
-            str(select),
+            str(query),
             'SELECT tid, zoid FROM current_object WHERE (tid > %(tid)s)'
         )
 
         # Bound to history-free we use history free
         context.keep_history = False
-        select = select.bind(context)
+        query = query.bind(context)
 
         self.assertEqual(
-            str(select),
+            str(query),
             'SELECT tid, zoid FROM object_state WHERE (tid > %(tid)s)'
         )
 
@@ -265,7 +321,6 @@ class TestTableSelect(TestCase):
         )
 
     def test_it(self):
-        from .. import it
         stmt = object_state.select(
             it.c.zoid,
             it.c.state
@@ -298,7 +353,6 @@ class TestTableSelect(TestCase):
             stmt.order_by(col_ref == object_state.c.state)
 
     def test_boolean_literal(self):
-        from .. import it
         stmt = transaction.select(
             transaction.c.tid
         ).where(
@@ -325,7 +379,6 @@ class TestTableSelect(TestCase):
         )
 
     def test_boolean_literal_it_joined_table(self):
-        from .. import it
         stmt = transaction.natural_join(
             object_state
         ).select(
