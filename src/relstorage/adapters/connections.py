@@ -26,7 +26,7 @@ import contextlib
 from zope.interface import implementer
 
 from .._util import Lazy
-from .interfaces import IManagedDBConnection
+from . import interfaces
 
 logger = __import__('logging').getLogger(__name__)
 
@@ -201,7 +201,7 @@ class AbstractManagedConnection(object):
             self.connmanager.rollback_and_close(conn, cursor)
 
 
-@implementer(IManagedDBConnection)
+@implementer(interfaces.IManagedLoadConnection)
 class LoadConnection(AbstractManagedConnection):
 
     __slots__ = ()
@@ -210,7 +210,7 @@ class LoadConnection(AbstractManagedConnection):
     _RESTART_NAME = 'restart_load'
 
 
-@implementer(IManagedDBConnection)
+@implementer(interfaces.IManagedStoreConnection)
 class StoreConnection(AbstractManagedConnection):
 
     __slots__ = ()
@@ -219,7 +219,7 @@ class StoreConnection(AbstractManagedConnection):
     _RESTART_NAME = 'restart_store'
 
 
-@implementer(IManagedDBConnection)
+@implementer(interfaces.IManagedDBConnection)
 class ClosedConnection(object):
     """
     Represents a permanently closed connection.

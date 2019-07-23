@@ -125,8 +125,7 @@ class AbstractTPCState(object):
             self.load_connection.rollback_quietly()
             if self.store_connection:
                 self.adapter.txncontrol.abort(
-                    self.store_connection.connection,
-                    self.store_connection.cursor,
+                    self.store_connection,
                     self.prepared_txn)
             if self.store_connection:
                 # It's possible that abort() could have closed this connection/cursor

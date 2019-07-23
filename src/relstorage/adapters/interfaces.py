@@ -20,7 +20,7 @@ from zope.interface import Attribute
 from zope.interface import Interface
 
 # pylint:disable=inherit-non-class,no-method-argument,no-self-argument
-# pylint:disable=too-many-ancestors
+# pylint:disable=too-many-ancestors,too-many-lines
 
 try:
     from zope.schema import Tuple
@@ -255,7 +255,12 @@ class IDBDriverOptions(Interface):
 
 
 class IConnectionManager(Interface):
-    """Open and close database connections"""
+    """
+    Open and close database connections.
+
+    This is a low-level interface; most operations should instead
+    use a pre-existing :class:`IManagedDBConnection`.
+    """
 
     def open():
         """Open a database connection and return (conn, cursor)."""
@@ -402,6 +407,89 @@ class IConnectionManager(Interface):
 
         .. versionadded:: 2.1a1
         """
+
+
+class IManagedDBConnection(Interface):
+    """
+    A managed DB connection consists of a DB-API ``connection`` object
+    and a single DB-API ``cursor`` from that connection.
+
+    This encapsulates proper use of ``IConnectionManager``, including
+    handling disconnections and re-connecting at appropriate times.
+
+    It is not allowed to use multiple cursors from a connection at the
+    same time; not all drivers properly support that.
+
+    If the DB-API connection is not open and presumed to be good, this
+    object has a false value.
+
+    "Restarting" a connection means to bring it to a current view of
+    the database. Typically this means a rollback so that a new
+    transaction can begin with a new MVCC snapshot.
+    """
+
+    cursor = Attribute("The DB-API cursor to use. Read-only.")
+    connection = Attribute("The DB-API connection to use. Read-only.")
+
+    def __bool__():
+        """
+        Return true if the database connection is believed to be ready to use.
+        """
+
+    def __nonzero__():
+        """
+        Same as __bool__ for Python 2.
+        """
+
+    def drop():
+        """
+        Unconditionally drop (close) the database connection.
+        """
+
+    def rollback_quietly():
+        """
+        Rollback the connection and return a true value on success.
+
+        When this completes, the connection will be in a neutral state,
+        not idle in a transaction.
+
+        If an error occurs during rollback, the connection is dropped
+        and a false value is returned.
+        """
+
+    def isolated_connection():
+        """
+        Context manager that opens a new, distinct connection and
+        returns its cursor.
+
+        No matter what happens in the ``with`` block, the connection will be
+        dropped afterwards.
+        """
+
+    def restart_and_call(f, *args, **kw):
+        """
+        Restart the connection (roll it back) and call a function
+        after doing this.
+
+        This may drop and re-connect the connection if necessary.
+
+        :param callable f:
+            The function to call: ``f(conn, cursor, *args, **kwargs)``.
+            May be called up to twice if it raises a disconnected exception
+            on the first try.
+
+        :return: The return value of ``f``.
+        """
+
+class IManagedLoadConnection(IManagedDBConnection):
+    """
+    A managed connection intended for loading.
+    """
+
+class IManagedStoreConnection(IManagedDBConnection):
+    """
+    A managed connection intended for storing data.
+    """
 
 
 class IReplicaSelector(Interface):
@@ -874,27 +962,35 @@ class ITransactionControl(Interface):
                         packed=False):
         """Add a transaction."""
 
-    def commit_phase1(conn, cursor, tid):
-        """Begin a commit.  Returns the transaction name.
+    def commit_phase1(store_connection, tid):
+        """
+        Begin a commit. Returns the transaction name.
 
         The transaction name must not be None.
 
-        This method should guarantee that commit_phase2() will succeed,
-        meaning that if commit_phase2() would raise any error, the error
-        should be raised in commit_phase1() instead.
+        This method should guarantee that :meth:`commit_phase2` will
+        succeed, meaning that if commit_phase2() would raise any
+        error, the error should be raised in :meth:`commit_phase1`
+        instead.
+
+        :param store_connection: An :class:`IManagedStoreConnection`
         """
 
-    def commit_phase2(conn, cursor, txn):
+    def commit_phase2(store_connection, txn):
         """Final transaction commit.
 
-        txn is the name returned by commit_phase1.
+        *txn* is the name returned by commit_phase1.
+
+        :param store_connection: An :class:`IManagedStoreConnection`
         """
 
-    def abort(conn, cursor, txn=None):
+    def abort(store_connection, txn=None):
         """
         Abort the commit, ignoring certain exceptions.
 
         If *txn* is not None, phase 1 is also aborted.
+
+        :param store_connection: An :class:`IManagedStoreConnection`
 
         :return: A true value if the connection was rolled back
                  without ignoring any exceptions; if an exception was

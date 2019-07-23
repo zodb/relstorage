@@ -64,9 +64,9 @@ from .pack import Pack
 from .store import Storer
 from .store import BlobStorer
 
-from .connections import LoadConnection
-from .connections import StoreConnection
-from .connections import ClosedConnection
+from ..adapters.connections import LoadConnection
+from ..adapters.connections import StoreConnection
+from ..adapters.connections import ClosedConnection
 
 from .tpc import ABORT_EARLY
 from .tpc import NotInTransaction

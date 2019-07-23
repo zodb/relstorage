@@ -34,32 +34,20 @@ class AbstractTransactionControl(ABC):
     def __init__(self, connmanager):
         self.connmanager = connmanager
 
-    def commit_phase1(self, conn, cursor, tid):
-        """Begin a commit.  Returns the transaction name.
-
-        The transaction name must not be None.
-
-        This method should guarantee that commit_phase2() will succeed,
-        meaning that if commit_phase2() would raise any error, the error
-        should be raised in commit_phase1() instead.
-        """
+    def commit_phase1(self, store_connection, tid):
         return '-'
 
-    def commit_phase2(self, conn, cursor, txn):
-        """Final transaction commit.
+    def commit_phase2(self, store_connection, txn):
+        store_connection.connection.commit()
 
-        txn is the name returned by commit_phase1.
-        """
-        conn.commit()
-
-    def abort(self, conn, cursor, txn=None):
+    def abort(self, store_connection, txn=None):
         """
         Abort the commit. If txn is not None, phase 1 is also aborted.
 
         The connection is rolled back quietly using :meth:`~IConnectionManager.rollback_quietly`
         and the boolean result of that function is returned.
         """
-        return self.connmanager.rollback_quietly(conn, cursor)
+        return store_connection.rollback_quietly()
 
     @abc.abstractmethod
     def get_tid(self, cursor):

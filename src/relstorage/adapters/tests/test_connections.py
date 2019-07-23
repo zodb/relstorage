@@ -13,6 +13,8 @@ from nti.testing.matchers import validly_provides
 from relstorage.tests import TestCase
 from relstorage.tests import MockConnectionManager
 
+from ..interfaces import IManagedStoreConnection
+from ..interfaces import IManagedLoadConnection
 from ..interfaces import IManagedDBConnection
 from ..connections import StoreConnection
 from ..connections import LoadConnection
@@ -21,6 +23,7 @@ from ..connections import ClosedConnection
 class TestConnectionCommon(TestCase):
 
     klass = StoreConnection
+    iface = IManagedStoreConnection
 
     def _makeArgument(self):
         return MockConnectionManager()
@@ -29,7 +32,7 @@ class TestConnectionCommon(TestCase):
         return self.klass(self._makeArgument())
 
     def test_provides(self):
-        assert_that(self._makeOne(), validly_provides(IManagedDBConnection))
+        assert_that(self._makeOne(), validly_provides(self.iface))
 
 class TestConnection(TestConnectionCommon):
 
@@ -122,6 +125,8 @@ class TestConnection(TestConnectionCommon):
 
 class TestLoadConnection(TestConnection):
     klass = LoadConnection
+    iface = IManagedLoadConnection
 
 class TestClosedConnection(TestConnectionCommon):
     klass = ClosedConnection
+    iface = IManagedDBConnection
