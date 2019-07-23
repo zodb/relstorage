@@ -24,31 +24,34 @@ from zope.interface import Interface
 
 try:
     from zope.schema import Tuple
-    from zope.schema import Field
     from zope.schema import Object
     from zope.interface.common.interfaces import IException
 except ImportError: # pragma: no cover
     # We have nti.testing -> zope.schema as a test dependency; but we
     # don't have it as a hard-coded runtime dependency because we
     # don't want to force a version on consumers of RelStorage.
-    def Tuple(description='', **_kw):
-        return Attribute(description)
+    def Tuple(*_args, **kwargs):
+        return Attribute(kwargs['description'])
 
     Object = Tuple
 
     def Factory(schema, description='', **_kw):
         return Attribute(description + " (Must implement %s)" % schema)
+
+    IException = Interface
 else:
-    from zope.schema.interfaces import SchemaNotProvided
-    class Factory(Field):
+    from zope.schema.interfaces import SchemaNotProvided as _SchemaNotProvided
+    from zope.schema import Field as _Field
+
+    class Factory(_Field):
         def __init__(self, schema, **kw):
             self.schema = schema
-            Field.__init__(self, **kw)
+            _Field.__init__(self, **kw)
 
         def _validate(self, value):
             super(Factory, self)._validate(value)
             if not self.schema.implementedBy(value):
-                raise SchemaNotProvided(self.schema, value).with_field_and_value(self, value)
+                raise _SchemaNotProvided(self.schema, value).with_field_and_value(self, value)
 
 
 
