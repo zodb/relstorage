@@ -239,6 +239,12 @@ class AbstractSchemaInstaller(DatabaseHelpersMixin,
         """
         raise NotImplementedError()
 
+    # NOTE: Prior to MySQL 8.0.16, CHECK constraints
+    # are ignored at creation time and dropped. Thus if you upgrade
+    # an existing 5.7 schema to 8, constraints will not be enforced,
+    # but if you create a new schema under 8, these constraints will
+    # be enforced.
+
     CREATE_OBJECT_STATE_TMPLS = (
         """
         CREATE TABLE object_state (

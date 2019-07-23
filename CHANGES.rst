@@ -58,6 +58,8 @@
   against the ``transaction`` table in history-preserving databases.
   See :issue:`159`.
 
+- Prepare more statements.
+
 3.0a5 (2019-07-11)
 ==================
 
