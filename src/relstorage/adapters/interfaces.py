@@ -22,6 +22,36 @@ from zope.interface import Interface
 # pylint:disable=inherit-non-class,no-method-argument,no-self-argument
 # pylint:disable=too-many-ancestors
 
+try:
+    from zope.schema import Tuple
+    from zope.schema import Field
+    from zope.schema import Object
+    from zope.interface.common.interfaces import IException
+except ImportError: # pragma: no cover
+    # We have nti.testing -> zope.schema as a test dependency; but we
+    # don't have it as a hard-coded runtime dependency because we
+    # don't want to force a version on consumers of RelStorage.
+    def Tuple(description='', **_kw):
+        return Attribute(description)
+
+    Object = Tuple
+
+    def Factory(schema, description='', **_kw):
+        return Attribute(description + " (Must implement %s)" % schema)
+else:
+    from zope.schema.interfaces import SchemaNotProvided
+    class Factory(Field):
+        def __init__(self, schema, **kw):
+            self.schema = schema
+            Field.__init__(self, **kw)
+
+        def _validate(self, value):
+            super(Factory, self)._validate(value)
+            if not self.schema.implementedBy(value):
+                raise SchemaNotProvided(self.schema, value).with_field_and_value(self, value)
+
+
+
 class IRelStorageAdapter(Interface):
     """A database adapter for RelStorage"""
 
@@ -66,20 +96,35 @@ class IDBDriver(Interface):
 
     __name__ = Attribute("The name of this driver")
 
-    disconnected_exceptions = Attribute("A tuple of exceptions this driver can raise if it is "
-                                        "disconnected from the database.")
-    close_exceptions = Attribute("A tuple of exceptions that we can ignore when we try to "
-                                 "close the connection to the database. Often this is the same "
-                                 "or an extension of `disconnected_exceptions`.")
+    disconnected_exceptions = Tuple(
+        description=(u"A tuple of exceptions this driver can raise on any operation if it is "
+                     u"disconnected from the database."),
+        value_type=Factory(IException)
+    )
 
-    lock_exceptions = Attribute("A tuple of exceptions") # XXX: Document
+    close_exceptions = Tuple(
+        description=(u"A tuple of exceptions that we can ignore when we try to "
+                     u"close the connection to the database. Often this is the same "
+                     u"or an extension of `disconnected_exceptions`."
+                     u"These exceptions may also be ignored on rolling back the connection, "
+                     u"if we are otherwise completely done with it and prepared to drop it. "),
+        value_type=Factory(IException),
+    )
 
-    use_replica_exceptions = Attribute("A tuple of exceptions raised by connecting "
-                                       "that should cause us to try a replica.")
+    lock_exceptions = Tuple(
+        description=u"A tuple of exceptions",
+        value_type=Factory(IException),
+    ) # XXX: Document
+
+    use_replica_exceptions = Tuple(
+        description=(u"A tuple of exceptions raised by connecting "
+                     u"that should cause us to try a replica."),
+        value_type=Factory(IException)
+    )
 
     Binary = Attribute("A callable.")
 
-    dialect = Attribute("The IDBDialect for this driver.")
+    dialect = Object(IDBDialect, description=u"The IDBDialect for this driver.")
 
     def binary_column_as_state_type(db_column_data):
         """
@@ -209,32 +254,46 @@ class IDBDriverOptions(Interface):
 class IConnectionManager(Interface):
     """Open and close database connections"""
 
-    disconnected_exceptions = Attribute(
-        """The tuple of exception types that might be
-        raised when the connection to the database has been broken.
-        """)
-
     def open():
         """Open a database connection and return (conn, cursor)."""
 
     def close(conn=None, cursor=None):
         """
         Close a connection and cursor, ignoring certain errors.
+
+        Return a True value if the connection was closed cleanly;
+        return a false value if an error was ignored.
         """
 
     def rollback_and_close(conn, cursor):
         """
-        Rollback the connection and close it.
+        Rollback the connection and close it, ignoring certain errors.
 
         Certain database drivers, such as MySQLdb using the SSCursor, require
         all cursors to be closed before rolling back (otherwise it generates a
         ProgrammingError: 2014 "Commands out of sync").
         This method abstracts that.
+
+        :return: A true value if the connection was closed without ignoring any exceptions;
+            if an exception was ignored, returns a false value.
         """
 
     def rollback(conn, cursor):
         """
+        Like `rollback_and_close`, but without the close, and letting
+        errors pass.
+
+        If an error does happen, then the connection and cursor are closed
+        before this method returns.
+        """
+
+    def rollback_quietly(conn, cursor):
+        """
         Like `rollback_and_close`, but without the close.
+
+        :return: A true value if the connection was rolled back without ignoring any exceptions;
+            if an exception was ignored, returns a false value (and the connection and cursor
+            are closed before this method returns).
         """
 
     def open_and_call(callback):
@@ -829,7 +888,16 @@ class ITransactionControl(Interface):
         """
 
     def abort(conn, cursor, txn=None):
-        """Abort the commit.  If txn is not None, phase 1 is also aborted."""
+        """
+        Abort the commit, ignoring certain exceptions.
+
+        If *txn* is not None, phase 1 is also aborted.
+
+        :return: A true value if the connection was rolled back
+                 without ignoring any exceptions; if an exception was
+                 ignored, returns a false value (and the connection
+                 and cursor are closed before this method returns).
+        """
 
 
 class ReplicaClosedException(Exception):

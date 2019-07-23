@@ -57,15 +57,12 @@ class CXOracleConnectionManager(AbstractConnectionManager):
     isolation_read_only = "ISOLATION LEVEL SERIALIZABLE"
 
     def __init__(self, driver, user, password, dsn, twophase, options):
-        self.disconnected_exceptions = driver.disconnected_exceptions
-        self.close_exceptions = driver.close_exceptions
-        self.use_replica_exceptions = driver.use_replica_exceptions
         self._user = user
         self._password = password
         self._dsn = dsn
         self._twophase = twophase
         self._db_connect = driver.connect
-        super(CXOracleConnectionManager, self).__init__(options)
+        super(CXOracleConnectionManager, self).__init__(options, driver)
 
     @metricmethod
     def open(self, transaction_mode="ISOLATION LEVEL READ COMMITTED",
@@ -90,7 +87,7 @@ class CXOracleConnectionManager(AbstractConnectionManager):
                     cursor.execute("SET TRANSACTION %s" % transaction_mode)
                 return conn, cursor
 
-            except self.use_replica_exceptions as e:
+            except self.driver.use_replica_exceptions as e:
                 if replica_selector is not None:
                     next_dsn = next(replica_selector)
                     if next_dsn is not None:

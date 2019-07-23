@@ -48,9 +48,9 @@ class TestAbstractDrivers(unittest.TestCase):
 
     def test_mock(self):
         from hamcrest import assert_that
-        from nti.testing.matchers import verifiably_provides
+        from nti.testing.matchers import validly_provides
         drivers = MockDrivers()
-        assert_that(drivers, verifiably_provides(IDBDriverOptions))
+        assert_that(drivers, validly_provides(IDBDriverOptions))
 
     def test_select_auto_no_drivers(self):
         drivers = MockDrivers()

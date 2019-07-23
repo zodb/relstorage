@@ -53,8 +53,13 @@ class AbstractTransactionControl(ABC):
         conn.commit()
 
     def abort(self, conn, cursor, txn=None):
-        """Abort the commit.  If txn is not None, phase 1 is also aborted."""
-        self.connmanager.rollback(conn, cursor)
+        """
+        Abort the commit. If txn is not None, phase 1 is also aborted.
+
+        The connection is rolled back quietly using :meth:`~IConnectionManager.rollback_quietly`
+        and the boolean result of that function is returned.
+        """
+        return self.connmanager.rollback_quietly(conn, cursor)
 
     @abc.abstractmethod
     def get_tid(self, cursor):

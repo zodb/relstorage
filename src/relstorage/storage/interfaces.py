@@ -27,7 +27,17 @@ from __future__ import print_function
 from zope.interface import Interface
 from zope.interface import Attribute
 
+from transaction.interfaces import TransientError
+from ZODB.POSException import StorageTransactionError
+
 # pylint:disable=inherit-non-class,no-self-argument,no-method-argument
+# pylint:disable=too-many-ancestors
+
+class StorageDisconnectedDuringCommit(StorageTransactionError, TransientError):
+    """
+    We lost a connection to the database during a commit. Probably restarting
+    the transaction will re-establish the connection.
+    """
 
 class IStaleAware(Interface):
     """
@@ -89,15 +99,15 @@ class IManagedDBConnection(Interface):
         Unconditionally drop (close) the database connection.
         """
 
-    def rollback():
+    def rollback_quietly():
         """
-        Rollback the connection.
+        Rollback the connection and return a true value on success.
 
         When this completes, the connection will be in a neutral state,
         not idle in a transaction.
 
         If an error occurs during rollback, the connection is dropped
-        and the exception is raised.
+        and a false value is returned.
         """
 
     def isolated_connection():

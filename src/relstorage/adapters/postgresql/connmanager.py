@@ -27,15 +27,12 @@ class Psycopg2ConnectionManager(AbstractConnectionManager):
 
     def __init__(self, driver, dsn, options):
         self._dsn = dsn
-        self.disconnected_exceptions = driver.disconnected_exceptions
-        self.close_exceptions = driver.close_exceptions
-        self.use_replica_exceptions = driver.use_replica_exceptions
         self.isolation_read_committed = driver.ISOLATION_LEVEL_READ_COMMITTED
         self.isolation_serializable = driver.ISOLATION_LEVEL_SERIALIZABLE
         self.isolation_repeatable_read = driver.ISOLATION_LEVEL_REPEATABLE_READ
         self.keep_history = options.keep_history
         self._db_connect_with_isolation = driver.connect_with_isolation
-        super(Psycopg2ConnectionManager, self).__init__(options)
+        super(Psycopg2ConnectionManager, self).__init__(options, driver)
 
     def _alter_dsn(self, replica):
         """Alter the DSN to use the specified replica.
@@ -80,7 +77,7 @@ class Psycopg2ConnectionManager(AbstractConnectionManager):
                 cursor.arraysize = 64
                 conn.replica = replica
                 return conn, cursor
-            except self.use_replica_exceptions as e:
+            except self.driver.use_replica_exceptions as e:
                 if replica is not None:
                     next_replica = replica_selector.next()
                     if next_replica is not None:

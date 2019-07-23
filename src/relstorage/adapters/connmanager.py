@@ -16,25 +16,20 @@ from __future__ import absolute_import, print_function
 from perfmetrics import metricmethod
 from zope.interface import implementer
 
+
 from .interfaces import IConnectionManager
 from .interfaces import ReplicaClosedException
 from .replica import ReplicaSelector
 
+logger = __import__('logging').getLogger(__name__)
 
 @implementer(IConnectionManager)
 class AbstractConnectionManager(object):
-    """Abstract base class for connection management.
+    """
+    Abstract base class for connection management.
 
     Responsible for opening and closing database connections.
     """
-
-    # disconnected_exceptions contains the exception types that might be
-    # raised when the connection to the database has been broken.
-    disconnected_exceptions = (ReplicaClosedException,)
-
-    # close_exceptions contains the exception types to ignore
-    # when the adapter attempts to close a database connection.
-    close_exceptions = ()
 
     # a series of callables (cursor, restart=bool)
     # for when a store connection is opened.
@@ -44,18 +39,39 @@ class AbstractConnectionManager(object):
     # when a load connection is opened
     _on_load_opened = ()
 
-    # psycopg2 raises ProgrammingError if we rollback when nothing is present.
-    # mysql-connector-python raises InterfaceError.
-    # OTOH, mysqlclient raises nothing and even wants it.
+    # psycopg2 raises ProgrammingError if we rollback when no results
+    # are present on the cursor. mysql-connector-python raises
+    # InterfaceError. OTOH, mysqlclient raises nothing and even wants
+    # it in certain circumstances.
+    #
+    # Subclasses should set this statically.
     _fetchall_on_rollback = True
 
-    def __init__(self, options):
-        # options is a relstorage.options.Options instance
+    # The list of exceptions to ignore on a rollback *or* close. We
+    # take this as the union of the driver's close exceptions and disconnected
+    # exceptions (drivers aren't required to organize them to overlap, but
+    # in practice they should.)
+    _ignored_exceptions = ()
+
+    replica_selector = None
+
+    def __init__(self, options, driver):
+        """
+        :param options: A :class:`relstorage.options.Options`.
+        :param driver: A :class:`relstorage.adapters.interfaces.IDBDriver`,
+            which we use for its exceptions.
+        """
+        self.driver = driver
+
+        self._ignored_exceptions = tuple(set(
+            driver.close_exceptions
+            + driver.disconnected_exceptions
+            + (ReplicaClosedException,)
+        ))
+
         if options.replica_conf:
             self.replica_selector = ReplicaSelector(
                 options.replica_conf, options.replica_timeout)
-        else:
-            self.replica_selector = None
 
         if options.ro_replica_conf:
             self.ro_replica_selector = ReplicaSelector(
@@ -94,40 +110,76 @@ class AbstractConnectionManager(object):
     def close(self, conn=None, cursor=None):
         """
         Close a connection and cursor, ignoring certain errors.
+
+        Return a True value if the connection was closed cleanly. Return
+        a False value if the processes ignored an error.
         """
-        for obj in (cursor, conn):
+        clean = True
+        for obj in (cursor, conn): # cursor first; some drivers want that done
             if obj is not None:
                 try:
                     obj.close()
-                except self.close_exceptions:
-                    pass
+                except self._ignored_exceptions: # pylint:disable=catching-non-exception
+                    clean = False
+        return clean
 
-    def rollback_and_close(self, conn, cursor):
-        # Some drivers require the cursor to be closed first.
-
-        # Some drivers also don't allow you to close without fetching
-        # all rows.
+    def __synchronize_cursor_for_rollback(self, cursor):
+        """Exceptions here are ignored, we don't know what state the cursor is in."""
         if cursor is not None and self._fetchall_on_rollback:
+            fetchall = cursor.fetchall
             try:
-                cursor.fetchall()
+                fetchall()
             except Exception: # pylint:disable=broad-except
                 pass
-        self.close(cursor)
 
+    @staticmethod
+    def __rollback_connection(conn, ignored_exceptions):
+        """Return True if we successfully rolled back."""
+        clean = True
         if conn is not None:
-            assert cursor is not None
             try:
                 conn.rollback()
-            except self.close_exceptions:
-                pass
-            finally:
-                self.close(conn)
+            except ignored_exceptions:
+                logger.debug("Ignoring exception rolling back connection", exc_info=True)
+                clean = False
+        return clean
+
+    def __rollback(self, conn, cursor, quietly):
+        # If an error occurs, close the connection and cursor.
+        #
+        # Some drivers require the cursor to be closed before closing
+        # the connection.
+        #
+        # Some drivers also don't allow you to close the cursor
+        # without fetching all rows.
+        self.__synchronize_cursor_for_rollback(cursor)
+        try:
+            clean = self.__rollback_connection(
+                conn,
+                # Let it raise if we're not meant to be quiet.
+                self._ignored_exceptions if quietly else ()
+            )
+        except:
+            clean = False
+            raise
+        finally:
+            if not clean:
+                self.close(conn, cursor)
+        return clean
+
+    def rollback_and_close(self, conn, cursor):
+        clean = self.__rollback(conn, cursor, True)
+        if clean:
+            # if an error already occurred, we closed things.
+            clean = self.close(conn, cursor)
+
+        return clean
 
     def rollback(self, conn, cursor):
-        # Like rollback and close, but doesn't bury exceptions.
-        if self._fetchall_on_rollback:
-            cursor.fetchall()
-        conn.rollback()
+        return self.__rollback(conn, cursor, False)
+
+    def rollback_quietly(self, conn, cursor):
+        return self.__rollback(conn, cursor, True)
 
     def open_and_call(self, callback):
         """Call a function with an open connection and cursor.
@@ -147,6 +199,7 @@ class AbstractConnectionManager(object):
                 raise
             else:
                 self.close(cursor)
+                cursor = None
                 conn.commit()
                 return res
         finally:

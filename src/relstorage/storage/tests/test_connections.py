@@ -8,7 +8,7 @@ from __future__ import division
 from __future__ import print_function
 
 from hamcrest import assert_that
-from nti.testing.matchers import verifiably_provides
+from nti.testing.matchers import validly_provides
 
 from relstorage.tests import TestCase
 from relstorage.tests import MockConnectionManager
@@ -29,7 +29,7 @@ class TestConnectionCommon(TestCase):
         return self.klass(self._makeArgument())
 
     def test_provides(self):
-        assert_that(self._makeOne(), verifiably_provides(IManagedDBConnection))
+        assert_that(self._makeOne(), validly_provides(IManagedDBConnection))
 
 class TestConnection(TestConnectionCommon):
 
@@ -105,7 +105,20 @@ class TestConnection(TestConnectionCommon):
         self.assertEqual(count, [2])
 
     def test_rollback_activates(self):
-        self.test_drop_activates('rollback')
+        self.test_drop_activates('rollback_quietly')
+
+    def test_call_reconnect(self):
+        manager = self._makeOne()
+        manager.open_if_needed()
+        called = []
+        def f(_conn, _cur, fresh):
+            called.append(fresh)
+            if not fresh:
+                raise manager.connmanager.driver.disconnected_exceptions[0]
+
+        manager.call(f, True)
+
+        self.assertEqual(called, [False, True])
 
 class TestLoadConnection(TestConnection):
     klass = LoadConnection

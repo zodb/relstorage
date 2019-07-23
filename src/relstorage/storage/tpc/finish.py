@@ -28,7 +28,7 @@ def Finish(vote_state):
     """
     # It is assumed that self._lock.acquire was called before this
     # method was called.
-    vote_state.load_connection.rollback()
+    vote_state.load_connection.rollback_quietly()
     txn = vote_state.prepared_txn
     assert txn is not None
     vote_state.adapter.txncontrol.commit_phase2(

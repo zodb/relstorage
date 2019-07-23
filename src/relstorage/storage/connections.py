@@ -51,6 +51,8 @@ class AbstractManagedConnection(object):
 
     # Hook functions
     on_opened = staticmethod(lambda conn, cursor: None)
+    # on_rolledback can be called with None, None if an error occurred
+    # during the rollback.
     on_rolledback = on_opened
     on_first_use = on_opened
 
@@ -78,21 +80,26 @@ class AbstractManagedConnection(object):
         self.__dict__.pop('cursor', None)
         self.connmanager.rollback_and_close(conn, cursor)
 
-    def rollback(self):
+    def rollback_quietly(self):
+        """
+        Make the connection inactive and quietly roll it back.
+
+        If an error occurs, drop the connection.
+        """
+        clean_rollback = True
         self.active = False
         if not self:
-            return
+            return clean_rollback
 
         conn = self.connection
         cur = self._cursor
         self.__dict__.pop('cursor', None)
-        try:
-            self.connmanager.rollback(conn, cur)
-        except:
+        clean_rollback = self.connmanager.rollback_quietly(conn, cur)
+        if not clean_rollback:
             self.drop()
-            raise
-        finally:
-            self.on_rolledback(conn, cur)
+
+        self.on_rolledback(self.connection, self._cursor)
+        return clean_rollback
 
     def open_if_needed(self):
         if not self:
@@ -135,6 +142,8 @@ class AbstractManagedConnection(object):
         def callback(conn, cursor, fresh, *args, **kwargs):
             assert conn is self.connection and cursor is self._cursor
             if not fresh:
+                # This could raise a disconnected exception, or a
+                # ReplicaClosedException.
                 self._restart(conn, cursor)
                 self.on_rolledback(conn, cursor)
             return f(conn, cursor, *args, **kwargs)
@@ -169,7 +178,8 @@ class AbstractManagedConnection(object):
 
         try:
             return f(self.connection, self._cursor, fresh_connection, *args, **kwargs)
-        except self.connmanager.disconnected_exceptions as e:
+        except self.connmanager.driver.disconnected_exceptions as e:
+            # XXX: This feels like it's factored wrong.
             if not can_reconnect:
                 raise
             logger.warning("Reconnecting %s: %s", e, self)
@@ -225,7 +235,7 @@ class ClosedConnection(object):
     def drop(self):
         "Does nothing."
 
-    rollback = drop
+    rollback_quietly = drop
 
     __bool__ = __nonzero__ = lambda self: False
 

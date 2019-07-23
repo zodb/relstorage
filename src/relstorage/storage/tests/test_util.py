@@ -24,7 +24,7 @@ from __future__ import print_function
 from ZODB.POSException import ReadOnlyError
 
 from hamcrest import assert_that
-from nti.testing.matchers import verifiably_provides
+from nti.testing.matchers import validly_provides
 
 from relstorage.tests import TestCase
 
@@ -50,14 +50,14 @@ class TestStaleAware(TestCase):
 
         method = Foo().method
 
-        assert_that(method, verifiably_provides(IStaleAware))
+        assert_that(method, validly_provides(IStaleAware))
 
     def test_stale(self):
 
         method = Foo().method
 
         stale = method.stale(KeyError) # pylint:disable=no-member
-        assert_that(stale, verifiably_provides(IStaleAware))
+        assert_that(stale, validly_provides(IStaleAware))
 
         with self.assertRaises(KeyError):
             stale()

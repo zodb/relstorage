@@ -17,10 +17,10 @@
   still paid the overhead of locking method calls and code complexity.
 
   The top-level storage (the one belonging to a ``ZODB.DB``) still
-  used heavyweight locks. ``ZODB.DB.storage`` is documented as being
-  only useful for tests, and the ``DB`` object itself does not expose
-  any operations that use the storage in a way that would require
-  thread safety.
+  used heavyweight locks in earlier releases. ``ZODB.DB.storage`` is
+  documented as being only useful for tests, and the ``DB`` object
+  itself does not expose any operations that use the storage in a way
+  that would require thread safety.
 
   The remaining thread safety support has been removed. This
   simplifies the code and reduces overhead.
@@ -58,7 +58,14 @@
   against the ``transaction`` table in history-preserving databases.
   See :issue:`159`.
 
-- Prepare more statements.
+- Prepare more statements used during regular polling.
+
+- Gracefully handle certain disconnected exceptions when rolling back
+  connections in between transactions. See :issue:`280`.
+
+- Refactor RelStorage internals for a cleaner separation of concerns.
+  This includes how (some) queries are written and managed, making it
+  easier to prepare statements, but only those actually used.
 
 3.0a5 (2019-07-11)
 ==================
