@@ -29,7 +29,7 @@ class OracleTransactionControl(GenericTransactionControl):
         GenericTransactionControl.__init__(self, connmanager, poller, keep_history, Binary)
         self.twophase = twophase
 
-    def commit_phase1(self, conn, cursor, tid):
+    def commit_phase1(self, store_connection, tid):
         """Begin a commit.  Returns the transaction name.
 
         The transaction name must not be None.
@@ -39,7 +39,7 @@ class OracleTransactionControl(GenericTransactionControl):
         should be raised in commit_phase1() instead.
         """
         if self.twophase:
-            conn.prepare()
+            store_connection.connection.prepare()
         return '-'
 
     @noop_when_history_free

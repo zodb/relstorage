@@ -25,7 +25,6 @@ from __future__ import division
 from __future__ import print_function
 
 from zope.interface import Interface
-from zope.interface import Attribute
 
 from transaction.interfaces import TransientError
 from ZODB.POSException import StorageTransactionError
