@@ -27,9 +27,9 @@ from ZODB import DB
 from ZODB.blob import is_blob_record
 from ZODB.serialize import referencesf
 from ZODB.tests.StorageTestBase import MinPO
-from ZODB.tests.StorageTestBase import snooze
 from ZODB.tests.StorageTestBase import zodb_pickle
 
+from relstorage.interfaces import IRelStorage
 from relstorage._compat import PY3
 from relstorage._compat import iteritems
 
@@ -168,6 +168,7 @@ class BasicRecoveryStorage(IteratorDeepCompare):
     def checkPackWithGCOnDestinationAfterRestore(self):
         raises = self.assertRaises
         closing = self._closing
+        __traceback_info__ = self._storage, self._dst
         db = closing(DB(self._storage))
         conn = closing(db.open())
         root = conn.root()
@@ -183,24 +184,42 @@ class BasicRecoveryStorage(IteratorDeepCompare):
         txn = transaction.get()
         txn.note(u'root -X->')
         txn.commit()
+
+        storage_last_tid = conn._storage.lastTransaction()
+        self.assertEqual(storage_last_tid, root._p_serial)
+
         # Now copy the transactions to the destination
         self._dst.copyTransactionsFrom(self._storage)
+        self.assertEqual(self._dst.lastTransaction(), storage_last_tid)
         # If the source storage is a history-free storage, all
         # of the transactions are now marked as packed in the
         # destination storage.  To trigger a pack, we have to
         # add another transaction to the destination that is
         # not packed.
         db2 = closing(DB(self._dst))
-        conn2 = closing(db2.open())
-        conn2.root().extra = 0
-        txn = transaction.get()
+        tx_manager = transaction.TransactionManager(explicit=True)
+        conn2 = closing(db2.open(tx_manager))
+        txn = tx_manager.begin()
+        root2 = conn2.root()
+        root2.extra = 0
         txn.note(u'root.extra = 0')
         txn.commit()
+
+        dest_last_tid = conn2._storage.lastTransaction()
+        self.assertGreater(dest_last_tid, storage_last_tid)
+        self.assertEqual(dest_last_tid, root2._p_serial)
+
         # Now pack the destination.
-        snooze()
-        self._dst.pack(time.time(), referencesf)
+        from ZODB.utils import u64 as bytes8_to_int64
+        if IRelStorage.providedBy(self._dst):
+            packtime = bytes8_to_int64(storage_last_tid)
+        else:
+            from persistent.timestamp import TimeStamp
+            packtime = TimeStamp(dest_last_tid).timeTime() + 2
+        self._dst.pack(packtime, referencesf)
         # And check to see that the root object exists, but not the other
         # objects.
+        __traceback_info__ += (packtime,)
         _data, _serial = self._dst.load(root._p_oid, '')
         raises(KeyError, self._dst.load, obj1._p_oid, '')
         raises(KeyError, self._dst.load, obj2._p_oid, '')

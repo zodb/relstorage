@@ -831,18 +831,15 @@ class GenericRelStorageTests(
             c.add(extra2)
             transaction.commit()
 
-            # Choose the pack time
-            now = packtime = time.time()
-            while packtime <= now:
-                time.sleep(0.1)
-                packtime = time.time()
-            while packtime == time.time():
-                time.sleep(0.1)
+            # Choose the pack time to be that last committed transaction.
+            packtime = c._storage.lastTransactionInt()
 
             extra2.foo = 'bar'
             extra3 = PersistentMapping()
             c.add(extra3)
             transaction.commit()
+
+            self.assertGreater(c._storage.lastTransactionInt(), packtime)
 
             self._storage.pack(packtime, referencesf)
 

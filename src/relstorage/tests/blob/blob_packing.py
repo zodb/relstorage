@@ -39,8 +39,6 @@ class TestBlobPackHistoryPreservingMixin(TestBlobMixin):
         filesystem.
         """
         from ZODB.utils import u64 as bytes8_to_int64
-        from ZODB.utils import p64 as int64_to_8bytes
-        from persistent.timestamp import TimeStamp
 
         connection1 = self.database.open()
         root = connection1.root()
@@ -61,18 +59,8 @@ class TestBlobPackHistoryPreservingMixin(TestBlobMixin):
             tid = blob._p_serial
             tids.append(tid)
             tid_int = bytes8_to_int64(tid)
-            tid_time = TimeStamp(tid).timeTime()
 
-            # Go backwards to deduce the next value *before* the tid
-            # we just committed.
-            before_time = tid_time
-            before_int = tid_int
-            while not before_time < tid_time:
-                before_int -= 1
-                before_time = TimeStamp(int64_to_8bytes(before_int)).timeTime()
-
-            times.append(before_time)
-
+            times.append(tid_int - 1)
 
         blob._p_activate()
 

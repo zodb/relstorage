@@ -72,6 +72,12 @@
   primarily intended to reduce the number of round-trips to the
   database. This is a step towards :issue:`281`.
 
+- Make ``RelStorage.pack()`` also accept a TID from the RelStorage
+  database to pack to. The usual Unix timestamp form for choosing a
+  pack time can be ambiguous in the event of multiple transactions
+  within a very short period of time. This is mostly a concern for
+  automated tests.
+
 3.0a5 (2019-07-11)
 ==================
 

@@ -490,6 +490,9 @@ class RelStorage(LegacyMethodsMixin,
 
         return max(self._ltid, int64_to_8bytes(self._prev_polled_tid or 0))
 
+    def lastTransactionInt(self):
+        return bytes8_to_int64(self.lastTransaction())
+
     def new_oid(self):
         # If we're committing, we can't restart the connection.
         return self._oids.new_oid(bool(self._tpc_phase))

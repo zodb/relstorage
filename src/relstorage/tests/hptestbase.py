@@ -191,10 +191,7 @@ class HistoryPreservingRelStorageTests(GenericRelStorageTests,
             self._storage.load(oid, '')
 
             # Pack
-            now = packtime = time.time()
-            while packtime <= now:
-                packtime = time.time()
-            self._storage.pack(packtime, referencesf)
+            self._storage.pack(self._storage.lastTransactionInt(), referencesf)
             self._storage.sync()
 
             if expect_object_deleted:
@@ -257,7 +254,6 @@ class HistoryPreservingRelStorageTests(GenericRelStorageTests,
             db.close()
 
     def checkHistoricalConnection(self):
-        import datetime
         import persistent
         import ZODB.POSException
         db = DB(self._storage)
@@ -267,9 +263,7 @@ class HistoryPreservingRelStorageTests(GenericRelStorageTests,
         root['first'] = persistent.mapping.PersistentMapping(count=0)
         transaction.commit()
 
-        time.sleep(.02)
-        now = datetime.datetime.utcnow()
-        time.sleep(.02)
+        time_of_first_transaction = conn._storage.lastTransaction()
 
         root['second'] = persistent.mapping.PersistentMapping()
         root['first']['count'] += 1
@@ -277,7 +271,7 @@ class HistoryPreservingRelStorageTests(GenericRelStorageTests,
 
         transaction1 = transaction.TransactionManager()
 
-        historical_conn = db.open(transaction_manager=transaction1, at=now)
+        historical_conn = db.open(transaction_manager=transaction1, at=time_of_first_transaction)
 
         eq = self.assertEqual
 
@@ -401,7 +395,7 @@ class HistoryPreservingRelStorageTests(GenericRelStorageTests,
         self.assertFalse(options.pack_gc)
         packer = Pack(options, storage._adapter, storage.blobhelper, storage._cache)
         self.assertFalse(packer.options.pack_gc)
-        packer.pack(time.time(), referencesf)
+        packer.pack(storage.lastTransactionInt(), referencesf)
 
         # ... and bring the storage into the current view...
         storage.sync()
@@ -429,7 +423,7 @@ class HistoryPreservingRelStorageTests(GenericRelStorageTests,
         txncontrol = self._storage._adapter.txncontrol
         return getattr(txncontrol, 'RS_TEST_TXN_PACK_NEEDS_SLEEP', False)
 
-    def __maybe_ignore_monotonic(self, cls, method_name):
+    def __maybe_ignore_monotonic(self, module, cls, method_name):
         if not self.__tid_clock_needs_care():
             return getattr(super(HistoryPreservingRelStorageTests, self), method_name)()
 
@@ -443,13 +437,26 @@ class HistoryPreservingRelStorageTests(GenericRelStorageTests,
             method = function_wrapper.__closure__[0].cell_contents
         else:
             method = unbound.__wrapped__ # pylint:disable=no-member
-        method(self)
+
+        def always_snooze():
+            time.sleep(0.3)
+
+        before_snooze = module.snooze
+        module.snooze = always_snooze
+        try:
+            method(self)
+        finally:
+            module.snooze = before_snooze
 
     def checkLoadBefore(self):
-        self.__maybe_ignore_monotonic(RevisionStorage.RevisionStorage, 'checkLoadBefore')
+        self.__maybe_ignore_monotonic(RevisionStorage,
+                                      RevisionStorage.RevisionStorage,
+                                      'checkLoadBefore')
 
     def checkPackUndoLog(self):
-        self.__maybe_ignore_monotonic(PackableStorage.PackableUndoStorage, 'checkPackUndoLog')
+        self.__maybe_ignore_monotonic(PackableStorage,
+                                      PackableStorage.PackableUndoStorage,
+                                      'checkPackUndoLog')
 
     def checkSimpleHistory(self):
         if not self.__tid_clock_needs_care():
