@@ -860,6 +860,7 @@ class GenericRelStorageTests(
     def checkPackWhileReferringObjectChanges(self):
         # Packing should not remove objects referenced by an
         # object that changes during packing.
+        from persistent.timestamp import TimeStamp
         db = self._closing(DB(self._storage))
         try:
             # add some data to be packed
@@ -878,9 +879,14 @@ class GenericRelStorageTests(
                 transaction.commit()
                 expect_oids.append(child2._p_oid)
 
+
             adapter = self._storage._adapter
             adapter.packundo.on_filling_object_refs = inject_changes
-            packtime = time.time()
+
+            # Pack to the current time based on the TID in the database
+            last_tid = self._storage.lastTransaction()
+            last_tid_time = TimeStamp(last_tid).timeTime()
+            packtime = last_tid_time + 1
             self._storage.pack(packtime, referencesf)
 
             # "The on_filling_object_refs hook should have been called once")

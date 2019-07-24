@@ -24,16 +24,34 @@ from ..schema import AbstractSchemaInstaller
 
 logger = __import__('logging').getLogger(__name__)
 
+###
+# Notes on procedures vs functions.
+#
+# When we have a result, we'd generally like to use a function,
+# and simply ``SELECT func()``.
+#
+# However, MySQL is badly broken and functions play poorly with
+# transaction logging (replication logging). For that reason, to
+# create a function, you must have SUPER privileges (essentially root)
+# so we can't count on being able to do that.
+# (https://dev.mysql.com/doc/refman/5.7/en/stored-programs-logging.html).
+# (Also, functions take out table locks and limit concurrency, and
+# must be marked DETERMINISTIC or NO SQL or just READS SQL DATA ---
+# they can't make modifications.)
+#
+# So we're stuck with procedures.
+#
+# The procedure should be called with ``cursor.execute('CALL
+# proc_name(%s)')`` instead of ``cursor.callproc()`` ---
+# ``callproc()`` involves setting server variables in an extra trip to
+# the server. That would enable us to use an OUT param for the result,
+# but getting that would be another round trip too. Procedures that
+# generate results via a SELECT statement also generate a blank result
+# that must be retrieved with cursor.nextset().
+# ``Driver.callproc_multi_result`` handles the details.
+
+
 # Procedure to set the minimum next OID in one trip to the server.
-# This returns a result, so we'd like to use a function (which we'd access
-# with `SELECT set_min_oid(...)`), but the MySQL manual warns that functions take
-# out table locks and limit concurrency, plus have some replication issues,
-# so we don't do that. Instead we have a procedure. The procedure should be called
-# using `cursor.execute('CALL set_min_oid(%s)` instead of cursor.callproc()
-# --- callproc() involves setting server variables in an extra trip to the server.
-# That would enable us to use an OUT param for the result, but getting that would be another
-# round trip too. Don't forget to use nextset() to get the result of the procedure itself
-# after getting the new oid.
 _SET_MIN_OID = """
 CREATE PROCEDURE set_min_oid(min_oid BIGINT)
 BEGIN
@@ -79,6 +97,107 @@ BEGIN
 END;
 """
 
+# NOTE: Unlike PostgreSQL, NOW() and UTC_TIMESTAMP() are only consistent
+# within a single *statement*; that is, unlike PostgreSQL, these values
+# can change within a transaction.
+
+# Procedure to generate a new 64-bit TID based on the current time.
+# Not called from Python, only from SQL.
+
+# We'd really prefer to use the database clock, as there's only one of
+# it and it's more likely to be consistent than clocks spread across
+# many client machines. Our test cases tend to assume that time.time()
+# moves forward at exactly the same speed as the TID clock, though,
+# especially if we don't commit anything. This doesn't hold true if we don't
+# use the local clock for the TID clock.
+_MAKE_CURRENT_TID = """
+CREATE PROCEDURE make_current_tid(OUT tid_64 BIGINT)
+BEGIN
+  DECLARE ts TIMESTAMP;
+  DECLARE year, month, day, hour, minute INT;
+  DECLARE second REAL;
+  DECLARE a, b BIGINT;
+
+  SET ts = UTC_TIMESTAMP(6); -- get fractional precision for seconds.
+  SET year   = EXTRACT(YEAR from ts),
+      month  = EXTRACT(MONTH from ts),
+      day    = EXTRACT(DAY from ts),
+      hour   = EXTRACT(hour from ts),
+      minute = EXTRACT(minute from ts),
+      second = EXTRACT(SECOND_MICROSECOND FROM ts) / 1000000;
+
+
+  SET a = (((year - 1900) * 12 + month - 1) * 31 + day - 1);
+  SET a = (a * 24 + hour) *60 + minute;
+  -- 60.0 / (1<<16) / (1 << 16);
+  SET b = CAST((second / 1.3969838619232178e-08) AS SIGNED INTEGER);
+
+  SET tid_64 = (a << 32) + b;
+END;
+"""
+
+_HF_LOCK_AND_CHOOSE_TID = """
+CREATE PROCEDURE lock_and_choose_tid()
+BEGIN
+    DECLARE scratch BIGINT;
+    DECLARE next_tid_64, current_tid_64 BIGINT;
+
+    SELECT tid
+    INTO scratch
+    FROM commit_row_lock
+    FOR UPDATE;
+
+    SELECT COALESCE(MAX(tid), 0)
+    INTO current_tid_64
+    FROM object_state;
+
+    CALL make_current_tid(next_tid_64);
+
+    IF next_tid_64 <= current_tid_64 THEN
+        SET next_tid_64 = current_tid_64 + 1;
+    END IF;
+
+    SELECT next_tid_64;
+END;
+"""
+
+_HP_LOCK_AND_CHOOSE_TID = """
+CREATE PROCEDURE lock_and_choose_tid(
+    p_packed BOOLEAN,
+    p_username BLOB,
+    p_description BLOB,
+    p_extension BLOB
+)
+BEGIN
+    DECLARE scratch BIGINT;
+    DECLARE next_tid_64, current_tid_64 BIGINT;
+
+    SELECT tid
+    INTO scratch
+    FROM commit_row_lock
+    FOR UPDATE;
+
+    SELECT COALESCE(MAX(tid), 0)
+    INTO current_tid_64
+    FROM transaction;
+
+    CALL make_current_tid(next_tid_64);
+
+    IF next_tid_64 <= current_tid_64 THEN
+        SET next_tid_64 = current_tid_64 + 1;
+    END IF;
+
+    INSERT INTO transaction (
+        tid, packed, username, description, extension
+    )
+    VALUES (
+        next_tid_64, p_packed, p_username, p_description, p_extension
+    );
+
+    SELECT next_tid_64;
+END;
+"""
+
 @implementer(ISchemaInstaller)
 class MySQLSchemaInstaller(AbstractSchemaInstaller):
 
@@ -103,11 +222,18 @@ class MySQLSchemaInstaller(AbstractSchemaInstaller):
 
     procedures = {
         'set_min_oid': _SET_MIN_OID,
+        'make_current_tid': _MAKE_CURRENT_TID,
     }
 
     def __init__(self, driver=None, **kwargs):
         self.driver = driver
         super(MySQLSchemaInstaller, self).__init__(**kwargs)
+        self.procedures = dict(self.procedures)
+        self.procedures['lock_and_choose_tid'] = (
+            _HF_LOCK_AND_CHOOSE_TID
+            if not self.keep_history
+            else _HP_LOCK_AND_CHOOSE_TID
+        )
 
     def get_database_name(self, cursor):
         cursor.execute("SELECT DATABASE()")

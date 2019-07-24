@@ -21,9 +21,6 @@ live here.
 from __future__ import absolute_import
 from __future__ import print_function
 
-import time
-
-from persistent.timestamp import TimeStamp
 from ZODB.POSException import ConflictError
 from ZODB.POSException import ReadConflictError
 from ZODB.POSException import StorageTransactionError
@@ -46,23 +43,16 @@ class DatabaseLockedForTid(object):
         # read TRANSACTION (or OBJECT_STATE in HF).
         # TODO: Continue working to remove the need for the artificial
         # lock.
-
-        adapter.locker.hold_commit_lock(cursor, ensure_current=True)
         user, desc, ext = ude
+        tid_int = adapter.txncontrol.lock_database_and_choose_next_tid(
+            cursor,
+            adapter.locker,
+            user,
+            desc,
+            ext
+        )
 
-        # Choose a transaction ID.
-        #
-        # Base the transaction ID on the current time, but ensure that
-        # the tid of this transaction is greater than any existing
-        # tid.
-        last_tid = adapter.txncontrol.get_tid(cursor)
-        now = time.time()
-        stamp = TimeStamp(*(time.gmtime(now)[:5] + (now % 60,)))
-        stamp = stamp.laterThan(TimeStamp(int64_to_8bytes(last_tid)))
-        tid = stamp.raw()
-
-        tid_int = bytes8_to_int64(tid)
-        adapter.txncontrol.add_transaction(cursor, tid_int, user, desc, ext)
+        tid = int64_to_8bytes(tid_int)
         return cls(tid, tid_int, adapter)
 
     @classmethod

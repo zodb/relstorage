@@ -21,7 +21,10 @@ class TestBlobPackHistoryPreservingMixin(TestBlobMixin):
 
     def setUp(self):
         super(TestBlobPackHistoryPreservingMixin, self).setUp()
+        # The 8 bytes for each TID up to BLOB_REVISION_COUNT
         self.tids = []
+        # The timestamps taken just *before* the corresponding
+        # TID. These are used as times to pack to.
         self.times = []
         self.oid = None
         self.fns = []
@@ -35,6 +38,10 @@ class TestBlobPackHistoryPreservingMixin(TestBlobMixin):
         Put some revisions of a blob object in our database and on the
         filesystem.
         """
+        from ZODB.utils import u64 as bytes8_to_int64
+        from ZODB.utils import p64 as int64_to_8bytes
+        from persistent.timestamp import TimeStamp
+
         connection1 = self.database.open()
         root = connection1.root()
 
@@ -44,17 +51,30 @@ class TestBlobPackHistoryPreservingMixin(TestBlobMixin):
 
         for i in range(self.BLOB_REVISION_COUNT):
             transaction.begin()
-            times.append(time.time())
             with blob.open('w') as f:
                 f.write(b'this is blob data ' + str(i).encode())
-            if i:
-                tids.append(blob._p_serial)
-            else:
+            if 'blob' not in root:
                 root['blob'] = blob
             transaction.commit()
 
+            blob._p_activate()
+            tid = blob._p_serial
+            tids.append(tid)
+            tid_int = bytes8_to_int64(tid)
+            tid_time = TimeStamp(tid).timeTime()
+
+            # Go backwards to deduce the next value *before* the tid
+            # we just committed.
+            before_time = tid_time
+            before_int = tid_int
+            while not before_time < tid_time:
+                before_int -= 1
+                before_time = TimeStamp(int64_to_8bytes(before_int)).timeTime()
+
+            times.append(before_time)
+
+
         blob._p_activate()
-        tids.append(blob._p_serial)
 
         self.oid = oid = root['blob']._p_oid
         fshelper = self.blob_storage.blobhelper.fshelper

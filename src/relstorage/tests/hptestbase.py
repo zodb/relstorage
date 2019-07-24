@@ -420,6 +420,81 @@ class HistoryPreservingRelStorageTests(GenericRelStorageTests,
         conn.close()
         db.close()
 
+    ###
+    # Fixes for tests that assume the current clock
+    # and the TID clock are the same.
+    ###
+
+    def __tid_clock_needs_care(self):
+        txncontrol = self._storage._adapter.txncontrol
+        return getattr(txncontrol, 'RS_TEST_TXN_PACK_NEEDS_SLEEP', False)
+
+    def __maybe_ignore_monotonic(self, cls, method_name):
+        if not self.__tid_clock_needs_care():
+            return getattr(super(HistoryPreservingRelStorageTests, self), method_name)()
+
+        # Override one from RevisionStorage to go back to actually sleeping,
+        # since our TID clock is external now.
+        unbound = getattr(cls, method_name)
+        if hasattr(unbound, 'im_func'):
+            # We're on python 2. There's no __wrapped__ to give us access to the raw
+            # function, we have to dig it out by hand. Our only option is the closure.
+            function_wrapper = unbound.im_func
+            method = function_wrapper.__closure__[0].cell_contents
+        else:
+            method = unbound.__wrapped__ # pylint:disable=no-member
+        method(self)
+
+    def checkLoadBefore(self):
+        self.__maybe_ignore_monotonic(RevisionStorage.RevisionStorage, 'checkLoadBefore')
+
+    def checkPackUndoLog(self):
+        self.__maybe_ignore_monotonic(PackableStorage.PackableUndoStorage, 'checkPackUndoLog')
+
+    def checkSimpleHistory(self):
+        if not self.__tid_clock_needs_care():
+            return super(HistoryPreservingRelStorageTests, self).checkSimpleHistory()
+        # This assumes that the `time` value in the storage.history()
+        # for an object always increases, even though there are 8-byte TID values
+        # that, while themselves increasing, round down to equal floating point
+        # time values. For example, these two values are in the proper sequence:
+        #   b'\x03\xd1K\xc6-\xf33!' == 275084366792831777,
+        # and
+        #   b'\x03\xd1K\xc6-\xf33"' == 275084366792831778,
+        # But both have
+        #   TimeStamp(tid).timeTime() == 1563997810.769531.
+        # This test tries to do something about that (delaying between transactions to let
+        # time.time() move forward), but only on Windows.
+        import sys
+        old_platform = sys.platform
+        sys.platform = 'win32'
+        try:
+            super(HistoryPreservingRelStorageTests, self).checkSimpleHistory()
+        finally:
+            sys.platform = old_platform
+
+    def checkPackJustOldRevisions(self):
+        if not self.__tid_clock_needs_care():
+            return super(HistoryPreservingRelStorageTests, self).checkPackJustOldRevisions()
+
+        # This uses yet another method to try to get a packtime after the
+        # clock has moved on.
+
+        class Time(object):
+
+            @staticmethod
+            def time():
+                time.sleep(0.01)
+                return time.time()
+
+        old_time = PackableStorage.time
+        PackableStorage.time = Time
+        try:
+            super(HistoryPreservingRelStorageTests, self).checkPackJustOldRevisions()
+        finally:
+            PackableStorage.time = old_time
+
+
 class HistoryPreservingToFileStorage(AbstractToFileStorage,
                                      UndoableRecoveryStorage,
                                      ZODBTestCase):

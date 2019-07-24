@@ -67,6 +67,11 @@
   This includes how (some) queries are written and managed, making it
   easier to prepare statements, but only those actually used.
 
+- On MySQL, move allocating a TID into the database. On benchmarks
+  of a local machine this can be a scant few percent faster, but it's
+  primarily intended to reduce the number of round-trips to the
+  database. This is a step towards :issue:`281`.
+
 3.0a5 (2019-07-11)
 ==================
 
