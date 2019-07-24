@@ -17,7 +17,7 @@ from __future__ import division
 from __future__ import print_function
 
 from hamcrest import assert_that
-from nti.testing.matchers import verifiably_provides
+from nti.testing.matchers import validly_provides
 
 from relstorage.tests import TestCase
 
@@ -31,7 +31,7 @@ class TestMultiStateCache(TestCase):
 
     def test_provides(self):
         assert_that(self._makeOne(),
-                    verifiably_provides(interfaces.IStateCache))
+                    validly_provides(interfaces.IStateCache))
 
     def test_delitem_found(self):
         c = self._makeOne({(1, 1): None}, {(1, 1): None})
@@ -58,7 +58,7 @@ class TestTracingCacheWrapper(TestCase):
 
     def test_provides(self):
         assert_that(self._makeOne(),
-                    verifiably_provides(interfaces.IStateCache))
+                    validly_provides(interfaces.IStateCache))
 
     def test_get_miss(self):
         from . import Cache

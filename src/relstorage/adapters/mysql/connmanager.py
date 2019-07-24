@@ -38,13 +38,10 @@ class MySQLdbConnectionManager(AbstractConnectionManager):
 
     def __init__(self, driver, params, options):
         self._params = params.copy()
-        self.disconnected_exceptions = driver.disconnected_exceptions
-        self.close_exceptions = driver.close_exceptions
-        self.use_replica_exceptions = driver.use_replica_exceptions
         self._db_connect = driver.connect
         self._db_driver = driver
         self._fetchall_on_rollback = driver.fetchall_on_rollback
-        super(MySQLdbConnectionManager, self).__init__(options)
+        super(MySQLdbConnectionManager, self).__init__(options, driver)
 
     def _alter_params(self, replica):
         """Alter the connection parameters to use the specified replica.
@@ -91,7 +88,7 @@ class MySQLdbConnectionManager(AbstractConnectionManager):
                     self._db_driver.set_autocommit(conn, False)
                 conn.replica = replica
                 return conn, cursor
-            except self.use_replica_exceptions as e:
+            except self.driver.use_replica_exceptions as e:
                 if replica is not None:
                     next_replica = replica_selector.next()
                     if next_replica is not None:

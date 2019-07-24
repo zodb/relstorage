@@ -17,7 +17,7 @@ from __future__ import print_function
 
 
 from hamcrest import assert_that
-from nti.testing.matchers import verifiably_provides
+from nti.testing.matchers import validly_provides
 
 from relstorage.tests import TestCase
 from relstorage.cache import interfaces
@@ -120,14 +120,14 @@ class GenericLRUCacheTests(TestCase):
     def test_implements(self):
         cache = self._makeOne(100)
         assert_that(cache,
-                    verifiably_provides(self._getIface()))
+                    validly_provides(self._getIface()))
         self.assertIsInstance(cache.stats(), dict)
         return cache
 
     def test_item_implements(self):
         cache = self._makeOne(20)
         entrya = cache.add_MRU((1, 0), (b'', 0))
-        assert_that(entrya, verifiably_provides(interfaces.ILRUEntry))
+        assert_that(entrya, validly_provides(interfaces.ILRUEntry))
 
     def test_add_too_many(self):
         class _Cache(self._getClass()):
@@ -272,11 +272,11 @@ class GenericGenerationalLRUCacheTests(GenericLRUCacheTests):
     def test_implements(self):
         cache = super(GenericGenerationalLRUCacheTests, self).test_implements()
         assert_that(cache.eden,
-                    verifiably_provides(interfaces.IGeneration))
+                    validly_provides(interfaces.IGeneration))
         assert_that(cache.protected,
-                    verifiably_provides(interfaces.IGeneration))
+                    validly_provides(interfaces.IGeneration))
         assert_that(cache.probation,
-                    verifiably_provides(interfaces.IGeneration))
+                    validly_provides(interfaces.IGeneration))
 
 
     def test_bad_generation_index_attribute_error(self):

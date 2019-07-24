@@ -8,7 +8,7 @@ from ZODB.blob import remove_committed_dir
 from ZODB.POSException import StorageTransactionError
 
 from hamcrest import assert_that
-from nti.testing.matchers import verifiably_provides
+from nti.testing.matchers import validly_provides
 
 
 from relstorage._compat import PY3
@@ -80,7 +80,7 @@ class BlobHelperTest(TestCase):
         return blobhelper
 
     def test_provides(self):
-        assert_that(self._make_default(), verifiably_provides(IBlobHelper))
+        assert_that(self._make_default(), validly_provides(IBlobHelper))
 
     def test_cannot_begin_twice(self):
         blobhelper = self._make_default()
@@ -424,4 +424,4 @@ class NoBlobHelperTest(TestCase):
         return self._class()()
 
     def test_provides(self):
-        assert_that(self.makeOne(), verifiably_provides(IBlobHelper))
+        assert_that(self.makeOne(), validly_provides(IBlobHelper))

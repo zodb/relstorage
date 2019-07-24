@@ -636,66 +636,68 @@ class GenericRelStorageTests(
 
     def checkAutoReconnect(self):
         # Verify auto-reconnect
-        db = DB(self._storage)
-        try:
-            c1 = db.open()
-            r = c1.root()
-            r['alpha'] = 1
-            transaction.commit()
-            c1.close()
+        db = self._closing(DB(self._storage))
 
-            # Going behind its back.
-            c1._storage._load_connection.connection.close()
-            c1._storage._store_connection.connection.close()
-            # ZODB5 implicitly calls sync
-            # immediately when a connection is opened;
-            # fake that here for older releases.
-            c2 = db.open()
-            self.assertIs(c2, c1)
-            c2.sync()
-            r = c2.root()
-            self.assertEqual(r['alpha'], 1)
-            r['beta'] = PersistentMapping()
-            c2.add(r['beta'])
-            transaction.commit()
-            c2.close()
-        finally:
-            db.close()
+        c1 = db.open()
+        r = c1.root()
+        r['alpha'] = 1
+        transaction.commit()
+        c1.close()
+
+        # Going behind its back.
+        c1._storage._load_connection.connection.close()
+        c1._storage._store_connection.connection.close()
+        # ZODB5 implicitly calls sync
+        # immediately when a connection is opened;
+        # fake that here for older releases.
+        c2 = db.open()
+        self.assertIs(c2, c1)
+        c2.sync()
+        r = c2.root()
+        self.assertEqual(r['alpha'], 1)
+        r['beta'] = PersistentMapping()
+        c2.add(r['beta'])
+        transaction.commit()
+        c2.close()
+
+        del c1
+        del c2
 
     def checkAutoReconnectOnSync(self):
         # Verify auto-reconnect.
-        db = DB(self._storage)
-        try:
-            c1 = db.open()
-            r = c1.root()
+        db = self._closing(DB(self._storage))
 
-            c1._storage._load_connection.connection.close()
-            c1._storage.sync()
-            # ZODB5 calls sync when a connection is opened. Our monkey
-            # patch on a Connection makes sure that works in earlier
-            # versions, but we don't have that patch on ZODB5. So test
-            # the storage directly. NOTE: The load connection must be open.
-            # to trigger the actual sync.
+        c1 = db.open()
+        r = c1.root()
 
-            r = c1.root()
-            r['alpha'] = 1
-            transaction.commit()
-            c1.close()
+        c1._storage._load_connection.connection.close()
+        c1._storage.sync()
+        # ZODB5 calls sync when a connection is opened. Our monkey
+        # patch on a Connection makes sure that works in earlier
+        # versions, but we don't have that patch on ZODB5. So test
+        # the storage directly. NOTE: The load connection must be open.
+        # to trigger the actual sync.
 
-            c1._storage._load_connection.connection.close()
-            c1._storage._store_connection.connection.close()
+        r = c1.root()
+        r['alpha'] = 1
+        transaction.commit()
+        c1.close()
 
-            c2 = db.open()
-            self.assertIs(c2, c1)
+        c1._storage._load_connection.connection.close()
+        c1._storage._store_connection.connection.close()
 
-            r = c2.root()
-            self.assertEqual(r['alpha'], 1)
-            r['beta'] = PersistentMapping()
-            c2.add(r['beta'])
-            transaction.commit()
-            c2.close()
-        finally:
-            db.close()
+        c2 = db.open()
+        self.assertIs(c2, c1)
+
+        r = c2.root()
+        self.assertEqual(r['alpha'], 1)
+        r['beta'] = PersistentMapping()
+        c2.add(r['beta'])
+        transaction.commit()
+        c2.close()
+
+        del c1
+        del c2
 
     def checkCachePolling(self):
         self._storage = self.make_storage(share_local_cache=False)
@@ -1065,7 +1067,7 @@ class GenericRelStorageTests(
         self._storage = self.make_storage(revert_when_stale=False)
 
         with mock.patch.object(self._storage._load_connection,
-                               'rollback') as rb:
+                               'rollback_quietly') as rb:
             self._storage.afterCompletion()
             rb.assert_called_with()
 
@@ -1105,7 +1107,7 @@ class GenericRelStorageTests(
         from io import StringIO
         from relstorage.adapters.interfaces import IRelStorageAdapter
         from hamcrest import assert_that
-        from nti.testing.matchers import verifiably_provides
+        from nti.testing.matchers import validly_provides
         schema = ZConfig.loadSchemaFile(StringIO(schema_xml))
         config, _ = ZConfig.loadConfigFile(schema, StringIO(conf))
 
@@ -1116,7 +1118,7 @@ class GenericRelStorageTests(
             self.assertEqual(storage.getName(), "xyz")
             adapter = storage._adapter
             self.assertIsInstance(adapter, self.get_adapter_class())
-            assert_that(adapter, verifiably_provides(IRelStorageAdapter))
+            assert_that(adapter, validly_provides(IRelStorageAdapter))
             self.verify_adapter_from_zconfig(adapter)
             self.assertEqual(adapter.keep_history, self.keep_history)
             self.assertEqual(
@@ -1321,15 +1323,15 @@ class AbstractIDBOptionsTest(unittest.TestCase):
 
     def test_db_options_compliance(self):
         from hamcrest import assert_that
-        from nti.testing.matchers import verifiably_provides
+        from nti.testing.matchers import validly_provides
 
         from relstorage.adapters.interfaces import IDBDriverOptions
         from relstorage.adapters.interfaces import IDBDriverFactory
         __traceback_info__ = self.db_options
-        assert_that(self.db_options, verifiably_provides(IDBDriverOptions))
+        assert_that(self.db_options, validly_provides(IDBDriverOptions))
 
         for factory in self.db_options.known_driver_factories():
-            assert_that(factory, verifiably_provides(IDBDriverFactory))
+            assert_that(factory, validly_provides(IDBDriverFactory))
 
 class AbstractIDBDriverTest(unittest.TestCase):
 
@@ -1337,11 +1339,11 @@ class AbstractIDBDriverTest(unittest.TestCase):
 
     def test_db_driver_compliance(self):
         from hamcrest import assert_that
-        from nti.testing.matchers import verifiably_provides
+        from nti.testing.matchers import validly_provides
 
         from relstorage.adapters.interfaces import IDBDriver
         __traceback_info__ = self.driver
-        assert_that(self.driver, verifiably_provides(IDBDriver))
+        assert_that(self.driver, validly_provides(IDBDriver))
 
 
 class DoubleCommitter(Persistent):

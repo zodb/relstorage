@@ -642,7 +642,8 @@ class HistoryPreservingPackUndo(PackUndo):
             log.info("pre_pack: finished successfully")
             conn.commit()
         except:
-            self.connmanager.rollback(conn, cursor)
+            self.connmanager.rollback_quietly(conn, cursor)
+            conn, cursor = None, None
             raise
         finally:
             self.connmanager.close(conn, cursor)
@@ -855,7 +856,7 @@ class HistoryPreservingPackUndo(PackUndo):
 
             except:
                 log.exception("pack: failed")
-                self.connmanager.rollback(conn, cursor)
+                self.connmanager.rollback_quietly(conn, cursor)
                 raise
 
             else:
@@ -1152,7 +1153,7 @@ class HistoryFreePackUndo(PackUndo):
                 self._pre_pack_main(conn, cursor, pack_tid, get_references)
             except:
                 log.exception("pre_pack: failed")
-                self.connmanager.rollback(conn, cursor)
+                self.connmanager.rollback_quietly(conn, cursor)
                 raise
             else:
                 conn.commit()
@@ -1274,7 +1275,7 @@ class HistoryFreePackUndo(PackUndo):
 
             except:
                 log.exception("pack: failed")
-                self.connmanager.rollback(conn, cursor)
+                self.connmanager.rollback_quietly(conn, cursor)
                 raise
 
             else:

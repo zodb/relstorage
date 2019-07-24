@@ -18,7 +18,7 @@ from __future__ import print_function
 import unittest
 
 from hamcrest import assert_that
-from nti.testing.matchers import verifiably_provides
+from nti.testing.matchers import validly_provides
 
 from relstorage.cache.interfaces import IStateCache
 from relstorage.tests import TestCase
@@ -43,7 +43,7 @@ class AbstractStateCacheTests(TestCase):
         return inst
 
     def test_provides(self):
-        assert_that(self._makeOne(), verifiably_provides(IStateCache))
+        assert_that(self._makeOne(), validly_provides(IStateCache))
 
     def test_delitem_not_there(self):
         c = self._makeOne()

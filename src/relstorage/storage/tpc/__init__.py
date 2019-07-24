@@ -98,13 +98,15 @@ class AbstractTPCState(object):
 
     def __init__(self, previous_state, transaction=None):
         if 0: # pylint:disable=using-constant-test
+            # This block (elided from the bytecode)
+            # is for pylint static analysis
             self.adapter = self.load_connection = self.store_connection = self.transaction = None
             self.prepared_txn = self.blobhelper = self.cache = None
             self.read_only = False
         for attr in AbstractTPCState.__slots__:
             val = getattr(previous_state, attr)
             setattr(self, attr, val)
-            #print(attr, self, previous_state, val)
+
         self.transaction = transaction
 
     def tpc_finish(self, transaction, f=None):
@@ -120,12 +122,15 @@ class AbstractTPCState(object):
             return self
 
         try:
-            self.load_connection.rollback()
+            self.load_connection.rollback_quietly()
             if self.store_connection:
                 self.adapter.txncontrol.abort(
-                    self.store_connection.connection,
-                    self.store_connection.cursor,
+                    self.store_connection,
                     self.prepared_txn)
+            if self.store_connection:
+                # It's possible that abort() could have closed this connection/cursor
+                # if an error happened (which would release the locks). Don't try to
+                # re-open it.
                 self.adapter.locker.release_commit_lock(self.store_connection.cursor)
             self.blobhelper.abort()
         finally:

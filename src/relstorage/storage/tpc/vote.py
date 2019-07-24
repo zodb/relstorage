@@ -347,9 +347,8 @@ class AbstractVote(AbstractTPCState):
 
         cursor = self.store_connection.cursor
         self.adapter.mover.update_current(cursor, committing_tid_int)
-        conn = self.store_connection.connection
         self.prepared_txn = self.adapter.txncontrol.commit_phase1(
-            conn, cursor, committing_tid_int)
+            self.store_connection, committing_tid_int)
 
     def tpc_finish(self, transaction, f=None):
         if transaction is not self.transaction:

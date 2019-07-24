@@ -27,7 +27,7 @@ import tempfile
 from hamcrest import assert_that
 from hamcrest import is_not as does_not
 from nti.testing.matchers import provides
-from nti.testing.matchers import verifiably_provides
+from nti.testing.matchers import validly_provides
 
 from ZODB.interfaces import IExternalGC
 from ZODB.interfaces import IBlobStorage
@@ -51,34 +51,34 @@ class TestRelStorage(TestCase):
 
     def test_provides(self):
         storage = self.makeOne()
-        assert_that(storage, verifiably_provides(IRelStorage))
-        assert_that(storage, verifiably_provides(IStorageUndoable))
+        assert_that(storage, validly_provides(IRelStorage))
+        assert_that(storage, validly_provides(IStorageUndoable))
         assert_that(storage, does_not(provides(IExternalGC)))
         assert_that(storage, does_not(provides(IBlobStorage)))
         assert_that(storage, does_not(provides(IBlobStorageRestoreable)))
-        assert_that(storage, does_not(verifiably_provides(IExternalGC)))
+        assert_that(storage, does_not(validly_provides(IExternalGC)))
 
     def test_provides_history_free(self):
         storage = self.makeOne(keep_history=False)
-        assert_that(storage, verifiably_provides(IRelStorage))
+        assert_that(storage, validly_provides(IRelStorage))
         assert_that(storage, does_not(provides(IStorageUndoable)))
         assert_that(storage, does_not(provides(IExternalGC)))
         assert_that(storage, does_not(provides(IBlobStorage)))
         assert_that(storage, does_not(provides(IBlobStorageRestoreable)))
-        assert_that(storage, does_not(verifiably_provides(IExternalGC)))
+        assert_that(storage, does_not(validly_provides(IExternalGC)))
 
     def test_provides_external_gc(self):
         adapter = MockAdapter()
         adapter.packundo.deleteObject = True
         storage = self.makeOne(adapter)
 
-        assert_that(storage, verifiably_provides(IRelStorage))
-        assert_that(storage, verifiably_provides(IExternalGC))
+        assert_that(storage, validly_provides(IRelStorage))
+        assert_that(storage, validly_provides(IExternalGC))
 
     def test_provides_blob_dir(self):
         tempd = tempfile.mkdtemp(".rstest_storage")
         self.addCleanup(shutil.rmtree, tempd, True)
         storage = self.makeOne(blob_dir=tempd)
-        assert_that(storage, verifiably_provides(IRelStorage))
-        assert_that(storage, verifiably_provides(IBlobStorage))
-        assert_that(storage, verifiably_provides(IBlobStorageRestoreable))
+        assert_that(storage, validly_provides(IRelStorage))
+        assert_that(storage, validly_provides(IBlobStorage))
+        assert_that(storage, validly_provides(IBlobStorageRestoreable))

@@ -64,9 +64,9 @@ from .pack import Pack
 from .store import Storer
 from .store import BlobStorer
 
-from .connections import LoadConnection
-from .connections import StoreConnection
-from .connections import ClosedConnection
+from ..adapters.connections import LoadConnection
+from ..adapters.connections import StoreConnection
+from ..adapters.connections import ClosedConnection
 
 from .tpc import ABORT_EARLY
 from .tpc import NotInTransaction
@@ -75,6 +75,7 @@ from .tpc.begin import HistoryPreserving
 from .tpc.restore import Restore
 
 from .util import copy_storage_methods
+from .interfaces import StorageDisconnectedDuringCommit
 
 __all__ = [
     'RelStorage',
@@ -474,10 +475,11 @@ class RelStorage(LegacyMethodsMixin,
         # Typically our next call from the ZODB Connection will be from its
         # `newTransaction` method, a forced `sync` followed by `poll_invalidations`.
 
-        # TODO: Why doesn't this use connmanager.restart_load()?
+        # This doesn't use restart_and_call() or even just restart() because we don't
+        # need to do those checks yet, we just want to quietly rollback.
         # They both rollback; the difference is that restart_load checks for replicas,
         # and calls any hooks needed.
-        self._load_connection.rollback()
+        self._load_connection.rollback_quietly()
 
     def lastTransaction(self):
         if self._ltid == z64 and self._prev_polled_tid is None:
@@ -519,9 +521,8 @@ class RelStorage(LegacyMethodsMixin,
             # So we can avoid the overhead of the extra rollback.
             return
 
-        try:
-            self._load_connection.rollback()
-        except self._adapter.connmanager.disconnected_exceptions:
+        rolled_back = self._load_connection.rollback_quietly()
+        if not rolled_back:
             # Disconnected. Well, the rollback happens automatically
             # in that case. No big deal, ignore it.
             #
@@ -529,7 +530,7 @@ class RelStorage(LegacyMethodsMixin,
             # asked to sync (XXX: why would we?) then that's probably a problem that
             # needs to be handled and the commit rolled back too.
             if self._tpc_phase:
-                raise
+                raise StorageDisconnectedDuringCommit()
 
     def __stale(self, stale_error):
         # Allow GC to do its thing with the locals
@@ -559,6 +560,9 @@ class RelStorage(LegacyMethodsMixin,
         # transactions are not explicit) Most of the time we won't be
         # stale, which is why we only install these hooks when we are,
         # and are careful to clean them up when we're not.
+        #
+        # Both _conn and _cursor will be None if the rollback detected
+        # a disconnect from the database.
 
         my_ns = vars(self)
         replacements = {

@@ -261,15 +261,16 @@ class MockOptions(Options):
 
 class MockConnectionManager(object):
 
-    disconnected_exceptions = ()
+    def __init__(self, driver=None):
+        if driver is None:
+            self.driver = MockDriver()
 
-
-    def rollback(self, conn, cursor): # pylint:disable=unused-argument
+    def rollback_quietly(self, conn, cursor): # pylint:disable=unused-argument
         if hasattr(conn, 'rollback'):
             conn.rollback()
 
     def rollback_and_close(self, conn, cursor):
-        self.rollback(conn, cursor)
+        self.rollback_quietly(conn, cursor)
         if conn:
             conn.close()
         if cursor:
@@ -307,9 +308,19 @@ class MockPoller(object):
     def __init__(self, driver=None):
         self.driver = driver or MockDriver()
 
+class DisconnectedException(Exception):
+    pass
+
+class CloseException(Exception):
+    pass
+
 class MockDriver(object):
 
+    disconnected_exceptions = (DisconnectedException,)
+    close_exceptions = (CloseException,)
+
     dialect = DefaultDialect()
+
 
 class MockAdapter(object):
 
