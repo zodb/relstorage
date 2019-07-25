@@ -83,6 +83,9 @@
   within a very short period of time. This is mostly a concern for
   automated tests.
 
+  Similarly, it will accept a value less than 0 to mean the most
+  recent transaction.
+
 - Make PyMySQL use the same precision as mysqlclient when sending
   floating point parameters.
 

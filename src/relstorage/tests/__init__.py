@@ -73,7 +73,11 @@ class TestCase(unittest.TestCase):
             connection.close = lambda *_, **__: None
 
     def __close(self, thing):
-        thing.close()
+        try:
+            thing.close()
+        except KeyError:
+            # As for Connection; a DB closes all its connections.
+            pass
 
     def _closing(self, o):
         """

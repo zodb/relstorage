@@ -30,6 +30,7 @@ from ZODB.utils import p64 as int64_to_8bytes
 from ZODB.utils import u64 as bytes8_to_int64
 
 from relstorage._compat import OID_SET_TYPE
+from relstorage._compat import MAX_TID
 from .util import writable_storage_method
 
 logger = __import__('logging').getLogger(__name__)
@@ -72,6 +73,11 @@ class Pack(object):
         #
         # To help them out, we accept 64-bit integer TIDs to specify an exact
         # transaction to pack to.
+
+        # We also allow None or a negative number to mean "current committed transaction".
+        if t is None:
+            t = -1
+
         if t > 275085010696509852:
             # Must be a TID.
 
@@ -83,29 +89,20 @@ class Pack(object):
             )
             best_pack_tid_int = t
             t = ts.timeTime()
+        elif t < 0 or t >= time.time():
+            # Packing for the current time or in the future means to pack
+            # to the lastest commit in the database. This matters if not all
+            # machine clocks are synchronized.
+            best_pack_tid_int = MAX_TID - 1
         else:
-            # Find the latest commit before or at the pack time,
-            # starting with the largest 64-bit TID that will produce that same
-            # time.time() value (since several TIDs can fit in the resolution
-            # of a time.time() value).
+            # Find the latest commit before or at the pack time.
+            # Note that several TIDs will fit in the resolution of a time.time(),
+            # so this is slightly ambiguous.
             requested_pack_ts = TimeStamp(*time.gmtime(t)[:5] + (t % 60,))
-            requested_pack_time = requested_pack_ts.timeTime()
             requested_pack_tid = requested_pack_ts.raw()
             requested_pack_tid_int = bytes8_to_int64(requested_pack_tid)
 
             best_pack_tid_int = requested_pack_tid_int
-            best_pack_time = t
-
-            while 1:
-                best_pack_time = TimeStamp(int64_to_8bytes(best_pack_tid_int)).timeTime()
-                if best_pack_time > requested_pack_time:
-                    break
-                best_pack_tid_int += 1
-
-            logger.debug(
-                "Requested pack time of %s maps to TID %d; latest TID for same time is %d.",
-                requested_pack_time, requested_pack_tid_int, best_pack_tid_int
-            )
 
         tid_int = self.packundo.choose_pack_transaction(best_pack_tid_int)
 

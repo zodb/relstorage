@@ -82,7 +82,7 @@ class TestBlobPackHistoryPreservingMixin(TestBlobMixin):
     def _pack_at_time_index(self, time_index=0, count_not_exist=0):
         if time_index is None:
             # Use now
-            packtime = time.time()
+            packtime = -1
         else:
             packtime = self.times[time_index]
         self.blob_storage.pack(packtime, referencesf)
