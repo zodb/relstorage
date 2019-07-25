@@ -51,7 +51,11 @@ class BlobTestBase(TestCase,
 
     def setUp(self):
         super(BlobTestBase, self).setUp()
-        self._storage = self.create_storage() # pylint:disable=no-member
+        try:
+            self._storage = self.create_storage() # pylint:disable=no-member
+        except:
+            self.tearDown()
+            raise
 
 
 class BlobUndoTests(BlobTestBase):
