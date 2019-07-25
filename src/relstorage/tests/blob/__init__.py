@@ -19,7 +19,14 @@ class TestBlobMixin(object):
         setUp(self)
         self._timer = MonotonicallyIncreasingTimeLayerMixin()
         self._timer.testSetUp()
-        self.blob_storage = self.create_storage(**self.DEFAULT_BLOB_STORAGE_KWARGS)
+        try:
+            self.blob_storage = self.create_storage(**self.DEFAULT_BLOB_STORAGE_KWARGS)
+        except:
+            # If setUp() raises an exception, tearDown is never called.
+            # That's bad: ZODB.tests.util.setUp() changes directories and
+            # monkeys with the contents of the stdlib tempfile.
+            tearDown(self)
+            raise
         self.database = DB(self.blob_storage)
 
     def tearDown(self):

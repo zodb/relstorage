@@ -33,7 +33,7 @@ class Adapter(BaseAdapter):
     # We don't usually have cx_oracle installed, so
     # fake it.
 
-    def _select_driver(self):
+    def _select_driver(self, options=None):
         d = MockDriver()
         d.connect = None
         d.NUMBER = None
