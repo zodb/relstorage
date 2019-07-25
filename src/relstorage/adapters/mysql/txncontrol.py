@@ -14,9 +14,28 @@
 """TransactionControl implementations"""
 
 from __future__ import absolute_import
+from __future__ import print_function
 
 from ..txncontrol import GenericTransactionControl
 
 
 class MySQLTransactionControl(GenericTransactionControl):
-    pass
+    # A temporary magic variable as we move TID allocation into some
+    # databases; with an external clock, we *do* need to sleep waiting for
+    # TIDs to change in a manner we can exploit; that or we need to be very
+    # careful about choosing pack times.
+    RS_TEST_TXN_PACK_NEEDS_SLEEP = 1
+
+    def lock_database_and_choose_next_tid(self, cursor, locker,
+                                          username,
+                                          description,
+                                          extension):
+        proc = 'lock_and_choose_tid'
+        args = ()
+        if self.keep_history:
+            proc = proc + '(%s, %s, %s, %s)'
+            args = (False, username, description, extension)
+
+        multi_results = self.driver.callproc_multi_result(cursor, proc, args)
+        tid, = multi_results[0][0]
+        return tid

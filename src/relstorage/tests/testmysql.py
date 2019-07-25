@@ -15,11 +15,18 @@
 from __future__ import absolute_import
 
 import logging
+import time
 import unittest
+
+from ZODB.utils import u64 as bytes8_to_int64
+from ZODB.tests import StorageTestBase
 
 from relstorage.adapters.mysql import MySQLAdapter
 from relstorage.options import Options
+from relstorage._util import timestamp_at_unixtime
 
+from . import StorageCreatingMixin
+from . import TestCase
 
 from .util import skipOnCI
 from .util import AbstractTestSuiteBuilder
@@ -72,6 +79,80 @@ class MySQLAdapterMixin(object):
         self.assertEqual(adapter._params, self.__get_adapter_options())
 
 
+class TestGenerateTID(MySQLAdapterMixin,
+                      StorageCreatingMixin,
+                      TestCase,
+                      StorageTestBase.StorageTestBase):
+    # pylint:disable=too-many-ancestors
+
+    def setUp(self):
+        super(TestGenerateTID, self).setUp()
+        self._storage = self._closing(self.make_storage())
+
+    def test_extract_parts(self):
+        unix_time = 1564063129.1277142
+
+        query = """
+        SELECT EXTRACT(year FROM ts) as YEAR,
+               EXTRACT(month FROM ts) AS month,
+               EXTRACT(day FROM ts) AS day,
+               EXTRACT(hour FROM ts) AS hour,
+               EXTRACT(minute FROM ts) AS minute,
+               %s MOD 60 AS seconds
+        FROM (
+            SELECT FROM_UNIXTIME(%s) + 0.0 AS ts
+        ) t
+        """
+        cursor = self._storage._load_connection.cursor
+        cursor.execute(query, (unix_time, unix_time))
+        year, month, day, hour, minute, seconds = cursor.fetchone()
+        self.assertEqual(year, 2019)
+        self.assertEqual(month, 7)
+        self.assertEqual(day, 25)
+        self.assertEqual(hour, 13) # If this is not 13, the time_zone is incorrect
+        self.assertEqual(minute, 58)
+        self.assertEqual(
+            round(float(seconds), 6),
+            49.127714)
+
+    def test_known_time(self):
+        now = 1564054182.277615
+        gmtime = (2019, 7, 25, 11, 29, 42, 3, 206, 0)
+
+        self.assertEqual(
+            time.gmtime(now),
+            gmtime
+        )
+
+        ts_now = timestamp_at_unixtime(now)
+        self.assertEqual(
+            ts_now.raw(),
+            b'\x03\xd1Oq\xb4bn\x00'
+        )
+
+        self.test_current_time(now)
+
+    def test_current_time(self, now=None):
+        if now is None:
+            now = time.time()
+        storage = self._storage
+        ts_now = timestamp_at_unixtime(now)
+
+        expected_tid_int = bytes8_to_int64(ts_now.raw())
+
+        cursor = storage._load_connection.cursor
+
+        cursor.execute('CALL make_tid_for_epoch(%s, @tid)', (now,))
+        cursor.execute('SELECT @tid')
+        tid, = cursor.fetchall()[0]
+
+        self.assertEqual(
+            tid,
+            expected_tid_int
+        )
+
+
+
 class MySQLTestSuiteBuilder(AbstractTestSuiteBuilder):
 
     __name__ = 'MySQL'
@@ -80,7 +161,8 @@ class MySQLTestSuiteBuilder(AbstractTestSuiteBuilder):
         from relstorage.adapters.mysql import drivers
         super(MySQLTestSuiteBuilder, self).__init__(
             drivers,
-            MySQLAdapterMixin
+            MySQLAdapterMixin,
+            extra_test_classes=(TestGenerateTID,)
         )
 
     def _compute_large_blob_size(self, use_small_blobs):

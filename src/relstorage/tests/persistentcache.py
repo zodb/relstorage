@@ -14,9 +14,6 @@
 """
 Test mixin for exercising persistent caching features.
 """
-import time
-
-
 import transaction
 
 from persistent.mapping import PersistentMapping
@@ -199,12 +196,12 @@ class PersistentCacheStorageTests(TestCase):
 
         checkpoints = self.assert_checkpoints(c1)
         self.__do_check_tids(root, old_tids)
-        tid = bytes8_to_int64(c1._storage.lastTransaction())
+        tid_int = bytes8_to_int64(c1._storage.lastTransaction())
         c1.close()
         if pack:
-            storage.pack(time.time(), referencesf)
+            storage.pack(tid_int, referencesf)
         db1.close()
-        return tid, checkpoints
+        return tid_int, checkpoints
 
     def __set_key_in_root_to(self,
                              storage,

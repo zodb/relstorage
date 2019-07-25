@@ -6,7 +6,6 @@ from __future__ import absolute_import
 from __future__ import print_function
 
 import os
-import time
 
 from ZODB.serialize import referencesf
 from ZODB.blob import Blob
@@ -21,7 +20,10 @@ class TestBlobPackHistoryPreservingMixin(TestBlobMixin):
 
     def setUp(self):
         super(TestBlobPackHistoryPreservingMixin, self).setUp()
+        # The 8 bytes for each TID up to BLOB_REVISION_COUNT
         self.tids = []
+        # The timestamps taken just *before* the corresponding
+        # TID. These are used as times to pack to.
         self.times = []
         self.oid = None
         self.fns = []
@@ -35,6 +37,8 @@ class TestBlobPackHistoryPreservingMixin(TestBlobMixin):
         Put some revisions of a blob object in our database and on the
         filesystem.
         """
+        from ZODB.utils import u64 as bytes8_to_int64
+
         connection1 = self.database.open()
         root = connection1.root()
 
@@ -44,17 +48,20 @@ class TestBlobPackHistoryPreservingMixin(TestBlobMixin):
 
         for i in range(self.BLOB_REVISION_COUNT):
             transaction.begin()
-            times.append(time.time())
             with blob.open('w') as f:
                 f.write(b'this is blob data ' + str(i).encode())
-            if i:
-                tids.append(blob._p_serial)
-            else:
+            if 'blob' not in root:
                 root['blob'] = blob
             transaction.commit()
 
+            blob._p_activate()
+            tid = blob._p_serial
+            tids.append(tid)
+            tid_int = bytes8_to_int64(tid)
+
+            times.append(tid_int - 1)
+
         blob._p_activate()
-        tids.append(blob._p_serial)
 
         self.oid = oid = root['blob']._p_oid
         fshelper = self.blob_storage.blobhelper.fshelper
@@ -74,7 +81,7 @@ class TestBlobPackHistoryPreservingMixin(TestBlobMixin):
     def _pack_at_time_index(self, time_index=0, count_not_exist=0):
         if time_index is None:
             # Use now
-            packtime = time.time()
+            packtime = -1
         else:
             packtime = self.times[time_index]
         self.blob_storage.pack(packtime, referencesf)

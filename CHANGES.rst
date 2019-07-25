@@ -67,6 +67,32 @@
   This includes how (some) queries are written and managed, making it
   easier to prepare statements, but only those actually used.
 
+- On MySQL, move allocating a TID into the database. On benchmarks
+  of a local machine this can be a scant few percent faster, but it's
+  primarily intended to reduce the number of round-trips to the
+  database. This is a step towards :issue:`281`.
+
+- On MySQL, set the connection timezone to be UTC. This is necessary
+  to get values consistent between ``UTC_TIMESTAMP``,
+  ``UNIX_TIMESTAMP``, ``FROM_UNIXTIME``, and Python's ``time.gmtime``,
+  as used for comparing TIDs.
+
+- Make ``RelStorage.pack()`` also accept a TID from the RelStorage
+  database to pack to. The usual Unix timestamp form for choosing a
+  pack time can be ambiguous in the event of multiple transactions
+  within a very short period of time. This is mostly a concern for
+  automated tests.
+
+  Similarly, it will accept a value less than 0 to mean the most
+  recent transaction.
+
+- Make PyMySQL use the same precision as mysqlclient when sending
+  floating point parameters.
+
+- Automatically detect when MySQL stored procedures in the database
+  are out of date with the current source in this package and replace
+  them.
+
 3.0a5 (2019-07-11)
 ==================
 

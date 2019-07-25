@@ -30,6 +30,7 @@ from ZODB.utils import p64 as int64_to_8bytes
 from ZODB.utils import u64 as bytes8_to_int64
 
 from relstorage._compat import OID_SET_TYPE
+from relstorage._compat import MAX_TID
 from .util import writable_storage_method
 
 logger = __import__('logging').getLogger(__name__)
@@ -56,18 +57,63 @@ class Pack(object):
     def __pre_pack(self, t, referencesf):
         logger.info("pack: beginning pre-pack")
 
-        # Find the latest commit before or at the pack time.
-        pack_point = TimeStamp(*time.gmtime(t)[:5] + (t % 60,)).raw()
-        tid_int = self.packundo.choose_pack_transaction(
-            bytes8_to_int64(pack_point))
+        # In 2019, Unix timestamps look like
+        #            1564006806.0
+        # While 64-bit integer TIDs for the same timestamp look like
+        #    275085010696509852
+        #
+        # Multiple TIDs can map to a single Unix timestamp.
+        # For example, the 9 integers between 275085010624927044 and
+        # 275085010624927035 all map to 1564006804.9999998.
+        #
+        # Therefore, Unix timestamps are ambiguous, especially if we're committing
+        # multiple transactions rapidly (within the resolution of the underlying TID
+        # clock).
+        # This ambiguity mostly matters for unit tests, where we do commit rapidly.
+        #
+        # To help them out, we accept 64-bit integer TIDs to specify an exact
+        # transaction to pack to.
+
+        # We also allow None or a negative number to mean "current committed transaction".
+        if t is None:
+            t = -1
+
+        if t > 275085010696509852:
+            # Must be a TID.
+
+            # Turn it back into a time.time() for later logging
+            ts = TimeStamp(int64_to_8bytes(t))
+            logger.debug(
+                "Treating requested pack time %s as TID meaning %s",
+                t, ts
+            )
+            best_pack_tid_int = t
+            t = ts.timeTime()
+        elif t < 0 or t >= time.time():
+            # Packing for the current time or in the future means to pack
+            # to the lastest commit in the database. This matters if not all
+            # machine clocks are synchronized.
+            best_pack_tid_int = MAX_TID - 1
+        else:
+            # Find the latest commit before or at the pack time.
+            # Note that several TIDs will fit in the resolution of a time.time(),
+            # so this is slightly ambiguous.
+            requested_pack_ts = TimeStamp(*time.gmtime(t)[:5] + (t % 60,))
+            requested_pack_tid = requested_pack_ts.raw()
+            requested_pack_tid_int = bytes8_to_int64(requested_pack_tid)
+
+            best_pack_tid_int = requested_pack_tid_int
+
+        tid_int = self.packundo.choose_pack_transaction(best_pack_tid_int)
+
         if tid_int is None:
             logger.debug("all transactions before %s have already "
                          "been packed", time.ctime(t))
             return
 
         s = time.ctime(TimeStamp(int64_to_8bytes(tid_int)).timeTime())
-        logger.info("pack: analyzing transactions committed "
-                    "%s or before", s)
+        logger.info("Analyzing transactions committed %s or before (TID %d)",
+                    s, tid_int)
 
         # In pre_pack, the adapter fills tables with
         # information about what to pack.  The adapter

@@ -16,6 +16,8 @@ Database schema installers
 """
 from __future__ import absolute_import
 
+from hashlib import md5
+
 from ZODB.POSException import StorageError
 from zope.interface import implementer
 
@@ -24,18 +26,37 @@ from ..schema import AbstractSchemaInstaller
 
 logger = __import__('logging').getLogger(__name__)
 
+###
+# Notes on procedures vs functions.
+#
+# When we have a result, we'd generally like to use a function,
+# and simply ``SELECT func()``.
+#
+# However, MySQL is badly broken and functions play poorly with
+# transaction logging (replication logging). For that reason, to
+# create a function, you must have SUPER privileges (essentially root)
+# so we can't count on being able to do that.
+# (https://dev.mysql.com/doc/refman/5.7/en/stored-programs-logging.html).
+# (Also, functions take out table locks and limit concurrency, and
+# must be marked DETERMINISTIC or NO SQL or just READS SQL DATA ---
+# they can't make modifications.)
+#
+# So we're stuck with procedures.
+#
+# The procedure should be called with ``cursor.execute('CALL
+# proc_name(%s)')`` instead of ``cursor.callproc()`` ---
+# ``callproc()`` involves setting server variables in an extra trip to
+# the server. That would enable us to use an OUT param for the result,
+# but getting that would be another round trip too. Procedures that
+# generate results via a SELECT statement also generate a blank result
+# that must be retrieved with cursor.nextset().
+# ``Driver.callproc_multi_result`` handles the details.
+
+
 # Procedure to set the minimum next OID in one trip to the server.
-# This returns a result, so we'd like to use a function (which we'd access
-# with `SELECT set_min_oid(...)`), but the MySQL manual warns that functions take
-# out table locks and limit concurrency, plus have some replication issues,
-# so we don't do that. Instead we have a procedure. The procedure should be called
-# using `cursor.execute('CALL set_min_oid(%s)` instead of cursor.callproc()
-# --- callproc() involves setting server variables in an extra trip to the server.
-# That would enable us to use an OUT param for the result, but getting that would be another
-# round trip too. Don't forget to use nextset() to get the result of the procedure itself
-# after getting the new oid.
 _SET_MIN_OID = """
 CREATE PROCEDURE set_min_oid(min_oid BIGINT)
+COMMENT '{CHECKSUM}'
 BEGIN
   -- In order to avoid deadlocks, we only do this if
   -- the number we want to insert is strictly greater than
@@ -79,6 +100,129 @@ BEGIN
 END;
 """
 
+# NOTE: Unlike PostgreSQL, NOW() and UTC_TIMESTAMP() are only consistent
+# within a single *statement*; that is, unlike PostgreSQL, these values
+# can change within a transaction.
+
+# Procedure to generate a new 64-bit TID based on the current time.
+# Not called from Python, only from SQL.
+
+# We'd really prefer to use the database clock, as there's only one of
+# it and it's more likely to be consistent than clocks spread across
+# many client machines. Our test cases tend to assume that time.time()
+# moves forward at exactly the same speed as the TID clock, though,
+# especially if we don't commit anything. This doesn't hold true if we don't
+# use the local clock for the TID clock.
+_MAKE_TID_FOR_EPOCH = """
+CREATE PROCEDURE make_tid_for_epoch(
+      IN unix_ts REAL,
+      OUT tid_64 BIGINT)
+COMMENT '{CHECKSUM}'
+BEGIN
+  DECLARE ts TIMESTAMP;
+  DECLARE year, month, day, hour, minute INT;
+  DECLARE a1, a, b BIGINT;
+  DECLARE b1, second REAL;
+
+  SET ts = FROM_UNIXTIME(unix_ts) + 0.0;
+
+  SET year   = EXTRACT(YEAR from ts),
+      month  = EXTRACT(MONTH from ts),
+      day    = EXTRACT(DAY from ts),
+      hour   = EXTRACT(hour from ts),
+      minute = EXTRACT(minute from ts),
+      second = unix_ts % 60;
+
+
+  SET a1 = (((year - 1900) * 12 + month - 1) * 31 + day - 1);
+  SET a = (a1 * 24 + hour) *60 + minute;
+  -- This is a magic constant; see _timestamp.c
+  SET b1 = second / 1.3969838619232178e-08;
+  -- CAST(AS INTEGER) rounds, but the C and Python TimeStamp
+  -- simply truncate, and we must match them.
+  SET b = TRUNCATE(b1, 0);
+
+  SET tid_64 = (a << 32) + b;
+END;
+
+"""
+
+
+_MAKE_CURRENT_TID = """
+CREATE PROCEDURE make_current_tid(OUT tid_64 BIGINT)
+COMMENT '{CHECKSUM}'
+BEGIN
+  CALL make_tid_for_epoch(
+    UNIX_TIMESTAMP(UTC_TIMESTAMP(6)),
+    tid_64
+  );
+END;
+"""
+
+_HF_LOCK_AND_CHOOSE_TID = """
+CREATE PROCEDURE lock_and_choose_tid()
+COMMENT '{CHECKSUM}'
+BEGIN
+    DECLARE scratch BIGINT;
+    DECLARE next_tid_64, current_tid_64 BIGINT;
+
+    SELECT tid
+    INTO scratch
+    FROM commit_row_lock
+    FOR UPDATE;
+
+    SELECT COALESCE(MAX(tid), 0)
+    INTO current_tid_64
+    FROM object_state;
+
+    CALL make_current_tid(next_tid_64);
+
+    IF next_tid_64 <= current_tid_64 THEN
+        SET next_tid_64 = current_tid_64 + 1;
+    END IF;
+
+    SELECT next_tid_64;
+END;
+"""
+
+_HP_LOCK_AND_CHOOSE_TID = """
+CREATE PROCEDURE lock_and_choose_tid(
+    p_packed BOOLEAN,
+    p_username BLOB,
+    p_description BLOB,
+    p_extension BLOB
+)
+COMMENT '{CHECKSUM}'
+BEGIN
+    DECLARE scratch BIGINT;
+    DECLARE next_tid_64, current_tid_64 BIGINT;
+
+    SELECT tid
+    INTO scratch
+    FROM commit_row_lock
+    FOR UPDATE;
+
+    SELECT COALESCE(MAX(tid), 0)
+    INTO current_tid_64
+    FROM transaction;
+
+    CALL make_current_tid(next_tid_64);
+
+    IF next_tid_64 <= current_tid_64 THEN
+        SET next_tid_64 = current_tid_64 + 1;
+    END IF;
+
+    INSERT INTO transaction (
+        tid, packed, username, description, extension
+    )
+    VALUES (
+        next_tid_64, p_packed, p_username, p_description, p_extension
+    );
+
+    SELECT next_tid_64;
+END;
+"""
+
 @implementer(ISchemaInstaller)
 class MySQLSchemaInstaller(AbstractSchemaInstaller):
 
@@ -103,11 +247,19 @@ class MySQLSchemaInstaller(AbstractSchemaInstaller):
 
     procedures = {
         'set_min_oid': _SET_MIN_OID,
+        'make_current_tid': _MAKE_CURRENT_TID,
+        'make_tid_for_epoch': _MAKE_TID_FOR_EPOCH,
     }
 
     def __init__(self, driver=None, **kwargs):
         self.driver = driver
         super(MySQLSchemaInstaller, self).__init__(**kwargs)
+        self.procedures = dict(self.procedures)
+        self.procedures['lock_and_choose_tid'] = (
+            _HF_LOCK_AND_CHOOSE_TID
+            if not self.keep_history
+            else _HP_LOCK_AND_CHOOSE_TID
+        )
 
     def get_database_name(self, cursor):
         cursor.execute("SELECT DATABASE()")
@@ -117,7 +269,10 @@ class MySQLSchemaInstaller(AbstractSchemaInstaller):
     def list_procedures(self, cursor):
         cursor.execute("SHOW PROCEDURE STATUS WHERE db = database()")
         native = self._metadata_to_native_str
-        return [native(row['name']) for row in self._rows_as_dicts(cursor)]
+        return {
+            native(row['name']): native(row['comment'])
+            for row in self._rows_as_dicts(cursor)
+        }
 
     def list_tables(self, cursor):
         return list(self.__list_tables_and_engines(cursor))
@@ -202,10 +357,26 @@ class MySQLSchemaInstaller(AbstractSchemaInstaller):
         MySQLOIDAllocator(self.driver).garbage_collect_oids(cursor)
 
     def create_procedures(self, cursor):
-        # TODO: Handle updates when we change the text.
         installed = self.list_procedures(cursor)
         for name, create_stmt in self.procedures.items():
             __traceback_info__ = name
+            checksum = md5(
+                create_stmt.encode('ascii')
+                if not isinstance(create_stmt, bytes)
+                else create_stmt
+            ).hexdigest()
+            create_stmt = create_stmt.format(CHECKSUM=checksum)
+            if name in installed:
+                stored_checksum = installed[name]
+                if stored_checksum != checksum:
+                    logger.info(
+                        "Re-creating procedure %s due to checksum mismatch %s != %s",
+                        name,
+                        stored_checksum, checksum
+                    )
+                    cursor.execute('DROP PROCEDURE %s' % (name,))
+                    del installed[name]
+
             if name not in installed:
                 cursor.execute(create_stmt)
 

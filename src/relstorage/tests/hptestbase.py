@@ -12,7 +12,6 @@
 #
 ##############################################################################
 """A foundation for history-preserving RelStorage tests"""
-import time
 import unittest
 
 import transaction
@@ -191,10 +190,7 @@ class HistoryPreservingRelStorageTests(GenericRelStorageTests,
             self._storage.load(oid, '')
 
             # Pack
-            now = packtime = time.time()
-            while packtime <= now:
-                packtime = time.time()
-            self._storage.pack(packtime, referencesf)
+            self._storage.pack(self._storage.lastTransactionInt(), referencesf)
             self._storage.sync()
 
             if expect_object_deleted:
@@ -245,9 +241,7 @@ class HistoryPreservingRelStorageTests(GenericRelStorageTests,
             transaction.get().note(u'add C to A')
             transaction.commit()
 
-            now = packtime = time.time()
-            while packtime <= now:
-                packtime = time.time()
+            packtime = c1._storage.lastTransactionInt()
             self._storage.pack(packtime, referencesf)
 
             # B should be gone, since nothing refers to it.
@@ -257,7 +251,6 @@ class HistoryPreservingRelStorageTests(GenericRelStorageTests,
             db.close()
 
     def checkHistoricalConnection(self):
-        import datetime
         import persistent
         import ZODB.POSException
         db = DB(self._storage)
@@ -267,9 +260,7 @@ class HistoryPreservingRelStorageTests(GenericRelStorageTests,
         root['first'] = persistent.mapping.PersistentMapping(count=0)
         transaction.commit()
 
-        time.sleep(.02)
-        now = datetime.datetime.utcnow()
-        time.sleep(.02)
+        time_of_first_transaction = conn._storage.lastTransaction()
 
         root['second'] = persistent.mapping.PersistentMapping()
         root['first']['count'] += 1
@@ -277,7 +268,7 @@ class HistoryPreservingRelStorageTests(GenericRelStorageTests,
 
         transaction1 = transaction.TransactionManager()
 
-        historical_conn = db.open(transaction_manager=transaction1, at=now)
+        historical_conn = db.open(transaction_manager=transaction1, at=time_of_first_transaction)
 
         eq = self.assertEqual
 
@@ -352,7 +343,7 @@ class HistoryPreservingRelStorageTests(GenericRelStorageTests,
 
         for i in range(5):
             tx = transaction.begin()
-            tx.description = 'Revision %s' % i
+            tx.description = u'Revision %s' % i
             root['key']['item'] = i
             transaction.commit()
 
@@ -401,7 +392,7 @@ class HistoryPreservingRelStorageTests(GenericRelStorageTests,
         self.assertFalse(options.pack_gc)
         packer = Pack(options, storage._adapter, storage.blobhelper, storage._cache)
         self.assertFalse(packer.options.pack_gc)
-        packer.pack(time.time(), referencesf)
+        packer.pack(storage.lastTransactionInt(), referencesf)
 
         # ... and bring the storage into the current view...
         storage.sync()
@@ -419,6 +410,205 @@ class HistoryPreservingRelStorageTests(GenericRelStorageTests,
         self.assertEqual(len(storage), 1)
         conn.close()
         db.close()
+
+    ###
+    # Fixes for tests that assume the current clock
+    # and the TID clock are the same.
+    ###
+
+    def __tid_clock_needs_care(self):
+        txncontrol = self._storage._adapter.txncontrol
+        return getattr(txncontrol, 'RS_TEST_TXN_PACK_NEEDS_SLEEP', False)
+
+    def __maybe_ignore_monotonic(self, cls, method_name):
+        if not self.__tid_clock_needs_care():
+            return getattr(super(HistoryPreservingRelStorageTests, self), method_name)()
+
+        # Override one from RevisionStorage to go back to actually sleeping,
+        # since our TID clock is external now.
+        unbound = getattr(cls, method_name)
+        if hasattr(unbound, 'im_func'):
+            # We're on python 2. There's no __wrapped__ to give us access to the raw
+            # function, we have to dig it out by hand. Our only option is the closure.
+            function_wrapper = unbound.im_func
+            unbound = function_wrapper.__closure__[0].cell_contents
+        else:
+            unbound = unbound.__wrapped__ # pylint:disable=no-member
+
+        bound = lambda: unbound(self)
+        self.__never_snoozing(bound)
+
+    def __never_snoozing(self, method):
+        def never_snooze():
+            return
+
+        before_snooze = RevisionStorage.snooze
+        assert PackableStorage.snooze == RevisionStorage.snooze
+        RevisionStorage.snooze = never_snooze
+        PackableStorage.snooze = never_snooze
+        try:
+            return method()
+        finally:
+            RevisionStorage.snooze = before_snooze
+            PackableStorage.snooze = before_snooze
+
+    def checkLoadBefore(self):
+        # Most of the time this works, but sometimes it fails an internal assertion,
+        # most commonly seen on AppVeyor.
+        # https://ci.appveyor.com/project/jamadden/relstorage/builds/26243441/job/p24ocr2ir6wpvg3v#L1087
+        raise unittest.SkipTest("Assumes it can control timestamps")
+
+    def checkLoadBeforeOld(self):
+        self.__maybe_ignore_monotonic(RevisionStorage.RevisionStorage,
+                                      'checkLoadBeforeOld')
+
+    def checkSimpleHistory(self):
+        if not self.__tid_clock_needs_care():
+            return super(HistoryPreservingRelStorageTests, self).checkSimpleHistory()
+        # This assumes that the `time` value in the storage.history()
+        # for an object always increases, even though there are 8-byte TID values
+        # that, while themselves increasing, round down to equal floating point
+        # time values. For example, these two values are in the proper sequence:
+        #   b'\x03\xd1K\xc6-\xf33!' == 275084366792831777,
+        # and
+        #   b'\x03\xd1K\xc6-\xf33"' == 275084366792831778,
+        # But both have
+        #   TimeStamp(tid).timeTime() == 1563997810.769531.
+        # This test tries to do something about that (delaying between transactions to let
+        # time.time() move forward), but only on Windows. So we begin by
+        # making that apply everywhere.
+        import sys
+        old_platform = sys.platform
+        sys.platform = 'win32'
+
+        # Now, we've seen one apparent genuine failure (Python 3.5 on Travis), that of reporting
+        #
+        #    AssertionError: 1564076099.641899 is not less than 1564076039.6496584
+        #
+        # Which is true, it isn't. In fact, there's a difference of
+        # 59.99s between the two stamps. Which makes very little sense:
+        #
+        # - The DB query orders by TID, DESC;
+        # - We iterate those in that same order.
+        #
+        # But the very first comparison is against the local value of time.time();
+        # So the only way I think this makes sense is if the local clock
+        # moved backwards. time.time() isn't guaranteed to be monotonic
+        # increasing and the docs specifically say it can move backwards.
+        try:
+            super(HistoryPreservingRelStorageTests, self).checkSimpleHistory()
+        finally:
+            sys.platform = old_platform
+
+    def _pack_to_latest(self, methname,
+                        find_packtime=lambda s: s.lastTransactionInt()):
+        # Ignore the pack timestamp given. The test is trying to pack to "now", but
+        # because of how fast we commit, that doesn't always work out correctly.
+        # Instead, use the actual most recent tid.
+        meth = getattr(super(HistoryPreservingRelStorageTests, self), methname)
+        if not self.__tid_clock_needs_care():
+            return meth()
+
+        orig_pack = self._storage.pack
+        def pack(packtime, ref_getter):
+            packtime = find_packtime(self._storage)
+            orig_pack(packtime, ref_getter)
+        self._storage.pack = pack
+
+        try:
+            return self.__never_snoozing(meth)
+        finally:
+            del self._storage.pack
+            orig_pack = None
+
+    def checkPackJustOldRevisions(self):
+        self._pack_to_latest('checkPackJustOldRevisions')
+
+    def checkPackAllRevisions(self):
+        self._pack_to_latest('checkPackAllRevisions')
+
+    def checkPackUndoLog(self):
+        packafter = []
+        orig_dostore = self._dostoreNP
+        def dostorenp(*args, **kwargs):
+            result = orig_dostore(*args, **kwargs)
+            if not packafter:
+                packafter.append(self._storage.lastTransactionInt())
+            return result
+        self._dostoreNP = dostorenp
+
+        def find_packtime(_storage):
+            assert len(packafter) == 1, packafter
+            return packafter[0]
+
+        try:
+            self._pack_to_latest('checkPackUndoLog', find_packtime)
+        finally:
+            del self._dostoreNP
+
+    def checkTransactionalUndoAfterPackWithObjectUnlinkFromRoot(self):
+        # This test replaces the one from TransactionalUndoStorage.
+        # The functional difference is that this one uses a deterministic pack time
+        # based on the actual TID, not the current clock.
+        from ZODB.tests.TransactionalUndoStorage import C
+        eq = self.assertEqual
+        db = DB(self._storage)
+        conn = db.open()
+        try:
+            root = conn.root()
+
+            o1 = C()
+            o2 = C()
+            root['obj'] = o1
+            o1.obj = o2
+            txn = transaction.get()
+            txn.note(u'o1 -> o2')
+            txn.commit()
+
+            packtime = conn._storage.lastTransactionInt()
+
+            o3 = C()
+            o2.obj = o3
+            txn = transaction.get()
+            txn.note(u'o1 -> o2 -> o3')
+            txn.commit()
+
+            o1.obj = o3
+            txn = transaction.get()
+            txn.note(u'o1 -> o3')
+            txn.commit()
+
+            log = self._storage.undoLog()
+            eq(len(log), 4)
+            for entry in zip(log, (b'o1 -> o3', b'o1 -> o2 -> o3',
+                                   b'o1 -> o2', b'initial database creation')):
+                eq(entry[0]['description'], entry[1])
+
+            self._storage.pack(packtime, referencesf)
+
+            log = self._storage.undoLog()
+            for entry in zip(log, (b'o1 -> o3', b'o1 -> o2 -> o3')):
+                eq(entry[0]['description'], entry[1])
+
+            tid = log[0]['id']
+            db.undo(tid)
+            txn = transaction.get()
+            txn.note(u'undo')
+            txn.commit()
+            # undo does a txn-undo, but doesn't invalidate
+            conn.sync()
+
+            log = self._storage.undoLog()
+            for entry in zip(log, (b'undo', b'o1 -> o3', b'o1 -> o2 -> o3')):
+                eq(entry[0]['description'], entry[1])
+
+            eq(o1.obj, o2)
+            eq(o1.obj.obj, o3)
+            self._iterate()
+        finally:
+            conn.close()
+            db.close()
+
 
 class HistoryPreservingToFileStorage(AbstractToFileStorage,
                                      UndoableRecoveryStorage,

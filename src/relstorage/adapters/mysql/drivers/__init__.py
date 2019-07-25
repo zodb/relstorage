@@ -56,14 +56,28 @@ class AbstractMySQLDriver(AbstractModuleDriver):
     # driver, though, can only do that on Python 2. For Python 3, only
     # the character_set_results can be binary. (See
     # https://github.com/zodb/relstorage/issues/213)
+    # Subclasses can set to None if they don't need to do this.
     MY_CHARSET_STMT = 'SET names binary'
+
+    # Make the default timezone UTC. That way UTC_TIMESTAMP()
+    # and UNIX_TIMESTAMP() and FROM_UNIXTIME are all self-consistent.
+    # Subclasses can set to None if they don't need to do this.
+    MY_TIMEZONE_STMT = "SET time_zone = '+00:00'"
+
+    # TODO: MySQLdb (mysqlclient) and PyMySQL support an
+    # ``init_command`` argument to connect() that could be used to
+    # automatically handle both these statements (``SET names binary,
+    # time_zone = X``).
 
     # Does this driver need cursor.fetchall() called before a rollback?
     fetchall_on_rollback = False
 
     def cursor(self, conn):
         cursor = AbstractModuleDriver.cursor(self, conn)
-        cursor.execute(self.MY_CHARSET_STMT)
+        if self.MY_CHARSET_STMT:
+            cursor.execute(self.MY_CHARSET_STMT)
+        if self.MY_TIMEZONE_STMT:
+            cursor.execute(self.MY_TIMEZONE_STMT)
         return cursor
 
     def callproc_multi_result(self, cursor, proc, args=()):

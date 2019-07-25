@@ -16,10 +16,16 @@
 from __future__ import absolute_import
 
 import abc
+import time
+
+from persistent.timestamp import TimeStamp
+from ZODB.utils import p64 as int64_to_8bytes
+from ZODB.utils import u64 as bytes8_to_int64
 
 from zope.interface import implementer
 
 from .._compat import ABC
+from .._util import timestamp_at_unixtime
 from ._util import noop_when_history_free
 
 from .schema import Schema
@@ -33,6 +39,7 @@ class AbstractTransactionControl(ABC):
 
     def __init__(self, connmanager):
         self.connmanager = connmanager
+        self.driver = self.connmanager.driver
 
     def commit_phase1(self, store_connection, tid):
         return '-'
@@ -59,6 +66,27 @@ class AbstractTransactionControl(ABC):
                         packed=False):
         """Add a transaction"""
         raise NotImplementedError()
+
+    def lock_database_and_choose_next_tid(self, cursor, locker,
+                                          username,
+                                          description,
+                                          extension):
+        locker.hold_commit_lock(cursor, ensure_current=True)
+
+        # Choose a transaction ID.
+        #
+        # Base the transaction ID on the current time, but ensure that
+        # the tid of this transaction is greater than any existing
+        # tid.
+        last_tid = self.get_tid(cursor)
+        now = time.time()
+        stamp = timestamp_at_unixtime(now)
+        stamp = stamp.laterThan(TimeStamp(int64_to_8bytes(last_tid)))
+        tid = stamp.raw()
+
+        tid_int = bytes8_to_int64(tid)
+        self.add_transaction(cursor, tid_int, username, description, extension)
+        return tid_int
 
 @implementer(ITransactionControl)
 class GenericTransactionControl(AbstractTransactionControl):
