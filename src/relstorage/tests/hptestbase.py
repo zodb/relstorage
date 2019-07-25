@@ -475,10 +475,26 @@ class HistoryPreservingRelStorageTests(GenericRelStorageTests,
         # But both have
         #   TimeStamp(tid).timeTime() == 1563997810.769531.
         # This test tries to do something about that (delaying between transactions to let
-        # time.time() move forward), but only on Windows.
+        # time.time() move forward), but only on Windows. So we begin by
+        # making that apply everywhere.
         import sys
         old_platform = sys.platform
         sys.platform = 'win32'
+
+        # Now, we've seen one apparent genuine failure (Python 3.5 on Travis), that of reporting
+        #
+        #    AssertionError: 1564076099.641899 is not less than 1564076039.6496584
+        #
+        # Which is true, it isn't. In fact, there's a difference of
+        # 59.99s between the two stamps. Which makes very little sense:
+        #
+        # - The DB query orders by TID, DESC;
+        # - We iterate those in that same order.
+        #
+        # But the very first comparison is against the local value of time.time();
+        # So the only way I think this makes sense is if the local clock
+        # moved backwards. time.time() isn't guaranteed to be monotonic
+        # increasing and the docs specifically say it can move backwards.
         try:
             super(HistoryPreservingRelStorageTests, self).checkSimpleHistory()
         finally:
