@@ -25,6 +25,7 @@ from ZODB.utils import u64 as bytes8_to_int64
 from zope.interface import implementer
 
 from .._compat import ABC
+from .._util import timestamp_at_unixtime
 from ._util import noop_when_history_free
 
 from .schema import Schema
@@ -79,7 +80,7 @@ class AbstractTransactionControl(ABC):
         # tid.
         last_tid = self.get_tid(cursor)
         now = time.time()
-        stamp = TimeStamp(*(time.gmtime(now)[:5] + (now % 60,)))
+        stamp = timestamp_at_unixtime(now)
         stamp = stamp.laterThan(TimeStamp(int64_to_8bytes(last_tid)))
         tid = stamp.raw()
 

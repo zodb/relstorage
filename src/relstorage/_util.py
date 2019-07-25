@@ -24,7 +24,17 @@ import sys
 import time
 import traceback
 
+from persistent.timestamp import TimeStamp
+
 logger = __import__('logging').getLogger(__name__)
+
+
+def timestamp_at_unixtime(now):
+    """
+    Return a :class:`persistent.timestamp.TimeStamp` for the moment
+    given by *now* (a float giving seconds since the epoch).
+    """
+    return TimeStamp(*(time.gmtime(now)[:5] + (now % 60,)))
 
 
 class timer(object):

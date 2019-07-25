@@ -16,6 +16,8 @@ Database schema installers
 """
 from __future__ import absolute_import
 
+from hashlib import md5
+
 from ZODB.POSException import StorageError
 from zope.interface import implementer
 
@@ -54,6 +56,7 @@ logger = __import__('logging').getLogger(__name__)
 # Procedure to set the minimum next OID in one trip to the server.
 _SET_MIN_OID = """
 CREATE PROCEDURE set_min_oid(min_oid BIGINT)
+COMMENT '{CHECKSUM}'
 BEGIN
   -- In order to avoid deadlocks, we only do this if
   -- the number we want to insert is strictly greater than
@@ -110,34 +113,55 @@ END;
 # moves forward at exactly the same speed as the TID clock, though,
 # especially if we don't commit anything. This doesn't hold true if we don't
 # use the local clock for the TID clock.
-_MAKE_CURRENT_TID = """
-CREATE PROCEDURE make_current_tid(OUT tid_64 BIGINT)
+_MAKE_TID_FOR_EPOCH = """
+CREATE PROCEDURE make_tid_for_epoch(
+      IN unix_ts REAL,
+      OUT tid_64 BIGINT)
+COMMENT '{CHECKSUM}'
 BEGIN
   DECLARE ts TIMESTAMP;
   DECLARE year, month, day, hour, minute INT;
-  DECLARE second REAL;
-  DECLARE a, b BIGINT;
+  DECLARE a1, a, b BIGINT;
+  DECLARE b1, second REAL;
 
-  SET ts = UTC_TIMESTAMP(6); -- get fractional precision for seconds.
+  SET ts = FROM_UNIXTIME(unix_ts) + 0.0;
+
   SET year   = EXTRACT(YEAR from ts),
       month  = EXTRACT(MONTH from ts),
       day    = EXTRACT(DAY from ts),
       hour   = EXTRACT(hour from ts),
       minute = EXTRACT(minute from ts),
-      second = EXTRACT(SECOND_MICROSECOND FROM ts) / 1000000;
+      second = unix_ts % 60;
 
 
-  SET a = (((year - 1900) * 12 + month - 1) * 31 + day - 1);
-  SET a = (a * 24 + hour) *60 + minute;
-  -- 60.0 / (1<<16) / (1 << 16);
-  SET b = CAST((second / 1.3969838619232178e-08) AS SIGNED INTEGER);
+  SET a1 = (((year - 1900) * 12 + month - 1) * 31 + day - 1);
+  SET a = (a1 * 24 + hour) *60 + minute;
+  -- This is a magic constant; see _timestamp.c
+  SET b1 = second / 1.3969838619232178e-08;
+  -- CAST(AS INTEGER) rounds, but the C and Python TimeStamp
+  -- simply truncate, and we must match them.
+  SET b = TRUNCATE(b1, 0);
 
   SET tid_64 = (a << 32) + b;
+END;
+
+"""
+
+
+_MAKE_CURRENT_TID = """
+CREATE PROCEDURE make_current_tid(OUT tid_64 BIGINT)
+COMMENT '{CHECKSUM}'
+BEGIN
+  CALL make_tid_for_epoch(
+    UNIX_TIMESTAMP(UTC_TIMESTAMP(6)),
+    tid_64
+  );
 END;
 """
 
 _HF_LOCK_AND_CHOOSE_TID = """
 CREATE PROCEDURE lock_and_choose_tid()
+COMMENT '{CHECKSUM}'
 BEGIN
     DECLARE scratch BIGINT;
     DECLARE next_tid_64, current_tid_64 BIGINT;
@@ -168,6 +192,7 @@ CREATE PROCEDURE lock_and_choose_tid(
     p_description BLOB,
     p_extension BLOB
 )
+COMMENT '{CHECKSUM}'
 BEGIN
     DECLARE scratch BIGINT;
     DECLARE next_tid_64, current_tid_64 BIGINT;
@@ -223,6 +248,7 @@ class MySQLSchemaInstaller(AbstractSchemaInstaller):
     procedures = {
         'set_min_oid': _SET_MIN_OID,
         'make_current_tid': _MAKE_CURRENT_TID,
+        'make_tid_for_epoch': _MAKE_TID_FOR_EPOCH,
     }
 
     def __init__(self, driver=None, **kwargs):
@@ -243,7 +269,10 @@ class MySQLSchemaInstaller(AbstractSchemaInstaller):
     def list_procedures(self, cursor):
         cursor.execute("SHOW PROCEDURE STATUS WHERE db = database()")
         native = self._metadata_to_native_str
-        return [native(row['name']) for row in self._rows_as_dicts(cursor)]
+        return {
+            native(row['name']): native(row['comment'])
+            for row in self._rows_as_dicts(cursor)
+        }
 
     def list_tables(self, cursor):
         return list(self.__list_tables_and_engines(cursor))
@@ -328,10 +357,26 @@ class MySQLSchemaInstaller(AbstractSchemaInstaller):
         MySQLOIDAllocator(self.driver).garbage_collect_oids(cursor)
 
     def create_procedures(self, cursor):
-        # TODO: Handle updates when we change the text.
         installed = self.list_procedures(cursor)
         for name, create_stmt in self.procedures.items():
             __traceback_info__ = name
+            checksum = md5(
+                create_stmt.encode('ascii')
+                if not isinstance(create_stmt, bytes)
+                else create_stmt
+            ).hexdigest()
+            create_stmt = create_stmt.format(CHECKSUM=checksum)
+            if name in installed:
+                stored_checksum = installed[name]
+                if stored_checksum != checksum:
+                    logger.info(
+                        "Re-creating procedure %s due to checksum mismatch %s != %s",
+                        name,
+                        stored_checksum, checksum
+                    )
+                    cursor.execute('DROP PROCEDURE %s' % (name,))
+                    del installed[name]
+
             if name not in installed:
                 cursor.execute(create_stmt)
 

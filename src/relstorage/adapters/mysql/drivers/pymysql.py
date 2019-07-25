@@ -28,6 +28,19 @@ __all__ = [
     'PyMySQLDriver',
 ]
 
+# The default conversion looses precision in floating point values,
+# truncating them at 5 digits and using an exponent, which also loses
+# precision. All other drivers send the full representation. See
+# pymysql.converters:escape_float. The version here is based on
+# what mysqlclient has.
+def escape_float(value, _mapping):
+    s = repr(value)
+    if s in ('inf', 'nan'):
+        raise TypeError("%s can not be used with MySQL" % s)
+    if 'e' not in s:
+        s += 'e0'
+    return s
+
 @implementer(IDBDriver)
 class PyMySQLDriver(AbstractMySQLDriver):
     __name__ = 'PyMySQL'
@@ -59,3 +72,10 @@ class PyMySQLDriver(AbstractMySQLDriver):
             # which should probably be taken as disconnect
             pymysql_err.DatabaseError,
         )
+
+        self._conversions = self.driver_module.converters.conversions.copy()
+        self._conversions[float] = escape_float
+
+    def connect(self, *args, **kwargs):
+        kwargs['conv'] = self._conversions
+        return AbstractMySQLDriver.connect(self, *args, **kwargs)

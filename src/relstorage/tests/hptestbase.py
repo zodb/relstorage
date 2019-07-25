@@ -346,7 +346,7 @@ class HistoryPreservingRelStorageTests(GenericRelStorageTests,
 
         for i in range(5):
             tx = transaction.begin()
-            tx.description = 'Revision %s' % i
+            tx.description = u'Revision %s' % i
             root['key']['item'] = i
             transaction.commit()
 
@@ -423,7 +423,7 @@ class HistoryPreservingRelStorageTests(GenericRelStorageTests,
         txncontrol = self._storage._adapter.txncontrol
         return getattr(txncontrol, 'RS_TEST_TXN_PACK_NEEDS_SLEEP', False)
 
-    def __maybe_ignore_monotonic(self, module, cls, method_name):
+    def __maybe_ignore_monotonic(self, cls, method_name):
         if not self.__tid_clock_needs_care():
             return getattr(super(HistoryPreservingRelStorageTests, self), method_name)()
 
@@ -434,29 +434,33 @@ class HistoryPreservingRelStorageTests(GenericRelStorageTests,
             # We're on python 2. There's no __wrapped__ to give us access to the raw
             # function, we have to dig it out by hand. Our only option is the closure.
             function_wrapper = unbound.im_func
-            method = function_wrapper.__closure__[0].cell_contents
+            unbound = function_wrapper.__closure__[0].cell_contents
         else:
-            method = unbound.__wrapped__ # pylint:disable=no-member
+            unbound = unbound.__wrapped__ # pylint:disable=no-member
 
-        def always_snooze():
-            time.sleep(0.3)
+        bound = lambda: unbound(self)
+        self.__never_snoozing(bound)
 
-        before_snooze = module.snooze
-        module.snooze = always_snooze
+    def __never_snoozing(self, method):
+        def never_snooze():
+            return
+
+        before_snooze = RevisionStorage.snooze
+        assert PackableStorage.snooze == RevisionStorage.snooze
+        RevisionStorage.snooze = never_snooze
+        PackableStorage.snooze = never_snooze
         try:
-            method(self)
+            return method()
         finally:
-            module.snooze = before_snooze
+            RevisionStorage.snooze = before_snooze
+            PackableStorage.snooze = before_snooze
 
-    def checkLoadBefore(self):
-        self.__maybe_ignore_monotonic(RevisionStorage,
-                                      RevisionStorage.RevisionStorage,
-                                      'checkLoadBefore')
+    # def checkLoadBefore(self):
+    #     raise unittest.SkipTest("Assumes it can control timestamps")
 
-    def checkPackUndoLog(self):
-        self.__maybe_ignore_monotonic(PackableStorage,
-                                      PackableStorage.PackableUndoStorage,
-                                      'checkPackUndoLog')
+    def checkLoadBeforeOld(self):
+        self.__maybe_ignore_monotonic(RevisionStorage.RevisionStorage,
+                                      'checkLoadBeforeOld')
 
     def checkSimpleHistory(self):
         if not self.__tid_clock_needs_care():
@@ -480,26 +484,51 @@ class HistoryPreservingRelStorageTests(GenericRelStorageTests,
         finally:
             sys.platform = old_platform
 
-    def checkPackJustOldRevisions(self):
+    def _pack_to_latest(self, methname,
+                        find_packtime=lambda s: s.lastTransactionInt()):
+        # Ignore the pack timestamp given. The test is trying to pack to "now", but
+        # because of how fast we commit, that doesn't always work out correctly.
+        # Instead, use the actual most recent tid.
+        meth = getattr(super(HistoryPreservingRelStorageTests, self), methname)
         if not self.__tid_clock_needs_care():
-            return super(HistoryPreservingRelStorageTests, self).checkPackJustOldRevisions()
+            return meth()
 
-        # This uses yet another method to try to get a packtime after the
-        # clock has moved on.
+        orig_pack = self._storage.pack
+        def pack(packtime, ref_getter):
+            packtime = find_packtime(self._storage)
+            orig_pack(packtime, ref_getter)
+        self._storage.pack = pack
 
-        class Time(object):
-
-            @staticmethod
-            def time():
-                time.sleep(0.01)
-                return time.time()
-
-        old_time = PackableStorage.time
-        PackableStorage.time = Time
         try:
-            super(HistoryPreservingRelStorageTests, self).checkPackJustOldRevisions()
+            return self.__never_snoozing(meth)
         finally:
-            PackableStorage.time = old_time
+            del self._storage.pack
+            orig_pack = None
+
+    def checkPackJustOldRevisions(self):
+        self._pack_to_latest('checkPackJustOldRevisions')
+
+    def checkPackAllRevisions(self):
+        self._pack_to_latest('checkPackAllRevisions')
+
+    def checkPackUndoLog(self):
+        packafter = []
+        orig_dostore = self._dostoreNP
+        def dostorenp(*args, **kwargs):
+            result = orig_dostore(*args, **kwargs)
+            if not packafter:
+                packafter.append(self._storage.lastTransactionInt())
+            return result
+        self._dostoreNP = dostorenp
+
+        def find_packtime(_storage):
+            assert len(packafter) == 1, packafter
+            return packafter[0]
+
+        try:
+            self._pack_to_latest('checkPackUndoLog', find_packtime)
+        finally:
+            del self._dostoreNP
 
 
 class HistoryPreservingToFileStorage(AbstractToFileStorage,

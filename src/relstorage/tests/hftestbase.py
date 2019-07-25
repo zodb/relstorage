@@ -68,12 +68,8 @@ class HistoryFreeRelStorageTests(GenericRelStorageTests, ZODBTestCase):
         pobj = loads(data)
         eq(pobj.getoid(), oid)
         eq(pobj.value, 3)
-        # Now pack all transactions; need to sleep a second to make
-        # sure that the pack time is greater than the last commit time.
-        now = packtime = time.time()
-        while packtime <= now:
-            packtime = time.time()
-        self._storage.pack(packtime, referencesf)
+
+        self._storage.pack(self._storage.lastTransactionInt() + 1, referencesf)
         self._storage.sync()
         # All revisions of the object should be gone, since there is no
         # reference from the root object to this object.
