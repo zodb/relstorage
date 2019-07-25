@@ -201,3 +201,33 @@ class MySQLAdapter(AbstractAdapter):
         multi_results = self.driver.callproc_multi_result(cursor, proc, args)
         tid, = multi_results[0][0]
         return tid
+
+    def tpc_prepare_phase1(self,
+                           store_connection,
+                           blobhelper,
+                           ude,
+                           committing_tid_int=None,
+                           after_selecting_tid=lambda tid: None):
+        if committing_tid_int is not None or self.keep_history:
+            # Already allocated, must be doing a restore. Let the super
+            # handle it in the slow path.
+            #
+            # OR
+            #
+            # History-preserving.
+            # TODO: Implement a fast path for both of those things.
+            return super(MySQLAdapter, self).tpc_prepare_phase1(
+                store_connection,
+                blobhelper,
+                ude,
+                committing_tid_int=committing_tid_int,
+                after_selecting_tid=after_selecting_tid)
+
+        multi_results = self.driver.callproc_multi_result(
+            store_connection.cursor,
+            'lock_and_choose_tid_and_move',
+        )
+
+        tid_int, = multi_results[0][0]
+        after_selecting_tid(tid_int)
+        return tid_int, "-"

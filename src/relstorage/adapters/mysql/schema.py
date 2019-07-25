@@ -159,12 +159,12 @@ BEGIN
 END;
 """
 
-_HF_LOCK_AND_CHOOSE_TID = """
-CREATE PROCEDURE lock_and_choose_tid()
+_HF_LOCK_AND_CHOOSE_TID_P = """
+CREATE PROCEDURE lock_and_choose_tid_p(OUT next_tid_64 BIGINT)
 COMMENT '{CHECKSUM}'
 BEGIN
     DECLARE scratch BIGINT;
-    DECLARE next_tid_64, current_tid_64 BIGINT;
+    DECLARE current_tid_64 BIGINT;
 
     SELECT tid
     INTO scratch
@@ -180,7 +180,15 @@ BEGIN
     IF next_tid_64 <= current_tid_64 THEN
         SET next_tid_64 = current_tid_64 + 1;
     END IF;
+END;
+"""
 
+_HF_LOCK_AND_CHOOSE_TID = """
+CREATE PROCEDURE lock_and_choose_tid()
+COMMENT '{CHECKSUM}'
+BEGIN
+    DECLARE next_tid_64 BIGINT;
+    CALL lock_and_choose_tid_p(next_tid_64);
     SELECT next_tid_64;
 END;
 """
@@ -223,6 +231,58 @@ BEGIN
 END;
 """
 
+_HF_LOCK_AND_CHOOSE_AND_MOVE = """
+CREATE PROCEDURE lock_and_choose_tid_and_move()
+COMMENT '{CHECKSUM}'
+BEGIN
+  DECLARE tid_64 BIGINT;
+
+  CALL lock_and_choose_tid_p(tid_64);
+
+  -- move_from_temp()
+  -- First the state for objects
+
+  INSERT INTO object_state (
+    zoid,
+    tid,
+    state_size,
+    state
+  )
+  SELECT zoid,
+         tid_64,
+         COALESCE(LENGTH(state), 0),
+         state
+  FROM temp_store
+  ORDER BY zoid
+  ON DUPLICATE KEY UPDATE
+     tid = VALUES(tid),
+     state_size = VALUES(state_size),
+     state = VALUES(state);
+
+  -- Then blob chunks. First delete in case we shrunk.
+  -- The MySQL optimizer, up
+  -- through at least 5.7.17 doesn't like actual subqueries in a DELETE
+  -- statement. See https://github.com/zodb/relstorage/issues/175
+  DELETE bc
+  FROM blob_chunk bc
+  INNER JOIN (SELECT zoid FROM temp_store) sq
+         ON bc.zoid = sq.zoid;
+
+  INSERT INTO blob_chunk (
+    zoid,
+    tid,
+    chunk_num,
+    chunk
+  )
+  SELECT zoid, tid_64, chunk_num, chunk
+  FROM temp_blob_chunk;
+
+  -- History free has no current_object to update.
+
+  SELECT tid_64;
+END;
+"""
+
 @implementer(ISchemaInstaller)
 class MySQLSchemaInstaller(AbstractSchemaInstaller):
 
@@ -260,6 +320,10 @@ class MySQLSchemaInstaller(AbstractSchemaInstaller):
             if not self.keep_history
             else _HP_LOCK_AND_CHOOSE_TID
         )
+
+        if not self.keep_history:
+            self.procedures['lock_and_choose_tid_and_move'] = _HF_LOCK_AND_CHOOSE_AND_MOVE
+            self.procedures['lock_and_choose_tid_p'] = _HF_LOCK_AND_CHOOSE_TID_P
 
     def get_database_name(self, cursor):
         cursor.execute("SELECT DATABASE()")
@@ -366,6 +430,7 @@ class MySQLSchemaInstaller(AbstractSchemaInstaller):
                 else create_stmt
             ).hexdigest()
             create_stmt = create_stmt.format(CHECKSUM=checksum)
+            assert checksum in create_stmt
             if name in installed:
                 stored_checksum = installed[name]
                 if stored_checksum != checksum:

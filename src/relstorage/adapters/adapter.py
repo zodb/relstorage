@@ -99,7 +99,6 @@ class AbstractAdapter(object):
 
         self.mover.move_from_temp(cursor, committing_tid_int, txn_has_blobs)
 
-
         after_selecting_tid(committing_tid_int)
 
         self.mover.update_current(cursor, committing_tid_int)
