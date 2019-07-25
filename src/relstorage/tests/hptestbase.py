@@ -546,6 +546,69 @@ class HistoryPreservingRelStorageTests(GenericRelStorageTests,
         finally:
             del self._dostoreNP
 
+    def checkTransactionalUndoAfterPackWithObjectUnlinkFromRoot(self):
+        # This test replaces the one from TransactionalUndoStorage.
+        # The functional difference is that this one uses a deterministic pack time
+        # based on the actual TID, not the current clock.
+        from ZODB.tests.TransactionalUndoStorage import C
+        eq = self.assertEqual
+        db = DB(self._storage)
+        conn = db.open()
+        try:
+            root = conn.root()
+
+            o1 = C()
+            o2 = C()
+            root['obj'] = o1
+            o1.obj = o2
+            txn = transaction.get()
+            txn.note(u'o1 -> o2')
+            txn.commit()
+
+            packtime = conn._storage.lastTransactionInt()
+
+            o3 = C()
+            o2.obj = o3
+            txn = transaction.get()
+            txn.note(u'o1 -> o2 -> o3')
+            txn.commit()
+
+            o1.obj = o3
+            txn = transaction.get()
+            txn.note(u'o1 -> o3')
+            txn.commit()
+
+            log = self._storage.undoLog()
+            eq(len(log), 4)
+            for entry in zip(log, (b'o1 -> o3', b'o1 -> o2 -> o3',
+                                   b'o1 -> o2', b'initial database creation')):
+                eq(entry[0]['description'], entry[1])
+
+            self._storage.pack(packtime, referencesf)
+
+            log = self._storage.undoLog()
+            for entry in zip(log, (b'o1 -> o3', b'o1 -> o2 -> o3')):
+                eq(entry[0]['description'], entry[1])
+
+            tid = log[0]['id']
+            db.undo(tid)
+            txn = transaction.get()
+            txn.note(u'undo')
+            txn.commit()
+            # undo does a txn-undo, but doesn't invalidate
+            conn.sync()
+
+            log = self._storage.undoLog()
+            for entry in zip(log, (b'undo', b'o1 -> o3', b'o1 -> o2 -> o3')):
+                eq(entry[0]['description'], entry[1])
+
+            eq(o1.obj, o2)
+            eq(o1.obj.obj, o3)
+            self._iterate()
+        finally:
+            conn.close()
+            db.close()
+
 
 class HistoryPreservingToFileStorage(AbstractToFileStorage,
                                      UndoableRecoveryStorage,
