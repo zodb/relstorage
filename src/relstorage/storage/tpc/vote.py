@@ -44,9 +44,8 @@ class DatabaseLockedForTid(object):
         # TODO: Continue working to remove the need for the artificial
         # lock.
         user, desc, ext = ude
-        tid_int = adapter.txncontrol.lock_database_and_choose_next_tid(
+        tid_int = adapter.lock_database_and_choose_next_tid(
             cursor,
-            adapter.locker,
             user,
             desc,
             ext
@@ -105,9 +104,9 @@ class AbstractVote(AbstractTPCState):
     def __init__(self, begin_state, committing_tid_lock=None):
         # type: (AbstractBegin, DatabaseLockedForTid) -> None
 
-        # If committing_tid is passed to this method, it means
-        # the database has already been locked and the TID is
-        # locked in.
+        # If committing_tid is passed to this method, it means the
+        # database has already been locked and the TID is locked in.
+        # This is (only!) done when we're restoring transactions.
         super(AbstractVote, self).__init__(begin_state, begin_state.transaction)
 
         self.required_tids = begin_state.required_tids or {} # type: Dict[int, int]
@@ -199,6 +198,8 @@ class AbstractVote(AbstractTPCState):
         try:
             blobhelper.vote(None)
         except StorageTransactionError:
+            # If this raises an STE, it must be a shared (non-db)
+            # blobhelper.
             blobs_must_be_moved_now = True
 
         if blobs_must_be_moved_now or LOCK_EARLY:
@@ -271,44 +272,7 @@ class AbstractVote(AbstractTPCState):
 
         return invalidated
 
-    def __finish_store(self, committing_tid_int):
-        """
-        Move stored objects from the temporary table to final storage.
-        """
-        # Move the new states into the permanent table
-        # TODO: Figure out how to do as much as possible of this before holding
-        # the commit lock. For example, use a dummy TID that we later replace.
-        # (This has FK issues in HP dbs).
-        txn_has_blobs = self.blobhelper.txn_has_blobs
-
-        cursor = self.store_connection.cursor
-        adapter = self.adapter
-
-        try:
-            adapter.mover.move_from_temp(cursor, committing_tid_int, txn_has_blobs)
-        except:
-            if 0: # pylint:disable=using-constant-test
-                # CPython's compiler will completely elide from bytecode
-                # a `if 0` block.
-                import gevent.util
-                gevent.util.print_run_info(greenlet_stacks=False)
-            raise
-
-    def __choose_tid_and_lock(self):
-        """
-        Choose a tid for the current transaction, and exclusively lock
-        the database commit lock.
-
-        This should be done as late in the commit as possible, since
-        it must hold an exclusive commit lock.
-        """
-        adapter = self.adapter
-        cursor = self.store_connection.cursor
-        lock = DatabaseLockedForTid.lock_database_for_next_tid(cursor, adapter, self.ude)
-        self.committing_tid_lock = lock
-        return lock
-
-    def __lock_and_move(self, method='finish'):
+    def __lock_and_move(self, blobhelper_method=None):
         # Here's where we take the global commit lock, and
         # allocate the next available transaction id, storing it
         # into history-preserving DBs. But if someone passed us
@@ -324,21 +288,30 @@ class AbstractVote(AbstractTPCState):
             assert self.committing_tid_lock, (self.prepared_txn, self.committing_tid_lock)
             return
 
-        if not self.committing_tid_lock:
-            self.__choose_tid_and_lock()
-        committing_tid_int = self.committing_tid_lock.tid_int
-        self.__finish_store(committing_tid_int)
+        kwargs = {}
+        if self.committing_tid_lock:
+            kwargs['committing_tid_int'] = self.committing_tid_lock.tid_int
+        if blobhelper_method:
+            # Must be voting.
+            blob_meth = getattr(self.blobhelper, blobhelper_method)
+            kwargs['after_selecting_tid'] = lambda tid_int: blob_meth(int64_to_8bytes(tid_int))
+        committing_tid_int, prepared_txn = self.adapter.tpc_prepare_phase1(
+            self.store_connection,
+            self.blobhelper,
+            self.ude,
+            **kwargs
+        )
 
-        # TODO: If this is a non-shared blobhelper, then we don't need to do
-        # this with the database commit lock held.
-        # Under gevent, this doesn't yield, though.
-        blobhelper_meth = getattr(self.blobhelper, method)
-        blobhelper_meth(self.committing_tid_lock.tid)
+        self.prepared_txn = prepared_txn
+        committing_tid_lock = self.committing_tid_lock
+        assert committing_tid_lock is None or committing_tid_int == committing_tid_lock.tid_int
+        if committing_tid_lock is None:
+            self.committing_tid_lock = DatabaseLockedForTid(
+                int64_to_8bytes(committing_tid_int),
+                committing_tid_int,
+                self.adapter
+            )
 
-        cursor = self.store_connection.cursor
-        self.adapter.mover.update_current(cursor, committing_tid_int)
-        self.prepared_txn = self.adapter.txncontrol.commit_phase1(
-            self.store_connection, committing_tid_int)
 
     def tpc_finish(self, transaction, f=None):
         if transaction is not self.transaction:

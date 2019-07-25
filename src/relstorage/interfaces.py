@@ -42,6 +42,9 @@ class IBlobHelper(Interface):
     BlobCacheChecker).
     """
 
+    NEEDS_DB_LOCK_TO_FINISH = Attribute("Boolean")
+    NEEDS_DB_LOCK_TO_VOTE = Attribute("Boolean")
+
     def new_instance(adapter):
         """
         Create a new instance for use in a new MVCC storage.

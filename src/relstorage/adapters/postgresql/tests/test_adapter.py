@@ -1,6 +1,7 @@
+# -*- coding: utf-8 -*-
 ##############################################################################
 #
-# Copyright (c) 2009 Zope Foundation and Contributors.
+# Copyright (c) 2019 Zope Foundation and Contributors.
 # All Rights Reserved.
 #
 # This software is subject to the provisions of the Zope Public License,
@@ -11,13 +12,27 @@
 # FOR A PARTICULAR PURPOSE.
 #
 ##############################################################################
-"""TransactionControl implementations"""
-
 from __future__ import absolute_import
+from __future__ import division
 from __future__ import print_function
 
-from ..txncontrol import GenericTransactionControl
+
+from hamcrest import assert_that
+from nti.testing.matchers import validly_provides
 
 
-class MySQLTransactionControl(GenericTransactionControl):
-    pass
+from relstorage.tests import TestCase
+
+from ..adapter import PostgreSQLAdapter as Adapter
+
+from ... import interfaces
+
+class TestAdapter(TestCase):
+
+    def _makeOne(self):
+        return Adapter()
+
+    def test_implements(self):
+
+        adapter = self._makeOne()
+        assert_that(adapter, validly_provides(interfaces.IRelStorageAdapter))

@@ -52,8 +52,11 @@ class ScriptRunner(object):
     format_vars = {
     }
 
+    def new_instance(self):
+        return type(self)()
+
     def with_format_vars(self, **new_vars):
-        inst = type(self)()
+        inst = self.new_instance()
         inst.format_vars = dict(self.format_vars)
         inst.format_vars.update(new_vars)
         return inst

@@ -56,7 +56,16 @@ else:
 
 
 class IRelStorageAdapter(Interface):
-    """A database adapter for RelStorage"""
+    """
+    A database adapter for RelStorage.
+
+    Historically, this has just been a holding place for other components
+    for the particular database. However, it is moving to holding algorithms
+    involved in the storage; this facilitates moving chunks of functionality
+    into database stored procedures as appropriate. The basic algorithms are
+    implemented in :class:`.adapter.AbstractAdapter`.
+
+    """
 
     driver = Attribute("The IDBDriver being used")
     connmanager = Attribute("An IConnectionManager")
@@ -73,7 +82,8 @@ class IRelStorageAdapter(Interface):
     txncontrol = Attribute("An ITransactionControl")
 
     def new_instance():
-        """Return an instance for use by another RelStorage instance.
+        """
+        Return an instance for use by another RelStorage instance.
 
         Adapters that are stateless can simply return self.  Adapters
         that have mutable state must make a clone and return it.
@@ -81,6 +91,16 @@ class IRelStorageAdapter(Interface):
 
     def __str__():
         """Return a short description of the adapter"""
+
+    def lock_database_and_choose_next_tid(cursor,
+                                          username,
+                                          description,
+                                          extension):
+        """
+        Lock the database and allocate the next tid.
+
+        This is a temporary step.
+        """
 
 
 class IDBDialect(Interface):
@@ -703,13 +723,47 @@ class IObjectMover(Interface):
         """
         Move the temporarily stored objects to permanent storage.
 
+        *tid* is the integer tid of the transaction being committed.
+
         Returns nothing.
+
+        The steps should be as follows:
+
+            - If we are preserving history, then ``INSERT`` into
+              ``object_state`` the values stored in ``temp_store``,
+              remembering to coalesce the
+              ``LENGTH(temp_store.state)``.
+
+            - Otherwise, when we are not preserving history,
+              ``INSERT`` missing rows from ``object_state`` into
+              ``temp_store``, and ``UPDATE`` rows that were already
+              there. (This is best done with an upsert). If blobs are
+              involved, then ``DELETE`` from ``blob_chunk`` where the
+              OID is in ``temp_store``.
+
+            - For both types of storage, ``INSERT`` into
+              ``blob_chunk`` the values from ``temp_blob_chunk``. In a
+              history-free storage, this may be combined with the last
+              step in an ``UPSERT``.
         """
 
     def update_current(cursor, tid):
-        """Update the current object pointers.
+        """
+        Update the current object pointers.
 
-        tid is the integer tid of the transaction being committed.
+        *tid* is the integer tid of the transaction being committed.
+
+        Returns nothing. This does nothing when the storage is history
+        free.
+
+        When the storage preserves history, all the objects in
+        ``object_state`` having the given *tid* should have their
+        (oid, *tid*) stored into ``current_object``. This can be done
+        with a single upsert.
+
+        XXX: Why do we need to look at ``object_state``? Is there a
+        reason we can't look at the smaller ``temp_store``? Conflict
+        resolution maybe?
         """
 
     def download_blob(cursor, oid, tid, filename):

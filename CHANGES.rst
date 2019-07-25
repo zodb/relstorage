@@ -70,7 +70,7 @@
 - On MySQL, move allocating a TID into the database. On benchmarks
   of a local machine this can be a scant few percent faster, but it's
   primarily intended to reduce the number of round-trips to the
-  database. This is a step towards :issue:`281`.
+  database. This is a step towards :issue:`281`. See :pr:`286`.
 
 - On MySQL, set the connection timezone to be UTC. This is necessary
   to get values consistent between ``UTC_TIMESTAMP``,

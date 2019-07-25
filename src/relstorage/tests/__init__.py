@@ -318,10 +318,15 @@ class DisconnectedException(Exception):
 class CloseException(Exception):
     pass
 
+class LockException(Exception):
+    pass
+
 class MockDriver(object):
 
     disconnected_exceptions = (DisconnectedException,)
     close_exceptions = (CloseException,)
+    lock_exceptions = (LockException,)
+    illegal_operation_exceptions = ()
 
     dialect = DefaultDialect()
 

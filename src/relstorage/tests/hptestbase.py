@@ -417,8 +417,8 @@ class HistoryPreservingRelStorageTests(GenericRelStorageTests,
     ###
 
     def __tid_clock_needs_care(self):
-        txncontrol = self._storage._adapter.txncontrol
-        return getattr(txncontrol, 'RS_TEST_TXN_PACK_NEEDS_SLEEP', False)
+        adapter = self._storage._adapter
+        return getattr(adapter, 'RS_TEST_TXN_PACK_NEEDS_SLEEP', False)
 
     def __maybe_ignore_monotonic(self, cls, method_name):
         if not self.__tid_clock_needs_care():
@@ -526,6 +526,9 @@ class HistoryPreservingRelStorageTests(GenericRelStorageTests,
 
     def checkPackAllRevisions(self):
         self._pack_to_latest('checkPackAllRevisions')
+
+    def checkPackOnlyOneObject(self):
+        self._pack_to_latest('checkPackOnlyOneObject')
 
     def checkPackUndoLog(self):
         packafter = []
