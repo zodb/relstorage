@@ -12,7 +12,6 @@
 #
 ##############################################################################
 """A foundation for history-preserving RelStorage tests"""
-import time
 import unittest
 
 import transaction
@@ -242,9 +241,7 @@ class HistoryPreservingRelStorageTests(GenericRelStorageTests,
             transaction.get().note(u'add C to A')
             transaction.commit()
 
-            now = packtime = time.time()
-            while packtime <= now:
-                packtime = time.time()
+            packtime = c1._storage.lastTransactionInt()
             self._storage.pack(packtime, referencesf)
 
             # B should be gone, since nothing refers to it.
@@ -455,8 +452,11 @@ class HistoryPreservingRelStorageTests(GenericRelStorageTests,
             RevisionStorage.snooze = before_snooze
             PackableStorage.snooze = before_snooze
 
-    # def checkLoadBefore(self):
-    #     raise unittest.SkipTest("Assumes it can control timestamps")
+    def checkLoadBefore(self):
+        # Most of the time this works, but sometimes it fails an internal assertion,
+        # most commonly seen on AppVeyor.
+        # https://ci.appveyor.com/project/jamadden/relstorage/builds/26243441/job/p24ocr2ir6wpvg3v#L1087
+        raise unittest.SkipTest("Assumes it can control timestamps")
 
     def checkLoadBeforeOld(self):
         self.__maybe_ignore_monotonic(RevisionStorage.RevisionStorage,
