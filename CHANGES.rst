@@ -77,6 +77,14 @@
   ``UNIX_TIMESTAMP``, ``FROM_UNIXTIME``, and Python's ``time.gmtime``,
   as used for comparing TIDs.
 
+- On MySQL, move most steps of finishing a transaction into a stored
+  procedure. Together with the TID allocation changes, this reduces
+  the number of database queries from 1 to lock + 1 to get TID + 1 to
+  store transaction + 1 to move states + 2 for blobs + 1 to set
+  current = 7 down to 1. This is expected to be especially helpful for
+  gevent deployments, as only one greenlet switch needs to occur once
+  the database lock is held. See :issue:`281`.
+
 - Make ``RelStorage.pack()`` also accept a TID from the RelStorage
   database to pack to. The usual Unix timestamp form for choosing a
   pack time can be ambiguous in the event of multiple transactions

@@ -16,7 +16,9 @@ Database schema installers
 """
 from __future__ import absolute_import
 
+import glob
 from hashlib import md5
+import os.path
 
 from ZODB.POSException import StorageError
 from zope.interface import implementer
@@ -53,235 +55,40 @@ logger = __import__('logging').getLogger(__name__)
 # ``Driver.callproc_multi_result`` handles the details.
 
 
-# Procedure to set the minimum next OID in one trip to the server.
-_SET_MIN_OID = """
-CREATE PROCEDURE set_min_oid(min_oid BIGINT)
-COMMENT '{CHECKSUM}'
-BEGIN
-  -- In order to avoid deadlocks, we only do this if
-  -- the number we want to insert is strictly greater than
-  -- what the current sequence value is. If we use a value less
-  -- than that, there's a chance a different session has already allocated
-  -- and inserted that value into the table, meaning its locked.
-  -- We obviously cannot JUST use MAX(zoid) to find this value, we can't see
-  -- what other sessions have done. But if that's already >= to the min_oid,
-  -- then we don't have to do anything.
-  DECLARE next_oid BIGINT;
-
-  SELECT COALESCE(MAX(ZOID), 0)
-  INTO next_oid
-  FROM new_oid;
-
-  IF next_oid < min_oid THEN
-    -- Can't say for sure. Just because we can only see values
-    -- less doesn't mean they're not there in another transaction.
-
-    -- This will never block.
-    INSERT INTO new_oid VALUES ();
-    SELECT LAST_INSERT_ID()
-    INTO next_oid;
-
-    IF min_oid > next_oid THEN
-      -- This is unlikely to block. We just confirmed that the
-      -- sequence value is strictly less than this, so no one else
-      -- should be doing this.
-      INSERT IGNORE INTO new_oid (zoid)
-      VALUES (min_oid);
-
-      SET next_oid = min_oid;
-    END IF;
-  ELSE
-    -- Return a NULL value to signal that this value cannot
-    -- be cached and used because we didn't allocate it.
-    SET next_oid = NULL;
-  END IF;
-
-  SELECT next_oid;
-END;
-"""
-
 # NOTE: Unlike PostgreSQL, NOW() and UTC_TIMESTAMP() are only consistent
 # within a single *statement*; that is, unlike PostgreSQL, these values
 # can change within a transaction.
 
-# Procedure to generate a new 64-bit TID based on the current time.
-# Not called from Python, only from SQL.
-
-# We'd really prefer to use the database clock, as there's only one of
-# it and it's more likely to be consistent than clocks spread across
-# many client machines. Our test cases tend to assume that time.time()
-# moves forward at exactly the same speed as the TID clock, though,
-# especially if we don't commit anything. This doesn't hold true if we don't
-# use the local clock for the TID clock.
-_MAKE_TID_FOR_EPOCH = """
-CREATE PROCEDURE make_tid_for_epoch(
-      IN unix_ts REAL,
-      OUT tid_64 BIGINT)
-COMMENT '{CHECKSUM}'
-BEGIN
-  DECLARE ts TIMESTAMP;
-  DECLARE year, month, day, hour, minute INT;
-  DECLARE a1, a, b BIGINT;
-  DECLARE b1, second REAL;
-
-  SET ts = FROM_UNIXTIME(unix_ts) + 0.0;
-
-  SET year   = EXTRACT(YEAR from ts),
-      month  = EXTRACT(MONTH from ts),
-      day    = EXTRACT(DAY from ts),
-      hour   = EXTRACT(hour from ts),
-      minute = EXTRACT(minute from ts),
-      second = unix_ts % 60;
-
-
-  SET a1 = (((year - 1900) * 12 + month - 1) * 31 + day - 1);
-  SET a = (a1 * 24 + hour) *60 + minute;
-  -- This is a magic constant; see _timestamp.c
-  SET b1 = second / 1.3969838619232178e-08;
-  -- CAST(AS INTEGER) rounds, but the C and Python TimeStamp
-  -- simply truncate, and we must match them.
-  SET b = TRUNCATE(b1, 0);
-
-  SET tid_64 = (a << 32) + b;
-END;
-
-"""
-
-
-_MAKE_CURRENT_TID = """
-CREATE PROCEDURE make_current_tid(OUT tid_64 BIGINT)
-COMMENT '{CHECKSUM}'
-BEGIN
-  CALL make_tid_for_epoch(
-    UNIX_TIMESTAMP(UTC_TIMESTAMP(6)),
-    tid_64
-  );
-END;
-"""
-
-_HF_LOCK_AND_CHOOSE_TID_P = """
-CREATE PROCEDURE lock_and_choose_tid_p(OUT next_tid_64 BIGINT)
-COMMENT '{CHECKSUM}'
-BEGIN
-    DECLARE scratch BIGINT;
-    DECLARE current_tid_64 BIGINT;
-
-    SELECT tid
-    INTO scratch
-    FROM commit_row_lock
-    FOR UPDATE;
-
-    SELECT COALESCE(MAX(tid), 0)
-    INTO current_tid_64
-    FROM object_state;
-
-    CALL make_current_tid(next_tid_64);
-
-    IF next_tid_64 <= current_tid_64 THEN
-        SET next_tid_64 = current_tid_64 + 1;
-    END IF;
-END;
-"""
-
-_HF_LOCK_AND_CHOOSE_TID = """
-CREATE PROCEDURE lock_and_choose_tid()
-COMMENT '{CHECKSUM}'
-BEGIN
-    DECLARE next_tid_64 BIGINT;
-    CALL lock_and_choose_tid_p(next_tid_64);
-    SELECT next_tid_64;
-END;
-"""
-
-_HP_LOCK_AND_CHOOSE_TID = """
-CREATE PROCEDURE lock_and_choose_tid(
-    p_packed BOOLEAN,
-    p_username BLOB,
-    p_description BLOB,
-    p_extension BLOB
-)
-COMMENT '{CHECKSUM}'
-BEGIN
-    DECLARE scratch BIGINT;
-    DECLARE next_tid_64, current_tid_64 BIGINT;
-
-    SELECT tid
-    INTO scratch
-    FROM commit_row_lock
-    FOR UPDATE;
-
-    SELECT COALESCE(MAX(tid), 0)
-    INTO current_tid_64
-    FROM transaction;
-
-    CALL make_current_tid(next_tid_64);
-
-    IF next_tid_64 <= current_tid_64 THEN
-        SET next_tid_64 = current_tid_64 + 1;
-    END IF;
-
-    INSERT INTO transaction (
-        tid, packed, username, description, extension
+def _read_proc_files(keep_history):
+    """
+    Read the procedure files appropriate for the *keep_history*
+    setting and return a dictionary from procedure name to procedure
+    definition source.
+    """
+    generic_proc_dir = os.path.join(os.path.dirname(__file__), 'procs')
+    specific_proc_dir = os.path.join(generic_proc_dir, 'hp' if keep_history else 'hf')
+    logger.info(
+        "Reading stored procedures from %s and %s",
+        generic_proc_dir, specific_proc_dir
     )
-    VALUES (
-        next_tid_64, p_packed, p_username, p_description, p_extension
-    );
+    proc_files = []
+    for d in generic_proc_dir, specific_proc_dir:
+        proc_files.extend(
+            glob.glob(os.path.join(d, "*.sql"))
+        )
 
-    SELECT next_tid_64;
-END;
-"""
+    procedures = {}
+    for proc_file_name in proc_files:
+        with open(proc_file_name, "rt") as f:
+            source = f.read().strip()
+            # No leading or trailing lines allowed, only the procedure
+            # definition. That way everything is part of the checksum.
+        assert source.startswith('CREATE') and source.endswith('END;')
+        proc_name = os.path.splitext(os.path.basename(proc_file_name))[0]
+        assert proc_name in source
+        procedures[proc_name] = source
 
-_HF_LOCK_AND_CHOOSE_AND_MOVE = """
-CREATE PROCEDURE lock_and_choose_tid_and_move()
-COMMENT '{CHECKSUM}'
-BEGIN
-  DECLARE tid_64 BIGINT;
-
-  CALL lock_and_choose_tid_p(tid_64);
-
-  -- move_from_temp()
-  -- First the state for objects
-
-  INSERT INTO object_state (
-    zoid,
-    tid,
-    state_size,
-    state
-  )
-  SELECT zoid,
-         tid_64,
-         COALESCE(LENGTH(state), 0),
-         state
-  FROM temp_store
-  ORDER BY zoid
-  ON DUPLICATE KEY UPDATE
-     tid = VALUES(tid),
-     state_size = VALUES(state_size),
-     state = VALUES(state);
-
-  -- Then blob chunks. First delete in case we shrunk.
-  -- The MySQL optimizer, up
-  -- through at least 5.7.17 doesn't like actual subqueries in a DELETE
-  -- statement. See https://github.com/zodb/relstorage/issues/175
-  DELETE bc
-  FROM blob_chunk bc
-  INNER JOIN (SELECT zoid FROM temp_store) sq
-         ON bc.zoid = sq.zoid;
-
-  INSERT INTO blob_chunk (
-    zoid,
-    tid,
-    chunk_num,
-    chunk
-  )
-  SELECT zoid, tid_64, chunk_num, chunk
-  FROM temp_blob_chunk;
-
-  -- History free has no current_object to update.
-
-  SELECT tid_64;
-END;
-"""
+    return procedures
 
 @implementer(ISchemaInstaller)
 class MySQLSchemaInstaller(AbstractSchemaInstaller):
@@ -305,25 +112,18 @@ class MySQLSchemaInstaller(AbstractSchemaInstaller):
         'pack_state_tid',
     )
 
-    procedures = {
-        'set_min_oid': _SET_MIN_OID,
-        'make_current_tid': _MAKE_CURRENT_TID,
-        'make_tid_for_epoch': _MAKE_TID_FOR_EPOCH,
-    }
+
+    # {keep_history: {proc_name: proc_source}}
+    _PROCEDURES = {} # type: dict
+
 
     def __init__(self, driver=None, **kwargs):
         self.driver = driver
         super(MySQLSchemaInstaller, self).__init__(**kwargs)
-        self.procedures = dict(self.procedures)
-        self.procedures['lock_and_choose_tid'] = (
-            _HF_LOCK_AND_CHOOSE_TID
-            if not self.keep_history
-            else _HP_LOCK_AND_CHOOSE_TID
-        )
 
-        if not self.keep_history:
-            self.procedures['lock_and_choose_tid_and_move'] = _HF_LOCK_AND_CHOOSE_AND_MOVE
-            self.procedures['lock_and_choose_tid_p'] = _HF_LOCK_AND_CHOOSE_TID_P
+        if self.keep_history not in self._PROCEDURES:
+            self._PROCEDURES[self.keep_history] = _read_proc_files(self.keep_history)
+        self.procedures = self._PROCEDURES[self.keep_history]
 
     def get_database_name(self, cursor):
         cursor.execute("SELECT DATABASE()")

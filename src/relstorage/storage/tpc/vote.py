@@ -323,6 +323,16 @@ class AbstractVote(AbstractTPCState):
         assert self.committing_tid_lock is not None, self
         self.blobhelper.finish(self.committing_tid_lock.tid)
 
+        # The IStorage docs say that f() "must be called while the
+        # storage transaction lock is held." We don't really have a
+        # "storage transaction lock", just the global database lock,
+        # that we want to drop as quickly as possible, so it would be
+        # nice to drop the commit lock and then call f(). This
+        # probably doesn't really matter, though, as ZODB.Connection
+        # doesn't use f().
+        #
+        # TODO: Get releasing the commit lock to happen all at once too, in the
+        # same database call, so we don't have to switch greenlets to do it.
         try:
             if f is not None:
                 f(self.committing_tid_lock.tid)
