@@ -16,10 +16,9 @@ from __future__ import absolute_import
 from __future__ import print_function
 
 from relstorage.adapters.postgresql.adapter import PostgreSQLAdapter
-from relstorage.adapters.postgresql.adapter import select_driver
+
 
 assert PostgreSQLAdapter
-assert select_driver
 
 
 def debug_locks(cursor, me_only=False, exclusive_only=False): # pragma: no cover

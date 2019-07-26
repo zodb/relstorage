@@ -21,7 +21,8 @@ from zope.interface import implementer
 from ZODB.POSException import Unsupported
 
 from ...options import Options
-from .._abstract_drivers import _select_driver
+
+from ..adapter import AbstractAdapter
 
 from ..dbiter import HistoryFreeDatabaseIterator
 from ..dbiter import HistoryPreservingDatabaseIterator
@@ -45,8 +46,6 @@ from .txncontrol import PostgreSQLTransactionControl
 
 log = logging.getLogger(__name__)
 
-def select_driver(options=None):
-    return _select_driver(options or Options(), drivers)
 
 # TODO: Move to own file
 class PGPoller(Poller):
@@ -61,10 +60,12 @@ class PGPoller(Poller):
 
 
 @implementer(IRelStorageAdapter)
-class PostgreSQLAdapter(object):
+class PostgreSQLAdapter(AbstractAdapter):
     """PostgreSQL adapter for RelStorage."""
-
     # pylint:disable=too-many-instance-attributes
+
+    driver_options = drivers
+
     def __init__(self, dsn='', options=None):
         # options is a relstorage.options.Options or None
         self._dsn = dsn
@@ -74,7 +75,7 @@ class PostgreSQLAdapter(object):
         self.keep_history = options.keep_history
         self.version_detector = PostgreSQLVersionDetector()
 
-        self.driver = driver = select_driver(options)
+        self.driver = driver = self._select_driver()
         log.debug("Using driver %r", driver)
 
         self.connmanager = Psycopg2ConnectionManager(

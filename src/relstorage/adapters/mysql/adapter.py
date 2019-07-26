@@ -51,13 +51,14 @@ from __future__ import absolute_import
 from __future__ import print_function
 
 import logging
+import os
 
 from zope.interface import implementer
 
 from relstorage._compat import iteritems
 from relstorage.options import Options
 
-from .._abstract_drivers import _select_driver
+from ..adapter import AbstractAdapter
 
 from ..dbiter import HistoryFreeDatabaseIterator
 from ..dbiter import HistoryPreservingDatabaseIterator
@@ -79,13 +80,13 @@ from .txncontrol import MySQLTransactionControl
 
 log = logging.getLogger(__name__)
 
-def select_driver(options=None):
-    return _select_driver(options or Options(), drivers)
 
 @implementer(IRelStorageAdapter)
-class MySQLAdapter(object):
+class MySQLAdapter(AbstractAdapter):
     """MySQL adapter for RelStorage."""
     # pylint:disable=too-many-instance-attributes
+
+    driver_options = drivers
 
     def __init__(self, options=None, **params):
         if options is None:
@@ -94,7 +95,12 @@ class MySQLAdapter(object):
         self.keep_history = options.keep_history
         self._params = params
 
-        self.driver = driver = select_driver(options)
+        RUNNING_ON_APPVEYOR = os.environ.get('APPVEYOR')
+        # 5.7.12-log crashes when we call the stored procedure
+        # to move objects. No clue why.
+        self._known_broken_mysql_procs = RUNNING_ON_APPVEYOR
+
+        self.driver = driver = self._select_driver()
         log.debug("Using driver %r", driver)
 
         self.connmanager = MySQLdbConnectionManager(
@@ -180,3 +186,60 @@ class MySQLAdapter(object):
         p = sorted(iteritems(p))
         parts.extend('%s=%r' % item for item in p)
         return ", ".join(parts)
+
+    # A temporary magic variable as we move TID allocation into some
+    # databases; with an external clock, we *do* need to sleep waiting for
+    # TIDs to change in a manner we can exploit; that or we need to be very
+    # careful about choosing pack times.
+    RS_TEST_TXN_PACK_NEEDS_SLEEP = 1
+
+    def lock_database_and_choose_next_tid(self,
+                                          cursor,
+                                          username,
+                                          description,
+                                          extension):
+        proc = 'lock_and_choose_tid'
+        args = ()
+        if self.keep_history:
+            # (packed, username, descr, extension)
+            proc = proc + '(%s, %s, %s, %s)'
+            args = (False, username, description, extension)
+
+        multi_results = self.driver.callproc_multi_result(cursor, proc, args)
+        tid, = multi_results[0][0]
+        return tid
+
+    def tpc_prepare_phase1(self,
+                           store_connection,
+                           blobhelper,
+                           ude,
+                           commit=True,
+                           committing_tid_int=None,
+                           after_selecting_tid=lambda tid: None):
+        if self._known_broken_mysql_procs:
+            # XXX: Figure out why we're broken on AppVeyor. We want to
+            # drop this fallback path, it's extra duplicate queries.
+            return super(MySQLAdapter, self).tpc_prepare_phase1(
+                store_connection,
+                blobhelper,
+                ude,
+                committing_tid_int=committing_tid_int,
+                after_selecting_tid=after_selecting_tid)
+
+        params = (committing_tid_int, commit)
+        # (p_committing_tid, p_commit)
+        proc = 'lock_and_choose_tid_and_move(%s, %s)'
+        if self.keep_history:
+            params += ude
+            # (p_committing_tid, p_commit, p_user, p_desc, p_ext)
+            proc = 'lock_and_choose_tid_and_move(%s, %s, %s, %s, %s)'
+
+        multi_results = self.driver.callproc_multi_result(
+            store_connection.cursor,
+            proc,
+            params
+        )
+
+        tid_int, = multi_results[0][0]
+        after_selecting_tid(tid_int)
+        return tid_int, "-"

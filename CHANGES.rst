@@ -5,6 +5,52 @@
 3.0a6 (unreleased)
 ==================
 
+Enhancements
+------------
+
+- Eliminate a few extra round trips to the database on transaction
+  completion: One extra ``ROLLBACK`` in all databases, and one query
+  against the ``transaction`` table in history-preserving databases.
+  See :issue:`159`.
+
+- Prepare more statements used during regular polling.
+
+- Gracefully handle certain disconnected exceptions when rolling back
+  connections in between transactions. See :issue:`280`.
+
+- Fix a cache error ("TypeError: NoneType object is not
+  subscriptable") when an object had been deleted (such as through
+  undoing its creation transaction, or with ``multi-zodb-gc``).
+
+- Implement ``IExternalGC`` for history-preserving databases. This
+  lets them be used with `zc.zodbdgc
+  <https://pypi.org/project/zc.zodbdgc/>`_, allowing for
+  multi-database garbage collection (see :issue:`76`). Note that you
+  must pack the database after running ``multi-zodb-gc`` in order to
+  reclaim space.
+
+  .. caution::
+
+     It is critical that ``pack-gc`` be turned off (set to false) in a
+     multi-database and that only ``multi-zodb-gc`` be used to perform
+     garbage collection.
+
+Packing
+~~~~~~~
+
+- Make ``RelStorage.pack()`` also accept a TID from the RelStorage
+  database to pack to. The usual Unix timestamp form for choosing a
+  pack time can be ambiguous in the event of multiple transactions
+  within a very short period of time. This is mostly a concern for
+  automated tests.
+
+  Similarly, it will accept a value less than 0 to mean the most
+  recent transaction in the database. This is useful when machine
+  clocks may not be well synchronized, or from automated tests.
+
+Implementation
+--------------
+
 - Remove vestigial top-level thread locks. No instance of RelStorage
   is thread safe.
 
@@ -36,55 +82,48 @@
   ``IBlobStorage``, and if ``keep-history`` is false, it won't
   implement ``IStorageUndoable``.
 
-- Fix a cache error ("TypeError: NoneType object is not
-  subscriptable") when an object had been deleted (such as through
-  undoing its creation transaction, or with ``multi-zodb-gc``).
-
-- Implement ``IExternalGC`` for history-preserving databases. This
-  lets them be used with `zc.zodbdgc
-  <https://pypi.org/project/zc.zodbdgc/>`_, allowing for
-  multi-database garbage collection (see :issue:`76`). Note that you
-  must pack the database after running ``multi-zodb-gc`` in order to
-  reclaim space.
-
-  .. caution::
-
-     It is critical that ``pack-gc`` be turned off (set to false) in a
-     multi-database and that only ``multi-zodb-gc`` be used to perform
-     garbage collection.
-
-- Eliminate a few extra round trips to the database on transaction
-  completion: One extra ``ROLLBACK`` in all databases, and one query
-  against the ``transaction`` table in history-preserving databases.
-  See :issue:`159`.
-
-- Prepare more statements used during regular polling.
-
-- Gracefully handle certain disconnected exceptions when rolling back
-  connections in between transactions. See :issue:`280`.
-
 - Refactor RelStorage internals for a cleaner separation of concerns.
   This includes how (some) queries are written and managed, making it
   easier to prepare statements, but only those actually used.
 
+
+MySQL
+-----
+
 - On MySQL, move allocating a TID into the database. On benchmarks
   of a local machine this can be a scant few percent faster, but it's
   primarily intended to reduce the number of round-trips to the
-  database. This is a step towards :issue:`281`.
+  database. This is a step towards :issue:`281`. See :pr:`286`.
 
 - On MySQL, set the connection timezone to be UTC. This is necessary
   to get values consistent between ``UTC_TIMESTAMP``,
   ``UNIX_TIMESTAMP``, ``FROM_UNIXTIME``, and Python's ``time.gmtime``,
   as used for comparing TIDs.
 
-- Make ``RelStorage.pack()`` also accept a TID from the RelStorage
-  database to pack to. The usual Unix timestamp form for choosing a
-  pack time can be ambiguous in the event of multiple transactions
-  within a very short period of time. This is mostly a concern for
-  automated tests.
+- On MySQL, move most steps of finishing a transaction into a stored
+  procedure. Together with the TID allocation changes, this reduces
+  the number of database queries from::
 
-  Similarly, it will accept a value less than 0 to mean the most
-  recent transaction.
+    1 to lock
+     + 1 to get TID
+     + 1 to store transaction (0 in history free)
+     + 1 to move states
+     + 1 for blobs (2 in history free)
+     + 1 to set current (0 in history free)
+     + 1 to commit
+    = 7 or 6 (in history free)
+
+  down to 1. This is expected to be especially helpful for gevent
+  deployments, as the database lock is held, the transaction finalized
+  and committed, and the database lock released, all without involving
+  greenlets or greenlet switches. By allowing the GIL to be released
+  longer it may also be helpful for threaded environments. See :issue:`281`.
+
+  .. caution::
+
+     Calling the stored procedure is known to crash MySQL 5.7.12 as
+     installed on AppVeyor. The cause is unknown. A temporary
+     workaround is present, but is likely to be removed.
 
 - Make PyMySQL use the same precision as mysqlclient when sending
   floating point parameters.
@@ -92,6 +131,7 @@
 - Automatically detect when MySQL stored procedures in the database
   are out of date with the current source in this package and replace
   them.
+
 
 3.0a5 (2019-07-11)
 ==================

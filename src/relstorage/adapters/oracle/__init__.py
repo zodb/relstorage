@@ -15,7 +15,6 @@
 from __future__ import absolute_import
 
 from relstorage.adapters.oracle.adapter import OracleAdapter
-from relstorage.adapters.oracle.adapter import select_driver
+
 
 assert OracleAdapter
-assert select_driver

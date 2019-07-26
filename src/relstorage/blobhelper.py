@@ -48,6 +48,9 @@ class NoBlobHelper(object):
 
     __slots__ = ()
 
+    NEEDS_DB_LOCK_TO_FINISH = False
+    NEEDS_DB_LOCK_TO_VOTE = False
+
     shared_blob_helper = False
     txn_has_blobs = False
     shared_blob_dir = None
@@ -89,7 +92,7 @@ class NoBlobHelper(object):
         raise AttributeError("NoBlobHelper has no 'fshelper'")
 
 
-@implementer(IBlobHelper)
+
 class _AbstractBlobHelper(object):
     """
     Stores blobs on the filesystem. This base class
@@ -310,6 +313,9 @@ class _AbstractBlobHelper(object):
 @implementer(IBlobHelper)
 class SharedBlobHelper(_AbstractBlobHelper):
 
+    NEEDS_DB_LOCK_TO_VOTE = True
+    NEEDS_DB_LOCK_TO_FINISH = False
+
     def __init__(self, options, adapter, fshelper=None):
         assert options.shared_blob_dir
 
@@ -400,8 +406,11 @@ class SharedBlobHelper(_AbstractBlobHelper):
         if not self._has_files(dirname):
             ZODB.blob.remove_committed_dir(dirname)
 
-
+@implementer(IBlobHelper)
 class CacheBlobHelper(_AbstractBlobHelper):
+
+    NEEDS_DB_LOCK_TO_VOTE = False
+    NEEDS_DB_LOCK_TO_FINISH = False
 
     class SizeLimited(object):
         """

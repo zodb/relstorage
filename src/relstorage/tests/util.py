@@ -307,7 +307,7 @@ class AbstractTestSuiteBuilder(ABC):
                 prefix = '%s_%s%s' % (
                     layer_prefix,
                     'Shared' if shared_blob_dir else 'Unshared',
-                    'WithHistory' if keep_history else 'NoHistory',
+                    'HistoryPreserving' if keep_history else 'HistoryFree',
                 )
 
                 # If the blob directory is a cache, don't test packing,

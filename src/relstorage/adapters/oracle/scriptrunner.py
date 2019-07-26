@@ -113,6 +113,9 @@ class CXOracleScriptRunner(OracleScriptRunner):
     def __init__(self, driver):
         self.driver = driver
 
+    def new_instance(self):
+        return type(self)(self.driver)
+
     def _outputtypehandler(self, cursor, name, defaultType,
                            size, precision, scale): # pylint:disable=unused-argument
         """cx_Oracle outputtypehandler that causes Oracle to send BLOBs inline.

@@ -35,6 +35,9 @@ Connector/Python 8.0.16 is also tested to work as is pg8000.
 .. note:: umysql support was removed in RelStorage 3.0. Use 'gevent
           MySQLdb' instead.
 
+.. note:: mysqlclient 1.4 is not available on Windows for Python 2.
+          PyMySQL is tested instead.
+
 For CPython3, install psycopg2, mysqlclient 1.4+, or cx_Oracle;
 PyMySQL, MySQL Connector/Python  and pg8000 are also known to work.
 

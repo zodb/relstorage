@@ -447,12 +447,12 @@ class AbstractObjectMover(ABC):
 
             if txn_has_blobs:
                 # If we can require storages to have an UPSERT (mysql and
-                # postgres do), then we can remove the DELETE.
+                # postgres do), then can we remove the DELETE?
+                # Answer: probably not. What if the blob shrunk and we
+                # have fewer chunks than we used to?
                 stmt = self._move_from_temp_hf_delete_blob_chunk_query
                 cursor.execute(stmt)
 
-        # TODO: Make this an UPSERT for history free storages.
-        # This would obviate the need for the above delete query.
         if txn_has_blobs:
             stmt = self._move_from_temp_copy_blob_query
             __traceabck_info__ = stmt

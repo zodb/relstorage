@@ -19,11 +19,13 @@ import logging
 from zope.interface import implementer
 
 from ...options import Options
-from .._abstract_drivers import _select_driver
+
+from ..adapter import AbstractAdapter
 from ..dbiter import HistoryFreeDatabaseIterator
 from ..dbiter import HistoryPreservingDatabaseIterator
 from ..interfaces import IRelStorageAdapter
 from ..poller import Poller
+
 from . import drivers
 from .batch import OracleRowBatcher
 from .connmanager import CXOracleConnectionManager
@@ -39,14 +41,19 @@ from .txncontrol import OracleTransactionControl
 
 log = logging.getLogger(__name__)
 
-def select_driver(options=None):
-    return _select_driver(options or Options(), drivers)
 
 @implementer(IRelStorageAdapter)
-class OracleAdapter(object):
+class OracleAdapter(AbstractAdapter):
     """Oracle adapter for RelStorage."""
     # pylint:disable=too-many-instance-attributes
-    def __init__(self, user, password, dsn, commit_lock_id=0,
+
+    driver_options = drivers
+
+    def __init__(self,
+                 user='relstoragetest',
+                 password='relstoragetest',
+                 dsn='192.168.1.131/orcl',
+                 commit_lock_id=0,
                  twophase=False, options=None):
         """Create an Oracle adapter.
 
@@ -67,7 +74,7 @@ class OracleAdapter(object):
         self.options = options
         self.keep_history = options.keep_history
 
-        self.driver = driver = select_driver(options)
+        self.driver = driver = self._select_driver()
         log.debug("Using driver %s", driver)
 
         self.connmanager = CXOracleConnectionManager(
