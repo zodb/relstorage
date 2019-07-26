@@ -190,12 +190,15 @@ class BlobUndoTests(BlobTestBase):
 class RecoveryBlobStorage(BlobTestBase,
                           IteratorDeepCompare):
 
+    _dst = None
+
     def setUp(self):
         BlobTestBase.setUp(self)
         self._dst = self.create_storage('dest') # pylint:disable=no-member
 
     def tearDown(self):
-        self._dst.close()
+        if self._dst is not None:
+            self._dst.close()
         BlobTestBase.tearDown(self)
 
     # Requires a setUp() that creates a self._dst destination storage
