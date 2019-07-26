@@ -293,13 +293,17 @@ class AbstractVote(AbstractTPCState):
             assert self.committing_tid_lock, (self.prepared_txn, self.committing_tid_lock)
             return
 
-        kwargs = {}
+        kwargs = {
+            'commit': True
+        }
         if self.committing_tid_lock:
             kwargs['committing_tid_int'] = self.committing_tid_lock.tid_int
         if blobhelper_method:
             # Must be voting.
             blob_meth = getattr(self.blobhelper, blobhelper_method)
             kwargs['after_selecting_tid'] = lambda tid_int: blob_meth(int64_to_8bytes(tid_int))
+            kwargs['commit'] = False
+
         committing_tid_int, prepared_txn = self.adapter.tpc_prepare_phase1(
             self.store_connection,
             self.blobhelper,
@@ -327,7 +331,7 @@ class AbstractVote(AbstractTPCState):
         # TODO: Move most of this into the Finish class/module.
         self.__lock_and_move()
         assert self.committing_tid_lock is not None, self
-        self.blobhelper.finish(self.committing_tid_lock.tid)
+
 
         # The IStorage docs say that f() "must be called while the
         # storage transaction lock is held." We don't really have a
@@ -337,8 +341,21 @@ class AbstractVote(AbstractTPCState):
         # probably doesn't really matter, though, as ZODB.Connection
         # doesn't use f().
         #
-        # TODO: Get releasing the commit lock to happen all at once too, in the
-        # same database call, so we don't have to switch greenlets to do it.
+        # If we called `lock_and_move` for the first time in this
+        # method, then the adapter will have been asked to go ahead
+        # and commit, releasing any locks it can (some adapters do,
+        # some don't). So we may or may not have a database lock at
+        # this point.
+        assert not self.blobhelper.NEEDS_DB_LOCK_TO_FINISH
+        try:
+            self.blobhelper.finish(self.committing_tid_lock.tid)
+        except (IOError, OSError):
+            # If something failed to move, that's not really a problem:
+            # if we did any moving now, we're just a cache.
+            logger.exception(
+                "Failed to update blob-cache"
+            )
+
         try:
             if f is not None:
                 f(self.committing_tid_lock.tid)

@@ -71,6 +71,7 @@ class AbstractAdapter(object):
                            store_connection,
                            blobhelper,
                            ude,
+                           commit=True, # pylint:disable=unused-argument
                            committing_tid_int=None,
                            after_selecting_tid=lambda tid: None):
         # Here's where we take the global commit lock, and

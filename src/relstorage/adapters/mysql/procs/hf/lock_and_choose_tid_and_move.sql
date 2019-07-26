@@ -1,5 +1,6 @@
 CREATE PROCEDURE lock_and_choose_tid_and_move(
-  p_committing_tid BIGINT
+  p_committing_tid BIGINT,
+  p_commit BOOLEAN
 )
 COMMENT '{CHECKSUM}'
 BEGIN
@@ -46,6 +47,10 @@ BEGIN
   FROM temp_blob_chunk;
 
   -- History free has no current_object to update.
+
+  IF p_commit THEN
+    COMMIT;
+  END IF;
 
   SELECT p_committing_tid;
 END;

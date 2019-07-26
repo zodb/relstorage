@@ -1,5 +1,6 @@
 CREATE PROCEDURE lock_and_choose_tid_and_move(
     p_committing_tid BIGINT,
+    p_commit BOOLEAN,
     p_username BLOB,
     p_description BLOB,
     p_extension BLOB
@@ -47,6 +48,10 @@ BEGIN
   ORDER BY zoid
   ON DUPLICATE KEY UPDATE
      tid = VALUES(tid);
+
+  IF p_commit THEN
+    COMMIT;
+  END IF;
 
   SELECT p_committing_tid;
 END;

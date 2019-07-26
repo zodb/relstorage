@@ -213,6 +213,7 @@ class MySQLAdapter(AbstractAdapter):
                            store_connection,
                            blobhelper,
                            ude,
+                           commit=True,
                            committing_tid_int=None,
                            after_selecting_tid=lambda tid: None):
         if self._known_broken_mysql_procs:
@@ -225,15 +226,17 @@ class MySQLAdapter(AbstractAdapter):
                 committing_tid_int=committing_tid_int,
                 after_selecting_tid=after_selecting_tid)
 
-        params = (committing_tid_int,)
-        args = '(%s)'
+        params = (committing_tid_int, commit)
+        # (p_committing_tid, p_commit)
+        proc = 'lock_and_choose_tid_and_move(%s, %s)'
         if self.keep_history:
             params += ude
-            args = '(%s, %s, %s, %s)'
+            # (p_committing_tid, p_commit, p_user, p_desc, p_ext)
+            proc = 'lock_and_choose_tid_and_move(%s, %s, %s, %s, %s)'
 
         multi_results = self.driver.callproc_multi_result(
             store_connection.cursor,
-            'lock_and_choose_tid_and_move' + args,
+            proc,
             params
         )
 
