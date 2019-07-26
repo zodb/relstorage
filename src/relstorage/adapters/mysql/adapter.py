@@ -201,6 +201,7 @@ class MySQLAdapter(AbstractAdapter):
         proc = 'lock_and_choose_tid'
         args = ()
         if self.keep_history:
+            # (packed, username, descr, extension)
             proc = proc + '(%s, %s, %s, %s)'
             args = (False, username, description, extension)
 
@@ -214,14 +215,9 @@ class MySQLAdapter(AbstractAdapter):
                            ude,
                            committing_tid_int=None,
                            after_selecting_tid=lambda tid: None):
-        if self._known_broken_mysql_procs or committing_tid_int is not None or self.keep_history:
-            # Already allocated, must be doing a restore. Let the super
-            # handle it in the slow path.
-            #
-            # OR
-            #
-            # History-preserving.
-            # TODO: Implement a fast path for both of those things.
+        if self._known_broken_mysql_procs:
+            # XXX: Figure out why we're broken on AppVeyor. We want to
+            # drop this fallback path, it's extra duplicate queries.
             return super(MySQLAdapter, self).tpc_prepare_phase1(
                 store_connection,
                 blobhelper,
@@ -229,9 +225,16 @@ class MySQLAdapter(AbstractAdapter):
                 committing_tid_int=committing_tid_int,
                 after_selecting_tid=after_selecting_tid)
 
+        params = (committing_tid_int,)
+        args = '(%s)'
+        if self.keep_history:
+            params += ude
+            args = '(%s, %s, %s, %s)'
+
         multi_results = self.driver.callproc_multi_result(
             store_connection.cursor,
-            'lock_and_choose_tid_and_move',
+            'lock_and_choose_tid_and_move' + args,
+            params
         )
 
         tid_int, = multi_results[0][0]

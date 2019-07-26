@@ -85,6 +85,12 @@
   gevent deployments, as only one greenlet switch needs to occur once
   the database lock is held. See :issue:`281`.
 
+  .. caution::
+
+     This is known to crash MySQL 5.7.12 as installed on AppVeyor. The
+     cause is unknown. A temporary workaround is present, but may be
+     removed.
+
 - Make ``RelStorage.pack()`` also accept a TID from the RelStorage
   database to pack to. The usual Unix timestamp form for choosing a
   pack time can be ambiguous in the event of multiple transactions

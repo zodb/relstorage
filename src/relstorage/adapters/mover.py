@@ -453,8 +453,6 @@ class AbstractObjectMover(ABC):
                 stmt = self._move_from_temp_hf_delete_blob_chunk_query
                 cursor.execute(stmt)
 
-        # TODO: Make this an UPSERT for history free storages.
-        # This would obviate the need for the above delete query.
         if txn_has_blobs:
             stmt = self._move_from_temp_copy_blob_query
             __traceabck_info__ = stmt

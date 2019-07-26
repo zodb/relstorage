@@ -1,9 +1,11 @@
-CREATE PROCEDURE lock_and_choose_tid_and_move()
+CREATE PROCEDURE lock_and_choose_tid_and_move(
+  p_committing_tid BIGINT
+)
 COMMENT '{CHECKSUM}'
 BEGIN
-  DECLARE tid_64 BIGINT;
-
-  CALL lock_and_choose_tid_p(tid_64);
+  IF p_committing_tid IS NULL THEN
+    CALL lock_and_choose_tid_p(p_committing_tid);
+  END IF;
 
   -- move_from_temp()
   -- First the state for objects
@@ -15,7 +17,7 @@ BEGIN
     state
   )
   SELECT zoid,
-         tid_64,
+         p_committing_tid,
          COALESCE(LENGTH(state), 0),
          state
   FROM temp_store
@@ -40,10 +42,10 @@ BEGIN
     chunk_num,
     chunk
   )
-  SELECT zoid, tid_64, chunk_num, chunk
+  SELECT zoid, p_committing_tid, chunk_num, chunk
   FROM temp_blob_chunk;
 
   -- History free has no current_object to update.
 
-  SELECT tid_64;
+  SELECT p_committing_tid;
 END;

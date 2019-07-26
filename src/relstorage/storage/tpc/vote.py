@@ -75,6 +75,11 @@ class DatabaseLockedForTid(object):
         self.tid_int = tid_int
         self.release_commit_lock = adapter.locker.release_commit_lock
 
+    def __repr__(self):
+        return "<%s tid_int=%d>" %(
+            self.__class__.__name__,
+            self.tid_int
+        )
 
 class AbstractVote(AbstractTPCState):
     """
@@ -304,7 +309,8 @@ class AbstractVote(AbstractTPCState):
 
         self.prepared_txn = prepared_txn
         committing_tid_lock = self.committing_tid_lock
-        assert committing_tid_lock is None or committing_tid_int == committing_tid_lock.tid_int
+        assert committing_tid_lock is None or committing_tid_int == committing_tid_lock.tid_int, (
+            committing_tid_int, committing_tid_lock)
         if committing_tid_lock is None:
             self.committing_tid_lock = DatabaseLockedForTid(
                 int64_to_8bytes(committing_tid_int),

@@ -92,7 +92,7 @@ build_script:
   # --no-use-pep517
   # Here, we only want to install one driver; we only support the best
   # driver on Windows.
-  - "%CMD_IN_ENV% %PYEXE% -m pip install -U -e .[test,postgresql,mysql]"
+  - if not "%GWHEEL_ONLY%"=="true" "%CMD_IN_ENV% %PYEXE% -m pip install -U -e .[test,postgresql,mysql]"
 
 test_script:
   - if not "%GWHEEL_ONLY%"=="true" cmd /c .travis\mysql.cmd
