@@ -43,7 +43,7 @@ tests_require = [
     'zc.zlibstorage',
     'zope.testrunner',
     'nti.testing',
-    'gevent >= 1.5a1',
+    'gevent >= 1.5a1; sys_platform != "win32"',
     'pyperf',
     'psutil',
 ] + memcache_require

@@ -34,6 +34,7 @@ from ZODB.tests.util import TestCase as ZODBTestCase
 
 from ZODB.utils import p64
 
+from relstorage.storage import bytes8_to_int64
 from relstorage.tests.RecoveryStorage import UndoableRecoveryStorage
 from relstorage.tests.reltestbase import GenericRelStorageTests
 from relstorage.tests.reltestbase import AbstractFromFileStorage
@@ -549,69 +550,41 @@ class HistoryPreservingRelStorageTests(GenericRelStorageTests,
         finally:
             del self._dostoreNP
 
-    def checkTransactionalUndoAfterPackWithObjectUnlinkFromRoot(self):
-        # This test replaces the one from TransactionalUndoStorage.
-        # The functional difference is that this one uses a deterministic pack time
-        # based on the actual TID, not the current clock.
-        from ZODB.tests.TransactionalUndoStorage import C
-        eq = self.assertEqual
-        db = DB(self._storage)
-        conn = db.open()
+    def __pack_after_first_commit_on_first_child_instance(self, meth_name):
+        commit_tids = []
+        def first_tpc_finish(inst, orig_finish, *args, **kwargs):
+            tid = orig_finish(*args, **kwargs)
+            commit_tids.append(tid)
+            del inst.tpc_finish
+            return tid
+
+        s = self._storage
+        orig_new_instance = s.new_instance
+        def new_instance():
+            inst = orig_new_instance()
+            orig_finish = inst.tpc_finish
+            inst.tpc_finish = lambda *args, **kw: first_tpc_finish(inst, orig_finish, *args, **kw)
+            return inst
+
+        s.new_instance = new_instance
+
+        def find_packtime(_storage):
+            assert len(commit_tids) == 1
+            return bytes8_to_int64(commit_tids[0])
+
         try:
-            root = conn.root()
-
-            o1 = C()
-            o2 = C()
-            root['obj'] = o1
-            o1.obj = o2
-            txn = transaction.get()
-            txn.note(u'o1 -> o2')
-            txn.commit()
-
-            packtime = conn._storage.lastTransactionInt()
-
-            o3 = C()
-            o2.obj = o3
-            txn = transaction.get()
-            txn.note(u'o1 -> o2 -> o3')
-            txn.commit()
-
-            o1.obj = o3
-            txn = transaction.get()
-            txn.note(u'o1 -> o3')
-            txn.commit()
-
-            log = self._storage.undoLog()
-            eq(len(log), 4)
-            for entry in zip(log, (b'o1 -> o3', b'o1 -> o2 -> o3',
-                                   b'o1 -> o2', b'initial database creation')):
-                eq(entry[0]['description'], entry[1])
-
-            self._storage.pack(packtime, referencesf)
-
-            log = self._storage.undoLog()
-            for entry in zip(log, (b'o1 -> o3', b'o1 -> o2 -> o3')):
-                eq(entry[0]['description'], entry[1])
-
-            tid = log[0]['id']
-            db.undo(tid)
-            txn = transaction.get()
-            txn.note(u'undo')
-            txn.commit()
-            # undo does a txn-undo, but doesn't invalidate
-            conn.sync()
-
-            log = self._storage.undoLog()
-            for entry in zip(log, (b'undo', b'o1 -> o3', b'o1 -> o2 -> o3')):
-                eq(entry[0]['description'], entry[1])
-
-            eq(o1.obj, o2)
-            eq(o1.obj.obj, o3)
-            self._iterate()
+            self._pack_to_latest(meth_name, find_packtime)
         finally:
-            conn.close()
-            db.close()
+            del s.new_instance
+            del s
 
+    def checkTransactionalUndoAfterPackWithObjectUnlinkFromRoot(self):
+        self.__pack_after_first_commit_on_first_child_instance(
+            'checkTransactionalUndoAfterPackWithObjectUnlinkFromRoot'
+        )
+
+    def checkPackUnlinkedFromRoot(self):
+        self.__pack_after_first_commit_on_first_child_instance('checkPackUnlinkedFromRoot')
 
 class HistoryPreservingToFileStorage(AbstractToFileStorage,
                                      UndoableRecoveryStorage,
