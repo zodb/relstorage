@@ -16,8 +16,6 @@ Database schema installers
 """
 from __future__ import absolute_import
 
-import re
-
 from zope.interface import implementer
 
 from ..interfaces import ISchemaInstaller
@@ -25,110 +23,13 @@ from ..schema import AbstractSchemaInstaller
 
 logger = __import__('logging').getLogger(__name__)
 
-# Versions of the installed stored procedures. Change these when
-# the corresponding code changes.
-postgresql_proc_version = '3.0B'
-
-
-postgresql_procedures = [
-    """
-CREATE OR REPLACE FUNCTION blob_chunk_delete_trigger() RETURNS TRIGGER
-AS $blob_chunk_delete_trigger$
-    -- Version: %(postgresql_proc_version)s
-    -- Unlink large object data file after blob_chunk row deletion
-    DECLARE
-        cnt integer;
-    BEGIN
-        SELECT count(*) into cnt FROM blob_chunk WHERE chunk=OLD.chunk;
-        IF (cnt = 1) THEN
-            -- Last reference to this oid, unlink
-            PERFORM lo_unlink(OLD.chunk);
-        END IF;
-        RETURN OLD;
-    END;
-$blob_chunk_delete_trigger$ LANGUAGE plpgsql;
-""" % globals(),
-    """
-CREATE OR REPLACE FUNCTION temp_blob_chunk_delete_trigger() RETURNS TRIGGER
-AS $temp_blob_chunk_delete_trigger$
-    -- Version: %(postgresql_proc_version)s
-    -- Unlink large object data file after temp_blob_chunk row deletion
-    DECLARE
-        cnt integer;
-    BEGIN
-        SELECT count(*) into cnt FROM blob_chunk WHERE chunk=OLD.chunk;
-        IF (cnt = 0) THEN
-            -- No more references to this oid, unlink
-            PERFORM lo_unlink(OLD.chunk);
-        END IF;
-        RETURN OLD;
-    END;
-$temp_blob_chunk_delete_trigger$ LANGUAGE plpgsql;
-""" % globals(),
-    """
-CREATE OR REPLACE FUNCTION merge_blob_chunks()
-  RETURNS VOID
-AS $$
-    -- Version: %(postgresql_proc_version)s
-    -- Merge blob chunks into one entirely on the server.
-DECLARE
-  masterfd integer;
-  masterloid oid;
-  chunkfd integer;
-  rec record;
-  buf bytea;
-BEGIN
-  -- In history-free mode, zoid and chunk_num is the key.
-  -- in history-preserving mode, zoid/tid/chunk_num is the key.
-  -- for chunks, zoid and tid must always be used to look up the master.
-  FOR rec IN SELECT zoid, tid, chunk_num, chunk
-    FROM blob_chunk WHERE chunk_num > 0
-    ORDER BY zoid, chunk_num LOOP
-    -- Find the master and open it.
-    SELECT chunk
-    INTO STRICT masterloid
-    FROM blob_chunk
-    WHERE zoid = rec.zoid and tid = rec.tid AND chunk_num = 0;
-
-    -- open master for writing
-    SELECT lo_open(masterloid, 131072) -- 0x20000, AKA INV_WRITE
-    INTO STRICT masterfd;
-
-    -- position at the end
-    PERFORM lo_lseek(masterfd, 0, 2);
-    -- open the child for reading
-    SELECT lo_open(rec.chunk, 262144) -- 0x40000 AKA INV_READ
-    INTO STRICT chunkfd;
-    -- copy the data
-    LOOP
-      SELECT loread(chunkfd, 8192)
-      INTO buf;
-
-      EXIT WHEN LENGTH(buf) = 0;
-
-      PERFORM lowrite(masterfd, buf);
-    END LOOP;
-    -- close the files
-    PERFORM lo_close(chunkfd);
-    PERFORM lo_close(masterfd);
-
-  END LOOP;
-
-  -- Finally, remove the redundant chunks. Our trigger
-  -- takes care of removing the large objects.
-  DELETE FROM blob_chunk WHERE chunk_num > 0;
-
-END;
-$$
-LANGUAGE plpgsql;
-    """ % globals()
-]
-
 
 @implementer(ISchemaInstaller)
 class PostgreSQLSchemaInstaller(AbstractSchemaInstaller):
 
     database_type = 'postgresql'
+
+    _PROCEDURES = {} # Caching of proc files.
 
     def __init__(self, options, connmanager, runner, locker):
         self.options = options
@@ -138,16 +39,9 @@ class PostgreSQLSchemaInstaller(AbstractSchemaInstaller):
 
     def get_database_name(self, cursor):
         cursor.execute("SELECT current_database()")
-        for (name,) in cursor:
-            if isinstance(name, str):
-                return name
-            if hasattr(name, 'encode'):
-                # OK, name must be a unicode object, and we must be on Py2.
-                # pg8000 does this.
-                assert isinstance(name, unicode) # pylint:disable=undefined-variable
-                return name.encode('ascii')
-            assert isinstance(name, bytes)
-            return name.decode('ascii')
+        row, = cursor.fetchall()
+        name, = row
+        return self._metadata_to_native_str(name)
 
     def _prepare_with_connection(self, conn, cursor):
         super(PostgreSQLSchemaInstaller, self)._prepare_with_connection(conn, cursor)
@@ -172,71 +66,88 @@ class PostgreSQLSchemaInstaller(AbstractSchemaInstaller):
                 # If we've done our job right, any blobs cached on
                 # disk are still perfectly valid.
 
+    def __native_names_only(self, cursor):
+        native = self._metadata_to_native_str
+        return [
+            native(name)
+            for (name,) in cursor.fetchall()
+        ]
+
     def list_tables(self, cursor):
         cursor.execute("SELECT tablename FROM pg_tables")
-        return [name if isinstance(name, str) else name.decode('ascii')
-                for (name,) in cursor.fetchall()]
+        return self.__native_names_only(cursor)
 
     def list_sequences(self, cursor):
         cursor.execute("SELECT relname FROM pg_class WHERE relkind = 'S'")
-        return [name for (name,) in cursor.fetchall()]
+        return self.__native_names_only(cursor)
 
     def list_languages(self, cursor):
         cursor.execute("SELECT lanname FROM pg_catalog.pg_language")
-        return [name for (name,) in cursor.fetchall()]
+        return self.__native_names_only(cursor)
 
     def install_languages(self, cursor):
         if 'plpgsql' not in self.list_languages(cursor):
             cursor.execute("CREATE LANGUAGE plpgsql")
 
     def list_procedures(self, cursor):
-        """Returns {procedure name: version}.  version may be None."""
+        """
+        Returns {procedure name: checksum}. *checksum* may be None.
+        """
+        # The description is populated with ``COMMENT ON FUNCTION <name> IS 'comment'``
         stmt = """
-        SELECT proname, prosrc
-        FROM pg_catalog.pg_namespace n
-        JOIN pg_catalog.pg_proc p ON pronamespace = n.oid
-        JOIN pg_catalog.pg_type t ON prorettype = t.oid
-        WHERE nspname = 'public'
+        SELECT p.proname AS funcname,  d.description
+        FROM pg_proc p
+        INNER JOIN pg_namespace n ON n.oid = p.pronamespace
+        LEFT JOIN pg_description As d ON (d.objoid = p.oid)
+        WHERE n.nspname = 'public'
         """
         cursor.execute(stmt)
         res = {}
-        for (name, text) in cursor.fetchall():
-            name = self._metadata_to_native_str(name)
-            text = self._metadata_to_native_str(text)
-
-            version = None
-            match = re.search(r'Version:\s*([0-9a-zA-Z.]+)', text)
-            if match is not None:
-                version = match.group(1)
-            res[name.lower()] = version
+        native = self._metadata_to_native_str
+        for (name, checksum) in cursor.fetchall():
+            name = native(name)
+            checksum = native(checksum) if checksum is not None else None
+            res[name.lower()] = checksum
         return res
 
     def all_procedures_installed(self, cursor):
-        """Check whether all required stored procedures are installed.
+        """
+        Check whether all required stored procedures are installed.
 
         Returns True only if all required procedures are installed and
         up to date.
         """
-        expect = [
-            'blob_chunk_delete_trigger',
-            'temp_blob_chunk_delete_trigger',
-            'merge_blob_chunks',
-        ]
-        current_procs = self.list_procedures(cursor)
-        for proc in expect:
-            if current_procs.get(proc) != postgresql_proc_version:
-                return False
+
+        expected = {
+            proc_name: self._checksum_for_str(proc_source)
+            for proc_name, proc_source
+            in self.procedures.items()
+        }
+
+        installed = self.list_procedures(cursor)
+        if installed != expected:
+            logger.info(
+                "Procedures incorrect, will reinstall. "
+                "Expected: %s."
+                "Actual: %s",
+                expected, installed
+            )
+            return False
         return True
 
     def install_procedures(self, cursor):
         """Install the stored procedures"""
         self.install_languages(cursor)
-        for stmt in postgresql_procedures:
-            cursor.execute(stmt)
+        for proc_name, proc_source in self.procedures.items():
+            checksum = self._checksum_for_str(proc_source)
+            cursor.execute(proc_source)
+            # For pg8000 we can't use a parameter here.
+            comment = "COMMENT ON FUNCTION %s IS '%s'" % (proc_name, checksum)
+            cursor.execute(comment)
 
     def list_triggers(self, cursor):
         cursor.execute("SELECT tgname FROM pg_trigger")
-        return [name for (name,) in cursor]
+        return self.__native_names_only(cursor)
 
     def install_triggers(self, cursor):
         stmt = """

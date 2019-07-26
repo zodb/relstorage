@@ -16,10 +16,6 @@ Database schema installers
 """
 from __future__ import absolute_import
 
-import glob
-from hashlib import md5
-import os.path
-
 from ZODB.POSException import StorageError
 from zope.interface import implementer
 
@@ -59,36 +55,7 @@ logger = __import__('logging').getLogger(__name__)
 # within a single *statement*; that is, unlike PostgreSQL, these values
 # can change within a transaction.
 
-def _read_proc_files(keep_history):
-    """
-    Read the procedure files appropriate for the *keep_history*
-    setting and return a dictionary from procedure name to procedure
-    definition source.
-    """
-    generic_proc_dir = os.path.join(os.path.dirname(__file__), 'procs')
-    specific_proc_dir = os.path.join(generic_proc_dir, 'hp' if keep_history else 'hf')
-    logger.info(
-        "Reading stored procedures from %s and %s",
-        generic_proc_dir, specific_proc_dir
-    )
-    proc_files = []
-    for d in generic_proc_dir, specific_proc_dir:
-        proc_files.extend(
-            glob.glob(os.path.join(d, "*.sql"))
-        )
 
-    procedures = {}
-    for proc_file_name in proc_files:
-        with open(proc_file_name, "rt") as f:
-            source = f.read().strip()
-            # No leading or trailing lines allowed, only the procedure
-            # definition. That way everything is part of the checksum.
-        assert source.startswith('CREATE') and source.endswith('END;')
-        proc_name = os.path.splitext(os.path.basename(proc_file_name))[0]
-        assert proc_name in source
-        procedures[proc_name] = source
-
-    return procedures
 
 @implementer(ISchemaInstaller)
 class MySQLSchemaInstaller(AbstractSchemaInstaller):
@@ -112,18 +79,11 @@ class MySQLSchemaInstaller(AbstractSchemaInstaller):
         'pack_state_tid',
     )
 
-
-    # {keep_history: {proc_name: proc_source}}
-    _PROCEDURES = {} # type: dict
-
+    _PROCEDURES = {}
 
     def __init__(self, driver=None, **kwargs):
         self.driver = driver
         super(MySQLSchemaInstaller, self).__init__(**kwargs)
-
-        if self.keep_history not in self._PROCEDURES:
-            self._PROCEDURES[self.keep_history] = _read_proc_files(self.keep_history)
-        self.procedures = self._PROCEDURES[self.keep_history]
 
     def get_database_name(self, cursor):
         cursor.execute("SELECT DATABASE()")
@@ -220,15 +180,22 @@ class MySQLSchemaInstaller(AbstractSchemaInstaller):
         super(MySQLSchemaInstaller, self)._prepare_with_connection(conn, cursor)
         MySQLOIDAllocator(self.driver).garbage_collect_oids(cursor)
 
+    def _read_proc_files(self):
+        name_to_source = super(MySQLSchemaInstaller, self)._read_proc_files()
+
+        for proc_name, source in name_to_source.items():
+            # No leading or trailing lines allowed, only the procedure
+            # definition. That way everything is part of the checksum.
+            assert source.startswith('CREATE') and source.endswith('END;')
+            # Ensure we're creating what we think we are.
+            assert proc_name in source
+        return name_to_source
+
     def create_procedures(self, cursor):
         installed = self.list_procedures(cursor)
         for name, create_stmt in self.procedures.items():
             __traceback_info__ = name
-            checksum = md5(
-                create_stmt.encode('ascii')
-                if not isinstance(create_stmt, bytes)
-                else create_stmt
-            ).hexdigest()
+            checksum = self._checksum_for_str(create_stmt)
             create_stmt = create_stmt.format(CHECKSUM=checksum)
             assert checksum in create_stmt
             if name in installed:

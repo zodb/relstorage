@@ -144,9 +144,13 @@ class DatabaseHelpersMixin(object):
     def _metadata_to_native_str(self, value):
         # Some drivers, in some configurations, notably older versions
         # of MySQLdb (mysqlclient) on Python 3 in 'NAMES binary' mode,
-        # can return column names and the like as bytes when we want str.
+        # can return column names and the like as bytes when we want native str.
+        # pg8000 on Python2 does the reverse and returns unicode when we want
+        # native str.
         if not isinstance(value, str):
-            value = value.decode('ascii')
+            # Checking for bytes tells us that it's a unicode object on Python 2;
+            # we won't get here if it's bytes (because bytes is str)
+            value = value.decode('ascii') if isinstance(value, bytes) else value.encode('ascii"')
         return value
 
     def _column_descriptions(self, cursor):

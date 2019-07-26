@@ -16,7 +16,12 @@ Database schema installers
 """
 import abc
 import logging
+import os
+import glob
+import sys
+
 from functools import partial
+from hashlib import md5
 
 from ZODB.POSException import StorageError
 
@@ -35,8 +40,7 @@ from .sql import State
 from .sql import Boolean
 from .sql import BinaryString
 
-
-log = logging.getLogger("relstorage")
+logger = log = logging.getLogger("relstorage")
 
 tmpl_property = partial(query_property,
                         property_suffix='_TMPLS',
@@ -134,6 +138,16 @@ class AbstractSchemaInstaller(DatabaseHelpersMixin,
 
     database_type = None  # provided by a subclass
 
+    # A dictionary from procedure name to procedure definition.
+    # We populate this automatically at construction time based on
+    # our history-keeping state.
+    procedures = None
+
+    # Class variable.
+    # {keep_history: {proc_name: proc_source}}
+    # subclasses *must* define if they want caching.
+    _PROCEDURES = None # type: dict
+
     def __init__(self, connmanager, runner, keep_history):
         self.connmanager = connmanager
         self.keep_history = keep_history
@@ -147,6 +161,70 @@ class AbstractSchemaInstaller(DatabaseHelpersMixin,
             state_type=self.COLTYPE_STATE,
             transactional_suffix=self.TRANSACTIONAL_TABLE_SUFFIX,
         )
+
+        # if subclasses don't define, we don't cache.
+        proc_cache = self._PROCEDURES if self._PROCEDURES is not None else {}
+        if self.keep_history not in proc_cache:
+            proc_cache[self.keep_history] = self._read_proc_files()
+        self.procedures = proc_cache[self.keep_history]
+
+    def _read_proc_files(self):
+        """
+        Read the procedure files appropriate for the *keep_history*
+        setting and return a dictionary from procedure name to
+        procedure definition source.
+
+        The files come from the ``procs`` subdirectory beside the
+        ``__file__`` in which the class of *self* is defined, and
+        either the ``hf`` or ``hp`` folders within ``procs``
+        (depending on ``self.keep_history``). The file name, minus the
+        ``.sql`` extension, must match the name of the procedure. All
+        ``.sql`` files in the ``procs`` directory are used for both
+        history states, and then files in the ``hf`` or ``hp``
+        directory are added to that; the file names in ``procs`` and ``h[pf]``
+        must not be duplicates. Further, the file name (minus extension)
+        must appear in the source.
+
+        The file source is read in text mode and stripped, but other than that
+        is unprocessed.
+        """
+
+        # TODO: importlib.resources or its backport importlib_resources
+
+        self_dir = os.path.dirname(sys.modules[type(self).__module__].__file__)
+
+        generic_proc_dir = os.path.join(self_dir, 'procs')
+        specific_proc_dir = os.path.join(generic_proc_dir, 'hp' if self.keep_history else 'hf')
+        logger.info(
+            "Reading stored procedures from %s and %s",
+            generic_proc_dir, specific_proc_dir
+        )
+        proc_files = []
+        for d in generic_proc_dir, specific_proc_dir:
+            proc_files.extend(
+                glob.glob(os.path.join(d, "*.sql"))
+            )
+
+        # Make sure there's no dups, that's probably an accident
+        assert len(proc_files) == len(set(proc_files))
+
+        procedures = {}
+        for proc_file_name in proc_files:
+            with open(proc_file_name, "rt") as f:
+                source = f.read().strip()
+            proc_name = os.path.splitext(os.path.basename(proc_file_name))[0]
+            assert proc_name in source
+            procedures[proc_name] = source
+
+        return procedures
+
+    @staticmethod
+    def _checksum_for_str(stmt):
+        return md5(
+            stmt.encode('ascii')
+            if not isinstance(stmt, bytes)
+            else stmt
+        ).hexdigest()
 
     @abc.abstractmethod
     def list_tables(self, cursor):

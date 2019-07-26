@@ -31,7 +31,7 @@ RelStorage 3.0 requires PostgreSQL 9.6 or above.
 
 .. tip::
 
-   Persistent object state data (pickles) will default to being stored
+   PostgreSQL defaults to storing persistent object state data (pickles)
    on disk in a compressed format if they are longer than roughly
    2,000 bytes. Thus wrapper storages like ``zc.zlibstorage`` are
    unlikely to save much disk space. They may still reduce network
