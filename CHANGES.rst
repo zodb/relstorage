@@ -117,13 +117,14 @@ MySQL
   deployments, as the database lock is held, the transaction finalized
   and committed, and the database lock released, all without involving
   greenlets or greenlet switches. By allowing the GIL to be released
-  longer it may also be helpful for threaded environments. See :issue:`281`.
+  longer it may also be helpful for threaded environments. See
+  :issue:`281` and :pr:`287` for benchmarks and specifics.
 
   .. caution::
 
-     Calling the stored procedure is known to crash MySQL 5.7.12 as
-     installed on AppVeyor. The cause is unknown. A temporary
-     workaround is present, but is likely to be removed.
+    MySQL 5.7.18 and earlier contain a severe bug that causes the
+    server to crash when the stored procedure is executed.
+
 
 - Make PyMySQL use the same precision as mysqlclient when sending
   floating point parameters.

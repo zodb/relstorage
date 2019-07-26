@@ -85,7 +85,7 @@ dsn
 MySQL Adapter Options
 =====================
 
-RelStorage 3.0 requires MySQL 5.7.9 or above; 5.7.16 or higher, or
+RelStorage 3.0 requires MySQL 5.7.19 or above; 5.7.21 or higher, or
 MySQL 8.0.16 or higher, is recommended.
 
 .. note::
@@ -96,6 +96,10 @@ MySQL 8.0.16 or higher, is recommended.
    constraints, but creating a new RelStorage schema under MySQL 8.0
    will include enforced ``CHECK`` constraints.
 
+.. caution::
+
+   MySQL 5.0.18 and earlier contain crashing bugs. See :pr:`287` for
+   details.
 
 The MySQL adapter accepts most parameters supported by the mysqlclient
 library (the maintained version of MySQL-python), including:
