@@ -51,6 +51,7 @@ from __future__ import absolute_import
 from __future__ import print_function
 
 import logging
+import os
 
 from zope.interface import implementer
 
@@ -93,6 +94,11 @@ class MySQLAdapter(AbstractAdapter):
         self.options = options
         self.keep_history = options.keep_history
         self._params = params
+
+        RUNNING_ON_APPVEYOR = os.environ.get('APPVEYOR')
+        # 5.7.12-log crashes when we call the stored procedure
+        # to move objects. No clue why.
+        self._known_broken_mysql_procs = RUNNING_ON_APPVEYOR
 
         self.driver = driver = self._select_driver()
         log.debug("Using driver %r", driver)
@@ -208,7 +214,7 @@ class MySQLAdapter(AbstractAdapter):
                            ude,
                            committing_tid_int=None,
                            after_selecting_tid=lambda tid: None):
-        if committing_tid_int is not None or self.keep_history:
+        if self._known_broken_mysql_procs or committing_tid_int is not None or self.keep_history:
             # Already allocated, must be doing a restore. Let the super
             # handle it in the slow path.
             #
