@@ -1,0 +1,9 @@
+CREATE OR REPLACE FUNCTION make_current_tid()
+RETURNS BIGINT
+AS
+$$
+  SELECT make_tid_for_epoch(
+    EXTRACT(EPOCH FROM clock_timestamp())
+  );
+$$
+LANGUAGE SQL STABLE STRICT PARALLEL SAFE;

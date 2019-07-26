@@ -15,10 +15,13 @@
 from __future__ import absolute_import
 
 import logging
+import time
 import unittest
 
 from ZODB.tests import StorageTestBase
 
+from relstorage._util import timestamp_at_unixtime
+from relstorage.storage import bytes8_to_int64
 from relstorage.adapters.postgresql import PostgreSQLAdapter
 
 from .util import AbstractTestSuiteBuilder
@@ -132,6 +135,77 @@ class TestBlobMerge(PostgreSQLAdapterMixin,
         conn.close()
         db.close()
 
+class TestGenerateTIDPG(PostgreSQLAdapterMixin,
+                        StorageCreatingMixin,
+                        TestCase,
+                        StorageTestBase.StorageTestBase):
+    # pylint:disable=too-many-ancestors
+
+    def setUp(self):
+        super(TestGenerateTIDPG, self).setUp()
+        self._storage = self._closing(self.make_storage())
+
+    def test_extract_parts(self):
+        unix_time = 1564063129.1277142
+
+        query = """
+        SELECT EXTRACT(year FROM ts) as YEAR,
+               EXTRACT(month FROM ts) AS month,
+               EXTRACT(day FROM ts) AS day,
+               EXTRACT(hour FROM ts) AS hour,
+               EXTRACT(minute FROM ts) AS minute,
+               EXTRACT(seconds FROM ts) AS seconds
+        FROM (
+            SELECT timezone('UTC', to_timestamp(%s)) AS ts
+        ) t
+        """
+        cursor = self._storage._load_connection.cursor
+        cursor.execute(query, (unix_time,))
+        year, month, day, hour, minute, seconds = cursor.fetchone()
+        self.assertEqual(year, 2019)
+        self.assertEqual(month, 7)
+        self.assertEqual(day, 25)
+        self.assertEqual(hour, 13) # If this is not 13, the time_zone is incorrect
+        self.assertEqual(minute, 58)
+        self.assertEqual(
+            round(float(seconds), 6),
+            49.127714)
+
+    def test_known_time(self):
+        now = 1564054182.277615
+        gmtime = (2019, 7, 25, 11, 29, 42, 3, 206, 0)
+
+        self.assertEqual(
+            time.gmtime(now),
+            gmtime
+        )
+
+        ts_now = timestamp_at_unixtime(now)
+        self.assertEqual(
+            ts_now.raw(),
+            b'\x03\xd1Oq\xb4bn\x00'
+        )
+
+        self.test_current_time(now)
+
+    def test_current_time(self, now=None):
+        if now is None:
+            now = time.time()
+        storage = self._storage
+        ts_now = timestamp_at_unixtime(now)
+
+        expected_tid_int = bytes8_to_int64(ts_now.raw())
+
+        cursor = storage._load_connection.cursor
+
+        cursor.execute('SELECT make_tid_for_epoch(%s)', (now,))
+        tid, = cursor.fetchall()[0]
+
+        self.assertEqual(
+            tid,
+            expected_tid_int
+        )
+
 # Timing shows that we spend 6.9s opening database connections to a
 # local PostgreSQL 11 server when using Python 3.7 and psycopg2 2.8
 # during a total test run of 2:27. I had thought that maybe connection
@@ -147,7 +221,7 @@ class PostgreSQLTestSuiteBuilder(AbstractTestSuiteBuilder):
         super(PostgreSQLTestSuiteBuilder, self).__init__(
             drivers,
             PostgreSQLAdapterMixin,
-            extra_test_classes=(TestBlobMerge,)
+            extra_test_classes=(TestBlobMerge, TestGenerateTIDPG)
         )
 
     def _compute_large_blob_size(self, use_small_blobs):

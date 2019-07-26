@@ -15,6 +15,7 @@
 Database schema installers
 """
 from __future__ import absolute_import
+from __future__ import print_function
 
 from zope.interface import implementer
 
@@ -138,12 +139,41 @@ class PostgreSQLSchemaInstaller(AbstractSchemaInstaller):
     def install_procedures(self, cursor):
         """Install the stored procedures"""
         self.install_languages(cursor)
-        for proc_name, proc_source in self.procedures.items():
-            checksum = self._checksum_for_str(proc_source)
-            cursor.execute(proc_source)
-            # For pg8000 we can't use a parameter here.
-            comment = "COMMENT ON FUNCTION %s IS '%s'" % (proc_name, checksum)
-            cursor.execute(comment)
+        # PostgreSQL procedures in the SQL language
+        # do lots of validation at compile time; in particular,
+        # they check that the functions they use in SELECT statements
+        # actually exist. When we have procedures that call each other,
+        # that means there's an order they have to be created in.
+        # Rather than try to figure out what that order is, or encode it
+        # in names somehow, we just loop multiple times until we don't get any errors,
+        # figuring that we'll create a leaf function on the first time, and then
+        # more and more dependent functions on each iteration.
+        iters = range(5)
+        last_ex = None
+        for _ in iters:
+            last_ex = None
+            for proc_name, proc_source in self.procedures.items():
+                __traceback_info__ = proc_name, self.keep_history
+                checksum = self._checksum_for_str(proc_source)
+
+                try:
+                    cursor.execute(proc_source)
+                except self.connmanager.driver.driver_module.ProgrammingError as ex:
+                    logger.info("Failed to create %s: %s", proc_name, ex)
+                    last_ex = ex, __traceback_info__
+                    cursor.connection.rollback()
+                    continue
+
+                # For pg8000 we can't use a parameter here.
+                comment = "COMMENT ON FUNCTION %s IS '%s'" % (proc_name, checksum)
+                cursor.execute(comment)
+                cursor.connection.commit()
+
+            if last_ex is None:
+                return
+
+        last_ex, __traceback_info__ = last_ex
+        raise last_ex
 
     def list_triggers(self, cursor):
         cursor.execute("SELECT tgname FROM pg_trigger")

@@ -213,6 +213,7 @@ class AbstractSchemaInstaller(DatabaseHelpersMixin,
             with open(proc_file_name, "rt") as f:
                 source = f.read().strip()
             proc_name = os.path.splitext(os.path.basename(proc_file_name))[0]
+            __traceback_info__ = proc_file_name, proc_name
             assert proc_name in source
             procedures[proc_name] = source
 

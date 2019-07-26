@@ -133,6 +133,10 @@ MySQL
   are out of date with the current source in this package and replace
   them.
 
+PostgreSQL
+----------
+
+- As for MySQL, move allocating a TID into the database.
 
 3.0a5 (2019-07-11)
 ==================

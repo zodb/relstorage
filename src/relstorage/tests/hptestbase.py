@@ -170,6 +170,7 @@ class HistoryPreservingRelStorageTests(GenericRelStorageTests,
             transaction.commit()
 
             info = self._storage.undoInfo()
+            __traceback_info__ = info
             self.assertEqual(info[0]['description'], check_string)
             self.assertEqual(info[1]['user_name'], b'/ ' + check_string)
         finally:

@@ -34,7 +34,24 @@ def timestamp_at_unixtime(now):
     Return a :class:`persistent.timestamp.TimeStamp` for the moment
     given by *now* (a float giving seconds since the epoch).
     """
-    return TimeStamp(*(time.gmtime(now)[:5] + (now % 60,)))
+
+    # ``now`` is a float (double precision.). We extract the seconds
+    # value using ``now % 60.0``. But performing a modulus operation
+    # on it tends to invent precision that we do not really have.
+    #
+    # For example, given the timestamp ``1564178539.353595``, the
+    # correct value for seconds is obviously ``19.353595``. But Python
+    # tends to answer ``19.35359501838684``. When the TimeStamp
+    # constructor takes that double precision value and applies *more*
+    # arithmetic to it to set the bias, the results get worse: we get
+    # ``1385384294.4`` when we should get ``1385384293.0838187``.
+    #
+    # If we're comparing with a system that doesn't use exactly IEEE double
+    # arithmetic to calculate the seconds value, this can lead to wrong answers.
+
+    gmtime = time.gmtime(now)
+    seconds = now % 60.0
+    return TimeStamp(*(gmtime[:5] + (seconds,)))
 
 
 class timer(object):
