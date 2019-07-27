@@ -10,7 +10,9 @@ addons:
 # Use postgresql 9.4 to get support for BLOB SQL functions for pg8000
 # Use postgresql 9.5 to get support for INSERT ON CONFLICT UPDATE
 # Use postgresql 9.6 ... just because
-  postgresql: "9.6"
+# In Postgresql 10, you don't have to put the arguments after a
+# function name in things like COMMENT, if it's unique.
+  postgresql: "10"
 # The default mysql is 5.7; we have a specific test for 8.0.
 
 matrix:
