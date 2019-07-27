@@ -182,7 +182,7 @@ class PostgreSQLAdapter(AbstractAdapter):
                                           username,
                                           description,
                                           extension):
-        proc_name = 'lock_and_choose_tid'
+        proc_name = 'SELECT lock_and_choose_tid'
         proc = proc_name + '()'
         args = ()
         if self.keep_history:
@@ -191,35 +191,71 @@ class PostgreSQLAdapter(AbstractAdapter):
             b = self._binary
             args = (False, b(username), b(description), b(extension))
 
-        cursor.execute('SELECT ' + proc, args)
+        cursor.execute(proc, args)
         tid, = cursor.fetchone()
         return tid
 
-    # def tpc_prepare_phase1(self,
-    #                        store_connection,
-    #                        blobhelper,
-    #                        ude,
-    #                        commit=True,
-    #                        committing_tid_int=None,
-    #                        after_selecting_tid=lambda tid: None):
+    def tpc_prepare_phase1(self,
+                           store_connection,
+                           blobhelper,
+                           ude,
+                           commit=True,
+                           committing_tid_int=None,
+                           after_selecting_tid=lambda tid: None):
 
-    #     params = (committing_tid_int, commit)
-    #     # (p_committing_tid, p_commit)
-    #     proc = 'lock_and_choose_tid_and_move(%s, %s)'
-    #     if self.keep_history:
-    #         params += ude
-    #         # (p_committing_tid, p_commit, p_user, p_desc, p_ext)
-    #         proc = 'lock_and_choose_tid_and_move(%s, %s, %s, %s, %s)'
+        # In all versions of Postgres (up through 11 anyway),
+        # stored functions cannot COMMIT. In Postgres 11,
+        # the newly-introduced stored procedures *can* COMMIT,
+        # if they're at the top level; that includes anonymous
+        # DO blocks, BUT (and this goes for both anonymous and CALL'd procs)
+        # ONLY if they're not already part of a transaction.
+        #
+        # Options:
+        #
+        # We can tack ``; COMMIT`` on to the end of the ``SELECT``
+        # statement, but pg8000 doesn't like that ("cannot insert
+        # multiple commands into a prepared statement") psycopg2 will
+        # allow it, but because the last statement wasn't a ``SELECT``
+        # we lose access to the TID.
+        #
+        # If we alter the temp tables to preserve their rows on
+        # COMMIT, we could COMMIT now, turn on autocommit, and call
+        # the function to move rows and make current. The problem
+        # there is that we would lose our row locks, so we're not
+        # guaranteed that we'd actually be able to finish the COMMIT.
+        #
+        # We can use the GUC (grand unified config) as session variables
+        # and store the return value in the session (as text) and select it back out
+        # after the commit. This seems to work, at the expense of extra
+        # DB communication, but it gets the COMMIT to happen in one
+        # trip to the DB: This is confirmed by database statement logging.
+        # The only problem here is that it still fails on pg8000;
+        # we'll just ignore that.
+        params = (committing_tid_int, commit)
+        # (p_committing_tid, p_commit)
+        proc = 'lock_and_choose_tid_and_move(%s, %s)'
+        if self.keep_history:
+            username, description, extension = ude
+            b = self._binary
+            params += (b(username), b(description), b(extension))
+            # (p_committing_tid, p_commit, p_user, p_desc, p_ext)
+            proc = 'lock_and_choose_tid_and_move(%s, %s, %s, %s, %s)'
 
-    #     multi_results = self.driver.callproc_multi_result(
-    #         store_connection.cursor,
-    #         proc,
-    #         params
-    #     )
+        if commit and self.driver.supports_multiple_statement_execute:
+            proc = (
+                "SELECT SET_CONFIG('rs.tid', " + proc + "::text, FALSE); COMMIT;"
+                "SELECT current_setting('rs.tid')"
+            )
+        else:
+            proc = 'SELECT ' + proc
 
-    #     tid_int, = multi_results[0][0]
-    #     after_selecting_tid(tid_int)
-    #     return tid_int, "-"
+
+        cursor = store_connection.cursor
+        cursor.execute(proc, params)
+        tid_int, = cursor.fetchone()
+        tid_int = int(tid_int)
+        after_selecting_tid(tid_int)
+        return tid_int, "-"
 
 
 

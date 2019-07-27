@@ -205,6 +205,9 @@ class PostgreSQLSchemaInstaller(AbstractSchemaInstaller):
         expected = self.procedures
 
         installed = self.list_procedures(cursor)
+        # If the database evolves over tiem, there could be
+        # extra procs still there that we don't care about.
+        installed = {k: v for k, v in installed.items() if k in expected}
         if installed != expected:
             logger.info(
                 "Procedures incorrect, will reinstall. "
@@ -261,13 +264,16 @@ class PostgreSQLSchemaInstaller(AbstractSchemaInstaller):
         # after that it's optional if the function isn't overloaded.
         for db_proc in self.list_procedures(cursor).values():
             # db_proc will have the signature but perhaps not the checksum.
-            disk_proc = self.procedures[db_proc.name]
+            try:
+                disk_proc = self.procedures[db_proc.name]
+            except KeyError: # pragma: no cover
+                # One in the DB no longer on disk.
+                # Ignore.
+                continue
             disk_proc.signature = db_proc.signature
             if db_proc.checksum == disk_proc.checksum:
                 continue
-            # if the checksum doesn't match, it's because we don't have
-            # one in the DB yet.
-            assert db_proc.checksum is None, (db_proc, disk_proc)
+
             db_proc.checksum = disk_proc.checksum
 
             # For pg8000 we can't use a parameter here (because it prepares?)

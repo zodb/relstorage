@@ -80,6 +80,11 @@ class AbstractManagedConnection(object):
         self.__dict__.pop('cursor', None)
         self.connmanager.rollback_and_close(conn, cursor)
 
+    # TODO: Better tracking of whether we are in a transaction
+    # and need to rollback or not. We currently send lots of
+    # extra ROLLBACK commands. That costs network time, and
+    # on Postgres it results in WARNINGS in the server logs.
+
     def rollback_quietly(self):
         """
         Make the connection inactive and quietly roll it back.
@@ -123,6 +128,9 @@ class AbstractManagedConnection(object):
         Unconditionally restart the connection.
         """
         self.active = False
+        if not self:
+            return
+
         self.restart_and_call(self.__noop)
 
     def restart_and_call(self, f, *args, **kw):

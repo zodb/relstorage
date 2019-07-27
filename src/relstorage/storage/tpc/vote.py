@@ -288,6 +288,8 @@ class AbstractVote(AbstractTPCState):
         # db, the lock must be held, and we must have finished all of our
         # storage actions. This is only expected to be the case when we have
         # a shared blob dir.
+        #
+        # Returns True if we also committed to the database.
         if self.prepared_txn:
             # Already done.
             assert self.committing_tid_lock, (self.prepared_txn, self.committing_tid_lock)
@@ -322,6 +324,7 @@ class AbstractVote(AbstractTPCState):
                 self.adapter
             )
 
+        return kwargs['commit']
 
     def tpc_finish(self, transaction, f=None):
         if transaction is not self.transaction:
@@ -329,7 +332,7 @@ class AbstractVote(AbstractTPCState):
                 "tpc_finish called with wrong transaction")
         # Handle the finishing. We cannot/must not fail now.
         # TODO: Move most of this into the Finish class/module.
-        self.__lock_and_move()
+        did_commit = self.__lock_and_move()
         assert self.committing_tid_lock is not None, self
 
 
@@ -359,7 +362,7 @@ class AbstractVote(AbstractTPCState):
         try:
             if f is not None:
                 f(self.committing_tid_lock.tid)
-            next_phase = Finish(self)
+            next_phase = Finish(self, not did_commit)
             return next_phase, self.committing_tid_lock.tid
         finally:
             self._clear_temp()

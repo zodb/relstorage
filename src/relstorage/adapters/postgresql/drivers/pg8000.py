@@ -145,6 +145,7 @@ class PG8000Driver(AbstractPostgreSQLDriver):
     _GEVENT_NEEDS_SOCKET_PATCH = True
 
     dialect = PG8000Dialect()
+    supports_multiple_statement_execute = False
 
     def __init__(self):
         super(PG8000Driver, self).__init__()

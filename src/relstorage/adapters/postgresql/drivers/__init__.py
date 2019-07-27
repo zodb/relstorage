@@ -32,6 +32,10 @@ class PostgreSQLDialect(DefaultDialect):
 
 class AbstractPostgreSQLDriver(AbstractModuleDriver):
     dialect = PostgreSQLDialect()
+    # Can we bundle statements into a single string?
+    # "SELECT 1; COMMIT;"
+    supports_multiple_statement_execute = True
+
 
 database_type = 'postgresql'
 

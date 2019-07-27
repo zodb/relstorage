@@ -19,21 +19,21 @@ from __future__ import print_function
 
 from . import NotInTransaction
 
-def Finish(vote_state):
+def Finish(vote_state, needs_store_commit=True):
     """
     The state we enter with tpc_finish.
 
     This is transient; once we successfully enter this state, we immediately return
     to the not-in-transaction state.
     """
-    # It is assumed that self._lock.acquire was called before this
-    # method was called.
     vote_state.load_connection.rollback_quietly()
-    txn = vote_state.prepared_txn
-    assert txn is not None
-    vote_state.adapter.txncontrol.commit_phase2(
-        vote_state.store_connection,
-        txn)
+    if needs_store_commit:
+        txn = vote_state.prepared_txn
+        assert txn is not None
+        vote_state.adapter.txncontrol.commit_phase2(
+            vote_state.store_connection,
+            txn)
+
     vote_state.committing_tid_lock.release_commit_lock(vote_state.store_connection.cursor)
     vote_state.cache.after_tpc_finish(vote_state.committing_tid_lock.tid)
 
