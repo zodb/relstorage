@@ -116,9 +116,9 @@ class PostgreSQLSchemaInstaller(AbstractSchemaInstaller):
                 # disk are still perfectly valid.
 
     def create_procedures(self, cursor):
-        if not self.all_procedures_installed(cursor):
-            self.install_procedures(cursor)
-            if not self.all_procedures_installed(cursor):
+        if not self.__all_procedures_installed(cursor):
+            self.__install_procedures(cursor)
+            if not self.__all_procedures_installed(cursor):
                 raise AssertionError(
                     "Could not get version information after "
                     "installing the stored procedures.")
@@ -127,7 +127,7 @@ class PostgreSQLSchemaInstaller(AbstractSchemaInstaller):
         triggers = self.list_triggers(cursor)
         __traceback_info__ = triggers, self.list_tables(cursor), self.get_database_name(cursor)
         if 'blob_chunk_delete' not in triggers:
-            self.install_triggers(cursor)
+            self.__install_triggers(cursor)
 
     def __native_names_only(self, cursor):
         native = self._metadata_to_native_str
@@ -148,7 +148,7 @@ class PostgreSQLSchemaInstaller(AbstractSchemaInstaller):
         cursor.execute("SELECT lanname FROM pg_catalog.pg_language")
         return self.__native_names_only(cursor)
 
-    def install_languages(self, cursor):
+    def __install_languages(self, cursor):
         if 'plpgsql' not in self.list_languages(cursor):
             cursor.execute("CREATE LANGUAGE plpgsql")
 
@@ -197,7 +197,7 @@ class PostgreSQLSchemaInstaller(AbstractSchemaInstaller):
 
         return res
 
-    def all_procedures_installed(self, cursor):
+    def __all_procedures_installed(self, cursor):
         """
         Check whether all required stored procedures are installed.
 
@@ -221,9 +221,10 @@ class PostgreSQLSchemaInstaller(AbstractSchemaInstaller):
             return False
         return True
 
-    def install_procedures(self, cursor):
+    def __install_procedures(self, cursor):
         """Install the stored procedures"""
-        self.install_languages(cursor)
+        self.__install_languages(cursor)
+
         # PostgreSQL procedures in the SQL language
         # do lots of validation at compile time; in particular,
         # they check that the functions they use in SELECT statements
@@ -233,6 +234,14 @@ class PostgreSQLSchemaInstaller(AbstractSchemaInstaller):
         # in names somehow, we just loop multiple times until we don't get any errors,
         # figuring that we'll create a leaf function on the first time, and then
         # more and more dependent functions on each iteration.
+
+        # We're here because we are missing procs or they are out of date, so
+        # we know we have functions to execute. But as noted, that could produce errors,
+        # leading to transaction rollback. If we had just created tables, for example,
+        # they'd be lost, because DDL is transactional in postgres. Not good.
+        # So we begin by committing.
+        cursor.connection.commit()
+
         iters = range(5)
         last_ex = None
         for _ in iters:
@@ -293,7 +302,7 @@ class PostgreSQLSchemaInstaller(AbstractSchemaInstaller):
         cursor.execute("SELECT tgname FROM pg_trigger")
         return self.__native_names_only(cursor)
 
-    def install_triggers(self, cursor):
+    def __install_triggers(self, cursor):
         stmt = """
         CREATE TRIGGER blob_chunk_delete
             BEFORE DELETE ON blob_chunk
