@@ -32,6 +32,8 @@ class Psycopg2ConnectionManager(AbstractConnectionManager):
         self.isolation_repeatable_read = driver.ISOLATION_LEVEL_REPEATABLE_READ
         self.keep_history = options.keep_history
         self._db_connect_with_isolation = driver.connect_with_isolation
+        self._may_need_rollback = driver.connection_may_need_rollback
+        self._may_need_commit = driver.connection_may_need_commit
         super(Psycopg2ConnectionManager, self).__init__(options, driver)
 
     def _alter_dsn(self, replica):
@@ -50,7 +52,7 @@ class Psycopg2ConnectionManager(AbstractConnectionManager):
 
     @metricmethod
     def open(self, isolation=None, deferrable=False, read_only=False,
-             replica_selector=None, **kwargs):
+             replica_selector=None, application_name=None, **kwargs):
         """Open a database connection and return (conn, cursor)."""
         # pylint:disable=arguments-differ
         if isolation is None:
@@ -72,7 +74,8 @@ class Psycopg2ConnectionManager(AbstractConnectionManager):
                     dsn,
                     isolation=isolation,
                     deferrable=deferrable,
-                    read_only=read_only
+                    read_only=read_only,
+                    application_name=application_name
                 )
                 cursor.arraysize = 64
                 conn.replica = replica
@@ -102,9 +105,19 @@ class Psycopg2ConnectionManager(AbstractConnectionManager):
         # serializable, read only mode. This should generally be
         # faster, as the *only* serializable transactions we have
         # should be READ ONLY.
-        return self.open(self.isolation_serializable,
-                         read_only=True,
-                         replica_selector=self.ro_replica_selector)
+        return self.open(
+            self.isolation_serializable,
+            read_only=True,
+            replica_selector=self.ro_replica_selector,
+            application_name='RS load'
+        )
 
     def open_for_pre_pack(self):
-        return self.open(self.isolation_read_committed)
+        return self.open(self.isolation_read_committed,
+                         application_name='RS prepack')
+
+    def _do_open_for_store(self):
+        return self.open(application_name='RS store')
+
+    def _do_open_for_call(self, callback):
+        return self.open(application_name='RS: ' + callback.__name__)

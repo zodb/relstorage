@@ -85,6 +85,10 @@ class AbstractManagedConnection(object):
     # extra ROLLBACK commands. That costs network time, and
     # on Postgres it results in WARNINGS in the server logs.
 
+    def commit(self):
+        if self:
+            self.connmanager.commit(self.connection, self._cursor)
+
     def rollback_quietly(self):
         """
         Make the connection inactive and quietly roll it back.

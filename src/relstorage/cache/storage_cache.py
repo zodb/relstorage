@@ -993,9 +993,9 @@ class _PersistentRowFilter(object):
         # In local tests, this function executes against PostgreSQL 11 in .78s
         # for 133,002 older OIDs; or, .35s for 57,002 OIDs against MySQL 5.7.
         logger.debug("Polling %d older oids stored in cache", len(oids))
-        def callback(_conn, cursor):
+        def poll_old_oids_remove(_conn, cursor):
             return self.adapter.mover.current_object_tids(cursor, oids)
-        current_tids_for_oids = self.adapter.connmanager.open_and_call(callback)
+        current_tids_for_oids = self.adapter.connmanager.open_and_call(poll_old_oids_remove)
 
         for oid in oids:
             if (oid not in current_tids_for_oids
@@ -1014,9 +1014,9 @@ class _PersistentRowFilter(object):
         # about. We might be better off using poller.list_changes(), just like
         # __poll_replace_checkpoints() does.
         logger.debug("Polling %d oids in delta_after1", len(oids))
-        def callback(_conn, cursor):
+        def poll_oids_delta1(_conn, cursor):
             return self.adapter.mover.current_object_tids(cursor, oids)
-        current_tids_for_oids = self.adapter.connmanager.open_and_call(callback)
+        current_tids_for_oids = self.adapter.connmanager.open_and_call(poll_oids_delta1)
         self.delta_after1 = type(self.delta_after1)(current_tids_for_oids)
         invalid_oids = {
             oid

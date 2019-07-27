@@ -246,14 +246,18 @@ class PostgreSQLAdapter(AbstractAdapter):
                 "SELECT SET_CONFIG('rs.tid', " + proc + "::text, FALSE); COMMIT;"
                 "SELECT current_setting('rs.tid')"
             )
+            needs_commit = False
         else:
             proc = 'SELECT ' + proc
+            needs_commit = commit
 
 
         cursor = store_connection.cursor
         cursor.execute(proc, params)
         tid_int, = cursor.fetchone()
         tid_int = int(tid_int)
+        if needs_commit:
+            self.txncontrol.commit_phase2(store_connection, "-")
         after_selecting_tid(tid_int)
         return tid_int, "-"
 

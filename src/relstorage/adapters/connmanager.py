@@ -132,17 +132,36 @@ class AbstractConnectionManager(object):
             except Exception: # pylint:disable=broad-except
                 pass
 
-    @staticmethod
-    def __rollback_connection(conn, ignored_exceptions):
+    def __rollback_connection(self, conn, ignored_exceptions):
         """Return True if we successfully rolled back."""
         clean = True
-        if conn is not None:
+        if conn is not None and self._may_need_rollback(conn):
             try:
                 conn.rollback()
             except ignored_exceptions:
                 logger.debug("Ignoring exception rolling back connection", exc_info=True)
                 clean = False
         return clean
+
+    def _may_need_rollback(self, conn): # pylint:disable=unused-argument
+        """
+        Answer if this connection might need to be rolled back.
+
+        If a subclass can definitively say that it does *not* need to
+        be rolled back, because it is not in a transaction,
+        it can override to return false.
+        """
+        return True
+
+    def _may_need_commit(self, conn): # pylint:disable=unused-argument
+        """
+        Answer if this connection might need to be committed.
+
+        If a subclass can definitively say that it does *not* need to
+        be committed, because it is not in a transaction,
+        it can override to return false.
+        """
+        return True
 
     def __rollback(self, conn, cursor, quietly):
         # If an error occurs, close the connection and cursor.
@@ -181,6 +200,13 @@ class AbstractConnectionManager(object):
     def rollback_quietly(self, conn, cursor):
         return self.__rollback(conn, cursor, True)
 
+    def commit(self, conn, cursor=None): # pylint:disable=unused-argument
+        if self._may_need_commit(conn):
+            conn.commit()
+
+    def _do_open_for_call(self, callback): # pylint:disable=unused-argument
+        return self.open()
+
     def open_and_call(self, callback):
         """Call a function with an open connection and cursor.
 
@@ -189,7 +215,7 @@ class AbstractConnectionManager(object):
         If the function raises an exception, aborts the transaction
         then propagates the exception.
         """
-        conn, cursor = self.open()
+        conn, cursor = self._do_open_for_call(callback)
         try:
             try:
                 res = callback(conn, cursor)
@@ -200,7 +226,7 @@ class AbstractConnectionManager(object):
             else:
                 self.close(cursor)
                 cursor = None
-                conn.commit()
+                self.commit(conn)
                 return res
         finally:
             self.close(conn, cursor)

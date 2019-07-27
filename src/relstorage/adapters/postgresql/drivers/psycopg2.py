@@ -53,6 +53,7 @@ class Psycopg2Driver(AbstractPostgreSQLDriver):
         self.ISOLATION_LEVEL_READ_COMMITTED = psycopg2.extensions.ISOLATION_LEVEL_READ_COMMITTED
         self.ISOLATION_LEVEL_SERIALIZABLE = psycopg2.extensions.ISOLATION_LEVEL_SERIALIZABLE
         self.ISOLATION_LEVEL_REPEATABLE_READ = psycopg2.extensions.ISOLATION_LEVEL_REPEATABLE_READ
+        self.STATUS_READY = psycopg2.extensions.STATUS_READY
 
     def _create_connection(self, mod):
         class Psycopg2Connection(mod.extensions.connection):
@@ -65,12 +66,18 @@ class Psycopg2Driver(AbstractPostgreSQLDriver):
     def connect_with_isolation(self, dsn,
                                isolation=None,
                                read_only=False,
-                               deferrable=False):
+                               deferrable=False,
+                               application_name=None):
         conn = self.connect(dsn)
         if isolation or deferrable or read_only:
             conn.set_session(isolation_level=isolation, readonly=read_only,
                              deferrable=deferrable)
-        return conn, conn.cursor()
+        cursor = conn.cursor()
+        if application_name:
+            cursor.execute('SET SESSION application_name = %s', (application_name,))
+            # Make it permanent, in case the connection rolls back.
+            conn.commit()
+        return conn, cursor
 
     # psycopg2 is smart enough to return memoryview or buffer on
     # Py3/Py2, respectively, for bytea columns. memoryview can't be
@@ -94,3 +101,13 @@ class Psycopg2Driver(AbstractPostgreSQLDriver):
             if data:
                 data = bytes(data)
             return data
+
+    def connection_may_need_rollback(self, conn):
+        # If we've immediately executed a 'BEGIN' command,
+        # the connection will report itself in a transaction, but
+        # unless we've actually executed some sort of statement the
+        # database will still know we're not and could issue a warning.
+        return conn.status != self.STATUS_READY
+
+    def connection_may_need_commit(self, conn):
+        return conn.status != self.STATUS_READY

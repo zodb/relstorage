@@ -40,6 +40,7 @@ from relstorage.cache.mapping import SizedLRUMapping
 
 from relstorage.cache.persistence import sqlite_connect
 from relstorage.cache.persistence import sqlite_files
+from relstorage.cache.persistence import FAILURE_TO_OPEN_DB_EXCEPTIONS
 from relstorage.cache.local_database import Database
 
 logger = __import__('logging').getLogger(__name__)
@@ -158,7 +159,11 @@ class LocalClient(object):
         """
         options = self.options
         if options.cache_local_dir:
-            conn = sqlite_connect(options, self.prefix, close_async=False)
+            try:
+                conn = sqlite_connect(options, self.prefix, close_async=False)
+            except FAILURE_TO_OPEN_DB_EXCEPTIONS:
+                logger.exception("Failed to read data from sqlite")
+                return
             with closing(conn):
                 self.read_from_sqlite(conn, row_filter)
 

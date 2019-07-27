@@ -24,7 +24,7 @@ class PostgreSQLStats(AbstractStats):
 
     def get_db_size(self):
         """Returns the approximate size of the database in bytes"""
-        def callback(_conn, cursor):
+        def get_size(_conn, cursor):
             cursor.execute("SELECT pg_database_size(current_database())")
             return cursor.fetchone()[0]
-        return self.connmanager.open_and_call(callback)
+        return self.connmanager.open_and_call(get_size)

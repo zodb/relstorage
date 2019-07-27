@@ -36,6 +36,17 @@ class AbstractPostgreSQLDriver(AbstractModuleDriver):
     # "SELECT 1; COMMIT;"
     supports_multiple_statement_execute = True
 
+    def connection_may_need_rollback(self, conn): # pylint:disable=unused-argument
+        return True
+
+    connection_may_need_commit = connection_may_need_rollback
+
+    def connect_with_isolation(self, dsn,
+                               isolation=None,
+                               read_only=False,
+                               deferrable=False,
+                               application_name=None):
+        raise NotImplementedError
 
 database_type = 'postgresql'
 

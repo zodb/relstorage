@@ -34,13 +34,12 @@ class AbstractTransactionControl(ABC):
 
     def __init__(self, connmanager):
         self.connmanager = connmanager
-        self.driver = self.connmanager.driver
 
     def commit_phase1(self, store_connection, tid):
         return '-'
 
     def commit_phase2(self, store_connection, txn):
-        store_connection.connection.commit()
+        store_connection.commit()
 
     def abort(self, store_connection, txn=None):
         """

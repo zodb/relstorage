@@ -633,12 +633,14 @@ class AbstractSchemaInstaller(DatabaseHelpersMixin,
         # XXX: We can generalize this to handle triggers, procs, etc,
         # to make subclasses have easier time.
         tables = self.list_tables(cursor)
+        __traceback_info__ = tables
         self.create_tables(cursor, tables)
         if 'transaction' in tables:
             self.update_schema(cursor, tables)
 
         self.create_procedures(cursor)
         self.create_triggers(cursor)
+        return tables
 
     def prepare(self):
         self.connmanager.open_and_call(self._prepare_with_connection)
@@ -725,7 +727,7 @@ class AbstractSchemaInstaller(DatabaseHelpersMixin,
         """
         stmt = self._zap_all_tbl_stmt if not slow else self._slow_zap_all_tbl_stmt
 
-        def callback(_conn, cursor):
+        def zap_all(_conn, cursor):
             existent = set(self.list_tables(cursor))
             todo = list(self.all_tables)
             todo.reverse() # using reversed()  doesn't print nicely
@@ -748,7 +750,7 @@ class AbstractSchemaInstaller(DatabaseHelpersMixin,
                 self._reset_oid(cursor)
                 log.debug("Done running OID reset script.")
 
-        self.connmanager.open_and_call(callback)
+        self.connmanager.open_and_call(zap_all)
 
     # Hooks for subclasses
 
@@ -764,7 +766,7 @@ class AbstractSchemaInstaller(DatabaseHelpersMixin,
 
     def drop_all(self):
         """Drop all tables and sequences."""
-        def callback(_conn, cursor):
+        def drop_all(_conn, cursor):
             existent = set(self.list_tables(cursor))
             todo = list(self.all_tables)
             todo.reverse()
@@ -773,4 +775,4 @@ class AbstractSchemaInstaller(DatabaseHelpersMixin,
                     cursor.execute("DROP TABLE %s" % table)
             for sequence in self.list_sequences(cursor):
                 cursor.execute("DROP SEQUENCE %s" % sequence)
-        self.connmanager.open_and_call(callback)
+        self.connmanager.open_and_call(drop_all)

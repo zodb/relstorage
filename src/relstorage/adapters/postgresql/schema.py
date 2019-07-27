@@ -106,17 +106,6 @@ class PostgreSQLSchemaInstaller(AbstractSchemaInstaller):
     def _prepare_with_connection(self, conn, cursor):
         super(PostgreSQLSchemaInstaller, self)._prepare_with_connection(conn, cursor)
 
-        if not self.all_procedures_installed(cursor):
-            self.install_procedures(cursor)
-            if not self.all_procedures_installed(cursor):
-                raise AssertionError(
-                    "Could not get version information after "
-                    "installing the stored procedures.")
-
-        triggers = self.list_triggers(cursor)
-        if 'blob_chunk_delete' not in triggers:
-            self.install_triggers(cursor)
-
         # Do we need to merge blob chunks?
         if not self.options.shared_blob_dir:
             cursor.execute('SELECT chunk_num FROM blob_chunk WHERE chunk_num > 0 LIMIT 1')
@@ -125,6 +114,21 @@ class PostgreSQLSchemaInstaller(AbstractSchemaInstaller):
                 cursor.execute("SELECT merge_blob_chunks()")
                 # If we've done our job right, any blobs cached on
                 # disk are still perfectly valid.
+
+    def create_procedures(self, cursor):
+        if not self.all_procedures_installed(cursor):
+            self.install_procedures(cursor)
+            if not self.all_procedures_installed(cursor):
+                raise AssertionError(
+                    "Could not get version information after "
+                    "installing the stored procedures.")
+
+    def create_triggers(self, cursor):
+        triggers = self.list_triggers(cursor)
+        __traceback_info__ = triggers
+        if 'blob_chunk_delete' not in triggers:
+            self.install_triggers(cursor)
+
 
     def __native_names_only(self, cursor):
         native = self._metadata_to_native_str
@@ -300,11 +304,11 @@ class PostgreSQLSchemaInstaller(AbstractSchemaInstaller):
         cursor.execute(stmt)
 
     def drop_all(self):
-        def callback(_conn, cursor):
+        def delete_blob_chunk(_conn, cursor):
             if 'blob_chunk' in self.list_tables(cursor):
                 # Trigger deletion of blob OIDs.
                 cursor.execute("DELETE FROM blob_chunk")
-        self.connmanager.open_and_call(callback)
+        self.connmanager.open_and_call(delete_blob_chunk)
         super(PostgreSQLSchemaInstaller, self).drop_all()
 
     def _create_pack_lock(self, cursor):
