@@ -147,7 +147,7 @@ class DatabaseHelpersMixin(object):
         # can return column names and the like as bytes when we want native str.
         # pg8000 on Python2 does the reverse and returns unicode when we want
         # native str.
-        if not isinstance(value, str):
+        if value is not None and not isinstance(value, str):
             # Checking for bytes tells us that it's a unicode object on Python 2;
             # we won't get here if it's bytes (because bytes is str)
             value = value.decode('ascii') if isinstance(value, bytes) else value.encode('ascii"')

@@ -24,6 +24,55 @@ from ..schema import AbstractSchemaInstaller
 
 logger = __import__('logging').getLogger(__name__)
 
+class _StoredFunction(object):
+    """
+    Represents a function stored in the database.
+
+    It is equal to another instance if it has the same
+    name and same checksum (signature and creation statement
+    are ignored).
+    """
+
+    # The function's name
+    name = None
+
+    # The function's signature: (boolean, bytea, bytea)
+    signature = None
+
+    # The function's CREATE statement
+    create = None
+
+    # The checksum for the create statement,
+    # as stored in the object's comment.
+    checksum = None
+
+    def __init__(self, name, signature, checksum, create=None):
+        self.name = name
+        self.signature = signature
+        self.checksum = checksum
+        self.create = create
+
+    def __str__(self):
+        """
+        Return ``name(signature)``
+        """
+        if self.signature is None:
+            # We didn't read this from the database at all.
+            # Don't pretend we know what it is.
+            return self.name
+        # Signature can be the empty string if it takes no params.
+        return "%s(%s)" % (self.name, self.signature)
+
+    def __repr__(self):
+        return "<%s %s>" % (
+            self, self.checksum
+        )
+
+    def __eq__(self, other):
+        if not isinstance(other, _StoredFunction):
+            return NotImplemented
+        return self.name == other.name and self.checksum == other.checksum
+
 
 @implementer(ISchemaInstaller)
 class PostgreSQLSchemaInstaller(AbstractSchemaInstaller):
@@ -37,6 +86,16 @@ class PostgreSQLSchemaInstaller(AbstractSchemaInstaller):
         super(PostgreSQLSchemaInstaller, self).__init__(
             connmanager, runner, options.keep_history)
         self.locker = locker
+
+    def _read_proc_files(self):
+        procs = super(PostgreSQLSchemaInstaller, self)._read_proc_files()
+        # Convert from bare strings into _StoredFunction objects
+        # (which are missing their signatures at this point).
+        return {
+            name: _StoredFunction(name, None, self._checksum_for_str(value), value)
+            for name, value
+            in procs.items()
+        }
 
     def get_database_name(self, cursor):
         cursor.execute("SELECT current_database()")
@@ -92,23 +151,47 @@ class PostgreSQLSchemaInstaller(AbstractSchemaInstaller):
 
     def list_procedures(self, cursor):
         """
-        Returns {procedure name: checksum}. *checksum* may be None.
+        Returns {procedure name: _StoredFunction}.
         """
-        # The description is populated with ``COMMENT ON FUNCTION <name> IS 'comment'``
+        # The description is populated with
+        # ``COMMENT ON FUNCTION <name>(<args>) IS 'comment'``.
+        # Prior to Postgres 10, the args are required; with
+        # 10 and later they are only needed if the function is overloaded.
         stmt = """
-        SELECT p.proname AS funcname,  d.description
+        SELECT p.proname AS funcname,
+               d.description,
+               pg_catalog.pg_get_function_identity_arguments(p.oid)
         FROM pg_proc p
         INNER JOIN pg_namespace n ON n.oid = p.pronamespace
         LEFT JOIN pg_description As d ON (d.objoid = p.oid)
         WHERE n.nspname = 'public'
         """
+
         cursor.execute(stmt)
         res = {}
         native = self._metadata_to_native_str
-        for (name, checksum) in cursor.fetchall():
+        for (name, checksum, signature) in cursor.fetchall():
             name = native(name)
-            checksum = native(checksum) if checksum is not None else None
-            res[name.lower()] = checksum
+            checksum = native(checksum)
+            signature = native(signature)
+
+            disk_func = self.procedures.get(name)
+            res[name.lower()] = db_func = _StoredFunction(
+                name,
+                signature,
+                checksum,
+                # Include the source, if it's around
+                disk_func.create if disk_func else None
+            )
+
+            if disk_func and disk_func.checksum == db_func.checksum:
+                # Yay, what's in the database matches what's read from disk.
+                # That means the signature must match too.
+                disk_func.signature = db_func.signature
+                # But of course we don't add a checksum to the db_func
+                # if we don't already have one; we wouldn't be able to tell
+                # a mismatch.
+
         return res
 
     def all_procedures_installed(self, cursor):
@@ -119,11 +202,7 @@ class PostgreSQLSchemaInstaller(AbstractSchemaInstaller):
         up to date.
         """
 
-        expected = {
-            proc_name: self._checksum_for_str(proc_source)
-            for proc_name, proc_source
-            in self.procedures.items()
-        }
+        expected = self.procedures
 
         installed = self.list_procedures(cursor)
         if installed != expected:
@@ -152,9 +231,9 @@ class PostgreSQLSchemaInstaller(AbstractSchemaInstaller):
         last_ex = None
         for _ in iters:
             last_ex = None
-            for proc_name, proc_source in self.procedures.items():
+            for proc_name, stored_func in self.procedures.items():
                 __traceback_info__ = proc_name, self.keep_history
-                checksum = self._checksum_for_str(proc_source)
+                proc_source = stored_func.create
 
                 try:
                     cursor.execute(proc_source)
@@ -164,16 +243,42 @@ class PostgreSQLSchemaInstaller(AbstractSchemaInstaller):
                     cursor.connection.rollback()
                     continue
 
-                # For pg8000 we can't use a parameter here.
-                comment = "COMMENT ON FUNCTION %s IS '%s'" % (proc_name, checksum)
-                cursor.execute(comment)
+                # Persist the function.
                 cursor.connection.commit()
 
             if last_ex is None:
-                return
+                # Yay, we got through it without any errors.
+                # Now we just need to update the signatures.
+                break
+        else:
+            # recall for:else: is only executed if there was no ``break``
+            # statement.
+            last_ex, __traceback_info__ = last_ex
+            raise last_ex
 
-        last_ex, __traceback_info__ = last_ex
-        raise last_ex
+        # Update checksums
+        # Postgres < 10 requires the signature to identify the function;
+        # after that it's optional if the function isn't overloaded.
+        for db_proc in self.list_procedures(cursor).values():
+            # db_proc will have the signature but perhaps not the checksum.
+            disk_proc = self.procedures[db_proc.name]
+            disk_proc.signature = db_proc.signature
+            if db_proc.checksum == disk_proc.checksum:
+                continue
+            # if the checksum doesn't match, it's because we don't have
+            # one in the DB yet.
+            assert db_proc.checksum is None, (db_proc, disk_proc)
+            db_proc.checksum = disk_proc.checksum
+
+            # For pg8000 we can't use a parameter here (because it prepares?)
+            comment = "COMMENT ON FUNCTION %s IS '%s'" % (
+                str(db_proc), db_proc.checksum
+            )
+            __traceback_info__ = comment
+            cursor.execute(comment)
+
+        cursor.connection.commit()
+
 
     def list_triggers(self, cursor):
         cursor.execute("SELECT tgname FROM pg_trigger")
