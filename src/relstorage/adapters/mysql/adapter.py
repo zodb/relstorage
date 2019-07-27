@@ -223,6 +223,7 @@ class MySQLAdapter(AbstractAdapter):
                 store_connection,
                 blobhelper,
                 ude,
+                commit=commit,
                 committing_tid_int=committing_tid_int,
                 after_selecting_tid=after_selecting_tid)
 

@@ -86,7 +86,7 @@ class AbstractManagedConnection(object):
     # on Postgres it results in WARNINGS in the server logs.
 
     def commit(self):
-        if self:
+        if self.connection is not None:
             self.connmanager.commit(self.connection, self._cursor)
 
     def rollback_quietly(self):
@@ -97,7 +97,7 @@ class AbstractManagedConnection(object):
         """
         clean_rollback = True
         self.active = False
-        if not self:
+        if self.connection is None:
             return clean_rollback
 
         conn = self.connection

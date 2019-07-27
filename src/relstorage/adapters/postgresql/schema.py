@@ -125,17 +125,16 @@ class PostgreSQLSchemaInstaller(AbstractSchemaInstaller):
 
     def create_triggers(self, cursor):
         triggers = self.list_triggers(cursor)
-        __traceback_info__ = triggers
+        __traceback_info__ = triggers, self.list_tables(cursor), self.get_database_name(cursor)
         if 'blob_chunk_delete' not in triggers:
             self.install_triggers(cursor)
 
-
     def __native_names_only(self, cursor):
         native = self._metadata_to_native_str
-        return [
+        return frozenset([
             native(name)
             for (name,) in cursor.fetchall()
-        ]
+        ])
 
     def list_tables(self, cursor):
         cursor.execute("SELECT tablename FROM pg_tables")

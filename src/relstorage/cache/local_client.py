@@ -133,8 +133,13 @@ class LocalClient(object):
     def save(self, **sqlite_args):
         options = self.options
         if options.cache_local_dir and self.__bucket.size:
-            conn = sqlite_connect(options, self.prefix,
-                                  **sqlite_args)
+            try:
+                conn = sqlite_connect(options, self.prefix,
+                                      **sqlite_args)
+            except FAILURE_TO_OPEN_DB_EXCEPTIONS:
+                logger.exception("Failed to open sqlite to write")
+                return 0
+
             with closing(conn):
                 try:
                     self.write_to_sqlite(conn)

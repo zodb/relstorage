@@ -622,6 +622,7 @@ class AbstractSchemaInstaller(DatabaseHelpersMixin,
 
         tables = self.list_tables(cursor)
         self.check_compatibility(cursor, tables)
+        return tables
 
     def create_procedures(self, cursor):
         "Subclasses should override"
@@ -632,15 +633,15 @@ class AbstractSchemaInstaller(DatabaseHelpersMixin,
     def _prepare_with_connection(self, conn, cursor): # pylint:disable=unused-argument
         # XXX: We can generalize this to handle triggers, procs, etc,
         # to make subclasses have easier time.
-        tables = self.list_tables(cursor)
-        __traceback_info__ = tables
-        self.create_tables(cursor, tables)
-        if 'transaction' in tables:
-            self.update_schema(cursor, tables)
+        existing_tables = self.list_tables(cursor)
+        __traceback_info__ = existing_tables
+        all_tables = self.create_tables(cursor, existing_tables)
+        __traceback_info__ = existing_tables, all_tables
+        if 'transaction' in existing_tables:
+            self.update_schema(cursor, existing_tables)
 
         self.create_procedures(cursor)
         self.create_triggers(cursor)
-        return tables
 
     def prepare(self):
         self.connmanager.open_and_call(self._prepare_with_connection)

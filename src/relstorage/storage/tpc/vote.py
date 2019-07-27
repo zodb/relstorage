@@ -211,7 +211,7 @@ class AbstractVote(AbstractTPCState):
             # It is crucial to do this only after locking the current
             # object rows in order to prevent deadlock. (The same order as a regular
             # transaction, just slightly sooner.)
-            self.__lock_and_move('vote')
+            self.__lock_and_move(vote_only=True)
 
         # New storage protocol
         return invalidated_oids
@@ -277,7 +277,7 @@ class AbstractVote(AbstractTPCState):
 
         return invalidated
 
-    def __lock_and_move(self, blobhelper_method=None):
+    def __lock_and_move(self, vote_only=False):
         # Here's where we take the global commit lock, and
         # allocate the next available transaction id, storing it
         # into history-preserving DBs. But if someone passed us
@@ -291,18 +291,18 @@ class AbstractVote(AbstractTPCState):
         #
         # Returns True if we also committed to the database.
         if self.prepared_txn:
-            # Already done.
+            # Already done; *should* have been vote_only.
             assert self.committing_tid_lock, (self.prepared_txn, self.committing_tid_lock)
-            return
+            return False
 
         kwargs = {
             'commit': True
         }
         if self.committing_tid_lock:
             kwargs['committing_tid_int'] = self.committing_tid_lock.tid_int
-        if blobhelper_method:
+        if vote_only:
             # Must be voting.
-            blob_meth = getattr(self.blobhelper, blobhelper_method)
+            blob_meth = self.blobhelper.vote
             kwargs['after_selecting_tid'] = lambda tid_int: blob_meth(int64_to_8bytes(tid_int))
             kwargs['commit'] = False
 
