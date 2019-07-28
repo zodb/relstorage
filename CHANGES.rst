@@ -133,6 +133,15 @@ MySQL
   are out of date with the current source in this package and replace
   them.
 
+PostgreSQL
+----------
+
+- As for MySQL, move allocating a TID into the database.
+
+- As for MySQL, move most steps of finishing a transaction into a
+  stored procedure. On psycopg2 and psycopg2cffi this is done in a
+  single database call. With pg8000, however, it still takes two, with
+  the second call being the COMMIT call that releases locks.
 
 3.0a5 (2019-07-11)
 ==================

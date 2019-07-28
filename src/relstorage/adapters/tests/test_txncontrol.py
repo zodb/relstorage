@@ -35,6 +35,9 @@ class MockStoreConnection(object):
     def rollback_quietly(self):
         self.connection.rollback()
 
+    def commit(self):
+        self.connection.commit()
+
 class TestTransactionControl(TestCase):
 
     def _getClass(self):

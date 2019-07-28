@@ -234,7 +234,7 @@ def _connect_to_file(fname, factory=Connection,
     # the database so that we can verify that it's not corrupt.
     pragmas.setdefault('journal_mode', 'wal')
     cur = connection.cursor()
-    __traceback_info__ = cur, pragmas
+    __traceback_info__ = fname, cur, pragmas
     try:
         _execute_pragmas(cur, **pragmas)
     except:
@@ -268,18 +268,22 @@ def sqlite_files(options, prefix):
         fname = os.path.join(parent_dir, 'relstorage-cache-' + prefix + '.sqlite3')
         wal_fname = fname + '-wal'
         shm_fname = fname + '-shm'
-        def destroy():
+        def real_destroy():
             logger.info("Replacing any existing cache at %s", fname)
             __quiet_remove(fname)
             __quiet_remove(wal_fname)
             __quiet_remove(shm_fname)
+        destroy = real_destroy
     else:
         fname = parent_dir
         wal_fname = None
-        def destroy():
+        def noop_destroy():
             "Nothing to do."
+        destroy = noop_destroy
     return fname, destroy
 
+CORRUPT_DB_EXCEPTIONS = (sqlite3.DatabaseError,)
+FAILURE_TO_OPEN_DB_EXCEPTIONS = (sqlite3.OperationalError,)
 
 def sqlite_connect(options, prefix,
                    overwrite=False,
@@ -297,7 +301,7 @@ def sqlite_connect(options, prefix,
     """
     fname, destroy = sqlite_files(options, prefix)
 
-    corrupt_db_ex = sqlite3.DatabaseError
+    corrupt_db_ex = CORRUPT_DB_EXCEPTIONS
     if overwrite:
         destroy()
         corrupt_db_ex = ()
@@ -338,7 +342,8 @@ def sqlite_connect(options, prefix,
             pragmas=pragmas,
             timeout=timeout,
         )
-    except corrupt_db_ex:
+    except corrupt_db_ex as e:
+        __traceback_info__ = e, fname, destroy
         logger.exception("Corrupt cache database at %s; replacing", fname)
         destroy()
         connection = _connect_to_file(fname, close_async=close_async,

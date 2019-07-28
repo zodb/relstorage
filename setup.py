@@ -85,7 +85,10 @@ setup(
         "Operating System :: Unix",
     ],
     long_description=read_file("README.rst"),
-    zip_safe=False,  # otherwise ZConfig can't see component.xml
+    # We cannot be used from an archive. ZConfig can't see
+    # our component.xml, and we rely on being able to use __file__ to
+    # list and locate auxiliary files (e.g., schema.py finds SQL files)
+    zip_safe=False,
     setup_requires=[
         'cffi',
     ],

@@ -103,5 +103,10 @@ class AbstractAdapter(object):
         after_selecting_tid(committing_tid_int)
 
         self.mover.update_current(cursor, committing_tid_int)
-        return committing_tid_int, self.txncontrol.commit_phase1(
+        prepared_txn_id = self.txncontrol.commit_phase1(
             store_connection, committing_tid_int)
+
+        if commit:
+            self.txncontrol.commit_phase2(store_connection, prepared_txn_id)
+
+        return committing_tid_int, prepared_txn_id

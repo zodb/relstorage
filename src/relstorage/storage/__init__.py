@@ -90,6 +90,8 @@ class _ClosedCache(object):
     def close(self):
         "does nothing"
 
+    release = close
+
 @implementer(IRelStorage)
 class RelStorage(LegacyMethodsMixin,
                  ConflictResolution.ConflictResolvingStorage):
@@ -365,7 +367,10 @@ class RelStorage(LegacyMethodsMixin,
             if instance is not None:
                 instance.close()
         self._instances = ()
+
         self._cache.close()
+        self._cache = _ClosedCache()
+
         self._tpc_phase = None
         self._oids = None
 

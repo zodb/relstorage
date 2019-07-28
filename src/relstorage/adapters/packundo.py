@@ -470,12 +470,12 @@ class HistoryPreservingPackUndo(PackUndo):
                 now = time.time()
                 if now >= log_at:
                     # save the work done so far
-                    conn.commit()
+                    self.connmanager.commit(conn, cursor)
                     log_at = now + 60
                     log.info(
                         "pre_pack: transactions analyzed: %d/%d",
                         txns_done, tid_count)
-        conn.commit()
+        self.connmanager.commit(conn, cursor)
         log.info("pre_pack: transactions analyzed: %d/%d", txns_done, tid_count)
 
     def _add_refs_for_tid(self, cursor, tid, get_references):
@@ -640,7 +640,7 @@ class HistoryPreservingPackUndo(PackUndo):
                      to_remove)
 
             log.info("pre_pack: finished successfully")
-            conn.commit()
+            self.connmanager.commit(conn, cursor)
         except:
             self.connmanager.rollback_quietly(conn, cursor)
             conn, cursor = None, None
@@ -696,7 +696,7 @@ class HistoryPreservingPackUndo(PackUndo):
         WHERE zoid = 0;
         """
         self.runner.run_script(cursor, stmt, {'pack_tid': pack_tid})
-        conn.commit()
+        self.connmanager.commit(conn, cursor)
 
     def _pre_pack_without_gc(self, conn, cursor, pack_tid):
         """
@@ -765,7 +765,7 @@ class HistoryPreservingPackUndo(PackUndo):
 
         # Traverse the graph, setting the 'keep' flags in pack_object
         self._traverse_graph(cursor)
-        conn.commit()
+        self.connmanager.commit(conn, cursor)
 
     def _find_pack_tid(self):
         """If pack was not completed, find our pack tid again"""
@@ -834,7 +834,7 @@ class HistoryPreservingPackUndo(PackUndo):
                         packed_list)
                     counter += 1
                     if time.time() >= start + self.options.pack_batch_timeout:
-                        conn.commit()
+                        self.connmanager.commit(conn, cursor)
                         if packed_func is not None:
                             for poid, ptid in packed_list:
                                 packed_func(poid, ptid)
@@ -861,7 +861,7 @@ class HistoryPreservingPackUndo(PackUndo):
 
             else:
                 log.info("pack: finished successfully")
-                conn.commit()
+                self.connmanager.commit(conn, cursor)
 
         finally:
             self.connmanager.close(conn, cursor)
@@ -930,7 +930,7 @@ class HistoryPreservingPackUndo(PackUndo):
     def _pack_cleanup(self, conn, cursor):
         """Remove unneeded table rows after packing"""
         # commit the work done so far, releasing row-level locks.
-        conn.commit()
+        self.connmanager.commit(conn, cursor)
         log.info("pack: cleaning up")
 
         # This section does not need to hold the commit lock, as it only
@@ -946,7 +946,7 @@ class HistoryPreservingPackUndo(PackUndo):
             stmt = self._script_delete_empty_transactions_batch
             self.runner.run_script_stmt(cursor, stmt)
             deleted = cursor.rowcount
-            conn.commit()
+            self.connmanager.commit(conn, cursor)
             self.locker.release_commit_lock(cursor)
             if deleted < 1000:
                 # Last set of deletions complete
@@ -1047,7 +1047,7 @@ class HistoryFreePackUndo(PackUndo):
         """ + self._lock_for_share
         self.runner.run_script_stmt(cursor, stmt)
         oids = list(r[0] for r in cursor)
-        conn.commit() # Release row locks
+        self.connmanager.commit(conn, cursor) # Release row locks
         log_at = time.time() + 60
         if oids:
             self.on_filling_object_refs()
@@ -1064,12 +1064,12 @@ class HistoryFreePackUndo(PackUndo):
                 now = time.time()
                 if now >= log_at:
                     # Save the work done so far.
-                    conn.commit()
+                    self.connmanager.commit(conn, cursor)
                     log_at = now + 60
                     log.info(
                         "pre_pack: objects analyzed: %d/%d",
                         oids_done, oid_count)
-            conn.commit() # Release all the share locks.
+            self.connmanager.commit(conn, cursor) # Release all the share locks.
             log.info(
                 "pre_pack: objects analyzed: %d/%d", oids_done, oid_count)
 
@@ -1156,7 +1156,7 @@ class HistoryFreePackUndo(PackUndo):
                 self.connmanager.rollback_quietly(conn, cursor)
                 raise
             else:
-                conn.commit()
+                self.connmanager.commit(conn, cursor)
                 log.info("pre_pack: finished successfully")
         finally:
             self.connmanager.close(conn, cursor)
@@ -1254,7 +1254,7 @@ class HistoryFreePackUndo(PackUndo):
                     packed_list.extend(items)
 
                     if time.time() >= start + self.options.pack_batch_timeout:
-                        conn.commit()
+                        self.connmanager.commit(conn, cursor)
                         if packed_func is not None:
                             for oid, tid in packed_list:
                                 packed_func(oid, tid)
@@ -1280,14 +1280,14 @@ class HistoryFreePackUndo(PackUndo):
 
             else:
                 log.info("pack: finished successfully")
-                conn.commit()
+                self.connmanager.commit(conn, cursor)
         finally:
             self.connmanager.close(conn, cursor)
 
 
     def _pack_cleanup(self, conn, cursor):
         # commit the work done so far
-        conn.commit()
+        self.connmanager.commit(conn, cursor)
         self.locker.release_commit_lock(cursor)
         log.info("pack: cleaning up")
 

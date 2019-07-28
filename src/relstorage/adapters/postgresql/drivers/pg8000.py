@@ -145,6 +145,7 @@ class PG8000Driver(AbstractPostgreSQLDriver):
     _GEVENT_NEEDS_SOCKET_PATCH = True
 
     dialect = PG8000Dialect()
+    supports_multiple_statement_execute = False
 
     def __init__(self):
         super(PG8000Driver, self).__init__()
@@ -234,7 +235,8 @@ class PG8000Driver(AbstractPostgreSQLDriver):
     def connect_with_isolation(self, dsn,
                                isolation=None,
                                read_only=False,
-                               deferrable=False):
+                               deferrable=False,
+                               application_name=None):
         conn = self.connect(dsn)
         cursor = conn.cursor()
         # For the current transaction
@@ -248,6 +250,8 @@ class PG8000Driver(AbstractPostgreSQLDriver):
         # NOTE: This will probably not play will with things like pgbouncer.
         # See http://initd.org/psycopg/docs/connection.html#connection.set_session
         cursor.execute('SET SESSION CHARACTERISTICS AS ' + transaction_stmt)
+        if application_name:
+            cursor.execute("SELECT set_config('application_name', %s, False)", (application_name,))
         conn.commit()
         return conn, cursor
 

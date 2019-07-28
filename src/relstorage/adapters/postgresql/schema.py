@@ -15,8 +15,7 @@
 Database schema installers
 """
 from __future__ import absolute_import
-
-import re
+from __future__ import print_function
 
 from zope.interface import implementer
 
@@ -25,104 +24,54 @@ from ..schema import AbstractSchemaInstaller
 
 logger = __import__('logging').getLogger(__name__)
 
-# Versions of the installed stored procedures. Change these when
-# the corresponding code changes.
-postgresql_proc_version = '3.0B'
-
-
-postgresql_procedures = [
+class _StoredFunction(object):
     """
-CREATE OR REPLACE FUNCTION blob_chunk_delete_trigger() RETURNS TRIGGER
-AS $blob_chunk_delete_trigger$
-    -- Version: %(postgresql_proc_version)s
-    -- Unlink large object data file after blob_chunk row deletion
-    DECLARE
-        cnt integer;
-    BEGIN
-        SELECT count(*) into cnt FROM blob_chunk WHERE chunk=OLD.chunk;
-        IF (cnt = 1) THEN
-            -- Last reference to this oid, unlink
-            PERFORM lo_unlink(OLD.chunk);
-        END IF;
-        RETURN OLD;
-    END;
-$blob_chunk_delete_trigger$ LANGUAGE plpgsql;
-""" % globals(),
+    Represents a function stored in the database.
+
+    It is equal to another instance if it has the same
+    name and same checksum (signature and creation statement
+    are ignored).
     """
-CREATE OR REPLACE FUNCTION temp_blob_chunk_delete_trigger() RETURNS TRIGGER
-AS $temp_blob_chunk_delete_trigger$
-    -- Version: %(postgresql_proc_version)s
-    -- Unlink large object data file after temp_blob_chunk row deletion
-    DECLARE
-        cnt integer;
-    BEGIN
-        SELECT count(*) into cnt FROM blob_chunk WHERE chunk=OLD.chunk;
-        IF (cnt = 0) THEN
-            -- No more references to this oid, unlink
-            PERFORM lo_unlink(OLD.chunk);
-        END IF;
-        RETURN OLD;
-    END;
-$temp_blob_chunk_delete_trigger$ LANGUAGE plpgsql;
-""" % globals(),
-    """
-CREATE OR REPLACE FUNCTION merge_blob_chunks()
-  RETURNS VOID
-AS $$
-    -- Version: %(postgresql_proc_version)s
-    -- Merge blob chunks into one entirely on the server.
-DECLARE
-  masterfd integer;
-  masterloid oid;
-  chunkfd integer;
-  rec record;
-  buf bytea;
-BEGIN
-  -- In history-free mode, zoid and chunk_num is the key.
-  -- in history-preserving mode, zoid/tid/chunk_num is the key.
-  -- for chunks, zoid and tid must always be used to look up the master.
-  FOR rec IN SELECT zoid, tid, chunk_num, chunk
-    FROM blob_chunk WHERE chunk_num > 0
-    ORDER BY zoid, chunk_num LOOP
-    -- Find the master and open it.
-    SELECT chunk
-    INTO STRICT masterloid
-    FROM blob_chunk
-    WHERE zoid = rec.zoid and tid = rec.tid AND chunk_num = 0;
 
-    -- open master for writing
-    SELECT lo_open(masterloid, 131072) -- 0x20000, AKA INV_WRITE
-    INTO STRICT masterfd;
+    # The function's name
+    name = None
 
-    -- position at the end
-    PERFORM lo_lseek(masterfd, 0, 2);
-    -- open the child for reading
-    SELECT lo_open(rec.chunk, 262144) -- 0x40000 AKA INV_READ
-    INTO STRICT chunkfd;
-    -- copy the data
-    LOOP
-      SELECT loread(chunkfd, 8192)
-      INTO buf;
+    # The function's signature: (boolean, bytea, bytea)
+    signature = None
 
-      EXIT WHEN LENGTH(buf) = 0;
+    # The function's CREATE statement
+    create = None
 
-      PERFORM lowrite(masterfd, buf);
-    END LOOP;
-    -- close the files
-    PERFORM lo_close(chunkfd);
-    PERFORM lo_close(masterfd);
+    # The checksum for the create statement,
+    # as stored in the object's comment.
+    checksum = None
 
-  END LOOP;
+    def __init__(self, name, signature, checksum, create=None):
+        self.name = name
+        self.signature = signature
+        self.checksum = checksum
+        self.create = create
 
-  -- Finally, remove the redundant chunks. Our trigger
-  -- takes care of removing the large objects.
-  DELETE FROM blob_chunk WHERE chunk_num > 0;
+    def __str__(self):
+        """
+        Return ``name(signature)``
+        """
+        if self.signature is None:
+            # We didn't read this from the database at all.
+            # Don't pretend we know what it is.
+            return self.name
+        # Signature can be the empty string if it takes no params.
+        return "%s(%s)" % (self.name, self.signature)
 
-END;
-$$
-LANGUAGE plpgsql;
-    """ % globals()
-]
+    def __repr__(self):
+        return "<%s %s>" % (
+            self, self.checksum
+        )
+
+    def __eq__(self, other):
+        if not isinstance(other, _StoredFunction):
+            return NotImplemented
+        return self.name == other.name and self.checksum == other.checksum
 
 
 @implementer(ISchemaInstaller)
@@ -130,38 +79,32 @@ class PostgreSQLSchemaInstaller(AbstractSchemaInstaller):
 
     database_type = 'postgresql'
 
+    _PROCEDURES = {} # Caching of proc files.
+
     def __init__(self, options, connmanager, runner, locker):
         self.options = options
         super(PostgreSQLSchemaInstaller, self).__init__(
             connmanager, runner, options.keep_history)
         self.locker = locker
 
+    def _read_proc_files(self):
+        procs = super(PostgreSQLSchemaInstaller, self)._read_proc_files()
+        # Convert from bare strings into _StoredFunction objects
+        # (which are missing their signatures at this point).
+        return {
+            name: _StoredFunction(name, None, self._checksum_for_str(value), value)
+            for name, value
+            in procs.items()
+        }
+
     def get_database_name(self, cursor):
         cursor.execute("SELECT current_database()")
-        for (name,) in cursor:
-            if isinstance(name, str):
-                return name
-            if hasattr(name, 'encode'):
-                # OK, name must be a unicode object, and we must be on Py2.
-                # pg8000 does this.
-                assert isinstance(name, unicode) # pylint:disable=undefined-variable
-                return name.encode('ascii')
-            assert isinstance(name, bytes)
-            return name.decode('ascii')
+        row, = cursor.fetchall()
+        name, = row
+        return self._metadata_to_native_str(name)
 
     def _prepare_with_connection(self, conn, cursor):
         super(PostgreSQLSchemaInstaller, self)._prepare_with_connection(conn, cursor)
-
-        if not self.all_procedures_installed(cursor):
-            self.install_procedures(cursor)
-            if not self.all_procedures_installed(cursor):
-                raise AssertionError(
-                    "Could not get version information after "
-                    "installing the stored procedures.")
-
-        triggers = self.list_triggers(cursor)
-        if 'blob_chunk_delete' not in triggers:
-            self.install_triggers(cursor)
 
         # Do we need to merge blob chunks?
         if not self.options.shared_blob_dir:
@@ -172,73 +115,194 @@ class PostgreSQLSchemaInstaller(AbstractSchemaInstaller):
                 # If we've done our job right, any blobs cached on
                 # disk are still perfectly valid.
 
+    def create_procedures(self, cursor):
+        if not self.__all_procedures_installed(cursor):
+            self.__install_procedures(cursor)
+            if not self.__all_procedures_installed(cursor):
+                raise AssertionError(
+                    "Could not get version information after "
+                    "installing the stored procedures.")
+
+    def create_triggers(self, cursor):
+        triggers = self.list_triggers(cursor)
+        __traceback_info__ = triggers, self.list_tables(cursor), self.get_database_name(cursor)
+        if 'blob_chunk_delete' not in triggers:
+            self.__install_triggers(cursor)
+
+    def __native_names_only(self, cursor):
+        native = self._metadata_to_native_str
+        return frozenset([
+            native(name)
+            for (name,) in cursor.fetchall()
+        ])
+
     def list_tables(self, cursor):
         cursor.execute("SELECT tablename FROM pg_tables")
-        return [name if isinstance(name, str) else name.decode('ascii')
-                for (name,) in cursor.fetchall()]
+        return self.__native_names_only(cursor)
 
     def list_sequences(self, cursor):
         cursor.execute("SELECT relname FROM pg_class WHERE relkind = 'S'")
-        return [name for (name,) in cursor.fetchall()]
+        return self.__native_names_only(cursor)
 
     def list_languages(self, cursor):
         cursor.execute("SELECT lanname FROM pg_catalog.pg_language")
-        return [name for (name,) in cursor.fetchall()]
+        return self.__native_names_only(cursor)
 
-    def install_languages(self, cursor):
+    def __install_languages(self, cursor):
         if 'plpgsql' not in self.list_languages(cursor):
             cursor.execute("CREATE LANGUAGE plpgsql")
 
     def list_procedures(self, cursor):
-        """Returns {procedure name: version}.  version may be None."""
-        stmt = """
-        SELECT proname, prosrc
-        FROM pg_catalog.pg_namespace n
-        JOIN pg_catalog.pg_proc p ON pronamespace = n.oid
-        JOIN pg_catalog.pg_type t ON prorettype = t.oid
-        WHERE nspname = 'public'
         """
+        Returns {procedure name: _StoredFunction}.
+        """
+        # The description is populated with
+        # ``COMMENT ON FUNCTION <name>(<args>) IS 'comment'``.
+        # Prior to Postgres 10, the args are required; with
+        # 10 and later they are only needed if the function is overloaded.
+        stmt = """
+        SELECT p.proname AS funcname,
+               d.description,
+               pg_catalog.pg_get_function_identity_arguments(p.oid)
+        FROM pg_proc p
+        INNER JOIN pg_namespace n ON n.oid = p.pronamespace
+        LEFT JOIN pg_description As d ON (d.objoid = p.oid)
+        WHERE n.nspname = 'public'
+        """
+
         cursor.execute(stmt)
         res = {}
-        for (name, text) in cursor.fetchall():
-            name = self._metadata_to_native_str(name)
-            text = self._metadata_to_native_str(text)
+        native = self._metadata_to_native_str
+        for (name, checksum, signature) in cursor.fetchall():
+            name = native(name)
+            checksum = native(checksum)
+            signature = native(signature)
 
-            version = None
-            match = re.search(r'Version:\s*([0-9a-zA-Z.]+)', text)
-            if match is not None:
-                version = match.group(1)
-            res[name.lower()] = version
+            disk_func = self.procedures.get(name)
+            res[name.lower()] = db_func = _StoredFunction(
+                name,
+                signature,
+                checksum,
+                # Include the source, if it's around
+                disk_func.create if disk_func else None
+            )
+
+            if disk_func and disk_func.checksum == db_func.checksum:
+                # Yay, what's in the database matches what's read from disk.
+                # That means the signature must match too.
+                disk_func.signature = db_func.signature
+                # But of course we don't add a checksum to the db_func
+                # if we don't already have one; we wouldn't be able to tell
+                # a mismatch.
+
         return res
 
-    def all_procedures_installed(self, cursor):
-        """Check whether all required stored procedures are installed.
+    def __all_procedures_installed(self, cursor):
+        """
+        Check whether all required stored procedures are installed.
 
         Returns True only if all required procedures are installed and
         up to date.
         """
-        expect = [
-            'blob_chunk_delete_trigger',
-            'temp_blob_chunk_delete_trigger',
-            'merge_blob_chunks',
-        ]
-        current_procs = self.list_procedures(cursor)
-        for proc in expect:
-            if current_procs.get(proc) != postgresql_proc_version:
-                return False
+
+        expected = self.procedures
+
+        installed = self.list_procedures(cursor)
+        # If the database evolves over tiem, there could be
+        # extra procs still there that we don't care about.
+        installed = {k: v for k, v in installed.items() if k in expected}
+        if installed != expected:
+            logger.info(
+                "Procedures incorrect, will reinstall. "
+                "Expected: %s."
+                "Actual: %s",
+                expected, installed
+            )
+            return False
         return True
 
-    def install_procedures(self, cursor):
+    def __install_procedures(self, cursor):
         """Install the stored procedures"""
-        self.install_languages(cursor)
-        for stmt in postgresql_procedures:
-            cursor.execute(stmt)
+        self.__install_languages(cursor)
+
+        # PostgreSQL procedures in the SQL language
+        # do lots of validation at compile time; in particular,
+        # they check that the functions they use in SELECT statements
+        # actually exist. When we have procedures that call each other,
+        # that means there's an order they have to be created in.
+        # Rather than try to figure out what that order is, or encode it
+        # in names somehow, we just loop multiple times until we don't get any errors,
+        # figuring that we'll create a leaf function on the first time, and then
+        # more and more dependent functions on each iteration.
+
+        # We're here because we are missing procs or they are out of date, so
+        # we know we have functions to execute. But as noted, that could produce errors,
+        # leading to transaction rollback. If we had just created tables, for example,
+        # they'd be lost, because DDL is transactional in postgres. Not good.
+        # So we begin by committing.
+        cursor.connection.commit()
+
+        iters = range(5)
+        last_ex = None
+        for _ in iters:
+            last_ex = None
+            for proc_name, stored_func in self.procedures.items():
+                __traceback_info__ = proc_name, self.keep_history
+                proc_source = stored_func.create
+
+                try:
+                    cursor.execute(proc_source)
+                except self.connmanager.driver.driver_module.ProgrammingError as ex:
+                    logger.info("Failed to create %s: %s", proc_name, ex)
+                    last_ex = ex, __traceback_info__
+                    cursor.connection.rollback()
+                    continue
+
+                # Persist the function.
+                cursor.connection.commit()
+
+            if last_ex is None:
+                # Yay, we got through it without any errors.
+                # Now we just need to update the signatures.
+                break
+        else:
+            # recall for:else: is only executed if there was no ``break``
+            # statement.
+            last_ex, __traceback_info__ = last_ex
+            raise last_ex
+
+        # Update checksums
+        # Postgres < 10 requires the signature to identify the function;
+        # after that it's optional if the function isn't overloaded.
+        for db_proc in self.list_procedures(cursor).values():
+            # db_proc will have the signature but perhaps not the checksum.
+            try:
+                disk_proc = self.procedures[db_proc.name]
+            except KeyError: # pragma: no cover
+                # One in the DB no longer on disk.
+                # Ignore.
+                continue
+            disk_proc.signature = db_proc.signature
+            if db_proc.checksum == disk_proc.checksum:
+                continue
+
+            db_proc.checksum = disk_proc.checksum
+
+            # For pg8000 we can't use a parameter here (because it prepares?)
+            comment = "COMMENT ON FUNCTION %s IS '%s'" % (
+                str(db_proc), db_proc.checksum
+            )
+            __traceback_info__ = comment
+            cursor.execute(comment)
+
+        cursor.connection.commit()
+
 
     def list_triggers(self, cursor):
         cursor.execute("SELECT tgname FROM pg_trigger")
-        return [name for (name,) in cursor]
+        return self.__native_names_only(cursor)
 
-    def install_triggers(self, cursor):
+    def __install_triggers(self, cursor):
         stmt = """
         CREATE TRIGGER blob_chunk_delete
             BEFORE DELETE ON blob_chunk
@@ -248,11 +312,11 @@ class PostgreSQLSchemaInstaller(AbstractSchemaInstaller):
         cursor.execute(stmt)
 
     def drop_all(self):
-        def callback(_conn, cursor):
+        def delete_blob_chunk(_conn, cursor):
             if 'blob_chunk' in self.list_tables(cursor):
                 # Trigger deletion of blob OIDs.
                 cursor.execute("DELETE FROM blob_chunk")
-        self.connmanager.open_and_call(callback)
+        self.connmanager.open_and_call(delete_blob_chunk)
         super(PostgreSQLSchemaInstaller, self).drop_all()
 
     def _create_pack_lock(self, cursor):

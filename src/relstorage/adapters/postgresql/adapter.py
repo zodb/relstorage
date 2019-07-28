@@ -18,7 +18,6 @@ import logging
 import re
 
 from zope.interface import implementer
-from ZODB.POSException import Unsupported
 
 from ...options import Options
 
@@ -76,6 +75,7 @@ class PostgreSQLAdapter(AbstractAdapter):
         self.version_detector = PostgreSQLVersionDetector()
 
         self.driver = driver = self._select_driver()
+        self._binary = driver.Binary
         log.debug("Using driver %r", driver)
 
         self.connmanager = Psycopg2ConnectionManager(
@@ -151,32 +151,6 @@ class PostgreSQLAdapter(AbstractAdapter):
 
         self.connmanager.add_on_store_opened(self.mover.on_store_opened)
         self.connmanager.add_on_load_opened(self.mover.on_load_opened)
-        self.connmanager.add_on_store_opened(self.__prepare_store_statements)
-
-
-    def __prepare_store_statements(self, cursor, restart=False):
-        if not restart:
-            try:
-                stmt = self.txncontrol._prepare_add_transaction_query
-            except (Unsupported, AttributeError):
-                # AttributeError is from the PG8000 version,
-                # Unsupported is from history-free
-                pass
-            else:
-                cursor.execute(stmt)
-
-            # If we don't commit now, any INSERT prepared statement
-            # for some reason, hold an *exclusive* lock on the table
-            # it references. That can prevent commits from working,
-            # depending no the table, because we also lock tables when
-            # committing. (Must be commit, not rollback, or the temp
-            # tables we created would vanish.)
-            #
-            # We're the last hook, we handle this for ours and for
-            # the mover's statements.
-            cursor.execute('SET lock_timeout = 0') # restore infinite lock timeout
-            cursor.connection.commit()
-
 
     def new_instance(self):
         inst = type(self)(dsn=self._dsn, options=self.options)
@@ -196,6 +170,96 @@ class PostgreSQLAdapter(AbstractAdapter):
         )
 
     __repr__ = __str__
+
+    # A temporary magic variable as we move TID allocation into some
+    # databases; with an external clock, we *do* need to sleep waiting for
+    # TIDs to change in a manner we can exploit; that or we need to be very
+    # careful about choosing pack times.
+    RS_TEST_TXN_PACK_NEEDS_SLEEP = 1
+
+    def lock_database_and_choose_next_tid(self,
+                                          cursor,
+                                          username,
+                                          description,
+                                          extension):
+        proc_name = 'SELECT lock_and_choose_tid'
+        proc = proc_name + '()'
+        args = ()
+        if self.keep_history:
+            # (packed, username, descr, extension)
+            proc = proc_name + '(%s, %s, %s, %s)'
+            b = self._binary
+            args = (False, b(username), b(description), b(extension))
+
+        cursor.execute(proc, args)
+        tid, = cursor.fetchone()
+        return tid
+
+    def tpc_prepare_phase1(self,
+                           store_connection,
+                           blobhelper,
+                           ude,
+                           commit=True,
+                           committing_tid_int=None,
+                           after_selecting_tid=lambda tid: None):
+
+        # In all versions of Postgres (up through 11 anyway),
+        # stored functions cannot COMMIT. In Postgres 11,
+        # the newly-introduced stored procedures *can* COMMIT,
+        # if they're at the top level; that includes anonymous
+        # DO blocks, BUT (and this goes for both anonymous and CALL'd procs)
+        # ONLY if they're not already part of a transaction.
+        #
+        # Options:
+        #
+        # We can tack ``; COMMIT`` on to the end of the ``SELECT``
+        # statement, but pg8000 doesn't like that ("cannot insert
+        # multiple commands into a prepared statement") psycopg2 will
+        # allow it, but because the last statement wasn't a ``SELECT``
+        # we lose access to the TID.
+        #
+        # If we alter the temp tables to preserve their rows on
+        # COMMIT, we could COMMIT now, turn on autocommit, and call
+        # the function to move rows and make current. The problem
+        # there is that we would lose our row locks, so we're not
+        # guaranteed that we'd actually be able to finish the COMMIT.
+        #
+        # We can use the GUC (grand unified config) as session variables
+        # and store the return value in the session (as text) and select it back out
+        # after the commit. This seems to work, at the expense of extra
+        # DB communication, but it gets the COMMIT to happen in one
+        # trip to the DB: This is confirmed by database statement logging.
+        # The only problem here is that it still fails on pg8000;
+        # we'll just ignore that.
+        params = (committing_tid_int, commit)
+        # (p_committing_tid, p_commit)
+        proc = 'lock_and_choose_tid_and_move(%s, %s)'
+        if self.keep_history:
+            username, description, extension = ude
+            b = self._binary
+            params += (b(username), b(description), b(extension))
+            # (p_committing_tid, p_commit, p_user, p_desc, p_ext)
+            proc = 'lock_and_choose_tid_and_move(%s, %s, %s, %s, %s)'
+
+        if commit and self.driver.supports_multiple_statement_execute:
+            proc = (
+                "SELECT SET_CONFIG('rs.tid', " + proc + "::text, FALSE); COMMIT;"
+                "SELECT current_setting('rs.tid')"
+            )
+            needs_commit = False
+        else:
+            proc = 'SELECT ' + proc
+            needs_commit = commit
+
+
+        cursor = store_connection.cursor
+        cursor.execute(proc, params)
+        tid_int, = cursor.fetchone()
+        tid_int = int(tid_int)
+        if needs_commit:
+            self.txncontrol.commit_phase2(store_connection, "-")
+        after_selecting_tid(tid_int)
+        return tid_int, "-"
 
 
 
