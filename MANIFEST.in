@@ -9,7 +9,7 @@ include CHANGES.rst
 include .landscape.yml
 recursive-include .travis *
 
-recursive-include src *.py *.xml *.txt *.test *.conf *.rst *.c *.h
+recursive-include src *.py *.xml *.txt *.test *.conf *.rst *.c *.h *.sql
 
 recursive-include docs *.py *.rst *.png Makefile
 recursive-exclude docs relstorage.*.rst _build
