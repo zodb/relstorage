@@ -572,12 +572,14 @@ def storage_reusable_suite(prefix, factory,
             storage.zap_all()
         return storage
 
-    def add_test_based_on_test_class(class_, **attr):
+    def add_test_based_on_test_class(klass, **attr):
         attr.update(create_storage=staticmethod(create_storage))
-        new_class = class_.__class__(
-            prefix + class_.__name__, (class_, ),
+        new_class = klass.__class__(
+            prefix + klass.__name__,
+            (klass, ),
             attr,
-            )
+        )
+        new_class.__module__ = klass.__module__
         new_class = unittest.skipUnless(storage_is_available, "Storage not available")(new_class)
         suite.addTest(unittest.makeSuite(new_class))
 

@@ -16,16 +16,19 @@
 Most of this code is lifted from ZODB/ZEO.
 """
 from __future__ import absolute_import
+from __future__ import print_function
 
 import os
+import re
 import threading
 import time
 
+from binascii import hexlify
+
+import BTrees
 import zc.lockfile
 import ZODB.blob
 
-from ZEO.ClientStorage import BlobCacheLayout
-from ZEO.ClientStorage import _check_blob_cache_size
 from ZODB.POSException import Unsupported
 from ZODB.POSException import POSKeyError
 from ZODB.POSException import StorageTransactionError
@@ -35,12 +38,15 @@ from zope.interface import implementer
 
 from relstorage._compat import iteritems
 from relstorage._compat import MAC
+from relstorage._util import byte_display
 from relstorage.interfaces import IBlobHelper
 from relstorage.interfaces import INoBlobHelper
 
 __all__ = [
     'BlobHelper',
 ]
+
+logger = __import__('logging').getLogger(__name__)
 
 @implementer(INoBlobHelper)
 class NoBlobHelper(object):
@@ -445,9 +451,8 @@ class CacheBlobHelper(_AbstractBlobHelper):
 
             target = max(self._blob_cache_size - self._blob_cache_size_check, 0)
 
-            check_blob_size_thread = threading.Thread(
-                target=_check_blob_cache_size,
-                args=(self.blob_dir, target),
+            check_blob_size_thread = _BlobCacheSizeChecker(
+                self.blob_dir, target
             )
             check_blob_size_thread.setDaemon(True)
             check_blob_size_thread.start()
@@ -466,10 +471,10 @@ class CacheBlobHelper(_AbstractBlobHelper):
 
         if fshelper is None:
             # The blob directory is a cache of the blobs
-            if 'zeocache' not in ZODB.blob.LAYOUTS:
-                ZODB.blob.LAYOUTS['zeocache'] = BlobCacheLayout()
+            if _BlobCacheLayout.LAYOUT_NAME not in ZODB.blob.LAYOUTS:
+                ZODB.blob.LAYOUTS[_BlobCacheLayout.LAYOUT_NAME] = _BlobCacheLayout()
             fshelper = ZODB.blob.FilesystemHelper(
-                options.blob_dir, layout_name='zeocache')
+                options.blob_dir, layout_name=_BlobCacheLayout.LAYOUT_NAME)
             fshelper.create()
 
         super(CacheBlobHelper, self).__init__(options, adapter, fshelper)
@@ -589,20 +594,194 @@ def BlobHelper(options, adapter):
 
 
 
-# Note: the following code is copied directly from ZEO.ClientStorage.
-# Because the symbols are not public (the function names start with an
-# underscore), indicating their signature could change at any time.
+# Note: the following code is roughly lifted from
+# ZEO.ClientStorage.
 
-def _lock_blob(path):
+def _lock_blob(path, retries=6000):
     lockfilename = os.path.join(os.path.dirname(path), '.lock')
     n = 0
     while 1:
         try:
             return zc.lockfile.LockFile(lockfilename)
         except zc.lockfile.LockError:
-            time.sleep(0.01)
             n += 1
-            if n > 60000:
+            if n > retries:
                 raise
-        else:
-            break
+            time.sleep(0.01)
+
+
+class _BlobCacheLayout(object):
+    """
+    Uses a two-level directory layout::
+
+        <blob-dir>/<oid1>/<oid2>.<tid>.blob
+
+    For example::
+
+        <blob-dir>/23/0.03d167f919308700.blob
+
+    The ``<oid1>`` (directory name) and ``<oid2>`` (first part of the
+    filename) are derived from the OID of the blob when treated as a
+    64-bit integer; ``<oid1>`` will only ever contain one or more
+    ASCII digits.
+    """
+
+    # This layout is a clone of the ZEO.ClientStorage.BlobCacheLayout
+    # class. We haven't changed anything about how it is structured,
+    # but we *might* in the future; we'd like to change the name, but
+    # that would invalidate all existing caches (the layout name is
+    # stored in a file on disk and checked when the FilesystemHelper is
+    # created)
+    LAYOUT_NAME = 'zeocache'
+
+    size = 997
+
+    def oid_to_path(self, oid):
+        return str(u64(oid) % self.size)
+
+    def getBlobFilePath(self, oid, tid):
+        base, rem = divmod(u64(oid), self.size)
+        return os.path.join(
+            str(rem),
+            "%s.%s%s" % (
+                base,
+                hexlify(tid).decode('ascii'),
+                ZODB.blob.BLOB_SUFFIX
+            )
+        )
+
+class _BlobCacheSizeChecker(threading.Thread):
+
+    def __init__(self, blob_dir, target_size):
+        with open(os.path.join(blob_dir, ZODB.blob.LAYOUT_MARKER)) as layout_file:
+            layout = layout_file.read().strip()
+
+        if not layout == _BlobCacheLayout.LAYOUT_NAME:
+            logger.critical("Invalid blob directory layout %s", layout)
+            raise ValueError("Invalid blob directory layout", layout)
+
+
+        self.__blob_dir = blob_dir
+        self.__target_size = target_size
+
+        super(_BlobCacheSizeChecker, self).__init__(name='Blob Cache Checker: %s' % blob_dir)
+
+    def __acquire_check_lock(self):
+        # Returns a lock, or None if we couldn't acquire it.
+        blob_dir = self.__blob_dir
+        lock_path = os.path.join(blob_dir, 'check_size.lock')
+
+        try:
+            return zc.lockfile.LockFile(lock_path)
+        except zc.lockfile.LockError:
+            try:
+                time.sleep(1)
+                return zc.lockfile.LockFile(lock_path)
+            except zc.lockfile.LockError:
+                # Someone is already cleaning up, so don't bother
+                logger.debug("Another thread is checking the blob cache size.")
+                return
+
+    def __size_blob_dir(self, is_cache_dir_name=re.compile(r'\d+$').match):
+        # Calculate the sizes of the blobs stored in the blob_dir.
+        # Return the total size, and a BTree {atime: [full path to blob file]}
+
+        # TODO: nti.zodb.containers has support for mapping
+        # time.time() values into integers for use with the (smaller,
+        # faster) IOBTree. Use that if we can prove that we can pop
+        # the min atime successfully (that is, while the
+        # nti.zodb.containers transformation is lossless and
+        # reversible, we need to prove that it also maintains order;
+        # I'm not sure it does).
+        #
+        # Other optimizations: Don't use a list until we get more than one
+        # file with a matching atime. And/or use tuples and not lists:
+        # tuples aren't tracked by the GC like lists are (after they survive one
+        # collection, anyway).
+
+        blob_dir = self.__blob_dir
+        blob_suffix = ZODB.blob.BLOB_SUFFIX
+        files_by_atime = BTrees.OOBTree.BTree()
+        size = 0
+
+        # Use os.walk() instead of os.listdir(); on 3.5+ this is much faster
+        # thanks to the use of os.scandir(). When we're on Python 3.5+ *only*
+        # we could use os.scandir ourself and maybe save some stat calls?
+        for dirpath, dirnames, filenames in os.walk(blob_dir):
+            # Walk top-down, only recursing into directories matching the
+            # OID components (of which there should be one level)
+            dirnames[:] = [d for d in dirnames if is_cache_dir_name(d)]
+            # Examine blob files.
+            blobfile_paths = [os.path.join(dirpath, f)
+                              for f in filenames
+                              if f.endswith(blob_suffix)]
+
+            for file_path in blobfile_paths:
+                stat = os.stat(file_path)
+                size += stat.st_size
+                t = stat.st_atime
+                if t not in files_by_atime:
+                    files_by_atime[t] = []
+
+                # The ZEO version returns a weird version of the path,
+                #
+                #     os.path.join(dirname, file_name)
+                #
+                # which it must later re-combine to get an actual path:
+                #
+                #     os.path.join(blob_dir, file_name)
+                #
+                # It's not clear why it doesn't return the full path
+                # that it already has. Temporary memory savings,
+                # perhaps? If so, is that even a concern anymore?
+                files_by_atime[t].append(file_path)
+
+        logger.debug("Blob cache size: %s", byte_display(size))
+        return size, files_by_atime
+
+    def __shrink_blob_dir(self, current_size, files_by_atime):
+        size = current_size
+        target_size = self.__target_size
+
+        while size > target_size and files_by_atime:
+            for file_path in files_by_atime.pop(files_by_atime.minKey()):
+                try:
+                    lock = _lock_blob(file_path, 0)
+                except zc.lockfile.LockError:
+                    logger.debug("Skipping locked %s", file_path)
+                    continue  # In use, skip
+
+                try:
+                    fsize = os.stat(file_path).st_size
+                    try:
+                        ZODB.blob.remove_committed(file_path)
+                    except OSError:
+                        pass # probably open on windows
+                    else:
+                        size -= fsize
+                finally:
+                    lock.close()
+
+                if size <= target_size:
+                    break
+
+        logger.debug("Reduced blob cache size: %s", byte_display(size))
+
+    def run(self):
+        logger.debug("Checking blob cache size. (target: %s)",
+                     byte_display(self.__target_size))
+
+        check_lock = self.__acquire_check_lock()
+        if check_lock is None:
+            return
+
+        try:
+            while 1:
+                size, files_by_atime = self.__size_blob_dir()
+
+                if size <= self.__target_size:
+                    break
+
+                self.__shrink_blob_dir(size, files_by_atime)
+        finally:
+            check_lock.close()
