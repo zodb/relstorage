@@ -1359,6 +1359,13 @@ class DoubleCommitter(Persistent):
         return Persistent.__getstate__(self)
 
 
+def _close_and_clean_storage(storage):
+    try:
+        storage.close()
+        storage.cleanup()
+    except Exception: # pylint:disable=broad-except
+        pass
+
 
 class AbstractToFileStorage(RelStorageTestBase):
     # Subclass this and set:
@@ -1385,13 +1392,16 @@ class AbstractToFileStorage(RelStorageTestBase):
     def _dst(self):
         if self.__dst is None:
             self.__dst = FileStorage(self._dst_path, create=True)
-            def clean(dst):
-                dst.close()
-                dst.cleanup()
-            self.addCleanup(clean, self.__dst)
+            # On Windows, though, this could be too late: We can't remove
+            # files that are still open, and zope.testing.setupstack
+            # was asked to remove the temp dir as part of tearing itself down;
+            # cleanups run after tearDown runs (which is when the setupstack runs.)
+            self.addCleanup(_close_and_clean_storage, self.__dst)
         return self.__dst
 
     def tearDown(self):
+        if hasattr(self.__dst, 'close'):
+            _close_and_clean_storage(self.__dst)
         self.__dst = 42 # Not none so we don't try to create.
         super(AbstractToFileStorage, self).tearDown()
 
@@ -1414,13 +1424,13 @@ class AbstractFromFileStorage(RelStorageTestBase):
     def _dst(self):
         if self.__dst is None:
             self.__dst = self.make_storage()
-            def clean(dst):
-                dst.close()
-                dst.cleanup()
-            self.addCleanup(clean, self.__dst)
+            self.addCleanup(_close_and_clean_storage, self.__dst)
         return self.__dst
 
     def tearDown(self):
+        if hasattr(self.__dst, 'close'):
+            _close_and_clean_storage(self.__dst)
+
         self.__dst = 42 # Not none so we don't try to create.
         super(AbstractFromFileStorage, self).tearDown()
 
