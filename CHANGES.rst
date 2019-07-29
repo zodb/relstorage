@@ -2,7 +2,7 @@
  Changes
 =========
 
-3.0a6 (unreleased)
+3.0a6 (2019-07-29)
 ==================
 
 Enhancements
