@@ -45,10 +45,13 @@ class PostgreSQLStats(AbstractStats):
     def large_database_change(self):
         conn, cursor = self.connmanager.open()
         try:
-            # VACUUM cannot be run inside a transaction block
-            conn.autocommit = True
-            cursor.execute('VACUUM (ANALYZE)')
+            # VACUUM cannot be run inside a transaction block;
+            # ANALYZE can be. Both update pg_class.reltuples.
+            # VACUUM needs a read table lock, meaning it can be blocked by writes
+            # and vice-versa; ANALYZE doesn't appear to need locks.
+            cursor.execute('ANALYZE')
             # Depending on the number of pages this touched, the estimate
             # can be better or worse.
+            conn.commit()
         finally:
             self.connmanager.close(conn, cursor)
