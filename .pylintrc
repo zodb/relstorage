@@ -104,3 +104,7 @@ max-locals=20
 # pylint leaves it off. This is the proximal cause of the
 # undefined-all-variable crash.
 #unsafe-load-any-extension = no
+
+# Local Variables:
+# mode: conf-space
+# End:

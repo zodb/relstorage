@@ -231,49 +231,21 @@ class PostgreSQLSchemaInstaller(AbstractSchemaInstaller):
         # actually exist. When we have procedures that call each other,
         # that means there's an order they have to be created in.
         # Rather than try to figure out what that order is, or encode it
-        # in names somehow, we just loop multiple times until we don't get any errors,
-        # figuring that we'll create a leaf function on the first time, and then
-        # more and more dependent functions on each iteration.
+        # in names somehow, we'll disable that validation for the duration
+        # of this transaction (just like pg_dump.)
+        cursor.execute('SET LOCAL check_function_bodies = off')
 
-        # We're here because we are missing procs or they are out of date, so
-        # we know we have functions to execute. But as noted, that could produce errors,
-        # leading to transaction rollback. If we had just created tables, for example,
-        # they'd be lost, because DDL is transactional in postgres. Not good.
-        # So we begin by committing.
-        cursor.connection.commit()
+        for proc_name, stored_func in self.procedures.items():
+            __traceback_info__ = proc_name, self.keep_history
+            proc_source = stored_func.create
 
-        iters = range(5)
-        last_ex = None
-        for _ in iters:
-            last_ex = None
-            for proc_name, stored_func in self.procedures.items():
-                __traceback_info__ = proc_name, self.keep_history
-                proc_source = stored_func.create
-
-                try:
-                    cursor.execute(proc_source)
-                except self.connmanager.driver.driver_module.ProgrammingError as ex:
-                    logger.info("Failed to create %s: %s", proc_name, ex)
-                    last_ex = ex, __traceback_info__
-                    cursor.connection.rollback()
-                    continue
-
-                # Persist the function.
-                cursor.connection.commit()
-
-            if last_ex is None:
-                # Yay, we got through it without any errors.
-                # Now we just need to update the signatures.
-                break
-        else:
-            # recall for:else: is only executed if there was no ``break``
-            # statement.
-            last_ex, __traceback_info__ = last_ex
-            raise last_ex
+            cursor.execute(proc_source)
 
         # Update checksums
         # Postgres < 10 requires the signature to identify the function;
         # after that it's optional if the function isn't overloaded.
+        # Rather than try to parse the signature from the file ourself, we
+        # let the database do it and then ask it.
         for db_proc in self.list_procedures(cursor).values():
             # db_proc will have the signature but perhaps not the checksum.
             try:
@@ -294,8 +266,6 @@ class PostgreSQLSchemaInstaller(AbstractSchemaInstaller):
             )
             __traceback_info__ = comment
             cursor.execute(comment)
-
-        cursor.connection.commit()
 
 
     def list_triggers(self, cursor):

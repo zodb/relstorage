@@ -664,6 +664,7 @@ class RelStorage(LegacyMethodsMixin,
 
     def copyTransactionsFrom(self, other):
         Copy(self.blobhelper, self, self).copyTransactionsFrom(other)
+        self._adapter.stats.large_database_change()
 
     def pack(self, t, referencesf, prepack_only=False, skip_prepack=False):
         pack = Pack(self._options, self._adapter, self.blobhelper, self._cache)
