@@ -47,7 +47,9 @@ class IteratorDeepCompare(object):
         """Confirm that storage1 and storage2 contain equivalent data"""
         eq = self.assertEqual
         missing = object()
-        self.assertEqual(len(storage1), len(storage2))
+        # len(storage) is only required to be approximate and for "informational purposes."
+        # So we cannot use it as a hard check.
+        # self.assertEqual(len(storage1), len(storage2))
         iter1 = self._closing(storage1.iterator())
         iter2 = self._closing(storage2.iterator())
         for txn1, txn2 in zip(iter1, iter2):

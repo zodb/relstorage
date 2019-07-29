@@ -22,9 +22,33 @@ from ..stats import AbstractStats
 
 class PostgreSQLStats(AbstractStats):
 
+    # Getting the COUNT(*)  of tables can be very expensive
+    # due to the need to examine rows to check their MVCC visibility.
+    # This method only promises to get the *approximate* size,
+    # so we use the tables the optimizer uses to get stats.
+    # With the autovacuum daemon running, this shouldn't get *too* far
+    # out of date.
+    # (https://www.postgresql.org/docs/11/monitoring-stats.html#PG-STAT-ALL-TABLES-VIEW)
+    _get_object_count_queries = (
+        "SELECT reltuples FROM pg_class WHERE relname = 'current_object'",
+        "SELECT reltuples FROM pg_class WHERE relname = 'object_state'"
+    )
+
+
     def get_db_size(self):
         """Returns the approximate size of the database in bytes"""
         def get_size(_conn, cursor):
             cursor.execute("SELECT pg_database_size(current_database())")
             return cursor.fetchone()[0]
         return self.connmanager.open_and_call(get_size)
+
+    def large_database_change(self):
+        conn, cursor = self.connmanager.open()
+        try:
+            # VACUUM cannot be run inside a transaction block
+            conn.autocommit = True
+            cursor.execute('VACUUM (ANALYZE)')
+            # Depending on the number of pages this touched, the estimate
+            # can be better or worse.
+        finally:
+            self.connmanager.close(conn, cursor)

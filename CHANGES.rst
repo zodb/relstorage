@@ -143,6 +143,11 @@ PostgreSQL
   single database call. With pg8000, however, it still takes two, with
   the second call being the COMMIT call that releases locks.
 
+- Speed up getting the approximate number of objects
+  (``len(storage)``) in a database by using the estimates collected by
+  the autovacuum process or analyzing tables, instead of asking for a
+  full table scan.
+
 3.0a5 (2019-07-11)
 ==================
 

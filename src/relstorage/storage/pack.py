@@ -44,6 +44,7 @@ class Pack(object):
         'blobhelper',
         'cache',
         'packundo',
+        'stats',
     )
 
     def __init__(self, options, adapter, blobhelper, cache):
@@ -51,6 +52,7 @@ class Pack(object):
         self.locker = adapter.locker
         self.connmanager = adapter.connmanager
         self.packundo = adapter.packundo.with_options(options)
+        self.stats = adapter.stats
         self.blobhelper = blobhelper
         self.cache = cache
 
@@ -205,3 +207,5 @@ class Pack(object):
                 self.locker.release_pack_lock(lock_cursor)
         finally:
             self.connmanager.rollback_and_close(lock_conn, lock_cursor)
+
+        self.stats.large_database_change()

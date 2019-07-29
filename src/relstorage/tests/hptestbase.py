@@ -381,6 +381,7 @@ class HistoryPreservingRelStorageTests(GenericRelStorageTests,
         self.assertEqual(len(state), history[1]['size'])
 
         # Length is still 2
+        storage._adapter.stats.large_database_change()
         self.assertEqual(len(storage), 2)
 
         # The most recent size is 0 too

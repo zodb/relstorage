@@ -18,9 +18,10 @@ import abc
 
 from .._compat import ABC
 from ._util import query_property
+from ._util import DatabaseHelpersMixin
 
 
-class AbstractStats(ABC):
+class AbstractStats(DatabaseHelpersMixin, ABC):
 
     def __init__(self, connmanager, keep_history):
         self.connmanager = connmanager
@@ -46,3 +47,11 @@ class AbstractStats(ABC):
     def get_db_size(self):
         """Returns the approximate size of the database in bytes"""
         raise NotImplementedError()
+
+
+    def large_database_change(self):
+        """
+        Call this when the database has changed substantially,
+        and it would be a good time to perform any updates or
+        optimizations.
+        """

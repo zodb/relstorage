@@ -340,7 +340,8 @@ class GenericRelStorageTests(
 
     def checkLen(self):
         # Override the version from BasicStorage because we
-        # actually do guarantee to keep track of the counts.
+        # actually do guarantee to keep track of the counts,
+        # within certain limits.
 
         # len(storage) reports the number of objects.
         # check it is zero when empty
@@ -350,6 +351,7 @@ class GenericRelStorageTests(
         # of this number
         self._dostore(data=PersistentMapping())
         self._dostore(data=PersistentMapping())
+        self._storage._adapter.stats.large_database_change()
         self.assertEqual(len(self._storage), 2)
 
     def checkDropAndPrepare(self):
