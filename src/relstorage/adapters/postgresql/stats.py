@@ -30,8 +30,8 @@ class PostgreSQLStats(AbstractStats):
     # out of date.
     # (https://www.postgresql.org/docs/11/monitoring-stats.html#PG-STAT-ALL-TABLES-VIEW)
     _get_object_count_queries = (
-        "SELECT reltuples FROM pg_class WHERE relname = 'current_object'",
-        "SELECT reltuples FROM pg_class WHERE relname = 'object_state'"
+        "SELECT reltuples::bigint FROM pg_class WHERE relname = 'current_object'",
+        "SELECT reltuples::bigint FROM pg_class WHERE relname = 'object_state'"
     )
 
 
