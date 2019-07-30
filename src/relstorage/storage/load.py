@@ -194,15 +194,20 @@ class Loader(object):
         if tid is maxtid or tid == maxtid:
             # This is probably from ZODB.utils.load_current(), which
             # is really trying to just get the current state of the
-            # object. So return that, formatted in the way this method
-            # returns it: (state, tid of state, tid_after_state) where
-            # tid_after_state will naturally be None
+            # object. This is almost entirely just from test cases; ZODB 5's mvccadapter
+            # doesn't even expose it, so ZODB.Connection doesn't use it.
+            #
+            # Shortcut the logic below by using load() (current),
+            # formatted in the way this method returns it:
+            #
+            #     ``(state, tid # of state, tid_after_state)``
+            #
+            # where tid_after_state will naturally be None
             return self.load(oid) + (None,)
         oid_int = bytes8_to_int64(oid)
 
         # TODO: This makes three separate queries, and also bypasses the cache.
         # We should be able to fix at least the multiple queries.
-
         if self.store_connection:
             # Allow loading data from later transactions
             # for conflict resolution.

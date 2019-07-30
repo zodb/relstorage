@@ -155,7 +155,8 @@ class CompiledQuery(object):
             #
             # Thus we keep a cache of statements we have prepared for
             # this particular connection/cursor.
-            #
+            # TODO: This should probably really be on the connection,
+            # not the cursor. connection is session.
             cursor_prep_stmts = self._stmt_cache_for_cursor(cursor)
             try:
                 stmt = cursor_prep_stmts[self._prepare_stmt]
