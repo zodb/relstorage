@@ -13,7 +13,7 @@ from ..oidallocator import AbstractOIDAllocator
 
 class MockOIDAllocator(AbstractOIDAllocator):
 
-    def set_min_oid(self, cursor, oid):
+    def set_min_oid(self, cursor, oid_int):
         raise NotImplementedError
 
     def new_oids(self, cursor):

@@ -30,9 +30,9 @@ class OracleOIDAllocator(AbstractOIDAllocator):
     def __init__(self, connmanager):
         self.connmanager = connmanager
 
-    def set_min_oid(self, cursor, oid):
+    def set_min_oid(self, cursor, oid_int):
         """Ensure the next OID is at least the given OID."""
-        n = (oid + 15) // 16
+        n = (oid_int + 15) // 16
         stmt = "SELECT zoid_seq.nextval FROM DUAL"
         cursor.execute(stmt)
         next_n = cursor.fetchone()[0]

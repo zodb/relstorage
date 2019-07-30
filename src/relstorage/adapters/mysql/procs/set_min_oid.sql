@@ -12,35 +12,43 @@ BEGIN
   -- We obviously cannot JUST use MAX(zoid) to find this value, we can't see
   -- what other sessions have done. But if that's already >= to the min_oid,
   -- then we don't have to do anything.
-  DECLARE next_oid BIGINT;
+  DECLARE current_max_oid BIGINT;
 
   SELECT COALESCE(MAX(ZOID), 0)
-  INTO next_oid
+  INTO current_max_oid
   FROM new_oid;
 
-  IF next_oid < min_oid THEN
+  IF current_max_oid >= min_oid THEN
+    -- Sweet. The values visible to us (already committed at the
+    -- time we opened this transaction) are in advance of
+    -- the requested minimum.
+    SET current_max_oid = NULL;
+  ELSE
     -- Can't say for sure. Just because we can only see values
     -- less doesn't mean they're not there in another transaction.
 
+    -- So we find out what the next allocation would be.
     -- This will never block.
     INSERT INTO new_oid VALUES ();
-    SELECT LAST_INSERT_ID()
-    INTO next_oid;
 
-    IF min_oid > next_oid THEN
-      -- This is unlikely to block. We just confirmed that the
-      -- sequence value is strictly less than this, so no one else
-      -- should be doing this.
+    SELECT LAST_INSERT_ID()
+    INTO current_max_oid;
+
+    -- If we still need to go higher, then we have no choice but to do
+    -- an insert. This is /unlikely/ to block or conflict. We just
+    -- confirmed that the sequence value is strictly less than this,
+    -- so no one else should be doing this *unless* two threads are
+    -- trying to copy transactions in at the same time and happened to
+    -- hit the same OID value. That's likely to fail at higher levels, but
+    -- perhaps it's possible. That means that our IGNORE modifier here could
+    -- let one thread insert data and the other pretend to: but either way, it means
+    -- it is not safe for us to assume we allocated this value and try to
+    -- generate more OIDs with it.
+    IF min_oid > current_max_oid THEN
       INSERT IGNORE INTO new_oid (zoid)
       VALUES (min_oid);
-
-      SET next_oid = min_oid;
     END IF;
-  ELSE
-    -- Return a NULL value to signal that this value cannot
-    -- be cached and used because we didn't allocate it.
-    SET next_oid = NULL;
   END IF;
 
-  SELECT next_oid;
+
 END;

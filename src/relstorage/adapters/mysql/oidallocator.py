@@ -49,8 +49,6 @@ class MySQLOIDAllocator(AbstractOIDAllocator):
     # already has a custom timeout.
     garbage_collect_batch_timeout = 5
 
-    _cached_next_n = 0
-
     def __init__(self, driver):
         """
         :param type disconnected_exception: The exception to raise when
@@ -90,10 +88,7 @@ class MySQLOIDAllocator(AbstractOIDAllocator):
     # "Any AUTO_INCREMENT value is reset to its start value. This is
     # true even for MyISAM and InnoDB, which normally do not reuse
     # sequence values."
-    def set_min_oid(self, cursor, oid):
-        """
-        Ensure the next OID is at least the given OID.
-        """
+    def set_min_oid(self, cursor, oid_int):
         # A simple statement like the following can easily deadlock:
         #
         # INSERT INTO new_oid (zoid)
@@ -111,15 +106,8 @@ class MySQLOIDAllocator(AbstractOIDAllocator):
         # We deal with this by using a stored procedure to efficiently make
         # multiple queries.
 
-        n = (oid + 15) // 16
-        multi_results = self.driver.callproc_multi_result(cursor, 'set_min_oid(%s)', (n,))
-        next_n, = multi_results[0][0]
-
-        # A side effect of checking may be allocating from the sequence.
-        # If it increased, we have a value we can use, because no one else can
-        # use that same value.
-        if next_n and next_n > n:
-            self._cached_next_n = max(next_n, self._cached_next_n)
+        n = (oid_int + 15) // 16
+        self.driver.callproc_multi_result(cursor, 'set_min_oid(%s)', (n,))
 
     @metricmethod
     def new_oids(self, cursor):
@@ -145,19 +133,15 @@ class MySQLOIDAllocator(AbstractOIDAllocator):
         #
         # Our solution is to just let rows build up if the delete fails. Eventually
         # a GC, which happens at startup, will occur and hopefully get most of them.
-        if self._cached_next_n:
-            n = self._cached_next_n
-            self._cached_next_n = 0
-        else:
-            stmt = "INSERT INTO new_oid VALUES ()"
-            cursor.execute(stmt)
+        stmt = "INSERT INTO new_oid VALUES ()"
+        cursor.execute(stmt)
 
-            # This is a DB-API extension. Fortunately, all
-            # supported drivers implement it. (In the past we used
-            # cursor.connection.insert_id(), which was specific to MySQLdb
-            # and PyMySQL.)
-            # 'SELECT LAST_INSERT_ID()' is the pure-SQL way to do this.
-            n = cursor.lastrowid
+        # This is a DB-API extension. Fortunately, all
+        # supported drivers implement it. (In the past we used
+        # cursor.connection.insert_id(), which was specific to MySQLdb
+        # and PyMySQL.)
+        # 'SELECT LAST_INSERT_ID()' is the pure-SQL way to do this.
+        n = cursor.lastrowid
 
         if n % self.garbage_collect_interval == 0:
             self.garbage_collect_oids(cursor, n)

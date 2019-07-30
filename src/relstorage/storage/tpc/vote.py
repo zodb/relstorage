@@ -163,17 +163,7 @@ class AbstractVote(AbstractTPCState):
         # objects and we're just updating older objects, this will frequently
         # be true. At the very least, we need to update the storage's 'max_new_oid'
         # property to reduce the need for this.
-        if self.max_stored_oid > storage._oids.max_new_oid:
-            # First, set it in the database for everyone.
-            next_oid = self.max_stored_oid + 1
-            adapter.oidallocator.set_min_oid(cursor, next_oid)
-            # Then, as per above, set it in the storage for this thread
-            # so we don't have to keep doing this if it only ever
-            # updates existing objects.
-            # NOTE: This is a non-transactional change to the storage's state.
-            # That's OK, though, as the underlying sequence for OIDs we allocate
-            # is also non-transactional.
-            storage._oids.max_new_oid = next_oid
+        storage._oids.set_min_oid(self.max_stored_oid)
 
         # Check the things registered by Connection.readCurrent(),
         # while at the same time taking out update locks on both those rows,

@@ -7,6 +7,7 @@
 
 - Eliminate runtime dependency on ZEO. See :issue:`293`.
 
+- Fix a rare race condition allocating OIDs on MySQL. See :issue:`283`.
 
 3.0a6 (2019-07-29)
 ==================

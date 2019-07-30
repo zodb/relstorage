@@ -576,15 +576,25 @@ class GenericRelStorageTests(
         from itertools import combinations
 
         thread_count = 11
-        oid_count = 1578
-        oids_by_thread = [set() for _ in range(thread_count)]
+        oids_per_segment = 578
+        segment_count = 3
+        total_expected_oids = oids_per_segment * segment_count
+        oids_by_thread = [list() for _ in range(thread_count)]
 
         def allocate_oids(thread_storage, thread_num):
             try:
-                oids_by_thread[thread_num].update(
-                    thread_storage.new_oid()
-                    for _ in range(oid_count)
-                )
+                store_conn = thread_storage._store_connection
+                allocator = thread_storage._adapter.oidallocator
+                my_oids = oids_by_thread[thread_num]
+                for _ in range(segment_count):
+                    my_oids.extend(
+                        bytes8_to_int64(thread_storage.new_oid())
+                        for _ in range(oids_per_segment)
+                    )
+                    # Periodically call set_min_oid, like the storage does,
+                    # to check for interference.
+                    allocator.set_min_oid(store_conn.cursor, my_oids[-1])
+                    store_conn.commit()
             finally:
                 thread_storage.release()
 
@@ -597,16 +607,29 @@ class GenericRelStorageTests(
         for t in threads:
             t.join(99)
 
-        # They all have the desired length
+        # They all have the desired length, and each one has no duplicates.
         self.assertEqual(
             [len(s) for s in oids_by_thread],
-            [oid_count for _ in range(thread_count)]
+            [total_expected_oids for _ in range(thread_count)]
+        )
+        self.assertEqual(
+            [len(s) for s in oids_by_thread],
+            [len(set(s)) for s in oids_by_thread]
         )
 
-        # The are all disjoint
+        # They are all disjoint
         for a, b in combinations(oids_by_thread, 2):
             __traceback_info__ = a, b
+            a = set(a)
+            b = set(b)
             self.assertTrue(a.isdisjoint(b))
+
+        # They are all monotonically increasing.
+        for s in oids_by_thread:
+            self.assertEqual(
+                s,
+                sorted(s)
+            )
 
     def checkUseCache(self):
         # Store an object, cache it, then retrieve it from the cache
