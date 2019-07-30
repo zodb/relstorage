@@ -27,9 +27,15 @@ from ..oidallocator import AbstractOIDAllocator
 @implementer(IOIDAllocator)
 class PostgreSQLOIDAllocator(AbstractOIDAllocator):
 
-    def set_min_oid(self, cursor, oid):
+    def set_min_oid(self, cursor, oid_int):
         """Ensure the next OID is at least the given OID."""
-        n = (oid + 15) // 16
+        n = (oid_int + 15) // 16
+        # This potentially wastes a value from the sequence to find
+        # out that we're already past the max. But that's the only option:
+        # curval() is local to this connection, and 'ALTER SEQUENCE ... MINVALUE n STARTS WITH n'
+        # takes a lock and doesn't let anyone use nextval() until we commit
+        # (which could take some time). (Connections are expensive in PostgreSQL,
+        # so we don't want to do what Oracle does and execute ALTER in a new connection.)
         cursor.execute("""
         SELECT CASE WHEN %s > nextval('zoid_seq')
             THEN setval('zoid_seq', %s)

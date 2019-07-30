@@ -96,7 +96,15 @@ class Psycopg2ConnectionManager(AbstractConnectionManager):
         # XXX: SERIALIZABLE isn't allowed on streaming replicas
         # (https://www.enterprisedb.com/blog/serializable-postgresql-11-and-beyond)
         # Do we really need SERIALIZABLE? Wouldn't REPEATABLE READ be
-        # sufficient? That's what we use on MySQL.
+        # sufficient? That's what we use on MySQL. OTOH, SERIALIZABLE
+        # is much more efficient on PostgreSQL than other systems
+        # and has some nice features.
+
+        # If we could get the store connections to work in
+        # SERIALIZABLE mode, we'd probably be able to stop the
+        # explicit locking altogether. With judicious use of
+        # savepoints, and proper re-raising of ConflictError, that
+        # might be possible.
 
         # Set the transaction to READ ONLY mode. This lets
         # transactions (especially SERIALIZABLE) elide some locks.
@@ -108,6 +116,7 @@ class Psycopg2ConnectionManager(AbstractConnectionManager):
         return self.open(
             self.isolation_serializable,
             read_only=True,
+            deferrable=False,
             replica_selector=self.ro_replica_selector,
             application_name='RS load'
         )
@@ -117,7 +126,8 @@ class Psycopg2ConnectionManager(AbstractConnectionManager):
                          application_name='RS prepack')
 
     def _do_open_for_store(self):
-        return self.open(application_name='RS store')
+        return self.open(self.isolation_read_committed,
+                         application_name='RS store')
 
     def _do_open_for_call(self, callback):
         return self.open(application_name='RS: ' + callback.__name__)

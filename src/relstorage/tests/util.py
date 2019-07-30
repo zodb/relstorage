@@ -2,8 +2,6 @@ import os
 import platform
 import unittest
 
-from relstorage._compat import ABC
-
 # ZODB >= 3.9.  The blob directory can be a private cache.
 shared_blob_dir_choices = (False, True)
 
@@ -91,7 +89,68 @@ class MinimalTestLayer(object):
         pass
 
 
-class AbstractTestSuiteBuilder(ABC):
+class _Availability(object):
+    """
+    Has a boolean value telling whether the driver or database is available,
+    and a string explaining why it is/is not.
+    """
+
+    def __init__(self, factory, drivers, max_priority, use_adapter, db_name):
+        from relstorage.adapters.interfaces import DriverNotAvailableError
+        self.driver_name = factory.driver_name
+        self.escaped_driver_name = self.driver_name.replace(' ', '').replace('/', '_')
+
+        try:
+            self.driver = drivers.select_driver(self.driver_name)
+        except DriverNotAvailableError:
+            self.driver = None
+
+        self._available = self.driver is not None and self.driver.priority <= max_priority
+
+        if not self._available:
+            if self.driver is None:
+                msg = 'Driver %s is not installed' % (self.driver_name,)
+            else:
+                msg = 'Driver %s has test priority %d >= max %d' % (
+                    self.driver_name, self.driver.priority, max_priority
+                )
+        else:
+            msg = 'Driver %s is installed' % (self.driver_name,)
+        self._msg = msg
+
+        if self.driver is not None:
+            type(self.driver).STRICT = True
+
+        if self._available:
+            # See if we can connect.
+            self.__check_db_access(use_adapter, db_name)
+
+
+    def __str__(self):
+        return self._msg
+
+    def __bool__(self):
+        return self._available
+
+    __nonzero__ = __bool__
+
+
+    def __check_db_access(self, use_adapter, db_name):
+        # We need to get an adapter to get a connmanager to try to connect.
+        from relstorage.options import Options
+        options = Options(driver=self.driver_name)
+
+        adapter_maker = use_adapter()
+        adapter_maker.driver_name = self.driver_name
+        adapter = adapter_maker.make_adapter(options, db_name)
+        try:
+            adapter.connmanager.open_and_call(lambda _conn, _cursor: None)
+        except Exception as e:  # pylint:disable=broad-except
+            self._available = False
+            self._msg = "%s: Failed to connect: %r %s" % (self._msg, type(e), e)
+
+
+class AbstractTestSuiteBuilder(object):
 
     __name__ = None # PostgreSQL, MySQL, Oracle
     # Drivers with a priority over this amount won't be part of the
@@ -126,7 +185,7 @@ class AbstractTestSuiteBuilder(ABC):
         raise NotImplementedError
 
     def test_suite(self):
-        from relstorage.adapters.interfaces import DriverNotAvailableError
+
         from .reltestbase import AbstractIDBDriverTest
         from .reltestbase import AbstractIDBOptionsTest
         suite = unittest.TestSuite()
@@ -136,30 +195,25 @@ class AbstractTestSuiteBuilder(ABC):
             {'db_options': self.drivers}
         )))
         for factory in self.drivers.known_driver_factories():
-            driver_name = factory.driver_name
-            try:
-                driver = self.drivers.select_driver(driver_name)
-            except DriverNotAvailableError:
-                driver = None
-
-            available = driver is not None and driver.priority <= self.MAX_PRIORITY
+            available = _Availability(
+                factory, self.drivers, self.MAX_PRIORITY,
+                self.use_adapter,
+                self.db_names['data']
+            )
 
             # On CI, we don't even add tests for unavailable drivers to the
             # list of tests; this makes the output much shorter and easier to read,
             # but it does make zope-testrunner's discovery options less useful.
             if available or TEST_UNAVAILABLE_DRIVERS:
-                if driver is not None:
-                    type(driver).STRICT = True
                 # Checking the driver is just a unit test, it doesn't connect or
                 # need a layer
                 suite.addTest(unittest.makeSuite(
                     self.__skipping_if_not_available(
                         type(
-                            self.__name__ + 'DBDriverTest_' + driver_name,
+                            self.__name__ + 'DBDriverTest_' + available.escaped_driver_name,
                             (AbstractIDBDriverTest,),
-                            {'driver': driver}
+                            {'driver': available.driver}
                         ),
-                        driver_name,
                         available)))
 
                 # We put the various drivers into a zope.testrunner layer
@@ -168,16 +222,13 @@ class AbstractTestSuiteBuilder(ABC):
                 driver_suite = unittest.TestSuite()
                 layer_name = '%s%s' % (
                     self.__name__,
-                    self.__escape_driver_name(driver_name),
+                    available.escaped_driver_name,
                 )
                 driver_suite.layer = MinimalTestLayer(layer_name)
                 driver_suite.layer.__module__ = self.__module__
-                self._add_driver_to_suite(driver_name, driver_suite, layer_name, available)
+                self._add_driver_to_suite(driver_suite, layer_name, available)
                 suite.addTest(driver_suite)
         return suite
-
-    def __escape_driver_name(self, driver_name):
-        return driver_name.replace(' ', '').replace('/', '_')
 
     def _default_make_check_class(self, bases, name, klass_dict=None):
         klass = type(
@@ -238,37 +289,35 @@ class AbstractTestSuiteBuilder(ABC):
             classes.append(klass)
         return classes
 
-    def __skipping_if_not_available(self, klass, driver_name, is_available):
+    def __skipping_if_not_available(self, klass, availability):
         klass.__module__ = self.__module__
         klass = unittest.skipUnless(
-            is_available,
-            "Driver %s is not installed" % (driver_name,))(klass)
+            availability,
+            str(availability))(klass)
         return klass
 
-    def _new_class_for_driver(self, driver_name, base, is_available):
+    def _new_class_for_driver(self, base, driver_available):
         klass = type(
-            base.__name__ + '_' + self.__escape_driver_name(driver_name),
+            base.__name__ + '_' + driver_available.escaped_driver_name,
             (base,),
-            {'driver_name': driver_name}
+            {'driver_name': driver_available.driver_name}
         )
-        return self.__skipping_if_not_available(klass, driver_name, is_available)
+        return self.__skipping_if_not_available(klass, driver_available)
 
-    def _add_driver_to_suite(self, driver_name, suite, layer_prefix, is_available):
+    def _add_driver_to_suite(self, suite, layer_prefix, driver_available):
         for klass in self._make_check_classes():
-            klass = self._new_class_for_driver(driver_name, klass, is_available)
+            klass = self._new_class_for_driver(klass, driver_available)
             suite.addTest(unittest.makeSuite(klass, "check"))
 
         for klass in self._make_zodbconvert_classes():
             suite.addTest(unittest.makeSuite(
-                self._new_class_for_driver(driver_name,
-                                           klass,
-                                           is_available)))
+                self._new_class_for_driver(klass,
+                                           driver_available)))
 
         for klass in self.extra_test_classes:
             suite.addTest(unittest.makeSuite(
-                self._new_class_for_driver(driver_name,
-                                           klass,
-                                           is_available)))
+                self._new_class_for_driver(klass,
+                                           driver_available)))
 
         from relstorage.tests.blob.testblob import storage_reusable_suite
         from relstorage.options import Options
@@ -282,10 +331,10 @@ class AbstractTestSuiteBuilder(ABC):
                 def create_storage(name, blob_dir,
                                    shared_blob_dir=shared_blob_dir,
                                    keep_history=keep_history, **kw):
-                    if not is_available:
-                        raise unittest.SkipTest("Driver %s is not installed" % (driver_name,))
-                    assert driver_name not in kw
-                    kw['driver'] = driver_name
+                    if not driver_available:
+                        raise unittest.SkipTest(str(driver_available))
+                    assert 'driver' not in kw
+                    kw['driver'] = driver_available.driver_name
                     db = self.db_names[name]
                     if not keep_history:
                         db += '_hf'
@@ -297,7 +346,7 @@ class AbstractTestSuiteBuilder(ABC):
                         **kw)
 
                     adapter_maker = self.use_adapter()
-                    adapter_maker.driver_name = driver_name
+                    adapter_maker.driver_name = driver_available.driver_name
                     adapter = adapter_maker.make_adapter(options, db)
                     __traceback_info__ = adapter, options
                     storage = RelStorage(adapter, name=name, options=options)
@@ -323,7 +372,7 @@ class AbstractTestSuiteBuilder(ABC):
                     test_blob_cache=(not shared_blob_dir),
                     # PostgreSQL blob chunks are max 2GB in size
                     large_blob_size=(not shared_blob_dir) and (self.large_blob_size) + 100,
-                    storage_is_available=is_available
+                    storage_is_available=driver_available
                 ))
 
         return suite

@@ -42,23 +42,59 @@ class AbstractOIDs(object):
     def new_oid(self, commit_in_progress):
         raise NotImplementedError
 
+    def set_min_oid(self, max_observed_oid):
+        raise NotImplementedError
+
 class OIDs(AbstractOIDs):
 
     __slots__ = (
         'preallocated_oids',
-        'max_new_oid',
+        'max_allocated_oid',
         'oidallocator',
         'store_connection',
     )
 
     def __init__(self, oidallocator, store_connection):
-        self.preallocated_oids = None
-        self.max_new_oid = 0
+        # From largest to smallest: [16, 15, 14, ..., 1]
+        self.preallocated_oids = [] # type: list
+        # The maximum OID we've handed out (or that has been observed)
+        # A value of 0 is not legal for the oidallocator to produce.
+        self.max_allocated_oid = 0 # type: int
         self.oidallocator = oidallocator
         self.store_connection = store_connection # type: StoreConnection
 
     def stale(self, ex):
         return StaleOIDs(ex, self)
+
+    def set_min_oid(self, max_observed_oid):
+        """
+        Ensure that the next oid we produce is greater than *max_observed_oid*.
+
+        Must be done in a transaction while the store connection is usable.
+        """
+        if max_observed_oid > self.max_allocated_oid:
+            # They saw one from outside of us that's greater than what
+            # we've allocated. We could be a brand new object that's
+            # never allocated an OID before (i.e., we're unused, or
+            # we've only done loads); or, we could be copying
+            # transactions from an external storage.
+
+            # Set it in the database for everyone.
+            self.oidallocator.set_min_oid(self.store_connection.cursor,
+                                          max_observed_oid)
+            # Then, set it in the storage for this thread
+            # so we don't have to keep doing this if it only ever
+            # updates existing objects.
+            # NOTE: This is a non-transactional change to the our state.
+            # That's OK, though, as the underlying sequence for OIDs we allocate
+            # is also non-transactional.
+            self.max_allocated_oid = max_observed_oid
+            # Discard any preallocated oids that are less than this; they're not
+            # safe to use in the most general case. In the typical case they probably
+            # are.
+            self.preallocated_oids = [i
+                                      for i in self.preallocated_oids
+                                      if i > max_observed_oid]
 
     def new_oid(self, commit_in_progress):
         # Prior to ZODB 5.1.2, this method was actually called on the
@@ -87,7 +123,10 @@ class OIDs(AbstractOIDs):
             )
 
         oid_int = self.preallocated_oids.pop()
-        self.max_new_oid = max(self.max_new_oid, oid_int)
+        # OIDs are monotonic, always increasing. It should never go down or
+        # return equal to what we've already seen.
+        assert oid_int > self.max_allocated_oid
+        self.max_allocated_oid = oid_int
         return int64_to_8bytes(oid_int)
 
     def __new_oid_callback(self, _store_conn, store_cursor, _fresh_connection):
@@ -109,6 +148,9 @@ class ReadOnlyOIDs(AbstractOIDs):
     def new_oid(self, commit_in_progress):
         raise ReadOnlyError
 
+    def set_min_oid(self, max_observed_oid):
+        raise ReadOnlyError
+
 @implementer(IStaleAware)
 class StaleOIDs(AbstractOIDs):
 
@@ -128,4 +170,7 @@ class StaleOIDs(AbstractOIDs):
         return self
 
     def new_oid(self, commit_in_progress):
+        raise self.stale_error
+
+    def set_min_oid(self, max_observed_oid):
         raise self.stale_error

@@ -792,12 +792,13 @@ class IOIDAllocator(Interface):
         Return a new :class:`list` of new, unused integer OIDs.
 
         The list should be contiguous and must be in sorted order from
-        highest to lowest.
+        highest to lowest. It must never contain 0.
         """
 
-    def set_min_oid(cursor, oid):
+    def set_min_oid(cursor, oid_int):
         """
-        Ensure the next OID is at least the given integer OID.
+        Ensure the next OID (the rightmost value from
+        :meth:`new_oids`) is greater than the given *oid_int*.
         """
 
 

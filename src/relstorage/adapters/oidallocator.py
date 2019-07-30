@@ -25,7 +25,9 @@ from .._compat import ABC
 # or table, value (n) represents (n * 16 - 15) through (n * 16). So,
 # value 1 represents OID block 1-16, 2 represents OID block 17-32, and
 # so on. The _oid_range_around helper method returns a list around
-# this number sorted in the proper way.
+# this number sorted in the proper way (largest to smallest, so that
+# list.pop() returns the smallest remaining number, and so on:
+# [16, 15, ..., 1] when given 1)
 #
 # Given:
 #    num_oids = 16
@@ -50,7 +52,7 @@ def _oid_range_around_iterable(n, _s=_OID_RANGE_SIZE, _range=_oid_range_around_a
 class AbstractOIDAllocator(ABC):
 
     @abc.abstractmethod
-    def set_min_oid(self, cursor, oid):
+    def set_min_oid(self, cursor, oid_int):
         raise NotImplementedError()
 
     @abc.abstractmethod

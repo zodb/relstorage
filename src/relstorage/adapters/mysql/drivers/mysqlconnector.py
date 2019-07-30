@@ -59,11 +59,18 @@ class PyMySQLConnectorDriver(AbstractMySQLDriver):
         if PYPY:
             # Patch to work around JIT bug found in (at least) 7.1.1
             # https://bitbucket.org/pypy/pypy/issues/3014/jit-issue-inlining-structunpack-hh
+            #
+            # In addition, we later discovered
+            # https://github.com/zodb/relstorage/issues/283#issuecomment-516489791,
+            # which was tracked down to be the same thing: protocol calls into utils
+            # to parse "length code" for lastrowid in utils.read_lc_int, which uses
+            # struct_unpack
             try:
                 from mysql.connector import catch23
                 from mysql.connector import protocol
+                from mysql.connector import utils
             except ImportError: # pragma: no cover
-                catch23 = protocol = None
+                catch23 = protocol = utils = None
 
             if not hasattr(catch23, 'struct_unpack') or not hasattr(protocol, 'struct_unpack'):
                 # pragma: no cover
@@ -78,6 +85,7 @@ class PyMySQLConnectorDriver(AbstractMySQLDriver):
 
                 catch23.struct_unpack = struct_unpack
                 protocol.struct_unpack = struct_unpack
+                utils.struct_unpack = struct_unpack
 
     @classmethod
     def _get_converter_class(cls):
