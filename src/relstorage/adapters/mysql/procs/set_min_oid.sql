@@ -43,7 +43,9 @@ BEGIN
     -- perhaps it's possible. That means that our IGNORE modifier here could
     -- let one thread insert data and the other pretend to: but either way, it means
     -- it is not safe for us to assume we allocated this value and try to
-    -- generate more OIDs with it.
+    -- generate more OIDs with it. (There is a warning issued in that case:
+    -- "Warning (Code 1062): Duplicate entry '123456' for key 'PRIMARY'"; can we detect
+    -- and deal with that?)
     IF min_oid > current_max_oid THEN
       INSERT IGNORE INTO new_oid (zoid)
       VALUES (min_oid);

@@ -584,7 +584,7 @@ class GenericRelStorageTests(
         def allocate_oids(thread_storage, thread_num):
             try:
                 store_conn = thread_storage._store_connection
-                allocator = thread_storage._adapter.oidallocator
+                allocator = thread_storage._oids
                 my_oids = oids_by_thread[thread_num]
                 for _ in range(segment_count):
                     my_oids.extend(
@@ -593,7 +593,7 @@ class GenericRelStorageTests(
                     )
                     # Periodically call set_min_oid, like the storage does,
                     # to check for interference.
-                    allocator.set_min_oid(store_conn.cursor, my_oids[-1])
+                    allocator.set_min_oid(my_oids[-1])
                     store_conn.commit()
             finally:
                 thread_storage.release()
