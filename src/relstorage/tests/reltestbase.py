@@ -580,9 +580,13 @@ class GenericRelStorageTests(
         oids_by_thread = [set() for _ in range(thread_count)]
 
         def allocate_oids(thread_storage, thread_num):
-            oids_by_thread[thread_num].update(thread_storage.new_oid()
-                                              for _ in range(oid_count))
-            thread_storage.release()
+            try:
+                oids_by_thread[thread_num].update(
+                    thread_storage.new_oid()
+                    for _ in range(oid_count)
+                )
+            finally:
+                thread_storage.release()
 
         threads = [threading.Thread(target=allocate_oids,
                                     args=(self._storage.new_instance(), i))

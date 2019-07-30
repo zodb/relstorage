@@ -49,7 +49,7 @@ class HistoryPreservingRelStorageTests(GenericRelStorageTests,
                                        PackableStorage.PackableUndoStorage,
                                        HistoryStorage.HistoryStorage,
                                        ZODBTestCase):
-    # pylint:disable=too-many-ancestors,abstract-method,too-many-locals
+    # pylint:disable=too-many-ancestors,abstract-method,too-many-locals,too-many-public-methods
     keep_history = True
 
     def checkUndoMultipleConflictResolution(self, *_args, **_kwargs):
@@ -543,17 +543,17 @@ class HistoryPreservingRelStorageTests(GenericRelStorageTests,
         finally:
             del self.assertLess
 
-    def _pack_to_latest(self, methname,
-                        find_packtime=lambda s: s.lastTransactionInt()):
-        # Ignore the pack timestamp given. The test is trying to pack to "now", but
-        # because of how fast we commit, that doesn't always work out correctly.
-        # Instead, use the actual most recent tid.
+    def _run_with_storage_packing_at_packtime(self,
+                                              methname,
+                                              find_packtime):
+        # Ignore the pack timestamp given. Execute `find_packtime(storage)`
+        # instead and use that.
         meth = getattr(super(HistoryPreservingRelStorageTests, self), methname)
         if not self.__tid_clock_needs_care():
             return meth()
 
         orig_pack = self._storage.pack
-        def pack(packtime, ref_getter):
+        def pack(_ignored_packtime, ref_getter):
             packtime = find_packtime(self._storage)
             orig_pack(packtime, ref_getter)
         self._storage.pack = pack
@@ -564,14 +564,22 @@ class HistoryPreservingRelStorageTests(GenericRelStorageTests,
             del self._storage.pack
             orig_pack = None
 
+    def _run_packing_to_latest(self, methname):
+        # Ignore the pack timestamp given. The test is trying to pack to "now", but
+        # because of how fast we commit, that doesn't always work out correctly.
+        # Instead, use the actual most recent tid.
+        return self._run_with_storage_packing_at_packtime(
+            methname,
+            find_packtime=lambda s: s.lastTransactionInt())
+
     def checkPackJustOldRevisions(self):
-        self._pack_to_latest('checkPackJustOldRevisions')
+        self._run_packing_to_latest('checkPackJustOldRevisions')
 
     def checkPackAllRevisions(self):
-        self._pack_to_latest('checkPackAllRevisions')
+        self._run_packing_to_latest('checkPackAllRevisions')
 
     def checkPackOnlyOneObject(self):
-        self._pack_to_latest('checkPackOnlyOneObject')
+        self._run_packing_to_latest('checkPackOnlyOneObject')
 
     def checkPackUndoLog(self):
         packafter = []
@@ -588,41 +596,69 @@ class HistoryPreservingRelStorageTests(GenericRelStorageTests,
             return packafter[0]
 
         try:
-            self._pack_to_latest('checkPackUndoLog', find_packtime)
+            self._run_with_storage_packing_at_packtime('checkPackUndoLog',
+                                                       find_packtime)
         finally:
             del self._dostoreNP
 
-    def __pack_after_first_commit_on_first_child_instance(self, meth_name):
+
+
+    def __pack_after_nth_commit_on_nth_child_instance(self, meth_name,
+                                                      commit_number, child_number=0):
+        # Use child_number = 0 to specify self._storage.
+        # Currently only support that or the first child
+        assert child_number in (0, 1)
+
         commit_tids = []
-        def first_tpc_finish(inst, orig_finish, *args, **kwargs):
+        def watching_tpc_finish(inst, orig_finish, *args, **kwargs):
             tid = orig_finish(*args, **kwargs)
             commit_tids.append(tid)
-            del inst.tpc_finish
+            if len(commit_tids) == commit_number:
+                del inst.tpc_finish
             return tid
 
         s = self._storage
-        orig_new_instance = s.new_instance
-        def new_instance():
-            inst = orig_new_instance()
-            orig_finish = inst.tpc_finish
-            inst.tpc_finish = lambda *args, **kw: first_tpc_finish(inst, orig_finish, *args, **kw)
-            return inst
-
-        s.new_instance = new_instance
+        if child_number == 1:
+            orig_new_instance = s.new_instance
+            def new_instance():
+                inst = orig_new_instance()
+                orig_finish = inst.tpc_finish
+                inst.tpc_finish = lambda *args, **kw: watching_tpc_finish(inst, orig_finish,
+                                                                          *args, **kw)
+                return inst
+            s.new_instance = new_instance
+        else:
+            orig_finish = s.tpc_finish
+            s.tpc_finish = lambda *args, **kw: watching_tpc_finish(s, orig_finish, *args, **kw)
 
         def find_packtime(_storage):
-            assert len(commit_tids) == 1
-            return bytes8_to_int64(commit_tids[0])
+            assert len(commit_tids) == commit_number
+            return bytes8_to_int64(commit_tids[commit_number - 1])
 
         try:
-            self._pack_to_latest(meth_name, find_packtime)
+            self._run_with_storage_packing_at_packtime(meth_name, find_packtime)
         finally:
-            del s.new_instance
-            del s
+            # Break cycles
+            s.new_instance = None
+            s = None
+
+    def __pack_after_first_commit_on_first_child_instance(self, meth_name):
+        return self.__pack_after_nth_commit_on_nth_child_instance(
+            meth_name,
+            1,
+            1
+        )
 
     def checkTransactionalUndoAfterPackWithObjectUnlinkFromRoot(self):
         self.__pack_after_first_commit_on_first_child_instance(
             'checkTransactionalUndoAfterPackWithObjectUnlinkFromRoot'
+        )
+
+    def checkTransactionalUndoAfterPack(self):
+        self.__pack_after_nth_commit_on_nth_child_instance(
+            'checkTransactionalUndoAfterPack',
+            2,
+            0
         )
 
     def checkPackUnlinkedFromRoot(self):
