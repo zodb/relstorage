@@ -28,6 +28,7 @@ from ZODB.POSException import POSKeyError
 
 from ZODB.utils import p64 as int64_to_8bytes
 from ZODB.utils import u64 as bytes8_to_int64
+from ZODB.utils import maxtid
 
 from relstorage.cache.interfaces import CacheConsistencyError
 from .util import storage_method
@@ -187,12 +188,32 @@ class Loader(object):
     @storage_method
     @Metric(method=True, rate=0.1)
     def loadBefore(self, oid, tid):
-        """Return the most recent revision of oid before tid committed."""
+        """
+        Return the most recent revision of oid before tid committed.
+        """
+        if tid is maxtid or tid == maxtid:
+            # This is probably from ZODB.utils.load_current(), which
+            # is really trying to just get the current state of the
+            # object. So return that, formatted in the way this method
+            # returns it: (state, tid of state, tid_after_state) where
+            # tid_after_state will naturally be None
+            return self.load(oid) + (None,)
         oid_int = bytes8_to_int64(oid)
+
+        # TODO: This makes three separate queries, and also bypasses the cache.
+        # We should be able to fix at least the multiple queries.
 
         if self.store_connection:
             # Allow loading data from later transactions
             # for conflict resolution.
+
+            # XXX: This doesn't seem to be used in conflict
+            # resolution. ZODB.ConflictResolution.tryToResolveConflict
+            # calls loadSerial(); About the only call in ZODB to
+            # loadBefore() is from BlobStorage.undo() (which
+            # RelStorage does not extend). Mixing and matching calls
+            # between connections using different isolation levels
+            # isn't great. Can we stop doing this?
             cursor = self.store_connection.cursor
         else:
             cursor = self.load_connection.cursor
