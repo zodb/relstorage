@@ -569,6 +569,41 @@ class GenericRelStorageTests(
             'old OID %r (%d) should be less than new OID %r (%d)'
             % (oid1, oid1_int, oid2, oid2_int))
 
+    def checkNoDuplicateOIDsManyThreads(self):
+        # Many threads in many storages can allocate OIDs with
+        # no duplicates or overlaps.
+        # https://github.com/zodb/relstorage/issues/283
+        from itertools import combinations
+
+        thread_count = 11
+        oid_count = 1578
+        oids_by_thread = [set() for _ in range(thread_count)]
+
+        def allocate_oids(thread_storage, thread_num):
+            oids_by_thread[thread_num].update(thread_storage.new_oid()
+                                              for _ in range(oid_count))
+            thread_storage.release()
+
+        threads = [threading.Thread(target=allocate_oids,
+                                    args=(self._storage.new_instance(), i))
+                   for i in range(thread_count)]
+        for t in threads:
+            t.start()
+
+        for t in threads:
+            t.join(99)
+
+        # They all have the desired length
+        self.assertEqual(
+            [len(s) for s in oids_by_thread],
+            [oid_count for _ in range(thread_count)]
+        )
+
+        # The are all disjoint
+        for a, b in combinations(oids_by_thread, 2):
+            __traceback_info__ = a, b
+            self.assertTrue(a.isdisjoint(b))
+
     def checkUseCache(self):
         # Store an object, cache it, then retrieve it from the cache
         self._storage = self.make_storage(
