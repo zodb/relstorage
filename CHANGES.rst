@@ -5,7 +5,7 @@
 3.0a7 (unreleased)
 ==================
 
-- Nothing changed yet.
+- Eliminate runtime dependency on ZEO. See :issue:`293`.
 
 
 3.0a6 (2019-07-29)

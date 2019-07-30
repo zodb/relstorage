@@ -59,7 +59,7 @@ class TestBlobCacheMixin(TestBlobMixin):
         self._old_threads = list(threading.enumerate())
 
         run_lock = threading.Semaphore(self.MAX_CLEANUP_THREADS)
-        self._orig_check_blob_cache_size = relstorage.blobhelper._check_blob_cache_size
+        self._orig_check_blob_cache_size = relstorage.blobhelper._BlobCacheSizeChecker.run
         def _check(*args):
             t = threading.current_thread()
             threading.current_thread().name = 'Blob Cache Cleanup'  + t.name
@@ -76,7 +76,7 @@ class TestBlobCacheMixin(TestBlobMixin):
             finally:
                 run_lock.release()
 
-        relstorage.blobhelper._check_blob_cache_size = _check
+        relstorage.blobhelper._BlobCacheSizeChecker.run = _check
 
     def _wait_for_all_spawned_threads_to_finish(self):
         # pylint:disable=method-hidden
@@ -91,7 +91,7 @@ class TestBlobCacheMixin(TestBlobMixin):
         # # Let the shrink run as many more times as it needs to, if it's waiting.
         # self.cleanup_finished.release()
         self._wait_for_all_spawned_threads_to_finish()
-        relstorage.blobhelper._check_blob_cache_size = self._orig_check_blob_cache_size
+        relstorage.blobhelper._BlobCacheSizeChecker.run = self._orig_check_blob_cache_size
         self._old_threads = []
         super(TestBlobCacheMixin, self).tearDown()
 

@@ -40,6 +40,11 @@ tests_require = [
     'random2',
     'zope.testing',
     'ZODB [test]',
+    # We have the aforementioned test_cache_stats from ZEO,
+    # which obviously needs a ZEO dependency. But on Python 2.7,
+    # ZEO depends on trollius, which is deprecated and can't be installed on
+    # PyPy 2.7 on Windows, so don't install it.
+    'ZEO >= 5.2; python_version > "2.7"',
     'zc.zlibstorage',
     'zope.testrunner',
     'nti.testing',
@@ -103,7 +108,6 @@ setup(
         # was added, and 5.1.2 is when Connection.new_oid was added
         # (https://github.com/zopefoundation/ZODB/issues/139)
         'ZODB >= 5.5',
-        'ZEO >= 5.2',
         # We directly use this, and its a transient dep of ZODB.
         # version 2.0 is where things became text, and 2.1 partly
         # relaxed those requirements.
