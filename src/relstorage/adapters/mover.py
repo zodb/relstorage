@@ -20,7 +20,6 @@ from abc import abstractmethod
 
 from perfmetrics import Metric
 from zope.interface import implementer
-from ZODB.POSException import Unsupported
 
 from .._compat import OID_TID_MAP_TYPE
 from ._util import noop_when_history_free
@@ -140,29 +139,46 @@ class AbstractObjectMover(ABC):
         row = cursor.fetchone()
         return row
 
+    _load_before_query = object_state.select(
+        object_state.c.state, object_state.c.tid
+    ).where(
+        object_state.c.zoid == object_state.orderedbindparam()
+    ).and_(
+        object_state.c.tid < object_state.orderedbindparam()
+    ).order_by(
+        object_state.c.tid, "DESC"
+    ).limit(
+        1
+    ).prepared()
+
+
     @metricmethod_sampled
     def load_before(self, cursor, oid, tid):
         """Returns the pickle and tid of an object before transaction tid.
 
         Returns (None, None) if no earlier state exists.
         """
-        stmt = """
-        SELECT state, tid
-        FROM object_state
-        WHERE zoid = %s
-            AND tid < %s
-        ORDER BY tid DESC
-        LIMIT 1
-        """
-        cursor.execute(stmt, (oid, tid))
+
+        self._load_before_query.execute(cursor, (oid, tid))
         row = cursor.fetchone()
         if row:
             state, tid = row
             state = self.driver.binary_column_as_state_type(state)
             # None in state means The object's creation has been undone
             return state, tid
-
         return None, None
+
+    _get_tid_after_query = object_state.select(
+        object_state.c.tid
+    ).where(
+        object_state.c.zoid == object_state.orderedbindparam()
+    ).and_(
+        object_state.c.tid > object_state.orderedbindparam()
+    ).order_by(
+        object_state.c.tid, "ASC"
+    ).limit(
+        1
+    ).prepared()
 
 
     @metricmethod_sampled
@@ -171,15 +187,7 @@ class AbstractObjectMover(ABC):
 
         Returns None if no later state exists.
         """
-        stmt = """
-        SELECT tid
-        FROM object_state
-        WHERE zoid = %s
-            AND tid > %s
-        ORDER BY tid
-        LIMIT 1
-        """
-        cursor.execute(stmt, (oid, tid))
+        self._get_tid_after_query.execute(cursor, (oid, tid))
         row = cursor.fetchone()
         if row:
             return row[0]
@@ -205,33 +213,15 @@ class AbstractObjectMover(ABC):
         return res
 
 
-    #: A sequence of *names* of attributes on this object that are statements to be
-    #: executed by ``on_store_opened`` when ``restart`` is False.
-    on_store_opened_statement_names = ()
-
     def on_store_opened(self, cursor, restart=False):
-        if restart:
-            return
-
-        if not restart:
-            for stmt_name in self.on_store_opened_statement_names:
-                try:
-                    prep = getattr(self, stmt_name)
-                except Unsupported:
-                    # Must not be needed
-                    pass
-                else:
-                    cursor.execute(prep)
-
-
-    #: A sequence of *names* of attributes on this object that are statements to be
-    #: executed by ``on_store_opened`` when ``restart`` is False.
-    on_load_opened_statement_names = ()
+        """
+        Hook for subclasses.
+        """
 
     def on_load_opened(self, cursor, restart=False):
-        if not restart:
-            for stmt_name in self.on_load_opened_statement_names:
-                cursor.execute(getattr(self, stmt_name))
+        """
+        Hook for subclasses.
+        """
 
     # The _generic methods allow for UPSERTs, at least on MySQL
     # and PostgreSQL. Previously, MySQL used `command='REPLACE'`

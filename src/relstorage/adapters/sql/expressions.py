@@ -188,6 +188,14 @@ class LessEqualExpression(BinaryExpression):
     def __init__(self, lhs, rhs):
         BinaryExpression.__init__(self, '<=', lhs, rhs)
 
+class LessExpression(BinaryExpression):
+
+    __slots__ = ()
+
+    def __init__(self, lhs, rhs):
+        BinaryExpression.__init__(self, '<', lhs, rhs)
+
+
 class And(Expression):
 
     __slots__ = (
@@ -233,3 +241,6 @@ class ExpressionOperatorMixin(object):
 
     def __le__(self, other):
         return LessEqualExpression(self, other)
+
+    def __lt__(self, other):
+        return LessExpression(self, other)

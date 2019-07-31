@@ -137,9 +137,6 @@ class RelStorage(LegacyMethodsMixin,
 
     _oids = ReadOnlyOIDs()
 
-
-    __initting = True
-
     # Attributes in our dictionary that shouldn't have stale()/no_longer_stale()
     # called on them. At this writing, it's just the type object.
     _STALE_IGNORED_ATTRS = (
@@ -263,17 +260,6 @@ class RelStorage(LegacyMethodsMixin,
 
             storer = BlobStorer(self.blobhelper, self._store_connection)
             copy_storage_methods(self, storer)
-
-        self.__initting = False
-
-    # __setattr__ is here during refactoring to help us make sure we're setting what we
-    # want to set.
-    # XXX: Remove before release.
-    def __setattr__(self, name, value):
-        # undo is special cased for reltestbase._make_readonly
-        if not self.__initting and name not in dir(self) and name != 'undo':
-            raise AttributeError("Cannot set %s" % name)
-        object.__setattr__(self, name, value)
 
     def __repr__(self):
         return "<%s at %x keep_history=%s phase=%r cache=%r>" % (
