@@ -631,7 +631,12 @@ class _BlobCacheLayout(object):
     # but we *might* in the future; we'd like to change the name, but
     # that would invalidate all existing caches (the layout name is
     # stored in a file on disk and checked when the FilesystemHelper is
-    # created)
+    # created).
+    #
+    # TODO: In particular, even though a history-free storage only has
+    # one revision of a blob in the database, we don't consider that
+    # when we're caching a blob, or when we're cleaning blobs up. We
+    # should be able to do better.
     LAYOUT_NAME = 'zeocache'
 
     size = 997
