@@ -39,14 +39,19 @@ from relstorage._compat import iteritems
 from relstorage._compat import MAC
 from relstorage._util import byte_display
 from relstorage._util import spawn
-from relstorage.interfaces import IBlobHelper
+
 from relstorage.interfaces import INoBlobHelper
+from relstorage.interfaces import IAuthoritativeBlobHelper
+from relstorage.interfaces import ICachedBlobHelper
 
 __all__ = [
     'BlobHelper',
 ]
 
 logger = __import__('logging').getLogger(__name__)
+
+# TODO: Make us a package.
+# pylint:disable=too-many-lines
 
 @implementer(INoBlobHelper)
 class NoBlobHelper(object):
@@ -316,7 +321,7 @@ class _AbstractBlobHelper(object):
         finally:
             self.clear_temp()
 
-@implementer(IBlobHelper)
+@implementer(IAuthoritativeBlobHelper)
 class SharedBlobHelper(_AbstractBlobHelper):
 
     NEEDS_DB_LOCK_TO_VOTE = True
@@ -412,7 +417,7 @@ class SharedBlobHelper(_AbstractBlobHelper):
         if not self._has_files(dirname):
             ZODB.blob.remove_committed_dir(dirname)
 
-@implementer(IBlobHelper)
+@implementer(ICachedBlobHelper)
 class CacheBlobHelper(_AbstractBlobHelper):
 
     NEEDS_DB_LOCK_TO_VOTE = False
@@ -678,10 +683,90 @@ class CacheBlobHelper(_AbstractBlobHelper):
         Although, it might be helpful as a size control?
         """
 
+    def _remove_old_revisions_of_stored_blobs(self, tid, total_size_stored):
+        """
+        Prune old revisions of blobs that are not in use.
+
+        This is only done if we're not keeping history. This assumes
+        the _BlobCacheLayout. (TODO: Generalize so we can do this for
+        shared blob dirs? That's slightly more dangerous since it's
+        our only copy of the data.)
+
+        Because this could reduce the disk footprint of the cache, it
+        takes the total amount of data stored, and returns a modified
+        value (less if we removed old revisions).
+        """
+        if not total_size_stored or self.options.keep_history:
+            return total_size_stored
+
+        # If we've added/edited some blobs in this transaction,
+        # and we're not keeping history, see if we can clean up
+        # some older blobs for the same OIDs. This will help keep
+        # our cache size contained.
+        blob_suffix = ZODB.blob.BLOB_SUFFIX
+        get_dir_for_oid = self.fshelper.getPathForOID # Including the base dir
+        get_local_path_for_oid_tid = self.fshelper.layout.getBlobFilePath
+        total_size = total_size_stored
+
+        for stored_blob_oid in self._txn_blobs:
+            # Chop off the first part of the OID; that's implicit in the full path
+            # that we pass to listdir()
+            stored_blob_file_path = os.path.split(
+                get_local_path_for_oid_tid(stored_blob_oid, tid))[1]
+            stored_oid_part, stored_tid_part, _ = stored_blob_file_path.split('.')
+
+            dir_for_oid = get_dir_for_oid(stored_blob_oid)
+            all_blob_files = [fname
+                              for fname in os.listdir(dir_for_oid)
+                              if fname.endswith(blob_suffix)]
+            if len(all_blob_files) < 2:
+                # Nothing to do if there's only one file.
+                continue
+
+            for filename in all_blob_files:
+                # TODO: We could same some calls to listdir() if we collected
+                # all the OIDs in self._txn_blobs that will wind up sharing
+                # a single directory. That would be a lot of blobs in a transaction,
+                # though.
+
+                # The "right" way to get an oid and tid from a path is to use
+                # fshelper.splitBlobFilename(), but it assumes that the first part of the
+                # path component contains the entire OID, whereas here we only have
+                # the remainder.
+                disk_oid_part, disk_tid_part, _ = filename.split('.')
+                if disk_oid_part != stored_oid_part:
+                    continue
+
+                filepath = os.path.join(self.blob_dir, dir_for_oid, filename)
+                if disk_tid_part < stored_tid_part:
+                    # The TID is stored in hex form. The hex form sorts identically to the
+                    # byte or integer form, with increasing values meaning newer tids.
+                    logger.debug(
+                        "Found older cached version of the blob %s at %s; attempting removal.",
+                        stored_blob_oid, filepath
+                    )
+                    # This takes the lock and removes it.
+                    total_size -= _BlobCacheSizeChecker.remove_blob_at_path(filepath)
+
+        # It's possible we actually removed more than we stored, if lots of them
+        # were still open before.
+        return total_size if total_size >= 0 else 0
+
     def finish(self, tid):
-        total_size = self._move_blobs_into_place(tid)
-        self.cache_checker.loaded(total_size)
-        super(CacheBlobHelper, self).finish(tid)
+        try:
+            total_size = self._move_blobs_into_place(tid)
+            # If this slows commit down too much, we could push it to a thread
+            # in a few different ways (a queue.Queue consumer, or just spawn())
+            total_size = self._remove_old_revisions_of_stored_blobs(tid, total_size)
+            self.cache_checker.loaded(total_size)
+        except Exception: # pylint:disable=broad-except
+            # We're a cache, we can ignore issues moving things into
+            # place or cleaning up old revisions. The data is still
+            # safe and will be downloaded if needed. Raising exceptions from
+            # finish() is bad, so don't do that.
+            logger.exception("Failed to properly put blob cache files into place.")
+        finally:
+            super(CacheBlobHelper, self).finish(tid)
 
 
 def BlobHelper(options, adapter):
@@ -742,7 +827,8 @@ class _BlobCacheLayout(object):
     size = 997
 
     def oid_to_path(self, oid):
-        return str(u64(oid) % self.size)
+        rem = u64(oid) % self.size
+        return str(rem)
 
     def getBlobFilePath(self, oid, tid):
         base, rem = divmod(u64(oid), self.size)
@@ -855,29 +941,38 @@ class _BlobCacheSizeChecker(object):
         logger.debug("Blob cache size: %s", byte_display(size))
         return size, files_by_atime
 
+    @staticmethod
+    def remove_blob_at_path(file_path, lock_retries=0):
+        """
+        Return the size of the blob that was removed, or 0
+        if the blob couldn't be removed because it was locked
+        or otherwise open (e.g., on Windows).
+        """
+        try:
+            lock = _lock_blob(file_path, lock_retries)
+        except zc.lockfile.LockError:
+            logger.debug("Skipping locked %s", file_path)
+            return 0  # In use, skip
+
+        try:
+            fsize = os.stat(file_path).st_size
+            try:
+                ZODB.blob.remove_committed(file_path)
+            except OSError:
+                return 0 # probably open on windows
+            else:
+                return fsize
+        finally:
+            lock.close()
+
     def __shrink_blob_dir(self, current_size, files_by_atime):
         size = current_size
         target_size = self.target_size
+        remove = self.remove_blob_at_path
 
         while size > target_size and files_by_atime:
             for file_path in files_by_atime.pop(files_by_atime.minKey()):
-                try:
-                    lock = _lock_blob(file_path, 0)
-                except zc.lockfile.LockError:
-                    logger.debug("Skipping locked %s", file_path)
-                    continue  # In use, skip
-
-                try:
-                    fsize = os.stat(file_path).st_size
-                    try:
-                        ZODB.blob.remove_committed(file_path)
-                    except OSError:
-                        pass # probably open on windows
-                    else:
-                        size -= fsize
-                finally:
-                    lock.close()
-
+                size -= remove(file_path)
                 if size <= target_size:
                     break
 

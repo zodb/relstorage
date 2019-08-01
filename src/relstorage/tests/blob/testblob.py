@@ -580,7 +580,7 @@ def storage_reusable_suite(prefix, factory,
             attr,
         )
         new_class.__module__ = klass.__module__
-        new_class = unittest.skipUnless(storage_is_available, "Storage not available")(new_class)
+        new_class = unittest.skipUnless(storage_is_available, str(storage_is_available))(new_class)
         suite.addTest(unittest.makeSuite(new_class))
 
     add_test_based_on_test_class(TestBlobTransaction)

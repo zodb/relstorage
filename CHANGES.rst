@@ -21,6 +21,12 @@
 - Improve the thread safety and resource usage of blob cache cleanup.
   Previously it could spawn many useless threads.
 
+- When caching blobs for a history free storage, if there's an older
+  revision of the blob in the cache, and it is not in use, go ahead
+  and preemptively remove it from disk. This can help prevent the
+  cache size from growing out of hand and limit the number of
+  expensive full cache checks required. See :issue:`297`.
+
 3.0a6 (2019-07-29)
 ==================
 
