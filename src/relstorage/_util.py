@@ -153,7 +153,7 @@ def spawn(func, args=()):
     try:
         import gevent.monkey
         import gevent
-    except ImportError:
+    except ImportError: # pragma: no cover
         pass
     else:
         if gevent.monkey.is_module_patched('threading'):
@@ -170,7 +170,7 @@ def get_this_psutil_process():
             proc.memory_full_info()
         except AccessDenied: # pragma: no cover
             proc = None
-    except ImportError:
+    except ImportError: # pragma: no cover
         proc = None
     return proc
 
@@ -181,7 +181,7 @@ def get_memory_usage():
     Returns 0 if this is not available.
     """
     proc = get_this_psutil_process()
-    if proc is None:
+    if proc is None: # pragma: no cover
         return 0
 
     rusage = proc.memory_full_info()

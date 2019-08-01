@@ -14,7 +14,7 @@ from nti.testing.matchers import validly_provides
 from relstorage._compat import PY3
 from relstorage.interfaces import IBlobHelper
 
-from . import TestCase
+from relstorage.tests import TestCase
 
 test_oid = b'\0' * 7 + b'\x01'
 test_tid = b'\0' * 7 + b'\x02'

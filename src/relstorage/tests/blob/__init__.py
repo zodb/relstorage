@@ -20,7 +20,7 @@ class TestBlobMixin(object):
         self._timer.testSetUp()
         try:
             self.blob_storage = self.create_storage(**self.DEFAULT_BLOB_STORAGE_KWARGS)
-        except:
+        except: # pragma: no cover
             # If setUp() raises an exception, tearDown is never called.
             # That's bad: ZODB.tests.util.setUp() changes directories and
             # monkeys with the contents of the stdlib tempfile.
@@ -45,7 +45,7 @@ class TestBlobMixin(object):
                     count += 1
                     try:
                         size += os.stat(os.path.join(base, f)).st_size
-                    except OSError:
+                    except OSError: # pragma: no cover
                         if os.path.exists(os.path.join(base, f)):
                             raise
         return count, size

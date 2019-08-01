@@ -15,6 +15,7 @@ exclude_lines =
     def __repr__
     raise AssertionError
     raise NotImplementedError
+    raise Unsupported
     if __name__ == .__main__.:
     if PYPY:
     if sys.platform == 'win32':
