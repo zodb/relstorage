@@ -15,8 +15,8 @@ from ZODB.POSException import POSKeyError
 
 import transaction
 
-from relstorage.interfaces import IAuthoritativeBlobHelper
-from relstorage.interfaces import ICachedBlobHelper
+from relstorage.blobhelper.interfaces import IAuthoritativeBlobHelper
+from relstorage.blobhelper.interfaces import ICachedBlobHelper
 from . import TestBlobMixin
 
 class TestBlobTransactionMixin(TestBlobMixin):

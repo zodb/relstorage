@@ -38,12 +38,12 @@ from zope import interface
 from zope.interface import implementer
 
 from ..blobhelper import BlobHelper
-from ..blobhelper import NoBlobHelper
+from ..blobhelper.interfaces import IBlobHelper
+from ..blobhelper.interfaces import INoBlobHelper
+
 from ..cache import StorageCache
 from ..options import Options
 from ..interfaces import IRelStorage
-from ..interfaces import IBlobHelper
-from ..interfaces import INoBlobHelper
 from ..adapters.connections import LoadConnection
 from ..adapters.connections import StoreConnection
 from ..adapters.connections import ClosedConnection
@@ -117,7 +117,7 @@ class RelStorage(LegacyMethodsMixin,
     _prev_polled_tid = None
 
     # If the blob directory is set, blobhelper is a BlobHelper.
-    blobhelper = NoBlobHelper()
+    blobhelper = BlobHelper(None, None)
 
     # The state of committing that were in. Certain operations are
     # only available in certain states; certain information is only needed
