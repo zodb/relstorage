@@ -192,7 +192,8 @@ class _LimitedCacheSizeMonitor(_AbstractCacheSizeMonitor):
             # we could go over that size. We prevent this by checking
             # the size again here, while we're holding our lock, and if we're
             # too big, we'll go again. This happens during the test cases.
-            dir_size = checker.blob_dir_size
+            # checker can be None if we did this externally.
+            dir_size = checker.blob_dir_size if checker is not None else -1
             logger.info(
                 "Finished checking %s with size of %s (max: %s; target %s)",
                 self.blob_dir,
@@ -204,7 +205,7 @@ class _LimitedCacheSizeMonitor(_AbstractCacheSizeMonitor):
                 logger.debug(
                     "Requesting new check for %s with size of %s (max: %s; target %s)",
                     self.blob_dir,
-                    checker.blob_dir_size,
+                    dir_size,
                     self.blob_cache_max_size,
                     byte_display(self.blob_cache_target_cleanup_size)
                 )
@@ -234,7 +235,12 @@ class _ExternalLimitedCacheSizeMonitor(_LimitedCacheSizeMonitor):
 
             popen.wait()
         finally:
-            when_done(None, None)
+            # Pretend that we held the check lock, even if we're not
+            # sure that we did. If we need to go again because we've already
+            # stored that much more data, that lets us schedule the process.
+            # TODO: Make the external process write something we can read,
+            # or use the exit code to determine if it had the lock.
+            when_done(None, True)
             when_done = None
 
     def _spawn(self):

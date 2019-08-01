@@ -190,11 +190,17 @@ class AbstractVote(AbstractTPCState):
 
         blobs_must_be_moved_now = False
         blobhelper = self.blobhelper
+        committing_tid_bytes = None
+        if self.committing_tid_lock:
+            # We've already picked a TID. Must have called undo().
+            committing_tid_bytes = self.committing_tid_lock.tid
+
         try:
-            blobhelper.vote(None)
+            blobhelper.vote(committing_tid_bytes)
         except StorageTransactionError:
             # If this raises an STE, it must be a shared (non-db)
-            # blobhelper.
+            # blobhelper, and the TID must not be locked.
+            assert committing_tid_bytes is None
             blobs_must_be_moved_now = True
 
         if blobs_must_be_moved_now or LOCK_EARLY:
@@ -271,7 +277,7 @@ class AbstractVote(AbstractTPCState):
         # Here's where we take the global commit lock, and
         # allocate the next available transaction id, storing it
         # into history-preserving DBs. But if someone passed us
-        # a TID (``restore``), then it must already be in the DB, and the lock must
+        # a TID (``restore`` or ``undo``), then it must already be in the DB, and the lock must
         # already be held.
         #
         # If we've prepared the transaction, then the TID must be in the

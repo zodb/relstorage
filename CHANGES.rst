@@ -37,6 +37,12 @@
   blob cache cleanup process to run in a subprocess instead of a
   thread. This can free up the storage process to handle requests.
 
+- Abort storage transactions immediately when an exception occurs.
+  Previously this could be specified by setting the environment
+  variable ``RELSTORAGE_ABORT_EARLY``. Aborting early releases
+  database locks to allow other transactions to make progress
+  immediately. See :issue:`50`.
+
 3.0a6 (2019-07-29)
 ==================
 

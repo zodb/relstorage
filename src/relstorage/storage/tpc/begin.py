@@ -98,6 +98,9 @@ class AbstractBegin(AbstractTPCState):
         return next_phase
 
     def store(self, oid, previous_tid, data, transaction):
+        """
+        This method should take no globally visible commit locks.
+        """
         # Called by Connection.commit(), after tpc_begin has been called.
         if transaction is not self.transaction:
             raise StorageTransactionError(self, transaction)
@@ -156,15 +159,14 @@ class AbstractBegin(AbstractTPCState):
         required_tids[oid_int] = required_tid_int
 
     def deleteObject(self, oid, oldserial, transaction):
-        # This method is only expected to be called from zc.zodbdgc
-        # currently, or from ZODB/tests/IExternalGC.test
+        """
+        This method operates directly against the ``object_state`` table;
+        as such, it immediately takes out locks on that table.
 
-        # This is called in a phase of two-phase-commit (tpc).
-        # This means we have a transaction, and that we are holding
-        # the commit lock as well as the regular lock.
-        # RelStorage native pack uses a separate pack lock, but
-        # unfortunately there's no way to not hold the commit lock;
-        # however, the transactions are very short.
+        This method is only expected to be called when performing
+        ``IExternalGC`` operations (e.g., from zc.zodbdgc
+        or from ZODB/tests/IExternalGC.test).
+        """
         if transaction is not self.transaction: # pragma: no cover
             raise StorageTransactionError(self, transaction)
 
@@ -218,6 +220,11 @@ class HistoryPreserving(AbstractBegin):
         self.committing_tid_lock = None
 
     def undo(self, transaction_id, transaction):
+        """
+        This method temporarily holds the pack lock, releasing it when
+        done, and it also holds the commit lock, keeping it held for
+        the next phase.
+        """
         # Typically if this is called, the store/restore methods will *not* be
         # called, but there's not a strict guarantee about that.
         if transaction is not self.transaction:

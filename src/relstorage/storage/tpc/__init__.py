@@ -32,15 +32,6 @@ from ZODB.POSException import StorageTransactionError
 
 log = logging.getLogger("relstorage")
 
-#: Set the ``RELSTORAGE_ABORT_EARLY`` environment variable when debugging
-#: a failure revealed by the ZODB test suite.  The test suite often fails
-#: to call tpc_abort in the event of an error, leading to deadlocks.
-#: This variable causes RelStorage to abort failed transactions
-#: early rather than wait for an explicit abort.
-#:
-#: TODO: Now that we lock rows explicitly, maybe this should now be the default?
-ABORT_EARLY = os.environ.get('RELSTORAGE_ABORT_EARLY')
-
 #: Set the ``RELSTORAGE_LOCK_EARLY`` environment variable if you
 #: experience deadlocks or failures to commit (``tpc_finish``). This
 #: will cause the commit lock to be taken as part of ``tpc_vote``
@@ -117,9 +108,10 @@ class AbstractTPCState(object):
             raise StorageTransactionError('tpc_finish called with wrong transaction')
         raise NotImplementedError("tpc_finish not allowed in this state.")
 
-    def tpc_abort(self, transaction):
-        if transaction is not self.transaction:
-            return self
+    def tpc_abort(self, transaction, force=False):
+        if not force:
+            if transaction is not self.transaction:
+                return self
 
         try:
             self.load_connection.rollback_quietly()

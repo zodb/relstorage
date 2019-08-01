@@ -66,8 +66,6 @@ from .pack import Pack
 from .store import Storer
 from .store import BlobStorer
 
-
-from .tpc import ABORT_EARLY
 from .tpc import NotInTransaction
 from .tpc.begin import HistoryFree
 from .tpc.begin import HistoryPreserving
@@ -401,6 +399,17 @@ class RelStorage(LegacyMethodsMixin,
     def checkCurrentSerialInTransaction(self, oid, serial, transaction):
         self._tpc_phase.checkCurrentSerialInTransaction(oid, serial, transaction)
 
+    # For the time between tpc_begin and tpc_abort, if anything we do
+    # would trigger an exception to propagate up (store(), tpc_vote(),
+    # whatever) we should immediately abort the transaction at the
+    # database level and release locks. This will allow other
+    # transactions to make progress faster. It also can help in the ZODB test suite,
+    # since some places manually call the tpc_* methods and aren't careful to
+    # tpc_abort() in the event of an exception like `transaction` is.
+    #
+    # Some of this is manual (in the tpc_* methods), but most of it is
+    # done through the @phase_dependent_aborts_early decorator.
+
     @metricmethod
     def tpc_begin(self, transaction, tid=None, status=' '):
         try:
@@ -408,7 +417,7 @@ class RelStorage(LegacyMethodsMixin,
         except:
             # Could be a database (connection) error, could be a programming
             # bug. Either way, we're fine to roll everything back and hope
-            # for the best on a retry.
+            # for the best on a retry. Perhaps we need to raise a TransientError?
             self._load_connection.drop()
             self._store_connection.drop()
             raise
@@ -417,7 +426,11 @@ class RelStorage(LegacyMethodsMixin,
             # tid is a committed transaction we will restore.
             # The allowed actions are carefully prescribed.
             # This argument is specified by IStorageRestoreable
-            self._tpc_phase = Restore(self._tpc_phase, tid, status)
+            try:
+                self._tpc_phase = Restore(self._tpc_phase, tid, status)
+            except:
+                self.tpc_abort(transaction, _force=True)
+                raise
 
     @metricmethod
     def tpc_vote(self, transaction):
@@ -428,8 +441,7 @@ class RelStorage(LegacyMethodsMixin,
         try:
             next_phase = self._tpc_phase.tpc_vote(transaction, self)
         except:
-            if ABORT_EARLY:
-                self._tpc_phase = self.tpc_abort(transaction)
+            self.tpc_abort(transaction, _force=True)
             raise
         else:
             self._tpc_phase = next_phase
@@ -442,15 +454,24 @@ class RelStorage(LegacyMethodsMixin,
         except:
             # OH NO! This isn't supposed to happen!
             # It's unlikely tpc_abort will get called...
-            self.tpc_abort(transaction)
+            self.tpc_abort(transaction, _force=True)
             raise
         self._tpc_phase = next_phase
         self._ltid = committed_tid
         return committed_tid
 
     @metricmethod
-    def tpc_abort(self, transaction):
-        self._tpc_phase = self._tpc_phase.tpc_abort(transaction)
+    def tpc_abort(self, transaction, _force=False):
+        # _force is not a public argument, it is an internal
+        # implementation detail.
+        try:
+            self._tpc_phase = self._tpc_phase.tpc_abort(transaction, _force)
+        except BaseException:
+            if _force:
+                # We're here under unexpected circumstances. It's possible something
+                # might go wrong rolling back.
+                self._tpc_phase = NotInTransaction.from_storage(self)
+            raise
 
     def afterCompletion(self):
         # Note that this method exists mainly to deal with read-only
