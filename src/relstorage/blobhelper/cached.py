@@ -31,6 +31,7 @@ from zope.interface import implementer
 
 from relstorage._util import byte_display
 from relstorage._util import spawn
+from relstorage._util import thread_spawn
 
 from .interfaces import ICachedBlobHelper
 from .abstract import AbstractBlobHelper
@@ -218,35 +219,34 @@ class _ExternalLimitedCacheSizeMonitor(_LimitedCacheSizeMonitor):
     """
     __slots__ = ()
 
-    def _spawn(self):
-        import threading
+    @staticmethod
+    def __run_checker(blob_dir, blob_cache_target_cleanup_size, when_done):
         import subprocess
         import sys
-        popen = subprocess.Popen([
-            sys.executable,
-            "-m",
-            __name__,
-            self.blob_dir,
-            str(int(self.blob_cache_target_cleanup_size))
-        ])
+        try:
+            popen = subprocess.Popen([
+                sys.executable,
+                "-m",
+                __name__,
+                blob_dir,
+                str(int(blob_cache_target_cleanup_size))
+            ])
 
-        def ready():
-            return popen.poll() is not None
-        popen.ready = ready
-
-        def wait_for_done():
             popen.wait()
-            self._when_done(None, None)
+        finally:
+            when_done(None, None)
+            when_done = None
 
+    def _spawn(self):
         # We need to call our _when_done handler so that tests can
         # determine when to look at the directory. This does not need
         # to be a native thread under gevent, a greenlet thread is
-        # perfect (native threads in the threadpool can be limited).
-        t = threading.Thread(target=wait_for_done)
-        t.setDaemon(True)
-        t.start()
-
-        return popen
+        # perfect (native threads in the threadpool can be limited),
+        # but we do need to wait on the popen object.
+        return thread_spawn(self.__run_checker,
+                            args=(self.blob_dir,
+                                  self.blob_cache_target_cleanup_size,
+                                  self._when_done))
 
 
 @implementer(ICachedBlobHelper)
@@ -697,7 +697,7 @@ def main():
     import sys
     # Configure basic logging to go to stdout/err so that it can be seen from
     # our parent process when we're launched from a storage.
-    logging.basicConfig(level=logging.INFO)
+    logging.basicConfig()
 
     args = sys.argv[1:]
 
