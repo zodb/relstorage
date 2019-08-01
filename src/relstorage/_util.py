@@ -82,9 +82,34 @@ def log_timed(func):
         return result
     return f
 
+_ThreadWithReady = None
+
 def _thread_spawn(func, args):
-    import threading
-    t = threading.Thread(target=func, args=args)
+    global _ThreadWithReady
+    if _ThreadWithReady is None:
+        import threading
+
+        class T(threading.Thread):
+            # Note that this is going to be a bit racy
+            # between threads; it may not appear in a reading
+            # thread right away.
+            __ready = False
+
+            def ready(self):
+                return self.__ready
+
+            def run(self):
+                try:
+                    super(T, self).run()
+                finally:
+                    self.__ready = True
+
+            def wait(self, timeout=None):
+                return self.join(timeout)
+
+        _ThreadWithReady = T
+
+    t = _ThreadWithReady(target=func, args=args)
     t.name = t.name + '-spawn-' + func.__name__
     t.start()
     return t
@@ -94,7 +119,15 @@ def _gevent_pool_spawn(func, args):
     return gevent.get_hub().threadpool.spawn(func, *args)
 
 def spawn(func, args=()):
-    """Execute func in a different (real) thread"""
+    """
+    Execute func in a different (real) thread.
+
+    Returns an object with a ``ready()`` method that can be called to
+    determine if the *func* has finished running, and a
+    ``wait([timeout])`` method that blocks until the function has
+    finished running. (This abstracts differences between the gevent
+    threadpool and direct use of threads.)
+    """
 
     submit = _thread_spawn
     try:
@@ -105,7 +138,7 @@ def spawn(func, args=()):
     else:
         if gevent.monkey.is_module_patched('threading'):
             submit = _gevent_pool_spawn
-    submit(func, args)
+    return submit(func, args)
 
 def get_this_psutil_process():
     # Returns a freshly queried object each time.
@@ -144,10 +177,10 @@ def byte_display(size):
     if size == 0:
         return '0 KB'
     if size <= 1024:
-        return '1 KB'
+        return '%s bytes' % size
     if size > 1048576:
         return '%0.02f MB' % (size / 1048576.0)
-    return '%d KB' % (size / 1024.0)
+    return '%0.02f KB' % (size / 1024.0)
 
 
 class Lazy(object):

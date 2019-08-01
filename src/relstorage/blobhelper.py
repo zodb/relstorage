@@ -20,7 +20,6 @@ from __future__ import print_function
 
 import os
 import re
-import threading
 import time
 
 from binascii import hexlify
@@ -39,6 +38,7 @@ from zope.interface import implementer
 from relstorage._compat import iteritems
 from relstorage._compat import MAC
 from relstorage._util import byte_display
+from relstorage._util import spawn
 from relstorage.interfaces import IBlobHelper
 from relstorage.interfaces import INoBlobHelper
 
@@ -420,45 +420,143 @@ class CacheBlobHelper(_AbstractBlobHelper):
 
     class SizeLimited(object):
         """
-        Control the size of the blob cache. Shared between BlobHelpers.
+        Control the size of the blob cache. This object is shared
+        between BlobHelpers, so it needs to be thread safe.
         """
 
+        __slots__ = (
+            'blob_dir',
+            'blob_cache_max_size',
+            'blob_cache_target_cleanup_size',
+            'bytes_loaded_since_last_check',
+            'bytes_loaded_check_threshold',
+            '_lock',
+            '_checker_thread',
+            '_checker',
+            '_exceeded_counter',
+            'reduced_event'
+        )
+
         def __init__(self, options):
-            self.blob_dir = options.blob_dir
-            self._blob_cache_size = options.blob_cache_size
-            self._blob_data_bytes_loaded = 0
+            import threading
+
             assert options.blob_cache_size_check < 100
-            self._blob_cache_size_check = (
-                self._blob_cache_size * options.blob_cache_size_check / 100)
-            self._check()
+
+            self.blob_dir = options.blob_dir
+            self.blob_cache_max_size = options.blob_cache_size
+            self.bytes_loaded_check_threshold = (
+                self.blob_cache_max_size * options.blob_cache_size_check / 100.0
+            )
+
+            self.blob_cache_target_cleanup_size = max(
+                self.blob_cache_max_size - self.bytes_loaded_check_threshold,
+                0
+            )
+            self.bytes_loaded_since_last_check = 0
+            self._lock = threading.Lock()
+            self._checker_thread = None
+            self._checker = _BlobCacheSizeChecker(
+                self.blob_dir, self.blob_cache_target_cleanup_size, self.__when_done
+            )
+            self._exceeded_counter = 0
+            self.reduced_event = threading.Event()
+            self.__check()
 
         def close(self):
-            if self._check_blob_size_thread is not None:
-                self._check_blob_size_thread.join()
+            try:
+                if self._checker_thread is not None:
+                    self._checker_thread.wait()
+            finally:
+                self._checker = None
 
         def loaded(self, byte_count):
-            self._blob_data_bytes_loaded += byte_count
-            if self._blob_data_bytes_loaded >= self._blob_cache_size_check:
-                self._check()
+            with self._lock:
+                self.bytes_loaded_since_last_check += byte_count
+                if self.bytes_loaded_since_last_check >= self.bytes_loaded_check_threshold:
+                    logger.debug(
+                        "Loaded %s bytes (>= %s) into %s, may need to check.",
+                        byte_display(self.bytes_loaded_since_last_check),
+                        byte_display(self.bytes_loaded_check_threshold),
+                        self.blob_dir
+                    )
+                    self.__check()
 
-        _check_blob_size_thread = None
-
-        def _check(self):
+        def __check(self):
             """
-            Run blob cache cleanup in another thread.
+            Run blob cache cleanup in another thread if needed.
+
+            Must be called with our lock held (or a guarantee that we're
+            single threaded.)
             """
-            self._blob_data_bytes_loaded = 0
+            on_init = self.bytes_loaded_since_last_check == 0
+            self.bytes_loaded_since_last_check = 0
+            self.reduced_event.clear()
+            self._exceeded_counter += 1
+            checker_thread = self._checker_thread
+            if checker_thread is not None and not checker_thread.ready():
+                # One running still.
+                logger.debug("Checker %s still running, not spawning for %s",
+                             self._checker_thread,
+                             self.blob_dir)
+                return
 
-            target = max(self._blob_cache_size - self._blob_cache_size_check, 0)
-
-            check_blob_size_thread = _BlobCacheSizeChecker(
-                self.blob_dir, target
+            # Only spawn a new one if there's not one running.
+            # This gets set back to None as part of the cleanup callback.
+            logger.info(
+                "Spawning cache checker for %s (%s)",
+                self.blob_dir,
+                "creating storage" if on_init else "exceeded threshold"
             )
-            check_blob_size_thread.setDaemon(True)
-            check_blob_size_thread.start()
-            self._check_blob_size_thread = check_blob_size_thread
+            self._exceeded_counter = 0
+            self._checker_thread = spawn(self._checker)
+
+        def __when_done(self, checker, holding_clean_lock):
+            """
+            Callback to be run from the cleanup thread.
+
+            Cleans up the state of *self*.
+            """
+            with self._lock:
+                # checker is the BlobCacheSizeChecker, but self._checker
+                # is the spawned thread.
+                # This is the last thing the BlobCacheSizeChecker does, so by
+                # definition it cannot be ready yet.
+                assert checker is self._checker
+                self._checker_thread = None
+                if not holding_clean_lock:
+                    self.reduced_event.set()
+                    return
+
+                # In principle, if the checker finished sizing the directory and got
+                # a cache size under its target and wanted to return to us,
+                # but then some other threads immediately loaded a bunch of blobs,
+                # we could go over that size. We prevent this by checking
+                # the size again here, while we're holding our lock, and if we're
+                # too big, we'll go again. This happens during the test cases.
+                dir_size = checker.blob_dir_size
+                logger.info(
+                    "Finished checking %s with size of %s (max: %s; target %s)",
+                    self.blob_dir,
+                    byte_display(dir_size),
+                    byte_display(self.blob_cache_max_size),
+                    byte_display(self.blob_cache_target_cleanup_size)
+                )
+                if self._exceeded_counter or dir_size > self.blob_cache_target_cleanup_size:
+                    logger.debug(
+                        "Requesting new check for %s with size of %s (max: %s; target %s)",
+                        self.blob_dir,
+                        checker.blob_dir_size,
+                        self.blob_cache_max_size,
+                        byte_display(self.blob_cache_target_cleanup_size)
+                    )
+                    self.__check()
+                else:
+                    self.reduced_event.set()
+
 
     class Unlimited(object):
+
+        __slots__ = ()
 
         def close(self):
             "Does nothing"
@@ -479,6 +577,8 @@ class CacheBlobHelper(_AbstractBlobHelper):
 
         super(CacheBlobHelper, self).__init__(options, adapter, fshelper)
 
+        # All blob helpers for all instances of this storage share the
+        # same cache_checker object.
         if cache_checker is None:
             if options.blob_cache_size:
                 cache_checker = self.SizeLimited(options)
@@ -655,9 +755,18 @@ class _BlobCacheLayout(object):
             )
         )
 
-class _BlobCacheSizeChecker(threading.Thread):
+class _BlobCacheSizeChecker(object):
 
-    def __init__(self, blob_dir, target_size):
+    __slots__ = (
+        'blob_dir',
+        # The last measured size of the blob directory.
+        'blob_dir_size',
+        'target_size',
+        '_finished_callback',
+        '__name__',
+    )
+
+    def __init__(self, blob_dir, target_size, when_done=lambda _me, _holding_lock: None):
         with open(os.path.join(blob_dir, ZODB.blob.LAYOUT_MARKER)) as layout_file:
             layout = layout_file.read().strip()
 
@@ -666,14 +775,16 @@ class _BlobCacheSizeChecker(threading.Thread):
             raise ValueError("Invalid blob directory layout", layout)
 
 
-        self.__blob_dir = blob_dir
-        self.__target_size = target_size
+        self.blob_dir = blob_dir
+        self.target_size = target_size
+        self.blob_dir_size = None
+        self._finished_callback = when_done
 
-        super(_BlobCacheSizeChecker, self).__init__(name='Blob Cache Checker: %s' % blob_dir)
+        self.__name__ = 'Blob Cache Checker: %s' % (blob_dir,)
 
     def __acquire_check_lock(self):
         # Returns a lock, or None if we couldn't acquire it.
-        blob_dir = self.__blob_dir
+        blob_dir = self.blob_dir
         lock_path = os.path.join(blob_dir, 'check_size.lock')
 
         try:
@@ -704,7 +815,7 @@ class _BlobCacheSizeChecker(threading.Thread):
         # tuples aren't tracked by the GC like lists are (after they survive one
         # collection, anyway).
 
-        blob_dir = self.__blob_dir
+        blob_dir = self.blob_dir
         blob_suffix = ZODB.blob.BLOB_SUFFIX
         files_by_atime = BTrees.OOBTree.BTree()
         size = 0
@@ -746,7 +857,7 @@ class _BlobCacheSizeChecker(threading.Thread):
 
     def __shrink_blob_dir(self, current_size, files_by_atime):
         size = current_size
-        target_size = self.__target_size
+        target_size = self.target_size
 
         while size > target_size and files_by_atime:
             for file_path in files_by_atime.pop(files_by_atime.minKey()):
@@ -772,21 +883,34 @@ class _BlobCacheSizeChecker(threading.Thread):
 
         logger.debug("Reduced blob cache size: %s", byte_display(size))
 
-    def run(self):
+    def __call__(self):
         logger.debug("Checking blob cache size. (target: %s)",
-                     byte_display(self.__target_size))
+                     byte_display(self.target_size))
 
         check_lock = self.__acquire_check_lock()
-        if check_lock is None:
-            return
-
         try:
-            while 1:
-                size, files_by_atime = self.__size_blob_dir()
+            if check_lock is None:
+                logger.debug("Failed to get filesystem clean lock.")
+                return
 
-                if size <= self.__target_size:
-                    break
-
-                self.__shrink_blob_dir(size, files_by_atime)
+            self.__run_with_lock()
         finally:
-            check_lock.close()
+            if check_lock is not None:
+                check_lock.close()
+            self._finished_callback(self, check_lock is not None)
+
+    def __run_with_lock(self):
+        while 1:
+            size, files_by_atime = self.__size_blob_dir()
+            self.blob_dir_size = size
+
+            if size <= self.target_size:
+                logger.debug(
+                    'Traversed %s to get size %s (<= %s); quitting',
+                    self.blob_dir,
+                    byte_display(self.blob_dir_size),
+                    byte_display(self.target_size)
+                )
+                break
+
+            self.__shrink_blob_dir(size, files_by_atime)

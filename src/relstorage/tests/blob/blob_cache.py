@@ -28,7 +28,6 @@ import random2
 from ZODB.blob import Blob
 import transaction
 
-import relstorage.blobhelper
 from relstorage.tests.util import RUNNING_ON_CI
 from . import TestBlobMixin
 
@@ -48,7 +47,6 @@ class TestBlobCacheMixin(TestBlobMixin):
         'blob_cache_size_check': 10
     }
 
-    MAX_CLEANUP_THREADS = 1
     # Too many client threads really slows us down because of the GIL,
     # but we do need some concurrency.
     CLIENT_COUNT = 4 if not RUNNING_ON_CI else 2
@@ -57,26 +55,6 @@ class TestBlobCacheMixin(TestBlobMixin):
         super(TestBlobCacheMixin, self).setUp()
         # We're going to wait for any threads we started to finish, so...
         self._old_threads = list(threading.enumerate())
-
-        run_lock = threading.Semaphore(self.MAX_CLEANUP_THREADS)
-        self._orig_check_blob_cache_size = relstorage.blobhelper._BlobCacheSizeChecker.run
-        def _check(*args):
-            t = threading.current_thread()
-            threading.current_thread().name = 'Blob Cache Cleanup'  + t.name
-            # The BlobHelper fires off threads constantly. Even though there's some
-            # internal locking, it uses the filesystem, and at a massive rate that
-            # can be problematic on some platforms. We don't want too many of them to stack up,
-            # so we gate with an in-memory lock.
-            if not run_lock.acquire(False):
-                return
-            try:
-                self._orig_check_blob_cache_size(*args)
-            except: # pylint:disable=bare-except
-                import traceback; traceback.print_exc()
-            finally:
-                run_lock.release()
-
-        relstorage.blobhelper._BlobCacheSizeChecker.run = _check
 
     def _wait_for_all_spawned_threads_to_finish(self):
         # pylint:disable=method-hidden
@@ -91,7 +69,6 @@ class TestBlobCacheMixin(TestBlobMixin):
         # # Let the shrink run as many more times as it needs to, if it's waiting.
         # self.cleanup_finished.release()
         self._wait_for_all_spawned_threads_to_finish()
-        relstorage.blobhelper._BlobCacheSizeChecker.run = self._orig_check_blob_cache_size
         self._old_threads = []
         super(TestBlobCacheMixin, self).tearDown()
 
@@ -146,10 +123,8 @@ class TestBlobCacheMixin(TestBlobMixin):
         return size
 
     def _wait_for_shrinks_to_finish(self):
-        # We already have this Condition acquired, and we keep it that way.
-        # Wait for someone to notify us that a cleanup has finished.
-        # We only allow one at a time, so this one did what was necessary.
-        self._wait_for_all_spawned_threads_to_finish()
+        cache_checker = self.blob_storage.blobhelper.cache_checker
+        cache_checker.reduced_event.wait()
         size = self._size_blobs_in_directory()
         self.assertLess(size, 5000)
 
