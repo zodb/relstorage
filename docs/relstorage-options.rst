@@ -97,17 +97,18 @@ blob-dir
         support will be provided*.
 
 shared-blob-dir
-        If true (the default, but **not** recommended), the blob directory
-        is assumed to be shared among all clients using NFS or
-        similar; blob data will be stored only on the filesystem and
-        not in the database. If false, blob data is stored in the
-        relational database and the blob directory holds a cache of
+        When this option is false (the default, and recommended), the
+        blob directory is treated as a cache. It should be on a local
+        filesystem that properly supports file locks. It *may* be shared
+        among clients on that same machine. Blob data is stored safely
+        in the relational database, and the blob directory holds a cache of
         blobs.
 
-        When this option is false (recommended), the blob directory is
-        treated as a cache. It should be on a local filesystem that
-        properly supports file locks. It may be shared among clients
-        on that same machine.
+        If true (**not** recommended), the blob directory
+        is assumed to be shared among all clients using NFS or
+        similar; blob data will be stored *only* on the filesystem and
+        not in the database. It is critical to have backups of this
+        directory, as this is the only source of blobs.
 
         .. warning::
 
@@ -115,8 +116,9 @@ shared-blob-dir
            commits is reduced. It is highly recommended to set this
            value to false.
 
-           In the future, the default value for this option will
-           change.
+        .. versionchanged:: 3.0a7
+
+           The default changed from true to fals.
 
 blob-cache-size
         Maximum size of the blob cache, in bytes. If empty (the
@@ -127,16 +129,33 @@ blob-cache-size
         recommended if you store large files such as videos, CD/DVD
         images, or virtual machine images.
 
+        When configured, the size is checked when a process opens a
+        storage for the first time, and at intervals based on
+        ``blob-cache-size-check``.
+
         This option allows suffixes such as "mb" or "gb".
+
         This option is ignored if shared-blob-dir is true.
 
 blob-cache-size-check
-        Blob cache check size as percent of blob-cache-size: "10" means
-        "10%". The blob cache size will be checked when this many bytes
-        have been loaded into the cache. Defaults to 10% of the blob
-        cache size.
+        Blob cache check size as percent of blob-cache-size: "10"
+        means "10%". The blob cache size will be checked when this
+        many bytes have been loaded into the cache by any one process.
+        Defaults to 10% of the blob cache size.
 
         This option is ignored if shared-blob-dir is true.
+
+blob-cache-size-check-external
+        When this value is false (the default), the blob cache size
+        will be checked using an internal native thread (even when the
+        process has been monkey-patched with gevent: gevent's
+        threadpool will be used). When this value is true, an external
+        subprocess will be used to check the size.
+
+        For large blob caches, where checking the size takes
+        measurable time, using an external process may improve
+        request response time for the application by reducing
+        contention for the GIL. It may also be helpful for gevent applications.
 
 blob-chunk-size
         When ZODB blobs are stored in MySQL, RelStorage breaks them into

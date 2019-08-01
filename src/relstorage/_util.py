@@ -40,6 +40,7 @@ __all__ = [
     'timestamp_at_unixtime',
     'timer',
     'log_timed',
+    'thread_spawn',
     'spawn',
     'get_memory_usage',
     'byte_display',
@@ -104,7 +105,7 @@ def log_timed(func):
 
 _ThreadWithReady = None
 
-def _thread_spawn(func, args):
+def thread_spawn(func, args, daemon=False):
     global _ThreadWithReady
     if _ThreadWithReady is None:
         import threading
@@ -131,6 +132,8 @@ def _thread_spawn(func, args):
 
     t = _ThreadWithReady(target=func, args=args)
     t.name = t.name + '-spawn-' + func.__name__
+    if daemon:
+        t.setDaemon(daemon)
     t.start()
     return t
 
@@ -149,11 +152,11 @@ def spawn(func, args=()):
     threadpool and direct use of threads.)
     """
 
-    submit = _thread_spawn
+    submit = thread_spawn
     try:
         import gevent.monkey
         import gevent
-    except ImportError:
+    except ImportError: # pragma: no cover
         pass
     else:
         if gevent.monkey.is_module_patched('threading'):
@@ -170,7 +173,7 @@ def get_this_psutil_process():
             proc.memory_full_info()
         except AccessDenied: # pragma: no cover
             proc = None
-    except ImportError:
+    except ImportError: # pragma: no cover
         proc = None
     return proc
 
@@ -181,7 +184,7 @@ def get_memory_usage():
     Returns 0 if this is not available.
     """
     proc = get_this_psutil_process()
-    if proc is None:
+    if proc is None: # pragma: no cover
         return 0
 
     rusage = proc.memory_full_info()

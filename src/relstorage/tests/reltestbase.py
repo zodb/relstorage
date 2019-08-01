@@ -1145,23 +1145,26 @@ class GenericRelStorageTests(
         replica_conf = self.get_adapter_zconfig_replica_conf()
 
         conf = u"""
-        %%import relstorage
+        %import relstorage
         <zodb main>
             <relstorage>
             name xyz
             read-only false
-            keep-history %s
-            replica-conf %s
+            keep-history {KEEP_HISTORY}
+            replica-conf {REPLICA_CONF}
+            blob-dir .
+            blob-cache-size-check-external true
+            blob-cache-size 100MB
             blob-chunk-size 10MB
             cache-local-dir-read-count 12
             cache-local-dir-write-max-size 10MB
-            %s
+            {ADAPTER}
             </relstorage>
         </zodb>
-        """ % (
-            'true' if self.keep_history else 'false',
-            replica_conf,
-            self.get_adapter_zconfig()
+        """.format(
+            KEEP_HISTORY='true' if self.keep_history else 'false',
+            REPLICA_CONF=replica_conf,
+            ADAPTER=self.get_adapter_zconfig()
         )
 
         schema_xml = u"""
@@ -1172,7 +1175,9 @@ class GenericRelStorageTests(
         """
         import ZConfig
         from io import StringIO
+        from ZODB.interfaces import IBlobStorageRestoreable
         from relstorage.adapters.interfaces import IRelStorageAdapter
+        from relstorage.blobhelper.interfaces import ICachedBlobHelper
         from hamcrest import assert_that
         from nti.testing.matchers import validly_provides
         schema = ZConfig.loadSchemaFile(StringIO(schema_xml))
@@ -1181,8 +1186,12 @@ class GenericRelStorageTests(
         db = config.database.open()
         try:
             storage = db.storage
+            assert_that(storage, validly_provides(IBlobStorageRestoreable))
             self.assertEqual(storage.isReadOnly(), False)
             self.assertEqual(storage.getName(), "xyz")
+            assert_that(storage.blobhelper, validly_provides(ICachedBlobHelper))
+            self.assertIn('_External', str(storage.blobhelper.cache_checker))
+
             adapter = storage._adapter
             self.assertIsInstance(adapter, self.get_adapter_class())
             assert_that(adapter, validly_provides(IRelStorageAdapter))

@@ -175,3 +175,9 @@ class TestBlobCacheMixin(TestBlobMixin):
         self._wait_for_shrinks_to_finish()
         __traceback_info__ = verification_errors
         self.assertEmpty(verification_errors)
+
+
+class TestBlobCacheExternalCleanupMixin(TestBlobCacheMixin):
+
+    DEFAULT_BLOB_STORAGE_KWARGS = dict(TestBlobCacheMixin.DEFAULT_BLOB_STORAGE_KWARGS)
+    DEFAULT_BLOB_STORAGE_KWARGS['blob_cache_size_check_external'] = True

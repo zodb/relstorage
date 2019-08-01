@@ -27,6 +27,16 @@
   cache size from growing out of hand and limit the number of
   expensive full cache checks required. See :issue:`297`.
 
+- Change the default value of the configuration setting
+  ``shared-blob-dir`` to false, meaning that the default is now to use
+  a blob cache. If you were using shared blobs before, you'll need to
+  explicitly set a value for ``shared-blob-dir`` to ``true`` before
+  starting RelStorage.
+
+- Add an option, ``blob-cache-size-check-external``, that causes the
+  blob cache cleanup process to run in a subprocess instead of a
+  thread. This can free up the storage process to handle requests.
+
 3.0a6 (2019-07-29)
 ==================
 

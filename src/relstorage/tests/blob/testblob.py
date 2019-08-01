@@ -44,6 +44,7 @@ from relstorage.tests.blob.blob_connection import TestConnectionBlobMixin
 from relstorage.tests.blob.blob_importexport import TestBlobImportExportMixin
 from relstorage.tests.blob.blob_transaction import TestBlobTransactionMixin
 from relstorage.tests.blob.blob_cache import TestBlobCacheMixin
+from relstorage.tests.blob.blob_cache import TestBlobCacheExternalCleanupMixin
 from relstorage.tests.blob import TestBlobMixin
 
 class BlobTestBase(TestCase,
@@ -549,6 +550,10 @@ class TestBlobCache(TestBlobCacheMixin,
                     TestCase):
     pass
 
+class TestBlobCacheExternalCleanup(TestBlobCacheExternalCleanupMixin,
+                                   TestCase):
+    pass
+
 def storage_reusable_suite(prefix, factory,
                            test_blob_storage_recovery=False,
                            test_packing=False,
@@ -589,6 +594,7 @@ def storage_reusable_suite(prefix, factory,
     add_test_based_on_test_class(TestConnectionBlob)
     if test_blob_cache:
         add_test_based_on_test_class(TestBlobCache)
+        add_test_based_on_test_class(TestBlobCacheExternalCleanup)
     if test_packing:
         base = TestBlobPackingHP if keep_history else TestBlobPackingHF
         add_test_based_on_test_class(base)

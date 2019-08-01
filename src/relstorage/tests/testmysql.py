@@ -137,6 +137,7 @@ class TestGenerateTID(MySQLAdapterMixin,
             now = time.time()
         storage = self._storage
         ts_now = timestamp_at_unixtime(now)
+        __traceback_info__ = now, ts_now, ts_now.raw()
 
         expected_tid_int = bytes8_to_int64(ts_now.raw())
 
