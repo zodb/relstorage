@@ -13,6 +13,14 @@
 - Optimize the ``loadBefore`` method. It appears to be mostly used in
   the tests.
 
+- Fix the blob cache cleanup thread to use a real native thread if
+  we're monkey-patched by gevent, using gevent's thread pool.
+  Previously, cleaning up the blob cache would block the event loop
+  for the duration. See :issue:`296`.
+
+- Improve the thread safety and resource usage of blob cache cleanup.
+  Previously it could spawn many useless threads.
+
 3.0a6 (2019-07-29)
 ==================
 
