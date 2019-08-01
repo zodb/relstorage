@@ -37,24 +37,42 @@ class Options(object):
 
     .. versionchanged:: 2.0b7
        The ``cache_delta_size_limit`` grew to 20000 on CPython.
+
+    .. versionchanged:: 3.0a7
+       Add the ``blob_cache_size_check_external`` option, defaulting to False.
+
+       Change the default for ``shared_blob_dir`` to False.
     """
 
     #: The name
     name = None
     #: Read only?
     read_only = False
+    #: Preserve history?
+    keep_history = True
+
+
+    ###
+    # Blob configuration
+    ###
+
     #: directory to hold blobs
     blob_dir = None
     #: Is the blob directory shared?
-    shared_blob_dir = True
+    shared_blob_dir = False
     #: How much local blob data to keep
     blob_cache_size = None
-    #: ?
+    #: Percentage of ``blob_cache_size``; when any individual
+    #: storage instance has written this many bytes of data into
+    #: the blob cache, launch a cleanup process.
     blob_cache_size_check = 10
-    #: The size to break blobs into for storage
+    #: Run the cache size check in an external process?
+    blob_cache_size_check_external = False
+    #: The size to break blobs into for storage.
+    #: Only applies to some databases.
     blob_chunk_size = 1 << 20
-    #: Preserve history?
-    keep_history = True
+
+
     #: File containing replica info
     replica_conf = None
     #: File containing read-only replica info

@@ -17,7 +17,7 @@
     <key name="blob-dir" required="no">
       <description>See the RelStorage README.txt file.</description>
     </key>
-    <key name="shared-blob-dir" datatype="boolean" default="true">
+    <key name="shared-blob-dir" datatype="boolean" default="false">
       <description>See the RelStorage README.txt file.</description>
     </key>
     <key name="blob-cache-size" datatype="byte-size" required="no">
@@ -26,6 +26,11 @@
     <key name="blob-cache-size-check" datatype="integer" required="no">
       <description>See the RelStorage README.txt file.</description>
     </key>
+    <key name="blob-cache-size-check-external" datatype="boolean"
+         required="no" default="false">
+      <description>See the RelStorage README.txt file.</description>
+    </key>
+
     <key name="blob-chunk-size" datatype="byte-size" required="no">
       <description>See the RelStorage README.txt file.</description>
     </key>

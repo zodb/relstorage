@@ -22,10 +22,8 @@ from __future__ import print_function
 from ZODB.POSException import Unsupported
 from zope.interface import implementer
 
-
 from .interfaces import INoBlobHelper
-from .cached import CacheBlobHelper
-from .shared import SharedBlobHelper
+
 
 __all__ = [
     'BlobHelper',
@@ -86,6 +84,11 @@ class NoBlobHelper(object):
 def BlobHelper(options, adapter):
     if options is None or not options.blob_dir:
         return NoBlobHelper()
+
+    # Prevent warnings from runpy that these were found in sys.modules
+    # before executing .cached.
+    from .cached import CacheBlobHelper
+    from .shared import SharedBlobHelper
 
     if options.shared_blob_dir:
         return SharedBlobHelper(options, adapter)
