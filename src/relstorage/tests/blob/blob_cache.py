@@ -20,7 +20,6 @@ This test is only for the non-shared (aka, "cached") case.
 from __future__ import absolute_import
 from __future__ import print_function
 
-import os
 import threading
 
 import random2
@@ -109,18 +108,6 @@ class TestBlobCacheMixin(TestBlobMixin):
             self._verify_blob_number(blob_number, conn, mode)
         conn.close()
 
-    def _size_blobs_in_directory(self):
-        size = 0
-        d = self.blob_storage.blobhelper.blob_dir
-        for base, _, files in os.walk(d):
-            for f in files:
-                if f.endswith('.blob'):
-                    try:
-                        size += os.stat(os.path.join(base, f)).st_size
-                    except OSError:
-                        if os.path.exists(os.path.join(base, f)):
-                            raise
-        return size
 
     def _wait_for_shrinks_to_finish(self):
         cache_checker = self.blob_storage.blobhelper.cache_checker

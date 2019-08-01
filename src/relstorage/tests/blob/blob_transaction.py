@@ -7,12 +7,16 @@ from __future__ import print_function
 import os
 
 from ZODB.interfaces import BlobError
+from ZODB.interfaces import IStorageUndoable
 from ZODB.blob import Blob
 from ZODB.POSException import ConflictError
 from ZODB.POSException import ConnectionStateError
 from ZODB.POSException import POSKeyError
+
 import transaction
 
+from relstorage.interfaces import IAuthoritativeBlobHelper
+from relstorage.interfaces import ICachedBlobHelper
 from . import TestBlobMixin
 
 class TestBlobTransactionMixin(TestBlobMixin):
@@ -26,6 +30,9 @@ class TestBlobTransactionMixin(TestBlobMixin):
         return blob1
 
     def _make_and_commit_blob(self, data=DATA1, close=True):
+        """
+        Stores a blob at root['blob1']
+        """
         blob = self._make_blob(data)
         conn = self.database.open()
         root1 = conn.root()
@@ -133,20 +140,25 @@ class TestBlobTransactionMixin(TestBlobMixin):
 
     def test_multiple_blobs(self):
         # We can open more than one blob object during the course of a single
-        # transaction::
+        # transaction, and we can write to a single blob using
+        # multiple handles.
         blob1, conn1 = self._make_and_commit_blob(close=False)
-        root1 = conn1.root()
         with blob1.open('a') as f:
             f.write(b'woot')
-        blob1a = root1['blob1']
-        with blob1a.open('a') as f:
+
+        root = conn1.root()
+        blob1_second_object = root['blob1']
+        assert blob1_second_object._p_oid == blob1._p_oid
+        # in fact it's actually the same object.
+        assert blob1_second_object is blob1
+        with blob1_second_object.open('a') as f:
             f.write(b'!')
 
         blob2 = Blob()
         blob2_contents = b'this is blob 2'
         with blob2.open('w') as f:
             f.write(blob2_contents)
-            root1['blob2'] = blob2
+            root['blob2'] = blob2
         transaction.commit()
 
         # Since we committed the current transaction above, the aggregate
@@ -154,11 +166,28 @@ class TestBlobTransactionMixin(TestBlobMixin):
         # blob2 (a different object) should be evident::
         blob1_contents = self.DATA1 + b'woot!'
         self._check_blob_contents(blob1, blob1_contents)
-        self._check_blob_contents(blob1a, blob1_contents)
+        self._check_blob_contents(blob1_second_object, blob1_contents)
         self._check_blob_contents(blob2, blob2_contents)
 
         transaction.abort()
         conn1.close()
+
+        if IStorageUndoable.providedBy(self.blob_storage):
+            # Whether or not we're using a shared or unshared
+            # blob-dir, when we keep history we will have three blob
+            # files on disk: two revisions of blob1, and one revision
+            # of blob2
+            self.assertEqual(3, self._count_blobs_in_directory())
+        else:
+            # If we are a shared blob directory, we didn't remove anything;
+            # that waits until pack time.
+            if IAuthoritativeBlobHelper.providedBy(self.blob_storage.blobhelper):
+                self.assertEqual(3, self._count_blobs_in_directory())
+            else:
+                # We will just have two blobs on disk. The earlier revision
+                # was automatically removed.
+                self.assertTrue(ICachedBlobHelper.providedBy(self.blob_storage.blobhelper))
+                self.assertEqual(2, self._count_blobs_in_directory())
 
     def test_persistent_blob_handle(self):
         # We shouldn't be able to persist a blob filehandle at commit time

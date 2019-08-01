@@ -33,22 +33,24 @@ from ZODB.mvccadapter import HistoricalStorageAdapter
 
 from ZODB.POSException import ReadConflictError
 
-from ZODB.utils import p64 as int64_to_8bytes
-from ZODB.utils import u64 as bytes8_to_int64
 from ZODB.utils import z64
 from zope import interface
 from zope.interface import implementer
 
-from relstorage._compat import clear_frames
+from ..blobhelper import BlobHelper
+from ..blobhelper import NoBlobHelper
+from ..cache import StorageCache
+from ..options import Options
+from ..interfaces import IRelStorage
+from ..interfaces import IBlobHelper
+from ..interfaces import INoBlobHelper
+from ..adapters.connections import LoadConnection
+from ..adapters.connections import StoreConnection
+from ..adapters.connections import ClosedConnection
+from .._compat import clear_frames
+from .._util import int64_to_8bytes
+from .._util import bytes8_to_int64
 
-
-from relstorage.blobhelper import BlobHelper
-from relstorage.blobhelper import NoBlobHelper
-from relstorage.cache import StorageCache
-from relstorage.options import Options
-from relstorage.interfaces import IRelStorage
-from relstorage.interfaces import IBlobHelper
-from relstorage.interfaces import INoBlobHelper
 
 from .transaction_iterator import TransactionIterator
 
@@ -64,9 +66,6 @@ from .pack import Pack
 from .store import Storer
 from .store import BlobStorer
 
-from ..adapters.connections import LoadConnection
-from ..adapters.connections import StoreConnection
-from ..adapters.connections import ClosedConnection
 
 from .tpc import ABORT_EARLY
 from .tpc import NotInTransaction

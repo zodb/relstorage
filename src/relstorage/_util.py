@@ -26,8 +26,28 @@ import traceback
 
 from persistent.timestamp import TimeStamp
 
+from ZODB.utils import p64
+from ZODB.utils import u64
+
 logger = __import__('logging').getLogger(__name__)
 
+int64_to_8bytes = p64
+bytes8_to_int64 = u64
+
+__all__ = [
+    'int64_to_8bytes',
+    'bytes8_to_int64',
+    'timestamp_at_unixtime',
+    'timer',
+    'log_timed',
+    'spawn',
+    'get_memory_usage',
+    'byte_display',
+    'Lazy',
+    'CachedIn',
+    'to_utf8',
+    'consume',
+]
 
 def timestamp_at_unixtime(now):
     """

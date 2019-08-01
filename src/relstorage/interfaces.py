@@ -140,6 +140,18 @@ class IBlobHelper(Interface):
     def close():
         pass
 
+
+class IAuthoritativeBlobHelper(IBlobHelper):
+    """
+    A blob helper that has the only copy of the blob data.
+    """
+
+class ICachedBlobHelper(IBlobHelper):
+    """
+    A blob helper that is only a cache; the real data is elsewhere.
+    """
+
+
 class INoBlobHelper(IBlobHelper):
     """
     An object that does nothing with blobs.
