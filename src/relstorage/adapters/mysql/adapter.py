@@ -88,7 +88,7 @@ class MySQLAdapter(AbstractAdapter):
 
     driver_options = drivers
 
-    def __init__(self, options=None, **params):
+    def __init__(self, options=None, oidallocator=None, **params):
         if options is None:
             options = Options()
         self.options = options
@@ -127,7 +127,10 @@ class MySQLAdapter(AbstractAdapter):
         )
         self.connmanager.add_on_store_opened(self.mover.on_store_opened)
         self.connmanager.add_on_load_opened(self.mover.on_load_opened)
-        self.oidallocator = MySQLOIDAllocator(driver)
+        if oidallocator is None:
+            oidallocator = MySQLOIDAllocator(driver)
+
+        self.oidallocator = oidallocator
 
         self.poller = Poller(
             self.driver,
@@ -172,7 +175,11 @@ class MySQLAdapter(AbstractAdapter):
         )
 
     def new_instance(self):
-        return type(self)(options=self.options, **self._params)
+        return type(self)(
+            options=self.options,
+            oidallocator=self.oidallocator.new_instance(),
+            **self._params
+        )
 
     def __str__(self):
         parts = [self.__class__.__name__]

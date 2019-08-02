@@ -28,13 +28,15 @@ from zope.interface import implementer
 
 from .interfaces import IStaleAware
 
+logger = __import__('logging').getLogger(__name__)
+
 class AbstractOIDs(object):
 
     __slots__ = (
     )
 
     def stale(self, ex):
-        raise NotImplementedError
+        return StaleOIDs(ex, self)
 
     def no_longer_stale(self):
         return self
@@ -63,9 +65,6 @@ class OIDs(AbstractOIDs):
         self.oidallocator = oidallocator
         self.store_connection = store_connection # type: StoreConnection
 
-    def stale(self, ex):
-        return StaleOIDs(ex, self)
-
     def set_min_oid(self, max_observed_oid):
         """
         Ensure that the next oid we produce is greater than *max_observed_oid*.
@@ -90,11 +89,11 @@ class OIDs(AbstractOIDs):
             # is also non-transactional.
             self.max_allocated_oid = max_observed_oid
             # Discard any preallocated oids that are less than this; they're not
-            # safe to use in the most general case. In the typical case they probably
-            # are.
-            self.preallocated_oids = [i
-                                      for i in self.preallocated_oids
-                                      if i > max_observed_oid]
+            # safe to use in the most general case. (In the typical case they probably
+            # are.)
+            preallocated_oids = self.preallocated_oids
+            while preallocated_oids and preallocated_oids[-1] < max_observed_oid:
+                preallocated_oids.pop()
 
     def new_oid(self, commit_in_progress):
         # Prior to ZODB 5.1.2, this method was actually called on the
@@ -121,12 +120,11 @@ class OIDs(AbstractOIDs):
                 self.__new_oid_callback,
                 can_reconnect=not commit_in_progress
             )
+            # OIDs are monotonic, always increasing. It should never
+            # go down or return equal to what we've already seen.
+            self.max_allocated_oid = max(self.preallocated_oids[0], self.max_allocated_oid)
 
         oid_int = self.preallocated_oids.pop()
-        # OIDs are monotonic, always increasing. It should never go down or
-        # return equal to what we've already seen.
-        assert oid_int > self.max_allocated_oid
-        self.max_allocated_oid = oid_int
         return int64_to_8bytes(oid_int)
 
     def __new_oid_callback(self, _store_conn, store_cursor, _fresh_connection):
@@ -138,12 +136,6 @@ class ReadOnlyOIDs(AbstractOIDs):
 
     __slots__ = (
     )
-
-    def stale(self, ex):
-        return StaleOIDs(ex, self)
-
-    def no_longer_stale(self):
-        return self
 
     def new_oid(self, commit_in_progress):
         raise ReadOnlyError

@@ -19,8 +19,6 @@ from __future__ import absolute_import
 
 import abc
 
-from .._compat import ABC
-
 # All of these allocators allocate 16 OIDs at a time. In the sequence
 # or table, value (n) represents (n * 16 - 15) through (n * 16). So,
 # value 1 represents OID block 1-16, 2 represents OID block 17-32, and
@@ -49,15 +47,27 @@ def _oid_range_around_assume_list(n, _s=_OID_RANGE_SIZE):
 def _oid_range_around_iterable(n, _s=_OID_RANGE_SIZE, _range=_oid_range_around_assume_list):
     return list(_range(n))
 
-class AbstractOIDAllocator(ABC):
+class AbstractOIDAllocator(object):
+    """
+    These objects are intended to be stateless.
+
+    They consult an underlying database sequence than increases, and
+    then derive additional OIDs from that sequence. ``new_oids``
+    returns a list of those OIDs, with the largest such OID in
+    position 0.
+    """
+    __slots__ = ()
+
+    def new_instance(self):
+        return self
 
     @abc.abstractmethod
     def set_min_oid(self, cursor, oid_int):
-        raise NotImplementedError()
+        raise NotImplementedError
 
     @abc.abstractmethod
     def new_oids(self, cursor):
-        raise NotImplementedError()
+        raise NotImplementedError
 
     if isinstance(range(1), list):
         # Py2

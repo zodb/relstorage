@@ -27,6 +27,8 @@ from ..oidallocator import AbstractOIDAllocator
 @implementer(IOIDAllocator)
 class PostgreSQLOIDAllocator(AbstractOIDAllocator):
 
+    __slots__ = ()
+
     def set_min_oid(self, cursor, oid_int):
         """Ensure the next OID is at least the given OID."""
         n = (oid_int + 15) // 16

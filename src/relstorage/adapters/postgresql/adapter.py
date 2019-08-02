@@ -65,7 +65,7 @@ class PostgreSQLAdapter(AbstractAdapter):
 
     driver_options = drivers
 
-    def __init__(self, dsn='', options=None):
+    def __init__(self, dsn='', options=None, oidallocator=None):
         # options is a relstorage.options.Options or None
         self._dsn = dsn
         if options is None:
@@ -103,7 +103,10 @@ class PostgreSQLAdapter(AbstractAdapter):
             version_detector=self.version_detector,
             batcher_factory=PostgreSQLRowBatcher,
         )
-        self.oidallocator = PostgreSQLOIDAllocator()
+        if oidallocator is None:
+            oidallocator = PostgreSQLOIDAllocator()
+
+        self.oidallocator = oidallocator
 
         self.poller = PGPoller(
             self.driver,
@@ -153,7 +156,11 @@ class PostgreSQLAdapter(AbstractAdapter):
         self.connmanager.add_on_load_opened(self.mover.on_load_opened)
 
     def new_instance(self):
-        inst = type(self)(dsn=self._dsn, options=self.options)
+        inst = type(self)(
+            dsn=self._dsn,
+            options=self.options,
+            oidallocator=self.oidallocator.new_instance()
+        )
         return inst
 
     def __str__(self):
