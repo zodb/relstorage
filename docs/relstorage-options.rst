@@ -155,7 +155,11 @@ blob-cache-size-check-external
         For large blob caches, where checking the size takes
         measurable time, using an external process may improve
         request response time for the application by reducing
-        contention for the GIL. It may also be helpful for gevent applications.
+        contention for the GIL. It may also be helpful for gevent
+        applications.
+
+        This is not recommended on Windows, where opening a file from
+        multiple processes can be a problem.
 
 blob-chunk-size
         When ZODB blobs are stored in MySQL, RelStorage breaks them into

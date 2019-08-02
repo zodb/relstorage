@@ -36,6 +36,7 @@
 - Add an option, ``blob-cache-size-check-external``, that causes the
   blob cache cleanup process to run in a subprocess instead of a
   thread. This can free up the storage process to handle requests.
+  This is not recommended on Windows.
 
 - Abort storage transactions immediately when an exception occurs.
   Previously this could be specified by setting the environment
