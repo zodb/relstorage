@@ -39,11 +39,21 @@ def phase_dependent(meth):
     Decorator to mark the method as requiring the current
     transaction phase as its first argument.
 
-    These are methods that can only be called after ``tpc_begin``.
+    These are methods that can only be called after ``tpc_begin``
+    and delegate to the ``tpc_phase`` object.
     """
     meth.phase_dependent = True
     return meth
 
+def phase_dependent_aborts_early(meth):
+    """
+    Like :func:`phase_dependent`, but if any exception
+    were to propagate out of the body of the method,
+    the TPC will be aborted  immediately.
+    """
+    meth = phase_dependent(meth)
+    meth.aborts_early = True
+    return meth
 
 class _StaleMethodWrapperType(type):
     # Make the _StaleMethodWrapper class also a descriptor
@@ -137,9 +147,19 @@ class stale_aware(object):
         return stale_aware_class(bound)
 
 def _make_phase_dependent(storage, method):
-    @functools.wraps(method)
-    def state(*args, **kwargs):
-        return method(storage._tpc_phase, *args, **kwargs)
+    aborts_early = getattr(method, 'aborts_early', False)
+    if aborts_early:
+        @functools.wraps(method)
+        def state(*args, **kwargs):
+            try:
+                return method(storage._tpc_phase, *args, **kwargs)
+            except:
+                storage.tpc_abort(None, _force=True)
+                raise
+    else:
+        @functools.wraps(method)
+        def state(*args, **kwargs):
+            return method(storage._tpc_phase, *args, **kwargs)
     return state
 
 def _make_cannot_write(method):
@@ -157,10 +177,16 @@ def copy_storage_methods(storage, delegate):
         __traceabck_info__ = var_name
         if var_name.startswith('_'):
             continue
+
         attr = getattr(delegate, var_name)
         if callable(attr) and getattr(attr, 'storage_method', None):
-            if read_only and getattr(attr, 'write_method', False):
-                attr = _make_cannot_write(attr)
-            elif getattr(attr, 'phase_dependent', None):
-                attr = _make_phase_dependent(storage, attr)
-            setattr(storage, var_name, attr)
+            storage_meth = attr
+
+            method_writes_to_db = getattr(storage_meth, 'write_method', False)
+            method_is_phase_dependent = getattr(storage_meth, 'phase_dependent', False)
+
+            if read_only and method_writes_to_db:
+                storage_meth = _make_cannot_write(storage_meth)
+            elif method_is_phase_dependent:
+                storage_meth = _make_phase_dependent(storage, storage_meth)
+            setattr(storage, var_name, storage_meth)

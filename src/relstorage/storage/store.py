@@ -25,7 +25,7 @@ from perfmetrics import Metric
 from perfmetrics import metricmethod
 
 from .util import writable_storage_method
-from .util import phase_dependent
+from .util import phase_dependent_aborts_early
 
 logger = __import__('logging').getLogger(__name__)
 
@@ -33,7 +33,7 @@ class Storer(object):
 
     __slots__ = ()
 
-    @phase_dependent
+    @phase_dependent_aborts_early
     @writable_storage_method
     @Metric(method=True, rate=0.1)
     def store(self, tpc_phase, oid, previous_tid, data, version, transaction):
@@ -43,7 +43,7 @@ class Storer(object):
         # If we get here and we're read-only, our phase will report that.
         tpc_phase.store(oid, previous_tid, data, transaction)
 
-    @phase_dependent
+    @phase_dependent_aborts_early
     @writable_storage_method
     def restore(self, tpc_phase, oid, serial, data, version, prev_txn, transaction):
         # Like store(), but used for importing transactions.  See the
@@ -55,7 +55,7 @@ class Storer(object):
 
         tpc_phase.restore(oid, serial, data, prev_txn, transaction)
 
-    @phase_dependent
+    @phase_dependent_aborts_early
     @writable_storage_method
     def deleteObject(self, tpc_phase, oid, oldserial, transaction):
         # This method is only expected to be called from zc.zodbdgc
@@ -74,7 +74,7 @@ class BlobStorer(object):
         self.blobhelper = blobhelper
         self.store_connection = store_connection
 
-    @phase_dependent
+    @phase_dependent_aborts_early
     @writable_storage_method
     @metricmethod
     def storeBlob(self, tpc_phase, oid, serial, data, blobfilename, version, txn):
@@ -95,7 +95,7 @@ class BlobStorer(object):
         self.blobhelper.storeBlob(cursor, store_func,
                                   oid, serial, data, blobfilename, version, txn)
 
-    @phase_dependent
+    @phase_dependent_aborts_early
     @writable_storage_method
     def restoreBlob(self, tpc_phase, oid, serial, data, blobfilename, prev_txn, txn):
         """
