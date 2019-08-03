@@ -150,8 +150,9 @@ class RowBatcher(object):
             if these_params_need_flattened:
                 params = self._flatten_params(params)
             stmt += suffix
-            __traceback_info__ = params
+            __traceback_info__ = stmt, params
             self.cursor.execute(stmt, params)
+
         return count
 
     def _flatten_params(self, params):

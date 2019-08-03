@@ -34,11 +34,31 @@ from ._abstract_drivers import _select_driver
 
 class AbstractAdapter(object):
 
+    keep_history = None # type: bool
     options = None # type: Options
     driver_options = None # type: IDBDriverOptions
     locker = None # type: ILocker
     txncontrol = None # type: ITransactionControl
     mover = None # type: IObjectMover
+    connmanager = None # type: IConnectionManager
+
+    def __init__(self, options=None):
+        if options is None:
+            options = Options()
+        self.options = options
+        self.keep_history = options.keep_history
+
+        self.driver = driver = self._select_driver()
+        self._binary = driver.Binary
+
+        self._create()
+
+        self.connmanager.add_on_store_opened(self.mover.on_store_opened)
+        self.connmanager.add_on_load_opened(self.mover.on_load_opened)
+        self.connmanager.add_on_store_opened(self.locker.on_store_opened)
+
+    def _create(self):
+        raise NotImplementedError
 
     def _select_driver(self, options=None):
         return _select_driver(

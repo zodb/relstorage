@@ -56,7 +56,6 @@ import os
 from zope.interface import implementer
 
 from relstorage._compat import iteritems
-from relstorage.options import Options
 
 from ..adapter import AbstractAdapter
 
@@ -89,19 +88,19 @@ class MySQLAdapter(AbstractAdapter):
     driver_options = drivers
 
     def __init__(self, options=None, oidallocator=None, **params):
-        if options is None:
-            options = Options()
-        self.options = options
-        self.keep_history = options.keep_history
         self._params = params
+        self.oidallocator = oidallocator
+        super(MySQLAdapter, self).__init__(options)
+
+    def _create(self):
+        options = self.options
+        driver = self.driver
+        params = self._params
 
         RUNNING_ON_APPVEYOR = os.environ.get('APPVEYOR')
         # 5.7.12-log crashes when we call the stored procedure
         # to move objects. No clue why.
         self._known_broken_mysql_procs = RUNNING_ON_APPVEYOR
-
-        self.driver = driver = self._select_driver()
-        log.debug("Using driver %r", driver)
 
         self.connmanager = MySQLdbConnectionManager(
             driver,
@@ -114,7 +113,7 @@ class MySQLAdapter(AbstractAdapter):
             driver=driver,
             batcher_factory=RowBatcher,
         )
-        self.connmanager.add_on_store_opened(self.locker.on_store_opened)
+
         self.schema = MySQLSchemaInstaller(
             driver=driver,
             connmanager=self.connmanager,
@@ -125,12 +124,9 @@ class MySQLAdapter(AbstractAdapter):
             driver,
             options=options,
         )
-        self.connmanager.add_on_store_opened(self.mover.on_store_opened)
-        self.connmanager.add_on_load_opened(self.mover.on_load_opened)
-        if oidallocator is None:
-            oidallocator = MySQLOIDAllocator(driver)
 
-        self.oidallocator = oidallocator
+        if self.oidallocator is None:
+            self.oidallocator = MySQLOIDAllocator(driver)
 
         self.poller = Poller(
             self.driver,

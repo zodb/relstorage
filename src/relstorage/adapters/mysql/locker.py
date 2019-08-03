@@ -36,19 +36,22 @@ _SET_TIMEOUT_STMT = 'SET SESSION innodb_lock_wait_timeout = %s'
 _SET_TIMEOUT_DEFAULT_STMT = _SET_TIMEOUT_STMT % ('DEFAULT',)
 
 @contextmanager
-def lock_timeout(cursor, timeout):
+def lock_timeout(cursor, timeout, restore_to=None):
     """
     ContextManager that sets the lock timeout to the given value,
     and returns it to the DEFAULT when done.
 
     If *timeout* is ``None``, makes no changes to the connection.
     """
-    if timeout is not None: # 0 is valid
+    if timeout is not None: # 0 is valid and means the same thing as 1
         cursor.execute(_SET_TIMEOUT_STMT, (timeout,))
         try:
             yield
         finally:
-            cursor.execute(_SET_TIMEOUT_DEFAULT_STMT)
+            if restore_to is None:
+                cursor.execute(_SET_TIMEOUT_DEFAULT_STMT)
+            else:
+                cursor.execute(_SET_TIMEOUT_STMT, (restore_to,))
     else:
         yield
 
@@ -126,13 +129,14 @@ class MySQLLocker(AbstractLocker):
             ver = self._metadata_to_native_str(ver)
             major = int(ver[0])
             __traceback_info__ = ver, major
-            self._supports_row_lock_nowait = (major >= 8)
-            if self._supports_row_lock_nowait:
+            native_nowait = self._supports_row_lock_nowait = (major >= 8)
+            if native_nowait:
                 self._lock_share_clause = 'FOR SHARE NOWAIT'
+            else:
+                assert self._lock_readCurrent_oids_for_share
+                self._lock_readCurrent_oids_for_share = self.__lock_readCurrent_nowait
 
     def _on_store_opened_set_row_lock_timeout(self, cursor, restart=False):
-        if restart:
-            return
         self._set_row_lock_timeout(cursor, self.commit_lock_timeout)
 
     def _set_row_lock_timeout(self, cursor, timeout):
@@ -145,10 +149,16 @@ class MySQLLocker(AbstractLocker):
         # corrupted data, written after free?' or something like that.
         cursor.fetchone()
 
+
+    def __lock_readCurrent_nowait(self, cursor, current_oids):
+        # For MySQL 5.7, we emulate NOWAIT by setting the lock timeout
+        with lock_timeout(cursor, 0, self.commit_lock_timeout):
+            AbstractLocker._lock_readCurrent_oids_for_share(self, cursor, current_oids)
+
     def release_commit_lock(self, cursor):
         "Auto-released by transaction end."
 
-    def _get_commit_lock_debug_info(self, cursor):
+    def _get_commit_lock_debug_info(self, cursor, was_failure=False):
         cursor.execute('SELECT connection_id()')
         conn_id = str(cursor.fetchone()[0])
 
@@ -158,8 +168,12 @@ class MySQLLocker(AbstractLocker):
             return 'Connection: ' + conn_id + '\n' + self._rows_as_pretty_string(cursor)
         except self.driver.driver_module.Error:
             # MySQL 5, or no permissions
-            cursor.execute('SELECT * from information_schema.innodb_locks')
-            rows = self._rows_as_pretty_string(cursor)
+            try:
+                cursor.execute('SELECT * from information_schema.innodb_locks')
+                rows = self._rows_as_pretty_string(cursor)
+            except self.driver.driver_module.Error:
+                # MySQL 8, and we had no permissions.
+                return 'Connection: ' + conn_id
             return 'Connection: ' + conn_id + '\n' + rows
 
     def hold_pack_lock(self, cursor):

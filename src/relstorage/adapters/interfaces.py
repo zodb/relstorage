@@ -16,6 +16,7 @@ from __future__ import absolute_import
 
 from ZODB.POSException import StorageError
 from ZODB.POSException import ReadConflictError
+from ZODB.POSException import ConflictError
 from zope.interface import Attribute
 from zope.interface import Interface
 
@@ -879,19 +880,6 @@ class IPackUndo(Interface):
         pack operation is required to actually remove these deleted items.
         """
 
-class StaleConnectionError(ReadConflictError):
-    """
-    Raised by `IPoller.poll_invalidations` when a stale connection is
-    detected.
-    """
-
-    @classmethod
-    def from_prev_and_new_tid(cls, prev_polled_tid, new_polled_tid):
-        return cls(
-            "The database connection is stale: new_polled_tid=%d, "
-            "prev_polled_tid=%d." % (new_polled_tid, prev_polled_tid))
-
-
 class IPoller(Interface):
     """Poll for new data"""
 
@@ -1053,12 +1041,59 @@ class ITransactionControl(Interface):
                  and cursor are closed before this method returns).
         """
 
+###
+# Exceptions
+###
 
 class ReplicaClosedException(Exception):
     """The connection to the replica has been closed"""
 
 class UnableToAcquireCommitLockError(StorageError):
-    """The commit lock cannot be acquired."""
+    """
+    The commit lock cannot be acquired due to a timeout.
+
+    This means some other transaction had the lock we needed. Retrying
+    the transaction may succeed.
+
+    However, for historical reasons, this exception is not a ``TransientError``.
+    """
+
+class UnableToLockRowsToModifyError(ConflictError):
+    """
+    We were unable to lock one or more rows that we intend to modify
+    due to a timeout.
+
+    This means another transaction already had the rows locked,
+    and thus we are in conflict with that transaction. Retrying the
+    transaction may succeed.
+
+    This is a type of ``ConflictError``, which is a transient error.
+    """
+
+class UnableToLockRowsToReadCurrentError(ReadConflictError):
+    """
+    We were unable to lock one or more rows that belong to an object
+    that ``Connection.readCurrent()`` was called on.
+
+    This means another transaction already had the rows locked with
+    intent to modify them, and thus we are in conflict with that
+    transaction. Retrying the transaction may succeed.
+
+    This is a type of ``ReadConflictError``, which is a transient error.
+    """
 
 class UnableToAcquirePackUndoLockError(StorageError):
     """A pack or undo operation is in progress."""
+
+
+class StaleConnectionError(ReadConflictError):
+    """
+    Raised by `IPoller.poll_invalidations` when a stale connection is
+    detected.
+    """
+
+    @classmethod
+    def from_prev_and_new_tid(cls, prev_polled_tid, new_polled_tid):
+        return cls(
+            "The database connection is stale: new_polled_tid=%d, "
+            "prev_polled_tid=%d." % (new_polled_tid, prev_polled_tid))

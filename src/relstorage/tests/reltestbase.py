@@ -1019,7 +1019,8 @@ class GenericRelStorageTests(
 
             # Try to load an object, which should cause ReadConflictError.
             r._p_deactivate()
-            self.assertRaises(ReadConflictError, lambda: r['beta'])
+            with self.assertRaises(ReadConflictError):
+                r.__getitem__('beta')
 
         finally:
             db.close()
@@ -1273,7 +1274,7 @@ class GenericRelStorageTests(
 
     def checkCanLoadObjectStateWhileBeingModified(self):
         # Get us an object in the database
-        storage1 = self._storage.new_instance()
+        storage1 = self._closing(self._storage.new_instance())
         data = zodb_pickle(MinPO(str(storage1)))
         t = TransactionMetaData()
         storage1.tpc_begin(t)
@@ -1288,7 +1289,7 @@ class GenericRelStorageTests(
 
         self._storage._cache.clear(load_persistent=False)
 
-        storage1 = self._storage.new_instance()
+        storage1 = self._closing(self._storage.new_instance())
 
         # Get a completely independent storage, not sharing a cache
         storage2 = self._closing(self.make_storage(zap=False))
@@ -1312,6 +1313,113 @@ class GenericRelStorageTests(
 
         storage1.close()
         storage2.close()
+
+    def __store_two_for_read_current_error(self):
+        db = self._closing(DB(self._storage))
+        conn = db.open()
+        root = conn.root()
+        root['object1'] = MinPO('object1')
+        root['object2'] = MinPO('object2')
+        transaction.commit()
+
+        obj1_oid = root['object1']._p_oid
+        obj2_oid = root['object2']._p_oid
+        obj1_tid = root['object1']._p_serial
+        assert obj1_tid == root['object2']._p_serial
+
+        conn.close()
+        # We can't close the DB, that will close the storage that we
+        # still need.
+        return obj1_oid, obj2_oid, obj1_tid
+
+    def __read_current_and_lock(self, storage, read_current_oid, lock_oid, tid):
+        tx = TransactionMetaData()
+        storage.tpc_begin(tx)
+        storage.checkCurrentSerialInTransaction(read_current_oid, tid, tx)
+        storage.store(lock_oid, tid, b'bad pickle2', '', tx)
+        storage.tpc_vote(tx)
+        return tx
+
+    def __do_check_error_with_conflicting_concurrent_read_current(
+            self,
+            exception_in_b,
+            commit_lock_timeout=None,
+            storageA=None,
+            storageB=None
+    ):
+        if commit_lock_timeout:
+            self._storage._adapter.locker.commit_lock_timeout = commit_lock_timeout
+            self._storage._options.commit_lock_timeout = commit_lock_timeout
+
+        if storageA is None:
+            storageA = self._closing(self._storage.new_instance())
+        if storageB is None:
+            storageB = self._closing(self._storage.new_instance())
+        # First, store the two objects in an accessible location.
+        obj1_oid, obj2_oid, tid = self.__store_two_for_read_current_error()
+
+        # Now transaction A readCurrent 2 and modify 1
+        # up through the vote phase
+        self.__read_current_and_lock(storageA, obj1_oid, obj2_oid, tid)
+
+        # Second transaction does exactly the opposite, and blocks,
+        # raising an exception.
+        if storageB is None:
+            storageB = self._closing(self._storage.new_instance())
+
+        before = time.time()
+        with self.assertRaises(exception_in_b):
+            self.__read_current_and_lock(storageB, obj2_oid, obj1_oid, tid)
+
+        after = time.time()
+        duration_blocking = after - before
+
+        return duration_blocking
+
+    def checkProperErrorWithConflictingConcurrentReadCurrent(self):
+        # Given two objects 1 and 2, if transaction A does readCurrent(1)
+        # and modifies 2 up through the voting phase, and then transaction
+        # B does readCurrent(2) and modifies 1 up through the voting phase,
+        # we get an error after ``commit_lock_timeout``  and not a deadlock.
+        from relstorage.adapters.interfaces import UnableToLockRowsToModifyError
+
+        # Use a very small commit lock timeout.
+        commit_lock_timeout = 1
+        duration_blocking = self.__do_check_error_with_conflicting_concurrent_read_current(
+            UnableToLockRowsToModifyError,
+            commit_lock_timeout=commit_lock_timeout
+        )
+
+        self.assertLessEqual(duration_blocking, commit_lock_timeout * 3)
+
+    def checkProperErrorWithInterleavedConflictingConcurrentReadCurrent(self):
+        # Similar to ``checkProperErrorWithConflictingConcurrentReadCurrent``
+        # except that we pause the process immediately after txA takes its exclusive
+        # locks to let txB take *its* exclusive locks. Then txB can go for the shared
+        # locks. In this fashion we get a database deadlock, which
+        # is reported as a retryable error. Note that we don't adjust the commit_lock_timeout;
+        # it doesn't apply.
+        #
+        # NOTE: When we move these steps into a stored procedure, this test will break
+        # because we won't be able to force the interleaving.
+        from relstorage.adapters.interfaces import UnableToLockRowsToReadCurrentError
+        storageA = self._closing(self._storage.new_instance())
+
+        def lock_current_objects(cursor, _current_oids):
+            storageA._adapter.locker._lock_rows_being_modified(cursor)
+
+        storageA._adapter.locker.lock_current_objects = lock_current_objects
+
+        duration_blocking = self.__do_check_error_with_conflicting_concurrent_read_current(
+            UnableToLockRowsToReadCurrentError,
+            storageA=storageA
+        )
+
+        # Even though we just went with the default commit_lock_timeout,
+        # which is large...
+        self.assertGreaterEqual(storageA._options.commit_lock_timeout, 10)
+        # ...the lock violation happened very quickly
+        self.assertLessEqual(duration_blocking, 3)
 
 
 class AbstractRSZodbConvertTests(StorageCreatingMixin,

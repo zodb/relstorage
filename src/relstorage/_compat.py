@@ -67,10 +67,12 @@ def iteroiditems(d):
 if PY3:
     string_types = (str,)
     unicode = str
+    number_types = (int, float)
     from io import StringIO as NStringIO
 else:
     string_types = (basestring,)
     unicode = unicode
+    number_types = (int, long, float)
     from io import BytesIO as NStringIO
 
 try:

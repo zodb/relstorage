@@ -48,6 +48,11 @@ class AbstractPostgreSQLDriver(AbstractModuleDriver):
                                application_name=None):
         raise NotImplementedError
 
+    def set_lock_timeout(self, cursor, timeout):
+        # PG8000 needs a literal embedded in the string; prepared
+        # statements can't be SET with a variable.
+        cursor.execute('SET lock_timeout = %s', (timeout,))
+
 database_type = 'postgresql'
 
 implement_db_driver_options(

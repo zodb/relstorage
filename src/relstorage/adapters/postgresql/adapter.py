@@ -19,8 +19,6 @@ import re
 
 from zope.interface import implementer
 
-from ...options import Options
-
 from ..adapter import AbstractAdapter
 
 from ..dbiter import HistoryFreeDatabaseIterator
@@ -68,16 +66,15 @@ class PostgreSQLAdapter(AbstractAdapter):
     def __init__(self, dsn='', options=None, oidallocator=None):
         # options is a relstorage.options.Options or None
         self._dsn = dsn
-        if options is None:
-            options = Options()
-        self.options = options
-        self.keep_history = options.keep_history
+        self.oidallocator = oidallocator
+        super(PostgreSQLAdapter, self).__init__(options)
+
+    def _create(self):
+        driver = self.driver
+        options = self.options
+        dsn = self._dsn
+
         self.version_detector = PostgreSQLVersionDetector()
-
-        self.driver = driver = self._select_driver()
-        self._binary = driver.Binary
-        log.debug("Using driver %r", driver)
-
         self.connmanager = Psycopg2ConnectionManager(
             driver,
             dsn=dsn,
@@ -103,10 +100,8 @@ class PostgreSQLAdapter(AbstractAdapter):
             version_detector=self.version_detector,
             batcher_factory=PostgreSQLRowBatcher,
         )
-        if oidallocator is None:
-            oidallocator = PostgreSQLOIDAllocator()
-
-        self.oidallocator = oidallocator
+        if self.oidallocator is None:
+            self.oidallocator = PostgreSQLOIDAllocator()
 
         self.poller = PGPoller(
             self.driver,
@@ -151,9 +146,6 @@ class PostgreSQLAdapter(AbstractAdapter):
             connmanager=self.connmanager,
             keep_history=self.keep_history
         )
-
-        self.connmanager.add_on_store_opened(self.mover.on_store_opened)
-        self.connmanager.add_on_load_opened(self.mover.on_load_opened)
 
     def new_instance(self):
         inst = type(self)(

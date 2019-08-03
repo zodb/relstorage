@@ -18,8 +18,6 @@ import logging
 
 from zope.interface import implementer
 
-from ...options import Options
-
 from ..adapter import AbstractAdapter
 from ..dbiter import HistoryFreeDatabaseIterator
 from ..dbiter import HistoryPreservingDatabaseIterator
@@ -69,13 +67,16 @@ class OracleAdapter(AbstractAdapter):
         self._password = password
         self._dsn = dsn
         self._twophase = twophase
-        if options is None:
-            options = Options()
-        self.options = options
-        self.keep_history = options.keep_history
 
-        self.driver = driver = self._select_driver()
-        log.debug("Using driver %s", driver)
+        super(OracleAdapter, self).__init__(options)
+
+    def _create(self):
+        driver = self.driver
+        user = self._user
+        password = self._password
+        twophase = self._twophase
+        options = self.options
+        dsn = self._dsn
 
         self.connmanager = CXOracleConnectionManager(
             driver,

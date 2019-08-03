@@ -110,7 +110,7 @@ class Options(object):
     #: storage.
     cache_local_storage = None
 
-    #: How long to wait for a commit lock
+    #: How long to wait for a commit lock, in seconds.
     commit_lock_timeout = 30
     #: Lock ID for Oracle
     commit_lock_id = 0

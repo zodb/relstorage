@@ -245,22 +245,27 @@ class AbstractVote(AbstractTPCState):
         # MySQL's InnoDB supports rapid deadlock detection, and starting with 8
         # NOWAIT.
         #
-        # Therefore, the strategy is to first take exclusive locks of things
-        # we will be modifying. Once that succeeds, then we attempt shared locks
-        # of readCurrent. If that fails because we can't get a lock, we know someone
-        # is in the process of modifying it and we have a conflict. If we get the locks,
-        # we still have to confirm the TIDs are the things we expect.
-        # (A possible optimization is to do those two steps at once, in the database.
-        # SELECT FOR SHARE WHERE oid = X and TID = x. If we don't get the right number of rows,
-        # conflict.)
+        # Therefore, the strategy is to first take exclusive locks of
+        # things we will be modifying. Once that succeeds, then we
+        # attempt shared locks of readCurrent. If that fails because
+        # we can't get a lock, we know someone is in the process of
+        # modifying it and we have a conflict. If we get the locks, we
+        # still have to confirm the TIDs are the things we expect. (A
+        # possible optimization is to do those two steps at once, in
+        # the database. SELECT FOR SHARE WHERE oid = X and TID = x. If
+        # we don't get the right number of rows, conflict.)
         #
-        # MySQL 5.7 and 8 handle this weird, though. If two transactions
-        # are in READ COMMITTED level, and one locks the odd rows for
-        # update, the other one blocks trying to lock the even rows
-        # for update. Then, when the first one tries to lock the even
-        # rows for sharing, it gets killed with a deadlock exception,
-        # and the second one takes the locks on the even rows. The
-        # same happens if you go the other way.
+        # MySQL 5.7 and 8 handle this weird, though. If two
+        # transactions are in READ COMMITTED level, and one locks the
+        # odd rows for update, the other one blocks trying to lock the
+        # even rows for update (when testing with small sets of rows;
+        # probably they all share the same database page? Are row
+        # locks implemented at the page level?). Then, when the first
+        # one tries to lock the even rows for sharing, it gets killed
+        # with a deadlock exception, and the second one takes the
+        # locks on the even rows. The same happens if you go the other
+        # way. This seems to be because of "intention locks."
+        # (https://dev.mysql.com/doc/refman/8.0/en/innodb-locking.html#innodb-intention-locks)
         read_current_oid_ints = self.required_tids.keys()
 
         # TODO: make this (the locking query?) more useful so we can

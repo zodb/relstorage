@@ -1,5 +1,11 @@
 CREATE OR REPLACE FUNCTION lock_and_choose_tid()
 RETURNS BIGINT
+  -- We're in the commit phase of two-phase commit.
+  -- It's very important not to error out here.
+  -- So we need a very long wait to get the commit lock.
+  -- Recall PostgreSQL uses milliseconds (it can also parse
+  -- strings like '10min').
+    SET lock_timeout = 600000
 AS
 $$
 DECLARE
@@ -14,7 +20,6 @@ BEGIN
   -- to indicate that the TIDs were the same, and a later view of the
   -- transaction would be incorrect (containing multiple distinct
   -- transactions).
-
   SELECT tid
   INTO scratch
   FROM commit_row_lock

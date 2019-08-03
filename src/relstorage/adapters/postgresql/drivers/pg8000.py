@@ -23,6 +23,8 @@ from collections import deque
 
 from zope.interface import implementer
 
+from relstorage._compat import number_types
+
 from ...interfaces import IDBDriver
 from ...sql import Compiler
 
@@ -256,3 +258,9 @@ class PG8000Driver(AbstractPostgreSQLDriver):
         return conn, cursor
 
     sql_compiler_class = PG8000Compiler
+
+    def set_lock_timeout(self, cursor, timeout):
+        # PG8000 needs a literal embedded in the string; prepared
+        # statements can't be SET with a variable.
+        assert isinstance(timeout, number_types)
+        cursor.execute('SET lock_timeout = %s' % (timeout,))

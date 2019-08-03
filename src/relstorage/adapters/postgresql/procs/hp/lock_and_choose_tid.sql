@@ -5,6 +5,11 @@ CREATE OR REPLACE FUNCTION lock_and_choose_tid(
   p_extension BYTEA
 )
 RETURNS BIGINT
+  -- We're in the commit phase of two-phase commit.
+  -- It's very important not to error out here.
+  -- So we need a very long wait to get the commit lock.
+  -- Recall PostgreSQL uses milliseconds
+    SET lock_timeout = 500000
 AS
 $$
 DECLARE
