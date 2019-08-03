@@ -103,6 +103,7 @@ class AbstractLocker(DatabaseHelpersMixin,
         self._set_row_lock_timeout(cursor, 0)
 
     _lock_current_clause = 'FOR UPDATE'
+    _lock_share_clause = 'FOR SHARE NOWAIT'
 
     #: These double as the query to get OIDs we'd like to lock, but
     #: do not actually lock them.
@@ -176,28 +177,27 @@ class AbstractLocker(DatabaseHelpersMixin,
         # locked when they are returned by the cursor, so we must
         # consume all the rows.
 
+        # See docs in vote.py.
+        # First, lock the rows we need exclusive access to.
+        stmt = self._lock_current_objects_query
+        cursor.execute(stmt)
+        rows = cursor
+        consume(rows)
+
+        # Then lock rows we need shared access to. This may deadlock.
         if current_oids:
-            stmt, table = self._get_current_objects_query
-            cursor.execute(stmt)
-
-            oids_being_updated = {row[0] for row in cursor}
-
-            oids_to_lock = oids_being_updated | set(current_oids)
-            oids_to_lock = sorted(oids_to_lock)
+            _, table = self._get_current_objects_query
+            oids_to_lock = sorted(set(current_oids))
 
             batcher = self.make_batcher(cursor, row_limit=1000)
 
             rows = batcher.select_from(
                 ('zoid',), table,
-                suffix='  %s ' % self._lock_current_clause,
+                suffix='  %s ' % self._lock_share_clause,
                 **{'zoid': oids_to_lock}
             )
-        else:
-            stmt = self._lock_current_objects_query
-            cursor.execute(stmt)
-            rows = cursor
 
-        consume(rows)
+
 
     # MySQL allows aggregates in the top level to use FOR UPDATE,
     # but PostgreSQL does not, so we have to use the second form.

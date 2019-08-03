@@ -95,6 +95,9 @@ class MySQLLocker(AbstractLocker):
     advisory locks anyway.
     """
 
+    # The old MySQL 5.7 syntax is the default
+    _lock_share_clause = 'LOCK IN SHARE MODE'
+
     def __init__(self, options, driver, batcher_factory):
         super(MySQLLocker, self).__init__(options, driver, batcher_factory)
         self._supports_row_lock_nowait = None
@@ -124,6 +127,8 @@ class MySQLLocker(AbstractLocker):
             major = int(ver[0])
             __traceback_info__ = ver, major
             self._supports_row_lock_nowait = (major >= 8)
+            if self._supports_row_lock_nowait:
+                self._lock_share_clause = 'FOR SHARE NOWAIT'
 
     def _on_store_opened_set_row_lock_timeout(self, cursor, restart=False):
         if restart:

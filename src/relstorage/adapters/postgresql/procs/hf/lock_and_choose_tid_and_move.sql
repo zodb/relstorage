@@ -12,7 +12,10 @@ BEGIN
 
   -- move_from_temp()
   -- First the state for objects
-
+  -- TODO: We probably do not need to order the
+  -- temp rows. The locks we need are already held.
+  -- Skipping that appears to make a difference in plans and
+  -- benchmarks. Confirm that and remove.
   INSERT INTO object_state (
     zoid,
     tid,

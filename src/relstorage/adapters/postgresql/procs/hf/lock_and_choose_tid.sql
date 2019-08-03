@@ -7,6 +7,14 @@ DECLARE
   current_tid_64 BIGINT;
   next_tid_64 BIGINT;
 BEGIN
+  -- In a history-free database, if we don't have a lock for the TID,
+  -- we could potentially end up with multiple processes choosing the
+  -- same TID (because there's no unique index on tids). As long as they were
+  -- working with different objects, there would be no database error
+  -- to indicate that the TIDs were the same, and a later view of the
+  -- transaction would be incorrect (containing multiple distinct
+  -- transactions).
+
   SELECT tid
   INTO scratch
   FROM commit_row_lock

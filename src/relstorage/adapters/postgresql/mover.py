@@ -56,9 +56,16 @@ class PostgreSQLObjectMover(AbstractObjectMover):
     @metricmethod_sampled
     def on_store_opened(self, cursor, restart=False):
         """Create the temporary tables for storing objects"""
-        # note that the md5 column is not used if self.keep_history == False.
+        # Note that the md5 column is not used if self.keep_history == False.
         # Ideally we wouldn't execute any of these on a restart, but
-        # I've seen an issue with temp_stare apparently going missing on pg8000
+        # I've seen an issue with temp_store apparently going missing on pg8000.
+        #
+        # In testing, using 'DELETE ROWS' is faster than using 'DROP TABLE':
+        # 1230/840ms for zodbshootout add/update with DROP vs 983/681ms.
+        # The theory was that maybe a vacuum or analyze would be needed after
+        # DELETE ROWS and not DROP TABLE, but that didn't seem to be true (it's possible
+        # an ANALYZE would still be helpful before using the temp table, but we
+        # haven't benchmarked that).
         ddl_stmts = [
             """
             CREATE TEMPORARY TABLE IF NOT EXISTS temp_store (

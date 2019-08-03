@@ -44,6 +44,13 @@
   database locks to allow other transactions to make progress
   immediately. See :issue:`50`.
 
+- Reduce the strength of locks taken by ``Connection.readCurrent`` so
+  that they don't conflict with other connections that just want to
+  verify they haven't changed. This also lets us immediately detect a
+  conflict error with an in-progress transaction that is trying to
+  alter those objects.
+
+
 3.0a6 (2019-07-29)
 ==================
 

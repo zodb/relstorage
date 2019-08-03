@@ -156,27 +156,120 @@ class AbstractVote(AbstractTPCState):
 
         # Reserve all OIDs used by this transaction.
 
-        # TODO: Is this really necessary in the common case? Maybe
-        # just in the restore case or the copyTransactionsFrom case?
         # In the common case where we allocated OIDs for new objects,
-        # this won't be true. In the uncommon case where we've *never* allocated
-        # objects and we're just updating older objects, this will frequently
-        # be true. At the very least, we need to update the storage's 'max_new_oid'
-        # property to reduce the need for this.
+        # the most recent OID we allocated will match the
+        # ``max_stored_oid```. In the also-common case where we've
+        # *never* allocated objects and we're just updating
+        # pre-existing objects, every OID we see will be newer than
+        # what we allocated (0, we never allocated). So it is the
+        # responsibility of the ``relstorage.storage.oid.OIDs`` object
+        # to keep track of seen OIDs across transacations, keeping
+        # track of the maximum that it's seen, and only actually
+        # sending a request down to the database when it's a genuinely
+        # higher OID.
+        #
+        # The other time this can come up is ``copyTransactionsFrom()`` or ``restore()``:
+        # those OIDs originated elsewhere and have no relation to our database sequence. That's
+        # ok, the same logic applies.
+        #
+        # In this way, we minimize trips to the DB. We could be a
+        # *little* bit smarter and track whether one of those APIs was
+        # used, or whether we're updating existing objects and avoid a
+        # bit more overhead, but benchmarking suggests that it's not
+        # worth it in common cases.
         storage._oids.set_min_oid(self.max_stored_oid)
 
         # Check the things registered by Connection.readCurrent(),
-        # while at the same time taking out update locks on both those rows,
-        # and the rows we might conflict with or will be replacing.
-        oid_ints = self.required_tids.keys()
+        # while at the same time taking out locks on those
+        # rows, and locks on the rows we might conflict with
+        # or will be replacing.
+        #
+        # The readCurrent locks are required. From
+        # ReadVerifyingStorage's checkCurrentSerialInTransaction: "If
+        # no exception is raised, then the serial must remain current
+        # through the end of the transaction."
+        #
+        # Applications sometimes (often) perform readCurrent() on the
+        # *wrong* object (for example: the BTree object or the
+        # zope.container container object, when what is really
+        # required, what will actually be modified, is a BTree
+        # bucket---very hard to predict), so very often these objects
+        # will not ever be modified. A share lock is enough to prevent
+        # any modifications without causing unnecessary blocking if
+        # the object would never be modified.
+        #
+        # It might seem that, because no method of a transaction (*except* for
+        # ``restore()``) writes directly to the ``object_state`` or
+        # ``current_object`` table *before* acquiring the commit lock,
+        # a share lock is enough even for objects we're definitely
+        # going to modify. That way lead sto deadlock, however:
+        #
+        # Tx a: LOCK OBJECT 1 FOR SHARE. (Tx a will modify this.)
+        # Tx b: LOCK OBJECT 1 FOR SHARE. (Tx b is just readCurrent.)
+        # Tx a: Obtain commit lock.
+        # Tx b: attempt to obtain commit lock; block.
+        # Tx a: UPDATE OBJECT 1; attempt to escalate shared lock to exclusive lock.
+        # --> DEADLOCK.
+        #
+        # Tx a needs to raise the lock of object 1, but Tx b's share
+        # lock is preventing it. Meanwhile, Tx b wants the commit
+        # lock, but TX a is holding it.
+        #
+        # If TX a took an exclusive lock, it would either block Tx b
+        # from getting a share lock, or be blocked by Tx b's share
+        # lock; either way, whichever one got to the commit lock would
+        # be able to complete.
+        #
+        # Further, it is trivial to show that if we wish to take both
+        # shared and exclusive locks, two transactions that have
+        # overlapping sets of objects (e.g., a wants shared on (1, 3,
+        # 5, 7) and exclusive on (2, 4, 6, 8) and b wants shared on
+        # (2, 4, 6, 8) and exclusive on (3, 5, 7)), no matter how we
+        # interleave those transactions we can easily result in
+        # deadlock *before* taking the commit lock. This is true if
+        # the both take their exclusive locks first and then attempt
+        # share locks on the remainder, both take shared locks on
+        # everything and attempt to upgrade to exclusive on that
+        # subset, or both take just the shared locks and then attempt
+        # to take the exclusive locks.
+        #
+        # THAT's FINE.
+        #
+        # As long as the database either supports NOWAIT (immediately
+        # error when you fail to get a requested lock) or rapid
+        # deadlock detection resulting in an error, we can catch that
+        # error and turn it into the ReadConflictError it actually is.
+        #
+        # PostgreSQL supports NOWAIT (and deadlock detection, after a small
+        # but configurable delay).
+        # MySQL's InnoDB supports rapid deadlock detection, and starting with 8
+        # NOWAIT.
+        #
+        # Therefore, the strategy is to first take exclusive locks of things
+        # we will be modifying. Once that succeeds, then we attempt shared locks
+        # of readCurrent. If that fails because we can't get a lock, we know someone
+        # is in the process of modifying it and we have a conflict. If we get the locks,
+        # we still have to confirm the TIDs are the things we expect.
+        # (A possible optimization is to do those two steps at once, in the database.
+        # SELECT FOR SHARE WHERE oid = X and TID = x. If we don't get the right number of rows,
+        # conflict.)
+        #
+        # MySQL 5.7 and 8 handle this weird, though. If two transactions
+        # are in READ COMMITTED level, and one locks the odd rows for
+        # update, the other one blocks trying to lock the even rows
+        # for update. Then, when the first one tries to lock the even
+        # rows for sharing, it gets killed with a deadlock exception,
+        # and the second one takes the locks on the even rows. The
+        # same happens if you go the other way.
+        read_current_oid_ints = self.required_tids.keys()
 
         # TODO: make this (the locking query?) more useful so we can
         # do fewer overall queries. right now the typical call
         # sequence will take three queries: This one, the one to get
         # current, and the one to detect conflicts.
-        locker.lock_current_objects(cursor, oid_ints)
+        locker.lock_current_objects(cursor, read_current_oid_ints)
 
-        current = mover.current_object_tids(cursor, oid_ints)
+        current = mover.current_object_tids(cursor, read_current_oid_ints)
         for oid_int, expect_tid_int in self.required_tids.items():
             actual_tid_int = current.get(oid_int, 0)
             if actual_tid_int != expect_tid_int:
