@@ -168,11 +168,16 @@ class MySQLSchemaInstaller(AbstractSchemaInstaller):
 
     def __convert_all_tables_to_innodb(self, cursor):
         tables = self.__list_tables_not_innodb(cursor)
+        if not tables:
+            logger.debug("All tables already InnoDB")
+            return
+
         logger.info("Converting tables to InnoDB: %s", tables)
         for table in tables:
             logger.info("Converting table %s to Innodb", table)
             cursor.execute("ALTER TABLE %s ENGINE=Innodb" % (table,))
         logger.info("Done converting tables to InnoDB: %s", tables)
+
 
     def _prepare_with_connection(self, conn, cursor):
         from .oidallocator import MySQLOIDAllocator
@@ -208,6 +213,11 @@ class MySQLSchemaInstaller(AbstractSchemaInstaller):
                     )
                     cursor.execute('DROP PROCEDURE %s' % (name,))
                     del installed[name]
+                else:
+                    logger.debug(
+                        "Checksum for procedure %s matches: %s",
+                        name, checksum
+                    )
 
             if name not in installed:
                 cursor.execute(create_stmt)
