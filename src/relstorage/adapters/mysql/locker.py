@@ -43,7 +43,10 @@ def lock_timeout(cursor, timeout, restore_to=None):
 
     If *timeout* is ``None``, makes no changes to the connection.
     """
-    if timeout is not None: # 0 is valid and means the same thing as 1
+    if timeout is not None: # 0 is valid
+        # Min value of timeout is 1; a value less than that produces
+        # a warning but gets truncated to 1
+        timeout = timeout if timeout >= 1 else 1
         cursor.execute(_SET_TIMEOUT_STMT, (timeout,))
         try:
             yield
@@ -100,6 +103,7 @@ class MySQLLocker(AbstractLocker):
 
     # The old MySQL 5.7 syntax is the default
     _lock_share_clause = 'LOCK IN SHARE MODE'
+    _lock_share_clause_nowait = 'LOCK IN SHARE MODE'
 
     def __init__(self, options, driver, batcher_factory):
         super(MySQLLocker, self).__init__(options, driver, batcher_factory)
@@ -131,7 +135,8 @@ class MySQLLocker(AbstractLocker):
             __traceback_info__ = ver, major
             native_nowait = self._supports_row_lock_nowait = (major >= 8)
             if native_nowait:
-                self._lock_share_clause = 'FOR SHARE NOWAIT'
+                self._lock_share_clause = 'FOR SHARE'
+                self._lock_share_clause_nowait = 'FOR SHARE NOWAIT'
             else:
                 assert self._lock_readCurrent_oids_for_share
                 self._lock_readCurrent_oids_for_share = self.__lock_readCurrent_nowait
@@ -140,7 +145,8 @@ class MySQLLocker(AbstractLocker):
         self._set_row_lock_timeout(cursor, self.commit_lock_timeout)
 
     def _set_row_lock_timeout(self, cursor, timeout):
-        # Min value of timeout is 1
+        # Min value of timeout is 1; a value less than that produces
+        # a warning.
         timeout = timeout if timeout >= 1 else 1
         cursor.execute(self.set_timeout_stmt, (timeout,))
         # It's INCREDIBLY important to fetch a row after we execute the SET statement;
@@ -152,8 +158,11 @@ class MySQLLocker(AbstractLocker):
 
     def __lock_readCurrent_nowait(self, cursor, current_oids):
         # For MySQL 5.7, we emulate NOWAIT by setting the lock timeout
+        if self.lock_readCurrent_for_share_blocks:
+            return AbstractLocker._lock_readCurrent_oids_for_share(self, cursor, current_oids)
+
         with lock_timeout(cursor, 0, self.commit_lock_timeout):
-            AbstractLocker._lock_readCurrent_oids_for_share(self, cursor, current_oids)
+            return AbstractLocker._lock_readCurrent_oids_for_share(self, cursor, current_oids)
 
     def release_commit_lock(self, cursor):
         "Auto-released by transaction end."

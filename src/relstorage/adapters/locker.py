@@ -105,7 +105,8 @@ class AbstractLocker(DatabaseHelpersMixin,
         self._set_row_lock_timeout(cursor, 0)
 
     _lock_current_clause = 'FOR UPDATE'
-    _lock_share_clause = 'FOR SHARE NOWAIT'
+    _lock_share_clause_nowait = 'FOR SHARE NOWAIT'
+    _lock_share_clause = 'FOR SHARE'
 
     #: These double as the query to get OIDs we'd like to lock, but
     #: do not actually lock them.
@@ -192,13 +193,21 @@ class AbstractLocker(DatabaseHelpersMixin,
         if current_oids:
             self._lock_readCurrent_oids_for_share(cursor, current_oids)
 
+    # Hook for unit tests, allow them to tell us *not* to use the NOWAIT
+    # locking flag for share.
+    lock_readCurrent_for_share_blocks = False
 
     def _lock_readCurrent_oids_for_share(self, cursor, current_oids):
         _, table = self._get_current_objects_query
         oids_to_lock = sorted(set(current_oids))
         batcher = self.make_batcher(cursor, row_limit=1000)
 
-        locking_suffix = ' %s ' % (self._lock_share_clause)
+        locking_suffix = ' %s ' % (
+            self._lock_share_clause
+            if self.lock_readCurrent_for_share_blocks
+            else
+            self._lock_share_clause_nowait
+        )
         try:
             rows = batcher.select_from(
                 ('zoid',), table,
