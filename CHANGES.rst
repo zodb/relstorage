@@ -44,6 +44,19 @@
   database locks to allow other transactions to make progress
   immediately. See :issue:`50`.
 
+- Reduce the strength of locks taken by ``Connection.readCurrent`` so
+  that they don't conflict with other connections that just want to
+  verify they haven't changed. This also lets us immediately detect a
+  conflict error with an in-progress transaction that is trying to
+  alter those objects. See :issue:`302`.
+
+- Make databases that use row-level locks (MySQL and PostgreSQL) raise
+  specific exceptions on failures to acquire those locks. A different
+  exception is raised for rows a transaction needs to modify compared
+  to rows it only needs to read. Both are considered transient to
+  encourage transaction middleware to retry. See :issue:`303`.
+
+
 3.0a6 (2019-07-29)
 ==================
 

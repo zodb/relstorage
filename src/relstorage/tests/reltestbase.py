@@ -26,6 +26,7 @@ import tempfile
 import time
 import threading
 import unittest
+from functools import partial
 
 import transaction
 from persistent import Persistent
@@ -1019,7 +1020,8 @@ class GenericRelStorageTests(
 
             # Try to load an object, which should cause ReadConflictError.
             r._p_deactivate()
-            self.assertRaises(ReadConflictError, lambda: r['beta'])
+            with self.assertRaises(ReadConflictError):
+                r.__getitem__('beta')
 
         finally:
             db.close()
@@ -1273,7 +1275,7 @@ class GenericRelStorageTests(
 
     def checkCanLoadObjectStateWhileBeingModified(self):
         # Get us an object in the database
-        storage1 = self._storage.new_instance()
+        storage1 = self._closing(self._storage.new_instance())
         data = zodb_pickle(MinPO(str(storage1)))
         t = TransactionMetaData()
         storage1.tpc_begin(t)
@@ -1288,7 +1290,7 @@ class GenericRelStorageTests(
 
         self._storage._cache.clear(load_persistent=False)
 
-        storage1 = self._storage.new_instance()
+        storage1 = self._closing(self._storage.new_instance())
 
         # Get a completely independent storage, not sharing a cache
         storage2 = self._closing(self.make_storage(zap=False))
@@ -1313,6 +1315,220 @@ class GenericRelStorageTests(
         storage1.close()
         storage2.close()
 
+    def __store_two_for_read_current_error(self):
+        db = self._closing(DB(self._storage))
+        conn = db.open()
+        root = conn.root()
+        root['object1'] = MinPO('object1')
+        root['object2'] = MinPO('object2')
+        transaction.commit()
+
+        obj1_oid = root['object1']._p_oid
+        obj2_oid = root['object2']._p_oid
+        obj1_tid = root['object1']._p_serial
+        assert obj1_tid == root['object2']._p_serial
+
+        conn.close()
+        # We can't close the DB, that will close the storage that we
+        # still need.
+        return obj1_oid, obj2_oid, obj1_tid
+
+    def __read_current_and_lock(self, storage, read_current_oid, lock_oid, tid):
+        tx = TransactionMetaData()
+        storage.tpc_begin(tx)
+        storage.checkCurrentSerialInTransaction(read_current_oid, tid, tx)
+        storage.store(lock_oid, tid, b'bad pickle2', '', tx)
+        storage.tpc_vote(tx)
+        return tx
+
+    def __do_check_error_with_conflicting_concurrent_read_current(
+            self,
+            exception_in_b,
+            commit_lock_timeout=None,
+            storageA=None,
+            storageB=None
+    ):
+        if commit_lock_timeout:
+            self._storage._adapter.locker.commit_lock_timeout = commit_lock_timeout
+            self._storage._options.commit_lock_timeout = commit_lock_timeout
+
+        if storageA is None:
+            storageA = self._closing(self._storage.new_instance())
+        if storageB is None:
+            storageB = self._closing(self._storage.new_instance())
+        # First, store the two objects in an accessible location.
+        obj1_oid, obj2_oid, tid = self.__store_two_for_read_current_error()
+
+        # Now transaction A readCurrent 2 and modify 1
+        # up through the vote phase
+        self.__read_current_and_lock(storageA, obj1_oid, obj2_oid, tid)
+
+        # Second transaction does exactly the opposite, and blocks,
+        # raising an exception (usually)
+        lock_b = partial(
+            self.__read_current_and_lock,
+            storageB,
+            obj2_oid,
+            obj1_oid,
+            tid
+        )
+        before = time.time()
+        if exception_in_b:
+            with self.assertRaises(exception_in_b):
+                lock_b()
+        else:
+            lock_b()
+        after = time.time()
+        duration_blocking = after - before
+
+        return duration_blocking
+
+    def checkProperErrorWithConflictingConcurrentReadCurrent(self):
+        # Given two objects 1 and 2, if transaction A does readCurrent(1)
+        # and modifies 2 up through the voting phase, and then transaction
+        # B does readCurrent(2) and modifies 1 up through the voting phase,
+        # we get an error after ``commit_lock_timeout``  and not a deadlock.
+        from relstorage.adapters.interfaces import UnableToLockRowsToModifyError
+
+        # Use a very small commit lock timeout.
+        commit_lock_timeout = 1
+        duration_blocking = self.__do_check_error_with_conflicting_concurrent_read_current(
+            UnableToLockRowsToModifyError,
+            commit_lock_timeout=commit_lock_timeout
+        )
+
+        self.assertLessEqual(duration_blocking, commit_lock_timeout * 3)
+
+    def __lock_rows_being_modified_only(self, storage, cursor, _current_oids):
+        # A monkey-patch for Locker.lock_current_objects to only take the exclusive
+        # locks.
+        storage._adapter.locker._lock_rows_being_modified(cursor)
+
+    def __assert_small_blocking_duration(self, storage, duration_blocking):
+        # Even though we just went with the default commit_lock_timeout,
+        # which is large...
+        self.assertGreaterEqual(storage._options.commit_lock_timeout, 10)
+        # ...the lock violation happened very quickly
+        self.assertLessEqual(duration_blocking, 3)
+
+    def checkProperErrorWithInterleavedConflictingConcurrentReadCurrent(self):
+        # Similar to
+        # ``checkProperErrorWithConflictingConcurrentReadCurrent``
+        # except that we pause the process immediately after txA takes
+        # its exclusive locks to let txB take *its* exclusive locks.
+        # Then txB can go for the shared locks, which will block if
+        # we're not in ``NOWAIT`` mode for shared locks. This tests
+        # that we don't block, we report a retryable error. Note that
+        # we don't adjust the commit_lock_timeout; it doesn't apply.
+        #
+        # NOTE: When we move these steps into a stored procedure, this test will break
+        # because we won't be able to force the interleaving.
+        from relstorage.adapters.interfaces import UnableToLockRowsToReadCurrentError
+        storageA = self._closing(self._storage.new_instance())
+
+        storageA._adapter.locker.lock_current_objects = partial(
+            self.__lock_rows_being_modified_only,
+            storageA)
+
+        duration_blocking = self.__do_check_error_with_conflicting_concurrent_read_current(
+            UnableToLockRowsToReadCurrentError,
+            storageA=storageA
+        )
+
+        self.__assert_small_blocking_duration(storageA, duration_blocking)
+
+    def checkProperErrorWithInterleavedConflictingConcurrentReadCurrentDeadlock(self):
+        # Like
+        # ``checkProperErrorWithInterleavedConflictingConcurrentReadCurrent``
+        # except that we interleave both txA and txB: txA takes modify
+        # lock, txB takes modify lock, txA attempts shared lock, txB
+        # attempts shared lock. This results in a database deadlock, which is reported as
+        # a retryable error.
+        #
+        # We have to use a thread to do the shared locks because it blocks.
+        from relstorage.adapters.interfaces import UnableToLockRowsToReadCurrentError
+
+        storageA = self._closing(self._storage.new_instance())
+        storageB = self._closing(self._storage.new_instance())
+        storageA.last_error = storageB.last_error = None
+
+        storageA._adapter.locker.lock_current_objects = partial(
+            self.__lock_rows_being_modified_only,
+            storageA)
+        storageB._adapter.locker.lock_current_objects = partial(
+            self.__lock_rows_being_modified_only,
+            storageB)
+
+        storageA._adapter.locker.lock_readCurrent_for_share_blocks = True
+        storageB._adapter.locker.lock_readCurrent_for_share_blocks = True
+
+        # This won't actually block, we haven't conflicted yet.
+        self.__do_check_error_with_conflicting_concurrent_read_current(
+            None,
+            storageA=storageA,
+            storageB=storageB
+        )
+
+        cond = threading.Condition()
+        cond.acquire()
+        def lock_shared(storage, notify=True):
+            cursor = storage._store_connection.cursor
+            read_current_oids = storage._tpc_phase.required_tids.keys()
+            if notify:
+                cond.acquire()
+                cond.notifyAll()
+                cond.release()
+
+            try:
+                storage._adapter.locker._lock_readCurrent_oids_for_share(
+                    cursor,
+                    read_current_oids
+                )
+            except UnableToLockRowsToReadCurrentError as ex:
+                storage.last_error = ex
+            finally:
+                if notify:
+                    cond.acquire()
+                    cond.notifyAll()
+                    cond.release()
+
+
+        thread_locking_a = threading.Thread(
+            target=lock_shared,
+            args=(storageA,)
+        )
+        thread_locking_a.start()
+
+        # wait for the background thread to get ready to lock.
+        cond.acquire()
+        cond.wait()
+        cond.release()
+
+        begin = time.time()
+
+        lock_shared(storageB, notify=False)
+
+        # Wait for background thread to finish.
+        cond.acquire()
+        cond.wait()
+        cond.release()
+
+        end = time.time()
+        duration_blocking = end - begin
+
+        # Now, one or the other storage got killed by the deadlock
+        # detector, but not both. Which one depends on the database.
+        # PostgreSQL likes to kill the foreground thread (storageB),
+        # MySQL likes to kill the background thread (storageA)
+        self.assertTrue(storageA.last_error or storageB.last_error)
+        self.assertFalse(storageA.last_error and storageB.last_error)
+
+        last_error = storageA.last_error or storageB.last_error
+
+        self.assertIn('deadlock', str(last_error).lower())
+
+        self.__assert_small_blocking_duration(storageA, duration_blocking)
+        self.__assert_small_blocking_duration(storageB, duration_blocking)
 
 class AbstractRSZodbConvertTests(StorageCreatingMixin,
                                  FSZODBConvertTests,

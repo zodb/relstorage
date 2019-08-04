@@ -31,7 +31,10 @@ from relstorage._util import Lazy
 from ._util import query_property as _query_property
 from ._util import DatabaseHelpersMixin
 from .schema import Schema
+
 from .interfaces import UnableToAcquireCommitLockError
+from .interfaces import UnableToLockRowsToModifyError
+from .interfaces import UnableToLockRowsToReadCurrentError
 
 logger = __import__('logging').getLogger(__name__)
 
@@ -55,8 +58,7 @@ class AbstractLocker(DatabaseHelpersMixin,
         This implementation calls :meth:`_on_store_opened_set_row_lock_timeout`
         when the store connection is initially opened.
         """
-        if not restart:
-            self._on_store_opened_set_row_lock_timeout(cursor)
+        self._on_store_opened_set_row_lock_timeout(cursor, restart)
 
     def _on_store_opened_set_row_lock_timeout(self, cursor, restart=False):
         """
@@ -103,6 +105,8 @@ class AbstractLocker(DatabaseHelpersMixin,
         self._set_row_lock_timeout(cursor, 0)
 
     _lock_current_clause = 'FOR UPDATE'
+    _lock_share_clause_nowait = 'FOR SHARE NOWAIT'
+    _lock_share_clause = 'FOR SHARE'
 
     #: These double as the query to get OIDs we'd like to lock, but
     #: do not actually lock them.
@@ -137,6 +141,7 @@ class AbstractLocker(DatabaseHelpersMixin,
             lock=self._lock_current_clause
         )
 
+    @metricmethod
     def lock_current_objects(self, cursor, current_oids):
         # We need to be sure to take the locks in a deterministic
         # order; the easiest way to do that is to order them by OID.
@@ -176,28 +181,86 @@ class AbstractLocker(DatabaseHelpersMixin,
         # locked when they are returned by the cursor, so we must
         # consume all the rows.
 
+        # See docs in vote.py.
+
+        # First, lock the rows we need exclusive access to.
+        # This will block for up to ``commit_lock_timeout``.
+        # Doing this first matters; always take the most exclusive locks
+        # first.
+        self._lock_rows_being_modified(cursor)
+
+        # Next, lock rows we need shared access to.
         if current_oids:
-            stmt, table = self._get_current_objects_query
-            cursor.execute(stmt)
+            self._lock_readCurrent_oids_for_share(cursor, current_oids)
 
-            oids_being_updated = {row[0] for row in cursor}
+    # Hook for unit tests, allow them to tell us *not* to use the NOWAIT
+    # locking flag for share.
+    lock_readCurrent_for_share_blocks = False
 
-            oids_to_lock = oids_being_updated | set(current_oids)
-            oids_to_lock = sorted(oids_to_lock)
+    def _lock_readCurrent_oids_for_share(self, cursor, current_oids):
+        _, table = self._get_current_objects_query
+        oids_to_lock = sorted(set(current_oids))
+        batcher = self.make_batcher(cursor, row_limit=1000)
 
-            batcher = self.make_batcher(cursor, row_limit=1000)
-
+        locking_suffix = ' %s ' % (
+            self._lock_share_clause
+            if self.lock_readCurrent_for_share_blocks
+            else
+            self._lock_share_clause_nowait
+        )
+        try:
             rows = batcher.select_from(
                 ('zoid',), table,
-                suffix='  %s ' % self._lock_current_clause,
+                suffix=locking_suffix,
                 **{'zoid': oids_to_lock}
             )
-        else:
-            stmt = self._lock_current_objects_query
+            consume(rows)
+        except self.illegal_operation_exceptions:
+            # Bug in our code
+            raise
+        except self.lock_exceptions:
+            self.__reraise_commit_lock_error(
+                cursor,
+                'SELECT zoid FROM {table} WHERE zoid IN () {lock}'.format(
+                    table=table,
+                    lock=locking_suffix
+                ),
+                UnableToLockRowsToReadCurrentError
+            )
+
+    def _lock_rows_being_modified(self, cursor):
+        stmt = self._lock_current_objects_query
+        try:
             cursor.execute(stmt)
             rows = cursor
+            consume(rows)
+        except self.illegal_operation_exceptions:
+            # Bug in our code
+            raise
+        except self.lock_exceptions:
+            self.__reraise_commit_lock_error(
+                cursor,
+                stmt,
+                UnableToLockRowsToModifyError
+            )
 
-        consume(rows)
+    def __reraise_commit_lock_error(self, cursor, lock_stmt, kind):
+        try:
+            debug_info = self._get_commit_lock_debug_info(cursor, True)
+        except Exception as nested: # pylint:disable=broad-except
+            logger.exception("Failed to get lock debug info")
+            debug_info = "%r(%r)" % (type(nested), nested)
+        __traceback_info__ = lock_stmt, debug_info
+        if debug_info:
+            logger.debug("Failed to acquire commit lock:\n%s", debug_info)
+        message = "Acquiring a commit lock failed: %s%s" % (
+            sys.exc_info()[1],
+            '\n' + debug_info if debug_info else ''
+        )
+        six.reraise(
+            kind,
+            kind(message),
+            sys.exc_info()[2])
 
     # MySQL allows aggregates in the top level to use FOR UPDATE,
     # but PostgreSQL does not, so we have to use the second form.
@@ -228,6 +291,8 @@ class AbstractLocker(DatabaseHelpersMixin,
     @metricmethod
     def hold_commit_lock(self, cursor, ensure_current=False, nowait=False):
         # pylint:disable=unused-argument
+        #
+        # This method is not used for PostgreSQL or MySQL.
         lock_stmt = self._commit_lock_query
         if nowait: # pragma: no cover
             if self._supports_row_lock_nowait:
@@ -240,32 +305,22 @@ class AbstractLocker(DatabaseHelpersMixin,
             rows = cursor.fetchall()
             if not rows or not rows[0]:
                 raise UnableToAcquireCommitLockError("No row returned from commit_row_lock")
-        except self.illegal_operation_exceptions as e:
+        except self.illegal_operation_exceptions:
             # Bug in our code.
             raise
-        except self.lock_exceptions as e:
+        except self.lock_exceptions:
             if nowait:
                 return False
-
-            try:
-                debug_info = self._get_commit_lock_debug_info(cursor)
-            except Exception as nested: # pylint:disable=broad-except
-                logger.exception("Failed to get lock debug info")
-                debug_info = "%r(%r)" % (type(nested), nested)
-            __traceback_info__ = lock_stmt, debug_info
-            if debug_info:
-                logger.debug("Failed to acquire commit lock:\n%s", debug_info)
-            message = "Acquiring a commit lock failed: %s%s" % (
-                e,
-                '\n' + debug_info if debug_info else ''
+            self.__reraise_commit_lock_error(
+                cursor,
+                lock_stmt,
+                UnableToAcquireCommitLockError
             )
-            six.reraise(
-                UnableToAcquireCommitLockError,
-                UnableToAcquireCommitLockError(message),
-                sys.exc_info()[2])
+
         return True
 
-    def _get_commit_lock_debug_info(self, cursor): # pylint:disable=unused-argument
+    def _get_commit_lock_debug_info(self, cursor, was_failure=False):
+        # pylint:disable=unused-argument
         """
         Subclasses can implement this to return a string
         that will be added to the exception message when a commit lock cannot
