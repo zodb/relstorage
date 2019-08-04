@@ -98,9 +98,114 @@ class IRelStorageAdapter(Interface):
                                           description,
                                           extension):
         """
-        Lock the database and allocate the next tid.
+        Lock the database with the commit lock and allocate the next
+        tid.
 
-        This is a temporary step.
+        In a simple implementation, this will first obtain the commit
+        lock with around :meth:`ILocker.hold_commit_lock`. Then it
+        will query the current most recently committed TID with
+        :meth:`ITransactionControl.get_tid`. It will choose the next
+        TID based on that value and the current timestamp, and then it
+        will write that value to the database with
+        :meth:`ITransactionControl.add_transaction`.
+
+        The *username*, *description* and *extension* paramaters are as for
+        ``add_transaction.
+
+        :return: The new TID integer.
+        """
+
+    def lock_database_and_move(
+            store_connection,
+            blobhelper,
+            ude,
+            commit=True,
+            committing_tid_int=None,
+            after_selecting_tid=None
+    ):
+        """
+        Lock the database, choose the next TID, and move temporary
+        data into its final place.
+
+        This is used in two modes. In the usual case, *commit* will be
+        true, and this method is called to implement the final step of
+        ``tpc_finish``. In that case, this method is responsible for
+        committing the transaction (using the *store_connection*
+        provided). When *commit* is false, this method is effectively
+        part of ``tpc_vote`` and must **not** commit.
+
+        The *blobhelper* is the :class:`IBlobHelper`. This method is
+        responsible for moving blob data into place if the blob data
+        is stored on the server and there are blobs in this
+        transaction. (Implementations that use stored procedures will
+        probably not need this argument; it is here to be able to
+        provide ``txn_has_blobs`` to
+        :meth:`IObjectMover.move_from_temp`.)
+
+        *ude* is a tuple of ``(username, description, extension)``.
+
+        If *committing_tid_int* is None, then this method must lock
+        the database and choose the next TID as if by calling
+        :meth:`lock_database_and_choose_next_tid` (passing in the
+        expanded *ude*); if it is **not** None, the database has
+        already been locked and the TID selected.
+
+        *after_selecting_tid* is a function of one argument, the
+        committing integer TID. If it is proveded, it must be called
+        once the TID has been selected and temporary data moved into
+        place.
+
+        Implementations are encouraged to do all of this work in as
+        few calls to the database as possible with a stored procedure
+        (ideally one call). The default implementation will use
+        :meth:`lock_database_and_choose_next_tid`,
+        :meth:`IObjectMover.move_from_temp`,
+        :meth:`IObjectMover.update_current` and
+        :meth:`ITransactionControl.commit_phase1` and
+        :meth:`ITransactionControl.commit_phase2`.
+
+        :return: A tuple ``(committing_tid_int, prepared_txn_id)``;
+                 the *prepared_txn_id* is irrelevant if *commit* was
+                 true.
+        """
+
+    def lock_objects_and_detect_conflicts(
+            cursor,
+            read_current_oids,
+    ):
+        """
+        Without taking the commit lock, lock the objects this
+        transaction wants to modify (for update) and the objects in
+        *read_current_oids* (for read).
+
+        Returns an iterable of ``(oid_int, committed_tid_int,
+        tid_this_txn_saw_int)`` for all OIDs that were locked (that
+        is, the OIDs that we're modifying plus the OIDs in
+        *required_tids*). If the ``tid_this_txn_saw_int`` is None,
+        that was an object we only read, not modified.
+
+        Implementations are encouraged to do all this work in as few
+        calls to the database as possible with a stored procedure. The
+        default implementation will use
+        :meth:`ILocker.lock_current_objects`,
+        :meth:`IObjectMover.current_object_tids`, and
+        :meth:`IObjectMover.detect_conflicts`.
+
+        This method may raise the same lock exceptions and
+        :meth:`ILocker.lock_current_objects`. In particular, it should
+        take care to distinguish between a failure to acquire an
+        update lock and a failure to acquire a read lock by raising
+        the appropriate exceptions
+        (:class:`UnableToLockRowsToModifyError` and
+        :class:`UnableToLockRowsToReadCurrentError`, respectively).
+
+        Optionally, if this method can detect a read current violation
+        based on the data in *read_current_oids* at the database
+        level, it may raise a :class:`ReadConflictError`.
+
+        :param cursor: The store cursor.
+        :param read_current_oids: A mapping from oid integer to tid
+            integer that the transaction expects.
         """
 
 

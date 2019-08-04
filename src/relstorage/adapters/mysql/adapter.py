@@ -98,8 +98,9 @@ class MySQLAdapter(AbstractAdapter):
         params = self._params
 
         RUNNING_ON_APPVEYOR = os.environ.get('APPVEYOR')
-        # 5.7.12-log crashes when we call the stored procedure
-        # to move objects. No clue why.
+        # Versions of MySQL prior to 5.7.19 crash when we call the stored procedure.
+        # See https://github.com/zodb/relstorage/pull/287#issuecomment-515518727
+        # TODO: Don't hardcode this on appveyor, actually detect the version.
         self._known_broken_mysql_procs = RUNNING_ON_APPVEYOR
 
         self.connmanager = MySQLdbConnectionManager(
@@ -212,17 +213,17 @@ class MySQLAdapter(AbstractAdapter):
         tid, = multi_results[0][0]
         return tid
 
-    def tpc_prepare_phase1(self,
-                           store_connection,
-                           blobhelper,
-                           ude,
-                           commit=True,
-                           committing_tid_int=None,
-                           after_selecting_tid=lambda tid: None):
+    def lock_database_and_move(self,
+                               store_connection,
+                               blobhelper,
+                               ude,
+                               commit=True,
+                               committing_tid_int=None,
+                               after_selecting_tid=lambda tid: None):
         if self._known_broken_mysql_procs:
-            # XXX: Figure out why we're broken on AppVeyor. We want to
-            # drop this fallback path, it's extra duplicate queries.
-            return super(MySQLAdapter, self).tpc_prepare_phase1(
+            # XXX: When can we drop this? Probably not until AppVeyor upgrades
+            # MySQL past 5.7.12.
+            return super(MySQLAdapter, self).lock_database_and_move(
                 store_connection,
                 blobhelper,
                 ude,

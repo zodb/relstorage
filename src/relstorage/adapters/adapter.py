@@ -24,6 +24,8 @@ from __future__ import print_function
 import time
 
 from persistent.timestamp import TimeStamp
+
+from ZODB.POSException import ReadConflictError
 from ZODB.utils import p64 as int64_to_8bytes
 from ZODB.utils import u64 as bytes8_to_int64
 
@@ -87,13 +89,13 @@ class AbstractAdapter(object):
         self.txncontrol.add_transaction(cursor, tid_int, username, description, extension)
         return tid_int
 
-    def tpc_prepare_phase1(self,
-                           store_connection,
-                           blobhelper,
-                           ude,
-                           commit=True, # pylint:disable=unused-argument
-                           committing_tid_int=None,
-                           after_selecting_tid=lambda tid: None):
+    def lock_database_and_move(self,
+                               store_connection,
+                               blobhelper,
+                               ude,
+                               commit=True,
+                               committing_tid_int=None,
+                               after_selecting_tid=lambda tid: None):
         # Here's where we take the global commit lock, and
         # allocate the next available transaction id, storing it
         # into history-preserving DBs. But if someone passed us
@@ -130,3 +132,22 @@ class AbstractAdapter(object):
             self.txncontrol.commit_phase2(store_connection, prepared_txn_id)
 
         return committing_tid_int, prepared_txn_id
+
+    def lock_objects_and_detect_conflicts(self, cursor, read_current_oids):
+        read_current_oid_ints = read_current_oids.keys()
+
+        self.locker.lock_current_objects(cursor, read_current_oid_ints)
+
+        current = self.mover.current_object_tids(cursor, read_current_oid_ints)
+        # We go ahead and compare the readCurrent TIDs here, so that we don't have to
+        # make the call to detect conflicts if there are readCurrent violations.
+        for oid_int, expect_tid_int in read_current_oids.items():
+            actual_tid_int = current.get(oid_int, 0)
+            if actual_tid_int != expect_tid_int:
+                raise ReadConflictError(
+                    oid=int64_to_8bytes(oid_int),
+                    serials=(int64_to_8bytes(actual_tid_int),
+                             int64_to_8bytes(expect_tid_int)))
+
+        conflicts = self.mover.detect_conflict(cursor)
+        return conflicts
