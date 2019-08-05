@@ -51,6 +51,7 @@ from __future__ import absolute_import
 from __future__ import print_function
 
 import logging
+import json
 import os
 
 from zope.interface import implementer
@@ -248,3 +249,29 @@ class MySQLAdapter(AbstractAdapter):
         tid_int, = multi_results[0][0]
         after_selecting_tid(tid_int)
         return tid_int, "-"
+
+    def lock_objects_and_detect_conflicts(self, cursor, read_current_oids):
+        read_current_param = None
+        if read_current_oids:
+            # In MySQL 8, we could pass in a JSON array and use JSON_TABLE
+            # to join directly against the data.
+
+            # In earlier versions, we could do some tricks with strings and
+            # preparing dynamic SQL.
+
+            # In all versions, we could write a query like
+            #   select tid from object_state where json_contains('[1, 8]', cast(zoid as json), '$')
+            # but that is very slow (entire table is scanned).
+            #
+            # We pass the string array, parse it as json, loop over it to put in a temp table
+            # and join that.
+            read_current_param = json.dumps(list(read_current_oids.items()))
+
+        multi_results = self.driver.callproc_multi_result(
+            cursor,
+            'lock_objects_and_detect_conflicts(%s)',
+            (read_current_param,)
+        )
+
+        conflicts = multi_results[0]
+        return conflicts

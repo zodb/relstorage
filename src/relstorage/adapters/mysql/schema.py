@@ -198,10 +198,14 @@ class MySQLSchemaInstaller(AbstractSchemaInstaller):
 
     def create_procedures(self, cursor):
         installed = self.list_procedures(cursor)
+        current_object = 'current_object' if self.keep_history else 'object_state'
         for name, create_stmt in self.procedures.items():
             __traceback_info__ = name
             checksum = self._checksum_for_str(create_stmt)
-            create_stmt = create_stmt.format(CHECKSUM=checksum)
+            create_stmt = create_stmt.format(
+                CHECKSUM=checksum,
+                CURRENT_OBJECT=current_object
+            )
             assert checksum in create_stmt
             if name in installed:
                 stored_checksum = installed[name]
