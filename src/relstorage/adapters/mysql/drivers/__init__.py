@@ -51,13 +51,18 @@ class AbstractMySQLDriver(AbstractModuleDriver):
     # Don't try to decode pickle states as UTF-8 (or whatever the
     # environment is configured as); See
     # https://github.com/zodb/relstorage/issues/57. This varies
-    # depending on Python 2/3 and which driver. Everything except
-    # mysqlclient on Python 3 can handle all names being binary; that
-    # driver, though, can only do that on Python 2. For Python 3, only
-    # the character_set_results can be binary. (See
-    # https://github.com/zodb/relstorage/issues/213)
-    # Subclasses can set to None if they don't need to do this.
-    MY_CHARSET_STMT = 'SET names binary'
+    # depending on Python 2/3 and which driver.
+    #
+    # In the past, we used 'SET names binary' for everything except
+    # mysqlclient on Python 3, which set the character_set_results
+    # only (because of an issue decoding column names (See
+    # https://github.com/zodb/relstorage/issues/213)). But having
+    # binary be the default encoding for string literals prevents
+    # using the JSON type. So we took another look at connection
+    # parameters and got things working with ``character_set_results``
+    # everywhere.
+    MY_CHARSET_STMT = 'SET character_set_results = binary'
+
 
     # Make the default timezone UTC. That way UTC_TIMESTAMP()
     # and UNIX_TIMESTAMP() and FROM_UNIXTIME are all self-consistent.

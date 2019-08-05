@@ -16,6 +16,8 @@ Database schema installers
 """
 from __future__ import absolute_import
 
+from collections import namedtuple
+
 from ZODB.POSException import StorageError
 from zope.interface import implementer
 
@@ -56,6 +58,8 @@ logger = __import__('logging').getLogger(__name__)
 # within a single *statement*; that is, unlike PostgreSQL, these values
 # can change within a transaction.
 
+_StoredProcedure = namedtuple('_StoredProcedure',
+                              'checksum character_set_client collation_connection')
 
 
 @implementer(ISchemaInstaller)
@@ -96,7 +100,10 @@ class MySQLSchemaInstaller(AbstractSchemaInstaller):
         cursor.execute("SHOW PROCEDURE STATUS WHERE db = database()")
         native = self._metadata_to_native_str
         return {
-            native(row['name']): native(row['comment'])
+            native(row['name']): _StoredProcedure(
+                native(row['comment']),
+                native(row['character_set_client']),
+                native(row['collation_connection']))
             for row in self._rows_as_dicts(cursor)
         }
 
@@ -199,6 +206,13 @@ class MySQLSchemaInstaller(AbstractSchemaInstaller):
         return name_to_source
 
     def create_procedures(self, cursor):
+        # Apparently procedures remember the ``character_set_client`` and ``collation_connection``
+        # that was in use at the time they were defined, and use that
+        # to perform implicit conversions on arguments and even internally. If we have
+        # done ``SET NAMES binary`` (as we do on Python 2) and we try to pass a JSON
+        # argument, or even parse a string into JSON inside the procedure, it will fail,
+        # saying it can't convert binary into JSON. Therefore we must be sure to have
+        # an appropriate value for both of those installed here.
         installed = self.list_procedures(cursor)
         current_object = 'current_object' if self.keep_history else 'object_state'
         major_version = self.version_detector.get_major_version(cursor)
@@ -208,6 +222,9 @@ class MySQLSchemaInstaller(AbstractSchemaInstaller):
         else:
             set_lock_timeout = 'SET innodb_lock_wait_timeout = 1;'
             for_share = 'LOCK IN SHARE MODE'
+
+        cursor.execute('SET SESSION character_set_client = utf8, '
+                       'collation_connection = utf8_general_ci')
 
         for name, create_stmt in self.procedures.items():
             __traceback_info__ = name
@@ -220,12 +237,17 @@ class MySQLSchemaInstaller(AbstractSchemaInstaller):
             )
             assert checksum in create_stmt
             if name in installed:
-                stored_checksum = installed[name]
-                if stored_checksum != checksum:
+                installed_proc = installed[name]
+                stored_checksum = installed_proc.checksum
+                character_set_client = installed_proc.character_set_client
+                collation_connection = installed_proc.collation_connection
+                expected = (checksum, 'utf8', 'utf8_general_ci')
+                if expected != (stored_checksum, character_set_client, collation_connection):
+                    print("CREATING", expected, installed_proc)
                     logger.info(
-                        "Re-creating procedure %s due to checksum mismatch %s != %s",
+                        "Re-creating procedure %s due to mismatch %s != %s",
                         name,
-                        stored_checksum, checksum
+                        installed_proc, expected
                     )
                     cursor.execute('DROP PROCEDURE %s' % (name,))
                     del installed[name]

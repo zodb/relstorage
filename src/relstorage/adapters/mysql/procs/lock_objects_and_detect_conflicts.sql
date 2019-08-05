@@ -1,41 +1,36 @@
 CREATE PROCEDURE lock_objects_and_detect_conflicts(
-  read_current_oids_tids_text TEXT
+  read_current_oids_tids JSON
 )
   COMMENT '{CHECKSUM}'
 BEGIN
-  DECLARE dummy BIGINT;
   DECLARE len INT;
   DECLARE i INT DEFAULT 0;
-  DECLARE read_current_oids_tids JSON;
 
-  SELECT COUNT(*)
-  FROM (
-    SELECT zoid
-    FROM {CURRENT_OBJECT}
-    WHERE zoid IN (
+  -- We have to force the server to materialize the results,
+  -- otherwise not all rows actually get locked.
+  CREATE TEMPORARY TABLE IF NOT EXISTS temp_locked_zoid (
+    zoid BIGINT PRIMARY KEY
+  ) ENGINE MEMORY;
+
+  DELETE FROM temp_locked_zoid;
+
+  INSERT INTO temp_locked_zoid
+  SELECT zoid
+  FROM {CURRENT_OBJECT}
+  WHERE zoid IN (
       SELECT zoid
       FROM temp_store
-    )
-    ORDER BY zoid
-    FOR UPDATE
-  ) t
-  INTO dummy;
+  )
+  ORDER BY zoid
+  FOR UPDATE;
+
 
   -- lock in share should NOWAIT
   -- or have a minimum lock timeout.
   -- We detect the MySQL version when we install the
   -- procedure and choose the appropriate statements.
 
-  IF read_current_oids_tids_text IS NOT NULL THEN
-    -- We must send the parameter in as TEXT; on Python 2 with
-    -- mysqlclient, trying to send it directly as JSON always fails
-    -- with "Cannot create a JSON value from a string with CHARACTER
-    -- SET 'binary'.", no matter what the character_set_client or
-    -- character_set_connection is, and no matter whether the
-    -- parameter in Python is bytes or unicode. This has also been seen
-    -- with Python 3 on Travis CI, but not locally on the mac, so there's
-    -- some system dependent behaviour involved.
-    SET read_current_oids_tids = CAST(read_current_oids_tids_text AS JSON);
+  IF read_current_oids_tids IS NOT NULL THEN
     SET len = JSON_LENGTH(read_current_oids_tids);
     WHILE i < len DO
       INSERT INTO temp_read_current (zoid, tid)
@@ -46,18 +41,17 @@ BEGIN
 
     {SET_LOCK_TIMEOUT}
 
-    SELECT COUNT(*)
-    FROM (
-      SELECT zoid
-      FROM {CURRENT_OBJECT}
-      WHERE zoid IN (
+      DELETE FROM temp_locked_zoid;
+
+    INSERT INTO temp_locked_zoid
+    SELECT zoid
+    FROM {CURRENT_OBJECT}
+    WHERE zoid IN (
         SELECT zoid
         FROM temp_read_current
-      )
-      ORDER BY zoid
-      {FOR_SHARE}
-    ) t
-    INTO dummy;
+    )
+    ORDER BY zoid
+    {FOR_SHARE};
 
   END IF;
 

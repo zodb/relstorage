@@ -210,6 +210,7 @@ class MySQLObjectMover(AbstractObjectMover):
 
         If serial is None, upload to the temporary table.
         """
+        Binary = self.driver.Binary
         if tid is not None:
             if self.keep_history:
                 delete_stmt = """
@@ -245,8 +246,8 @@ class MySQLObjectMover(AbstractObjectMover):
                     # chunk, even if the blob file is empty.
                     break
                 if use_tid:
-                    params = (oid, tid, chunk_num, chunk)
+                    params = (oid, tid, chunk_num, Binary(chunk))
                 else:
-                    params = (oid, chunk_num, chunk)
+                    params = (oid, chunk_num, Binary(chunk))
                 cursor.execute(insert_stmt, params)
                 chunk_num += 1
