@@ -22,8 +22,9 @@ BEGIN
 
   -- lock in share should NOWAIT
   -- or have a minimum lock timeout.
-  -- we use the timeout because it works on 5.7 and 8
-  -- while NOWAIT only works on 8.
+  -- We detect the MySQL version when we install the
+  -- procedure and choose the appropriate statements.
+
   IF read_current_oids_tids IS NOT NULL THEN
     SET len = JSON_LENGTH(read_current_oids_tids);
     WHILE i < len DO
@@ -33,7 +34,7 @@ BEGIN
       SET i = i + 1;
     END WHILE;
 
-    SET SESSION innodb_lock_wait_timeout = 1;
+    {SET_LOCK_TIMEOUT}
 
     SELECT COUNT(*)
     FROM (
@@ -44,7 +45,7 @@ BEGIN
         FROM temp_read_current
       )
       ORDER BY zoid
-      LOCK IN SHARE MODE
+      {FOR_SHARE}
     ) t
     INTO dummy;
 

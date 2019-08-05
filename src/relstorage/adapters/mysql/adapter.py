@@ -52,6 +52,7 @@ from __future__ import print_function
 
 import logging
 import json
+import time
 import os
 
 from zope.interface import implementer
@@ -63,6 +64,9 @@ from ..adapter import AbstractAdapter
 from ..dbiter import HistoryFreeDatabaseIterator
 from ..dbiter import HistoryPreservingDatabaseIterator
 from ..interfaces import IRelStorageAdapter
+from ..interfaces import UnableToLockRowsToModifyError
+from ..interfaces import UnableToLockRowsToReadCurrentError
+
 from ..poller import Poller
 from ..scriptrunner import ScriptRunner
 from ..batch import RowBatcher
@@ -75,6 +79,7 @@ from .oidallocator import MySQLOIDAllocator
 from .packundo import MySQLHistoryFreePackUndo
 from .packundo import MySQLHistoryPreservingPackUndo
 from .schema import MySQLSchemaInstaller
+from .schema import MySQLVersionDetector
 from .stats import MySQLStats
 from .txncontrol import MySQLTransactionControl
 
@@ -88,9 +93,10 @@ class MySQLAdapter(AbstractAdapter):
 
     driver_options = drivers
 
-    def __init__(self, options=None, oidallocator=None, **params):
+    def __init__(self, options=None, oidallocator=None, version_detector=None, **params):
         self._params = params
         self.oidallocator = oidallocator
+        self.version_detector = version_detector
         super(MySQLAdapter, self).__init__(options)
 
     def _create(self):
@@ -104,6 +110,9 @@ class MySQLAdapter(AbstractAdapter):
         # TODO: Don't hardcode this on appveyor, actually detect the version.
         self._known_broken_mysql_procs = RUNNING_ON_APPVEYOR
 
+        if self.version_detector is None:
+            self.version_detector = MySQLVersionDetector()
+
         self.connmanager = MySQLdbConnectionManager(
             driver,
             params=params,
@@ -114,6 +123,7 @@ class MySQLAdapter(AbstractAdapter):
             options=options,
             driver=driver,
             batcher_factory=RowBatcher,
+            version_detector=self.version_detector,
         )
 
         self.schema = MySQLSchemaInstaller(
@@ -121,6 +131,7 @@ class MySQLAdapter(AbstractAdapter):
             connmanager=self.connmanager,
             runner=self.runner,
             keep_history=self.keep_history,
+            version_detector=self.version_detector,
         )
         self.mover = MySQLObjectMover(
             driver,
@@ -176,6 +187,7 @@ class MySQLAdapter(AbstractAdapter):
         return type(self)(
             options=self.options,
             oidallocator=self.oidallocator.new_instance(),
+            version_detector=self.version_detector,
             **self._params
         )
 
@@ -251,6 +263,11 @@ class MySQLAdapter(AbstractAdapter):
         return tid_int, "-"
 
     def lock_objects_and_detect_conflicts(self, cursor, read_current_oids):
+        if self.locker.lock_readCurrent_for_share_blocks:
+            # Delegate to the individual statements that can control lock timeouts.
+            return super(MySQLAdapter, self).lock_objects_and_detect_conflicts(cursor,
+                                                                               read_current_oids)
+
         read_current_param = None
         if read_current_oids:
             # In MySQL 8, we could pass in a JSON array and use JSON_TABLE
@@ -265,13 +282,35 @@ class MySQLAdapter(AbstractAdapter):
             #
             # We pass the string array, parse it as json, loop over it to put in a temp table
             # and join that.
+            #
+            # I also benchmarked sending the data in a format suitable
+            # for concatenating to the end of 'INSERT ... VALUES' and
+            # using dynamic SQL in the stored proc to execute that
+            # ('PREPARE stmt FROM @str; EXECUTE stmt') and it
+            # benchmarked essentially the same. Usually there are a
+            # small number of things being readCurrent so it probably
+            # doesn't matter.
             read_current_param = json.dumps(list(read_current_oids.items()))
 
-        multi_results = self.driver.callproc_multi_result(
-            cursor,
-            'lock_objects_and_detect_conflicts(%s)',
-            (read_current_param,)
-        )
+        proc = 'lock_objects_and_detect_conflicts(%s)'
+        begin = time.time()
+        try:
+            multi_results = self.driver.callproc_multi_result(
+                cursor,
+                proc,
+                (read_current_param,)
+            )
+        except self.locker.lock_exceptions:
+            elapsed = time.time() - begin
+            kind = UnableToLockRowsToModifyError
+            if read_current_oids and elapsed < self.locker.commit_lock_timeout:
+                kind = UnableToLockRowsToReadCurrentError
+
+            self.locker.reraise_commit_lock_error(
+                cursor,
+                proc,
+                kind
+            )
 
         conflicts = multi_results[0]
         return conflicts

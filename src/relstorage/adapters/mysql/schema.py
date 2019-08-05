@@ -21,6 +21,7 @@ from zope.interface import implementer
 
 from ..interfaces import ISchemaInstaller
 from ..schema import AbstractSchemaInstaller
+from .._util import DatabaseHelpersMixin
 
 logger = __import__('logging').getLogger(__name__)
 
@@ -81,8 +82,9 @@ class MySQLSchemaInstaller(AbstractSchemaInstaller):
 
     _PROCEDURES = {}
 
-    def __init__(self, driver=None, **kwargs):
+    def __init__(self, driver=None, version_detector=None, **kwargs):
         self.driver = driver
+        self.version_detector = version_detector or MySQLVersionDetector()
         super(MySQLSchemaInstaller, self).__init__(**kwargs)
 
     def get_database_name(self, cursor):
@@ -199,12 +201,22 @@ class MySQLSchemaInstaller(AbstractSchemaInstaller):
     def create_procedures(self, cursor):
         installed = self.list_procedures(cursor)
         current_object = 'current_object' if self.keep_history else 'object_state'
+        major_version = self.version_detector.get_major_version(cursor)
+        if self.version_detector.supports_nowait(cursor):
+            set_lock_timeout = ''
+            for_share = 'FOR SHARE NOWAIT'
+        else:
+            set_lock_timeout = 'SET innodb_lock_wait_timeout = 1;'
+            for_share = 'LOCK IN SHARE MODE'
+
         for name, create_stmt in self.procedures.items():
             __traceback_info__ = name
-            checksum = self._checksum_for_str(create_stmt)
+            checksum = self._checksum_for_str(create_stmt) + '; ver ' + str(major_version)
             create_stmt = create_stmt.format(
                 CHECKSUM=checksum,
-                CURRENT_OBJECT=current_object
+                CURRENT_OBJECT=current_object,
+                SET_LOCK_TIMEOUT=set_lock_timeout,
+                FOR_SHARE=for_share
             )
             assert checksum in create_stmt
             if name in installed:
@@ -238,3 +250,21 @@ class MySQLSchemaInstaller(AbstractSchemaInstaller):
             logger.debug("Done creating tables after drop")
         else:
             super(MySQLSchemaInstaller, self)._after_zap_all_tables(cursor, slow)
+
+
+class MySQLVersionDetector(DatabaseHelpersMixin):
+
+    _major_version = None
+
+    def get_major_version(self, cursor):
+        if self._major_version is None:
+            cursor.execute('SELECT version()')
+            ver = cursor.fetchone()[0]
+            # PyMySQL on Win/Py3 returns this as a byte string; everywhere
+            # else it's native.
+            ver = self._metadata_to_native_str(ver)
+            self._major_version = int(ver[0])
+        return self._major_version
+
+    def supports_nowait(self, cursor):
+        return self.get_major_version(cursor) >= 8

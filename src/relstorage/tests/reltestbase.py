@@ -1423,8 +1423,15 @@ class GenericRelStorageTests(
         #
         # NOTE: When we move these steps into a stored procedure, this test will break
         # because we won't be able to force the interleaving.
+
+        if 'lock_objects_and_detect_conflicts' in vars(type(self._storage._adapter)):
+            raise unittest.SkipTest("%s does not allow manual interleaving" % (
+                self._storage._adapter
+            ))
+
         from relstorage.adapters.interfaces import UnableToLockRowsToReadCurrentError
         storageA = self._closing(self._storage.new_instance())
+
 
         storageA._adapter.locker.lock_current_objects = partial(
             self.__lock_rows_being_modified_only,
