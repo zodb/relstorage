@@ -243,7 +243,6 @@ class MySQLSchemaInstaller(AbstractSchemaInstaller):
                 collation_connection = installed_proc.collation_connection
                 expected = (checksum, 'utf8', 'utf8_general_ci')
                 if expected != (stored_checksum, character_set_client, collation_connection):
-                    print("CREATING", expected, installed_proc)
                     logger.info(
                         "Re-creating procedure %s due to mismatch %s != %s",
                         name,
