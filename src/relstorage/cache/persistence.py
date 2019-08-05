@@ -44,6 +44,13 @@ else:
 Unpickler = Unpickler
 Pickler = Pickler
 
+SQ3_SUPPORTS_WINDOW = sqlite3.sqlite_version_info >= (3, 25) # 2018-09-15
+SQ3_SUPPORTS_UPSERT = sqlite3.sqlite_version_info >= (3, 24) # 2018-06-04
+SQ3_SUPPORTS_PAREN_UPDATE = sqlite3.sqlite_version_info >= (3, 15) # 2016-10-14
+SQ3_SUPPORTS_CTE = sqlite3.sqlite_version_info >= (3, 8, 3) # 2014-02-03
+SQ3_MIN_VERSION = (3, 8, 3)
+SQ3_IS_MIN_VERSION = sqlite3.sqlite_version_info >= SQ3_MIN_VERSION
+
 logger = log = logging.getLogger(__name__)
 
 def _normalize_path(options):
@@ -155,6 +162,7 @@ def _execute_pragma(cur, name, value):
     cur.fetchall()
 
 def _execute_pragmas(cur, **kwargs):
+    logger.info("Connected to sqlite3 version %s", sqlite3.sqlite_version)
     for k, v in kwargs.items():
         # Query, report, then change
         __traceback_info__ = k, v
@@ -282,8 +290,19 @@ def sqlite_files(options, prefix):
         destroy = noop_destroy
     return fname, destroy
 
+
+class Sqlite3TooOldError(ValueError):
+    """Raised if the sqlite3 module is too old."""
+
+    def __init__(self):
+        super(Sqlite3TooOldError, self).__init__(
+            "Unable to use sqlite; minimum version is %s but this version is %s" % (
+                SQ3_MIN_VERSION, sqlite3.sqlite_version_info
+            ))
+
 CORRUPT_DB_EXCEPTIONS = (sqlite3.DatabaseError,)
-FAILURE_TO_OPEN_DB_EXCEPTIONS = (sqlite3.OperationalError,)
+FAILURE_TO_OPEN_DB_EXCEPTIONS = (sqlite3.OperationalError, Sqlite3TooOldError)
+
 
 def sqlite_connect(options, prefix,
                    overwrite=False,
@@ -299,6 +318,10 @@ def sqlite_connect(options, prefix,
     .. caution:: Using the connection as a context manager does **not**
        result in the connection being closed, only committed or rolled back.
     """
+
+    if not SQ3_IS_MIN_VERSION: # pragma: no cover
+        raise Sqlite3TooOldError()
+
     fname, destroy = sqlite_files(options, prefix)
 
     corrupt_db_ex = CORRUPT_DB_EXCEPTIONS
@@ -350,6 +373,7 @@ def sqlite_connect(options, prefix,
                                       pragmas=pragmas)
 
     return connection
+
 
 def __quiet_remove(path):
     try:

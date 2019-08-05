@@ -441,6 +441,11 @@ Persistent Local Caching
 Like ZEO, RelStorage can store its local cache to disk for a quicker
 application warmup period.
 
+.. versionchanged:: 3.0a7
+   Raise a descriptive error if the ``sqlite3`` library is too old to
+   be used by the local cache. RelStorage requires at least 3.8.3 but
+   works better with 3.15 and best with 3.24 or newer.
+
 .. versionchanged:: 3.0a1
    The persistent file format and contents have been substantially
    changed to produce much better hit rates.
@@ -500,6 +505,11 @@ cache-local-dir
            If the database (ZODB.DB object) is not properly
            :class:`closed <ZODB.interfaces.IDatabase>`, then the cache files will not be written.
 
+        .. tip::
+           This requires at least sqlite3 3.8.3 or better. Improved
+           performance comes with version 3.15 and the best
+           performance is with 3.24 or higher.
+
 cache-local-dir-count
         How many files that ``cache-local-dir`` will be allowed to
         contain before files start getting reused. Set this equal to
@@ -508,7 +518,7 @@ cache-local-dir-count
         The default is 20.
 
         .. versionchanged:: 3.0a1
-           This setting is now ignored and a single file is used.
+           This setting is now ignored and deprecated and a single file is used.
 
 cache-local-dir-compress
         Whether to compress the persistent cache files on disk. The
@@ -521,7 +531,7 @@ cache-local-dir-compress
         .. versionadded:: 2.0b5
 
         .. versionchanged:: 3.0a1
-           This setting is now ignored and no extra compression is applied.
+           This setting is now ignored and deprecated and no extra compression is applied.
 
 cache-local-dir-read-count
         The maximum number of files to read to populate the cache on
@@ -550,7 +560,7 @@ cache-local-dir-read-count
         .. versionadded:: 2.0b5
 
         .. versionchanged:: 3.0a1
-           This setting is now ignored and a single file is used.
+           This setting is now ignored and deprecated and a single file is used.
 
 cache-local-dir-write-max-size
         The *approximate* maximum size of each individual cache file

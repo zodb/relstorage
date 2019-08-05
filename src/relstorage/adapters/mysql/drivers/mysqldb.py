@@ -23,7 +23,7 @@ from zope.interface import implementer
 from relstorage.adapters.interfaces import IDBDriver
 
 from relstorage._util import Lazy
-from relstorage._compat import PY3
+
 from . import AbstractMySQLDriver
 
 __all__ = [

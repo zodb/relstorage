@@ -10,7 +10,7 @@ BEGIN
   -- otherwise not all rows actually get locked.
   CREATE TEMPORARY TABLE IF NOT EXISTS temp_locked_zoid (
     zoid BIGINT PRIMARY KEY
-  ) ENGINE MEMORY;
+  );
 
   DELETE FROM temp_locked_zoid;
 
@@ -41,7 +41,7 @@ BEGIN
 
     {SET_LOCK_TIMEOUT}
 
-      DELETE FROM temp_locked_zoid;
+    DELETE FROM temp_locked_zoid;
 
     INSERT INTO temp_locked_zoid
     SELECT zoid
