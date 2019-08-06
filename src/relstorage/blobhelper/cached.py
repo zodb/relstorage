@@ -418,7 +418,7 @@ class CacheBlobHelper(AbstractBlobHelper):
                 continue
 
             for filename in all_blob_files:
-                # TODO: We could same some calls to listdir() if we collected
+                # TODO: We could save some calls to listdir() if we collected
                 # all the OIDs in self._txn_blobs that will wind up sharing
                 # a single directory. That would be a lot of blobs in a transaction,
                 # though.

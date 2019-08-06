@@ -21,11 +21,11 @@
 - Improve the thread safety and resource usage of blob cache cleanup.
   Previously it could spawn many useless threads.
 
-- When caching blobs for a history free storage, if there's an older
-  revision of the blob in the cache, and it is not in use, go ahead
-  and preemptively remove it from disk. This can help prevent the
-  cache size from growing out of hand and limit the number of
-  expensive full cache checks required. See :issue:`297`.
+- When caching a newly uploaded blob for a history free storage, if
+  there's an older revision of the blob in the cache, and it is not in
+  use, go ahead and preemptively remove it from disk. This can help
+  prevent the cache size from growing out of hand and limit the number
+  of expensive full cache checks required. See :issue:`297`.
 
 - Change the default value of the configuration setting
   ``shared-blob-dir`` to false, meaning that the default is now to use
