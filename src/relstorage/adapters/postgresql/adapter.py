@@ -242,7 +242,8 @@ class PostgreSQLAdapter(AbstractAdapter):
 
         if commit and self.driver.supports_multiple_statement_execute:
             proc = (
-                "SELECT SET_CONFIG('rs.tid', " + proc + "::text, FALSE); COMMIT;"
+                "SELECT SET_CONFIG('rs.tid', " + proc + "::text, FALSE); "
+                "COMMIT; "
                 "SELECT current_setting('rs.tid')"
             )
             needs_commit = False
@@ -260,6 +261,21 @@ class PostgreSQLAdapter(AbstractAdapter):
         after_selecting_tid(tid_int)
         return tid_int, "-"
 
+
+    lock_objects_and_detect_conflicts_interleavable = False
+
+    def _best_lock_objects_and_detect_conflicts(self, cursor, read_current_oids):
+        read_current_param = None
+        if read_current_oids:
+            read_current_param = [[k, v] for k, v in read_current_oids.items()]
+
+        cursor.execute('SELECT * FROM lock_objects_and_detect_conflicts(%s)',
+                       (read_current_param,))
+        conflicts = cursor.fetchall()
+        return conflicts
+
+    def _describe_best_lock_objects_and_detect_conflicts(self):
+        return 'lock_objects_and_detect_conflicts(%s)'
 
 
 class PostgreSQLVersionDetector(object):

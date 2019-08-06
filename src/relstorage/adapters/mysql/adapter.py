@@ -52,7 +52,6 @@ from __future__ import print_function
 
 import logging
 import json
-import time
 import os
 
 from zope.interface import implementer
@@ -64,8 +63,6 @@ from ..adapter import AbstractAdapter
 from ..dbiter import HistoryFreeDatabaseIterator
 from ..dbiter import HistoryPreservingDatabaseIterator
 from ..interfaces import IRelStorageAdapter
-from ..interfaces import UnableToLockRowsToModifyError
-from ..interfaces import UnableToLockRowsToReadCurrentError
 
 from ..poller import Poller
 from ..scriptrunner import ScriptRunner
@@ -262,12 +259,9 @@ class MySQLAdapter(AbstractAdapter):
         after_selecting_tid(tid_int)
         return tid_int, "-"
 
-    def lock_objects_and_detect_conflicts(self, cursor, read_current_oids):
-        if self.locker.lock_readCurrent_for_share_blocks:
-            # Delegate to the individual statements that can control lock timeouts.
-            return super(MySQLAdapter, self).lock_objects_and_detect_conflicts(cursor,
-                                                                               read_current_oids)
+    lock_objects_and_detect_conflicts_interleavable = False
 
+    def _best_lock_objects_and_detect_conflicts(self, cursor, read_current_oids):
         read_current_param = None
         if read_current_oids:
             # In MySQL 8, we could pass in a JSON array and use JSON_TABLE
@@ -293,24 +287,13 @@ class MySQLAdapter(AbstractAdapter):
             read_current_param = json.dumps(list(read_current_oids.items()))
 
         proc = 'lock_objects_and_detect_conflicts(%s)'
-        begin = time.time()
-        try:
-            multi_results = self.driver.callproc_multi_result(
-                cursor,
-                proc,
-                (read_current_param,)
-            )
-        except self.locker.lock_exceptions:
-            elapsed = time.time() - begin
-            kind = UnableToLockRowsToModifyError
-            if read_current_oids and elapsed < self.locker.commit_lock_timeout:
-                kind = UnableToLockRowsToReadCurrentError
-
-            self.locker.reraise_commit_lock_error(
-                cursor,
-                proc,
-                kind
-            )
-
+        multi_results = self.driver.callproc_multi_result(
+            cursor,
+            proc,
+            (read_current_param,)
+        )
         conflicts = multi_results[0]
         return conflicts
+
+    def _describe_best_lock_objects_and_detect_conflicts(self):
+        return 'lock_objects_and_detect_conflicts(%s)'

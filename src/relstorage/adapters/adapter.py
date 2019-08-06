@@ -24,6 +24,7 @@ from __future__ import print_function
 import time
 
 from persistent.timestamp import TimeStamp
+from perfmetrics import metricmethod
 
 from ZODB.POSException import ReadConflictError
 from ZODB.utils import p64 as int64_to_8bytes
@@ -33,6 +34,9 @@ from .._util import timestamp_at_unixtime
 from ..options import Options
 
 from ._abstract_drivers import _select_driver
+from .interfaces import UnableToLockRowsToModifyError
+from .interfaces import UnableToLockRowsToReadCurrentError
+
 
 class AbstractAdapter(object):
 
@@ -133,7 +137,30 @@ class AbstractAdapter(object):
 
         return committing_tid_int, prepared_txn_id
 
+    lock_objects_and_detect_conflicts_interleavable = True
+
+    @metricmethod
     def lock_objects_and_detect_conflicts(self, cursor, read_current_oids):
+        if self.locker.lock_readCurrent_for_share_blocks:
+            # Delegate to the individual statements that can control lock timeouts.
+            return self._composed_lock_objects_and_detect_conflicts(cursor,
+                                                                    read_current_oids)
+        begin = time.time()
+        try:
+            return self._best_lock_objects_and_detect_conflicts(cursor, read_current_oids)
+        except self.locker.lock_exceptions:
+            elapsed = time.time() - begin
+            kind = UnableToLockRowsToModifyError
+            if read_current_oids and elapsed < self.locker.commit_lock_timeout:
+                kind = UnableToLockRowsToReadCurrentError
+
+            self.locker.reraise_commit_lock_error(
+                cursor,
+                self._describe_best_lock_objects_and_detect_conflicts(),
+                kind
+            )
+
+    def _composed_lock_objects_and_detect_conflicts(self, cursor, read_current_oids):
         read_current_oid_ints = read_current_oids.keys()
 
         self.locker.lock_current_objects(cursor, read_current_oid_ints)
@@ -151,3 +178,8 @@ class AbstractAdapter(object):
 
         conflicts = self.mover.detect_conflict(cursor)
         return conflicts
+
+    _best_lock_objects_and_detect_conflicts = _composed_lock_objects_and_detect_conflicts
+
+    def _describe_best_lock_objects_and_detect_conflicts(self):
+        return '<unknown>'

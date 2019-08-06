@@ -91,8 +91,16 @@ class PostgreSQLSchemaInstaller(AbstractSchemaInstaller):
         procs = super(PostgreSQLSchemaInstaller, self)._read_proc_files()
         # Convert from bare strings into _StoredFunction objects
         # (which are missing their signatures at this point).
+        current_object = 'current_object' if self.keep_history else 'object_state'
         return {
-            name: _StoredFunction(name, None, self._checksum_for_str(value), value)
+            name: _StoredFunction(
+                name,
+                None,
+                self._checksum_for_str(value),
+                value.format(
+                    CURRENT_OBJECT=current_object
+                )
+            )
             for name, value
             in procs.items()
         }
@@ -238,7 +246,8 @@ class PostgreSQLSchemaInstaller(AbstractSchemaInstaller):
         for proc_name, stored_func in self.procedures.items():
             __traceback_info__ = proc_name, self.keep_history
             proc_source = stored_func.create
-
+            # All definitions should be written with 'CREATE OR REPLACE'
+            # so we don't need to bother with 'DROP'
             cursor.execute(proc_source)
 
         # Update checksums
