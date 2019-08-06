@@ -324,9 +324,19 @@ class AbstractVote(AbstractTPCState):
         # local temp cache for the new state, so we don't need to
         # fetch it, meaning this result will be small.
         #
-        # We *probably* have the previous state already in our storage
-        # cache already so we're not returning that from the database
-        # either.
+        # The resolution process needs three pickles: the one we tried
+        # to save, the one we're based off of, and the one currently
+        # committed. The new one is passed as a parameter; the one
+        # currently committed can optionally be passed (if not,
+        # loadSerial() is used to get it), and the one we were based
+        # off of is always loaded with loadSerial(). We *probably*
+        # have the one we're based off of already in our storage
+        # cache; the one that's currently committed is, I think, less
+        # likely to be there, so there may be some benefit from
+        # returning it in the conflict query. If we have a cache miss
+        # and have to go to the database, that's bad: we're holding
+        # object locks at this point so we're potentially blocking
+        # other transactions.
         required_tids = self.required_tids
         if conflicts:
             logger.debug("Attempting to resolve %d conflicts", len(conflicts))
