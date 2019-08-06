@@ -27,7 +27,8 @@ driver
 PostgreSQL Adapter Options
 ==========================
 
-RelStorage 3.0 requires PostgreSQL 9.6 or above.
+RelStorage 3.0 requires PostgreSQL 9.6 or above. PostgreSQL 12,
+currently in development, is not supported.
 
 .. tip::
 

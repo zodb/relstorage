@@ -265,12 +265,28 @@ class PostgreSQLAdapter(AbstractAdapter):
     lock_objects_and_detect_conflicts_interleavable = False
 
     def _best_lock_objects_and_detect_conflicts(self, cursor, read_current_oids):
-        read_current_param = None
+        read_current_oids_p = None
+        read_current_tids_p = None
         if read_current_oids:
-            read_current_param = [[k, v] for k, v in read_current_oids.items()]
+            # Pass both the OIDs and TIDS and make the database do an extra query
+            # to filter the non-matching so that we only have to deal with rows that
+            # actually conflict. This keeps the Python-level loop that we do once the rows are
+            # locked as short as possible.
+            # Separate arrays are faster to deal with than an array of tuples,
+            # they just have to be in the same order.
 
-        cursor.execute('SELECT * FROM lock_objects_and_detect_conflicts(%s)',
-                       (read_current_param,))
+            # Just pass in the OIDs and let it return to us the committed tids
+            # which we will loop over to compare. This simplifies the SQL
+            # and reduces the number of queries we have to do. If that looping is
+            # a problem
+            read_current_oids_p = []
+            read_current_tids_p = []
+            for k, v in read_current_oids.items():
+                read_current_oids_p.append(k)
+                read_current_tids_p.append(v)
+
+        cursor.execute('SELECT * FROM lock_objects_and_detect_conflicts(%s, %s)',
+                       (read_current_oids_p, read_current_tids_p,))
         conflicts = cursor.fetchall()
         return conflicts
 
