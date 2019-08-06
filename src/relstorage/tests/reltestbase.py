@@ -1421,10 +1421,13 @@ class GenericRelStorageTests(
         # that we don't block, we report a retryable error. Note that
         # we don't adjust the commit_lock_timeout; it doesn't apply.
         #
-        # NOTE: When we move these steps into a stored procedure, this test will break
+        # If we're using a stored procedure, this test will break
         # because we won't be able to force the interleaving.
+        #
+        # TODO: We still have the old method around in _composed_lock_objects_and_detect_conflicts;
+        # test it.
 
-        if 'lock_objects_and_detect_conflicts' in vars(type(self._storage._adapter)):
+        if not self._storage._adapter.lock_objects_and_detect_conflicts_interleavable:
             raise unittest.SkipTest("%s does not allow manual interleaving" % (
                 self._storage._adapter
             ))

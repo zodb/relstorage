@@ -242,7 +242,8 @@ class PostgreSQLAdapter(AbstractAdapter):
 
         if commit and self.driver.supports_multiple_statement_execute:
             proc = (
-                "SELECT SET_CONFIG('rs.tid', " + proc + "::text, FALSE); COMMIT;"
+                "SELECT SET_CONFIG('rs.tid', " + proc + "::text, FALSE); "
+                "COMMIT; "
                 "SELECT current_setting('rs.tid')"
             )
             needs_commit = False
@@ -260,6 +261,37 @@ class PostgreSQLAdapter(AbstractAdapter):
         after_selecting_tid(tid_int)
         return tid_int, "-"
 
+
+    lock_objects_and_detect_conflicts_interleavable = False
+
+    def _best_lock_objects_and_detect_conflicts(self, cursor, read_current_oids):
+        read_current_oids_p = None
+        read_current_tids_p = None
+        if read_current_oids:
+            # Pass both the OIDs and TIDS and make the database do an extra query
+            # to filter the non-matching so that we only have to deal with rows that
+            # actually conflict. This keeps the Python-level loop that we do once the rows are
+            # locked as short as possible.
+            # Separate arrays are faster to deal with than an array of tuples,
+            # they just have to be in the same order.
+
+            # Just pass in the OIDs and let it return to us the committed tids
+            # which we will loop over to compare. This simplifies the SQL
+            # and reduces the number of queries we have to do. If that looping is
+            # a problem
+            read_current_oids_p = []
+            read_current_tids_p = []
+            for k, v in read_current_oids.items():
+                read_current_oids_p.append(k)
+                read_current_tids_p.append(v)
+
+        cursor.execute('SELECT * FROM lock_objects_and_detect_conflicts(%s, %s)',
+                       (read_current_oids_p, read_current_tids_p,))
+        conflicts = cursor.fetchall()
+        return conflicts
+
+    def _describe_best_lock_objects_and_detect_conflicts(self):
+        return 'lock_objects_and_detect_conflicts(%s)'
 
 
 class PostgreSQLVersionDetector(object):

@@ -57,10 +57,11 @@
   encourage transaction middleware to retry. See :issue:`303`.
 
 - Move more of the vote phase of transaction commit into a database
-  stored procedure on MySQL, beginning with taking the row-level
-  locks. This eliminates several more database round trips and the
-  need for the Python thread (or greenlet) to repeatedly release and
-  then acquire the GIL while holding global locks.
+  stored procedure on MySQL and PostgreSQL, beginning with taking the
+  row-level locks. This eliminates several more database round trips
+  and the need for the Python thread (or greenlet) to repeatedly
+  release and then acquire the GIL while holding global locks. See
+  :issue:`304`.
 
 3.0a6 (2019-07-29)
 ==================
