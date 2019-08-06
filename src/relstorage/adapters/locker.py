@@ -215,11 +215,11 @@ class AbstractLocker(DatabaseHelpersMixin,
                 **{'zoid': oids_to_lock}
             )
             consume(rows)
-        except self.illegal_operation_exceptions:
+        except self.illegal_operation_exceptions: # pragma: no cover
             # Bug in our code
             raise
         except self.lock_exceptions:
-            self.__reraise_commit_lock_error(
+            self.reraise_commit_lock_error(
                 cursor,
                 'SELECT zoid FROM {table} WHERE zoid IN () {lock}'.format(
                     table=table,
@@ -234,17 +234,17 @@ class AbstractLocker(DatabaseHelpersMixin,
             cursor.execute(stmt)
             rows = cursor
             consume(rows)
-        except self.illegal_operation_exceptions:
+        except self.illegal_operation_exceptions: # pragma: no cover
             # Bug in our code
             raise
         except self.lock_exceptions:
-            self.__reraise_commit_lock_error(
+            self.reraise_commit_lock_error(
                 cursor,
                 stmt,
                 UnableToLockRowsToModifyError
             )
 
-    def __reraise_commit_lock_error(self, cursor, lock_stmt, kind):
+    def reraise_commit_lock_error(self, cursor, lock_stmt, kind):
         try:
             debug_info = self._get_commit_lock_debug_info(cursor, True)
         except Exception as nested: # pylint:disable=broad-except
@@ -305,13 +305,13 @@ class AbstractLocker(DatabaseHelpersMixin,
             rows = cursor.fetchall()
             if not rows or not rows[0]:
                 raise UnableToAcquireCommitLockError("No row returned from commit_row_lock")
-        except self.illegal_operation_exceptions:
+        except self.illegal_operation_exceptions: # pragma: no cover
             # Bug in our code.
             raise
         except self.lock_exceptions:
             if nowait:
                 return False
-            self.__reraise_commit_lock_error(
+            self.reraise_commit_lock_error(
                 cursor,
                 lock_stmt,
                 UnableToAcquireCommitLockError

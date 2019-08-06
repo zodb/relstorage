@@ -56,6 +56,10 @@ class PyMySQLConnectorDriver(AbstractMySQLDriver):
         # conn.close() -> InternalError: Unread result found
         # By the time we get to a close(), it's too late to do anything about it.
         self.close_exceptions += (self.driver_module.InternalError,)
+
+        if self.Binary is str:
+            self.Binary = bytearray
+
         if PYPY:
             # Patch to work around JIT bug found in (at least) 7.1.1
             # https://bitbucket.org/pypy/pypy/issues/3014/jit-issue-inlining-structunpack-hh
@@ -156,6 +160,7 @@ class PyMySQLConnectorDriver(AbstractMySQLDriver):
         kwargs['use_pure'] = self.USE_PURE
         converter_class = self._get_converter_class()
         kwargs['converter_class'] = converter_class
+        kwargs['get_warnings'] = True
 
         con = self.driver_module.connect(*args, **kwargs)
 

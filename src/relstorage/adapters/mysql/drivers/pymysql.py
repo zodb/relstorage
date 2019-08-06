@@ -78,4 +78,9 @@ class PyMySQLDriver(AbstractMySQLDriver):
 
     def connect(self, *args, **kwargs):
         kwargs['conv'] = self._conversions
+        # For bytes and bytearrays, put the "_binary" character set introducer
+        # in front. If we haven't set the ``connection_charset`` to binary --- and we can't
+        # because that breaks JSON types --- then this is needed for sending state data
+        # to avoid warnings about invalid character sequences.
+        kwargs['binary_prefix'] = True
         return AbstractMySQLDriver.connect(self, *args, **kwargs)

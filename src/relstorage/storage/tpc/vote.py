@@ -147,8 +147,6 @@ class AbstractVote(AbstractTPCState):
         cursor = self.store_connection.cursor
         assert cursor is not None
         adapter = self.adapter
-        locker = adapter.locker
-        mover = adapter.mover
 
         # execute all remaining batch store operations.
         # This exists as an extension point.
@@ -178,6 +176,8 @@ class AbstractVote(AbstractTPCState):
         # bit more overhead, but benchmarking suggests that it's not
         # worth it in common cases.
         storage._oids.set_min_oid(self.max_stored_oid)
+
+        # TODO: Move this comment to documentation on ILocker.
 
         # Check the things registered by Connection.readCurrent(),
         # while at the same time taking out locks on those
@@ -266,24 +266,10 @@ class AbstractVote(AbstractTPCState):
         # locks on the even rows. The same happens if you go the other
         # way. This seems to be because of "intention locks."
         # (https://dev.mysql.com/doc/refman/8.0/en/innodb-locking.html#innodb-intention-locks)
-        read_current_oid_ints = self.required_tids.keys()
 
-        # TODO: make this (the locking query?) more useful so we can
-        # do fewer overall queries. right now the typical call
-        # sequence will take three queries: This one, the one to get
-        # current, and the one to detect conflicts.
-        locker.lock_current_objects(cursor, read_current_oid_ints)
+        conflicts = adapter.lock_objects_and_detect_conflicts(cursor, self.required_tids)
 
-        current = mover.current_object_tids(cursor, read_current_oid_ints)
-        for oid_int, expect_tid_int in self.required_tids.items():
-            actual_tid_int = current.get(oid_int, 0)
-            if actual_tid_int != expect_tid_int:
-                raise ReadConflictError(
-                    oid=int64_to_8bytes(oid_int),
-                    serials=(int64_to_8bytes(actual_tid_int),
-                             int64_to_8bytes(expect_tid_int)))
-
-        invalidated_oids = self.__check_and_resolve_conflicts(storage)
+        invalidated_oids = self.__check_and_resolve_conflicts(storage, conflicts)
 
 
         blobs_must_be_moved_now = False
@@ -310,7 +296,7 @@ class AbstractVote(AbstractTPCState):
         # New storage protocol
         return invalidated_oids
 
-    def __check_and_resolve_conflicts(self, storage):
+    def __check_and_resolve_conflicts(self, storage, conflicts):
         """
         Either raises an `ConflictError`, or successfully resolves
         all conflicts.
@@ -341,12 +327,22 @@ class AbstractVote(AbstractTPCState):
         # We *probably* have the previous state already in our storage
         # cache already so we're not returning that from the database
         # either.
-        conflicts = adapter.mover.detect_conflict(cursor)
+        required_tids = self.required_tids
         if conflicts:
             logger.debug("Attempting to resolve %d conflicts", len(conflicts))
 
         for conflict in conflicts:
             oid_int, committed_tid_int, tid_this_txn_saw_int = conflict
+            if tid_this_txn_saw_int is None:
+                # A readCurrent entry. Did it conflict?
+                expect_tid_int = required_tids[oid_int]
+                if committed_tid_int != expect_tid_int:
+                    raise ReadConflictError(
+                        oid=int64_to_8bytes(oid_int),
+                        serials=(int64_to_8bytes(committed_tid_int),
+                                 int64_to_8bytes(expect_tid_int)))
+                continue
+
             state_from_this_txn = cache.read_temp(oid_int)
             oid = int64_to_8bytes(oid_int)
             prev_tid = int64_to_8bytes(committed_tid_int)
@@ -400,7 +396,7 @@ class AbstractVote(AbstractTPCState):
             kwargs['after_selecting_tid'] = lambda tid_int: blob_meth(int64_to_8bytes(tid_int))
             kwargs['commit'] = False
 
-        committing_tid_int, prepared_txn = self.adapter.tpc_prepare_phase1(
+        committing_tid_int, prepared_txn = self.adapter.lock_database_and_move(
             self.store_connection,
             self.blobhelper,
             self.ude,

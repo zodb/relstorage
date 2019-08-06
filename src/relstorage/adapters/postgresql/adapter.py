@@ -194,13 +194,13 @@ class PostgreSQLAdapter(AbstractAdapter):
         tid, = cursor.fetchone()
         return tid
 
-    def tpc_prepare_phase1(self,
-                           store_connection,
-                           blobhelper,
-                           ude,
-                           commit=True,
-                           committing_tid_int=None,
-                           after_selecting_tid=lambda tid: None):
+    def lock_database_and_move(self,
+                               store_connection,
+                               blobhelper, # pylint:disable=unused-argument
+                               ude,
+                               commit=True,
+                               committing_tid_int=None,
+                               after_selecting_tid=lambda tid: None):
 
         # In all versions of Postgres (up through 11 anyway),
         # stored functions cannot COMMIT. In Postgres 11,

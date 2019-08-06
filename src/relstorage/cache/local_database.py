@@ -32,6 +32,9 @@ from relstorage._compat import OID_TID_MAP_TYPE
 from relstorage._util import log_timed
 from relstorage.adapters.batch import RowBatcher
 
+from .persistence import SQ3_SUPPORTS_UPSERT as SUPPORTS_UPSERT
+from .persistence import SQ3_SUPPORTS_PAREN_UPDATE as SUPPORTS_PAREN_UPDATE
+
 
 logger = __import__('logging').getLogger(__name__)
 
@@ -56,10 +59,7 @@ class SimpleQueryProperty(object):
         cur.close()
         return result
 
-SUPPORTS_WINDOW = sqlite3.sqlite_version_info >= (3, 25) # 2018-09-15
-SUPPORTS_UPSERT = sqlite3.sqlite_version_info >= (3, 24) # 2018-06-04
-SUPPORTS_PAREN_UPDATE = sqlite3.sqlite_version_info >= (3, 15) # 2016-10-14
-SUPPORTS_CTE = sqlite3.sqlite_version_info >= (3, 8, 3) # 2014-02-03
+
 
 class Database(ABC):
     """

@@ -16,11 +16,14 @@ Database schema installers
 """
 from __future__ import absolute_import
 
+from collections import namedtuple
+
 from ZODB.POSException import StorageError
 from zope.interface import implementer
 
 from ..interfaces import ISchemaInstaller
 from ..schema import AbstractSchemaInstaller
+from .._util import DatabaseHelpersMixin
 
 logger = __import__('logging').getLogger(__name__)
 
@@ -55,6 +58,8 @@ logger = __import__('logging').getLogger(__name__)
 # within a single *statement*; that is, unlike PostgreSQL, these values
 # can change within a transaction.
 
+_StoredProcedure = namedtuple('_StoredProcedure',
+                              'checksum character_set_client collation_connection')
 
 
 @implementer(ISchemaInstaller)
@@ -81,8 +86,9 @@ class MySQLSchemaInstaller(AbstractSchemaInstaller):
 
     _PROCEDURES = {}
 
-    def __init__(self, driver=None, **kwargs):
+    def __init__(self, driver=None, version_detector=None, **kwargs):
         self.driver = driver
+        self.version_detector = version_detector or MySQLVersionDetector()
         super(MySQLSchemaInstaller, self).__init__(**kwargs)
 
     def get_database_name(self, cursor):
@@ -94,7 +100,10 @@ class MySQLSchemaInstaller(AbstractSchemaInstaller):
         cursor.execute("SHOW PROCEDURE STATUS WHERE db = database()")
         native = self._metadata_to_native_str
         return {
-            native(row['name']): native(row['comment'])
+            native(row['name']): _StoredProcedure(
+                native(row['comment']),
+                native(row['character_set_client']),
+                native(row['collation_connection']))
             for row in self._rows_as_dicts(cursor)
         }
 
@@ -197,19 +206,47 @@ class MySQLSchemaInstaller(AbstractSchemaInstaller):
         return name_to_source
 
     def create_procedures(self, cursor):
+        # Apparently procedures remember the ``character_set_client`` and ``collation_connection``
+        # that was in use at the time they were defined, and use that
+        # to perform implicit conversions on arguments and even internally. If we have
+        # done ``SET NAMES binary`` (as we do on Python 2) and we try to pass a JSON
+        # argument, or even parse a string into JSON inside the procedure, it will fail,
+        # saying it can't convert binary into JSON. Therefore we must be sure to have
+        # an appropriate value for both of those installed here.
         installed = self.list_procedures(cursor)
+        current_object = 'current_object' if self.keep_history else 'object_state'
+        major_version = self.version_detector.get_major_version(cursor)
+        if self.version_detector.supports_nowait(cursor):
+            set_lock_timeout = ''
+            for_share = 'FOR SHARE NOWAIT'
+        else:
+            set_lock_timeout = 'SET innodb_lock_wait_timeout = 1;'
+            for_share = 'LOCK IN SHARE MODE'
+
+        cursor.execute('SET SESSION character_set_client = utf8, '
+                       'collation_connection = utf8_general_ci')
+
         for name, create_stmt in self.procedures.items():
             __traceback_info__ = name
-            checksum = self._checksum_for_str(create_stmt)
-            create_stmt = create_stmt.format(CHECKSUM=checksum)
+            checksum = self._checksum_for_str(create_stmt) + '; ver ' + str(major_version)
+            create_stmt = create_stmt.format(
+                CHECKSUM=checksum,
+                CURRENT_OBJECT=current_object,
+                SET_LOCK_TIMEOUT=set_lock_timeout,
+                FOR_SHARE=for_share
+            )
             assert checksum in create_stmt
             if name in installed:
-                stored_checksum = installed[name]
-                if stored_checksum != checksum:
+                installed_proc = installed[name]
+                stored_checksum = installed_proc.checksum
+                character_set_client = installed_proc.character_set_client
+                collation_connection = installed_proc.collation_connection
+                expected = (checksum, 'utf8', 'utf8_general_ci')
+                if expected != (stored_checksum, character_set_client, collation_connection):
                     logger.info(
-                        "Re-creating procedure %s due to checksum mismatch %s != %s",
+                        "Re-creating procedure %s due to mismatch %s != %s",
                         name,
-                        stored_checksum, checksum
+                        installed_proc, expected
                     )
                     cursor.execute('DROP PROCEDURE %s' % (name,))
                     del installed[name]
@@ -234,3 +271,21 @@ class MySQLSchemaInstaller(AbstractSchemaInstaller):
             logger.debug("Done creating tables after drop")
         else:
             super(MySQLSchemaInstaller, self)._after_zap_all_tables(cursor, slow)
+
+
+class MySQLVersionDetector(DatabaseHelpersMixin):
+
+    _major_version = None
+
+    def get_major_version(self, cursor):
+        if self._major_version is None:
+            cursor.execute('SELECT version()')
+            ver = cursor.fetchone()[0]
+            # PyMySQL on Win/Py3 returns this as a byte string; everywhere
+            # else it's native.
+            ver = self._metadata_to_native_str(ver)
+            self._major_version = int(ver[0])
+        return self._major_version
+
+    def supports_nowait(self, cursor):
+        return self.get_major_version(cursor) >= 8

@@ -105,9 +105,10 @@ class MySQLLocker(AbstractLocker):
     _lock_share_clause = 'LOCK IN SHARE MODE'
     _lock_share_clause_nowait = 'LOCK IN SHARE MODE'
 
-    def __init__(self, options, driver, batcher_factory):
+    def __init__(self, options, driver, batcher_factory, version_detector):
         super(MySQLLocker, self).__init__(options, driver, batcher_factory)
         self._supports_row_lock_nowait = None
+        self.version_detector = version_detector
 
         # No good preparing this, mysql can't take parameters in EXECUTE,
         # they have to be user variables, which defeats most of the point
@@ -125,16 +126,9 @@ class MySQLLocker(AbstractLocker):
         # permissions on that function by default, so we do it the old fashioned
         # way with version()
         if self._supports_row_lock_nowait is None:
-            # TODO: Move this to a supporting MySQLVersionDetector.
-            cursor.execute('SELECT version()')
-            ver = cursor.fetchone()[0]
-            # PyMySQL on Win/Py3 returns this as a byte string; everywhere
-            # else it's native.
-            ver = self._metadata_to_native_str(ver)
-            major = int(ver[0])
-            __traceback_info__ = ver, major
-            native_nowait = self._supports_row_lock_nowait = (major >= 8)
-            if native_nowait:
+            self._supports_row_lock_nowait = self.version_detector.supports_nowait(cursor)
+
+            if self._supports_row_lock_nowait:
                 self._lock_share_clause = 'FOR SHARE'
                 self._lock_share_clause_nowait = 'FOR SHARE NOWAIT'
             else:

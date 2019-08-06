@@ -23,7 +23,7 @@ from zope.interface import implementer
 from relstorage.adapters.interfaces import IDBDriver
 
 from relstorage._util import Lazy
-from relstorage._compat import PY3
+
 from . import AbstractMySQLDriver
 
 __all__ = [
@@ -39,13 +39,6 @@ class MySQLdbDriver(AbstractMySQLDriver):
     PRIORITY = 1
     PRIORITY_PYPY = 3
     _GEVENT_CAPABLE = False
-
-    if PY3:
-        # Setting the character_set_client = binary results in
-        # mysqlclient failing to decode column names. I haven't
-        # seen any UTF related warnings from this driver for the state
-        # values.
-        MY_CHARSET_STMT = 'SET character_set_results = binary'
 
     fetchall_on_rollback = True
 
