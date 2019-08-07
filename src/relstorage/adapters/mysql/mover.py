@@ -96,7 +96,6 @@ class MySQLObjectMover(AbstractObjectMover):
     # more similar to what PostgreSQL uses, possibly allowing more
     # query sharing (with a smarter query runner/interpreter).
 
-    @metricmethod_sampled
     def store_temp(self, cursor, batcher, oid, prev_tid, data):
         suffix = """
         ON DUPLICATE KEY UPDATE
@@ -105,6 +104,12 @@ class MySQLObjectMover(AbstractObjectMover):
             md5 = VALUES(md5)
         """
         self._generic_store_temp(batcher, oid, prev_tid, data, suffix=suffix)
+
+    @metricmethod_sampled
+    def replace_temps(self, cursor, state_oid_tid_iter):
+        # We can use the regular batcher and store_temps -> store_temp
+        # method because of our upsert query.
+        self.store_temps(cursor, state_oid_tid_iter)
 
     @metricmethod_sampled
     def restore(self, cursor, batcher, oid, tid, data):

@@ -764,6 +764,7 @@ class AbstractSchemaInstaller(DatabaseHelpersMixin,
         self._init_after_create(cursor)
         log.debug("Done running init script.")
 
+    DROP_TABLE_TMPL = 'DROP TABLE {table}'
 
     def drop_all(self):
         """Drop all tables and sequences."""
@@ -773,7 +774,7 @@ class AbstractSchemaInstaller(DatabaseHelpersMixin,
             todo.reverse()
             for table in todo:
                 if table in existent:
-                    cursor.execute("DROP TABLE %s" % table)
+                    cursor.execute(self.DROP_TABLE_TMPL.format(table=table))
             for sequence in self.list_sequences(cursor):
                 cursor.execute("DROP SEQUENCE %s" % sequence)
         self.connmanager.open_and_call(drop_all)

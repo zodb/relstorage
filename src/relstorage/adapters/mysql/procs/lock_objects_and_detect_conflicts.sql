@@ -58,15 +58,16 @@ BEGIN
   -- readCurrent conflicts first so we don't waste time resolving
   -- state conflicts if we are going to fail the transaction.
 
-  SELECT zoid, {CURRENT_OBJECT}.tid, NULL
+  SELECT zoid, {CURRENT_OBJECT}.tid, NULL, NULL
   FROM {CURRENT_OBJECT}
   INNER JOIN temp_read_current USING (zoid)
   WHERE temp_read_current.tid <> {CURRENT_OBJECT}.tid
   UNION ALL
-  SELECT zoid, tid, prev_tid
-  FROM {CURRENT_OBJECT}
+  SELECT cur.zoid, cur.tid, temp_store.prev_tid, {OBJECT_STATE_NAME}.state
+  FROM {CURRENT_OBJECT} cur
   INNER JOIN temp_store USING (zoid)
-  WHERE temp_store.prev_tid <> {CURRENT_OBJECT}.tid;
+  {OBJECT_STATE_JOIN}
+  WHERE temp_store.prev_tid <> cur.tid;
 
 
 END;

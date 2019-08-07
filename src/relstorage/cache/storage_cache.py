@@ -1079,18 +1079,22 @@ class _TemporaryStorage(object):
         return self._read_temp_state(startpos, endpos)
 
     def __iter__(self):
+        return self.iter_for_oids(None)
+
+    def iter_for_oids(self, oids):
         read_temp_state = self._read_temp_state
-        for startpos, endpos, oid_int, prev_tid_int in self.items():
+        for startpos, endpos, oid_int, prev_tid_int in self.items(oids):
             state = read_temp_state(startpos, endpos)
             yield state, oid_int, prev_tid_int
 
-    def items(self):
+    def items(self, oids=None):
         # Order the queue by file position, which should help
         # if the file is large and needs to be read
         # sequentially from disk.
         items = [
             (startpos, endpos, oid_int, prev_tid_int)
             for (oid_int, (startpos, endpos, prev_tid_int)) in iteroiditems(self._queue_contents)
+            if oids is None or oid_int in oids
         ]
         items.sort()
         return items

@@ -72,7 +72,11 @@ class MySQLdbConnectionManager(AbstractConnectionManager):
             params = self._params
 
         while True:
-            __traceback_info__ = params
+            __traceback_info__ = {
+                k: v if k != 'passwd' else '<*****>'
+                for k, v in params.items()
+            }
+
             try:
                 conn = self._db_connect(**params)
                 cursor = self._db_driver.cursor(conn)

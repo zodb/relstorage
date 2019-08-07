@@ -63,6 +63,13 @@
   release and then acquire the GIL while holding global locks. See
   :issue:`304`.
 
+- Make conflict resolution require fewer database round trips,
+  especially on PostgreSQL and MySQL, at the expense of using more
+  memory. In the ideal case it now only needs one (MySQL) or two
+  (PostgreSQL) queries. Previously it needed at least twice the number
+  of trips as there were conflicting objects. On both databases, the
+  benchmarks are 40% to 80% faster (depending on cache configuration).
+
 3.0a6 (2019-07-29)
 ==================
 

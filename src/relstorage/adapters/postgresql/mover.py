@@ -66,15 +66,19 @@ class PostgreSQLObjectMover(AbstractObjectMover):
         # DELETE ROWS and not DROP TABLE, but that didn't seem to be true (it's possible
         # an ANALYZE would still be helpful before using the temp table, but we
         # haven't benchmarked that).
-        ddl_stmts = [
-            """
-            CREATE TEMPORARY TABLE IF NOT EXISTS temp_store (
+
+        temp_store_table_tmpl = """
+            CREATE TEMPORARY TABLE IF NOT EXISTS {NAME} (
                 zoid        BIGINT NOT NULL PRIMARY KEY,
                 prev_tid    BIGINT NOT NULL,
                 md5         CHAR(32),
                 state       BYTEA
             ) ON COMMIT DELETE ROWS;
-            """,
+        """
+
+        ddl_stmts = [
+            temp_store_table_tmpl.format(NAME='temp_store'),
+            temp_store_table_tmpl.format(NAME='temp_store_replacements'),
             """
             CREATE TEMPORARY TABLE IF NOT EXISTS temp_blob_chunk (
                 zoid        BIGINT NOT NULL,
@@ -248,15 +252,40 @@ class PostgreSQLObjectMover(AbstractObjectMover):
             params['tid'] = tid
         cursor.execute(insert_stmt, params)
 
-    def store_temps(self, cursor, state_oid_tid_iter):
+
+    def _do_store_temps(self, cursor, state_oid_tid_iter, table_name):
         # History-preserving storages need the md5 to compare states.
         # We could calculate that on the server using pgcrypto, if its
         # available. Or we could just compare directly, instead of comparing
         # md5; that's fast on PostgreSQL.
         if state_oid_tid_iter:
-            buf = TempStoreCopyBuffer(state_oid_tid_iter,
+            buf = TempStoreCopyBuffer(table_name,
+                                      state_oid_tid_iter,
                                       self._compute_md5sum if self.keep_history else None)
             cursor.copy_expert(buf.COPY_COMMAND, buf)
+
+    @metricmethod_sampled
+    def _store_temps(self, cursor, state_oid_tid_iter):
+        self._do_store_temps(cursor, state_oid_tid_iter, 'temp_store')
+
+    @metricmethod_sampled
+    def replace_temps(self, cursor, state_oid_tid_iter):
+        # Upload and then replace. We *could* go right into the table
+        # if we first deleted but that would require either iterating twice
+        # and/or bufferring all the state data in memory. If it's small that's ok,
+        # but it could be large.
+        self._do_store_temps(cursor, state_oid_tid_iter, 'temp_store_replacements')
+        # TODO: Prepare this query.
+        cursor.execute(
+            """
+            UPDATE temp_store
+            SET prev_tid = r.prev_tid,
+                md5 = r.md5,
+                state = r.state
+            FROM temp_store_replacements r
+            WHERE temp_store.zoid = r.zoid
+            """
+        )
 
 
 class TempStoreCopyBuffer(io.BufferedIOBase):
@@ -267,10 +296,11 @@ class TempStoreCopyBuffer(io.BufferedIOBase):
 
     # pg8000 uses readinto(); psycopg2 uses read().
 
-    COPY_COMMAND = "COPY temp_store (zoid, prev_tid, md5, state) FROM STDIN WITH (FORMAT binary)"
+    COPY_COMMAND_TMPL = "COPY {NAME} (zoid, prev_tid, md5, state) FROM STDIN WITH (FORMAT binary)"
 
-    def __init__(self, state_oid_tid_iterable, digester):
+    def __init__(self, table, state_oid_tid_iterable, digester):
         super(TempStoreCopyBuffer, self).__init__()
+        self.COPY_COMMAND = self.COPY_COMMAND_TMPL.format(NAME=table)
         self.state_oid_tid_iterable = state_oid_tid_iterable
         self._iter = iter(state_oid_tid_iterable)
         self._digester = digester

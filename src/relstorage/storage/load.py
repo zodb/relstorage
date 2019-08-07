@@ -172,13 +172,19 @@ class Loader(object):
         if state:
             return state
 
-        state = self.adapter.mover.load_revision(
-            self.load_connection.cursor, oid_int, tid_int)
-        if state is None and self.store_connection:
-            # Allow loading data from later transactions
-            # for conflict resolution.
+        for conn in self.store_connection, self.load_connection:
+            if not conn:
+                continue
+
+            # Allow loading data from later transactions for conflict
+            # resolution. In fact try that first because it's more
+            # likely that our old load connection can't see this new
+            # state (because this method is used only for conflict resolution).
             state = self.adapter.mover.load_revision(
-                self.store_connection.cursor, oid_int, tid_int)
+                conn.cursor, oid_int, tid_int)
+
+            if state is not None:
+                break
 
         if state is None or not state:
             raise POSKeyError(oid)
