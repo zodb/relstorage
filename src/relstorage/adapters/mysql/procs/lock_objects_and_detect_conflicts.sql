@@ -6,8 +6,13 @@ BEGIN
   DECLARE len INT;
   DECLARE i INT DEFAULT 0;
 
-  -- We have to force the server to materialize the results,
-  -- otherwise not all rows actually get locked.
+  -- We have to force the server to materialize the results, otherwise
+  -- not all rows actually get locked. Also, it is critically
+  -- important to do ``eq_ref`` joins against the table we're locking,
+  -- and only require a PRIMARY KEY access, to avoid locking more
+  -- index records than necessary (any sort of range access can lead
+  -- to unexpected locking between transactions). See mysql/locker.py
+  -- for more.
   CREATE TEMPORARY TABLE IF NOT EXISTS temp_locked_zoid (
     zoid BIGINT PRIMARY KEY
   );

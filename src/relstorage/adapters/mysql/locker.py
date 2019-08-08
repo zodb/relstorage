@@ -64,12 +64,15 @@ class MySQLLocker(AbstractLocker):
     """
     MySQL locks.
 
-    Two types of locks are used. The ordinary commit lock is a
-    standard InnoDB row-level lock; this brings the benefits of being
-    lightweight and automatically being released if the transaction
-    aborts or commits, plus instant deadlock detection. Prior to MySQL
-    8.0, these don't support ``NOWAIT`` syntax, so we synthesize that
-    by setting the session variable `innodb_lock_wait_timeout
+    .. rubric:: Commit and Object Locks
+
+    Two types of locks are used. The ordinary commit lock and the
+    object locks are standard InnoDB row-level locks; this brings the
+    benefits of being lightweight and automatically being released if
+    the transaction aborts or commits, plus instant deadlock
+    detection. Prior to MySQL 8.0, these don't support ``NOWAIT``
+    syntax, so we synthesize that by setting the session variable
+    `innodb_lock_wait_timeout
     <https://dev.mysql.com/doc/refman/5.7/en/innodb-parameters.html#sysvar_innodb_lock_wait_timeout>`_.
 
     Note that this lock cannot be against the ``object_state`` or
@@ -87,6 +90,47 @@ class MySQLLocker(AbstractLocker):
 
     The ``ensure_current`` argument is essentially ignored; the locks
     taken out by ``lock_current_objects`` take care of that.
+
+    .. rubric:: Shared and Exclusive Locks Can Block Each Other On Unrelated Rows
+
+    We use two lock classes for object locks: shared locks for
+    readCurrent, and exclusive locks for modified objects.
+
+    MySQL 5.7 and 8 handle this weird, though. If two transactions are
+    at any level besides ``SERIALIZABLE``, and one locks the *odd*
+    rows ``FOR UPDATE`` the other one blocks trying to lock the *even*
+    rows ``FOR UPDATE`` *or* in shared mode, if they happened to use
+    queries like ``WHERE (zoid % 2) = 1``. This is surprising. (It's
+    not surprising in ``SERIALIZABLE``; MySQL's ``SERIALIZABLE`` is
+    quite pessimistic.)
+
+    This is because (quoting
+    https://dev.mysql.com/doc/refman/5.7/en/innodb-locks-set.html)
+    "``SELECT ... LOCK IN SHARE MODE`` sets shared next-key locks on
+    all index records the search encounters." While "``SELECT ... FOR
+    UPDATE`` sets an exclusive next-key lock on every record the
+    search encounters. However, only an index record lock is required
+    for statements that lock rows using a unique index to search for a
+    unique row. For index records the search encounters, ``SELECT ...
+    FOR UPDATE`` blocks other sessions from doing ``SELECT ... LOCK IN
+    SHARE MODE`` or from reading in certain transaction isolation
+    levels." The complex ``WHERE`` clause does range queries and
+    traversal of the index such that it winds up locking many
+    unexpected rows.
+
+    The good news is that the query we actually use for locking,
+    ``SELECT zoid FROM ... WHERE zoid in (SELECT zoid from
+    temp_store)``, doesn't do a range scan. It first accessess the
+    ``temp_store`` table and does a sort into a temporary table using
+    the index; then it accesses ``object_state`` or ``current_object``
+    using the ``eq_ref`` method and the PRIMARY key index in a nested
+    loop (sadly all MySQL joins are nested loops). This locks only the
+    actually required rows.
+
+    We should probably add some optimizer hints to make absolutely
+    sure of that.
+
+    .. rubric:: Pack Locks
 
     The second type of lock, an advisory lock, is used for pack locks.
     This lock uses the `GET_LOCK
