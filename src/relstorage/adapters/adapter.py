@@ -159,6 +159,8 @@ class AbstractAdapter(object):
         try:
             return self._best_lock_objects_and_detect_conflicts(cursor, read_current_oids)
         except self.locker.lock_exceptions:
+            # Heuristic to guess. If the stored proc or stored proc runner can do better,
+            # they should.
             elapsed = time.time() - begin
             kind = UnableToLockRowsToModifyError
             if read_current_oids and elapsed < self.locker.commit_lock_timeout:

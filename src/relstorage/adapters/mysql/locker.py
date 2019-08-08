@@ -154,7 +154,8 @@ class MySQLLocker(AbstractLocker):
 
     def __init__(self, options, driver, batcher_factory, version_detector):
         super(MySQLLocker, self).__init__(options, driver, batcher_factory)
-        self._supports_row_lock_nowait = None
+        assert self.supports_row_lock_nowait # Set by default in the class.
+        self.supports_row_lock_nowait = None
         self.version_detector = version_detector
 
         # No good preparing this, mysql can't take parameters in EXECUTE,
@@ -172,10 +173,10 @@ class MySQLLocker(AbstractLocker):
         # sys.version_major() is 5.7.9+, but we don't have execute
         # permissions on that function by default, so we do it the old fashioned
         # way with version()
-        if self._supports_row_lock_nowait is None:
-            self._supports_row_lock_nowait = self.version_detector.supports_nowait(cursor)
+        if self.supports_row_lock_nowait is None:
+            self.supports_row_lock_nowait = self.version_detector.supports_nowait(cursor)
 
-            if self._supports_row_lock_nowait:
+            if self.supports_row_lock_nowait:
                 self._lock_share_clause = 'FOR SHARE'
                 self._lock_share_clause_nowait = 'FOR SHARE NOWAIT'
             else:

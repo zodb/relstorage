@@ -42,8 +42,11 @@ class PostgreSQLLocker(AbstractLocker):
         # Maybe for timeout == 0, we should do SET LOCAL, which
         # is guaranteed not to persist?
         # Recall postgresql uses milliseconds, but our configuration is given
-        # in seconds.
-        self.driver.set_lock_timeout(cursor, timeout * 1000)
+        # in integer seconds.
+        # For tests, though, we accept floating point numbers
+        timeout_ms = int(timeout * 1000.0)
+        self.driver.set_lock_timeout(cursor, timeout_ms)
+
 
     def release_commit_lock(self, cursor):
         # no action needed, locks released with transaction.

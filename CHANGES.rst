@@ -5,8 +5,21 @@
 3.0a8 (unreleased)
 ==================
 
-- Nothing changed yet.
+- Switch the order in which object locks are taken: try shared locks
+  first and only then attempt exclusive locks. Shared locks do not
+  have to block, so a quick lock timeout here means that a
+  ``ReadConflictError`` is inevitable. This works best on PostgreSQL
+  and MySQL 8, which support true non-blocking locks. On MySQL 5.7,
+  non-blocking locks are emulated with a 1s timeout See :issue:`310`.
 
+- Fix MySQL to immediately rollback its transaction when it gets a
+  lock timeout, while still in the stored procedure on the database.
+  Previously it would have required a round trip to the Python
+  process, which could take an arbitrary amount of time while the
+  transaction may have still been holding some locks. (After
+  :issue:`310` they would only be shared locks, but before they would
+  have been exclusive locks.) This should make for faster recovery in
+  heavily loaded environments with lots of conflicts. See :`313`.
 
 3.0a7 (2019-08-07)
 ==================
