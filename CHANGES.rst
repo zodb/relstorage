@@ -42,7 +42,10 @@
 - Add an option, ``blob-cache-size-check-external``, that causes the
   blob cache cleanup process to run in a subprocess instead of a
   thread. This can free up the storage process to handle requests.
-  This is not recommended on Windows.
+  This is not recommended on Windows. (``python -m
+  relstorage.blobhelper.cached /path/to/cache size_in_bytes`` can be
+  used to run a manual cleanup at any time. This is currently an
+  internal implementation detail.)
 
 - Abort storage transactions immediately when an exception occurs.
   Previously this could be specified by setting the environment
