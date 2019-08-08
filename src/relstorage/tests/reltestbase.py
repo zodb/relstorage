@@ -1422,7 +1422,7 @@ class GenericRelStorageTests(
 
         self.assertLessEqual(duration_blocking, commit_lock_timeout * 3)
 
-    def __lock_rows_being_modified_only(self, storage, cursor, _current_oids):
+    def __lock_rows_being_modified_only(self, storage, cursor, _current_oids, _share_blocks):
         # A monkey-patch for Locker.lock_current_objects to only take the exclusive
         # locks.
         storage._adapter.locker._lock_rows_being_modified(cursor)
@@ -1445,19 +1445,12 @@ class GenericRelStorageTests(
         # we don't adjust the commit_lock_timeout; it doesn't apply.
         #
         # If we're using a stored procedure, this test will break
-        # because we won't be able to force the interleaving.
-        #
-        # TODO: We still have the old method around in _composed_lock_objects_and_detect_conflicts;
-        # test it.
-
-        if not self._storage._adapter.lock_objects_and_detect_conflicts_interleavable:
-            raise unittest.SkipTest("%s does not allow manual interleaving" % (
-                self._storage._adapter
-            ))
+        # because we won't be able to force the interleaving, so we make it
+        # use the old version.
 
         from relstorage.adapters.interfaces import UnableToLockRowsToReadCurrentError
         storageA = self._closing(self._storage.new_instance())
-
+        storageA._adapter.force_lock_objects_and_detect_conflicts_interleavable = True
 
         storageA._adapter.locker.lock_current_objects = partial(
             self.__lock_rows_being_modified_only,
@@ -1492,8 +1485,8 @@ class GenericRelStorageTests(
             self.__lock_rows_being_modified_only,
             storageB)
 
-        storageA._adapter.locker.lock_readCurrent_for_share_blocks = True
-        storageB._adapter.locker.lock_readCurrent_for_share_blocks = True
+        storageA._adapter.force_lock_readCurrent_for_share_blocking = True
+        storageB._adapter.force_lock_readCurrent_for_share_blocking = True
 
         # This won't actually block, we haven't conflicted yet.
         self.__do_check_error_with_conflicting_concurrent_read_current(
@@ -1515,7 +1508,8 @@ class GenericRelStorageTests(
             try:
                 storage._adapter.locker._lock_readCurrent_oids_for_share(
                     cursor,
-                    read_current_oids
+                    read_current_oids,
+                    True
                 )
             except UnableToLockRowsToReadCurrentError as ex:
                 storage.last_error = ex

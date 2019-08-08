@@ -69,11 +69,27 @@ if PY3:
     unicode = str
     number_types = (int, float)
     from io import StringIO as NStringIO
+    from perfmetrics import metricmethod
+    from perfmetrics import Metric
 else:
     string_types = (basestring,)
     unicode = unicode
     number_types = (int, long, float)
     from io import BytesIO as NStringIO
+
+    # On Python 2, functools.update_wrapper doesn't set the '__wrapped__'
+    # attribute, and we need that.
+    from perfmetrics import Metric as _PMetric
+    class Metric(_PMetric):
+        def __call__(self, f):
+            new_f = _PMetric.__call__(self, f)
+            new_f.__wrapped__ = f
+            return new_f
+
+    metricmethod = Metric(method=True)
+
+metricmethod_sampled = Metric(method=True, rate=0.1)
+
 
 try:
     from abc import ABC

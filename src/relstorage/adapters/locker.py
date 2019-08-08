@@ -22,9 +22,9 @@ import abc
 import sys
 import six
 
-from perfmetrics import metricmethod
 
 from relstorage._compat import ABC
+from relstorage._compat import metricmethod
 from relstorage._util import consume
 from relstorage._util import Lazy
 
@@ -142,7 +142,7 @@ class AbstractLocker(DatabaseHelpersMixin,
         )
 
     @metricmethod
-    def lock_current_objects(self, cursor, current_oids):
+    def lock_current_objects(self, cursor, read_current_oid_ints, shared_locks_block):
         # We need to be sure to take the locks in a deterministic
         # order; the easiest way to do that is to order them by OID.
         # But we have two separate sets of OIDs we need to lock: the
@@ -190,21 +190,19 @@ class AbstractLocker(DatabaseHelpersMixin,
         self._lock_rows_being_modified(cursor)
 
         # Next, lock rows we need shared access to.
-        if current_oids:
-            self._lock_readCurrent_oids_for_share(cursor, current_oids)
+        if read_current_oid_ints:
+            self._lock_readCurrent_oids_for_share(cursor, read_current_oid_ints,
+                                                  shared_locks_block)
 
-    # Hook for unit tests, allow them to tell us *not* to use the NOWAIT
-    # locking flag for share.
-    lock_readCurrent_for_share_blocks = False
 
-    def _lock_readCurrent_oids_for_share(self, cursor, current_oids):
+    def _lock_readCurrent_oids_for_share(self, cursor, current_oids, shared_locks_block):
         _, table = self._get_current_objects_query
         oids_to_lock = sorted(set(current_oids))
         batcher = self.make_batcher(cursor, row_limit=1000)
 
         locking_suffix = ' %s ' % (
             self._lock_share_clause
-            if self.lock_readCurrent_for_share_blocks
+            if shared_locks_block
             else
             self._lock_share_clause_nowait
         )

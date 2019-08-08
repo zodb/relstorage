@@ -21,9 +21,9 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-from perfmetrics import Metric
-from perfmetrics import metricmethod
 
+from .._compat import metricmethod
+from .._compat import metricmethod_sampled
 from .util import writable_storage_method
 from .util import phase_dependent_aborts_early
 
@@ -35,7 +35,7 @@ class Storer(object):
 
     @phase_dependent_aborts_early
     @writable_storage_method
-    @Metric(method=True, rate=0.1)
+    @metricmethod_sampled
     def store(self, tpc_phase, oid, previous_tid, data, version, transaction):
         # Called by Connection.commit(), after tpc_begin has been called.
         assert not version, "Versions aren't supported"

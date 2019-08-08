@@ -197,13 +197,14 @@ class MySQLLocker(AbstractLocker):
         cursor.fetchone()
 
 
-    def __lock_readCurrent_nowait(self, cursor, current_oids):
+    def __lock_readCurrent_nowait(self, cursor, current_oids, shared_locks_block):
         # For MySQL 5.7, we emulate NOWAIT by setting the lock timeout
-        if self.lock_readCurrent_for_share_blocks:
-            return AbstractLocker._lock_readCurrent_oids_for_share(self, cursor, current_oids)
+        if shared_locks_block:
+            return AbstractLocker._lock_readCurrent_oids_for_share(self, cursor, current_oids, True)
 
         with lock_timeout(cursor, 0, self.commit_lock_timeout):
-            return AbstractLocker._lock_readCurrent_oids_for_share(self, cursor, current_oids)
+            return AbstractLocker._lock_readCurrent_oids_for_share(self, cursor, current_oids,
+                                                                   False)
 
     def release_commit_lock(self, cursor):
         "Auto-released by transaction end."

@@ -37,6 +37,9 @@ class Adapter(BaseAdapter):
         d.STRING = None
         d.Binary = None
         d.use_replica_exceptions = ()
+        d.binary_column_as_state_type = lambda b: b
+        d.binary_column_as_bytes = lambda b: b
+        d.__name__ = 'cx_Oracle'
         alsoProvides(d, interfaces.IDBDriver)
         return d
 

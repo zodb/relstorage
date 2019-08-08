@@ -523,13 +523,19 @@ class IDatabaseIterator(Interface):
 class ILocker(Interface):
     """Acquire and release the commit and pack locks."""
 
-    def lock_current_objects(cursor, oids):
+    def lock_current_objects(cursor, read_current_oid_ints, shared_locks_block):
         """
-        Lock the objects involved in the current transaction, which
-        must have been moved into the temporary tables.
+        Lock the objects being modified in the current transaction
+        exclusively, plus the relevant rows for the objects whose OIDs
+        are contained in *read_current_oid_ints* with a read lock.
 
-        In addition to those, lock the relevant rows for the objects
-        whose OIDS are contained in *oids*.
+        The exclusive locks should always be taken in a blocking fashion;
+        the shared read locks should be taken without blocking (raising an
+        exception if blocking would occur) if possible, unless *shared_locks_block*
+        is set to True.
+
+        See :meth:`IRelStorageAdapter.lock_objects_and_detect_conflicts`
+        for a description of the expected behaviour.
 
         This should be done as part of the voting phase of TPC, before
         taking out the final commit lock.
@@ -647,7 +653,7 @@ class IObjectMover(Interface):
         ``replace_temps``, which is also only called once.
         """
 
-    def restore(cursor, batcher, oid, tid, data, stmt_buf):
+    def restore(cursor, batcher, oid, tid, data):
         """Store an object directly, without conflict detection.
 
         Used for copying transactions into this database.
@@ -799,16 +805,12 @@ class IPackUndo(Interface):
         and returns a set of OIDs that state refers to.
         """
 
-    def pack(pack_tid, sleep=None, packed_func=None):
+    def pack(pack_tid, packed_func=None):
         """Pack.  Requires the information provided by pre_pack.
 
         packed_func, if provided, will be called for every object state
         packed, just after the object is removed. The function must
         accept two parameters, oid and tid (64 bit integers).
-
-        The sleep function defaults to time.sleep(). It can be
-        overridden to do something else instead of sleep during
-        pauses.
         """
 
     def deleteObject(cursor, oid_int, tid_int):

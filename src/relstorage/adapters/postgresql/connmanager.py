@@ -16,8 +16,7 @@ from __future__ import absolute_import
 
 import logging
 
-from perfmetrics import metricmethod
-
+from ..._compat import metricmethod
 from ..connmanager import AbstractConnectionManager
 
 log = logging.getLogger(__name__)

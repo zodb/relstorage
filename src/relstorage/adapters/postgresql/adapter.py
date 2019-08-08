@@ -262,7 +262,7 @@ class PostgreSQLAdapter(AbstractAdapter):
         return tid_int, "-"
 
 
-    lock_objects_and_detect_conflicts_interleavable = False
+    DEFAULT_LOCK_OBJECTS_AND_DETECT_CONFLICTS_INTERLEAVABLE = False
 
     def _best_lock_objects_and_detect_conflicts(self, cursor, read_current_oids):
         read_current_oids_p = None

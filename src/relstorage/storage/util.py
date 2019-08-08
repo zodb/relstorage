@@ -128,7 +128,7 @@ class stale_aware(object):
         # and because we want to limit the overhead of additional
         # function calls (these methods are commonly used),
         # we derive a new class whose __call__ is exactly the bound
-        # method's __call__.  For this reason, its important to access
+        # method's __call__.  For this reason, it's important to access
         # these methods only once and cache them (which is what copy_storage_methods
         # does).
 
@@ -146,6 +146,7 @@ class stale_aware(object):
         # stale_aware_class = functools.wraps(bound)(stale_aware_class)
         return stale_aware_class(bound)
 
+
 def _make_phase_dependent(storage, method):
     aborts_early = getattr(method, 'aborts_early', False)
     if aborts_early:
@@ -160,12 +161,14 @@ def _make_phase_dependent(storage, method):
         @functools.wraps(method)
         def state(*args, **kwargs):
             return method(storage._tpc_phase, *args, **kwargs)
+    state.__wrapped__ = method # For Py2
     return state
 
 def _make_cannot_write(method):
     @functools.wraps(method)
     def read_only(*args, **kwargs):
         raise ReadOnlyError
+    read_only.__wrapped__ = method
     return read_only
 
 def copy_storage_methods(storage, delegate):
