@@ -123,8 +123,8 @@ class Restore(object):
         # Note also that this doesn't go through the cache.
 
         # TODO: Make it go through the cache, or at least the same
-        # sort of queing thing, so that we can do a bulk COPY?
-        # This complicates restoreBlob() and it complicates voting.
+        # sort of queing thing, so that we can do a bulk COPY.
+        # The way we do it now complicates restoreBlob() and it complicates voting.
         adapter.mover.restore(
             cursor, self.batcher, oid_int, tid_int, data)
 

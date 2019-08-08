@@ -25,6 +25,7 @@ from relstorage.storage import bytes8_to_int64
 from relstorage.adapters.postgresql import PostgreSQLAdapter
 
 from .util import AbstractTestSuiteBuilder
+from .util import DEFAULT_DATABASE_SERVER_HOST
 from . import StorageCreatingMixin
 from . import TestCase
 
@@ -46,13 +47,9 @@ class PostgreSQLAdapterMixin(object):
             else:
                 dbname = self.base_dbname + '_hf'
         dsn = (
-            "dbname='%s' user='relstoragetest' password='relstoragetest'"
-            % dbname
+            "dbname='%s' user='relstoragetest' password='relstoragetest' host='%s'"
+            % (dbname, DEFAULT_DATABASE_SERVER_HOST)
         )
-        # psycopg2cffi can have a unix socket path hardcoded in it,
-        # and that path may not be right
-        if 'cffi' in self.driver_name.lower():
-            dsn += " host='127.0.0.1'"
         return dsn
 
     def get_adapter_zconfig(self):

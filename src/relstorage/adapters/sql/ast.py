@@ -27,6 +27,15 @@ class LiteralNode(Resolvable):
     def resolve_against(self, table):
         return self
 
+class NullNode(LiteralNode):
+    __slots__ = ()
+
+    def __init__(self):
+        super(NullNode, self).__init__(None)
+
+    def __compile_visit__(self, compiler):
+        compiler.emit_null()
+
 class BooleanNode(LiteralNode):
 
     __slots__ = ()
@@ -35,6 +44,8 @@ class TextNode(LiteralNode):
     __slots__ = ()
 
 def as_node(c):
+    if c is None:
+        return NullNode()
     if isinstance(c, bool):
         return BooleanNode(c)
     if isinstance(c, int):

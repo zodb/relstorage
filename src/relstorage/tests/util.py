@@ -59,8 +59,9 @@ USE_SMALL_BLOBS = ((RUNNING_ON_CI # slow here
 # still try to use the socket.) (The TCP port can be bound
 # by non-root, but the default Unix socket often requires
 # root permissions to open.)
+STANDARD_DATABASE_SERVER_HOST = '127.0.0.1'
 DEFAULT_DATABASE_SERVER_HOST = os.environ.get('RS_DB_HOST',
-                                              '127.0.0.1')
+                                              STANDARD_DATABASE_SERVER_HOST)
 
 
 TEST_UNAVAILABLE_DRIVERS = not bool(os.environ.get('RS_SKIP_UNAVAILABLE_DRIVERS'))

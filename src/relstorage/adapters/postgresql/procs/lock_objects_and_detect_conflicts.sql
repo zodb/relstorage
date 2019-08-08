@@ -2,7 +2,7 @@ CREATE OR REPLACE FUNCTION lock_objects_and_detect_conflicts(
   read_current_oids BIGINT[],
   read_current_tids BIGINT[]
 )
-  RETURNS TABLE(zoid BIGINT, tid BIGINT, prev_tid BIGINT)
+  RETURNS TABLE(zoid BIGINT, tid BIGINT, prev_tid BIGINT, committed_state BYTEA)
 AS
 $$
 BEGIN
@@ -47,17 +47,18 @@ BEGIN
         ORDER BY zoid
         FOR SHARE NOWAIT
       )
-      SELECT locked.zoid, locked.tid, NULL::BIGINT
+      SELECT locked.zoid, locked.tid, NULL::BIGINT, NULL::BYTEA
       FROM locked WHERE locked.tid <> locked.desired;
   END IF;
 
 
-
   RETURN QUERY
-  SELECT {CURRENT_OBJECT}.zoid, {CURRENT_OBJECT}.tid, temp_store.prev_tid
-  FROM {CURRENT_OBJECT}
+  SELECT cur.zoid, cur.tid,
+         temp_store.prev_tid, {OBJECT_STATE_NAME}.state
+  FROM {CURRENT_OBJECT} cur
   INNER JOIN temp_store USING (zoid)
-  WHERE temp_store.prev_tid <> {CURRENT_OBJECT}.tid;
+  {OBJECT_STATE_JOIN}
+  WHERE temp_store.prev_tid <> cur.tid;
 
   RETURN;
 

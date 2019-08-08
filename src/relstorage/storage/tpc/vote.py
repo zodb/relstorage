@@ -121,8 +121,8 @@ class AbstractVote(AbstractTPCState):
         self.invalidated_oids = set() # type: Set[bytes]
 
     def enter(self, storage):
-        resolved_in_vote = self.__vote(storage)
-        self.invalidated_oids.update(resolved_in_vote)
+        resolved_in_vote_oid_ints = self.__vote(storage)
+        self.invalidated_oids.update({int64_to_8bytes(i) for i in resolved_in_vote_oid_ints})
 
     def _flush_temps_to_db(self, cursor):
         mover = self.adapter.mover
@@ -269,7 +269,7 @@ class AbstractVote(AbstractTPCState):
 
         conflicts = adapter.lock_objects_and_detect_conflicts(cursor, self.required_tids)
 
-        invalidated_oids = self.__check_and_resolve_conflicts(storage, conflicts)
+        invalidated_oid_ints = self.__check_and_resolve_conflicts(storage, conflicts)
 
 
         blobs_must_be_moved_now = False
@@ -294,20 +294,21 @@ class AbstractVote(AbstractTPCState):
             self.__lock_and_move(vote_only=True)
 
         # New storage protocol
-        return invalidated_oids
+        return invalidated_oid_ints
 
     def __check_and_resolve_conflicts(self, storage, conflicts):
         """
         Either raises an `ConflictError`, or successfully resolves
         all conflicts.
 
-        Returns a set of byte OIDs for objects modified in this transaction
+        Returns a set of int OIDs for objects modified in this transaction
         but which were then updated by conflict resolution and so must
         be invalidated.
 
         All the rows needed for detecting conflicts should be locked against
         concurrent changes.
         """
+        # pylint:disable=too-many-locals
         cursor = self.store_connection.cursor
         adapter = self.adapter
         cache = self.cache
@@ -315,7 +316,7 @@ class AbstractVote(AbstractTPCState):
 
         # Detect conflicting changes.
         # Try to resolve the conflicts.
-        invalidated = set()  # a set of OIDs (bytes)
+        invalidated_oid_ints = set()
 
         # In the past, we didn't load all conflicts from the DB at
         # once, just one at a time. This was because we also fetched
@@ -342,7 +343,7 @@ class AbstractVote(AbstractTPCState):
             logger.debug("Attempting to resolve %d conflicts", len(conflicts))
 
         for conflict in conflicts:
-            oid_int, committed_tid_int, tid_this_txn_saw_int = conflict
+            oid_int, committed_tid_int, tid_this_txn_saw_int, committed_state = conflict
             if tid_this_txn_saw_int is None:
                 # A readCurrent entry. Did it conflict?
                 expect_tid_int = required_tids[oid_int]
@@ -358,7 +359,8 @@ class AbstractVote(AbstractTPCState):
             prev_tid = int64_to_8bytes(committed_tid_int)
             serial = int64_to_8bytes(tid_this_txn_saw_int)
 
-            resolved_state = tryToResolveConflict(oid, prev_tid, serial, state_from_this_txn)
+            resolved_state = tryToResolveConflict(oid, prev_tid, serial,
+                                                  state_from_this_txn, committed_state)
             if resolved_state is None:
                 # unresolvable; kill the whole transaction
                 raise ConflictError(
@@ -368,14 +370,17 @@ class AbstractVote(AbstractTPCState):
                 )
 
             # resolved
-            state_from_this_txn = resolved_state
-            # TODO: Make this use the bulk methods so we can use COPY.
-            adapter.mover.replace_temp(
-                cursor, oid_int, committed_tid_int, state_from_this_txn)
-            invalidated.add(oid)
-            cache.store_temp(oid_int, state_from_this_txn)
+            invalidated_oid_ints.add(oid_int)
+            cache.store_temp(oid_int, resolved_state, committed_tid_int)
 
-        return invalidated
+        if invalidated_oid_ints:
+            # We resolved some conflicts, so we need to send them over to the database.
+            adapter.mover.replace_temps(
+                cursor,
+                self.cache.temp_objects.iter_for_oids(invalidated_oid_ints)
+            )
+
+        return invalidated_oid_ints
 
     def __lock_and_move(self, vote_only=False):
         # Here's where we take the global commit lock, and

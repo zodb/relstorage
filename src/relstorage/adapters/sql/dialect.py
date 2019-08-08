@@ -229,6 +229,9 @@ class Compiler(object):
         for content in contents:
             self.buf.write(content)
 
+    def emit_null(self):
+        self.emit('NULL')
+
     def emit_w_padding_space(self, value):
         ended_in_space = self.buf.getvalue().endswith(' ')
         value = value.strip()

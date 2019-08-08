@@ -462,6 +462,14 @@ class GenericRelStorageTests(
         finally:
             db.close()
 
+    def __make_tryToResolveConflict_ignore_committedData(self, storage):
+        orig = storage.tryToResolveConflict
+        def resolve(oid, ctid, ptid, newpickle, committed_data): # pylint:disable=unused-argument
+            return orig(oid, ctid, ptid, newpickle)
+        storage.tryToResolveConflict = resolve
+        return storage
+
+
     def checkResolveConflictBetweenConnections(self, clear_cache=False):
         # Verify that conflict resolution works between storage instances
         # bound to connections.
@@ -485,7 +493,7 @@ class GenericRelStorageTests(
         storage1._cache.reset_stats()
         if clear_cache:
             storage1._cache.clear(load_persistent=False)
-            self.assertEqual(storage1._cache.stats()['hits'], 0)
+        self.assertEqual(storage1._cache.stats()['hits'], 0)
 
         obj.inc()
         obj.inc()
@@ -494,17 +502,25 @@ class GenericRelStorageTests(
         # revid1 that add two to _value.
         root_storage = self._storage
         try:
-            self._storage = storage1
+            self._storage = self.__make_tryToResolveConflict_ignore_committedData(storage1)
             _revid2 = self._dostoreNP(oid, revid=revid1, data=zodb_pickle(obj))
-            self._storage = storage2
+            self._storage = self.__make_tryToResolveConflict_ignore_committedData(storage2)
             _revid3 = self._dostoreNP(oid, revid=revid1, data=zodb_pickle(obj))
 
-            # Both of them needed to resolve conflicts, and both of them
-            # found the data in their cache (unless we cleared the cache;
-            # in which case, the first one resolved the state and saved it
-            # back to the database and cache, and the second one found it there)
-            self.assertEqual(storage1._cache.stats()['hits'],
-                             2 if not clear_cache else 1)
+            # Both of them needed to resolve conflicts, and since we
+            # didn't pass any data up from the storage, both of them
+            # found the data in their cache (unless we cleared the
+            # cache; in which case, the first one resolved the state
+            # and saved it back to the database and cache, and the
+            # second one found it there)
+            cache_stats = storage1._cache.stats()
+            __traceback_info__ = cache_stats, clear_cache
+            if clear_cache:
+                self.assertEqual(cache_stats['misses'], 2)
+                self.assertEqual(cache_stats['hits'], 1)
+            else:
+                self.assertEqual(cache_stats['misses'], 0)
+                self.assertEqual(cache_stats['hits'], 2)
 
             data, _serialno = self._storage.load(oid, '')
             inst = zodb_unpickle(data)
@@ -1144,7 +1160,11 @@ class GenericRelStorageTests(
             IMVCCAfterCompletionStorage.providedBy(self._storage))
 
     def checkConfigureViaZConfig(self):
-        replica_conf = self.get_adapter_zconfig_replica_conf()
+        replica_fn = None
+        replica_conf = ''
+        if util.DEFAULT_DATABASE_SERVER_HOST == util.STANDARD_DATABASE_SERVER_HOST:
+            replica_fn = self.get_adapter_zconfig_replica_conf()
+            replica_conf = 'replica-conf ' + self.get_adapter_zconfig_replica_conf()
 
         conf = u"""
         %import relstorage
@@ -1153,7 +1173,7 @@ class GenericRelStorageTests(
             name xyz
             read-only false
             keep-history {KEEP_HISTORY}
-            replica-conf {REPLICA_CONF}
+            {REPLICA_CONF}
             blob-dir .
             blob-cache-size-check-external true
             blob-cache-size 100MB
@@ -1168,6 +1188,8 @@ class GenericRelStorageTests(
             REPLICA_CONF=replica_conf,
             ADAPTER=self.get_adapter_zconfig()
         )
+
+        __traceback_info__ = conf
 
         schema_xml = u"""
         <schema>
@@ -1199,9 +1221,10 @@ class GenericRelStorageTests(
             assert_that(adapter, validly_provides(IRelStorageAdapter))
             self.verify_adapter_from_zconfig(adapter)
             self.assertEqual(adapter.keep_history, self.keep_history)
-            self.assertEqual(
-                adapter.connmanager.replica_selector.replica_conf,
-                replica_conf)
+            if replica_fn:
+                self.assertEqual(
+                    adapter.connmanager.replica_selector.replica_conf,
+                    replica_fn)
             self.assertEqual(storage._options.blob_chunk_size, 10485760)
         finally:
             db.close()

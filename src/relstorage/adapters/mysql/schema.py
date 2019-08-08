@@ -215,6 +215,16 @@ class MySQLSchemaInstaller(AbstractSchemaInstaller):
         # an appropriate value for both of those installed here.
         installed = self.list_procedures(cursor)
         current_object = 'current_object' if self.keep_history else 'object_state'
+        if self.keep_history:
+            object_state_join = """
+            INNER JOIN object_state ON (object_state.zoid = cur.zoid
+                                       AND object_state.tid = cur.tid)
+            """
+            object_state_name = 'object_state'
+        else:
+            object_state_join = ""
+            object_state_name = 'cur'
+
         major_version = self.version_detector.get_major_version(cursor)
         if self.version_detector.supports_nowait(cursor):
             set_lock_timeout = ''
@@ -232,6 +242,8 @@ class MySQLSchemaInstaller(AbstractSchemaInstaller):
             create_stmt = create_stmt.format(
                 CHECKSUM=checksum,
                 CURRENT_OBJECT=current_object,
+                OBJECT_STATE_NAME=object_state_name,
+                OBJECT_STATE_JOIN=object_state_join,
                 SET_LOCK_TIMEOUT=set_lock_timeout,
                 FOR_SHARE=for_share
             )

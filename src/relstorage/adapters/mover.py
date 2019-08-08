@@ -313,7 +313,10 @@ class AbstractObjectMover(ABC):
     _detect_conflict_query = Schema.temp_store.natural_join(
         Schema.all_current_object
     ).select(
-        Schema.temp_store.c.zoid, Schema.all_current_object.c.tid, Schema.temp_store.c.prev_tid
+        Schema.temp_store.c.zoid, Schema.all_current_object.c.tid, Schema.temp_store.c.prev_tid,
+        # We don't get the state here; no particularly good reason except that I need to write
+        # that into our query framework.
+        None
     ).where(
         Schema.temp_store.c.prev_tid != Schema.all_current_object.c.tid
     ).order_by(
@@ -330,7 +333,6 @@ class AbstractObjectMover(ABC):
         rows = cursor.fetchall()
         return rows
 
-    @metricmethod_sampled
     def replace_temp(self, cursor, oid, prev_tid, data):
         """Replace an object in the temporary table.
 
@@ -346,6 +348,12 @@ class AbstractObjectMover(ABC):
         WHERE zoid = %s
         """
         cursor.execute(stmt, (prev_tid, md5sum, self.driver.Binary(data), oid))
+
+    @metricmethod_sampled
+    def replace_temps(self, cursor, state_oid_tid_iter):
+        for data, oid_int, tid_int in state_oid_tid_iter:
+            self.replace_temp(cursor, oid_int, tid_int, data)
+
 
     # Subclasses may override any of these queries if there is a
     # more optimal form.

@@ -179,10 +179,13 @@ class IRelStorageAdapter(Interface):
         *read_current_oids* (for read).
 
         Returns an iterable of ``(oid_int, committed_tid_int,
-        tid_this_txn_saw_int)`` for all OIDs that were locked (that
-        is, the OIDs that we're modifying plus the OIDs in
-        *required_tids*). If the ``tid_this_txn_saw_int`` is None,
-        that was an object we only read, not modified.
+        tid_this_txn_saw_int, committed_state)`` for all OIDs that
+        were locked (that is, the OIDs that we're modifying plus the
+        OIDs in *required_tids*) and which had conflicts.
+
+        If the ``tid_this_txn_saw_int`` is None, that was an object we
+        only read, not modified. ``committed_state`` is allowed to be None if
+        there isn't an efficient way to query that in bulk from the database.
 
         Implementations are encouraged to do all this work in as few
         calls to the database as possible with a stored procedure. The
@@ -793,7 +796,7 @@ class IObjectMover(Interface):
         ``oid_int`` values will be distinct. It is further guaranteed that
         this method will not be called more than once in a given transaction;
         further updates to the temporary table will be made using
-        ``replace_temp``, one at a time.
+        ``replace_temps``, which is also only called once.
         """
 
     def restore(cursor, batcher, oid, tid, data, stmt_buf):
@@ -809,20 +812,22 @@ class IObjectMover(Interface):
         Find all conflicts in the data about to be committed.
 
         If there is a conflict, returns a sequence of
-        ``(oid, committed_tid, attempted_committed_tid)``.
+        ``(oid, committed_tid, attempted_committed_tid, committed_state)``.
 
         This method should be called during the ``tpc_vote`` phase of a transaction,
         with :meth:`ILocker.lock_current_objects` held.
         """
 
-    def replace_temp(cursor, oid, prev_tid, data):
+    def replace_temps(cursor, state_oid_tid_iter):
         """
-        Replace an object in the temporary table.
+        Replace all objects in the temporary table with new data from
+        *state_oid_tid_iter*.
 
-        This happens after conflict resolution.
+        This happens after conflict resolution. The param is as for
+        ``store_temps``.
 
-        TODO: This method needs to go away and use the regular
-        row batcher, so we can take advantage of bulk optimizations.
+        Implementations should try to perform this in as few database operations
+        as possible.
         """
 
     def move_from_temp(cursor, tid, txn_has_blobs):

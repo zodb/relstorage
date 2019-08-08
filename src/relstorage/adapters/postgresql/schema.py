@@ -92,13 +92,24 @@ class PostgreSQLSchemaInstaller(AbstractSchemaInstaller):
         # Convert from bare strings into _StoredFunction objects
         # (which are missing their signatures at this point).
         current_object = 'current_object' if self.keep_history else 'object_state'
+        if self.keep_history:
+            object_state_join = """
+            INNER JOIN object_state ON (object_state.zoid = cur.zoid
+                                       AND object_state.tid = cur.tid)
+            """
+            object_state_name = 'object_state'
+        else:
+            object_state_join = ""
+            object_state_name = 'cur'
         return {
             name: _StoredFunction(
                 name,
                 None,
                 self._checksum_for_str(value),
                 value.format(
-                    CURRENT_OBJECT=current_object
+                    CURRENT_OBJECT=current_object,
+                    OBJECT_STATE_JOIN=object_state_join,
+                    OBJECT_STATE_NAME=object_state_name
                 )
             )
             for name, value
@@ -247,7 +258,8 @@ class PostgreSQLSchemaInstaller(AbstractSchemaInstaller):
             __traceback_info__ = proc_name, self.keep_history
             proc_source = stored_func.create
             # All definitions should be written with 'CREATE OR REPLACE'
-            # so we don't need to bother with 'DROP'
+            # so we don't need to bother with 'DROP'. Though, if the return
+            # type changes, we can't REPLACE.
             cursor.execute(proc_source)
 
         # Update checksums
@@ -314,6 +326,8 @@ class PostgreSQLSchemaInstaller(AbstractSchemaInstaller):
     CREATE INDEX pack_object_keep_true ON pack_object (visited)
         WHERE keep = true;
     """
+
+    DROP_TABLE_TMPL = 'DROP TABLE IF EXISTS {table}'
 
     def _reset_oid(self, cursor):
         stmt = "ALTER SEQUENCE zoid_seq RESTART WITH 1;"
