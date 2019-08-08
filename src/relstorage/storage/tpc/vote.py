@@ -258,14 +258,26 @@ class AbstractVote(AbstractTPCState):
         # MySQL 5.7 and 8 handle this weird, though. If two
         # transactions are in READ COMMITTED level, and one locks the
         # odd rows for update, the other one blocks trying to lock the
-        # even rows for update (when testing with small sets of rows;
-        # probably they all share the same database page? Are row
-        # locks implemented at the page level?). Then, when the first
-        # one tries to lock the even rows for sharing, it gets killed
-        # with a deadlock exception, and the second one takes the
-        # locks on the even rows. The same happens if you go the other
-        # way. This seems to be because of "intention locks."
-        # (https://dev.mysql.com/doc/refman/8.0/en/innodb-locking.html#innodb-intention-locks)
+        # even rows for update using queries like ``(zoid % 2) = 1``.
+        # This is because "SELECT ... LOCK IN SHARE MODE sets shared
+        # next-key locks on all index records the search encounters."
+        # while "SELECT ... FOR UPDATE sets an exclusive next-key lock
+        # on every record the search encounters. However, only an
+        # index record lock is required for statements that lock rows
+        # using a unique index to search for a unique row. For index
+        # records the search encounters, SELECT ... FOR UPDATE blocks
+        # other sessions from doing SELECT ... LOCK IN SHARE MODE or
+        # from reading in certain transaction isolation levels." That
+        # sort of query does a range scan and locks many index rows.
+        #
+        # The good news is that the query we actually use, ``SELECT
+        # zoid WHERE zoid in (SELECT zoid from temp_table)`` doesn't
+        # do a range scan. It first accessess the temp_table and does
+        # a sort into a temporary table using the index; then it
+        # accesses object_state or current_object using the ``eq_ref``
+        # method using the PRIMARY key index. This locks only the
+        # actually required rows. We should probably add some
+        # optimizer hints to make absolutely sure of that.
 
         conflicts = adapter.lock_objects_and_detect_conflicts(cursor, self.required_tids)
 

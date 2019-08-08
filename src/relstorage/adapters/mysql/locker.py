@@ -68,8 +68,8 @@ class MySQLLocker(AbstractLocker):
     standard InnoDB row-level lock; this brings the benefits of being
     lightweight and automatically being released if the transaction
     aborts or commits, plus instant deadlock detection. Prior to MySQL
-    8.0, these don't support ``NOWAIT`` syntax, so we synthesize that by
-    setting the session variable `innodb_lock_wait_timeout
+    8.0, these don't support ``NOWAIT`` syntax, so we synthesize that
+    by setting the session variable `innodb_lock_wait_timeout
     <https://dev.mysql.com/doc/refman/5.7/en/innodb-parameters.html#sysvar_innodb_lock_wait_timeout>`_.
 
     Note that this lock cannot be against the ``object_state`` or
@@ -77,10 +77,13 @@ class MySQLLocker(AbstractLocker):
     been locked by other transactions, and we risk deadlock.
 
     Also note that by default, a lock timeout will only rollback the
-    current *statement*, not the whole session, as in most databases
-    (this doesn't apply to ``NOWAIT`` in MySQL 8). Fortunately, a lock timeout
-    only rolling back the single statement is exactly what we want to implement
-    ``NOWAIT`` on earlier databases.
+    current *statement*, not the whole transaction, as in most
+    databases (this doesn't apply to ``NOWAIT`` in MySQL 8); to
+    release any locks taken earlier, we must explicitly rollback the
+    transaction. Fortunately, a lock timeout only rolling back the
+    single statement is exactly what we want to implement ``NOWAIT``
+    on earlier databases. In contrast, a detected deadlock will
+    actually rollback the entire transaction.
 
     The ``ensure_current`` argument is essentially ignored; the locks
     taken out by ``lock_current_objects`` take care of that.
