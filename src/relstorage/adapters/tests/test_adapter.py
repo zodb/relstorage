@@ -16,10 +16,24 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-from ..adapter import MySQLAdapter as Adapter
-from ...tests import test_adapter
+from hamcrest import assert_that
+from nti.testing.matchers import validly_provides
 
-class TestAdapter(test_adapter.AdapterTestBase):
+from relstorage.tests import TestCase
+
+from .. import interfaces
+
+class AdapterTestBase(TestCase):
 
     def _makeOne(self):
-        return Adapter()
+        raise NotImplementedError
+
+    def test_implements(self):
+        adapter = self._makeOne()
+        assert_that(adapter, validly_provides(interfaces.IRelStorageAdapter))
+
+
+def test_suite():
+    # Nothing to see here.
+    import unittest
+    return unittest.TestSuite()

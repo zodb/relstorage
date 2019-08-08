@@ -26,6 +26,7 @@ from zope.interface import Interface
 try:
     from zope.schema import Tuple
     from zope.schema import Object
+    from zope.schema import Bool
     from zope.interface.common.interfaces import IException
 except ImportError: # pragma: no cover
     # We have nti.testing -> zope.schema as a test dependency; but we
@@ -35,6 +36,7 @@ except ImportError: # pragma: no cover
         return Attribute(kwargs['description'])
 
     Object = Tuple
+    Bool = Tuple
 
     def Factory(schema, description='', **_kw):
         return Attribute(description + " (Must implement %s)" % schema)
@@ -56,293 +58,6 @@ else:
 
 
 
-class IRelStorageAdapter(Interface):
-    """
-    A database adapter for RelStorage.
-
-    Historically, this has just been a holding place for other components
-    for the particular database. However, it is moving to holding algorithms
-    involved in the storage; this facilitates moving chunks of functionality
-    into database stored procedures as appropriate. The basic algorithms are
-    implemented in :class:`.adapter.AbstractAdapter`.
-
-    """
-
-    driver = Attribute("The IDBDriver being used")
-    connmanager = Attribute("An IConnectionManager")
-    dbiter = Attribute("An IDatabaseIterator")
-    keep_history = Attribute("True if this adapter supports undo")
-    locker = Attribute("An ILocker")
-    mover = Attribute("An IObjectMover")
-    oidallocator = Attribute("An IOIDAllocator")
-    packundo = Attribute("An IPackUndo")
-    poller = Attribute("An IPoller")
-    runner = Attribute("An IScriptRunner")
-    schema = Attribute("An ISchemaInstaller")
-    stats = Attribute("An IStats")
-    txncontrol = Attribute("An ITransactionControl")
-
-    def new_instance():
-        """
-        Return an instance for use by another RelStorage instance.
-
-        Adapters that are stateless can simply return self.  Adapters
-        that have mutable state must make a clone and return it.
-        """
-
-    def __str__():
-        """Return a short description of the adapter"""
-
-    def lock_database_and_choose_next_tid(cursor,
-                                          username,
-                                          description,
-                                          extension):
-        """
-        Lock the database with the commit lock and allocate the next
-        tid.
-
-        In a simple implementation, this will first obtain the commit
-        lock with around :meth:`ILocker.hold_commit_lock`. Then it
-        will query the current most recently committed TID with
-        :meth:`ITransactionControl.get_tid`. It will choose the next
-        TID based on that value and the current timestamp, and then it
-        will write that value to the database with
-        :meth:`ITransactionControl.add_transaction`.
-
-        The *username*, *description* and *extension* paramaters are as for
-        ``add_transaction.
-
-        :return: The new TID integer.
-        """
-
-    def lock_database_and_move(
-            store_connection,
-            blobhelper,
-            ude,
-            commit=True,
-            committing_tid_int=None,
-            after_selecting_tid=None
-    ):
-        """
-        Lock the database, choose the next TID, and move temporary
-        data into its final place.
-
-        This is used in two modes. In the usual case, *commit* will be
-        true, and this method is called to implement the final step of
-        ``tpc_finish``. In that case, this method is responsible for
-        committing the transaction (using the *store_connection*
-        provided). When *commit* is false, this method is effectively
-        part of ``tpc_vote`` and must **not** commit.
-
-        The *blobhelper* is the :class:`IBlobHelper`. This method is
-        responsible for moving blob data into place if the blob data
-        is stored on the server and there are blobs in this
-        transaction. (Implementations that use stored procedures will
-        probably not need this argument; it is here to be able to
-        provide ``txn_has_blobs`` to
-        :meth:`IObjectMover.move_from_temp`.)
-
-        *ude* is a tuple of ``(username, description, extension)``.
-
-        If *committing_tid_int* is None, then this method must lock
-        the database and choose the next TID as if by calling
-        :meth:`lock_database_and_choose_next_tid` (passing in the
-        expanded *ude*); if it is **not** None, the database has
-        already been locked and the TID selected.
-
-        *after_selecting_tid* is a function of one argument, the
-        committing integer TID. If it is proveded, it must be called
-        once the TID has been selected and temporary data moved into
-        place.
-
-        Implementations are encouraged to do all of this work in as
-        few calls to the database as possible with a stored procedure
-        (ideally one call). The default implementation will use
-        :meth:`lock_database_and_choose_next_tid`,
-        :meth:`IObjectMover.move_from_temp`,
-        :meth:`IObjectMover.update_current` and
-        :meth:`ITransactionControl.commit_phase1` and
-        :meth:`ITransactionControl.commit_phase2`.
-
-        :return: A tuple ``(committing_tid_int, prepared_txn_id)``;
-                 the *prepared_txn_id* is irrelevant if *commit* was
-                 true.
-        """
-
-    def lock_objects_and_detect_conflicts(
-            cursor,
-            read_current_oids,
-    ):
-        """
-        Without taking the commit lock, lock the objects this
-        transaction wants to modify (for exclusive update) and the
-        objects in *read_current_oids* (for shared read).
-
-        Returns an iterable of ``(oid_int, committed_tid_int,
-        tid_this_txn_saw_int, committed_state)`` for current objects
-        that were locked, plus objects which had conflicts.
-
-        Implementations are encouraged to do all this work in as few
-        calls to the database as possible with a stored procedure. The
-        default implementation will use
-        :meth:`ILocker.lock_current_objects`,
-        :meth:`IObjectMover.current_object_tids`, and
-        :meth:`IObjectMover.detect_conflicts`.
-
-        This method may raise the same lock exceptions and
-        :meth:`ILocker.lock_current_objects`. In particular, it should
-        take care to distinguish between a failure to acquire an
-        update lock and a failure to acquire a read lock by raising
-        the appropriate exceptions
-        (:class:`UnableToLockRowsToModifyError` and
-        :class:`UnableToLockRowsToReadCurrentError`, respectively).
-
-        Because two separate classes of locks are to be obtained,
-        implementations will typically need to make two separate
-        locking queries. If the second of those queries fails, the
-        implementation is encouraged to immediately release locks
-        taken by the first operation before raising an exception.
-        Ideally this happens in the database stored procedure.
-        (PostgreSQL works this way automatically --- any error rolls
-        the transaction back and releases locks --- but this takes
-        work on MySQL except in the case of deadlock.)
-
-        .. rubric:: Read Current Locks
-
-        The *read_current_oids* maps OID integers to expected TID
-        integers. Each such object must be read share locked for the
-        duration of the transaction so we can ensure that the final
-        commit occurs without those objects having been changed. From
-        ReadVerifyingStorage's ``checkCurrentSerialInTransaction``:
-        "If no [ReadConflictError] exception is raised, then the
-        serial must remain current through the end of the
-        transaction."
-
-        Applications sometimes (often) perform readCurrent() on the
-        *wrong* object (for example: the ``BTree`` object or the
-        ``zope.container`` container object, when what is really
-        required, what will actually be modified, is a ``BTree``
-        bucket---very hard to predict), so very often these objects
-        will not ever be modified. (Indeed, ``BTree.__setitem__`` and
-        ``__delitem__`` perform readCurrent on the BTree itself; but
-        once the first bucket has been established, the BTree will not
-        usually be modified.) A share lock is enough to prevent any
-        modifications without causing unnecessary blocking if the
-        object would never be modified.
-
-        In the results, if the ``tid_this_txn_saw_int`` is ``None``,
-        that was an object we only read, and share locked. If the
-        ``committed_tid_int`` does not match the TID we expected to
-        get, then the caller will raise a ``ReadConflictError`` and
-        abort the transaction. The implementation is encouraged to
-        return all such rows *first* so that these inexpensive checks
-        can be accomplished before the more expensive conflict
-        resolution process.
-
-        Optionally, if this method can detect a read current violation
-        based on the data in *read_current_oids* at the database
-        level, it may raise a :class:`ReadConflictError`. This method
-        is also allowed and encouraged to *only* return read current
-        violations; further, it need only return the first such
-        violation (because an exception will immediately be raised.)
-
-        Implementations are encouraged to use the database ``NOWAIT``
-        feature (or equivalent) to take read current locks. If such an
-        object is already locked exclusively, that means it is being
-        modified and this transaction is racing the modification
-        transaction. Taking the lock with ``NOWAIT`` and raising an
-        error lets the write transaction proceed, while this one rolls
-        back and retries. (Hopefully the write transaction finishes
-        quickly, or several retries may be needed.)
-
-        .. rubric:: Modified Objects and Conflicts
-
-        All objects that this transaction intends to modify (which are
-        in the ``temp_store`` table) must be exclusively write locked
-        when this method returns.
-
-        The remainder of the results (where ``tid_this_txn_saw_int``
-        is not ``None``) give objects that we have detected a conflict
-        (a modification that has committed earlier to an object this
-        transaction also wants to modify).
-
-        As an optimization for conflict resolution,
-        ``committed_state`` may give the current committed state of
-        the object (corresponding to ``committed_tid_int``), but is
-        allowed to be ``None`` if there isn't an efficient way to
-        query that in bulk from the database.
-
-        .. rubric:: Deadlocks, and Shared vs Exclusive Locks
-
-        It might seem that, because no method of a transaction
-        (*except* for ``restore()``) writes directly to the
-        ``object_state`` or ``current_object`` table *before*
-        acquiring the commit lock, a share lock is enough even for
-        objects we're definitely going to modify. That way leads to
-        deadlock, however. Consider this order of operations:
-
-            1. Tx a: LOCK OBJECT 1 FOR SHARE. (Tx a will modify this.)
-
-            2. Tx b: LOCK OBJECT 1 FOR SHARE. (Tx b is just
-               readCurrent.)
-
-            3. Tx a: Obtain commit lock.
-
-            4. Tx b: attempt to obtain commit lock; block.
-
-            5. Tx a: UPDATE OBJECT 1; attempt to escalate shared lock
-               to exclusive lock. --> DEADLOCK with the shared lock
-               from step 2.
-
-        Tx a needs to raise the lock of object 1, but Tx b's share
-        lock is preventing it. Meanwhile, Tx b wants the commit lock,
-        but Tx a is holding it.
-
-        If Tx a took an exclusive lock, it would either block Tx b
-        from getting a share lock, or be blocked by Tx b's share lock;
-        either way, whichever one got to the commit lock would be able
-        to complete.
-
-        Further, it is trivial to show that when using two lock
-        classes, two transactions that have overlapping sets of
-        objects (e.g., a wants shared on ``(1, 3, 5, 7)`` and
-        exclusive on ``(2, 4, 6, 8)`` and b wants shared on ``(2, 4,
-        6, 8)`` and exclusive on ``(3, 5, 7)``), can easily deadlock
-        *before* taking the commit lock, no matter how we interleave
-        those operations. This is true if they both take their
-        exclusive locks first and then attempt share locks on the
-        remainder, both take shared locks on everything and attempt to
-        upgrade to exclusive on that subset, or both take just the
-        shared locks and then attempt to take the exclusive locks.
-
-        **That's perfectly fine.**
-
-        As long as the database either supports ``NOWAIT``
-        (immediately error when you fail to get a requested lock) or
-        rapid deadlock detection resulting in an error, we can catch
-        that error and turn it into the ``ReadConflictError`` it
-        actually is.
-
-        PostgreSQL supports ``NOWAIT`` (and deadlock detection, after
-        a small but configurable delay). MySQL's InnoDB supports rapid
-        deadlock detection, and starting with MySQL 8, it supports
-        ``NOWAIT``.
-
-        Therefore, the original strategy was to first take exclusive
-        locks of things we will be modifying. Once that succeeds, then
-        we attempt shared locks of readCurrent using ``NOWAIT``. If
-        that fails because we can't get a lock, we know someone is in
-        the process of modifying it and we have a conflict. If we get
-        the locks, we still have to confirm the TIDs are the things we
-        expect. (A possible optimization is to do those two steps at
-        once, in the database. ``SELECT FOR SHARE WHERE oid = X and
-        TID = x``. If we don't get the right number of rows,
-        conflict.)
-
-        :param cursor: The store cursor.
-        :param read_current_oids: A mapping from oid integer to tid
-            integer that the transaction expects.
-        """
 
 
 class IDBDialect(Interface):
@@ -1283,6 +998,398 @@ class ITransactionControl(Interface):
                  ignored, returns a false value (and the connection
                  and cursor are closed before this method returns).
         """
+
+class IDBStats(Interface):
+    """
+    Collecting, viewing and updating database information.
+    """
+
+    def get_object_count():
+        """Returns the approximate number of objects in the database"""
+
+    def get_db_size():
+        """Returns the approximate size of the database in bytes"""
+
+    def large_database_change():
+        """
+        Call this when the database has changed substantially,
+        and it would be a good time to perform any updates or
+        optimizations.
+        """
+
+
+class IRelStorageAdapter(Interface):
+    """
+    A database adapter for RelStorage.
+
+    Historically, this has just been a holding place for other components
+    for the particular database. However, it is moving to holding algorithms
+    involved in the storage; this facilitates moving chunks of functionality
+    into database stored procedures as appropriate. The basic algorithms are
+    implemented in :class:`.adapter.AbstractAdapter`.
+
+    """
+
+    driver = Object(IDBDriver)
+    connmanager = Object(IConnectionManager)
+    dbiter = Object(IDatabaseIterator)
+    keep_history = Bool(description=u"True if this adapter supports undo")
+    locker = Object(ILocker)
+    mover = Object(IObjectMover)
+    oidallocator = Object(IOIDAllocator)
+    packundo = Object(IPackUndo)
+    poller = Object(IPoller)
+    runner = Object(IScriptRunner)
+    schema = Object(ISchemaInstaller)
+    stats = Object(IDBStats)
+    txncontrol = Object(ITransactionControl)
+
+    def new_instance():
+        """
+        Return an instance for use by another RelStorage instance.
+
+        Adapters that are stateless can simply return self.  Adapters
+        that have mutable state must make a clone and return it.
+        """
+
+    def __str__():
+        """Return a short description of the adapter"""
+
+    def lock_database_and_choose_next_tid(cursor,
+                                          username,
+                                          description,
+                                          extension):
+        """
+        Lock the database with the commit lock and allocate the next
+        tid.
+
+        In a simple implementation, this will first obtain the commit
+        lock with around :meth:`ILocker.hold_commit_lock`. Then it
+        will query the current most recently committed TID with
+        :meth:`ITransactionControl.get_tid`. It will choose the next
+        TID based on that value and the current timestamp, and then it
+        will write that value to the database with
+        :meth:`ITransactionControl.add_transaction`.
+
+        The *username*, *description* and *extension* paramaters are as for
+        ``add_transaction.
+
+        :return: The new TID integer.
+        """
+
+    def lock_database_and_move(
+            store_connection,
+            blobhelper,
+            ude,
+            commit=True,
+            committing_tid_int=None,
+            after_selecting_tid=None
+    ):
+        """
+        Lock the database, choose the next TID, and move temporary
+        data into its final place.
+
+        This is used in two modes. In the usual case, *commit* will be
+        true, and this method is called to implement the final step of
+        ``tpc_finish``. In that case, this method is responsible for
+        committing the transaction (using the *store_connection*
+        provided). When *commit* is false, this method is effectively
+        part of ``tpc_vote`` and must **not** commit.
+
+        The *blobhelper* is the :class:`IBlobHelper`. This method is
+        responsible for moving blob data into place if the blob data
+        is stored on the server and there are blobs in this
+        transaction. (Implementations that use stored procedures will
+        probably not need this argument; it is here to be able to
+        provide ``txn_has_blobs`` to
+        :meth:`IObjectMover.move_from_temp`.)
+
+        *ude* is a tuple of ``(username, description, extension)``.
+
+        If *committing_tid_int* is None, then this method must lock
+        the database and choose the next TID as if by calling
+        :meth:`lock_database_and_choose_next_tid` (passing in the
+        expanded *ude*); if it is **not** None, the database has
+        already been locked and the TID selected.
+
+        *after_selecting_tid* is a function of one argument, the
+        committing integer TID. If it is proveded, it must be called
+        once the TID has been selected and temporary data moved into
+        place.
+
+        Implementations are encouraged to do all of this work in as
+        few calls to the database as possible with a stored procedure
+        (ideally one call). The default implementation will use
+        :meth:`lock_database_and_choose_next_tid`,
+        :meth:`IObjectMover.move_from_temp`,
+        :meth:`IObjectMover.update_current` and
+        :meth:`ITransactionControl.commit_phase1` and
+        :meth:`ITransactionControl.commit_phase2`.
+
+        :return: A tuple ``(committing_tid_int, prepared_txn_id)``;
+                 the *prepared_txn_id* is irrelevant if *commit* was
+                 true.
+        """
+
+    def lock_objects_and_detect_conflicts(
+            cursor,
+            read_current_oids,
+    ):
+        """
+        Without taking the commit lock, lock the objects this
+        transaction wants to modify (for exclusive update) and the
+        objects in *read_current_oids* (for shared read).
+
+        Returns an iterable of ``(oid_int, committed_tid_int,
+        tid_this_txn_saw_int, committed_state)`` for current objects
+        that were locked, plus objects which had conflicts.
+
+        Implementations are encouraged to do all this work in as few
+        calls to the database as possible with a stored procedure. The
+        default implementation will use
+        :meth:`ILocker.lock_current_objects`,
+        :meth:`IObjectMover.current_object_tids`, and
+        :meth:`IObjectMover.detect_conflicts`.
+
+        This method may raise the same lock exceptions and
+        :meth:`ILocker.lock_current_objects`. In particular, it should
+        take care to distinguish between a failure to acquire an
+        update lock and a failure to acquire a read lock by raising
+        the appropriate exceptions
+        (:class:`UnableToLockRowsToModifyError` and
+        :class:`UnableToLockRowsToReadCurrentError`, respectively).
+
+        Because two separate classes of locks are to be obtained,
+        implementations will typically need to make two separate
+        locking queries. If the second of those queries fails, the
+        implementation is encouraged to immediately release locks
+        taken by the first operation before raising an exception.
+        Ideally this happens in the database stored procedure.
+        (PostgreSQL works this way automatically --- any error rolls
+        the transaction back and releases locks --- but this takes
+        work on MySQL except in the case of deadlock.)
+
+        .. rubric:: Read Current Locks
+
+        The *read_current_oids* maps OID integers to expected TID
+        integers. Each such object must be read share locked for the
+        duration of the transaction so we can ensure that the final
+        commit occurs without those objects having been changed. From
+        ReadVerifyingStorage's ``checkCurrentSerialInTransaction``:
+        "If no [ReadConflictError] exception is raised, then the
+        serial must remain current through the end of the
+        transaction."
+
+        Applications sometimes (often) perform readCurrent() on the
+        *wrong* object (for example: the ``BTree`` object or the
+        ``zope.container`` container object, when what is really
+        required, what will actually be modified, is a ``BTree``
+        bucket---very hard to predict), so very often these objects
+        will not ever be modified. (Indeed, ``BTree.__setitem__`` and
+        ``__delitem__`` perform readCurrent on the BTree itself; but
+        once the first bucket has been established, the BTree will not
+        usually be modified.) A share lock is enough to prevent any
+        modifications without causing unnecessary blocking if the
+        object would never be modified.
+
+        In the results, if the ``tid_this_txn_saw_int`` is ``None``,
+        that was an object we only read, and share locked. If the
+        ``committed_tid_int`` does not match the TID we expected to
+        get, then the caller will raise a ``ReadConflictError`` and
+        abort the transaction. The implementation is encouraged to
+        return all such rows *first* so that these inexpensive checks
+        can be accomplished before the more expensive conflict
+        resolution process.
+
+        Optionally, if this method can detect a read current violation
+        based on the data in *read_current_oids* at the database
+        level, it may raise a :class:`ReadConflictError`. This method
+        is also allowed and encouraged to *only* return read current
+        violations; further, it need only return the first such
+        violation (because an exception will immediately be raised.)
+
+        Implementations are encouraged to use the database ``NOWAIT``
+        feature (or equivalent) to take read current locks. If such an
+        object is already locked exclusively, that means it is being
+        modified and this transaction is racing the modification
+        transaction. Taking the lock with ``NOWAIT`` and raising an
+        error lets the write transaction proceed, while this one rolls
+        back and retries. (Hopefully the write transaction finishes
+        quickly, or several retries may be needed.)
+
+        .. rubric:: Modified Objects and Conflicts
+
+        All objects that this transaction intends to modify (which are
+        in the ``temp_store`` table) must be exclusively write locked
+        when this method returns.
+
+        The remainder of the results (where ``tid_this_txn_saw_int``
+        is not ``None``) give objects that we have detected a conflict
+        (a modification that has committed earlier to an object this
+        transaction also wants to modify).
+
+        As an optimization for conflict resolution,
+        ``committed_state`` may give the current committed state of
+        the object (corresponding to ``committed_tid_int``), but is
+        allowed to be ``None`` if there isn't an efficient way to
+        query that in bulk from the database.
+
+        .. rubric:: Deadlocks, and Shared vs Exclusive Locks
+
+        It might seem that, because no method of a transaction
+        (*except* for ``restore()``) writes directly to the
+        ``object_state`` or ``current_object`` table *before*
+        acquiring the commit lock, a share lock is enough even for
+        objects we're definitely going to modify. That way leads to
+        deadlock, however. Consider this order of operations:
+
+            1. Tx a: LOCK OBJECT 1 FOR SHARE. (Tx a will modify this.)
+
+            2. Tx b: LOCK OBJECT 1 FOR SHARE. (Tx b is just
+               readCurrent.)
+
+            3. Tx a: Obtain commit lock.
+
+            4. Tx b: attempt to obtain commit lock; block.
+
+            5. Tx a: UPDATE OBJECT 1; attempt to escalate shared lock
+               to exclusive lock. --> DEADLOCK with the shared lock
+               from step 2.
+
+        Tx a needs to raise the lock of object 1, but Tx b's share
+        lock is preventing it. Meanwhile, Tx b wants the commit lock,
+        but Tx a is holding it.
+
+        If Tx a took an exclusive lock, it would either block Tx b
+        from getting a share lock, or be blocked by Tx b's share lock;
+        either way, whichever one got to the commit lock would be able
+        to complete.
+
+        Further, it is trivial to show that when using two lock
+        classes, two transactions that have overlapping sets of
+        objects (e.g., a wants shared on ``(1, 3, 5, 7)`` and
+        exclusive on ``(2, 4, 6, 8)`` and b wants shared on ``(2, 4,
+        6, 8)`` and exclusive on ``(3, 5, 7)``), can easily deadlock
+        *before* taking the commit lock, no matter how we interleave
+        those operations. This is true if they both take their
+        exclusive locks first and then attempt share locks on the
+        remainder, both take shared locks on everything and attempt to
+        upgrade to exclusive on that subset, or both take just the
+        shared locks and then attempt to take the exclusive locks.
+        This extends to more than two processes.
+
+        **That's perfectly fine.**
+
+        As long as the database either supports ``NOWAIT``
+        (immediately error when you fail to get a requested lock) or
+        rapid deadlock detection resulting in an error, we can catch
+        that error and turn it into the ``ReadConflictError`` it
+        actually is.
+
+        PostgreSQL supports ``NOWAIT`` (and deadlock detection, after
+        a small but configurable delay). MySQL's InnoDB supports rapid
+        deadlock detection, and starting with MySQL 8, it supports
+        ``NOWAIT``.
+
+        .. rubric:: Lock Order
+
+        The original strategy was to first take exclusive locks of
+        things we will be modifying. Once that succeeds, then we
+        attempt shared locks of readCurrent using ``NOWAIT``. If that
+        fails because we can't get a lock, we know someone is in the
+        process of modifying it and we have a conflict. If we get the
+        locks, we still have to confirm the TIDs are the things we
+        expect. (A possible optimization is to do those two steps at
+        once, in the database. ``SELECT FOR SHARE WHERE oid = X and
+        TID = x``. If we don't get the right number of rows,
+        conflict.) This prioritizes writers over readers: readers fail
+        at the expense of writers.
+
+        However, it means that if we're going to fail a transaction
+        because an object we'd like to read lock has been modified, we
+        have to wait until we timeout, or acquire all of our exclusive
+        locks. Depending on transaction ordering, this could mean
+        unnecessarily long delays. Suppose Tx a wants to write to
+        objects 1 and 2, and Tx b wants to write to 1 but only read 2.
+        (Recall that a ZODB connection automatically upgrades
+        readCurrent() into just modifications. 1 and 2 could be bank
+        accounts; Tx a is doing a transfer, but Tx b is checking
+        collateral (account 2) for a loan that was approved and
+        transferring that into 1.)
+
+            1. Tx a: LOCK 1, 2 EXCLUSIVE. (No share locks.)
+
+            2. Tx b: LOCK 1 EXCLUSIVE. -> Block; queue for lock 1.
+
+            3. Tx a: Resolve a conflict in 1, wait for the commit
+               lock, and finally commit and release the locks on 1 and
+
+            4. Tx c: LOCK 2 EXCLUSIVE.
+
+            5. Tx b: LOCK 2 SHARE -> wait exception.
+
+        Here, Tx b had to wait while Tx a finished its entire
+        business, only to have Tx c swoop in and get the lock first,
+        leading to Tx b raising an exception. Some databases guarantee
+        that locks are handed off in FIFO fashion, but not all do.
+        Even if the database granted Tb b the share lock first, it
+        would still discover that the TID had changed and raise an
+        exception. Meanwhile, Tx b has been holding an exclusive lock
+        on 1 this entire time, preventing anyone else from modifying
+        it.
+
+        If we take the share locks first, the scenario looks like
+        this:
+
+            1. Tx a: LOCK 1, 2 EXCLUSIVE. (No share locks.)
+
+            2. Tx b: LOCK 2 SHARE -> wait exception; begin retry.
+
+        Tx b gets much quicker notification that it won't be able to
+        progress and begins a retry.
+
+        Both orders have the problem that if Tx a takes longer to
+        commit than Tx b does to begin its retry, Tx b may take the
+        same action against the same state of the database several
+        times in a row before giving up. What's different is that in
+        the exclusive first version, that only happens if Tx a and Tx
+        b have no exclusive locks in common:
+
+            1. Tx a: Lock 1 EXCLUSIVE.
+
+            2. Tx b: Lock 2 EXCLUSIVE.
+
+            3. Tx b: Lock 1 SHARE -> wait exception, begin retry.
+
+        However, this can be mitigated by introducing small backoff
+        delays in the transaction retry logic.
+
+        Suppose a different transaction already modified object 2.
+        With the original lock order (exclusive first), the scenario
+        doesn't change. Tx b has to wait for Tx a to finish before it
+        can determine that fact (Tx a has to resolve a conflict or
+        fail). If Tx b got to go first, it would relatively quickly
+        discover this fact, but at the cost of waiting for an
+        exclusive lock for an arbitrary amount of time:
+
+            1. Tx b: Lock 1 EXCLUSIVE. (Potentially blocks.)
+
+            2. Tx a: Lock 1, 2 EXCLUSIVE. -> Block; queue for lock 1.
+
+            3. Tx b: Lock 2 SHARE.
+
+            4. Tx b: Determine 2 has been modified; raise
+               ReadConflictError.
+
+        Taking the share lock first solves this concern; Tx b is
+        immediately able to determine that 2 has been modified and
+        quickly raise an exception without holding any other locks.
+
+        :param cursor: The store cursor.
+        :param read_current_oids: A mapping from oid integer to tid
+            integer that the transaction expects.
+        """
+
 
 ###
 # Exceptions

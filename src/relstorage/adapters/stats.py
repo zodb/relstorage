@@ -16,11 +16,14 @@
 
 import abc
 
+from zope.interface import implementer
+
 from .._compat import ABC
+from .interfaces import IDBStats
 from ._util import query_property
 from ._util import DatabaseHelpersMixin
 
-
+@implementer(IDBStats)
 class AbstractStats(DatabaseHelpersMixin, ABC):
 
     def __init__(self, connmanager, keep_history):

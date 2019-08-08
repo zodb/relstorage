@@ -17,22 +17,11 @@ from __future__ import division
 from __future__ import print_function
 
 
-from hamcrest import assert_that
-from nti.testing.matchers import validly_provides
-
-
-from relstorage.tests import TestCase
-
 from ..adapter import PostgreSQLAdapter as Adapter
 
-from ... import interfaces
+from ...tests import test_adapter
 
-class TestAdapter(TestCase):
+class TestAdapter(test_adapter.AdapterTestBase):
 
     def _makeOne(self):
         return Adapter()
-
-    def test_implements(self):
-
-        adapter = self._makeOne()
-        assert_that(adapter, validly_provides(interfaces.IRelStorageAdapter))
