@@ -2,7 +2,7 @@
  Changes
 =========
 
-3.0a7 (unreleased)
+3.0a7 (2019-08-07)
 ==================
 
 - Eliminate runtime dependency on ZEO. See :issue:`293`.
