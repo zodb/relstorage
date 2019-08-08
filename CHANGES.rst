@@ -10,7 +10,13 @@
   have to block, so a quick lock timeout here means that a
   ``ReadConflictError`` is inevitable. This works best on PostgreSQL
   and MySQL 8, which support true non-blocking locks. On MySQL 5.7,
-  non-blocking locks are emulated with a 1s timeout See :issue:`310`.
+  non-blocking locks are emulated with a 1s timeout. See :issue:`310`.
+
+  .. note:: The transaction machinery will retry read conflict errors
+            by default. The more rapid detection of them may lead to
+            extra retries if there was a process still finishing its
+            commit. Consider adding small sleep backoffs to retry
+            logic.
 
 - Fix MySQL to immediately rollback its transaction when it gets a
   lock timeout, while still in the stored procedure on the database.

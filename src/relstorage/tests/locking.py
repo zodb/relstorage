@@ -174,7 +174,9 @@ class TestLocking(TestCase):
         from relstorage.adapters.interfaces import UnableToLockRowsToModifyError
 
         # Use a very small commit lock timeout.
-        commit_lock_timeout = 0.1
+        # TODO: We can actually go much smaller for PostgreSQL, just not MySQL.
+        # We need a way to identify that.
+        commit_lock_timeout = 1
         duration_blocking = self.__do_check_error_with_conflicting_concurrent_read_current(
             UnableToLockRowsToModifyError,
             commit_lock_timeout=commit_lock_timeout,

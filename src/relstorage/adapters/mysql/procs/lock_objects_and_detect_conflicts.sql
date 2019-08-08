@@ -15,6 +15,9 @@ BEGIN
        -- exclusive locks.)
        -- and then reraise the exception.
        SET @@innodb_lock_wait_timeout = prev_timeout;
+       -- The server depends on these error messages.
+       -- TODO: Write test cases that verify we rollback our shared locks if we
+       -- can't get the exclusive locks.
        IF prev_timeout IS NULL THEN
          SET @msg = 'Failed to get exclusive locks.';
        ELSE
@@ -98,6 +101,7 @@ BEGIN
   -- readCurrent conflicts first so we don't waste time resolving
   -- state conflicts if we are going to fail the transaction.
   -- Only need to return one of those.
+  -- TODO: Break if we get a row; don't even bother taking exclusive locks.
   SELECT * FROM (
     SELECT zoid, {CURRENT_OBJECT}.tid, NULL as prev_tid, NULL as state
     FROM {CURRENT_OBJECT}
