@@ -312,7 +312,7 @@ class MySQLAdapter(AbstractAdapter):
 
         # There's always a useless last result, the result of the stored procedure itself.
         proc_result = multi_results.pop()
-        assert proc_result == ()
+        assert not proc_result, proc_result
 
         # With read_current_oids, the proc returns one or two results,
         # either of which may be empty. If it returns one, that's
