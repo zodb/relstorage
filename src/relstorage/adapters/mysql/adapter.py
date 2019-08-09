@@ -332,12 +332,12 @@ class MySQLAdapter(AbstractAdapter):
                 assert read_conflicts[0][-1] is None, multi_results
                 conflicts = read_conflicts
             else:
-                assert len(multi_results) == 2
-                assert not multi_results[0]
+                assert len(multi_results) == 2, multi_results
+                assert not multi_results[0], multi_results
                 conflicts = multi_results[1]
         else:
             # Only conflicts were checked and returned.
-            assert len(multi_results) == 1
+            assert len(multi_results) == 1, multi_results
             conflicts = multi_results[0]
 
         return conflicts
