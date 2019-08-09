@@ -387,7 +387,12 @@ class LocalClientOIDTests(AbstractStateCacheTests):
 
         # But it gets removed based on having seen it and knowing
         # it's there.
-        c.write_to_sqlite(conn)
+        conn._rs_has_closed = True # Prevent closing by the write method
+        try:
+            c.write_to_sqlite(conn)
+        finally:
+            conn._rs_has_closed = False
+
         self.assertEmpty(db.oid_to_tid)
 
     def test_ctor(self):

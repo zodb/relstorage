@@ -5,6 +5,11 @@
 3.0a8 (unreleased)
 ==================
 
+- Improve the safety of the persistent local cache in high-concurrency
+  environments using older versions of SQLite. Perform a quick
+  integrity check on startup and refuse to use the cache files if they
+  are reported corrupt.
+
 - Switch the order in which object locks are taken: try shared locks
   first and only then attempt exclusive locks. Shared locks do not
   have to block, so a quick lock timeout here means that a

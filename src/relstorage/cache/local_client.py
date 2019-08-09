@@ -341,7 +341,7 @@ class LocalClient(object):
         # to fit the desired size, so essentially all the rows in the database
         # should go in our cache.
         @_log_timed
-        def data():
+        def fetch_and_filter_rows():
             # Do this here so that we don't have the result
             # in a local variable and it can be collected
             # before we measure the memory delta.
@@ -354,9 +354,7 @@ class LocalClient(object):
             # We make one call into sqlite and let it handle the iterating.
             # Items are (oid, key_tid, state, actual_tid). Currently,
             # key_tid == actual_tid
-            cur = db.fetch_rows_by_priority()
-            items = cur.fetchall()
-            cur.close()
+            items = db.list_rows_by_priority()
             # row_filter produces the sequence ((oid, key_tid) (state, actual_tid))
             if row_filter is not None:
                 row_iter = row_filter(checkpoints, items)
@@ -369,9 +367,14 @@ class LocalClient(object):
             items.reverse()
             return items
 
+        f = fetch_and_filter_rows.__wrapped__
+        f.__name__ = f.__name__ + ':' + (
+            str(row_filter) if row_filter is not None else '<no filter>'
+        )
+
         # In the large benchmark, this is 25% of the total time.
         # 18% of the total time is preallocating the entry nodes.
-        self.__bucket.bulk_update(data(),
+        self.__bucket.bulk_update(fetch_and_filter_rows(),
                                   source=connection,
                                   log_count=len(self._min_allowed_writeback),
                                   mem_usage_before=mem_before)
@@ -511,9 +514,50 @@ class LocalClient(object):
             cur.execute("COMMIT")
 
 
-        # Take out (exclusive) locks now; if we don't, we can get
-        # 'OperationalError: database is locked' But beginning
-        # immediate lets us stand in line.
+        # Take out (reserved write) locks now; if we don't, we can get
+        # 'OperationalError: database is locked' (the SQLITE_BUSY
+        # error code; the SQLITE_LOCKED error code is about table
+        # locks and has the string 'database table is locked') But
+        # beginning immediate lets us stand in line.
+        #
+        # Note that the SQLITE_BUSY error on COMMIT happens "if an
+        # another thread or process has a shared lock on the database
+        # that prevented the database from being updated.", But "When
+        # COMMIT fails in this way, the transaction remains active and
+        # the COMMIT can be retried later after the reader has had a
+        # chance to clear." So we could retry the commit a couple
+        # times and give up if can't get there. It looks like one
+        # production database takes about 2.5s to execute this entire function;
+        # it seems like most instances that are shutting down get to this place
+        # at roughly the same time and stack up waiting:
+        #
+        # Instance | Save Time | write_to_sqlite time
+        #     1    |   2.36s   |   2.35s
+        #     2    |   5.31s   |   5.30s
+        #     3    |   6.51s   |   6.30s
+        #     4    |   7.91s   |   7.90s
+        #
+        # That either suggests that all waiting happens just to acquire this lock and
+        # commit this transaction (and that subsequent operations are inconsequential
+        # in terms of time) OR that the exclusive lock isn't truly getting dropped,
+        # OR that some function in subsequent processes is taking longer and longer.
+        # And indeed, our logging showed that a gc.collect() at the end of this function was
+        # taking more and more time:
+        #
+        # Instance | GC Time  | Reported memory usage after GC
+        #    1     |   2.00s  |     34.4MB
+        #    2     |   3.50s  |     83.2MB
+        #    3     |   4.94s  |    125.9MB
+        #    4     |   6.44   |    202.1MB
+        #
+        # The exclusive lock time did vary, but not as much; trim time
+        # didn't really vary:
+        #
+        # Instance |  Exclusive Write Time | Batch Insert Time | Fetch Current
+        #    1     |   0.09s               |   0.12s           |   0.008s
+        #    2     |   1.19s               |   0.44s           |   0.008s
+        #    3     |   0.91s               |   0.43s           |   0.026s
+        #    4     |   0.92s               |   0.34s           |   0.026s
         with _timer() as exclusive_timer:
             cur.execute('BEGIN IMMEDIATE')
             # During the time it took for us to commit, and the time that we
@@ -522,7 +566,7 @@ class LocalClient(object):
             # Things might have changed in the database since our
             # snapshot where we put temp objects in, so we can't rely on
             # just assuming that's the truth anymore.
-            db.move_from_temp()
+            rows_inserted = db.move_from_temp()
             if self.checkpoints:
                 db.update_checkpoints(*self.checkpoints)
 
@@ -547,25 +591,25 @@ class LocalClient(object):
 
         # Cleanups
         cur.close()
-
+        del cur
+        db.close() # closes the connection.
         del db
         del stored_oid_tid
 
-        with _timer() as gc_timer:
-            import gc
-            gc.collect()
+        # We're probably shutting down, don't perform a GC; we see
+        # that can get quite lengthy.
 
         end = time.time()
         stats = self.stats()
         mem_after = get_memory_usage()
         logger.info(
             "Wrote %d items to %s in %s "
-            "(%s to fetch current, %s to insert batch, %s to write, %s to trim, %s to gc). "
+            "(%s to fetch current, %s to insert batch (%d rows), %s to write, %s to trim). "
             "Used %s memory. (Storage: %s) "
             "Total hits %s; misses %s; ratio %s (stores: %s)",
             count_written, connection, end - begin,
-            fetch_current - begin, batch_timer.duration, exclusive_timer.duration,
-            trim_timer.duration, gc_timer.duration,
+            fetch_current - begin, batch_timer.duration, rows_inserted, exclusive_timer.duration,
+            trim_timer.duration,
             byte_display(mem_after - mem_before), self._bucket0,
             stats['hits'], stats['misses'], stats['ratio'], stats['sets'])
 

@@ -902,6 +902,9 @@ class _PersistentRowFilter(object):
         self.delta_after1 = delta_type()
         self.polled_invalid_oids = OID_SET_TYPE()
 
+    def __str__(self):
+        return "<PersistentRowFilter>"
+
     def __call__(self, checkpoints, row_iter):
         if not checkpoints:
             # Nothing to do except put in correct format, no transforms are possible.
