@@ -22,14 +22,16 @@ from __future__ import absolute_import
 from __future__ import print_function
 
 from ZODB.POSException import ConflictError
-from ZODB.POSException import ReadConflictError
 from ZODB.POSException import StorageTransactionError
 from ZODB.utils import p64 as int64_to_8bytes
 from ZODB.utils import u64 as bytes8_to_int64
 
+from ..interfaces import VoteReadConflictError
+
 from . import LOCK_EARLY
 from . import AbstractTPCState
 from .finish import Finish
+
 
 logger = __import__('logging').getLogger(__name__)
 
@@ -261,7 +263,7 @@ class AbstractVote(AbstractTPCState):
                 # A readCurrent entry. Did it conflict?
                 expect_tid_int = required_tids[oid_int]
                 if committed_tid_int != expect_tid_int:
-                    raise ReadConflictError(
+                    raise VoteReadConflictError(
                         oid=int64_to_8bytes(oid_int),
                         serials=(int64_to_8bytes(committed_tid_int),
                                  int64_to_8bytes(expect_tid_int)))

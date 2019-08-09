@@ -28,6 +28,7 @@ from zope.interface import Interface
 
 from transaction.interfaces import TransientError
 from ZODB.POSException import StorageTransactionError
+from ZODB.POSException import ReadConflictError
 
 # pylint:disable=inherit-non-class,no-self-argument,no-method-argument
 # pylint:disable=too-many-ancestors
@@ -60,3 +61,9 @@ class IStaleAware(Interface):
 
         :return: Another `IStaleAware`.
         """
+
+class VoteReadConflictError(ReadConflictError):
+    """
+    A read conflict (from Connection.readCurrent()) that wasn't
+    detected until the storage voted.
+    """

@@ -295,6 +295,13 @@ class MySQLAdapter(AbstractAdapter):
                 (read_current_param,)
             )
         except self.locker.lock_exceptions as e:
+            # On MySQL 5.7, the time-based mechanism to determine that
+            # we failed to take NOWAIT shared locks is not reliable
+            # when the commit lock timeout is very small (close to 1),
+            # because it can take several seconds for the procedure te
+            # error out. Thus we provide a specific error message that
+            # we key off. (We don't change errno or state or anything
+            # like that in case anybody introspects that stuff.)
             if 'shared locks' in str(e):
                 self.locker.reraise_commit_lock_error(
                     cursor,
@@ -302,7 +309,37 @@ class MySQLAdapter(AbstractAdapter):
                     UnableToLockRowsToReadCurrentError
                 )
             raise
-        conflicts = multi_results[0]
+
+        # There's always a useless last result, the result of the stored procedure itself.
+        proc_result = multi_results.pop()
+        assert proc_result == ()
+
+        # With read_current_oids, the proc returns one or two results,
+        # either of which may be empty. If it returns one, that's
+        # because it detected a read conflict and aborted before
+        # trying to lock other rows. If it returns two, the first will
+        # always be empty because there was no read conflict.
+        #
+        # If we didn't have read_current_oids, it will only return a
+        # single result, the conflicts (which may be empty.)
+
+        if read_current_oids:
+            if len(multi_results) == 1:
+                # We quit before we checked for conflicts. Must be
+                # a read conflict of length 1.
+                read_conflicts = multi_results[0]
+                assert len(read_conflicts) == 1, multi_results
+                assert read_conflicts[0][-1] is None, multi_results
+                conflicts = read_conflicts
+            else:
+                assert len(multi_results) == 2
+                assert not multi_results[0]
+                conflicts = multi_results[1]
+        else:
+            # Only conflicts were checked and returned.
+            assert len(multi_results) == 1
+            conflicts = multi_results[0]
+
         return conflicts
 
     def _describe_best_lock_objects_and_detect_conflicts(self):

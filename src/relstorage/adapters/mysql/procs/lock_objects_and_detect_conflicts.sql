@@ -2,7 +2,7 @@ CREATE PROCEDURE lock_objects_and_detect_conflicts(
   read_current_oids_tids JSON
 )
   COMMENT '{CHECKSUM}'
-BEGIN
+label_proc:BEGIN
   DECLARE len INT;
   DECLARE i INT DEFAULT 0;
   DECLARE prev_timeout INT;
@@ -48,7 +48,7 @@ BEGIN
   -- or have a minimum lock timeout.
   -- We detect the MySQL version when we install the
   -- procedure and choose the appropriate statements.
-  SET prev_timeout = @@innodb_lock_wait_timeout;
+
   IF read_current_oids_tids IS NOT NULL THEN
     -- We don't make the server do a round-trip to put this data
     -- into a temp table because we're specifically trying to limit round trips.
@@ -64,6 +64,7 @@ BEGIN
 
     -- The timeout only goes to 1; this procedure seems to always take roughtly 2s
     -- to actually detect a lock timeout problem, however.
+    SET prev_timeout = @@innodb_lock_wait_timeout;
     {SET_LOCK_TIMEOUT}
 
     DELETE FROM temp_locked_zoid;
@@ -79,9 +80,25 @@ BEGIN
     {FOR_SHARE};
 
     SET @@innodb_lock_wait_timeout = prev_timeout;
+    -- Signal that we handled shared locks, so any lock failure to come is exclusive locks.
+    SET prev_timeout = NULL;
+
+    -- Now return any such rows that we locked
+    -- that are in conflict. This forms its own result set.
+    -- No point doing any more work taking exclusive locks, etc,
+    -- because we will immediately abort.
+    SELECT zoid, {CURRENT_OBJECT}.tid, NULL as prev_tid, NULL as state
+    FROM {CURRENT_OBJECT}
+    INNER JOIN temp_read_current USING (zoid)
+    WHERE temp_read_current.tid <> {CURRENT_OBJECT}.tid
+    LIMIT 1;
+
+    IF FOUND_ROWS() > 0 THEN
+      ROLLBACK; -- release locks.
+      LEAVE label_proc; -- return
+    END IF;
 
   END IF;
-  SET prev_timeout = NULL;
 
   DELETE FROM temp_locked_zoid;
 
@@ -95,21 +112,6 @@ BEGIN
   ORDER BY zoid
   FOR UPDATE;
 
-
-
-
-  -- readCurrent conflicts first so we don't waste time resolving
-  -- state conflicts if we are going to fail the transaction.
-  -- Only need to return one of those.
-  -- TODO: Break if we get a row; don't even bother taking exclusive locks.
-  SELECT * FROM (
-    SELECT zoid, {CURRENT_OBJECT}.tid, NULL as prev_tid, NULL as state
-    FROM {CURRENT_OBJECT}
-    INNER JOIN temp_read_current USING (zoid)
-    WHERE temp_read_current.tid <> {CURRENT_OBJECT}.tid
-    LIMIT 1
-  ) lt
-  UNION ALL
   SELECT cur.zoid, cur.tid, temp_store.prev_tid, {OBJECT_STATE_NAME}.state
   FROM {CURRENT_OBJECT} cur
   INNER JOIN temp_store USING (zoid)
