@@ -154,7 +154,8 @@ class MySQLLocker(AbstractLocker):
 
     def __init__(self, options, driver, batcher_factory, version_detector):
         super(MySQLLocker, self).__init__(options, driver, batcher_factory)
-        self._supports_row_lock_nowait = None
+        assert self.supports_row_lock_nowait # Set by default in the class.
+        self.supports_row_lock_nowait = None
         self.version_detector = version_detector
 
         # No good preparing this, mysql can't take parameters in EXECUTE,
@@ -172,10 +173,10 @@ class MySQLLocker(AbstractLocker):
         # sys.version_major() is 5.7.9+, but we don't have execute
         # permissions on that function by default, so we do it the old fashioned
         # way with version()
-        if self._supports_row_lock_nowait is None:
-            self._supports_row_lock_nowait = self.version_detector.supports_nowait(cursor)
+        if self.supports_row_lock_nowait is None:
+            self.supports_row_lock_nowait = self.version_detector.supports_nowait(cursor)
 
-            if self._supports_row_lock_nowait:
+            if self.supports_row_lock_nowait:
                 self._lock_share_clause = 'FOR SHARE'
                 self._lock_share_clause_nowait = 'FOR SHARE NOWAIT'
             else:
@@ -197,13 +198,14 @@ class MySQLLocker(AbstractLocker):
         cursor.fetchone()
 
 
-    def __lock_readCurrent_nowait(self, cursor, current_oids):
+    def __lock_readCurrent_nowait(self, cursor, current_oids, shared_locks_block):
         # For MySQL 5.7, we emulate NOWAIT by setting the lock timeout
-        if self.lock_readCurrent_for_share_blocks:
-            return AbstractLocker._lock_readCurrent_oids_for_share(self, cursor, current_oids)
+        if shared_locks_block:
+            return AbstractLocker._lock_readCurrent_oids_for_share(self, cursor, current_oids, True)
 
         with lock_timeout(cursor, 0, self.commit_lock_timeout):
-            return AbstractLocker._lock_readCurrent_oids_for_share(self, cursor, current_oids)
+            return AbstractLocker._lock_readCurrent_oids_for_share(self, cursor, current_oids,
+                                                                   False)
 
     def release_commit_lock(self, cursor):
         "Auto-released by transaction end."

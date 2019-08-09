@@ -63,10 +63,11 @@ from ..adapter import AbstractAdapter
 from ..dbiter import HistoryFreeDatabaseIterator
 from ..dbiter import HistoryPreservingDatabaseIterator
 from ..interfaces import IRelStorageAdapter
-
+from ..interfaces import UnableToLockRowsToReadCurrentError
 from ..poller import Poller
 from ..scriptrunner import ScriptRunner
 from ..batch import RowBatcher
+
 from . import drivers
 from .connmanager import MySQLdbConnectionManager
 from .locker import MySQLLocker
@@ -259,7 +260,7 @@ class MySQLAdapter(AbstractAdapter):
         after_selecting_tid(tid_int)
         return tid_int, "-"
 
-    lock_objects_and_detect_conflicts_interleavable = False
+    DEFAULT_LOCK_OBJECTS_AND_DETECT_CONFLICTS_INTERLEAVABLE = False
 
     def _best_lock_objects_and_detect_conflicts(self, cursor, read_current_oids):
         read_current_param = None
@@ -287,11 +288,20 @@ class MySQLAdapter(AbstractAdapter):
             read_current_param = json.dumps(list(read_current_oids.items()))
 
         proc = 'lock_objects_and_detect_conflicts(%s)'
-        multi_results = self.driver.callproc_multi_result(
-            cursor,
-            proc,
-            (read_current_param,)
-        )
+        try:
+            multi_results = self.driver.callproc_multi_result(
+                cursor,
+                proc,
+                (read_current_param,)
+            )
+        except self.locker.lock_exceptions as e:
+            if 'shared locks' in str(e):
+                self.locker.reraise_commit_lock_error(
+                    cursor,
+                    self._describe_best_lock_objects_and_detect_conflicts(),
+                    UnableToLockRowsToReadCurrentError
+                )
+            raise
         conflicts = multi_results[0]
         return conflicts
 

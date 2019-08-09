@@ -16,18 +16,13 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+from zope.interface import alsoProvides
 
-from hamcrest import assert_that
-from nti.testing.matchers import validly_provides
-
-
-from relstorage.tests import TestCase
 from relstorage.tests import MockDriver
-
 from ..adapter import OracleAdapter as BaseAdapter
 
 from ... import interfaces
-
+from ...tests import test_adapter
 
 class Adapter(BaseAdapter):
     # We don't usually have cx_oracle installed, so
@@ -41,13 +36,14 @@ class Adapter(BaseAdapter):
         d.BINARY = None
         d.STRING = None
         d.Binary = None
+        d.use_replica_exceptions = ()
+        d.binary_column_as_state_type = lambda b: b
+        d.binary_column_as_bytes = lambda b: b
+        d.__name__ = 'cx_Oracle'
+        alsoProvides(d, interfaces.IDBDriver)
         return d
 
-class TestAdapter(TestCase):
+class TestAdapter(test_adapter.AdapterTestBase):
 
     def _makeOne(self):
         return Adapter()
-
-    def test_implements(self):
-        adapter = self._makeOne()
-        assert_that(adapter, validly_provides(interfaces.IRelStorageAdapter))

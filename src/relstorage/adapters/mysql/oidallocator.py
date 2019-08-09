@@ -18,9 +18,9 @@ IOIDAllocator implementations.
 
 from __future__ import absolute_import
 
-from perfmetrics import metricmethod
 from zope.interface import implementer
 
+from ..._compat import metricmethod
 from ..interfaces import IOIDAllocator
 from ..oidallocator import AbstractOIDAllocator
 from .locker import lock_timeout

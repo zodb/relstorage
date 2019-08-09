@@ -18,11 +18,11 @@ from __future__ import absolute_import
 import logging
 import time
 
-from perfmetrics import metricmethod
 from ZODB.POSException import UndoError
 from ZODB.utils import u64
 from zope.interface import implementer
 
+from .._compat import metricmethod
 from ..iter import fetchmany
 from ..treemark import TreeMarker
 from .interfaces import IPackUndo

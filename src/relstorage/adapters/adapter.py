@@ -24,12 +24,13 @@ from __future__ import print_function
 import time
 
 from persistent.timestamp import TimeStamp
-from perfmetrics import metricmethod
+
 
 from ZODB.POSException import ReadConflictError
 from ZODB.utils import p64 as int64_to_8bytes
 from ZODB.utils import u64 as bytes8_to_int64
 
+from .._compat import metricmethod
 from .._util import timestamp_at_unixtime
 from ..options import Options
 
@@ -137,18 +138,29 @@ class AbstractAdapter(object):
 
         return committing_tid_int, prepared_txn_id
 
-    lock_objects_and_detect_conflicts_interleavable = True
+    DEFAULT_LOCK_OBJECTS_AND_DETECT_CONFLICTS_INTERLEAVABLE = True
+
+    # Hooks for unit tests.
+    force_lock_objects_and_detect_conflicts_interleavable = False
+    force_lock_readCurrent_for_share_blocking = False
 
     @metricmethod
     def lock_objects_and_detect_conflicts(self, cursor, read_current_oids):
-        if self.locker.lock_readCurrent_for_share_blocks:
-            # Delegate to the individual statements that can control lock timeouts.
+        if (
+                self.force_lock_readCurrent_for_share_blocking
+                or self.force_lock_objects_and_detect_conflicts_interleavable
+        ):
+            # Delegate to the individual statements that can control lock timeouts,
+            # or that allow a controlling test to carefully interleave operations to simulate
+            # various concurrency situations.
             return self._composed_lock_objects_and_detect_conflicts(cursor,
                                                                     read_current_oids)
         begin = time.time()
         try:
             return self._best_lock_objects_and_detect_conflicts(cursor, read_current_oids)
         except self.locker.lock_exceptions:
+            # Heuristic to guess. If the stored proc or stored proc runner can do better,
+            # they should.
             elapsed = time.time() - begin
             kind = UnableToLockRowsToModifyError
             if read_current_oids and elapsed < self.locker.commit_lock_timeout:
@@ -163,7 +175,8 @@ class AbstractAdapter(object):
     def _composed_lock_objects_and_detect_conflicts(self, cursor, read_current_oids):
         read_current_oid_ints = read_current_oids.keys()
 
-        self.locker.lock_current_objects(cursor, read_current_oid_ints)
+        self.locker.lock_current_objects(cursor, read_current_oid_ints,
+                                         self.force_lock_readCurrent_for_share_blocking)
 
         current = self.mover.current_object_tids(cursor, read_current_oid_ints)
         # We go ahead and compare the readCurrent TIDs here, so that we don't have to

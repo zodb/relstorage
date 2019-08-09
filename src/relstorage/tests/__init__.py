@@ -1,6 +1,7 @@
 """relstorage.tests package"""
 
 import abc
+import contextlib
 import os
 import unittest
 
@@ -19,6 +20,10 @@ except ImportError: # Python 2
     import mock
 
 mock = mock
+
+@contextlib.contextmanager
+def _fakeSubTest(*_args, **_kwargs):
+    yield
 
 class TestCase(unittest.TestCase):
     """
@@ -41,6 +46,13 @@ class TestCase(unittest.TestCase):
         'assertRegex',
         None
     ) or getattr(unittest.TestCase, 'assertRegexpMatches')
+
+    # 2.7 doesn't have subtest.
+    subTest = getattr(
+        unittest.TestCase,
+        'subTest',
+        None
+    ) or _fakeSubTest
 
     def setUp(self):
         super(TestCase, self).setUp()

@@ -25,7 +25,6 @@ import weakref
 
 import ZODB.interfaces
 
-from perfmetrics import metricmethod
 
 from ZODB import ConflictResolution
 
@@ -48,6 +47,7 @@ from ..adapters.connections import LoadConnection
 from ..adapters.connections import StoreConnection
 from ..adapters.connections import ClosedConnection
 from .._compat import clear_frames
+from .._compat import metricmethod
 from .._util import int64_to_8bytes
 from .._util import bytes8_to_int64
 

@@ -21,9 +21,6 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-from perfmetrics import Metric
-from perfmetrics import metricmethod
-
 from ZODB.POSException import POSKeyError
 
 from ZODB.utils import p64 as int64_to_8bytes
@@ -31,6 +28,8 @@ from ZODB.utils import u64 as bytes8_to_int64
 from ZODB.utils import maxtid
 
 from relstorage.cache.interfaces import CacheConsistencyError
+from .._compat import metricmethod
+from .._compat import metricmethod_sampled
 from .util import storage_method
 from .util import stale_aware
 
@@ -106,7 +105,7 @@ class Loader(object):
 
     @stale_aware
     @storage_method
-    @Metric(method=True, rate=0.1)
+    @metricmethod_sampled
     def load(self, oid, version=''):
         # pylint:disable=unused-argument
         oid_int = bytes8_to_int64(oid)
@@ -152,7 +151,7 @@ class Loader(object):
 
     # This is *NOT* stale aware for some reason (why?)
     @storage_method
-    @Metric(method=True, rate=0.1)
+    @metricmethod_sampled
     def loadSerial(self, oid, serial):
         """Load a specific revision of an object"""
         oid_int = bytes8_to_int64(oid)
@@ -192,7 +191,7 @@ class Loader(object):
 
     @stale_aware
     @storage_method
-    @Metric(method=True, rate=0.1)
+    @metricmethod_sampled
     def loadBefore(self, oid, tid):
         """
         Return the most recent revision of oid before tid committed.

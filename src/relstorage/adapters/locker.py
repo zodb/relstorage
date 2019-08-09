@@ -22,9 +22,9 @@ import abc
 import sys
 import six
 
-from perfmetrics import metricmethod
 
 from relstorage._compat import ABC
+from relstorage._compat import metricmethod
 from relstorage._util import consume
 from relstorage._util import Lazy
 
@@ -71,15 +71,15 @@ class AbstractLocker(DatabaseHelpersMixin,
         """
 
     #: Set this to a false value if you don't support ``NOWAIT`` and we'll
-    #: instead set the lock timeout to 0.
-    _supports_row_lock_nowait = True
+    #: instead set the lock timeout to a low value.
+    supports_row_lock_nowait = True
 
     def _set_row_lock_timeout(self, cursor, timeout):
         "Implement this to change the row lock timeout."
 
     def _set_row_lock_nowait(self, cursor): # pragma: no cover
         """
-        If :attr:`_supports_row_lock_timeout` is not true, then this
+        If :attr:`supports_row_lock_timeout` is not true, then this
         class will call this method when :meth:`hold_commit_lock` is
         called with a false value for *nowait*.
 
@@ -142,7 +142,7 @@ class AbstractLocker(DatabaseHelpersMixin,
         )
 
     @metricmethod
-    def lock_current_objects(self, cursor, current_oids):
+    def lock_current_objects(self, cursor, read_current_oid_ints, shared_locks_block):
         # We need to be sure to take the locks in a deterministic
         # order; the easiest way to do that is to order them by OID.
         # But we have two separate sets of OIDs we need to lock: the
@@ -181,30 +181,26 @@ class AbstractLocker(DatabaseHelpersMixin,
         # locked when they are returned by the cursor, so we must
         # consume all the rows.
 
-        # See docs in vote.py.
+        # Lock order is explained in IRelStorageAdapter.lock_objects_and_detect_conflicts.
 
-        # First, lock the rows we need exclusive access to.
+        # First lock rows we need shared access to, typically without blocking.
+        if read_current_oid_ints:
+            self._lock_readCurrent_oids_for_share(cursor, read_current_oid_ints,
+                                                  shared_locks_block)
+
+
+        # Then lock the rows we need exclusive access to.
         # This will block for up to ``commit_lock_timeout``.
-        # Doing this first matters; always take the most exclusive locks
-        # first.
         self._lock_rows_being_modified(cursor)
 
-        # Next, lock rows we need shared access to.
-        if current_oids:
-            self._lock_readCurrent_oids_for_share(cursor, current_oids)
-
-    # Hook for unit tests, allow them to tell us *not* to use the NOWAIT
-    # locking flag for share.
-    lock_readCurrent_for_share_blocks = False
-
-    def _lock_readCurrent_oids_for_share(self, cursor, current_oids):
+    def _lock_readCurrent_oids_for_share(self, cursor, current_oids, shared_locks_block):
         _, table = self._get_current_objects_query
         oids_to_lock = sorted(set(current_oids))
         batcher = self.make_batcher(cursor, row_limit=1000)
 
         locking_suffix = ' %s ' % (
             self._lock_share_clause
-            if self.lock_readCurrent_for_share_blocks
+            if shared_locks_block
             else
             self._lock_share_clause_nowait
         )
@@ -295,7 +291,7 @@ class AbstractLocker(DatabaseHelpersMixin,
         # This method is not used for PostgreSQL or MySQL.
         lock_stmt = self._commit_lock_query
         if nowait: # pragma: no cover
-            if self._supports_row_lock_nowait:
+            if self.supports_row_lock_nowait:
                 lock_stmt = self._commit_lock_nowait_query
             else:
                 self._set_row_lock_nowait(cursor)

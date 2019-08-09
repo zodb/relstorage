@@ -18,10 +18,11 @@ from __future__ import absolute_import
 from hashlib import md5
 from abc import abstractmethod
 
-from perfmetrics import Metric
+
 from zope.interface import implementer
 
 from .._compat import OID_TID_MAP_TYPE
+from .._compat import metricmethod_sampled
 from ._util import noop_when_history_free
 from ._util import query_property as _query_property
 from .._compat import ABC
@@ -32,7 +33,7 @@ from .schema import Schema
 objects = Schema.all_current_object_state
 object_state = Schema.object_state
 
-metricmethod_sampled = Metric(method=True, rate=0.1)
+
 
 @implementer(IObjectMover)
 class AbstractObjectMover(ABC):

@@ -6,24 +6,16 @@ CREATE OR REPLACE FUNCTION lock_objects_and_detect_conflicts(
 AS
 $$
 BEGIN
-  -- Unlike MySQL, we can simply do the SELECT (with PERFORM) for its
-  -- side effects to lock the rows.
-
-  PERFORM {CURRENT_OBJECT}.zoid
-  FROM {CURRENT_OBJECT}
-  WHERE {CURRENT_OBJECT}.zoid IN (
-      SELECT temp_store.zoid
-      FROM temp_store
-  )
-  ORDER BY {CURRENT_OBJECT}.zoid
-  FOR UPDATE;
-
 
   -- lock in share should NOWAIT
 
   IF read_current_oids IS NOT NULL THEN
     -- readCurrent conflicts first so we don't waste time resolving
-    -- state conflicts if we are going to fail the transaction.
+    -- state conflicts if we are going to fail the transaction. We only need to return
+    -- the first conflict; it will immediately raise an exception.
+    -- TODO: Does this actually stream to the client? I don't think so, so we
+    -- need to detect if we got any rows and if so, not bother taking the exclusive
+    -- locks.
 
     -- Doing this in a single query takes some effort to make sure
     -- that the required rows all get locked. The optimizer is smart
@@ -48,8 +40,21 @@ BEGIN
         FOR SHARE NOWAIT
       )
       SELECT locked.zoid, locked.tid, NULL::BIGINT, NULL::BYTEA
-      FROM locked WHERE locked.tid <> locked.desired;
+      FROM locked WHERE locked.tid <> locked.desired
+      LIMIT 1;
   END IF;
+
+  -- Unlike MySQL, we can simply do the SELECT (with PERFORM) for its
+  -- side effects to lock the rows.
+  -- This one will block.
+  PERFORM {CURRENT_OBJECT}.zoid
+  FROM {CURRENT_OBJECT}
+  WHERE {CURRENT_OBJECT}.zoid IN (
+      SELECT temp_store.zoid
+      FROM temp_store
+  )
+  ORDER BY {CURRENT_OBJECT}.zoid
+  FOR UPDATE;
 
 
   RETURN QUERY
