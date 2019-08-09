@@ -23,12 +23,13 @@ import itertools
 import sys
 import time
 import traceback
+from logging import DEBUG
 
 from persistent.timestamp import TimeStamp
 
-
 from ZODB.utils import p64
 from ZODB.utils import u64
+from ZODB.loglevels import TRACE
 
 logger = __import__('logging').getLogger(__name__)
 
@@ -94,14 +95,23 @@ class timer(object):
         self.end = self.counter()
         self.duration = self.end - self.begin
 
+_MIN_LOG_TIMED_DURATION = 0.03
+
 def log_timed(func):
     @functools.wraps(func)
     def f(*args, **kwargs):
         t = timer()
         with t:
             result = func(*args, **kwargs)
-        logger.debug("Function %s took %s", func.__name__, t.duration)
+        level = TRACE
+        if t.duration > _MIN_LOG_TIMED_DURATION:
+            level = DEBUG
+
+        logger.log(level, "Function %s took %s",
+                   func.__name__,
+                   t.duration)
         return result
+    f.__wrapped__ = func # Py2 compat.
     return f
 
 _ThreadWithReady = None

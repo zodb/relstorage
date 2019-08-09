@@ -20,7 +20,6 @@ class UpdateTests(TestCase):
     # UPSERTS or multi-column updates aren't available.
 
     USE_UPSERT = False
-    USE_PAREN_UPDATE = False
 
     def setUp(self):
         self.options = MockOptionsWithMemoryDB()
@@ -38,7 +37,6 @@ class UpdateTests(TestCase):
         return Database.from_connection(
             self.connection,
             use_upsert=self.USE_UPSERT,
-            use_paren_update=self.USE_PAREN_UPDATE
         )
 
     def test_set_checkpoints(self):
@@ -185,12 +183,6 @@ class UpdateTests(TestCase):
                  "Requires upserts")
 class UpsertUpdateTests(UpdateTests):
     USE_UPSERT = True
-
-
-@unittest.skipIf(not local_database.SUPPORTS_PAREN_UPDATE,
-                 "Requires paren updates")
-class ParenUpdateTests(UpdateTests):
-    USE_PAREN_UPDATE = True
 
 
 class MultiConnectionTests(TestCase):

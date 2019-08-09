@@ -33,7 +33,6 @@ from relstorage._util import log_timed
 from relstorage.adapters.batch import RowBatcher
 
 from .persistence import SQ3_SUPPORTS_UPSERT as SUPPORTS_UPSERT
-from .persistence import SQ3_SUPPORTS_PAREN_UPDATE as SUPPORTS_PAREN_UPDATE
 
 
 logger = __import__('logging').getLogger(__name__)
@@ -71,11 +70,9 @@ class Database(ABC):
     @classmethod
     def from_connection(cls,
                         connection,
-                        use_upsert=SUPPORTS_UPSERT,
-                        use_paren_update=SUPPORTS_PAREN_UPDATE):
-        kind = _UpsertUpdateDatabase
-        if not use_upsert:
-            kind = _ParenUpdateDatabase if use_paren_update else _OldUpdateDatabaseModel
+                        use_upsert=SUPPORTS_UPSERT):
+
+        kind = _UpsertUpdateDatabase if use_upsert else _InsertReplaceDatabase
         return kind(connection)
 
     def __init__(self, connection):
@@ -83,7 +80,16 @@ class Database(ABC):
         self.cursor = connection.cursor()
         self.cursor.arraysize = 100
         self.create_schema()
-        self.close = self.connection.close
+
+    def close(self):
+        try:
+            if self.cursor is not None:
+                self.cursor.close()
+            if self.connection is not None:
+                self.connection.close()
+        finally:
+            self.cursor = None
+            self.connection = None
 
     # The main repository of our data. This uses the OID of the object
     # as the INTEGER PRIMARY KEY --- that's a special type of key that
@@ -127,16 +133,17 @@ class Database(ABC):
     def create_schema(self):
         self.cursor.executescript(self._schema)
 
-    @property
     @log_timed
-    def oid_to_tid(self):
-        """
-        A map from OID to its corresponding TID, for
-        all the data in the database.
-        """
+    def _read_oids_and_tids_from_db_to_map(self):
         cur = self.connection.execute('SELECT zoid, tid FROM object_state')
         with closing(cur):
             return OID_TID_MAP_TYPE(cur.fetchall())
+
+    oid_to_tid = property(_read_oids_and_tids_from_db_to_map,
+                          doc="""
+        A map from OID to its corresponding TID, for
+        all the data in the database.
+        """)
 
     @property
     def checkpoints(self):
@@ -216,6 +223,18 @@ class Database(ABC):
         cur.arraysize = 100
         return cur
 
+    @log_timed
+    def list_rows_by_priority(self):
+        """
+        Like ``fetch_rows_by_priority``, but returns a list instead of cursor.
+        """
+        cur = self.fetch_rows_by_priority()
+        try:
+            items = cur.fetchall()
+        finally:
+            cur.close()
+        return items
+
     def store_temp(self, rows):
         """
         Given an iterator of ``(oid, tid, state, frequency)`` values,
@@ -246,12 +265,14 @@ class Database(ABC):
     def move_from_temp(self):
         """
         Take rows in the temporary table and put them in the permanent table,
-        overwriting rows for the same object that are older.
+        overwriting rows for the same object that are older (based on TID)
 
         If there is a row that is newer, then it is preserved and the temporary
         row is discarded.
 
         The temporary table will be clear after this.
+
+        Returns the total number of rows that were stored into the permanent table.
         """
         raise NotImplementedError
 
@@ -360,7 +381,9 @@ class _UpsertUpdateDatabase(Database):
             frequency = excluded.frequency + object_state.frequency
         WHERE excluded.tid > tid
         """)
+        rows_inserted = self.cursor.rowcount
         self.cursor.execute("DELETE FROM temp_state")
+        return rows_inserted
 
     def update_checkpoints(self, cp0, cp1):
         self.cursor.execute("""
@@ -370,70 +393,51 @@ class _UpsertUpdateDatabase(Database):
         WHERE excluded.cp0 > cp0
         """, (cp0, cp1))
 
-class _ParenUpdateDatabase(Database):
+class _InsertReplaceDatabase(Database):
     def move_from_temp(self):
-        self._update_existing_values()
+        # The old 'INSERT OR REPLACE' syntax is supported from
+        # 3.0.0 forward. It's not as flexible as the true upsert:
+        # for example, you can't specify the type of conflict, nor
+        # can you use a WHERE clause or specify the values to use
+        # in the update. It also doesn't increment the cursor's change
+        # counter for replaced rows.
+        self.cursor.execute("""
+        DELETE FROM temp_state
+        WHERE EXISTS (
+            SELECT 1
+            FROM object_state
+            WHERE object_state.zoid = temp_state.zoid
+            AND object_state.tid >= temp_state.tid
+        )
+        """)
+        self.cursor.execute('SELECT COUNT(*) FROM temp_state')
+        rows_inserted = self.cursor.fetchall()[0][0]
 
         self.cursor.execute("""
-        INSERT INTO object_state (zoid, tid, state, frequency)
+        INSERT OR REPLACE INTO object_state (zoid, tid, state, frequency)
         SELECT zoid, tid, state, frequency
         FROM temp_state
-        WHERE zoid NOT IN (SELECT zoid FROM object_state)
         """)
-        self.cursor.execute("DELETE FROM temp_state")
 
-    def _update_existing_values(self):
-        self.cursor.execute("""
-            WITH newer_values AS (SELECT temp_state.*
-                FROM temp_state
-                INNER JOIN object_state on temp_state.zoid = object_state.zoid
-                WHERE object_state.tid < temp_state.tid
-            )
-            UPDATE object_state
-            SET (tid, frequency, state) = (SELECT newer_values.tid,
-                                            newer_values.frequency + object_state.frequency,
-                                            newer_values.state
-                                           FROM newer_values WHERE newer_values.zoid = zoid)
-            WHERE zoid IN (SELECT zoid FROM newer_values)
-        """)
+        self.cursor.execute("DELETE FROM temp_state")
+        return rows_inserted
 
     def update_checkpoints(self, cp0, cp1):
         cur = self.cursor
-        cur.execute("SELECT cp0, cp1 FROM checkpoints")
-        row = cur.fetchone()
-        if not row:
-            # First time in.
-            cur.execute("""
-            INSERT INTO checkpoints (id, cp0, cp1)
-            VALUES (0, ?, ?)
-            """, (cp0, cp1))
-        elif row[0] < cp0:
-            cur.execute("""
-            UPDATE checkpoints SET cp0 = ?, cp1 = ?
-            """, (cp0, cp1))
+        cur.execute("""
+        INSERT OR REPLACE INTO checkpoints(id, cp0, cp1)
+        SELECT 0, ?, ?
+        FROM checkpoints
+        WHERE cp0 < ?
+        UNION
+        SELECT 0, ?, ?
+        WHERE NOT EXISTS (SELECT id FROM checkpoints)
+        """, (
+            cp0, cp1,
+            cp0,
+            cp0, cp1
+        ))
 
-
-class _OldUpdateDatabaseModel(_ParenUpdateDatabase):
-    """
-    Fallback to using multiple sub-selects to update
-    multiple columns.
-    """
-    def _update_existing_values(self):
-        self.cursor.execute("""
-        WITH newer_values AS (SELECT temp_state.*
-            FROM temp_state
-            INNER JOIN object_state on temp_state.zoid = object_state.zoid
-            WHERE object_state.tid < temp_state.tid
-        )
-        UPDATE object_state
-        SET tid = (SELECT newer_values.tid
-                   FROM newer_values WHERE newer_values.zoid = zoid),
-        frequency = (SELECT  newer_values.frequency + object_state.frequency
-                     FROM newer_values WHERE newer_values.zoid = zoid),
-            state = (SELECT newer_values.state
-                     FROM newer_values WHERE newer_values.zoid = zoid)
-        WHERE zoid IN (SELECT zoid FROM newer_values)
-        """)
 
 class _ExplainCursor(object): # pragma: no cover (A debugging aid)
     def __init__(self, cur):
