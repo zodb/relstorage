@@ -32,6 +32,8 @@ from ZODB.Connection import TransactionMetaData
 
 from ZODB.tests.MinPO import MinPO
 
+from relstorage.storage.interfaces import VoteReadConflictError
+
 from . import TestCase
 
 def WithAndWithoutInterleaving(func):
@@ -70,6 +72,12 @@ class TestLocking(TestCase):
     def make_storage(self, *args, **kwargs):
         raise NotImplementedError
 
+    @property
+    def __tiny_commit_time(self):
+        # Use a very small commit lock timeout.
+        if self._storage._adapter.schema.database_type == 'postgresql':
+            return 0.1
+        return 1
 
     def __store_two_for_read_current_error(self):
         db = self._closing(DB(self._storage))
@@ -87,12 +95,13 @@ class TestLocking(TestCase):
         conn.close()
         # We can't close the DB, that will close the storage that we
         # still need.
-        return obj1_oid, obj2_oid, obj1_tid
+        return obj1_oid, obj2_oid, obj1_tid, db
 
     def __read_current_and_lock(self, storage, read_current_oid, lock_oid, tid):
         tx = TransactionMetaData()
         storage.tpc_begin(tx)
-        storage.checkCurrentSerialInTransaction(read_current_oid, tid, tx)
+        if read_current_oid is not None:
+            storage.checkCurrentSerialInTransaction(read_current_oid, tid, tx)
         storage.store(lock_oid, tid, b'bad pickle2', '', tx)
         storage.tpc_vote(tx)
         return tx
@@ -107,6 +116,7 @@ class TestLocking(TestCase):
             copy_interleave=('A', 'B'),
             abort=True
     ):
+        # pylint:disable=too-many-locals
         root_adapter = self._storage._adapter
         if commit_lock_timeout:
             root_adapter.locker.commit_lock_timeout = commit_lock_timeout
@@ -124,7 +134,7 @@ class TestLocking(TestCase):
             storageB._adapter.force_lock_objects_and_detect_conflicts_interleavable = should_ileave
 
         # First, store the two objects in an accessible location.
-        obj1_oid, obj2_oid, tid = self.__store_two_for_read_current_error()
+        obj1_oid, obj2_oid, tid, _ = self.__store_two_for_read_current_error()
 
         # Now transaction A readCurrent 1 and modify 2
         # up through the vote phase
@@ -173,10 +183,7 @@ class TestLocking(TestCase):
         # we get an error after ``commit_lock_timeout``  and not a deadlock.
         from relstorage.adapters.interfaces import UnableToLockRowsToModifyError
 
-        # Use a very small commit lock timeout.
-        # TODO: We can actually go much smaller for PostgreSQL, just not MySQL.
-        # We need a way to identify that.
-        commit_lock_timeout = 1
+        commit_lock_timeout = self.__tiny_commit_time
         duration_blocking = self.__do_check_error_with_conflicting_concurrent_read_current(
             UnableToLockRowsToModifyError,
             commit_lock_timeout=commit_lock_timeout,
@@ -186,6 +193,64 @@ class TestLocking(TestCase):
         self.assertLessEqual(duration_blocking, commit_lock_timeout * 3)
 
     @WithAndWithoutInterleaving
+    def checkTL_ReadCurrentConflict_DoesNotTakeExclusiveLocks(self):
+        # Proves that if we try to check an old serial that has already moved on,
+        # we don't try taking exclusive locks at all.
+        from relstorage.adapters.interfaces import UnableToLockRowsToModifyError
+        obj1_oid, obj2_oid, tid, db = self.__store_two_for_read_current_error()
+        assert obj1_oid, obj1_oid
+        assert obj2_oid, obj2_oid
+        assert tid, tid
+
+        root_adapter = self._storage._adapter
+        commit_lock_timeout = self.__tiny_commit_time
+        root_adapter.locker.commit_lock_timeout = commit_lock_timeout
+        self._storage._options.commit_lock_timeout = commit_lock_timeout
+
+        storageA = self._closing(self._storage.new_instance())
+        storageC = self._closing(self._storage.new_instance())
+
+        # The Begin phase actually calls into the database when readCurrent()
+        # is called to verify the tid. So we actually need to do that much of it now.
+        storageB = self._closing(self._storage.new_instance())
+        txb = TransactionMetaData()
+        storageB.tpc_begin(txb) # Capture our current tid now
+        storageB.checkCurrentSerialInTransaction(obj2_oid, tid, txb)
+
+        should_ileave = root_adapter.force_lock_objects_and_detect_conflicts_interleavable
+        for s in storageA, storageB, storageC:
+            s._adapter.force_lock_objects_and_detect_conflicts_interleavable = should_ileave
+
+        # Walk through a full transaction in A so that the tid changes.
+        conn = db.open()
+        root = conn.root()
+        root['object1'].some_attr = 1
+        root['object2'].some_attr = 1
+        transaction.commit()
+        new_tid = root['object1']._p_serial
+        conn.close()
+        self.assertGreater(new_tid, tid)
+
+        # Tx A takes exclusive lock on object1
+        txa = self.__read_current_and_lock(storageA, None, obj1_oid, new_tid)
+
+        # Prove that it's locked. (This is slow on MySQL 5.7)
+        with self.assertRaises(UnableToLockRowsToModifyError):
+            self.__read_current_and_lock(storageC, None, obj1_oid, new_tid)
+
+        # Now, try to readCurrent of object2 in the old tid, and take an exclusive lock
+        # on obj1. We should immediately get a read current error and not conflict with the
+        # exclusive lock.
+        with self.assertRaisesRegex(VoteReadConflictError, "serial this txn started"):
+            self.__read_current_and_lock(storageB, obj2_oid, obj1_oid, tid)
+
+        # Which is still held because we cannot lock it.
+        with self.assertRaises(UnableToLockRowsToModifyError):
+            self.__read_current_and_lock(storageC, None, obj1_oid, new_tid)
+
+        storageA.tpc_abort(txa)
+
+    @WithAndWithoutInterleaving
     def checkTL_OverlappedReadCurrent_SharedLocksFirst(self):
         # Starting with two objects 1 and 2, if transaction A modifies 1 and
         # does readCurrent of 2, up through the voting phase, and transaction B does
@@ -193,7 +258,7 @@ class TestLocking(TestCase):
         # error. (We use the same two objects instead of a new object in transaction B to prove
         # shared locks are taken first.)
         from relstorage.adapters.interfaces import UnableToLockRowsToReadCurrentError
-        commit_lock_timeout = 1
+        commit_lock_timeout = self.__tiny_commit_time
         duration_blocking = self.__do_check_error_with_conflicting_concurrent_read_current(
             UnableToLockRowsToReadCurrentError,
             commit_lock_timeout=commit_lock_timeout,
@@ -206,7 +271,9 @@ class TestLocking(TestCase):
             self.assertLessEqual(duration_blocking, commit_lock_timeout * 2.5)
 
 
-    def __lock_rows_being_modified_only(self, storage, cursor, _current_oids, _share_blocks):
+    def __lock_rows_being_modified_only(self, storage, cursor,
+                                        _current_oids, _share_blocks,
+                                        _after_share=lambda: None):
         # A monkey-patch for Locker.lock_current_objects to only take the exclusive
         # locks.
         storage._adapter.locker._lock_rows_being_modified(cursor)

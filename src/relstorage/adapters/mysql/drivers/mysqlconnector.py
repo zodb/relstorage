@@ -186,6 +186,8 @@ class PyMySQLConnectorDriver(AbstractMySQLDriver):
                 multi_results.append(resultset.fetchall())
             except self.driver_module.InterfaceError:
                 # This gets raised on the empty set at the end, for some reason.
+                # Ensure we put one there to be like the others
+                multi_results.append(())
                 break
         return multi_results
 

@@ -13,9 +13,8 @@ BEGIN
     -- readCurrent conflicts first so we don't waste time resolving
     -- state conflicts if we are going to fail the transaction. We only need to return
     -- the first conflict; it will immediately raise an exception.
-    -- TODO: Does this actually stream to the client? I don't think so, so we
-    -- need to detect if we got any rows and if so, not bother taking the exclusive
-    -- locks.
+    -- Up through PG12, RETURN QUERY does *NOT* stream to the client, it buffers
+    -- everything. So we must manually break and not do the locking.
 
     -- Doing this in a single query takes some effort to make sure
     -- that the required rows all get locked. The optimizer is smart
@@ -42,6 +41,9 @@ BEGIN
       SELECT locked.zoid, locked.tid, NULL::BIGINT, NULL::BYTEA
       FROM locked WHERE locked.tid <> locked.desired
       LIMIT 1;
+    IF FOUND THEN
+      RETURN;
+    END IF;
   END IF;
 
   -- Unlike MySQL, we can simply do the SELECT (with PERFORM) for its
@@ -55,7 +57,6 @@ BEGIN
   )
   ORDER BY {CURRENT_OBJECT}.zoid
   FOR UPDATE;
-
 
   RETURN QUERY
   SELECT cur.zoid, cur.tid,

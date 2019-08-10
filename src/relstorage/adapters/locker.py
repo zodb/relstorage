@@ -142,7 +142,8 @@ class AbstractLocker(DatabaseHelpersMixin,
         )
 
     @metricmethod
-    def lock_current_objects(self, cursor, read_current_oid_ints, shared_locks_block):
+    def lock_current_objects(self, cursor, read_current_oid_ints, shared_locks_block,
+                             after_lock_share=lambda: None):
         # We need to be sure to take the locks in a deterministic
         # order; the easiest way to do that is to order them by OID.
         # But we have two separate sets of OIDs we need to lock: the
@@ -187,6 +188,7 @@ class AbstractLocker(DatabaseHelpersMixin,
         if read_current_oid_ints:
             self._lock_readCurrent_oids_for_share(cursor, read_current_oid_ints,
                                                   shared_locks_block)
+            after_lock_share()
 
 
         # Then lock the rows we need exclusive access to.

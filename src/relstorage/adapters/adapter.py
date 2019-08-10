@@ -25,11 +25,10 @@ import time
 
 from persistent.timestamp import TimeStamp
 
-
-from ZODB.POSException import ReadConflictError
 from ZODB.utils import p64 as int64_to_8bytes
 from ZODB.utils import u64 as bytes8_to_int64
 
+from relstorage.storage.interfaces import VoteReadConflictError
 from .._compat import metricmethod
 from .._util import timestamp_at_unixtime
 from ..options import Options
@@ -175,19 +174,23 @@ class AbstractAdapter(object):
     def _composed_lock_objects_and_detect_conflicts(self, cursor, read_current_oids):
         read_current_oid_ints = read_current_oids.keys()
 
-        self.locker.lock_current_objects(cursor, read_current_oid_ints,
-                                         self.force_lock_readCurrent_for_share_blocking)
+        def after_lock_share():
+            current = self.mover.current_object_tids(cursor, read_current_oid_ints)
+            # We go ahead and compare the readCurrent TIDs here, so
+            # that we don't have to make the call to detect conflicts
+            # or even lock rows if there are readCurrent violations.
+            for oid_int, expect_tid_int in read_current_oids.items():
+                actual_tid_int = current.get(oid_int, 0)
+                if actual_tid_int != expect_tid_int:
+                    raise VoteReadConflictError(
+                        oid=int64_to_8bytes(oid_int),
+                        serials=(int64_to_8bytes(actual_tid_int),
+                                 int64_to_8bytes(expect_tid_int)))
 
-        current = self.mover.current_object_tids(cursor, read_current_oid_ints)
-        # We go ahead and compare the readCurrent TIDs here, so that we don't have to
-        # make the call to detect conflicts if there are readCurrent violations.
-        for oid_int, expect_tid_int in read_current_oids.items():
-            actual_tid_int = current.get(oid_int, 0)
-            if actual_tid_int != expect_tid_int:
-                raise ReadConflictError(
-                    oid=int64_to_8bytes(oid_int),
-                    serials=(int64_to_8bytes(actual_tid_int),
-                             int64_to_8bytes(expect_tid_int)))
+        self.locker.lock_current_objects(
+            cursor, read_current_oid_ints,
+            self.force_lock_readCurrent_for_share_blocking,
+            after_lock_share)
 
         conflicts = self.mover.detect_conflict(cursor)
         return conflicts

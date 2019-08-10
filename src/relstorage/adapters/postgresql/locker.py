@@ -29,12 +29,10 @@ class PostgreSQLLocker(AbstractLocker):
 
     def _on_store_opened_set_row_lock_timeout(self, cursor, restart=False):
         # This only lasts beyond the current transaction if it
-        # commits.
-        if not restart:
-            # We never change our lock timeout setting; the lock_and_choose_tid
-            # functions have it as part of their function definition, and
-            # we have NOWAIT for when we need a 0 timeout.
-            self._set_row_lock_timeout(cursor, self.commit_lock_timeout)
+        # commits. If we have a rollback, then our effect is lost. Thus,
+        # we can't be sure if it actually has taken effect, so even on a restart
+        # we need to perform it.
+        self._set_row_lock_timeout(cursor, self.commit_lock_timeout)
 
     def _set_row_lock_timeout(self, cursor, timeout):
         # This will rollback if the transaction rolls back,
