@@ -35,8 +35,6 @@ from .vote import DatabaseLockedForTid
 from .vote import HistoryFree as HFVoteFactory
 from .vote import HistoryPreserving as HPVoteFactory
 
-from ..load import Loader
-
 
 class TransactionConflictsWithItselfError(ReadConflictError):
     """

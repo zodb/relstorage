@@ -35,7 +35,8 @@ class PostgreSQLStats(AbstractStats):
     )
 
     _update_object_count_queries = (
-        'ANALYZE current_object, transaction',
+        # Only on PG11 can you list more than one table.
+        'ANALYZE current_object',
         'ANALYZE object_state'
     )
 

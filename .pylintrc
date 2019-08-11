@@ -50,7 +50,8 @@ disable=
     duplicate-code,
     inconsistent-return-statements,
     useless-object-inheritance,
-    chained-comparison
+    chained-comparison,
+    max-ancestors
 #   undefined-all-variable
 
 
@@ -98,6 +99,7 @@ ignored-modules=relstorage.cache._cache_ring
 [DESIGN]
 max-attributes=15
 max-locals=20
+
 
 [BASIC]
 # Prospector turns on unsafe-load-any-extension by default, but

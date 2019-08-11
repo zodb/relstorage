@@ -131,7 +131,7 @@ class Compiler(object):
         # That may also help facilitate caching.
         Compiler._prepared_stmt_counter += 1
         return 'rs_prep_stmt_%s_%d_%d' % (
-            getattr(self.root,"__name__", ''),
+            getattr(self.root, "__name__", ''),
             Compiler._prepared_stmt_counter,
             abs(hash(query)),
         )

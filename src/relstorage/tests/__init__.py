@@ -363,7 +363,7 @@ class MockDriver(object):
     dialect = DefaultDialect()
 
     isolation_load = 'SERIALIZABLE'
-    def connection_may_need_rollback(self, conn):
+    def connection_may_need_rollback(self, conn): # pylint:disable=unused-argument
         return True
     connection_may_need_commit = connection_may_need_rollback
 

@@ -110,7 +110,7 @@ class CXOracleConnectionManager(AbstractConnectionManager):
         return self.open(self.isolation_read_only,
                          replica_selector=self.ro_replica_selector)
 
-    def restart_load(self, conn, cursor):
+    def restart_load(self, conn, cursor, needs_rollback=True):
         """Reinitialize a connection for loading objects."""
         self.check_replica(conn, cursor,
                            replica_selector=self.ro_replica_selector)
@@ -139,7 +139,7 @@ class CXOracleConnectionManager(AbstractConnectionManager):
         xid = str(cursor.fetchone()[0])
         conn.begin(0, xid, '0')
 
-    def _do_open_for_store(self):
+    def _do_open_for_store(self, **open_args):
         if self._twophase:
             conn, cursor = self.open(transaction_mode=None, twophase=True)
         else:
