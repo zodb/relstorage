@@ -48,6 +48,9 @@ BEGIN
 
   -- History free has no current_object to update.
 
+  -- Clean up all our temp state.
+  CALL clean_temp_state(false);
+
   IF p_commit THEN
     COMMIT;
   END IF;

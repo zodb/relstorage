@@ -55,7 +55,7 @@ class Query(ParamMixin,
         #
         # TODO: In test cases, we spend a lot of time binding and compiling.
         # Can we find another layer of caching somewhere?
-        result = self.bind(inst).compiled()
+
         if not self.__name__:
             # Go through the class hierarchy, find out what we're called.
             for base in klass.mro():
@@ -65,6 +65,7 @@ class Query(ParamMixin,
                         break
         assert self.__name__
 
+        result = self.bind(inst).compiled()
         vars(inst)[self.__name__] = result
 
         return result
@@ -121,22 +122,22 @@ class CompiledQuery(object):
     def __str__(self):
         return self.stmt
 
-    _cursor_cache = WeakKeyDictionary()
+    _connection_cache = WeakKeyDictionary()
 
-    def _stmt_cache_for_cursor(self, cursor):
+    def _stmt_cache_for_connection(self, connection):
         """Returns a dictionary."""
         # If we can't store it directly on the cursor, as happens for
         # types implemented in C, we use a weakkey dictionary.
         try:
-            cursor_prep_stmts = cursor._rs_prepared_statements
+            session_prep_stmts = connection._rs_prepared_statements
         except AttributeError:
             try:
-                cursor_prep_stmts = cursor._rs_prepared_statements = {}
+                session_prep_stmts = connection._rs_prepared_statements = {}
             except AttributeError:
-                cursor_prep_stmts = self._cursor_cache.get(cursor)
-                if cursor_prep_stmts is None:
-                    cursor_prep_stmts = self._cursor_cache[cursor] = {}
-        return cursor_prep_stmts
+                session_prep_stmts = self._connection_cache.get(connection)
+                if session_prep_stmts is None:
+                    session_prep_stmts = self._connection_cache[connection] = {}
+        return session_prep_stmts
 
     def execute(self, cursor, params=None):
         # (Any, dict) -> None
@@ -157,11 +158,11 @@ class CompiledQuery(object):
             # this particular connection/cursor.
             # TODO: This should probably really be on the connection,
             # not the cursor. connection is session.
-            cursor_prep_stmts = self._stmt_cache_for_cursor(cursor)
+            session_prep_stmts = self._stmt_cache_for_connection(cursor.connection)
             try:
-                stmt = cursor_prep_stmts[self._prepare_stmt]
+                stmt = session_prep_stmts[self._prepare_stmt]
             except KeyError:
-                stmt = cursor_prep_stmts[self._prepare_stmt] = self.stmt
+                stmt = session_prep_stmts[self._prepare_stmt] = self.stmt
                 __traceback_info__ = self._prepare_stmt, self, self.root.dialect.compiler(self.root)
                 cursor.execute(self._prepare_stmt)
             params = self._prepare_converter(params)

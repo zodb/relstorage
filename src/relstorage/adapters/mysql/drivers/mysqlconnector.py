@@ -172,6 +172,11 @@ class PyMySQLConnectorDriver(AbstractMySQLDriver):
         # but the prepared cursor doesn't gain us anything anyway.
         return con
 
+    def cursor(self, conn):
+        cur = conn.cursor()
+        cur.connection = conn
+        return cur
+
     def set_autocommit(self, conn, value):
         # This implementation uses a property instead of a method.
         conn.autocommit = value

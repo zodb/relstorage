@@ -57,20 +57,24 @@ class AbstractManagedConnection(object):
     on_first_use = on_opened
 
     def __bool__(self):
-        return self.connection is not None and self._cursor is not None
+        return self.connection is not None
 
     __nonzero__ = __bool__
 
     @Lazy
     def cursor(self):
-        if not self.active or not self:
+        if not self.active or not self._cursor:
             # XXX: If we've been explicitly dropped, do we always want to
             # automatically re-open? Probably not; bad things could happen:
             # a load connection could skip into the future, and a store connection
             # could lose temp tables.
-            conn, cursor = self.open_if_needed()
-            self.active = True
-            self.on_first_use(conn, cursor)
+            if self.connection:
+                cursor = self.connmanager.cursor_for_connection(self.connection)
+            else:
+                _, cursor = self.open_if_needed()
+                self.active = True
+
+            self.on_first_use(self.connection, cursor)
         return self._cursor
 
     def drop(self):
@@ -85,9 +89,9 @@ class AbstractManagedConnection(object):
     # extra ROLLBACK commands. That costs network time, and
     # on Postgres it results in WARNINGS in the server logs.
 
-    def commit(self):
+    def commit(self, force=False):
         if self.connection is not None:
-            self.connmanager.commit(self.connection, self._cursor)
+            self.connmanager.commit(self.connection, self._cursor, force=force)
 
     def rollback_quietly(self):
         """
@@ -102,7 +106,7 @@ class AbstractManagedConnection(object):
 
         conn = self.connection
         cur = self._cursor
-        self.__dict__.pop('cursor', None)
+        self.__dict__.pop('cursor', None) # force on_first_use to be called.
         clean_rollback = self.connmanager.rollback_quietly(conn, cur)
         if not clean_rollback:
             self.drop()
@@ -129,13 +133,20 @@ class AbstractManagedConnection(object):
 
     def restart(self):
         """
-        Unconditionally restart the connection.
+        Restart the connection if there is any chance that it has any associated state.
         """
-        self.active = False
         if not self:
+            assert self._cursor is None
+            assert not self.active
             return
 
+        # If we don't do this even when we're not active, we can
+        if not self.active and 'cursor' not in self.__dict__:
+            return
+
+        self.active = False
         self.restart_and_call(self.__noop)
+
 
     def restart_and_call(self, f, *args, **kw):
         """
@@ -154,10 +165,14 @@ class AbstractManagedConnection(object):
         def callback(conn, cursor, fresh, *args, **kwargs):
             assert conn is self.connection and cursor is self._cursor
             if not fresh:
+                # We need to restart.
+                needs_rollback = 'cursor' in self.__dict__
                 # This could raise a disconnected exception, or a
                 # ReplicaClosedException.
-                self._restart(conn, cursor)
+                self._restart(conn, cursor, needs_rollback)
                 self.on_rolledback(conn, cursor)
+            if f == self.on_first_use:
+                self.cursor = cursor
             return f(conn, cursor, *args, **kwargs)
 
         return self.call(callback, True, *args, **kw)
@@ -212,6 +227,13 @@ class AbstractManagedConnection(object):
         finally:
             self.connmanager.rollback_and_close(conn, cursor)
 
+    def __repr__(self):
+        return "<%s at 0x%x conn=%r cur=%r>" % (
+            self.__class__.__name__,
+            id(self),
+            self.connection,
+            self._cursor
+        )
 
 @implementer(interfaces.IManagedLoadConnection)
 class LoadConnection(AbstractManagedConnection):
@@ -220,6 +242,7 @@ class LoadConnection(AbstractManagedConnection):
 
     _NEW_CONNECTION_NAME = 'open_for_load'
     _RESTART_NAME = 'restart_load'
+    load = True
 
 
 @implementer(interfaces.IManagedStoreConnection)

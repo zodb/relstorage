@@ -239,7 +239,19 @@ class IConnectionManager(Interface):
     use a pre-existing :class:`IManagedDBConnection`.
     """
 
-    def open():
+    isolation_load = Attribute("Default load isolation level.")
+    isolation_store = Attribute("Default store isolation level.")
+    isolation_read_committed = Attribute("Read committed.")
+    isolation_serializable = Attribute("Serializable.")
+
+
+    def open(
+            isolation=None,
+            deferrable=False,
+            read_only=False,
+            replica_selector=None,
+            application_name=None,
+            **kwargs):
         """Open a database connection and return (conn, cursor)."""
 
     def close(conn=None, cursor=None):

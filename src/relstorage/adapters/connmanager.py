@@ -53,6 +53,11 @@ class AbstractConnectionManager(object):
     # in practice they should.)
     _ignored_exceptions = ()
 
+    isolation_load = None
+    isolation_store = None
+    isolation_serializable = None
+    isolation_read_committed = None
+
     replica_selector = None
 
     def __init__(self, options, driver):
@@ -61,6 +66,7 @@ class AbstractConnectionManager(object):
         :param driver: A :class:`relstorage.adapters.interfaces.IDBDriver`,
             which we use for its exceptions.
         """
+        self.keep_history = options.keep_history
         self.driver = driver
 
         self._ignored_exceptions = tuple(set(
@@ -78,6 +84,14 @@ class AbstractConnectionManager(object):
                 options.ro_replica_conf, options.replica_timeout)
         else:
             self.ro_replica_selector = self.replica_selector
+
+        self.isolation_load = self.isolation_serializable
+        self.isolation_store = self.isolation_read_committed
+
+        self._may_need_rollback = driver.connection_may_need_rollback
+        self._may_need_commit = driver.connection_may_need_commit
+        self._do_commit = driver.commit
+        self._do_rollback = driver.rollback
 
     def add_on_store_opened(self, f):
         """
@@ -102,7 +116,13 @@ class AbstractConnectionManager(object):
         """
         self._on_load_opened += (f,)
 
-    def open(self, **kwargs):
+    def open(self,
+             isolation=None,
+             read_only=False,
+             deferrable=False,
+             replica_selector=None,
+             application_name=None,
+             **kwargs):
         """Open a database connection and return (conn, cursor)."""
         raise NotImplementedError()
 
@@ -132,18 +152,24 @@ class AbstractConnectionManager(object):
             except Exception: # pylint:disable=broad-except
                 pass
 
-    def __rollback_connection(self, conn, ignored_exceptions):
+    def __rollback_connection(self, conn, ignored_exceptions, restarting):
         """Return True if we successfully rolled back."""
         clean = True
-        if conn is not None and self._may_need_rollback(conn):
-            try:
-                conn.rollback()
-            except ignored_exceptions:
-                logger.debug("Ignoring exception rolling back connection", exc_info=True)
-                clean = False
+        if conn is not None:
+            if self._may_need_rollback(conn):
+                try:
+                    self._do_rollback(conn)
+                except ignored_exceptions:
+                    logger.debug("Ignoring exception rolling back connection", exc_info=True)
+                    clean = False
+            elif restarting:
+                self._begin_for_restart(conn)
         return clean
 
-    def _may_need_rollback(self, conn): # pylint:disable=unused-argument
+    def _begin_for_restart(self, conn):
+        pass
+
+    def _may_need_rollback(self, conn): # pylint:disable=unused-argument,method-hidden
         """
         Answer if this connection might need to be rolled back.
 
@@ -153,7 +179,7 @@ class AbstractConnectionManager(object):
         """
         return True
 
-    def _may_need_commit(self, conn): # pylint:disable=unused-argument
+    def _may_need_commit(self, conn): # pylint:disable=unused-argument,method-hidden
         """
         Answer if this connection might need to be committed.
 
@@ -163,7 +189,7 @@ class AbstractConnectionManager(object):
         """
         return True
 
-    def __rollback(self, conn, cursor, quietly):
+    def __rollback(self, conn, cursor, quietly, restarting):
         # If an error occurs, close the connection and cursor.
         #
         # Some drivers require the cursor to be closed before closing
@@ -176,7 +202,8 @@ class AbstractConnectionManager(object):
             clean = self.__rollback_connection(
                 conn,
                 # Let it raise if we're not meant to be quiet.
-                self._ignored_exceptions if quietly else ()
+                self._ignored_exceptions if quietly else (),
+                restarting
             )
         except:
             clean = False
@@ -187,7 +214,7 @@ class AbstractConnectionManager(object):
         return clean
 
     def rollback_and_close(self, conn, cursor):
-        clean = self.__rollback(conn, cursor, True)
+        clean = self.__rollback(conn, cursor, True, False)
         if clean:
             # if an error already occurred, we closed things.
             clean = self.close(conn, cursor)
@@ -195,17 +222,25 @@ class AbstractConnectionManager(object):
         return clean
 
     def rollback(self, conn, cursor):
-        return self.__rollback(conn, cursor, False)
+        return self.__rollback(conn, cursor, False, None)
+
+    def rollback_for_restart(self, conn, cursor):
+        return self.__rollback(conn, cursor, False, True)
 
     def rollback_quietly(self, conn, cursor):
-        return self.__rollback(conn, cursor, True)
+        return self.__rollback(conn, cursor, True, None)
 
-    def commit(self, conn, cursor=None): # pylint:disable=unused-argument
-        if self._may_need_commit(conn):
-            conn.commit()
+    def commit(self, conn, cursor=None, force=False):
+        if self._may_need_commit(conn) or force:
+            self._do_commit(conn, cursor)
 
     def _do_open_for_call(self, callback): # pylint:disable=unused-argument
         return self.open()
+
+    def cursor_for_connection(self, conn):
+        cursor = self.driver.cursor(conn)
+        cursor.arraysize = 1024
+        return cursor
 
     def open_and_call(self, callback):
         """Call a function with an open connection and cursor.
@@ -224,7 +259,7 @@ class AbstractConnectionManager(object):
                 conn, cursor = None, None
                 raise
             else:
-                self.close(cursor)
+                self.close(None, cursor)
                 cursor = None
                 self.commit(conn)
                 return res
@@ -249,11 +284,12 @@ class AbstractConnectionManager(object):
                          cursor, restart=False)
         return conn, cursor
 
-    def restart_load(self, conn, cursor):
+    def restart_load(self, conn, cursor, needs_rollback=True):
         """Reinitialize a connection for loading objects."""
         self.check_replica(conn, cursor,
                            replica_selector=self.ro_replica_selector)
-        self.rollback(conn, cursor)
+        if needs_rollback:
+            self.rollback(conn, cursor)
         self._call_hooks(self._on_load_opened, conn, cursor,
                          cursor, restart=True)
 
@@ -270,13 +306,30 @@ class AbstractConnectionManager(object):
                 raise ReplicaClosedException(
                     "Switched replica from %s to %s" % (conn.replica, current))
 
-    def _do_open_for_store(self):
+    def open_for_pre_pack(self):
+        """Open a connection to be used for the pre-pack phase.
+        Returns (conn, cursor).
         """
-        Subclasses may override.
+        return self.open_for_store(application_name='RS prepack')
 
-        Returns (conn, cursor)
-        """
-        return self.open()
+    def _do_open_for_store(self, **open_args):
+        open_args['isolation'] = self.isolation_store
+        open_args['read_only'] = False
+        open_args['deferrable'] = False
+        if 'application_name' not in open_args:
+            open_args['application_name'] = 'RS store'
+        return self.open(**open_args)
+
+    def _do_open_for_call(self, callback):
+        isolation = getattr(callback, 'transaction_isolation_level', self.isolation_store)
+        read_only = getattr(callback, 'transaction_read_only', False)
+        deferrable = getattr(callback, 'transaction_deferrable', False)
+        return self.open(
+            isolation=isolation,
+            read_only=read_only,
+            deferrable=deferrable,
+            application_name='RS: ' + callback.__name__)
+
 
     def _after_opened_for_store(self, conn, cursor, restart=False):
         """
@@ -288,12 +341,12 @@ class AbstractConnectionManager(object):
         # pylint:disable=unused-argument
         return
 
-    def open_for_store(self):
+    def open_for_store(self, **open_args):
         """Open and initialize a connection for storing objects.
 
         Returns (conn, cursor).
         """
-        conn, cursor = self._do_open_for_store()
+        conn, cursor = self._do_open_for_store(**open_args)
         try:
             self._after_opened_for_store(conn, cursor)
         except:
@@ -304,17 +357,11 @@ class AbstractConnectionManager(object):
 
         return conn, cursor
 
-    def restart_store(self, conn, cursor):
+    def restart_store(self, conn, cursor, needs_rollback=True):
         """Reuse a store connection."""
         self.check_replica(conn, cursor)
-        self.rollback(conn, cursor)
+        if needs_rollback:
+            self.rollback_for_restart(conn, cursor)
         self._after_opened_for_store(conn, cursor)
         self._call_hooks(self._on_store_opened, conn, cursor,
                          cursor, restart=True)
-
-
-    def open_for_pre_pack(self):
-        """Open a connection to be used for the pre-pack phase.
-        Returns (conn, cursor).
-        """
-        return self.open_for_store()

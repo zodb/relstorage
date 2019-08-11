@@ -31,7 +31,7 @@ class Psycopg2cffiDriver(Psycopg2Driver):
     PRIORITY = 2
     PRIORITY_PYPY = 1
 
-    def _create_connection(self, mod):
+    def _create_connection(self, mod): # pylint:disable=arguments-differ
         # The psycopg2cffi cursor doesn't go through the generic
         # ``execute()`` function for copy_to/from/expert, it goes
         # right to the low-level _pq_execute() method. As a
@@ -50,9 +50,26 @@ class Psycopg2cffiDriver(Psycopg2Driver):
                 self.connection._begin_transaction()
                 return super(Cursor, self).copy_expert(*args, **kwargs)
 
-        class Connection(super(Psycopg2cffiDriver, self)._create_connection(mod)):
+        class Connection(super(Psycopg2cffiDriver, self)._create_connection(mod, 'readonly')):
             def __init__(self, dsn, **kwargs):
                 super(Connection, self).__init__(dsn, **kwargs)
                 self.cursor_factory = Cursor
+                self.readonly = None
 
         return Connection
+
+    # as of psycopg2cffi 2.8.1 connection has no '.info' attribute.
+
+    def debug_connection(self, conn, *extra): # pragma: no cover
+        print(conn, *extra)
+
+    def connection_may_need_rollback(self, conn):
+        return conn.status != self.STATUS_READY
+
+    def connection_may_need_commit(self, conn):
+        if conn.readonly:
+            return False
+        return self.connection_may_need_rollback(conn)
+
+    def sync_status_after_commit(self, conn):
+        conn.status = self.STATUS_READY

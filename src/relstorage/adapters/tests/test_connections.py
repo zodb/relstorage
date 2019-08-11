@@ -62,6 +62,7 @@ class TestConnection(TestConnectionCommon):
             getattr(manager, 'cursor')
 
         del manager.on_opened
+        del manager.on_first_use
         self.assertEqual(cc, [manager.connection, manager.cursor])
 
     def test_restart_and_call_opens(self):

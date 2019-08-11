@@ -100,6 +100,10 @@ class TestCompiledQuery(TestCase):
         class Cursor(object):
             __slots__ = ('__weakref__',)
 
+            @property
+            def connection(self):
+                return self
+
             def execute(self, stmt):
                 executed.append(stmt)
 

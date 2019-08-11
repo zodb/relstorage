@@ -17,9 +17,5 @@ from __future__ import absolute_import
 
 from ..txncontrol import GenericTransactionControl
 
-class _PostgreSQLTransactionControl(GenericTransactionControl):
-    pass
-
-
-class PostgreSQLTransactionControl(_PostgreSQLTransactionControl):
+class PostgreSQLTransactionControl(GenericTransactionControl):
     pass

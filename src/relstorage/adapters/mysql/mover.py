@@ -29,6 +29,8 @@ from ..mover import metricmethod_sampled
 @implementer(IObjectMover)
 class MySQLObjectMover(AbstractObjectMover):
 
+    truncate_temp_tables = 'false'
+
     @metricmethod_sampled
     def on_store_opened(self, cursor, restart=False):
         """Create the temporary table for storing objects"""
@@ -42,12 +44,13 @@ class MySQLObjectMover(AbstractObjectMover):
             # a DROP/CREATE (9457). TRUNCATE is in the replication
             # logs like a DROP/CREATE. (DROP TEMPORARY TABLE is *not*
             # DDL and not transaction ending).
-            stmt = "TRUNCATE TABLE temp_store"
-            cursor.execute(stmt)
-            stmt = "TRUNCATE TABLE temp_read_current"
-            cursor.execute(stmt)
-            stmt = "TRUNCATE TABLE temp_blob_chunk"
-            cursor.execute(stmt)
+            # We are up to 4 temp tables, doing this with a call to a stored
+            # proc saves round trips.
+            #
+            # It's possible that the DDL lock that TRUNCATE takes can be a bottleneck
+            # in some places, though? Have specifically test that.
+            cursor.execute("CALL clean_temp_state(%s)" % (self.truncate_temp_tables,))
+            cursor.fetchall()
         else:
             # InnoDB tables benchmark much faster for concurrency=2
             # and 6 than MyISAM tables under both MySQL 5.5 and 5.7,
@@ -80,6 +83,13 @@ class MySQLObjectMover(AbstractObjectMover):
                 chunk_num   BIGINT UNSIGNED NOT NULL,
                             PRIMARY KEY (zoid, chunk_num),
                 chunk       LONGBLOB
+            ) ENGINE InnoDB
+            """
+            cursor.execute(stmt)
+
+            stmt = """
+            CREATE TEMPORARY TABLE IF NOT EXISTS temp_locked_zoid (
+                zoid BIGINT UNSIGNED NOT NULL PRIMARY KEY
             ) ENGINE InnoDB
             """
             cursor.execute(stmt)

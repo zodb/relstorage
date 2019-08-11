@@ -12,6 +12,8 @@ from . import TestBlobMixin
 
 class TestConnectionBlobMixin(TestBlobMixin):
 
+    first_data = b"(1) I'm a happy Blob."
+
     def testPuttingInConnection(self):
         # Putting a Blob into a Connection works like every other object:
        # Connections handle Blobs specially. To demonstrate that, we
@@ -19,7 +21,7 @@ class TestConnectionBlobMixin(TestBlobMixin):
 
         self.blob = blob = Blob()
         with blob.open("w") as f:
-            f.write(b"I'm a happy Blob.")
+            f.write(self.first_data)
 
         connection = self.database.open()
         root = connection.root()
@@ -50,7 +52,7 @@ class TestConnectionBlobMixin(TestBlobMixin):
 
         with blob2.open("r") as f:
             data = f.read()
-        self.assertEqual(data, b"I'm a happy Blob.")
+        self.assertEqual(data, self.first_data)
         transaction2.abort()
         connection2.close()
 
@@ -61,12 +63,15 @@ class TestConnectionBlobMixin(TestBlobMixin):
         connection = self.database.open()
         transaction3 = transaction.TransactionManager()
         connection3 = self.database.open(transaction_manager=transaction3)
+
+        second_data = b"(2) I am an ecstatic Blob."
         with connection.root()['myblob'].open('w') as f:
-            f.write(b'I am an ecstatic Blob.')
+            f.write(second_data)
         transaction.commit()
+
         with connection3.root()['myblob'].open('r') as f:
             data = f.read()
-        self.assertEqual(data, b"I'm a happy Blob.")
+        self.assertEqual(data, self.first_data)
 
         transaction3.abort()
         connection.close()

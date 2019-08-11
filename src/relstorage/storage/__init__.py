@@ -456,6 +456,8 @@ class RelStorage(LegacyMethodsMixin,
             # It's unlikely tpc_abort will get called...
             self.tpc_abort(transaction, _force=True)
             raise
+        # The store connection is either committed or rolledback;
+        # the load connection is now rolledback.
         self._tpc_phase = next_phase
         self._ltid = committed_tid
         return committed_tid
@@ -472,25 +474,6 @@ class RelStorage(LegacyMethodsMixin,
                 # might go wrong rolling back.
                 self._tpc_phase = NotInTransaction.from_storage(self)
             raise
-
-    def afterCompletion(self):
-        # Note that this method exists mainly to deal with read-only
-        # transactions that don't go through 2-phase commit (although
-        # it's called for all transactions). For this reason, we only
-        # have to roll back the load connection. The store connection
-        # is completed during normal write-transaction commit or
-        # abort.
-
-        # The next time we use the load connection, it will need to poll
-        # and will call our __on_first_use.
-        # Typically our next call from the ZODB Connection will be from its
-        # `newTransaction` method, a forced `sync` followed by `poll_invalidations`.
-
-        # This doesn't use restart_and_call() or even just restart() because we don't
-        # need to do those checks yet, we just want to quietly rollback.
-        # They both rollback; the difference is that restart_load checks for replicas,
-        # and calls any hooks needed.
-        self._load_connection.rollback_quietly()
 
     def lastTransaction(self):
         if self._ltid == z64 and self._prev_polled_tid is None:
@@ -512,6 +495,25 @@ class RelStorage(LegacyMethodsMixin,
         # XXX: This is broken for purposes of copyTransactionsFrom() because
         # it can only be iterated over once. zodbconvert works around this.
         return TransactionIterator(self._adapter, start, stop)
+
+    def afterCompletion(self):
+        # Note that this method exists mainly to deal with read-only
+        # transactions that don't go through 2-phase commit (although
+        # it's called for all transactions). For this reason, we only
+        # have to roll back the load connection. The store connection
+        # is completed during normal write-transaction commit or
+        # abort.
+
+        # The next time we use the load connection, it will need to poll
+        # and will call our __on_first_use.
+        # Typically our next call from the ZODB Connection will be from its
+        # `newTransaction` method, a forced `sync` followed by `poll_invalidations`.
+
+        # This doesn't use restart_and_call() or even just restart() because we don't
+        # need to do those checks yet, we just want to quietly rollback.
+        # They both rollback; the difference is that restart_load checks for replicas,
+        # and calls any hooks needed.
+        self._load_connection.rollback_quietly()
 
     def sync(self, force=True):
         """
@@ -545,6 +547,48 @@ class RelStorage(LegacyMethodsMixin,
             # needs to be handled and the commit rolled back too.
             if self._tpc_phase:
                 raise StorageDisconnectedDuringCommit()
+
+    def poll_invalidations(self):
+        """
+        Look for OIDs of objects that changed since _prev_polled_tid.
+
+        Returns {oid: 1}, or None if all objects need to be invalidated
+        because prev_polled_tid is not in the database (presumably it
+        has been packed).
+        """
+        # poll_invalidations is called by Connection.newTransaction(), which is a
+        # transaction synchronizer method.
+        # Connection.afterCompletion() also calls Connection.newTransaction() if we're not
+        # using explicit transactions.
+        # Our sync() will have been called just before this, so we should not need to
+        # restart the connection, just make a call. The load_connection logic handles that
+        # for us.
+
+        if self._closed:
+            # If we've never loaded (self._load_connection is false),
+            # it might seem that there's no point in doing a poll, but
+            # that's not true. testMVCC breaks if we skip this. It's not exactly clear
+            # why.
+            return {}
+
+        # __on_load_first_use is also the function we gave the LoadConnection to automatically
+        # call when we access the cursor for the first time. In this situation, we optimize
+        # for when the function is the same and only call it once.
+        changes, new_polled_tid = self._load_connection.restart_and_call(
+            self.__on_load_first_use
+        )
+        # Now we're in a fully synced state, meaning
+        # we don't need to do anything fancy with the load connection
+        # anymore. Let it know that.
+        self._load_connection.active = True
+        self._prev_polled_tid = new_polled_tid
+
+        if changes is None:
+            oids = None
+        else:
+            # The value is ignored, only key matters
+            oids = {int64_to_8bytes(oid_int): 1 for oid_int, _tid_int in changes}
+        return oids
 
     def __stale(self, stale_error):
         # Allow GC to do its thing with the locals
@@ -633,33 +677,6 @@ class RelStorage(LegacyMethodsMixin,
         )
 
         return changes, new_polled_tid
-
-    def poll_invalidations(self):
-        """Look for OIDs of objects that changed since _prev_polled_tid.
-
-        Returns {oid: 1}, or None if all objects need to be invalidated
-        because prev_polled_tid is not in the database (presumably it
-        has been packed).
-        """
-        if self._closed:
-            return {}
-
-        changes, new_polled_tid = self._load_connection.restart_and_call(
-            self.__on_load_first_use
-        )
-        # Now we're in a fully synced state, meaning
-        # we don't need to do anything fancy with the load connection
-        # anymore. Let it know that.
-        self._load_connection.active = True
-
-        self._prev_polled_tid = new_polled_tid
-
-        if changes is None:
-            oids = None
-        else:
-            # The value is ignored, only key matters
-            oids = {int64_to_8bytes(oid_int): 1 for oid_int, _tid_int in changes}
-        return oids
 
     def temporaryDirectory(self):
         """Return a directory that should be used for uncommitted blob data.

@@ -53,5 +53,7 @@ BEGIN
     COMMIT;
   END IF;
 
+  CALL clean_temp_state(false);
+
   SELECT p_committing_tid;
 END;

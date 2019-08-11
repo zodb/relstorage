@@ -35,6 +35,7 @@ from .interfaces import NoDriversAvailableError
 from .interfaces import ReplicaClosedException
 from .interfaces import UnknownDriverError
 
+logger = __import__('logging').getLogger(__name__)
 
 def _select_driver(options, driver_options):
     return _select_driver_by_name(options.driver, driver_options)
@@ -158,6 +159,29 @@ class AbstractModuleDriver(ABC):
 
     def cursor(self, conn):
         return conn.cursor()
+
+    def debug_connection(self, conn, *extra): # pragma: no cover
+        print(conn, *extra)
+
+    def get_messages(self, conn): # pragma: no cover pylint:disable=unused-argument
+        return ()
+
+    def __transaction_boundary(self, conn, meth):
+        meth()
+        messages = self.get_messages(conn)
+        for msg in messages:
+            logger.debug(msg)
+
+    def commit(self, conn, cursor=None): #  pylint:disable=unused-argument
+        self.__transaction_boundary(conn, conn.commit)
+
+    def rollback(self, conn):
+        self.__transaction_boundary(conn, conn.rollback)
+
+    def connection_may_need_rollback(self, conn): # pylint:disable=unused-argument
+        return True
+
+    connection_may_need_commit = connection_may_need_rollback
 
     # Things that can be recognized as a pickled state,
     # passed to an io.BytesIO reader, and unpickled.

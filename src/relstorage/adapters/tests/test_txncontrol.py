@@ -65,7 +65,7 @@ class TestTransactionControl(TestCase):
 
     def test_add_transaction_hp(self):
         inst = self._makeOne()
-        cur = MockCursor()
+        cur = MockCursor(self)
         __traceback_info__ = inst.__dict__
         inst.add_transaction(cur, 1, u'user', u'desc', u'ext')
         self.assertEqual(

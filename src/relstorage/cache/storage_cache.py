@@ -1019,6 +1019,8 @@ class _PersistentRowFilter(object):
         logger.debug("Polling %d oids in delta_after1", len(oids))
         def poll_oids_delta1(_conn, cursor):
             return self.adapter.mover.current_object_tids(cursor, oids)
+        poll_oids_delta1.transaction_isolation_level = self.adapter.connmanager.isolation_load
+        poll_oids_delta1.transaction_read_only = True
         current_tids_for_oids = self.adapter.connmanager.open_and_call(poll_oids_delta1)
         self.delta_after1 = type(self.delta_after1)(current_tids_for_oids)
         invalid_oids = {
