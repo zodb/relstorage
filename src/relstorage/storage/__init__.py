@@ -574,7 +574,7 @@ class RelStorage(LegacyMethodsMixin,
         # __on_load_first_use is also the function we gave the LoadConnection to automatically
         # call when we access the cursor for the first time. In this situation, we optimize
         # for when the function is the same and only call it once.
-        changes, new_polled_tid = self._load_connection.restart_and_call(
+        changed_oids, new_polled_tid = self._load_connection.restart_and_call(
             self.__on_load_first_use
         )
         # Now we're in a fully synced state, meaning
@@ -583,11 +583,11 @@ class RelStorage(LegacyMethodsMixin,
         self._load_connection.active = True
         self._prev_polled_tid = new_polled_tid
 
-        if changes is None:
+        if changed_oids is None:
             oids = None
         else:
             # The value is ignored, only key matters
-            oids = {int64_to_8bytes(oid_int): 1 for oid_int, _tid_int in changes}
+            oids = {int64_to_8bytes(oid_int): 1 for oid_int in changed_oids}
         return oids
 
     def __stale(self, stale_error):
@@ -670,7 +670,7 @@ class RelStorage(LegacyMethodsMixin,
         # It's not good if this raises a CacheConsistencyError, that should
         # be a fresh connection. It's not clear that we can take any steps to
         # recover that the cache hasn't already taken.
-        self._cache.after_poll(
+        changes = self._cache.after_poll(
             cursor,
             prev,
             new_polled_tid, changes

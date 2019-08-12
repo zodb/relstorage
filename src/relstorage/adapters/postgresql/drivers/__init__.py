@@ -56,7 +56,7 @@ class AbstractPostgreSQLDriver(AbstractModuleDriver):
             notices = list(notices)
             if isinstance(notices[0], dict):
                 # pg8000
-                notices = [d['M'] for d in notices]
+                notices = [d[b'M'] for d in notices]
                 conn.notices.clear()
             else:
                 notices = list(notices)

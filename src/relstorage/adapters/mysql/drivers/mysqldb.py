@@ -93,12 +93,12 @@ class GeventMySQLdbDriver(MySQLdbDriver):
 
     # If we have more rows than this, it will take multiple trips to
     # the socket and C to read them. OTOH, that's a rough indication
-    # of how often we will yield to the event loop. Note that iterating
-    # directly over the cursor uses fetchone(), so we will yield for
-    # every row. Using fetchall() will yield between fetching this many
-    # rows, but all the results will still be returned to the caller
-    # for processing in one batch.
-    cursor_arraysize = 10
+    # of how often we will yield to the event loop. Using fetchall()
+    # will yield between fetching this many rows, but all the results
+    # will still be returned to the caller for processing in one
+    # batch. Plain iteration will yield after this many rows, and return
+    # rows to the caller one at a time.
+    cursor_arraysize = 1024
 
     def __init__(self):
         super(GeventMySQLdbDriver, self).__init__()
@@ -163,6 +163,14 @@ class GeventMySQLdbDriver(MySQLdbDriver):
                             # Avoid a useless extra trip at the end.
                             break
                     return result
+
+                def __iter__(self):
+                    fetch = self.fetchmany
+                    batch = fetch()
+                    while batch:
+                        for row in batch:
+                            yield row
+                        batch = fetch()
 
 
             # Prior to mysqlclient 1.4, there was a 'waiter' Connection
