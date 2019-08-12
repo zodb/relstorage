@@ -51,7 +51,7 @@ disable=
     inconsistent-return-statements,
     useless-object-inheritance,
     chained-comparison,
-    max-ancestors
+    too-many-ancestors
 #   undefined-all-variable
 
 
