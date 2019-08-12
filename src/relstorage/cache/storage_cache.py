@@ -892,6 +892,7 @@ class StorageCache(object):
             change_to,
             delta_size
         )
+        # XXX: Make this atomic.
         old_value = self.cache.get_checkpoints()
         if old_value and old_value != expect:
             log.debug(

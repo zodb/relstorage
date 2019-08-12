@@ -18,11 +18,14 @@ MySQLdb IDBDriver implementations.
 from __future__ import absolute_import
 from __future__ import print_function
 
+import os
+
 from zope.interface import implementer
 
 from relstorage.adapters.interfaces import IDBDriver
 from relstorage.adapters._abstract_drivers import AbstractModuleDriver
 
+from relstorage.zodburi_resolver import convert_int as parse_bool
 from relstorage._util import Lazy
 
 from . import AbstractMySQLDriver
@@ -100,6 +103,15 @@ class GeventMySQLdbDriver(MySQLdbDriver):
     # rows to the caller one at a time.
     cursor_arraysize = 1024
 
+    # Set this to false to allow switching on queries and fetches
+    # after we've made some sort of lock call. If you rarely have conflicts, then this
+    # provides the best throughput. Set it to true to stop gevent from switching
+    # on network traffic when locked; if you have conflicts and load issues, by
+    # allowing a single greenlet to commit faster, you may gain improvements.
+    use_critical_phase_when_locked = parse_bool(
+        os.environ.get('RELSTORAGE_GEVENT_NO_SWITCH_WHEN_LOCKED', "false")
+    )
+
     def __init__(self):
         super(GeventMySQLdbDriver, self).__init__()
         # Replace self._connect (which was MySQLdb.connect) with
@@ -115,123 +127,15 @@ class GeventMySQLdbDriver(MySQLdbDriver):
 
     _Connection = None
 
+    def callproc_multi_result(self, cursor, proc, args=()):
+        if self.use_critical_phase_when_locked and 'lock' in proc:
+            # We're entering a critical phase. We actually *don't* want to yield,
+            # we want to get our results back as fast as possible
+            # because other people will be waiting on us.
+            cursor.enter_critical_phase_until_transaction_end()
+        return MySQLdbDriver.callproc_multi_result(self, cursor, proc, args)
+
     @classmethod
     def _get_connection_class(cls):
-        if cls._Connection is None:
-            # pylint:disable=import-error,no-name-in-module
-            from MySQLdb.connections import Connection as Base
-            from MySQLdb.cursors import SSCursor as BaseCursor
-
-            from gevent import socket
-            from gevent import get_hub
-            from gevent import sleep
-            wait = socket.wait # pylint:disable=no-member
-
-            class Cursor(BaseCursor):
-                # Internally this calls mysql_use_result(). The source
-                # code for that function has this comment: "There
-                # shouldn't be much processing per row because mysql
-                # server shouldn't have to wait for the client (and
-                # will not wait more than 30 sec/packet)." Imperically
-                # that doesn't seem to be true.
-
-                def _fetch_row(self, size=1):
-                    # Somewhat surprisingly, if we just wait on read,
-                    # we end up blocking forever. This is because of the buffers
-                    # maintained inside the MySQL library: we might already have the
-                    # rows that we need buffered.
-                    # Blocking on write is pointless: by definition we're here to read results
-                    # so we can always write. That just forces us to take a trip around the event
-                    # loop for no good reason.
-                    # Therefore, our best option to periodically yield is to explicitly invoke
-                    # gevent.sleep(). Without any time given, it will yield to other ready
-                    # greenlets; only sometimes will it force a trip around the event loop.
-                    sleep()
-                    return BaseCursor._fetch_row(self, size)
-
-                def fetchall(self):
-                    result = []
-                    fetch = self.fetchmany
-                    while 1:
-                        # Even if self.rowcount is 0 we must still call
-                        # or we get the connection out of sync.
-                        rows = fetch()
-                        if not rows:
-                            break
-                        result.extend(rows)
-                        if self.rownumber == self.rowcount:
-                            # Avoid a useless extra trip at the end.
-                            break
-                    return result
-
-                def __iter__(self):
-                    fetch = self.fetchmany
-                    batch = fetch()
-                    while batch:
-                        for row in batch:
-                            yield row
-                        batch = fetch()
-
-
-            # Prior to mysqlclient 1.4, there was a 'waiter' Connection
-            # argument that could be used to do this, but it was removed.
-            # So we implement it ourself.
-            class Connection(Base):
-                default_cursor = Cursor
-                gevent_read_watcher = None
-                gevent_write_watcher = None
-                gevent_hub = None
-
-                def check_watchers(self):
-                    # We can be used from more than one thread in a sequential
-                    # fashion.
-                    hub = get_hub()
-                    if hub is not self.gevent_hub:
-                        self.__close_watchers()
-
-                        fileno = self.fileno()
-                        hub = self.gevent_hub = get_hub()
-                        self.gevent_read_watcher = hub.loop.io(fileno, 1)
-                        self.gevent_write_watcher = hub.loop.io(fileno, 2)
-
-                def __close_watchers(self):
-                    if self.gevent_read_watcher is not None:
-                        self.gevent_read_watcher.close()
-                        self.gevent_write_watcher.close()
-                        self.gevent_hub = None
-
-                def query(self, query):
-                    # From the mysqlclient implementation:
-                    # "Since _mysql releases the GIL while querying, we need immutable buffer"
-                    if isinstance(query, bytearray):
-                        query = bytes(query)
-
-                    self.check_watchers()
-
-                    wait(self.gevent_write_watcher, hub=self.gevent_hub)
-                    self.send_query(query)
-                    wait(self.gevent_read_watcher, hub=self.gevent_hub)
-                    self.read_query_result()
-
-                # The default implementations of 'rollback' and
-                # 'commit' use only C API functions `mysql_rollback`
-                # and `mysql_commit`; it doesn't touch any internal
-                # state. Those in turn simply call
-                # `mysql_real_query("rollback")` and
-                # `mysql_real_query("commit")`. That's a synchronous
-                # function that waits for the result to be ready. We
-                # don't want to block like that (commit could
-                # potentially take some time.)
-
-                def rollback(self):
-                    self.query('rollback')
-
-                def commit(self):
-                    self.query('commit')
-
-                def close(self):
-                    self.__close_watchers()
-                    Base.close(self)
-
-            cls._Connection = Connection
-        return cls._Connection
+        from ._mysqldb_gevent import Connection
+        return Connection

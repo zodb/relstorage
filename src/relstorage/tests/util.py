@@ -151,6 +151,8 @@ class _Availability(object):
         adapter = adapter_maker.make_adapter(options, db_name)
         try:
             adapter.connmanager.open_and_call(self.__check_db_access_cb)
+        except (TypeError, AttributeError):
+            raise
         except Exception as e:  # pylint:disable=broad-except
             self._available = False
             self._msg = "%s: Failed to connect: %r %s" % (self._msg, type(e), e)
