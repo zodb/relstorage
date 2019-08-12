@@ -238,9 +238,7 @@ class AbstractConnectionManager(object):
         return self.open()
 
     def cursor_for_connection(self, conn):
-        cursor = self.driver.cursor(conn)
-        cursor.arraysize = 1024
-        return cursor
+        return self.driver.cursor(conn)
 
     def open_and_call(self, callback):
         """Call a function with an open connection and cursor.

@@ -157,8 +157,12 @@ class AbstractModuleDriver(ABC):
     def set_autocommit(self, conn, value):
         conn.autocommit(value)
 
+    cursor_arraysize = 1024
+
     def cursor(self, conn):
-        return conn.cursor()
+        cur = conn.cursor()
+        cur.arraysize = self.cursor_arraysize
+        return cur
 
     def debug_connection(self, conn, *extra): # pragma: no cover
         print(conn, *extra)
