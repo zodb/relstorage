@@ -104,6 +104,10 @@ class MultiStateCache(object):
     def updating_delta_map(self, deltas):
         return self.l.updating_delta_map(deltas)
 
+    def replace_checkpoints(self, expected, desired):
+        if self.g.replace_checkpoints(expected, desired):
+            return self.l.replace_checkpoints(expected, desired)
+
 @interface.implementer(IStateCache)
 class TracingStateCache(object):
     """

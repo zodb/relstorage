@@ -54,6 +54,16 @@
   behaviour in a concurrent environment, depending on the cursor
   implementation.
 
+- Add three environment variables to control the odds of whether any
+  given poll actually suggests shifted checkpoints. These are all
+  floating point numbers between 0 and 1. They are
+  ``RELSTORAGE_CP_REPLACEMENT_CHANCE_WHEN_FULL`` (default to 0.7),
+  ``RELSTORAGE_CP_REPLACEMENT_BEGIN_CONSIDERING_PERCENT`` (default
+  0.8) and ``RELSTORAGE_CP_REPLACEMENT_CHANCE_WHEN_CLOSE`` (default
+  0.2). (There are corresponding class variables on the storage cache
+  that could also be set.) It's not clear whether these will be
+  useful, so they are not officially options yet but they may become
+  so. Feedback is appreciated! See :issue:`323`.
 
 3.0a7 (2019-08-07)
 ==================

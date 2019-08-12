@@ -49,7 +49,9 @@ class StorageCacheTests(TestCase):
         inst = self.getClass()(MockAdapter(), options,
                                'myprefix')
         self._instances.append(inst)
-        return inst.new_instance() # coverage and sharing testing
+        inst = inst.new_instance() # coverage and sharing testing
+        inst.CP_REPLACEMENT_CHANCE_WHEN_FULL = 1
+        return inst
 
     def test_ctor(self):
         from relstorage.tests.fakecache import Client

@@ -49,6 +49,7 @@ logger = __import__('logging').getLogger(__name__)
 @interface.implementer(IStateCache,
                        IPersistentCache)
 class LocalClient(object):
+    # pylint:disable=too-many-public-methods
 
     # Use the same markers as zc.zlibstorage (well, one marker)
     # to automatically avoid double-compression
@@ -297,6 +298,18 @@ class LocalClient(object):
 
     def get_checkpoints(self):
         return self.checkpoints
+
+    def replace_checkpoints(self, old_checkpoints, desired_checkpoints):
+        with self._lock:
+            stored = self.get_checkpoints()
+            if stored and stored != old_checkpoints:
+                logger.debug(
+                    "Checkpoints already shifted to %s, not replacing.",
+                    stored
+                )
+                return None
+            self.store_checkpoints(*desired_checkpoints)
+            return desired_checkpoints
 
     def close(self):
         pass
