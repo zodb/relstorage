@@ -135,6 +135,11 @@ class _Availability(object):
 
     __nonzero__ = __bool__
 
+    def __check_db_access_cb(self, _conn, _cursor):
+        "Does nothing"
+
+    __check_db_access_cb.transaction_read_only = True
+
 
     def __check_db_access(self, use_adapter, db_name):
         # We need to get an adapter to get a connmanager to try to connect.
@@ -145,7 +150,7 @@ class _Availability(object):
         adapter_maker.driver_name = self.driver_name
         adapter = adapter_maker.make_adapter(options, db_name)
         try:
-            adapter.connmanager.open_and_call(lambda _conn, _cursor: None)
+            adapter.connmanager.open_and_call(self.__check_db_access_cb)
         except Exception as e:  # pylint:disable=broad-except
             self._available = False
             self._msg = "%s: Failed to connect: %r %s" % (self._msg, type(e), e)

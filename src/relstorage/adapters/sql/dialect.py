@@ -112,8 +112,7 @@ class Compiler(object):
 
     _prepared_stmt_counter = 0
 
-    @classmethod
-    def _next_prepared_stmt_name(cls, query):
+    def _next_prepared_stmt_name(self, query):
         # Even with the GIL, this isn't fully safe to do; two threads
         # can still get the same value. We don't want to allocate a
         # lock because we might be patched by gevent later. So that's
@@ -130,9 +129,10 @@ class Compiler(object):
         # single-threaded.
         #
         # That may also help facilitate caching.
-        cls._prepared_stmt_counter += 1
-        return 'rs_prep_stmt_%d_%d' % (
-            cls._prepared_stmt_counter,
+        Compiler._prepared_stmt_counter += 1
+        return 'rs_prep_stmt_%s_%d_%d' % (
+            getattr(self.root, "__name__", ''),
+            Compiler._prepared_stmt_counter,
             abs(hash(query)),
         )
 

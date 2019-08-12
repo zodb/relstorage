@@ -278,6 +278,7 @@ class TestTableSelect(TestCase):
         stmt = current_object.insert(
             current_object.c.zoid
         )
+        stmt.__name__ = 'ins'
 
         self.assertEqual(
             str(stmt),
@@ -292,7 +293,7 @@ class TestTableSelect(TestCase):
         stmt = stmt.compiled()
         self.assertRegex(
             stmt._prepare_stmt,
-            r"PREPARE rs_prep_stmt_[0-9]*_[0-9]* \(BIGINT\) AS.*"
+            r"PREPARE rs_prep_stmt_ins_[0-9]*_[0-9]* \(BIGINT\) AS.*"
         )
 
     def test_prepared_insert_select_with_param(self):
@@ -304,6 +305,7 @@ class TestTableSelect(TestCase):
                 object_state.orderedbindparam()
             )
         )
+        stmt.__name__ = 'ins'
         self.assertEqual(
             str(stmt),
             'INSERT INTO current_object(zoid, tid) SELECT zoid, %s FROM object_state'
@@ -317,7 +319,7 @@ class TestTableSelect(TestCase):
         stmt = stmt.compiled()
         self.assertRegex(
             stmt._prepare_stmt,
-            r"PREPARE rs_prep_stmt_[0-9]*_[0-9]* \(BIGINT\) AS.*"
+            r"PREPARE rs_prep_stmt_ins_[0-9]*_[0-9]* \(BIGINT\) AS.*"
         )
 
     def test_it(self):

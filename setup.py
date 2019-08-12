@@ -131,15 +131,16 @@ setup(
         # Python 3 because it's a binary driver and *probably* faster
         # for CPython; it requires some minor code changes to support,
         # so be sure to test this configuration. mysqlclient doesn't
-        # compile on windows for Python 2.7 and only has wheels for
-        # 3.6 and 3.7, though, so only install the pure-python
-        # version.
+        # compile on windows for Python 2.7 (it doesn't support the
+        # old Visual C) and is hard to compile for anything newer; it sometimes
+        # has wheels but not always, so don't suggest it.
+
 
         # pylint:disable=line-too-long
-        'mysql:platform_python_implementation=="CPython" and (sys_platform != "win32" or python_version > "3.5")': [
+        'mysql:platform_python_implementation=="CPython" and (sys_platform != "win32")': [
             'mysqlclient >= 1.4',
         ],
-        'mysql:platform_python_implementation=="PyPy" or (sys_platform == "win32" and python_version < "3.6")': [
+        'mysql:platform_python_implementation=="PyPy" or (sys_platform == "win32")': [
             'PyMySQL>=0.6.6',
         ],
         # Notes on psycopg2: In 2.8, they stopped distributing full
@@ -152,9 +153,10 @@ setup(
         # See http://initd.org/psycopg/docs/install.html#binary-packages
         'postgresql: platform_python_implementation == "CPython"': [
             # 2.4.1+ is required for proper bytea handling;
-            # 2.6+ is needed for 64-bit lobject support.
-            # 2.7+ is needed for Python 3.7 support and PostgreSQL 10+.
-            # 2.7.6+ is needed for PostgreSQL 11
+            # 2.6+ is needed for 64-bit lobject support;
+            # 2.7+ is needed for Python 3.7 support and PostgreSQL 10+;
+            # 2.7.6+ is needed for PostgreSQL 11;
+            # 2.8 is needed for conn.info
             'psycopg2 >= 2.8.3',
         ],
         'postgresql: platform_python_implementation == "PyPy"': [
@@ -179,10 +181,10 @@ setup(
             # First, mysql
             # pymysql on 3.6 on all platforms. We get coverage data from Travis,
             # and we get 2.7 from PyPy and Windows.
-            'PyMySQL >= 0.6.6; python_version == "3.6" or platform_python_implementation == "PyPy" or (sys_platform == "win32" and python_version < "3.6")',
+            'PyMySQL >= 0.6.6; python_version == "3.6" or platform_python_implementation == "PyPy" or sys_platform == "win32"',
             # mysqlclient (binary) on all CPythons. It's the default,
             # except on old Windows. We get coverage from Travis.
-            'mysqlclient >= 1.4;platform_python_implementation=="CPython" and (sys_platform != "win32" or python_version > "3.5")',
+            'mysqlclient >= 1.4;platform_python_implementation=="CPython" and (sys_platform != "win32")',
             # mysql-connector-python on Python 3.7 for coverage on Travis and ensuring it works
             # on Windows, and PyPy for testing there, since it's one of two pure-python versions.
             'mysql-connector-python >= 8.0.16; python_version == "3.7" or platform_python_implementation == "PyPy"',

@@ -30,7 +30,19 @@
   transaction may have still been holding some locks. (After
   :issue:`310` they would only be shared locks, but before they would
   have been exclusive locks.) This should make for faster recovery in
-  heavily loaded environments with lots of conflicts. See :`313`.
+  heavily loaded environments with lots of conflicts. See :issue:`313`.
+
+- Make MySQL clear its temp tables using a single round trip.
+  Truncation is optional and disabled by default. See :issue:`319`.
+
+- Fix PostgreSQL to not send the definition of the temporary tables
+  for every transaction. This is only necessary for the first
+  transaction.
+
+- Improve handling of commit and rollback, especially on PostgreSQL.
+  We now generate many fewer unneeded rollbacks. See :issue:`289`.
+
+- Stop checking the status of ``readCurrent`` OIDs twice.
 
 3.0a7 (2019-08-07)
 ==================

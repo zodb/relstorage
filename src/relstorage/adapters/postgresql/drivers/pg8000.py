@@ -182,6 +182,8 @@ class PG8000Driver(AbstractPostgreSQLDriver):
                 return self.execute(sql, stream=stream)
 
         class Connection(self.driver_module.Connection):
+            readonly = False
+
             def __init__(self,
                          user, host='localhost',
                          unix_sock=None,
@@ -240,7 +242,7 @@ class PG8000Driver(AbstractPostgreSQLDriver):
                                deferrable=False,
                                application_name=None):
         conn = self.connect(dsn)
-        cursor = conn.cursor()
+        cursor = self.cursor(conn)
         # For the current transaction
         transaction_stmt = 'TRANSACTION %s %s %s' % (
             isolation,
@@ -255,7 +257,8 @@ class PG8000Driver(AbstractPostgreSQLDriver):
         if application_name:
             cursor.execute("SELECT set_config('application_name', %s, False)", (application_name,))
         conn.commit()
-        return conn, cursor
+        conn.readonly = read_only
+        return conn
 
     sql_compiler_class = PG8000Compiler
 
@@ -264,3 +267,15 @@ class PG8000Driver(AbstractPostgreSQLDriver):
         # statements can't be SET with a variable.
         assert isinstance(timeout, number_types)
         cursor.execute('SET lock_timeout = %s' % (timeout,))
+
+    # TODO: Implement 'connection_may_need_commit' and 'connection_may_need_rollback'
+    # based on the actual state of the transaction. In psycopg2, we have the .status
+    # or .info to tell us; can we find something similar here?
+    def connection_may_need_rollback(self, conn):
+        # Got to rollback even if we are read only to get fresh view of the database.
+        return True
+
+    def connection_may_need_commit(self, conn):
+        if conn.readonly:
+            return False
+        return conn.in_transaction

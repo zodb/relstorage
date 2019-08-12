@@ -14,6 +14,7 @@
 """Pack/Undo implementations.
 """
 from __future__ import absolute_import
+from __future__ import print_function
 
 import logging
 import time
@@ -204,10 +205,11 @@ class PackUndo(DatabaseHelpersMixin):
     _delete_object_stmt = None
 
     def deleteObject(self, cursor, oid, oldserial):
+        params = {'oid': u64(oid), 'tid': u64(oldserial)}
         self.runner.run_script_stmt(
             cursor,
             self._delete_object_stmt,
-            {'oid': u64(oid), 'tid': u64(oldserial)})
+            params)
         return cursor.rowcount
 
 @implementer(IPackUndo)

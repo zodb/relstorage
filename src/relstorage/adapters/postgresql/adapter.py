@@ -241,23 +241,30 @@ class PostgreSQLAdapter(AbstractAdapter):
             proc = 'lock_and_choose_tid_and_move(%s, %s, %s, %s, %s)'
 
         if commit and self.driver.supports_multiple_statement_execute:
+            # Do this all in one trip to the database so that we don't need to
+            # wake up to handle the commit. Unfortunately, though, this
+            # will make the internal state of our connection object in libpq not match
+            # the actual state of the transaction on the server so we must still
+            # execute connection.commit() to bring them back in sync. This results
+            # in a warning on the server about no transaction being in progress.
             proc = (
                 "SELECT SET_CONFIG('rs.tid', " + proc + "::text, FALSE); "
                 "COMMIT; "
                 "SELECT current_setting('rs.tid')"
             )
-            needs_commit = False
         else:
             proc = 'SELECT ' + proc
-            needs_commit = commit
 
 
         cursor = store_connection.cursor
         cursor.execute(proc, params)
         tid_int, = cursor.fetchone()
         tid_int = int(tid_int)
-        if needs_commit:
-            self.txncontrol.commit_phase2(store_connection, "-")
+        if commit:
+            if self.driver.supports_multiple_statement_execute:
+                self.driver.sync_status_after_commit(store_connection.connection)
+            else:
+                self.txncontrol.commit_phase2(store_connection, "-")
         after_selecting_tid(tid_int)
         return tid_int, "-"
 

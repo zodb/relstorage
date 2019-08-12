@@ -36,12 +36,17 @@ class MySQLdbConnectionManager(AbstractConnectionManager):
     # READ ONLY was new in 5.6
     isolation_repeatable_read_ro = isolation_repeatable_read + ' , READ ONLY'
 
+    isolation_serializable = 'ISOLATION LEVEL SERIALIZABLE'
+
     def __init__(self, driver, params, options):
         self._params = params.copy()
         self._db_connect = driver.connect
         self._db_driver = driver
         self._fetchall_on_rollback = driver.fetchall_on_rollback
         super(MySQLdbConnectionManager, self).__init__(options, driver)
+
+        self.isolation_load = self.isolation_repeatable_read_ro
+        self.isolation_store = self.isolation_read_committed
 
     def _alter_params(self, replica):
         """Alter the connection parameters to use the specified replica.
@@ -57,10 +62,15 @@ class MySQLdbConnectionManager(AbstractConnectionManager):
             params['host'] = replica
         return params
 
-    def open(self, transaction_mode="ISOLATION LEVEL READ COMMITTED",
-             replica_selector=None, **kwargs):
+    def open(self,
+             isolation=None,
+             deferrable=False,
+             read_only=False,
+             replica_selector=None,
+             application_name=None,
+             **kwargs):
         """Open a database connection and return (conn, cursor)."""
-        # pylint:disable=arguments-differ
+        # pylint:disable=arguments-differ,unused-argument
         if replica_selector is None:
             replica_selector = self.replica_selector
 
@@ -71,6 +81,11 @@ class MySQLdbConnectionManager(AbstractConnectionManager):
             replica = None
             params = self._params
 
+        if isolation is None:
+            isolation = self.isolation_load
+        if read_only and 'READ ONLY' not in isolation:
+            isolation += ' , READ ONLY'
+
         while True:
             __traceback_info__ = {
                 k: v if k != 'passwd' else '<*****>'
@@ -79,18 +94,18 @@ class MySQLdbConnectionManager(AbstractConnectionManager):
 
             try:
                 conn = self._db_connect(**params)
-                cursor = self._db_driver.cursor(conn)
-                cursor.arraysize = 64
-                if transaction_mode:
-                    self._db_driver.set_autocommit(conn, True)
-                    # Transaction isolation cannot be changed inside a
-                    # transaction. 'SET SESSION' changes it for all
-                    # upcoming transactions.
-                    stmt = "SET SESSION TRANSACTION %s" % transaction_mode
-                    __traceback_info__ = stmt
-                    cursor.execute(stmt)
-                    self._db_driver.set_autocommit(conn, False)
+                cursor = self.cursor_for_connection(conn)
+
+                self._db_driver.set_autocommit(conn, True)
+                # Transaction isolation cannot be changed inside a
+                # transaction. 'SET SESSION' changes it for all
+                # upcoming transactions.
+                stmt = "SET SESSION TRANSACTION %s" % isolation
+                __traceback_info__ = stmt
+                cursor.execute(stmt)
+                self._db_driver.set_autocommit(conn, False)
                 conn.replica = replica
+                conn.readonly = read_only
                 return conn, cursor
             except self.driver.use_replica_exceptions as e:
                 if replica is not None:
@@ -106,14 +121,6 @@ class MySQLdbConnectionManager(AbstractConnectionManager):
 
     def _do_open_for_load(self):
         return self.open(
-            self.isolation_repeatable_read_ro,
+            isolation=self.isolation_load,
+            read_only=True,
             replica_selector=self.ro_replica_selector)
-
-    def open_for_pre_pack(self):
-        """Open a connection to be used for the pre-pack phase.
-        Returns (conn, cursor).
-
-        This overrides a method.
-        """
-        conn, cursor = self.open(self.isolation_read_committed)
-        return conn, cursor

@@ -64,10 +64,19 @@ class CXOracleConnectionManager(AbstractConnectionManager):
         super(CXOracleConnectionManager, self).__init__(options, driver)
 
     @metricmethod
-    def open(self, transaction_mode="ISOLATION LEVEL READ COMMITTED",
-             twophase=False, replica_selector=None, **kwargs):
+    def open(self,
+             isolation=None,
+             read_only=False,
+             deferrable=False,
+             replica_selector=None,
+             application_name=None,
+             twophase=False,
+             **kwargs):
         """Open a database connection and return (conn, cursor)."""
         # pylint:disable=arguments-differ
+        if isolation is None:
+            isolation = 'ISOLATION LEVEL READ COMMITTED'
+
         if replica_selector is None:
             replica_selector = self.replica_selector
 
@@ -82,8 +91,8 @@ class CXOracleConnectionManager(AbstractConnectionManager):
                 conn = self._db_connect(self._user, self._password, dsn, **kw)
                 cursor = conn.cursor()
                 cursor.arraysize = 64
-                if transaction_mode:
-                    cursor.execute("SET TRANSACTION %s" % transaction_mode)
+                if isolation:
+                    cursor.execute("SET TRANSACTION %s" % isolation)
                 return conn, cursor
 
             except self.driver.use_replica_exceptions as e:
@@ -101,7 +110,7 @@ class CXOracleConnectionManager(AbstractConnectionManager):
         return self.open(self.isolation_read_only,
                          replica_selector=self.ro_replica_selector)
 
-    def restart_load(self, conn, cursor):
+    def restart_load(self, conn, cursor, needs_rollback=True):
         """Reinitialize a connection for loading objects."""
         self.check_replica(conn, cursor,
                            replica_selector=self.ro_replica_selector)
@@ -130,7 +139,7 @@ class CXOracleConnectionManager(AbstractConnectionManager):
         xid = str(cursor.fetchone()[0])
         conn.begin(0, xid, '0')
 
-    def _do_open_for_store(self):
+    def _do_open_for_store(self, **open_args):
         if self._twophase:
             conn, cursor = self.open(transaction_mode=None, twophase=True)
         else:

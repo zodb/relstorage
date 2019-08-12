@@ -66,30 +66,26 @@ class PostgreSQLObjectMover(AbstractObjectMover):
         # DELETE ROWS and not DROP TABLE, but that didn't seem to be true (it's possible
         # an ANALYZE would still be helpful before using the temp table, but we
         # haven't benchmarked that).
-
-        temp_store_table_tmpl = """
+        if not restart:
+            temp_store_table_tmpl = """
             CREATE TEMPORARY TABLE IF NOT EXISTS {NAME} (
                 zoid        BIGINT NOT NULL PRIMARY KEY,
                 prev_tid    BIGINT NOT NULL,
                 md5         CHAR(32),
                 state       BYTEA
             ) ON COMMIT DELETE ROWS;
-        """
-
-        ddl_stmts = [
-            temp_store_table_tmpl.format(NAME='temp_store'),
-            temp_store_table_tmpl.format(NAME='temp_store_replacements'),
             """
-            CREATE TEMPORARY TABLE IF NOT EXISTS temp_blob_chunk (
-                zoid        BIGINT NOT NULL,
-                chunk_num   BIGINT NOT NULL,
-                chunk       OID,
-                PRIMARY KEY (zoid, chunk_num)
-            ) ON COMMIT DELETE ROWS;
-            """,
-        ]
-        if not restart:
-            ddl_stmts += [
+            ddl_stmts = [
+                temp_store_table_tmpl.format(NAME='temp_store'),
+                temp_store_table_tmpl.format(NAME='temp_store_replacements'),
+                """
+                CREATE TEMPORARY TABLE IF NOT EXISTS temp_blob_chunk (
+                    zoid        BIGINT NOT NULL,
+                    chunk_num   BIGINT NOT NULL,
+                    chunk       OID,
+                    PRIMARY KEY (zoid, chunk_num)
+                ) ON COMMIT DELETE ROWS;
+                """,
                 """
                 -- This trigger removes blobs that get replaced before being
                 -- moved to blob_chunk.  Note that it is never called when
@@ -101,33 +97,12 @@ class PostgreSQLObjectMover(AbstractObjectMover):
                 """,
             ]
 
-            # XXX: we're not preparing statements anymore until just
-            # before we want to use them, so this is no longer needed.
-
-            # For some reason, preparing the INSERT statement also
-            # wants to acquire a lock. If we're committing in another
-            # transaction, this can block indefinitely (if that other
-            # transaction happens to be in this same thread!)
-            # checkIterationIntraTransaction
-            # (PostgreSQLHistoryPreservingRelStorageTests) easily
-            # triggers this, and running zodbshootout with certain
-            # benchmarks and certain concurrency does as well.
-            # Fortunately, I don't think this is a common case, and we
-            # can workaround the test failure by only prepping this in
-            # the store connection. However, we do still need to
-            # increase the lock timeout (which is specified in
-            # milliseconds).
-            #
-            # TODO: Is there a more general solution? We initially set
-            # this to 100, but under high concurrency (10 processes)
-            # that turned out to be laughably optimistic. We might
-            # actually need to go as high as the commit lock timeout.
-            # cursor.execute('SET lock_timeout = 10000')
-
-        for stmt in ddl_stmts:
-            cursor.execute(stmt)
+            for stmt in ddl_stmts:
+                cursor.execute(stmt)
+            cursor.connection.commit()
 
         AbstractObjectMover.on_store_opened(self, cursor, restart)
+
 
     @metricmethod_sampled
     def store_temp(self, _cursor, batcher, oid, prev_tid, data):

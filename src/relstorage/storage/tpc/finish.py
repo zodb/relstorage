@@ -26,8 +26,11 @@ def Finish(vote_state, needs_store_commit=True):
     This is transient; once we successfully enter this state, we immediately return
     to the not-in-transaction state.
     """
+    # Bring the load connection to current status.
     vote_state.load_connection.rollback_quietly()
     if needs_store_commit:
+        # We may have already committed the store connection, so there's
+        # no point doing so again. Also no point in rolling it back either.
         txn = vote_state.prepared_txn
         assert txn is not None
         vote_state.adapter.txncontrol.commit_phase2(

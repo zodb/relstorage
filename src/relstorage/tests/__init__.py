@@ -222,16 +222,17 @@ class MockConnection(object):
         self.closed = True
 
     def cursor(self):
-        return MockCursor()
+        return MockCursor(self)
 
 class MockCursor(object):
     closed = False
 
-    def __init__(self):
+    def __init__(self, conn=None):
         self.executed = []
         self.inputsizes = {}
         self.results = []
         self.many_results = None
+        self.connection = conn
 
     def setinputsizes(self, **kw):
         self.inputsizes.update(kw)
@@ -277,6 +278,8 @@ class MockOptions(Options):
 
 class MockConnectionManager(object):
 
+    isolation_load = 'SERIALIZABLE'
+
     def __init__(self, driver=None):
         if driver is None:
             self.driver = MockDriver()
@@ -298,10 +301,16 @@ class MockConnectionManager(object):
 
     open_for_store = open_for_load
 
-    def restart_load(self, conn, cursor):
+    def restart_load(self, conn, cursor, needs_rollback=True):
         pass
 
     restart_store = restart_load
+
+    def cursor_for_connection(self, conn):
+        return conn.cursor()
+
+    def open_and_call(self, func):
+        return func(*self.open_for_load())
 
 class MockPackUndo(object):
     pass
@@ -323,6 +332,17 @@ class MockPoller(object):
 
     def __init__(self, driver=None):
         self.driver = driver or MockDriver()
+        self.changes = []  # [(oid, tid)]
+
+    def list_changes(self, _cursor, after_tid, last_tid):
+        # Return a list, because the caller is allowed
+        # to assume a length. Return exactly the item in the list because
+        # it may be a type other than a tuple
+        return [
+            item
+            for item in self.changes
+            if item[1] > after_tid and item[1] <= last_tid
+        ]
 
 class DisconnectedException(Exception):
     pass
@@ -342,6 +362,30 @@ class MockDriver(object):
 
     dialect = DefaultDialect()
 
+    isolation_load = 'SERIALIZABLE'
+    def connection_may_need_rollback(self, conn): # pylint:disable=unused-argument
+        return True
+    connection_may_need_commit = connection_may_need_rollback
+
+    def commit(self, conn):
+        conn.commit()
+
+    def rollback(self, conn):
+        conn.rollback()
+
+class MockObjectMover(object):
+    def __init__(self):
+        self.data = {}  # {oid_int: (state, tid_int)}
+
+    def load_current(self, _cursor, oid_int):
+        return self.data.get(oid_int, (None, None))
+
+    def current_object_tids(self, _cursor, oids):
+        return {
+            oid: self.data[oid][1]
+            for oid in oids
+            if oid in self.data
+        }
 
 class MockAdapter(object):
 
@@ -351,3 +395,4 @@ class MockAdapter(object):
         self.packundo = MockPackUndo()
         self.oidallocator = MockOIDAllocator()
         self.poller = MockPoller(self.driver)
+        self.mover = MockObjectMover()

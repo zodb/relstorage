@@ -18,7 +18,7 @@ Stats implementations
 from __future__ import absolute_import
 
 from ..stats import AbstractStats
-
+from .._util import query_property
 
 class PostgreSQLStats(AbstractStats):
 
@@ -34,6 +34,13 @@ class PostgreSQLStats(AbstractStats):
         "SELECT reltuples::bigint FROM pg_class WHERE relname = 'object_state'"
     )
 
+    _update_object_count_queries = (
+        # Only on PG11 can you list more than one table.
+        'ANALYZE current_object',
+        'ANALYZE object_state'
+    )
+
+    _update_object_count_query = query_property('_update_object_count')
 
     def get_db_size(self):
         """Returns the approximate size of the database in bytes"""
@@ -43,15 +50,13 @@ class PostgreSQLStats(AbstractStats):
         return self.connmanager.open_and_call(get_size)
 
     def large_database_change(self):
-        conn, cursor = self.connmanager.open()
-        try:
+        def analyze(_conn, cursor):
             # VACUUM cannot be run inside a transaction block;
             # ANALYZE can be. Both update pg_class.reltuples.
             # VACUUM needs a read table lock, meaning it can be blocked by writes
             # and vice-versa; ANALYZE doesn't appear to need locks.
-            cursor.execute('ANALYZE')
+            cursor.execute(self._update_object_count_query)
             # Depending on the number of pages this touched, the estimate
             # can be better or worse.
-            conn.commit()
-        finally:
-            self.connmanager.close(conn, cursor)
+
+        self.connmanager.open_and_call(analyze)

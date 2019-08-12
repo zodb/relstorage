@@ -73,6 +73,16 @@ class MySQLdbDriver(AbstractMySQLDriver):
             kwargs['cursorclass'] = self._strict_cursor
         return AbstractMySQLDriver.connect(self, *args, **kwargs)
 
+    def connection_may_need_rollback(self, conn):
+        if conn.readonly:
+            return True
+        return True
+
+    def connection_may_need_commit(self, conn):
+        if conn.readonly:
+            return False
+        return True
+
 class GeventMySQLdbDriver(MySQLdbDriver):
     __name__ = 'gevent MySQLdb'
 

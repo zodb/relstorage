@@ -26,6 +26,7 @@ from ZODB.utils import u64 as bytes8_to_int64
 
 from relstorage._compat import base64_decodebytes
 from relstorage._compat import dumps
+from relstorage._compat import metricmethod_sampled
 from relstorage._compat import OID_TID_MAP_TYPE
 from relstorage._util import to_utf8
 
@@ -34,7 +35,11 @@ from .vote import DatabaseLockedForTid
 from .vote import HistoryFree as HFVoteFactory
 from .vote import HistoryPreserving as HPVoteFactory
 
-from ..load import Loader
+
+class TransactionConflictsWithItselfError(ReadConflictError):
+    """
+    The transaction asked for two different OIDs for the same object.
+    """
 
 class _BadFactory(object):
 
@@ -59,15 +64,13 @@ class AbstractBegin(AbstractTPCState):
         # The factory we call to produce a voting state. Must return
         # an object with an enter() method.
         'tpc_vote_factory',
-
-        'getTid',
     )
 
     _DEFAULT_TPC_VOTE_FACTORY = _BadFactory # type: Callable[..., AbstractTPCState]
 
     def __init__(self, previous_state, transaction):
         super(AbstractBegin, self).__init__(previous_state, transaction)
-        self.getTid = None
+        #self.getTid = None
         self.max_stored_oid = 0 # type: int
         # We'll replace this later with the right type when it's needed.
         self.required_tids = {} # type: Dict[int, int]
@@ -83,9 +86,11 @@ class AbstractBegin(AbstractTPCState):
             ext = b""
         self.ude = user, desc, ext
 
+        # In many cases we can defer this; we only need it
+        # if we do deleteObject() or store a blob (which we're not fully in
+        # control of)
         self.store_connection.restart()
         self.cache.tpc_begin()
-
         self.blobhelper.begin()
 
     def tpc_vote(self, transaction, storage):
@@ -106,8 +111,6 @@ class AbstractBegin(AbstractTPCState):
             raise StorageTransactionError(self, transaction)
 
         cache = self.cache
-        cursor = self.store_connection.cursor
-        assert cursor is not None
         oid_int = bytes8_to_int64(oid)
         if previous_tid:
             # previous_tid is the tid of the state that the
@@ -128,18 +131,11 @@ class AbstractBegin(AbstractTPCState):
         # COPY in postgres.
         cache.store_temp(oid_int, data, prev_tid_int)
 
+
+    @metricmethod_sampled
     def checkCurrentSerialInTransaction(self, oid, required_tid, transaction):
         if transaction is not self.transaction:
             raise StorageTransactionError(self, transaction)
-
-        if self.getTid is None:
-            loader = Loader(self.adapter, self.load_connection, self.store_connection, self.cache)
-            self.getTid = loader.getTid
-
-        committed_tid = self.getTid(oid)
-        if committed_tid != required_tid:
-            raise ReadConflictError(
-                oid=oid, serials=(committed_tid, required_tid))
 
         required_tid_int = bytes8_to_int64(required_tid)
         oid_int = bytes8_to_int64(oid)
@@ -152,11 +148,23 @@ class AbstractBegin(AbstractTPCState):
 
         previous_serial_int = required_tids.get(oid_int, required_tid_int)
         if previous_serial_int != required_tid_int:
-            raise ReadConflictError(
+            raise TransactionConflictsWithItselfError(
                 oid=oid,
                 serials=(int64_to_8bytes(previous_serial_int),
                          required_tid))
         required_tids[oid_int] = required_tid_int
+
+        # Previously, we used Loader.getTid() (a wrapper around
+        # Loader.load()) to check that what's visible in the database
+        # load connection is what they asked for.
+        #
+        # But this shouldn't actually matter: This object came from
+        # the load connection in the first place. This is probably a
+        # cache hit. If it doesn't match, then we failed to notice a
+        # change and invalidate the object. This is called from
+        # Connection.commit(), which happens after tpc_begin() and
+        # just before tpc_vote(), so there's no real reason not to
+        # just defer it a bit until we do it in bulk for vote.
 
     def deleteObject(self, oid, oldserial, transaction):
         """
@@ -186,7 +194,6 @@ class AbstractBegin(AbstractTPCState):
         # We delegate the actual operation to the adapter's packundo,
         # just like native pack
         cursor = self.store_connection.cursor
-        assert cursor is not None
         # When this is done, we get a tpc_vote,
         # and a tpc_finish.
         # The interface doesn't specify a return value, so for testing

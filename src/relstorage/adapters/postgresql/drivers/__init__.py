@@ -25,6 +25,8 @@ from ..._abstract_drivers import implement_db_driver_options
 from ..._abstract_drivers import AbstractModuleDriver
 from ...sql import DefaultDialect
 
+logger = __import__('logging').getLogger(__name__)
+
 class PostgreSQLDialect(DefaultDialect):
     """
     The defaults are setup for PostgreSQL.
@@ -35,11 +37,6 @@ class AbstractPostgreSQLDriver(AbstractModuleDriver):
     # Can we bundle statements into a single string?
     # "SELECT 1; COMMIT;"
     supports_multiple_statement_execute = True
-
-    def connection_may_need_rollback(self, conn): # pylint:disable=unused-argument
-        return True
-
-    connection_may_need_commit = connection_may_need_rollback
 
     def connect_with_isolation(self, dsn,
                                isolation=None,
@@ -52,6 +49,21 @@ class AbstractPostgreSQLDriver(AbstractModuleDriver):
         # PG8000 needs a literal embedded in the string; prepared
         # statements can't be SET with a variable.
         cursor.execute('SET lock_timeout = %s', (timeout,))
+
+    def get_messages(self, conn):
+        notices = conn.notices
+        if notices:
+            notices = list(notices)
+            if isinstance(notices[0], dict):
+                # pg8000
+                notices = [d['M'] for d in notices]
+                conn.notices.clear()
+            else:
+                notices = list(notices)
+                del conn.notices[:]
+        return notices
+
+
 
 database_type = 'postgresql'
 

@@ -34,13 +34,7 @@ label_proc:BEGIN
   -- index records than necessary (any sort of range access can lead
   -- to unexpected locking between transactions). See mysql/locker.py
   -- for more.
-  CREATE TEMPORARY TABLE IF NOT EXISTS temp_locked_zoid (
-    zoid BIGINT PRIMARY KEY
-  );
 
-
-
-  -- TODO: Do the temp table creation in the mover.py
   -- TODO: Investigate these plans. I was seeing them both use filesort and
   -- temporary table. That can't be right. Or good.
 

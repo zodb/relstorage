@@ -13,13 +13,14 @@
 ##############################################################################
 """PostgreSQL adapter for RelStorage."""
 from __future__ import absolute_import
+from __future__ import print_function
 
 import logging
 
 from ..._compat import metricmethod
 from ..connmanager import AbstractConnectionManager
 
-log = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
 class Psycopg2ConnectionManager(AbstractConnectionManager):
@@ -31,9 +32,8 @@ class Psycopg2ConnectionManager(AbstractConnectionManager):
         self.isolation_repeatable_read = driver.ISOLATION_LEVEL_REPEATABLE_READ
         self.keep_history = options.keep_history
         self._db_connect_with_isolation = driver.connect_with_isolation
-        self._may_need_rollback = driver.connection_may_need_rollback
-        self._may_need_commit = driver.connection_may_need_commit
         super(Psycopg2ConnectionManager, self).__init__(options, driver)
+
 
     def _alter_dsn(self, replica):
         """Alter the DSN to use the specified replica.
@@ -55,7 +55,7 @@ class Psycopg2ConnectionManager(AbstractConnectionManager):
         """Open a database connection and return (conn, cursor)."""
         # pylint:disable=arguments-differ
         if isolation is None:
-            isolation = self.isolation_read_committed
+            isolation = self.isolation_store
 
         if replica_selector is None:
             replica_selector = self.replica_selector
@@ -69,26 +69,29 @@ class Psycopg2ConnectionManager(AbstractConnectionManager):
 
         while True:
             try:
-                conn, cursor = self._db_connect_with_isolation(
+                # psycopg2 seems to have a cache of Connection objects
+                # so closing one and then opening again often gets the same
+                # object back.
+                conn = self._db_connect_with_isolation(
                     dsn,
                     isolation=isolation,
                     deferrable=deferrable,
                     read_only=read_only,
                     application_name=application_name
                 )
-                cursor.arraysize = 64
+                cursor = self.cursor_for_connection(conn)
                 conn.replica = replica
                 return conn, cursor
             except self.driver.use_replica_exceptions as e:
                 if replica is not None:
                     next_replica = replica_selector.next()
                     if next_replica is not None:
-                        log.warning("Unable to connect to replica %s: %s, "
-                                    "now trying %s", replica, e, next_replica)
+                        logger.warning("Unable to connect to replica %s: %s, "
+                                       "now trying %s", replica, e, next_replica)
                         replica = next_replica
                         dsn = self._alter_dsn(replica)
                         continue
-                log.warning("Unable to connect: %s", e)
+                logger.warning("Unable to connect: %s", e)
                 raise
 
     def _do_open_for_load(self):
@@ -113,20 +116,9 @@ class Psycopg2ConnectionManager(AbstractConnectionManager):
         # faster, as the *only* serializable transactions we have
         # should be READ ONLY.
         return self.open(
-            self.isolation_serializable,
+            self.isolation_load,
             read_only=True,
             deferrable=False,
             replica_selector=self.ro_replica_selector,
             application_name='RS load'
         )
-
-    def open_for_pre_pack(self):
-        return self.open(self.isolation_read_committed,
-                         application_name='RS prepack')
-
-    def _do_open_for_store(self):
-        return self.open(self.isolation_read_committed,
-                         application_name='RS store')
-
-    def _do_open_for_call(self, callback):
-        return self.open(application_name='RS: ' + callback.__name__)

@@ -129,9 +129,12 @@ class Loader(object):
             raise POSKeyError(oid)
         return state, int64_to_8bytes(tid_int)
 
-    @stale_aware
     @storage_method
     def getTid(self, oid):
+        """
+        Return the transaction TID bytes for the OID, as
+        seen from the load connection.
+        """
         _state, serial = self.load(oid)
         return serial
 
