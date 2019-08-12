@@ -64,6 +64,8 @@ class AbstractPostgreSQLDriver(AbstractModuleDriver):
         return notices
 
 
+    def synchronize_cursor_for_rollback(self, cursor):
+        """Does nothing."""
 
 database_type = 'postgresql'
 

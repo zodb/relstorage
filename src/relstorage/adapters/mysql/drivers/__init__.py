@@ -74,9 +74,6 @@ class AbstractMySQLDriver(AbstractModuleDriver):
     # automatically handle both these statements (``SET names binary,
     # time_zone = X``).
 
-    # Does this driver need cursor.fetchall() called before a rollback?
-    fetchall_on_rollback = False
-
     def cursor(self, conn):
         cursor = AbstractModuleDriver.cursor(self, conn)
         if self.MY_CHARSET_STMT:
@@ -84,6 +81,9 @@ class AbstractMySQLDriver(AbstractModuleDriver):
         if self.MY_TIMEZONE_STMT:
             cursor.execute(self.MY_TIMEZONE_STMT)
         return cursor
+
+    def synchronize_cursor_for_rollback(self, cursor):
+        """Does nothing."""
 
     def callproc_multi_result(self, cursor, proc, args=()):
         """

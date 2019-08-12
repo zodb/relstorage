@@ -21,6 +21,7 @@ from __future__ import print_function
 from zope.interface import implementer
 
 from relstorage.adapters.interfaces import IDBDriver
+from relstorage.adapters._abstract_drivers import AbstractModuleDriver
 
 from relstorage._util import Lazy
 
@@ -40,7 +41,8 @@ class MySQLdbDriver(AbstractMySQLDriver):
     PRIORITY_PYPY = 3
     _GEVENT_CAPABLE = False
 
-    fetchall_on_rollback = True
+    def synchronize_cursor_for_rollback(self, cursor):
+        AbstractModuleDriver.synchronize_cursor_for_rollback(self, cursor)
 
     @Lazy
     def _strict_cursor(self):
@@ -89,9 +91,13 @@ class GeventMySQLdbDriver(MySQLdbDriver):
     _GEVENT_CAPABLE = True
     _GEVENT_NEEDS_SOCKET_PATCH = False
 
-    # If we have more rows than this, it will take multiple trips
-    # to the socket and C to read them. OTOH, that's an indication of how often
-    # we expect to be switching.
+    # If we have more rows than this, it will take multiple trips to
+    # the socket and C to read them. OTOH, that's a rough indication
+    # of how often we will yield to the event loop. Note that iterating
+    # directly over the cursor uses fetchone(), so we will yield for
+    # every row. Using fetchall() will yield between fetching this many
+    # rows, but all the results will still be returned to the caller
+    # for processing in one batch.
     cursor_arraysize = 10
 
     def __init__(self):
@@ -112,28 +118,38 @@ class GeventMySQLdbDriver(MySQLdbDriver):
     @classmethod
     def _get_connection_class(cls):
         if cls._Connection is None:
-            # pylint:disable=import-error,no-name-in-module,too-many-statements
+            # pylint:disable=import-error,no-name-in-module
             from MySQLdb.connections import Connection as Base
             from MySQLdb.cursors import SSCursor as BaseCursor
 
             from gevent import socket
             from gevent import get_hub
+            from gevent import sleep
             wait = socket.wait # pylint:disable=no-member
 
             class Cursor(BaseCursor):
+                # Internally this calls mysql_use_result(). The source
+                # code for that function has this comment: "There
+                # shouldn't be much processing per row because mysql
+                # server shouldn't have to wait for the client (and
+                # will not wait more than 30 sec/packet)." Imperically
+                # that doesn't seem to be true.
 
-                def __init__(self, connection):
-                    BaseCursor.__init__(self, connection)
-                    self._fetch_row = self._gevent_fetch_row
-
-                def _gevent_fetch_row(self, size=1):
+                def _fetch_row(self, size=1):
                     # Somewhat surprisingly, if we just wait on read,
-                    # we end up blocking forever.
-                    wait(self.connection.gevent_rw_watcher, hub=self.connection.gevent_hub)
+                    # we end up blocking forever. This is because of the buffers
+                    # maintained inside the MySQL library: we might already have the
+                    # rows that we need buffered.
+                    # Blocking on write is pointless: by definition we're here to read results
+                    # so we can always write. That just forces us to take a trip around the event
+                    # loop for no good reason.
+                    # Therefore, our best option to periodically yield is to explicitly invoke
+                    # gevent.sleep(). Without any time given, it will yield to other ready
+                    # greenlets; only sometimes will it force a trip around the event loop.
+                    sleep()
                     return BaseCursor._fetch_row(self, size)
 
                 def fetchall(self):
-                    self.connection.check_watchers()
                     result = []
                     fetch = self.fetchmany
                     while 1:
@@ -148,12 +164,6 @@ class GeventMySQLdbDriver(MySQLdbDriver):
                             break
                     return result
 
-                def close(self):
-                    # Account for being closed in a different thread than what
-                    # opened us.
-                    if '_fetch_row' in self.__dict__:
-                        del self._fetch_row
-                    BaseCursor.close(self)
 
             # Prior to mysqlclient 1.4, there was a 'waiter' Connection
             # argument that could be used to do this, but it was removed.
@@ -162,7 +172,6 @@ class GeventMySQLdbDriver(MySQLdbDriver):
                 default_cursor = Cursor
                 gevent_read_watcher = None
                 gevent_write_watcher = None
-                gevent_rw_watcher = None
                 gevent_hub = None
 
                 def check_watchers(self):
@@ -176,13 +185,11 @@ class GeventMySQLdbDriver(MySQLdbDriver):
                         hub = self.gevent_hub = get_hub()
                         self.gevent_read_watcher = hub.loop.io(fileno, 1)
                         self.gevent_write_watcher = hub.loop.io(fileno, 2)
-                        self.gevent_rw_watcher = hub.loop.io(fileno, 3)
 
                 def __close_watchers(self):
                     if self.gevent_read_watcher is not None:
                         self.gevent_read_watcher.close()
                         self.gevent_write_watcher.close()
-                        self.gevent_rw_watcher.close()
                         self.gevent_hub = None
 
                 def query(self, query):
