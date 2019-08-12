@@ -314,7 +314,7 @@ class IConnectionManager(Interface):
         :return: ``(conn, cursor)``
         """
 
-    def restart_load(conn, cursor):
+    def restart_load(conn, cursor, needs_rollback=True):
         """
         Reinitialize a connection for loading objects.
 
@@ -325,7 +325,7 @@ class IConnectionManager(Interface):
         disconnected.
         """
 
-    def open_for_store():
+    def open_for_store(**open_args):
         """
         Open and initialize a connection for storing objects.
 
@@ -351,12 +351,15 @@ class IConnectionManager(Interface):
         :return: ``(conn, cursor)``
         """
 
-    def restart_store(conn, cursor):
+    def restart_store(conn, cursor, needs_rollback=True):
         """
         Rollback and reuse a store connection.
 
         Raise one of self.disconnected_exceptions if the database
         has disconnected.
+
+        You can set *needs_rollback* to false if you're certain
+        the connection does not need rolled back.
         """
 
     def open_for_pre_pack():
@@ -380,6 +383,12 @@ class IConnectionManager(Interface):
         opened in ``READ COMMITTED`` isolation level.
 
         :return: ``(conn, cursor)``
+        """
+
+    def cursor_for_connection(conn):
+        """
+        If the cursor returned by an open method was discarded
+        for state management purposes, use this to get a new cursor.
         """
 
     def add_on_store_opened(f):

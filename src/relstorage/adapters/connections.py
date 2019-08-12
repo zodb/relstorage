@@ -140,7 +140,8 @@ class AbstractManagedConnection(object):
             assert not self.active
             return
 
-        # If we don't do this even when we're not active, we can
+        # If we've never accessed the cursor, we shouldn't have any
+        # state to restart.
         if not self.active and 'cursor' not in self.__dict__:
             return
 
@@ -242,7 +243,7 @@ class LoadConnection(AbstractManagedConnection):
 
     _NEW_CONNECTION_NAME = 'open_for_load'
     _RESTART_NAME = 'restart_load'
-    load = True
+
 
 
 @implementer(interfaces.IManagedStoreConnection)

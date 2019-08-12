@@ -48,7 +48,7 @@ class MySQLObjectMover(AbstractObjectMover):
             # proc saves round trips.
             #
             # It's possible that the DDL lock that TRUNCATE takes can be a bottleneck
-            # in some places, though? Have specifically test that.
+            # in some places, though?
             cursor.execute("CALL clean_temp_state(%s)" % (self.truncate_temp_tables,))
             cursor.fetchall()
         else:
