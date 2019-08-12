@@ -44,6 +44,17 @@
 
 - Stop checking the status of ``readCurrent`` OIDs twice.
 
+- Make the gevent MySQL driver yield more frequently while getting
+  large result sets. Previously it would block in C to read the entire
+  result set. Now it yields according to the cursor's ``arraysize``.
+  See :issue:`315`.
+
+- Polling for changes now iterates the cursor instead of using
+  ``fetchall()``. This can reduce memory usage and provide better
+  behaviour in a concurrent environment, depending on the cursor
+  implementation.
+
+
 3.0a7 (2019-08-07)
 ==================
 

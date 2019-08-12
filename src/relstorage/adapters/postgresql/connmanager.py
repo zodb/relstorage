@@ -47,8 +47,6 @@ class Psycopg2ConnectionManager(AbstractConnectionManager):
             dsn = '%s host=%s' % (self._dsn, replica)
         return dsn
 
-    _fetchall_on_rollback = False
-
     @metricmethod
     def open(self, isolation=None, deferrable=False, read_only=False,
              replica_selector=None, application_name=None, **kwargs):

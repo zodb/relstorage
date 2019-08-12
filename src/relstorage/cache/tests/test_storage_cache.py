@@ -449,29 +449,6 @@ class StorageCacheTests(TestCase):
         self.assertEqual(dict(c.delta_after0), {2: 45})
         self.assertEqual(dict(c.delta_after1), {1: 35})
 
-    def test_after_poll_new_checkpoints_bad_changes_duplicates(self):
-        from relstorage.tests.fakecache import data
-        from relstorage.cache.interfaces import CacheConsistencyError
-        data['myprefix:checkpoints'] = b'50 40'
-
-        # Note that OID 3 changed twice. `list_changes` is required
-        # to only produce the most recent change for a given
-        # OID, so this data is in violation of the contract. Make sure
-        # that we catch that.
-        changes = [(3, 42), (1, 35), (2, 45), (3, 41)]
-
-        adapter = MockAdapter()
-        c = self.getClass()(adapter, MockOptionsWithFakeCache(), 'myprefix')
-        adapter.poller.changes = changes
-        __traceback_info__ = adapter.poller.changes
-        c.checkpoints = (40, 30)
-        c.current_tid = 40
-
-        with self.assertRaisesRegex(CacheConsistencyError, "to have total len"):
-            c.after_poll(None, 40, 50, None)
-        self.assertIsNone(c.checkpoints)
-        self.assertIsNone(c.current_tid)
-
     def test_after_poll_new_checkpoints_bad_changes_out_of_order(self):
         from relstorage.tests.fakecache import data
         from relstorage.cache.interfaces import CacheConsistencyError
@@ -549,10 +526,10 @@ class StorageCacheTests(TestCase):
         c.delta_size_limit = 2
         c.checkpoints = (40, 30)
         c.current_tid = 40
-        shifted_checkpoints = c.after_poll(None, 40, 314, [(1, 45), (2, 46)])
+        c.after_poll(None, 40, 314, [(1, 45), (2, 46)])
+        expected_checkpoints = (314, 40)
         self.assertEqual(c.checkpoints, (40, 30))
-        self.assertEqual(shifted_checkpoints, (314, 40))
-        self.assertEqual(c.local_client.get_checkpoints(), shifted_checkpoints)
+        self.assertEqual(c.local_client.get_checkpoints(), expected_checkpoints)
         self.assertEqual(dict(c.delta_after0), {1: 45, 2: 46})
         self.assertEqual(dict(c.delta_after1), {})
 
@@ -565,13 +542,15 @@ class StorageCacheTests(TestCase):
         c.delta_size_limit = 2
         c.checkpoints = (40, 30)
         c.current_tid = 40
+        shifted_checkpoints = []
         old_suggest = c._suggest_shifted_checkpoints
         def suggest():
             data['myprefix:checkpoints'] = b'1 1'
-            return old_suggest()
+            shifted_checkpoints.append(old_suggest())
         c._suggest_shifted_checkpoints = suggest
 
-        shifted_checkpoints = c.after_poll(None, 40, 314, [(1, 45), (2, 46)])
+        c.after_poll(None, 40, 314, [(1, 45), (2, 46)])
+        shifted_checkpoints = shifted_checkpoints[0]
         self.assertEqual(c.checkpoints, (40, 30))
         self.assertIsNone(shifted_checkpoints)
         self.assertEqual(c.local_client.get_checkpoints(), shifted_checkpoints)
@@ -582,13 +561,14 @@ class StorageCacheTests(TestCase):
         from relstorage.tests.fakecache import data
         data['myprefix:checkpoints'] = b'40 30'
         c = self._makeOne()
+
         c.delta_size_limit = 0
         c.checkpoints = (40, 30)
         c.current_tid = 40
-        shifted_checkpoints = c.after_poll(None, 40, 314, [(1, 45), (2, 46)])
+        c.after_poll(None, 40, 314, [(1, 45), (2, 46)])
+        expected_checkpoints = (314, 314)
         self.assertEqual(c.checkpoints, (40, 30))
-        self.assertEqual(shifted_checkpoints, (314, 314))
-        self.assertEqual(c.local_client.get_checkpoints(), shifted_checkpoints)
+        self.assertEqual(c.local_client.get_checkpoints(), expected_checkpoints)
         self.assertEqual(dict(c.delta_after0), {1: 45, 2: 46})
         self.assertEqual(dict(c.delta_after1), {})
 

@@ -157,8 +157,12 @@ class AbstractModuleDriver(ABC):
     def set_autocommit(self, conn, value):
         conn.autocommit(value)
 
+    cursor_arraysize = 1024
+
     def cursor(self, conn):
-        return conn.cursor()
+        cur = conn.cursor()
+        cur.arraysize = self.cursor_arraysize
+        return cur
 
     def debug_connection(self, conn, *extra): # pragma: no cover
         print(conn, *extra)
@@ -182,6 +186,21 @@ class AbstractModuleDriver(ABC):
         return True
 
     connection_may_need_commit = connection_may_need_rollback
+
+
+    def synchronize_cursor_for_rollback(self, cursor):
+        """Exceptions here are ignored, we don't know what state the cursor is in."""
+        # psycopg2 raises ProgrammingError if we rollback when no results
+        # are present on the cursor. mysql-connector-python raises
+        # InterfaceError. OTOH, mysqlclient raises nothing and even wants
+        # it in certain circumstances.
+
+        if cursor is not None:
+            fetchall = cursor.fetchall
+            try:
+                fetchall()
+            except Exception: # pylint:disable=broad-except
+                pass
 
     # Things that can be recognized as a pickled state,
     # passed to an io.BytesIO reader, and unpickled.

@@ -42,7 +42,6 @@ class MySQLdbConnectionManager(AbstractConnectionManager):
         self._params = params.copy()
         self._db_connect = driver.connect
         self._db_driver = driver
-        self._fetchall_on_rollback = driver.fetchall_on_rollback
         super(MySQLdbConnectionManager, self).__init__(options, driver)
 
         self.isolation_load = self.isolation_repeatable_read_ro

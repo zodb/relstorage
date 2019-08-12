@@ -56,7 +56,7 @@ class AbstractPostgreSQLDriver(AbstractModuleDriver):
             notices = list(notices)
             if isinstance(notices[0], dict):
                 # pg8000
-                notices = [d['M'] for d in notices]
+                notices = [d[b'M'] for d in notices]
                 conn.notices.clear()
             else:
                 notices = list(notices)
@@ -64,6 +64,8 @@ class AbstractPostgreSQLDriver(AbstractModuleDriver):
         return notices
 
 
+    def synchronize_cursor_for_rollback(self, cursor):
+        """Does nothing."""
 
 database_type = 'postgresql'
 

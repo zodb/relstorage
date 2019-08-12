@@ -373,6 +373,9 @@ class MockDriver(object):
     def rollback(self, conn):
         conn.rollback()
 
+    def synchronize_cursor_for_rollback(self, cursor):
+        cursor.fetchall()
+
 class MockObjectMover(object):
     def __init__(self):
         self.data = {}  # {oid_int: (state, tid_int)}

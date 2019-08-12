@@ -39,14 +39,6 @@ class AbstractConnectionManager(object):
     # when a load connection is opened
     _on_load_opened = ()
 
-    # psycopg2 raises ProgrammingError if we rollback when no results
-    # are present on the cursor. mysql-connector-python raises
-    # InterfaceError. OTOH, mysqlclient raises nothing and even wants
-    # it in certain circumstances.
-    #
-    # Subclasses should set this statically.
-    _fetchall_on_rollback = True
-
     # The list of exceptions to ignore on a rollback *or* close. We
     # take this as the union of the driver's close exceptions and disconnected
     # exceptions (drivers aren't required to organize them to overlap, but
@@ -90,6 +82,7 @@ class AbstractConnectionManager(object):
 
         self._may_need_rollback = driver.connection_may_need_rollback
         self._may_need_commit = driver.connection_may_need_commit
+        self._synchronize_cursor_for_rollback = driver.synchronize_cursor_for_rollback
         self._do_commit = driver.commit
         self._do_rollback = driver.rollback
 
@@ -143,15 +136,6 @@ class AbstractConnectionManager(object):
                     clean = False
         return clean
 
-    def __synchronize_cursor_for_rollback(self, cursor):
-        """Exceptions here are ignored, we don't know what state the cursor is in."""
-        if cursor is not None and self._fetchall_on_rollback:
-            fetchall = cursor.fetchall
-            try:
-                fetchall()
-            except Exception: # pylint:disable=broad-except
-                pass
-
     def __rollback_connection(self, conn, ignored_exceptions, restarting):
         """Return True if we successfully rolled back."""
         clean = True
@@ -197,7 +181,7 @@ class AbstractConnectionManager(object):
         #
         # Some drivers also don't allow you to close the cursor
         # without fetching all rows.
-        self.__synchronize_cursor_for_rollback(cursor)
+        self._synchronize_cursor_for_rollback(cursor)
         try:
             clean = self.__rollback_connection(
                 conn,
@@ -238,9 +222,7 @@ class AbstractConnectionManager(object):
         return self.open()
 
     def cursor_for_connection(self, conn):
-        cursor = self.driver.cursor(conn)
-        cursor.arraysize = 1024
-        return cursor
+        return self.driver.cursor(conn)
 
     def open_and_call(self, callback):
         """Call a function with an open connection and cursor.

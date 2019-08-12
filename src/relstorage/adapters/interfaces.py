@@ -877,10 +877,11 @@ class IPoller(Interface):
         of the exceptions listed in the disconnected_exceptions
         attribute of the associated IConnectionManager.
 
-        Returns (changes, new_polled_tid), where changes is either a
-        list of (oid, tid) that have changed, or None to indicate that
+        Returns (changes, new_polled_tid), where changes is either an
+        iterable of (oid, tid) that have changed, or None to indicate that
         the changes are too complex to list. new_polled_tid is never
-        None.
+        None. Important: You must consume the changes iterable, and you must
+        not make any other queries until you do.
 
         This method may raise :class:`StaleConnectionError` (a
         ``ReadConflictError``) if the database has reverted to an
@@ -895,12 +896,15 @@ class IPoller(Interface):
         Return the ``(oid, tid)`` values changed in a range of
         transactions.
 
-        The returned sequence (which has a defined ``len``) must
-        include the latest changes in the range *after_tid* < ``tid``
-        <= *last_tid*.
+        The returned iterable (which is not guaranteed to have a
+        defined ``len``) must include the latest changes in the range
+        *after_tid* < ``tid`` <= *last_tid*.
 
         The ``oid`` values returned will be distinct: each ``oid``
         will have been changed in exactly one ``tid``.
+
+        Important: You must consume the returned iterable in its entirety,
+        and you must not make any other queries until you do.
         """
 
 

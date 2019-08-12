@@ -33,7 +33,10 @@ from relstorage._compat import OID_TID_MAP_TYPE
 from relstorage._compat import OID_OBJECT_MAP_TYPE
 from relstorage._compat import OID_SET_TYPE
 from relstorage._compat import iteroiditems
+from relstorage._compat import metricmethod
+from relstorage._compat import metricmethod_sampled
 from relstorage._util import log_timed
+from relstorage._util import consume
 
 from relstorage.cache import persistence
 from relstorage.cache.interfaces import IPersistentCache
@@ -692,6 +695,10 @@ class StorageCache(object):
 
         *prev_tid_int* can be None, in which case the changes
         parameter will be ignored. new_tid_int can not be None.
+
+        If *changes* was not none, this method returns a collection of
+        OID integers from it. (Because changes is only required to be
+        an iterable, you may not be able to iterate it again.)
         """
         my_prev_tid_int = self.current_tid or 0
         self.current_tid = new_tid_int
@@ -743,10 +750,14 @@ class StorageCache(object):
                 # In that case, `changes` should also be None and we really shouldn't
                 # get here.
                 and new_tid_int >= my_prev_tid_int):
-            if changes:
-                # All the conditions for keeping the checkpoints were met,
-                # so just update self.delta_after0 and self.current_tid.
-                self.__poll_update_delta0_from_changes(changes)
+
+            # All the conditions for keeping the checkpoints were met,
+            # so just update self.delta_after0 and self.current_tid.
+            try:
+                changes = self.__poll_update_delta0_from_changes(changes)
+            except:
+                consume(changes)
+                raise
         else:
             log.debug(
                 "Using new checkpoints: %s. Current cp: %s. "
@@ -756,10 +767,15 @@ class StorageCache(object):
                 changes is None, prev_tid_int, my_prev_tid_int,
                 new_tid_int
             )
+            if changes is not None:
+                changes = OID_SET_TYPE([oid for oid, _tid in changes])
+
             self.__poll_replace_checkpoints(cursor, global_checkpoints, new_tid_int)
 
         if not global_checkpoints_in_future and len(self.delta_after0) >= self.delta_size_limit:
-            return self._suggest_shifted_checkpoints()
+            self._suggest_shifted_checkpoints()
+
+        return changes
 
     def __poll_establish_global_checkpoints(self, new_tid_int):
         # Because we *always* have checkpoints in our local_client,
@@ -775,14 +791,19 @@ class StorageCache(object):
 
         self.checkpoints = self.cache.store_checkpoints(new_tid_int, new_tid_int)
 
+    @metricmethod_sampled
     def __poll_update_delta0_from_changes(self, changes):
         m = self.cache.updating_delta_map(self.delta_after0)
         m_get = m.get
+        changed_oids = OID_SET_TYPE()
         for oid_int, tid_int in changes:
+            changed_oids.add(oid_int)
             my_tid_int = m_get(oid_int, -1)
             if tid_int > my_tid_int:
                 m[oid_int] = tid_int
+        return changed_oids
 
+    @metricmethod
     def __poll_replace_checkpoints(self, cursor, new_checkpoints, new_tid_int):
         # We have to replace the checkpoints.
         cp0, cp1 = new_checkpoints
@@ -810,34 +831,27 @@ class StorageCache(object):
             # for tracing).
             updating_0 = self.cache.updating_delta_map(new_delta_after0)
             updating_1 = self.cache.updating_delta_map(new_delta_after1)
-            for oid_int, tid_int in change_list:
-                if tid_int <= cp1 or tid_int > new_tid_int:
-                    self._reset(
-                        "Requested changes %d < tid <= %d "
-                        "but change %d for OID %d out of range." % (
-                            cp1, new_tid_int,
-                            tid_int, oid_int
+            try:
+                for oid_int, tid_int in change_list:
+                    if tid_int <= cp1 or tid_int > new_tid_int:
+                        self._reset(
+                            "Requested changes %d < tid <= %d "
+                            "but change %d for OID %d out of range." % (
+                                cp1, new_tid_int,
+                                tid_int, oid_int
+                            )
                         )
-                    )
 
-                if tid_int > cp0:
-                    updating_0[oid_int] = tid_int
-                else:
-                    # This must be > cp1
-                    updating_1[oid_int] = tid_int
+                    d = updating_0 if tid_int > cp0 else updating_1
+                    d[oid_int] = tid_int
+            except:
+                consume(change_list)
+                raise
 
             # Everybody has a home (we didn't get duplicate entries
             # or multiple entries for the same OID with different TID)
-            l0 = len(new_delta_after0)
-            l1 = len(new_delta_after1)
-            if l0 + l1 != len(change_list):
-                self._reset(
-                    "Expected delta_after0 (%d) and delta_after1 (%d) "
-                    "to have total len %d, not %d" % (
-                        l0, l1,
-                        len(change_list), l0 + l1
-                    )
-                )
+            # This is guaranteed by the IPoller interface, so we don't waste
+            # time tracking it here.
 
         self.checkpoints = new_checkpoints
         self.delta_after0 = new_delta_after0

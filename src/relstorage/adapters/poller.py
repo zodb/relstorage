@@ -146,7 +146,8 @@ class Poller(object):
             params['self_tid'] = ignore_tid
 
         stmt.execute(cursor, params)
-        changes = cursor.fetchall()
+        # See list_changes: This could be a large result set.
+        changes = cursor
         return changes, new_polled_tid
 
     def list_changes(self, cursor, after_tid, last_tid):
@@ -155,4 +156,7 @@ class Poller(object):
         """
         params = {'min_tid': after_tid, 'max_tid': last_tid}
         self._list_changes_range_query.execute(cursor, params)
-        return cursor.fetchall()
+        # Return the cursor: let it be its own iterable. This could be a
+        # very large result set. For things that matter, like gevent,
+        # consume in batches allowing periodic switches.
+        return cursor
