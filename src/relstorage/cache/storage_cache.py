@@ -808,16 +808,19 @@ class StorageCache(object):
         and determine whether we should try to replace them.
         """
 
+        # Use the global state-sharing default random generator by
+        # default (allow replacement for testing). This ensures our
+        # uniform odds are truly uniform (unless someone reseeds the
+        # generator) across all instances. (Interestingly, Python 3.7
+        # automatically reseeds the generator on fork.) A single shared instance
+        # of SystemRandom would get all workers on a single machine sharing the same
+        # sequence, but it costs a system call.
+
         delta_size = len(self.delta_after0)
         limit = self.delta_size_limit
 
         if delta_size < (limit * self.CP_REPLACEMENT_BEGIN_CONSIDERING_PERCENT):
             return False
-
-        logger.debug(
-            "Rolling dice to see if checkpoints should shift. len(delta_after0)=%d",
-            delta_size
-        )
 
         if delta_size >= limit:
             chances = self.CP_REPLACEMENT_CHANCE_WHEN_FULL
@@ -825,8 +828,15 @@ class StorageCache(object):
         else:
             chances = self.CP_REPLACEMENT_CHANCE_WHEN_CLOSE
             when_dice_not_used = False
-        if chances < 1 and _random() >= chances:
-            return False
+
+        if chances < 1:
+            # e.g., for a 90% chance, only 10% of the range of random
+            # numbers (uniformly generated in the range [0.0, 1.0))
+            # should lead to a false return.
+            # 0.0 -- 0.89 < 0.9: True
+            # 0.9 -- 0.99 >= 0.9: False
+            return _random() < chances
+
         return when_dice_not_used
 
 
