@@ -79,6 +79,8 @@ class NoBlobHelper(object):
     def fshelper(self):
         raise AttributeError("NoBlobHelper has no 'fshelper'")
 
+    def __repr__(self):
+        return "<NoBlobHelper>"
 
 
 def BlobHelper(options, adapter):

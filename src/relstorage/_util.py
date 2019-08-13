@@ -23,7 +23,9 @@ import itertools
 import sys
 import time
 import traceback
+import os
 from logging import DEBUG
+from logging import WARN
 
 from persistent.timestamp import TimeStamp
 
@@ -76,16 +78,18 @@ def timestamp_at_unixtime(now):
     seconds = now % 60.0
     return TimeStamp(*(gmtime[:5] + (seconds,)))
 
+try:
+    from pyperf import perf_counter as _counter
+except ImportError: # pragma: no cover
+    _counter = time.time
+
 
 class timer(object):
     begin = None
     end = None
     duration = None
 
-    try:
-        from pyperf import perf_counter as counter
-    except ImportError: # pragma: no cover
-        counter = time.time
+    counter = _counter
 
     def __enter__(self):
         self.begin = self.counter()
@@ -95,23 +99,64 @@ class timer(object):
         self.end = self.counter()
         self.duration = self.end - self.begin
 
-_MIN_LOG_TIMED_DURATION = 0.03
+_LOG_TIMED_MIN_DURATION = 0.31
+_LOG_TIMED_WARN_DURATION = 1.01
+
+def do_log_duration_info(basic_msg, func,
+                         args, kwargs,
+                         actual_duration):
+
+    log_level = TRACE
+    # Defer capturing the name; it might get changed at
+    # runtime.
+    log_msg = basic_msg
+    log_args = (func.__name__, actual_duration)
+    if actual_duration > func.warn_duration:
+        log_level = WARN
+        # This will capture 'self' as the first argument,
+        # so you can put useful things into that repr if you'd
+        # like.
+        try:
+            load = os.getloadavg()
+        except (OSError, AttributeError):
+            load = "<unknown load>"
+        mem = byte_display(get_memory_usage())
+
+        if args and kwargs:
+            log_msg += " (load=%s) (memory=%s) (args=%r kwargs=%r)"
+            log_args += (load, mem, args, kwargs)
+        elif args:
+            log_msg += " (load=%s) (memory=%s) (args=%r)"
+            log_args += (load, mem, args)
+    elif actual_duration > func.min_duration_to_log:
+        log_level = DEBUG
+
+    logger.log(log_level, log_msg, *log_args)
 
 def log_timed(func):
+    counter = _counter
+    log = do_log_duration_info
     @functools.wraps(func)
     def f(*args, **kwargs):
-        t = timer()
-        with t:
+        begin = counter()
+        try:
             result = func(*args, **kwargs)
-        level = TRACE
-        if t.duration > _MIN_LOG_TIMED_DURATION:
-            level = DEBUG
+        finally:
+            end = counter()
+            duration = end - begin
 
-        logger.log(level, "Function %s took %s",
-                   func.__name__,
-                   t.duration)
+            log_msg = "Function %s took %.3fs."
+            log(log_msg, func, args, kwargs, duration)
+
         return result
+
     f.__wrapped__ = func # Py2 compat.
+
+    # Store these on each individual function so they can be
+    # tweaked later: Class.func.__wrapped__.min_duration_to_log = X
+    func.min_duration_to_log = _LOG_TIMED_MIN_DURATION
+    func.warn_duration = _LOG_TIMED_WARN_DURATION
+
     return f
 
 _ThreadWithReady = None

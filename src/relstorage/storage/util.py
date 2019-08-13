@@ -7,10 +7,12 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-import functools
+from functools import partial
 
 from ZODB.POSException import ReadOnlyError
 from zope.interface import implementer
+
+from relstorage._compat import wraps
 
 from .interfaces import IStaleAware
 
@@ -60,7 +62,7 @@ class _StaleMethodWrapperType(type):
     # so that when we put it in the class dictionary, it
     # gets a chance to bind to the instance.
     def __get__(cls, inst, klass):
-        return functools.partial(cls, inst)
+        return partial(cls, inst)
 
 @implementer(IStaleAware)
 class _StaleMethodWrapper(object):
@@ -150,7 +152,7 @@ class stale_aware(object):
 def _make_phase_dependent(storage, method):
     aborts_early = getattr(method, 'aborts_early', False)
     if aborts_early:
-        @functools.wraps(method)
+        @wraps(method)
         def state(*args, **kwargs):
             try:
                 return method(storage._tpc_phase, *args, **kwargs)
@@ -158,14 +160,13 @@ def _make_phase_dependent(storage, method):
                 storage.tpc_abort(None, _force=True)
                 raise
     else:
-        @functools.wraps(method)
+        @wraps(method)
         def state(*args, **kwargs):
             return method(storage._tpc_phase, *args, **kwargs)
-    state.__wrapped__ = method # For Py2
     return state
 
 def _make_cannot_write(method):
-    @functools.wraps(method)
+    @wraps(method)
     def read_only(*args, **kwargs):
         raise ReadOnlyError
     read_only.__wrapped__ = method

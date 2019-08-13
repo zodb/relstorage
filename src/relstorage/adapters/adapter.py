@@ -29,7 +29,7 @@ from ZODB.utils import p64 as int64_to_8bytes
 from ZODB.utils import u64 as bytes8_to_int64
 
 from relstorage.storage.interfaces import VoteReadConflictError
-from .._compat import metricmethod
+from .._compat import metricmethod_sampled
 from .._util import timestamp_at_unixtime
 from ..options import Options
 
@@ -72,6 +72,7 @@ class AbstractAdapter(object):
             self.driver_options
         )
 
+    @metricmethod_sampled
     def lock_database_and_choose_next_tid(self, cursor,
                                           username,
                                           description,
@@ -93,6 +94,7 @@ class AbstractAdapter(object):
         self.txncontrol.add_transaction(cursor, tid_int, username, description, extension)
         return tid_int
 
+    @metricmethod_sampled
     def lock_database_and_move(self,
                                store_connection,
                                blobhelper,
@@ -143,7 +145,7 @@ class AbstractAdapter(object):
     force_lock_objects_and_detect_conflicts_interleavable = False
     force_lock_readCurrent_for_share_blocking = False
 
-    @metricmethod
+    @metricmethod_sampled
     def lock_objects_and_detect_conflicts(self, cursor, read_current_oids):
         if (
                 self.force_lock_readCurrent_for_share_blocking

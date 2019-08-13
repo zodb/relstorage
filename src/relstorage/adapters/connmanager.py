@@ -144,7 +144,6 @@ class AbstractConnectionManager(object):
                 try:
                     self._do_rollback(conn)
                 except ignored_exceptions:
-                    logger.debug("Ignoring exception rolling back connection", exc_info=True)
                     clean = False
             elif restarting:
                 self._begin_for_restart(conn)

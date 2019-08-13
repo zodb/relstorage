@@ -71,14 +71,25 @@ if PY3:
     from io import StringIO as NStringIO
     from perfmetrics import metricmethod
     from perfmetrics import Metric
+    from functools import wraps
 else:
     string_types = (basestring,)
     unicode = unicode
     number_types = (int, long, float)
     from io import BytesIO as NStringIO
-
     # On Python 2, functools.update_wrapper doesn't set the '__wrapped__'
     # attribute, and we need that.
+    from functools import wraps as _wraps
+    class wraps(object):
+        def __init__(self, func):
+            self._orig = func
+            self._wrapper = _wraps(func)
+
+        def __call__(self, replacement):
+            replacement = self._wrapper(replacement)
+            replacement.__wrapped__ = self._orig
+            return replacement
+
     from perfmetrics import Metric as _PMetric
     class Metric(_PMetric):
         def __call__(self, f):

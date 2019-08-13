@@ -27,6 +27,10 @@ from __future__ import print_function
 import logging
 import os
 
+from transaction.interfaces import NoTransaction
+from transaction._transaction import rm_key
+from transaction import get as get_thread_local_transaction
+
 from ZODB.POSException import ReadOnlyError
 from ZODB.POSException import StorageTransactionError
 
@@ -99,6 +103,56 @@ class AbstractTPCState(object):
             setattr(self, attr, val)
 
         self.transaction = transaction
+
+    def __repr__(self):
+        result = "<%s at 0x%x blobhelper=%r stored_count=%s %s" % (
+            type(self).__name__,
+            id(self),
+            self.blobhelper,
+            len(self.cache.temp_objects) if self.cache.temp_objects else None,
+            self._tpc_state_transaction_data(),
+        )
+
+        extra = self._tpc_state_extra_repr_info()
+        for k, v in extra.items():
+            result += ' %s=%r' % (k, v)
+        result += '>'
+        return result
+
+    def _tpc_state_extra_repr_info(self):
+        return {}
+
+    def _tpc_state_transaction_data(self):
+        # Grovels around in the transaction object and tries to find interesting
+        # things to include.
+
+        # The ZODB Connection passes us an internal TransactionMetaData
+        # object; the real transaction object stores a reference to that in its data,
+        # keyed off the connection.
+        # We may or may not be able to get the real transaction using transaction.get(),
+        # depending on if we are using the global (thread local) transaction manager or not.
+        try:
+            global_tx = get_thread_local_transaction()
+        except NoTransaction:
+            # It's in explicit mode and we're not using it.
+            return "<no global transaction> tx=%r" % (self.transaction,)
+
+        tx_data = getattr(global_tx, '_data', None)
+        if not tx_data:
+            # No data stored on the transaction (or the implementation changed!)
+            return "<no transaction data> tx=%r" % (self.transaction,)
+
+        for v in tx_data.values():
+            if v is self.transaction:
+                # Yes, we found the metadata that ZODB uses, so we are
+                # joined to this transaction.
+                break
+        else:
+            return "<no transaction meta %r> tx=%r" % (tx_data, self.transaction,)
+
+        resources = sorted(global_tx._resources, key=rm_key)
+        return "transaction=%r resources=%r" % (global_tx, resources)
+
 
     def tpc_finish(self, transaction, f=None):
         # For the sake of some ZODB tests, we need to implement this everywhere,

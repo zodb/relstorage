@@ -21,11 +21,15 @@ live here.
 from __future__ import absolute_import
 from __future__ import print_function
 
+import time
+
 from ZODB.POSException import ConflictError
 from ZODB.POSException import StorageTransactionError
 from ZODB.utils import p64 as int64_to_8bytes
 from ZODB.utils import u64 as bytes8_to_int64
 
+from relstorage._util import log_timed
+from relstorage._util import do_log_duration_info
 from ..interfaces import VoteReadConflictError
 
 from . import LOCK_EARLY
@@ -106,6 +110,12 @@ class AbstractVote(AbstractTPCState):
         # {oid_bytes}: Things that get changed as part of the vote process
         # and thus need to be invalidated.
         'invalidated_oids',
+        # How many conflicts there were to resolve. None if we're not there yet.
+        'count_conflicts',
+        # The timestamp we gained control after locking, and then the
+        # timestamp we completed voting. If it takes "too long" to get
+        # around to finishing, we'll log a warning.
+        'lock_and_vote_times'
     )
 
     def __init__(self, begin_state, committing_tid_lock=None):
@@ -121,11 +131,22 @@ class AbstractVote(AbstractTPCState):
         self.ude = begin_state.ude
         self.committing_tid_lock = committing_tid_lock # type: Optional[DatabaseLockedForTid]
         self.invalidated_oids = set() # type: Set[bytes]
+        self.count_conflicts = None
+        self.lock_and_vote_times = [None, None]
+
+    def _tpc_state_extra_repr_info(self):
+        return {
+            'share_lock_count': len(self.required_tids),
+            'conflict_count': self.count_conflicts,
+            'invalidated_count': len(self.invalidated_oids),
+        }
 
     def enter(self, storage):
         resolved_in_vote_oid_ints = self.__vote(storage)
         self.invalidated_oids.update({int64_to_8bytes(i) for i in resolved_in_vote_oid_ints})
+        self.lock_and_vote_times[1] = time.time()
 
+    @log_timed
     def _flush_temps_to_db(self, cursor):
         mover = self.adapter.mover
         mover.store_temps(cursor, self.cache.temp_objects)
@@ -183,6 +204,7 @@ class AbstractVote(AbstractTPCState):
         # readCurrent(). This could raise ReadConflictError or locking
         # errors. See ``IRelStorageAdapter`` for details.
         conflicts = adapter.lock_objects_and_detect_conflicts(cursor, self.required_tids)
+        self.lock_and_vote_times[0] = time.time()
 
         invalidated_oid_ints = self.__check_and_resolve_conflicts(storage, conflicts)
 
@@ -211,6 +233,7 @@ class AbstractVote(AbstractTPCState):
         # New storage protocol
         return invalidated_oid_ints
 
+    @log_timed
     def __check_and_resolve_conflicts(self, storage, conflicts):
         """
         Either raises an `ConflictError`, or successfully resolves
@@ -254,8 +277,9 @@ class AbstractVote(AbstractTPCState):
         # object locks at this point so we're potentially blocking
         # other transactions.
         required_tids = self.required_tids
-        if conflicts:
-            logger.debug("Attempting to resolve %d conflicts", len(conflicts))
+        self.count_conflicts = count_conflicts = len(conflicts)
+        if count_conflicts:
+            logger.debug("Attempting to resolve %d conflicts", count_conflicts)
 
         for conflict in conflicts:
             oid_int, committed_tid_int, tid_this_txn_saw_int, committed_state = conflict
@@ -297,6 +321,7 @@ class AbstractVote(AbstractTPCState):
 
         return invalidated_oid_ints
 
+    @log_timed
     def __lock_and_move(self, vote_only=False):
         # Here's where we take the global commit lock, and
         # allocate the next available transaction id, storing it
@@ -346,13 +371,17 @@ class AbstractVote(AbstractTPCState):
 
         return kwargs['commit']
 
+    @log_timed
     def tpc_finish(self, transaction, f=None):
         if transaction is not self.transaction:
             raise StorageTransactionError(
                 "tpc_finish called with wrong transaction")
+        finish_entry = time.time()
         # Handle the finishing. We cannot/must not fail now.
         # TODO: Move most of this into the Finish class/module.
         did_commit = self.__lock_and_move()
+        if did_commit:
+            locks_released = time.time()
         assert self.committing_tid_lock is not None, self
 
 
@@ -383,6 +412,24 @@ class AbstractVote(AbstractTPCState):
             if f is not None:
                 f(self.committing_tid_lock.tid)
             next_phase = Finish(self, not did_commit)
+            if not did_commit:
+                locks_released = time.time()
+
+            locked_duration = locks_released - self.lock_and_vote_times[0]
+            between_vote_and_finish = finish_entry - self.lock_and_vote_times[1]
+            do_log_duration_info(
+                "Objects were locked by %s for %.3fs",
+                AbstractVote.tpc_finish.__wrapped__, # pylint:disable=no-member
+                self, None,
+                locked_duration
+            )
+            do_log_duration_info(
+                "Time between vote exiting and %s entering was %.3fs",
+                AbstractVote.tpc_finish.__wrapped__, # pylint:disable=no-member
+                self, None,
+                between_vote_and_finish
+            )
+
             return next_phase, self.committing_tid_lock.tid
         finally:
             self._clear_temp()
