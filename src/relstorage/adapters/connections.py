@@ -25,6 +25,7 @@ import contextlib
 
 from zope.interface import implementer
 
+from .._compat import wraps
 from .._util import Lazy
 from . import interfaces
 
@@ -163,6 +164,7 @@ class AbstractManagedConnection(object):
 
         :return: The return value of ``f``.
         """
+        @wraps(f)
         def callback(conn, cursor, fresh, *args, **kwargs):
             assert conn is self.connection and cursor is self._cursor
             if not fresh:
@@ -210,14 +212,15 @@ class AbstractManagedConnection(object):
             # XXX: This feels like it's factored wrong.
             if not can_reconnect:
                 raise
-            logger.warning("Reconnecting %s: %s", e, self)
+            logger.warning("Disconnected (%s) when running %s; attempting reconnect",
+                           e, f, self, exc_info=True)
             self.drop()
             try:
                 self._open_connection()
             except:
                 logger.exception("Reconnect %s failed", self)
                 raise
-            logger.info("Reconnected %s", self)
+            logger.info("Reconnected %s to run %s", self, f)
             return f(self.connection, self._cursor, True, *args, **kwargs)
 
     @contextlib.contextmanager
