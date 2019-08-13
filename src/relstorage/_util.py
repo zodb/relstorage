@@ -25,7 +25,9 @@ import time
 import traceback
 import os
 from logging import DEBUG
+from logging import INFO
 from logging import WARN
+from logging import ERROR
 
 from persistent.timestamp import TimeStamp
 
@@ -85,22 +87,32 @@ except ImportError: # pragma: no cover
 
 
 class timer(object):
-    begin = None
-    end = None
+    __begin = None
+    __end = None
     duration = None
 
     counter = _counter
 
     def __enter__(self):
-        self.begin = self.counter()
+        self.__begin = self.counter()
         return self
 
     def __exit__(self, t, v, tb):
-        self.end = self.counter()
-        self.duration = self.end - self.begin
+        self.__end = self.counter()
+        self.duration = self.__end - self.__begin
 
-_LOG_TIMED_MIN_DURATION = 0.31
-_LOG_TIMED_WARN_DURATION = 1.01
+_LOG_TIMED_DEBUG_DURATION = 0.31
+_LOG_TIMED_INFO_DURATION = 1.31
+_LOG_TIMED_WARN_DURATION = 5.71
+_LOG_TIMED_ERROR_DURATION = 20.01
+
+_LOG_TIMED_DEFAULT_DURATIONS = (
+        (DEBUG, _LOG_TIMED_DEBUG_DURATION),
+        (INFO, _LOG_TIMED_INFO_DURATION),
+        (WARN, _LOG_TIMED_WARN_DURATION),
+        (ERROR, _LOG_TIMED_ERROR_DURATION)
+    )
+_LOG_TIMED_DEFAULT_DETAILS_THRESHOLD = WARN
 
 def do_log_duration_info(basic_msg, func,
                          args, kwargs,
@@ -111,8 +123,12 @@ def do_log_duration_info(basic_msg, func,
     # runtime.
     log_msg = basic_msg
     log_args = (func.__name__, actual_duration)
-    if actual_duration > func.warn_duration:
-        log_level = WARN
+    for level, duration in func.log_levels:
+        if actual_duration < duration:
+            break
+        log_level = level
+
+    if log_level >= func.log_details_threshold:
         # This will capture 'self' as the first argument,
         # so you can put useful things into that repr if you'd
         # like.
@@ -128,8 +144,6 @@ def do_log_duration_info(basic_msg, func,
         elif args:
             log_msg += " (load=%s) (memory=%s) (args=%r)"
             log_args += (load, mem, args)
-    elif actual_duration > func.min_duration_to_log:
-        log_level = DEBUG
 
     logger.log(log_level, log_msg, *log_args)
 
@@ -154,8 +168,8 @@ def log_timed(func):
 
     # Store these on each individual function so they can be
     # tweaked later: Class.func.__wrapped__.min_duration_to_log = X
-    func.min_duration_to_log = _LOG_TIMED_MIN_DURATION
-    func.warn_duration = _LOG_TIMED_WARN_DURATION
+    func.log_levels = _LOG_TIMED_DEFAULT_DURATIONS
+    func.log_details_threshold = _LOG_TIMED_DEFAULT_DETAILS_THRESHOLD
 
     return f
 
@@ -211,12 +225,13 @@ def spawn(func, args=()):
     submit = thread_spawn
     try:
         import gevent.monkey
-        import gevent
     except ImportError: # pragma: no cover
         pass
     else:
         if gevent.monkey.is_module_patched('threading'):
             submit = _gevent_pool_spawn
+
+    logger.debug("Using %s to run %s", submit, func)
     return submit(func, args)
 
 def get_this_psutil_process():

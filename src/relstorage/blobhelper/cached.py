@@ -32,6 +32,7 @@ from zope.interface import implementer
 from relstorage._util import byte_display
 from relstorage._util import spawn
 from relstorage._util import thread_spawn
+from relstorage._util import timer
 
 from .interfaces import ICachedBlobHelper
 from .abstract import AbstractBlobHelper
@@ -193,10 +194,15 @@ class _LimitedCacheSizeMonitor(_AbstractCacheSizeMonitor):
             # the size again here, while we're holding our lock, and if we're
             # too big, we'll go again. This happens during the test cases.
             # checker can be None if we did this externally.
-            dir_size = checker.blob_dir_size if checker is not None else -1
+            dir_size = -1
+            duration = 0.0
+            if checker is not None:
+                dir_size = checker.blob_dir_size
+                duration = checker.duration
+
             logger.info(
-                "Finished checking %s with size of %s (max: %s; target %s)",
-                self.blob_dir,
+                "Finished checking %s (in %.3fs) with size of %s (max: %s; target %s)",
+                self.blob_dir, duration,
                 byte_display(dir_size),
                 byte_display(self.blob_cache_max_size),
                 byte_display(self.blob_cache_target_cleanup_size)
@@ -509,7 +515,7 @@ class _BlobCacheLayout(object):
             )
         )
 
-class _BlobCacheSizeChecker(object):
+class _BlobCacheSizeChecker(timer):
 
     __slots__ = (
         'blob_dir',
@@ -517,7 +523,9 @@ class _BlobCacheSizeChecker(object):
         'blob_dir_size',
         'target_size',
         '_finished_callback',
+        # To name a thread
         '__name__',
+        'duration',
     )
 
     def __init__(self, blob_dir, target_size, when_done=lambda _me, _holding_lock: None):
@@ -535,6 +543,7 @@ class _BlobCacheSizeChecker(object):
         self.target_size = target_size
         self.blob_dir_size = None
         self._finished_callback = when_done
+        self.duration = 0.0
 
         self.__name__ = 'Blob Cache Checker: %s' % (blob_dir,)
 
@@ -649,22 +658,23 @@ class _BlobCacheSizeChecker(object):
         logger.debug("Reduced blob cache size for %s: %s", self.blob_dir, byte_display(size))
 
     def __call__(self):
-        logger.info("Checking blob cache size for %s. (target: %s)",
-                    self.blob_dir,
-                    byte_display(self.target_size))
+        with self:
+            logger.info("Checking blob cache size for %s. (target: %s)",
+                        self.blob_dir,
+                        byte_display(self.target_size))
 
-        check_lock = self.__acquire_check_lock()
-        try:
-            if check_lock is None:
-                logger.info("Failed to get filesystem clean lock (%s); quitting.",
-                            self.blob_dir)
-                return
+            check_lock = self.__acquire_check_lock()
+            try:
+                if check_lock is None:
+                    logger.info("Failed to get filesystem clean lock (%s); quitting.",
+                                self.blob_dir)
+                    return
 
-            self.__run_with_lock()
-        finally:
-            if check_lock is not None:
-                check_lock.close()
-            self._finished_callback(self, check_lock is not None)
+                self.__run_with_lock()
+            finally:
+                if check_lock is not None:
+                    check_lock.close()
+                self._finished_callback(self, check_lock is not None)
 
     def __run_with_lock(self):
         while 1:
