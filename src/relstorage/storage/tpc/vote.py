@@ -29,6 +29,7 @@ from ZODB.utils import p64 as int64_to_8bytes
 from ZODB.utils import u64 as bytes8_to_int64
 
 from relstorage._util import log_timed
+from relstorage._util import log_timed_only_self
 from relstorage._util import do_log_duration_info
 from ..interfaces import VoteReadConflictError
 
@@ -237,7 +238,7 @@ class AbstractVote(AbstractTPCState):
         # New storage protocol
         return invalidated_oid_ints
 
-    @log_timed
+    @log_timed_only_self
     def __check_and_resolve_conflicts(self, storage, conflicts):
         """
         Either raises an `ConflictError`, or successfully resolves
@@ -284,10 +285,6 @@ class AbstractVote(AbstractTPCState):
         self.count_conflicts = count_conflicts = len(conflicts)
         if count_conflicts:
             logger.debug("Attempting to resolve %d conflicts", count_conflicts)
-            o = conflicts
-            # Mutate conflicts in place to avoid it getting logged with log_timed
-            conflicts = o[:]
-            del o[:]
 
         for conflict in conflicts:
             oid_int, committed_tid_int, tid_this_txn_saw_int, committed_state = conflict

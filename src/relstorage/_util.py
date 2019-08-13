@@ -145,6 +145,8 @@ def do_log_duration_info(basic_msg, func,
             log_msg += " (load=%s) (memory=%s) (args=%r kwargs=%r)"
             log_args += (load, mem, args, kwargs)
         elif args:
+            if getattr(func, 'log_args_only_self', None):
+                args = args[:1]
             log_msg += " (load=%s) (memory=%s) (args=%r)"
             log_args += (load, mem, args)
 
@@ -175,6 +177,10 @@ def log_timed(func):
     func.log_details_threshold = _LOG_TIMED_DEFAULT_DETAILS_THRESHOLD
 
     return f
+
+def log_timed_only_self(func):
+    func.log_args_only_self = 1
+    return log_timed(func)
 
 _ThreadWithReady = None
 
