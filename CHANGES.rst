@@ -2,7 +2,7 @@
  Changes
 =========
 
-3.0a8 (unreleased)
+3.0a8 (2019-08-13)
 ==================
 
 - Improve the safety of the persistent local cache in high-concurrency
