@@ -145,6 +145,13 @@ class MemcacheStateCache(object):
                 # More validation
                 return (c0, c1) if c0 >= c1 else None
 
+    def replace_checkpoints(self, expected, change_to):
+        cp = self.get_checkpoints()
+        if cp is not None and cp != expected:
+            return None
+        self.store_checkpoints(*change_to)
+        return change_to
+
     def close(self):
         self.client.disconnect_all()
         self.client = None

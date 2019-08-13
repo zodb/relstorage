@@ -108,6 +108,16 @@ class IStateCache(Interface):
         If not found, return None.
         """
 
+    def replace_checkpoints(expected, desired):
+        """
+        Replace the current checkpoints with *desired*.
+
+        This should be as atomic as possible. If the currently stored checkpoints
+        do not match *expected*, nothing should be done.
+
+        Return a true value if the checkpoints were replaced, false otherwise.
+        """
+
     def close():
         """
         Release external resources held by this object.

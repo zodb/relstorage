@@ -19,6 +19,7 @@ from __future__ import print_function
 
 import logging
 import os
+import random
 import threading
 
 from persistent.timestamp import TimeStamp
@@ -772,10 +773,72 @@ class StorageCache(object):
 
             self.__poll_replace_checkpoints(cursor, global_checkpoints, new_tid_int)
 
-        if not global_checkpoints_in_future and len(self.delta_after0) >= self.delta_size_limit:
+        if not global_checkpoints_in_future and self._should_suggest_shifted_checkpoints():
             self._suggest_shifted_checkpoints()
 
         return changes
+
+    #: By default, a 70% chance when we're full.
+    CP_REPLACEMENT_CHANCE_WHEN_FULL = float(
+        os.environ.get(
+            'RELSTORAGE_CP_REPLACEMENT_CHANCE_WHEN_FULL',
+            "0.7"
+        )
+    )
+
+    #: If we're just close, a 20% chance.
+    CP_REPLACEMENT_CHANCE_WHEN_CLOSE = float(
+        os.environ.get(
+            'RELSTORAGE_CP_REPLACEMENT_CHANCE_WHEN_CLOSE',
+            "0.2"
+        )
+    )
+
+    #: Start considering that we're close when we're 80% full.
+    CP_REPLACEMENT_BEGIN_CONSIDERING_PERCENT = float(
+        os.environ.get(
+            'RELSTORAGE_CP_REPLACEMENT_BEGIN_CONSIDERING_PERCENT',
+            "0.8"
+        )
+    )
+
+    def _should_suggest_shifted_checkpoints(self, _random=random.random):
+        """
+        Take the size of the checkpoints and our thresholds into account
+        and determine whether we should try to replace them.
+        """
+
+        # Use the global state-sharing default random generator by
+        # default (allow replacement for testing). This ensures our
+        # uniform odds are truly uniform (unless someone reseeds the
+        # generator) across all instances. (Interestingly, Python 3.7
+        # automatically reseeds the generator on fork.) A single shared instance
+        # of SystemRandom would get all workers on a single machine sharing the same
+        # sequence, but it costs a system call.
+
+        delta_size = len(self.delta_after0)
+        limit = self.delta_size_limit
+
+        if delta_size < (limit * self.CP_REPLACEMENT_BEGIN_CONSIDERING_PERCENT):
+            return False
+
+        if delta_size >= limit:
+            chances = self.CP_REPLACEMENT_CHANCE_WHEN_FULL
+            when_dice_not_used = True
+        else:
+            chances = self.CP_REPLACEMENT_CHANCE_WHEN_CLOSE
+            when_dice_not_used = False
+
+        if chances < 1:
+            # e.g., for a 90% chance, only 10% of the range of random
+            # numbers (uniformly generated in the range [0.0, 1.0))
+            # should lead to a false return.
+            # 0.0 -- 0.89 < 0.9: True
+            # 0.9 -- 0.99 >= 0.9: False
+            return _random() < chances
+
+        return when_dice_not_used
+
 
     def __poll_establish_global_checkpoints(self, new_tid_int):
         # Because we *always* have checkpoints in our local_client,
@@ -852,6 +915,11 @@ class StorageCache(object):
             # or multiple entries for the same OID with different TID)
             # This is guaranteed by the IPoller interface, so we don't waste
             # time tracking it here.
+        logger.debug(
+            "Built new deltas from cp1 %s to current_tid %s of sizes %d (0) and %d (1)",
+            cp1, new_tid_int,
+            len(new_delta_after0), len(new_delta_after1)
+        )
 
         self.checkpoints = new_checkpoints
         self.delta_after0 = new_delta_after0
@@ -887,27 +955,16 @@ class StorageCache(object):
         expect = self.checkpoints
 
         logger.debug(
-            "Broadcasting shift of checkpoints to %s."
+            "Broadcasting shift of checkpoints to %s. "
             "len(delta_after0) == %d.",
             change_to,
             delta_size
         )
-        # XXX: Make this atomic.
-        old_value = self.cache.get_checkpoints()
-        if old_value and old_value != expect:
-            log.debug(
-                "Checkpoints already shifted to %s, not broadcasting.",
-                old_value)
-            return None
 
-        # Shift the checkpoints.
-        # Although this is a race with other instances, the race
-        # should not matter.
-        self.cache.store_checkpoints(*change_to)
         # The poll code will later see the new checkpoints
         # and update self.checkpoints and self.delta_after(0|1).
+        return self.cache.replace_checkpoints(expect, change_to)
 
-        return change_to
 
 class _PersistentRowFilter(object):
 

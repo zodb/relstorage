@@ -49,7 +49,12 @@ class StorageCacheTests(TestCase):
         inst = self.getClass()(MockAdapter(), options,
                                'myprefix')
         self._instances.append(inst)
-        return inst.new_instance() # coverage and sharing testing
+        inst = inst.new_instance() # coverage and sharing testing
+        # Deterministic shifting
+        inst.CP_REPLACEMENT_CHANCE_WHEN_FULL = 1
+        inst.CP_REPLACEMENT_BEGIN_CONSIDERING_PERCENT = 1
+        inst.CP_REPLACEMENT_CHANCE_WHEN_CLOSE = 0
+        return inst
 
     def test_ctor(self):
         from relstorage.tests.fakecache import Client
@@ -571,6 +576,49 @@ class StorageCacheTests(TestCase):
         self.assertEqual(c.local_client.get_checkpoints(), expected_checkpoints)
         self.assertEqual(dict(c.delta_after0), {1: 45, 2: 46})
         self.assertEqual(dict(c.delta_after1), {})
+
+    def __not_called(self):
+        self.fail("Should not be called")
+
+    def test_should_suggest_shifted_checkpoints_too_small(self):
+        c = self._makeOne()
+        c.delta_size_limit = 10
+        # Empty
+        self.assertFalse(c._should_suggest_shifted_checkpoints(self.__not_called))
+        # 90% full
+        c.delta_after0 = 'a' * 9
+        self.assertFalse(c._should_suggest_shifted_checkpoints(self.__not_called))
+
+    def test_should_suggest_shifted_checkpoints_full_no_random(self):
+        c = self._makeOne()
+        c.delta_size_limit = 10
+        # Our setUp made it ignore random.
+        c.delta_after0 = 'a' * 10
+        self.assertTrue(c._should_suggest_shifted_checkpoints(self.__not_called))
+
+    def test_should_suggest_shifted_checkpoints_full_random(self):
+        c = self._makeOne()
+        c.delta_size_limit = 10
+        c.delta_after0 = 'a' * 10
+
+        # 90% chance.
+        c.CP_REPLACEMENT_CHANCE_WHEN_FULL = 0.9
+
+        self.assertTrue(c._should_suggest_shifted_checkpoints(lambda: 0.89))
+        self.assertFalse(c._should_suggest_shifted_checkpoints(lambda: 0.9))
+
+    def test_should_suggest_shifted_checkpoints_close(self):
+        c = self._makeOne()
+        c.delta_size_limit = 10
+        c.delta_after0 = 'a' * 5
+
+        # 30% full
+        c.CP_REPLACEMENT_BEGIN_CONSIDERING_PERCENT = 0.3
+        # 90% chance.
+        c.CP_REPLACEMENT_CHANCE_WHEN_CLOSE = 0.9
+
+        self.assertTrue(c._should_suggest_shifted_checkpoints(lambda: 0.89))
+        self.assertFalse(c._should_suggest_shifted_checkpoints(lambda: 0.9))
 
 
 class PersistentRowFilterTests(TestCase):
