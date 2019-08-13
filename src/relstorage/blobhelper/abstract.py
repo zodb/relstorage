@@ -48,6 +48,14 @@ class AbstractBlobHelper(object):
         self.fshelper = fshelper
         self.new_instance_kwargs = {}
 
+    def __repr__(self):
+        return "<%s at 0x%x blob_dir=%r txn_blobs=%s>" % (
+            type(self).__name__,
+            id(self),
+            self.blob_dir,
+            len(self._txn_blobs) if self._txn_blobs is not None else None
+        )
+
     def new_instance(self, adapter):
         return type(self)(
             self.options,

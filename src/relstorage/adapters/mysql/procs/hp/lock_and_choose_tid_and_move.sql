@@ -27,8 +27,8 @@ BEGIN
          md5,
          COALESCE(LENGTH(state), 0),
          state
-  FROM temp_store
-  ORDER BY zoid;
+  FROM temp_store;
+
 
   -- Now blob chunks.
   INSERT INTO blob_chunk (
@@ -45,15 +45,16 @@ BEGIN
   SELECT zoid, tid
   FROM object_state
   WHERE tid = p_committing_tid
-  ORDER BY zoid
   ON DUPLICATE KEY UPDATE
      tid = VALUES(tid);
 
   IF p_commit THEN
     COMMIT;
+    CALL clean_temp_state(false);
+    COMMIT;
   END IF;
 
-  CALL clean_temp_state(false);
+
 
   SELECT p_committing_tid;
 END;

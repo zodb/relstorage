@@ -15,7 +15,6 @@
 Database schema installers
 """
 import abc
-import logging
 import os
 import glob
 import sys
@@ -40,7 +39,7 @@ from .sql import State
 from .sql import Boolean
 from .sql import BinaryString
 
-logger = log = logging.getLogger("relstorage")
+logger = __import__('logging').getLogger(__name__)
 
 tmpl_property = partial(query_property,
                         property_suffix='_TMPLS',
@@ -732,37 +731,37 @@ class AbstractSchemaInstaller(DatabaseHelpersMixin,
             existent = set(self.list_tables(cursor))
             todo = list(self.all_tables)
             todo.reverse() # using reversed()  doesn't print nicely
-            log.debug("Checking tables: %r", todo)
+            logger.debug("Checking tables: %r", todo)
             self._before_zap_all_tables(cursor, existent, slow)
             for table in todo:
-                log.debug("Considering table %s", table)
+                logger.debug("Considering table %s", table)
                 if table.startswith('temp_'):
                     continue
                 if table in existent:
                     table_stmt = stmt % table
-                    log.debug(table_stmt)
+                    logger.debug(table_stmt)
                     cursor.execute(table_stmt)
-            log.debug("Done deleting from tables.")
+            logger.debug("Done deleting from tables.")
 
             self._after_zap_all_tables(cursor, slow)
 
             if reset_oid:
-                log.debug("Running OID reset script.")
+                logger.debug("Running OID reset script.")
                 self._reset_oid(cursor)
-                log.debug("Done running OID reset script.")
+                logger.debug("Done running OID reset script.")
 
         self.connmanager.open_and_call(zap_all)
 
     # Hooks for subclasses
 
     def _before_zap_all_tables(self, cursor, tables, slow=False):
-        log.debug("Before zapping existing tables (%s) with %s; slow: %s",
-                  tables, cursor, slow)
+        logger.debug("Before zapping existing tables (%s) with %s; slow: %s",
+                     tables, cursor, slow)
 
     def _after_zap_all_tables(self, cursor, slow=False):
-        log.debug("Running init script. Slow: %s", slow)
+        logger.debug("Running init script. Slow: %s", slow)
         self._init_after_create(cursor)
-        log.debug("Done running init script.")
+        logger.debug("Done running init script.")
 
     DROP_TABLE_TMPL = 'DROP TABLE {table}'
 

@@ -259,11 +259,12 @@ class RelStorage(LegacyMethodsMixin,
             copy_storage_methods(self, storer)
 
     def __repr__(self):
-        return "<%s at %x keep_history=%s phase=%r cache=%r>" % (
+        return "<%s at %x keep_history=%s phase=%r blobhelper=%r cache=%r>" % (
             self.__class__.__name__,
             id(self),
             self._options.keep_history,
             self._tpc_phase,
+            self.blobhelper,
             self._cache
         )
 
