@@ -2,7 +2,7 @@ CREATE PROCEDURE lock_and_choose_tid_p(OUT next_tid_64 BIGINT)
 COMMENT '{CHECKSUM}'
 BEGIN
     DECLARE scratch BIGINT;
-    DECLARE current_tid_64 BIGINT;
+    DECLARE committed_tid_64 BIGINT;
 
     -- We're in the commit phase of two-phase commit.
     -- It's very important not to error out here.
@@ -15,12 +15,12 @@ BEGIN
     FOR UPDATE;
 
     SELECT COALESCE(MAX(tid), 0)
-    INTO current_tid_64
+    INTO committed_tid_64
     FROM object_state;
 
     CALL make_current_tid(next_tid_64);
 
-    IF next_tid_64 <= current_tid_64 THEN
-        SET next_tid_64 = current_tid_64 + 1;
+    IF next_tid_64 <= committed_tid_64 THEN
+        SET next_tid_64 = committed_tid_64 + 1;
     END IF;
 END;

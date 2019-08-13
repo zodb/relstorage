@@ -74,17 +74,20 @@ class DatabaseLockedForTid(object):
         'tid',
         'tid_int',
         'release_commit_lock',
+        'local_allocation_time',
     )
 
     def __init__(self, tid, tid_int, adapter):
         self.tid = tid
         self.tid_int = tid_int
         self.release_commit_lock = adapter.locker.release_commit_lock
+        self.local_allocation_time = time.time()
 
     def __repr__(self):
-        return "<%s tid_int=%d>" %(
+        return "<%s tid_int=%d created=%s>" %(
             self.__class__.__name__,
-            self.tid_int
+            self.tid_int,
+            self.local_allocation_time
         )
 
 class AbstractVote(AbstractTPCState):
@@ -225,6 +228,7 @@ class AbstractVote(AbstractTPCState):
             blobs_must_be_moved_now = True
 
         if blobs_must_be_moved_now or LOCK_EARLY:
+            logger.debug("Locking early (for blobs? %s)", blobs_must_be_moved_now)
             # It is crucial to do this only after locking the current
             # object rows in order to prevent deadlock. (The same order as a regular
             # transaction, just slightly sooner.)
@@ -280,6 +284,10 @@ class AbstractVote(AbstractTPCState):
         self.count_conflicts = count_conflicts = len(conflicts)
         if count_conflicts:
             logger.debug("Attempting to resolve %d conflicts", count_conflicts)
+            o = conflicts
+            # Mutate conflicts in place to avoid it getting logged with log_timed
+            conflicts = o[:]
+            del o[:]
 
         for conflict in conflicts:
             oid_int, committed_tid_int, tid_this_txn_saw_int, committed_state = conflict
@@ -368,6 +376,10 @@ class AbstractVote(AbstractTPCState):
                 committing_tid_int,
                 self.adapter
             )
+            logger.debug("Adapter locked database and allocated tid %s",
+                         self.committing_tid_lock)
+        else:
+            logger.debug("Database lock and tid already done", self.committing_tid_lock)
 
         return kwargs['commit']
 

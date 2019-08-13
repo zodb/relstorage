@@ -5,7 +5,9 @@
 3.0a9 (unreleased)
 ==================
 
-- Nothing changed yet.
+- Several minor logging changes.
+
+- Make the gevent MySQL driver more efficient at avoiding needless  waits.
 
 - Due to a bug in MySQL (incorrectly rounding the 'minute' value of a
   timestamp up), TIDs generated in the last half second of a minute

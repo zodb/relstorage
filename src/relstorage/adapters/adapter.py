@@ -37,6 +37,7 @@ from ._abstract_drivers import _select_driver
 from .interfaces import UnableToLockRowsToModifyError
 from .interfaces import UnableToLockRowsToReadCurrentError
 
+logger = __import__('logging').getLogger(__name__)
 
 class AbstractAdapter(object):
 
@@ -92,6 +93,7 @@ class AbstractAdapter(object):
 
         tid_int = bytes8_to_int64(tid)
         self.txncontrol.add_transaction(cursor, tid_int, username, description, extension)
+        logger.debug("Picked next tid locally: %s", tid_int)
         return tid_int
 
     @metricmethod_sampled
