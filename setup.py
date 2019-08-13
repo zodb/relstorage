@@ -88,6 +88,7 @@ setup(
         "Topic :: Software Development :: Libraries :: Python Modules",
         "Operating System :: Microsoft :: Windows",
         "Operating System :: Unix",
+        "Development Status :: 3 - Alpha",
     ],
     long_description=read_file("README.rst"),
     # We cannot be used from an archive. ZConfig can't see
