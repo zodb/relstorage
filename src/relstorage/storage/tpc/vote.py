@@ -273,9 +273,9 @@ class AbstractVote(AbstractTPCState):
             oid = int64_to_8bytes(oid_int)
             prev_tid = int64_to_8bytes(committed_tid_int)
             serial = int64_to_8bytes(tid_this_txn_saw_int)
-
             resolved_state = tryToResolveConflict(oid, prev_tid, serial,
                                                   state_from_this_txn, committed_state)
+
             if resolved_state is None:
                 # unresolvable; kill the whole transaction
                 raise ConflictError(
