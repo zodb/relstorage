@@ -29,6 +29,7 @@ from ZODB.utils import p64 as int64_to_8bytes
 from ZODB.utils import u64 as bytes8_to_int64
 
 from relstorage._util import log_timed
+from relstorage._util import log_timed_only_self
 from relstorage._util import do_log_duration_info
 from ..interfaces import VoteReadConflictError
 
@@ -74,17 +75,20 @@ class DatabaseLockedForTid(object):
         'tid',
         'tid_int',
         'release_commit_lock',
+        'local_allocation_time',
     )
 
     def __init__(self, tid, tid_int, adapter):
         self.tid = tid
         self.tid_int = tid_int
         self.release_commit_lock = adapter.locker.release_commit_lock
+        self.local_allocation_time = time.time()
 
     def __repr__(self):
-        return "<%s tid_int=%d>" %(
+        return "<%s tid_int=%d created=%s>" %(
             self.__class__.__name__,
-            self.tid_int
+            self.tid_int,
+            self.local_allocation_time
         )
 
 class AbstractVote(AbstractTPCState):
@@ -225,6 +229,7 @@ class AbstractVote(AbstractTPCState):
             blobs_must_be_moved_now = True
 
         if blobs_must_be_moved_now or LOCK_EARLY:
+            logger.debug("Locking early (for blobs? %s)", blobs_must_be_moved_now)
             # It is crucial to do this only after locking the current
             # object rows in order to prevent deadlock. (The same order as a regular
             # transaction, just slightly sooner.)
@@ -233,7 +238,7 @@ class AbstractVote(AbstractTPCState):
         # New storage protocol
         return invalidated_oid_ints
 
-    @log_timed
+    @log_timed_only_self
     def __check_and_resolve_conflicts(self, storage, conflicts):
         """
         Either raises an `ConflictError`, or successfully resolves
@@ -368,6 +373,10 @@ class AbstractVote(AbstractTPCState):
                 committing_tid_int,
                 self.adapter
             )
+            logger.debug("Adapter locked database and allocated tid %s",
+                         self.committing_tid_lock)
+        else:
+            logger.debug("Database lock and tid already done", self.committing_tid_lock)
 
         return kwargs['commit']
 

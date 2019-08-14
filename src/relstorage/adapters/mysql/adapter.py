@@ -52,11 +52,11 @@ from __future__ import print_function
 
 import logging
 import json
-import os
 
 from zope.interface import implementer
 
 from relstorage._compat import iteritems
+from relstorage._compat import metricmethod_sampled
 
 from ..adapter import AbstractAdapter
 
@@ -102,11 +102,6 @@ class MySQLAdapter(AbstractAdapter):
         driver = self.driver
         params = self._params
 
-        RUNNING_ON_APPVEYOR = os.environ.get('APPVEYOR')
-        # Versions of MySQL prior to 5.7.19 crash when we call the stored procedure.
-        # See https://github.com/zodb/relstorage/pull/287#issuecomment-515518727
-        # TODO: Don't hardcode this on appveyor, actually detect the version.
-        self._known_broken_mysql_procs = RUNNING_ON_APPVEYOR
 
         if self.version_detector is None:
             self.version_detector = MySQLVersionDetector()
@@ -208,6 +203,7 @@ class MySQLAdapter(AbstractAdapter):
     # careful about choosing pack times.
     RS_TEST_TXN_PACK_NEEDS_SLEEP = 1
 
+    @metricmethod_sampled
     def lock_database_and_choose_next_tid(self,
                                           cursor,
                                           username,
@@ -222,8 +218,10 @@ class MySQLAdapter(AbstractAdapter):
 
         multi_results = self.driver.callproc_multi_result(cursor, proc, args)
         tid, = multi_results[0][0]
+        log.debug("Locked database only to choose tid %s", tid)
         return tid
 
+    @metricmethod_sampled
     def lock_database_and_move(self,
                                store_connection,
                                blobhelper,
@@ -231,7 +229,7 @@ class MySQLAdapter(AbstractAdapter):
                                commit=True,
                                committing_tid_int=None,
                                after_selecting_tid=lambda tid: None):
-        if self._known_broken_mysql_procs:
+        if not self.version_detector.supports_good_stored_procs(store_connection.cursor):
             # XXX: When can we drop this? Probably not until AppVeyor upgrades
             # MySQL past 5.7.12.
             return super(MySQLAdapter, self).lock_database_and_move(
@@ -258,6 +256,7 @@ class MySQLAdapter(AbstractAdapter):
 
         tid_int, = multi_results[0][0]
         after_selecting_tid(tid_int)
+        log.debug("Locked database and moved rows for tid %s", tid_int)
         return tid_int, "-"
 
     DEFAULT_LOCK_OBJECTS_AND_DETECT_CONFLICTS_INTERLEAVABLE = False
@@ -322,6 +321,8 @@ class MySQLAdapter(AbstractAdapter):
         #
         # If we didn't have read_current_oids, it will only return a
         # single result, the conflicts (which may be empty.)
+        # If these asserts fail, it's a good sign that we're running with an
+        # incompatible version of our stored procedures.
 
         if read_current_oids:
             if len(multi_results) == 1:

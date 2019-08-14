@@ -168,6 +168,8 @@ class StorageCreatingMixin(ABC):
     def _wrap_storage(self, storage):
         return storage
 
+    DEFAULT_COMMIT_LOCK_TIMEOUT = 10
+
     def make_storage(self, zap=True, **kw):
         from . import util
         from relstorage.storage import RelStorage
@@ -188,7 +190,7 @@ class StorageCreatingMixin(ABC):
             kw['cache_local_dir'] = os.path.abspath('.')
         if 'commit_lock_timeout' not in kw:
             # Cut this way down so we get better feedback.
-            kw['commit_lock_timeout'] = 10
+            kw['commit_lock_timeout'] = self.DEFAULT_COMMIT_LOCK_TIMEOUT
 
         assert self.driver_name
         options = Options(keep_history=self.keep_history, driver=self.driver_name, **kw)

@@ -5,11 +5,17 @@
 3.0a9 (unreleased)
 ==================
 
-- Nothing changed yet.
+- Several minor logging changes.
+
+- Make the gevent MySQL driver more efficient at avoiding needless  waits.
 
 - Due to a bug in MySQL (incorrectly rounding the 'minute' value of a
   timestamp up), TIDs generated in the last half second of a minute
   would suddenly jump ahead by 4,266,903,756 integers (a full minute).
+
+- Fix leaking an internal value for ``innodb_lock_timeout`` across
+  commits on MySQL. This could lead to ``tpc_vote`` blocking longer
+  than desired. See :issue:`331`.
 
 3.0a8 (2019-08-13)
 ==================

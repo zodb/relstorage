@@ -27,15 +27,23 @@ class MySQLdbConnectionManager(AbstractConnectionManager):
 
     # https://dev.mysql.com/doc/refman/5.7/en/innodb-transaction-isolation-levels.html
 
-    # Each statement gets its own snapshot. Locking is minimized to
-    # the exact index records found.
+    # Each statement gets its own snapshot. Persistent locking is minimized to
+    # the exact index records found (assuming they were found with unique queries.
+    # So only query on primary key or unique indexes).
     isolation_read_committed = "ISOLATION LEVEL READ COMMITTED"
-    # (DEFAULT) A snapshot is taken when the first statement is executed.
-    # All reads are from that snapshot.
+    # (DEFAULT) A snapshot is taken when the first statement is
+    # executed. All reads are from that snapshot. You can use 'START
+    # TRANSACTION WITH CONSISTENT SNAPSHOT' to take a snapshot immediately.
+    # If read-only, supposed to barely use locks.
     isolation_repeatable_read = "ISOLATION LEVEL REPEATABLE READ"
     # READ ONLY was new in 5.6
     isolation_repeatable_read_ro = isolation_repeatable_read + ' , READ ONLY'
-
+    # Serializable takes a snapshot, but also implicitly adds 'FOR
+    # SHARE' to the end of every SELECT statement (even in READ ONLY
+    # mode) --- but only for specific queries like 'SELECT * FROM
+    # object_state WHERE zoid = X'; range queries, OTOH, that return
+    # the same rows, are unaffected. Therefore, it fails to achieve
+    # concurrency with writes.
     isolation_serializable = 'ISOLATION LEVEL SERIALIZABLE'
 
     def __init__(self, driver, params, options):

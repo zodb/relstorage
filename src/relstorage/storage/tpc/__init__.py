@@ -109,7 +109,7 @@ class AbstractTPCState(object):
             type(self).__name__,
             id(self),
             self.blobhelper,
-            len(self.cache.temp_objects) if self.cache.temp_objects else None,
+            len(self.cache.temp_objects) if self.cache.temp_objects is not None else None,
             self._tpc_state_transaction_data(),
         )
 

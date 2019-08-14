@@ -38,39 +38,38 @@ class Cursor(BaseCursor):
     def _noop(self):
         """Does nothing."""
 
+    # Somewhat surprisingly, if we just wait on read,
+    # we end up blocking forever. This is because of the buffers
+    # maintained inside the MySQL library: we might already have the
+    # rows that we need buffered.
+
+    # Blocking on write is pointless: by definition
+    # we're here to read results so we can always
+    # write. That just forces us to take a trip around
+    # the event loop for no good reason.
+
+    # Therefore, our best option to periodically yield
+    # is to explicitly invoke gevent.sleep(). Without
+    # any time given, it will yield to other ready
+    # greenlets; only sometimes will it force a trip
+    # around the event loop.
+
+    # TODO: But if we're actually going to need to read data,
+    # we want to wait until it arrives. Can we get that info
+    # somehow? Can we develop a heuristic?
+
+    # Somewhat amusingly, the low-levels of libmysqlclient use
+    # kevent to do waiting: mysql_real_query -> cli_read_query_result ->
+    # my_net_read -> net_read_packet -> via_read_buff -> vio_read
+    # -> vio_io_wait -> kevent
+    #
+    # We do this *after* fetching results, not before, just in case
+    # we only needed to make one fetch.
     sleep = staticmethod(gevent_sleep)
-
-    def _fetch_row(self, size=1):
-        # Somewhat surprisingly, if we just wait on read,
-        # we end up blocking forever. This is because of the buffers
-        # maintained inside the MySQL library: we might already have the
-        # rows that we need buffered.
-
-        # Blocking on write is pointless: by definition
-        # we're here to read results so we can always
-        # write. That just forces us to take a trip around
-        # the event loop for no good reason.
-
-        # Therefore, our best option to periodically yield
-        # is to explicitly invoke gevent.sleep(). Without
-        # any time given, it will yield to other ready
-        # greenlets; only sometimes will it force a trip
-        # around the event loop.
-
-        # TODO: But if we're actually going to need to read data,
-        # we want to wait until it arrives. Can we get that info
-        # somehow? Can we develop a heuristic?
-
-        # Somewhat amusingly, the low-levels of libmysqlclient use
-        # kevent to do waiting: mysql_real_query -> cli_read_query_result ->
-        # my_net_read -> net_read_packet -> via_read_buff -> vio_read
-        # -> vio_io_wait -> kevent
-        self.sleep()
-        return BaseCursor._fetch_row(self, size)
 
     def fetchall(self):
         result = []
-        fetch = self.fetchmany
+        fetch = self.fetchmany # calls _fetch_row with the arraysize
         while 1:
             # Even if self.rowcount is 0 we must still call
             # or we get the connection out of sync.
@@ -81,6 +80,7 @@ class Cursor(BaseCursor):
             if self.rownumber == self.rowcount:
                 # Avoid a useless extra trip at the end.
                 break
+            self.sleep()
         return result
 
     def __iter__(self):
@@ -89,6 +89,7 @@ class Cursor(BaseCursor):
         while batch:
             for row in batch:
                 yield row
+            self.sleep()
             batch = fetch()
 
     def enter_critical_phase_until_transaction_end(self):

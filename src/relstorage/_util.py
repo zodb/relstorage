@@ -24,6 +24,7 @@ import sys
 import time
 import traceback
 import os
+
 from logging import DEBUG
 from logging import INFO
 from logging import WARN
@@ -36,6 +37,7 @@ from ZODB.utils import u64
 from ZODB.loglevels import TRACE
 
 logger = __import__('logging').getLogger(__name__)
+perf_logger = logger.getChild('timing')
 
 int64_to_8bytes = p64
 bytes8_to_int64 = u64
@@ -116,7 +118,8 @@ _LOG_TIMED_DEFAULT_DETAILS_THRESHOLD = WARN
 
 def do_log_duration_info(basic_msg, func,
                          args, kwargs,
-                         actual_duration):
+                         actual_duration,
+                         log=perf_logger):
 
     log_level = TRACE
     # Defer capturing the name; it might get changed at
@@ -128,7 +131,7 @@ def do_log_duration_info(basic_msg, func,
             break
         log_level = level
 
-    if log_level >= func.log_details_threshold:
+    if log_level >= func.log_details_threshold and log.isEnabledFor(log_level):
         # This will capture 'self' as the first argument,
         # so you can put useful things into that repr if you'd
         # like.
@@ -142,10 +145,12 @@ def do_log_duration_info(basic_msg, func,
             log_msg += " (load=%s) (memory=%s) (args=%r kwargs=%r)"
             log_args += (load, mem, args, kwargs)
         elif args:
+            if getattr(func, 'log_args_only_self', None):
+                args = args[:1]
             log_msg += " (load=%s) (memory=%s) (args=%r)"
             log_args += (load, mem, args)
 
-    logger.log(log_level, log_msg, *log_args)
+    log.log(log_level, log_msg, *log_args)
 
 def log_timed(func):
     counter = _counter
@@ -172,6 +177,10 @@ def log_timed(func):
     func.log_details_threshold = _LOG_TIMED_DEFAULT_DETAILS_THRESHOLD
 
     return f
+
+def log_timed_only_self(func):
+    func.log_args_only_self = 1
+    return log_timed(func)
 
 _ThreadWithReady = None
 
