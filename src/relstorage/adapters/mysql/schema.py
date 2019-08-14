@@ -287,17 +287,58 @@ class MySQLSchemaInstaller(AbstractSchemaInstaller):
 
 class MySQLVersionDetector(DatabaseHelpersMixin):
 
+    _version = None
+    _version_info = None
     _major_version = None
 
+    def _fetch_version_from_server(self, cursor):
+        # The newer alternative to VERSION() isn't available everywhere
+        # yet.
+        # Hook for testing.
+        cursor.execute('SELECT version()')
+        ver = cursor.fetchone()[0]
+        # PyMySQL on Win/Py3 returns this as a byte string; everywhere
+        # else it's native.
+        return self._metadata_to_native_str(ver)
+
+    def _setup(self, cursor):
+        if self._major_version:
+            return
+
+        ver = self._version = self._fetch_version_from_server(cursor)
+        # . separated parts, with the last one optionally given a suffix
+        ver_parts = ver.split('.')
+        ver_parts = [part if '-' not in part else part[:part.index('-')]
+                     for part in ver_parts]
+        self._version_info = tuple(int(i) for i in ver_parts)
+        self._major_version = int(ver[0])
+
     def get_major_version(self, cursor):
-        if self._major_version is None:
-            cursor.execute('SELECT version()')
-            ver = cursor.fetchone()[0]
-            # PyMySQL on Win/Py3 returns this as a byte string; everywhere
-            # else it's native.
-            ver = self._metadata_to_native_str(ver)
-            self._major_version = int(ver[0])
+        self._setup(cursor)
         return self._major_version
+
+    def get_version(self, cursor):
+        self._setup(cursor)
+        return self._version
+
+    def get_version_info(self, cursor):
+        self._setup(cursor)
+        return self._version_info
 
     def supports_nowait(self, cursor):
         return self.get_major_version(cursor) >= 8
+
+    def supports_transaction_isolation(self, cursor):
+        """
+        The system variable @@transaction_isolation was added in 5.7.20
+        along with @@transaction_read_only. Before that there was @@tx_isolation,
+        but that's been removed in MySQL 8.
+        """
+        return self.get_version_info(cursor) >= (5, 7, 20)
+
+    def supports_good_stored_procs(self, cursor):
+        """
+        Versions of MySQL prior to 5.7.19 crash when we call the stored procedure.
+        See https://github.com/zodb/relstorage/pull/287#issuecomment-515518727
+        """
+        return self.get_version_info(cursor) >= (5, 7, 19)

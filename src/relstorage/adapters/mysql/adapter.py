@@ -52,7 +52,6 @@ from __future__ import print_function
 
 import logging
 import json
-import os
 
 from zope.interface import implementer
 
@@ -103,11 +102,6 @@ class MySQLAdapter(AbstractAdapter):
         driver = self.driver
         params = self._params
 
-        RUNNING_ON_APPVEYOR = os.environ.get('APPVEYOR')
-        # Versions of MySQL prior to 5.7.19 crash when we call the stored procedure.
-        # See https://github.com/zodb/relstorage/pull/287#issuecomment-515518727
-        # TODO: Don't hardcode this on appveyor, actually detect the version.
-        self._known_broken_mysql_procs = RUNNING_ON_APPVEYOR
 
         if self.version_detector is None:
             self.version_detector = MySQLVersionDetector()
@@ -235,7 +229,7 @@ class MySQLAdapter(AbstractAdapter):
                                commit=True,
                                committing_tid_int=None,
                                after_selecting_tid=lambda tid: None):
-        if self._known_broken_mysql_procs:
+        if not self.version_detector.supports_good_stored_procs(store_connection.cursor):
             # XXX: When can we drop this? Probably not until AppVeyor upgrades
             # MySQL past 5.7.12.
             return super(MySQLAdapter, self).lock_database_and_move(

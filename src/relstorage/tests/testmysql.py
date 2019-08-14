@@ -241,9 +241,15 @@ class GenericMySQLTestsMixin(object):
         storage.close()
 
     def checkIsolationLevels(self):
+
         def assert_storage(storage):
             load_cur = storage._load_connection.cursor
             store_cur = storage._store_connection.cursor
+            version_detector = storage._adapter.version_detector
+            if not version_detector.supports_transaction_isolation(load_cur):
+                raise unittest.SkipTest("Needs MySQL better than %s" % (
+                    version_detector.get_version(load_cur)
+                ))
 
             for cur, ex_iso, ex_ro, ex_timeout in (
                     # Timeout for load is mysql default.
