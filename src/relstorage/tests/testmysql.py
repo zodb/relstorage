@@ -119,6 +119,7 @@ class TestGenerateTID(MySQLAdapterMixin,
         now = 1564054182.277615
         gmtime = (2019, 7, 25, 11, 29, 42, 3, 206, 0)
 
+
         self.assertEqual(
             time.gmtime(now),
             gmtime
@@ -132,20 +133,42 @@ class TestGenerateTID(MySQLAdapterMixin,
 
         self.test_current_time(now)
 
+        # Problematic values due to rounding
+        # of minutes due to seconds
+        for now, gmtime in (
+                (1565774811.9655108,
+                 (2019, 8, 14, 9, 26, 51, 2, 226, 0)),
+                (1565767799.607957,
+                 (2019, 8, 14, 7, 29, 59, 2, 226, 0)),
+                (1565775177.915336,
+                 (2019, 8, 14, 9, 32, 57, 2, 226, 0)),
+                (1565775299.106127,
+                 (2019, 8, 14, 9, 34, 59, 2, 226, 0)),
+                (1565775479.180209,
+                 (2019, 8, 14, 9, 37, 59, 2, 226, 0)),
+        ):
+            self.assertEqual(time.gmtime(now), gmtime)
+            self.test_current_time(now)
+
     def test_current_time(self, now=None):
+        from persistent.timestamp import TimeStamp
+        from relstorage._util import int64_to_8bytes
         if now is None:
             now = time.time()
         storage = self._storage
         ts_now = timestamp_at_unixtime(now)
-        __traceback_info__ = now, ts_now, ts_now.raw()
 
         expected_tid_int = bytes8_to_int64(ts_now.raw())
+        __traceback_info__ = now, now % 60.0, time.gmtime(now), ts_now, expected_tid_int
 
         cursor = storage._load_connection.cursor
 
         cursor.execute('CALL make_tid_for_epoch(%s, @tid)', (now,))
         cursor.execute('SELECT @tid')
         tid, = cursor.fetchall()[0]
+
+        tid_as_timetime = TimeStamp(int64_to_8bytes(tid)).timeTime()
+        __traceback_info__ += (tid_as_timetime - ts_now.timeTime(),)
 
         self.assertEqual(
             tid,
