@@ -7,6 +7,9 @@
 
 - Nothing changed yet.
 
+- Due to a bug in MySQL (incorrectly rounding the 'minute' value of a
+  timestamp up), TIDs generated in the last half second of a minute
+  would suddenly jump ahead by 4,266,903,756 integers (a full minute).
 
 3.0a8 (2019-08-13)
 ==================
