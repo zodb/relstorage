@@ -1,18 +1,8 @@
 CREATE PROCEDURE lock_and_choose_tid_p(OUT next_tid_64 BIGINT)
 COMMENT '{CHECKSUM}'
 BEGIN
-    DECLARE scratch BIGINT;
-    DECLARE committed_tid_64 BIGINT;
-
-    -- We're in the commit phase of two-phase commit.
-    -- It's very important not to error out here.
-    -- So we need a very long wait to get the commit lock.
-    SET SESSION innodb_lock_wait_timeout = 500;
-
-    SELECT tid
-    INTO scratch
-    FROM commit_row_lock
-    FOR UPDATE;
+  DECLARE committed_tid_64 BIGINT;
+  CALL lock_database_for_commit();
 
     SELECT COALESCE(MAX(tid), 0)
     INTO committed_tid_64

@@ -197,48 +197,87 @@ class MySQLTestSuiteBuilder(AbstractTestSuiteBuilder):
         return Options().blob_chunk_size
 
     def _make_check_class_HistoryFreeRelStorageTests(self, bases, name):
-        @skipOnCI("Travis MySQL goes away error 2006")
-        def check16MObject(self):
-            # NOTE: If your mySQL goes away, check the server's value for
-            # `max_allowed_packet`, you probably need to increase it.
-            # JAM uses 64M.
-            # http://dev.mysql.com/doc/refman/5.7/en/packet-too-large.html
-            bases[0].check16MObject(self)
-
-        def checkMyISAMTablesProduceErrorWhenNoCreate(self):
-            from ZODB.POSException import StorageError
-            def cb(_conn, cursor):
-                cursor.execute('ALTER TABLE new_oid ENGINE=MyISAM;')
-            self._storage._adapter.connmanager.open_and_call(cb)
-            # Now open a new storage that's not allowed to create
-            with self.assertRaisesRegex(
-                    StorageError,
-                    'MyISAM is no longer supported.*new_oid'
-            ):
-                self.open(create_schema=False)
-
-        def checkMyISAMTablesAutoMigrate(self):
-            # Verify we have a broken state.
-            self.checkMyISAMTablesProduceErrorWhenNoCreate()
-            # Now a storage that can alter a table will do so.
-            storage = self.open()
-            storage.close()
-            storage = self.open(create_schema=False)
-            storage.close()
+        bases = (GenericMySQLTestsMixin, ) + bases
 
         klass_dict = {
-            f.__name__: f
-            for f in (
-                check16MObject,
-                checkMyISAMTablesProduceErrorWhenNoCreate,
-                checkMyISAMTablesAutoMigrate,
-            )
         }
 
         return self._default_make_check_class(bases, name, klass_dict=klass_dict)
 
     # pylint:disable=line-too-long
-    _make_check_class_HistoryPreservingRelStorageTests = _make_check_class_HistoryFreeRelStorageTests
+    def _make_check_class_HistoryPreservingRelStorageTests(self, bases, name):
+        return self._make_check_class_HistoryFreeRelStorageTests(bases, name)
+
+
+class GenericMySQLTestsMixin(object):
+
+    @skipOnCI("Travis MySQL goes away error 2006")
+    def check16MObject(self):
+        # NOTE: If your mySQL goes away, check the server's value for
+        # `max_allowed_packet`, you probably need to increase it.
+        # JAM uses 64M.
+        # http://dev.mysql.com/doc/refman/5.7/en/packet-too-large.html
+        super(GenericMySQLTestsMixin, self).check16MObject()
+
+    def checkMyISAMTablesProduceErrorWhenNoCreate(self):
+        from ZODB.POSException import StorageError
+        def cb(_conn, cursor):
+            cursor.execute('ALTER TABLE new_oid ENGINE=MyISAM;')
+        self._storage._adapter.connmanager.open_and_call(cb)
+        # Now open a new storage that's not allowed to create
+        with self.assertRaisesRegex(
+                StorageError,
+                'MyISAM is no longer supported.*new_oid'
+        ):
+            self.open(create_schema=False)
+
+    def checkMyISAMTablesAutoMigrate(self):
+        # Verify we have a broken state.
+        self.checkMyISAMTablesProduceErrorWhenNoCreate()
+        # Now a storage that can alter a table will do so.
+        storage = self.open()
+        storage.close()
+        storage = self.open(create_schema=False)
+        storage.close()
+
+    def checkIsolationLevels(self):
+        def assert_storage(storage):
+            load_cur = storage._load_connection.cursor
+            store_cur = storage._store_connection.cursor
+
+            for cur, ex_iso, ex_ro, ex_timeout in (
+                    # Timeout for load is mysql default.
+                    [load_cur, 'REPEATABLE-READ', True, 50],
+                    [store_cur, 'READ-COMMITTED', False, self.DEFAULT_COMMIT_LOCK_TIMEOUT],
+            ):
+                cur.execute("""
+                SELECT @@transaction_isolation,
+                       @@transaction_read_only,
+                       @@innodb_lock_wait_timeout
+                """)
+                row, = cur.fetchall()
+                iso, ro, timeout = row
+                __traceback_info__ = row
+                iso = iso.decode('ascii') if not isinstance(iso, str) else iso
+                self.assertEqual(iso, ex_iso)
+                self.assertEqual(ro, ex_ro)
+                self.assertEqual(timeout, ex_timeout)
+
+        # By default
+        assert_storage(self._storage)
+
+        # In a new instance, and after we do a transaction with it.
+        from ZODB.DB import DB
+        import transaction
+
+        db = self._closing(DB(self._storage))
+        conn = self._closing(db.open())
+        assert_storage(conn._storage)
+
+        conn.root()['obj'] = 1
+        transaction.commit()
+
+        assert_storage(conn._storage)
 
 
 def test_suite():

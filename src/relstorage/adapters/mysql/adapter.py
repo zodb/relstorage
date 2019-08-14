@@ -319,9 +319,33 @@ class MySQLAdapter(AbstractAdapter):
         proc_result = multi_results.pop()
         assert not proc_result, proc_result
 
-        conflicts = []
-        for results in multi_results:
-            conflicts.extend(results)
+        # With read_current_oids, the proc returns one or two results,
+        # either of which may be empty. If it returns one, that's
+        # because it detected a read conflict and aborted before
+        # trying to lock other rows. If it returns two, the first will
+        # always be empty because there was no read conflict.
+        #
+        # If we didn't have read_current_oids, it will only return a
+        # single result, the conflicts (which may be empty.)
+        # If these asserts fail, it's a good sign that we're running with an
+        # incompatible version of our stored procedures.
+
+        if read_current_oids:
+            if len(multi_results) == 1:
+                # We quit before we checked for conflicts. Must be
+                # a read conflict of length 1.
+                read_conflicts = multi_results[0]
+                assert len(read_conflicts) == 1, multi_results
+                assert read_conflicts[0][-1] is None, multi_results
+                conflicts = read_conflicts
+            else:
+                assert len(multi_results) == 2, multi_results
+                assert not multi_results[0], multi_results
+                conflicts = multi_results[1]
+        else:
+            # Only conflicts were checked and returned.
+            assert len(multi_results) == 1, multi_results
+            conflicts = multi_results[0]
 
         return conflicts
 
