@@ -231,6 +231,10 @@ class HistoryPreserving(AbstractBegin):
         This method temporarily holds the pack lock, releasing it when
         done, and it also holds the commit lock, keeping it held for
         the next phase.
+
+        Returns an iterable of ``(oid_int, tid_int)`` pairs giving the
+        items that were restored and are now current. All of those oids that
+        had any data stored for ``transaction_id`` are now invalid.
         """
         # Typically if this is called, the store/restore methods will *not* be
         # called, but there's not a strict guarantee about that.
@@ -263,7 +267,17 @@ class HistoryPreserving(AbstractBegin):
             self_tid_int = self.committing_tid_lock.tid_int
             copied = adapter.packundo.undo(
                 cursor, undo_tid_int, self_tid_int)
-            oids = [int64_to_8bytes(oid_int) for oid_int, _ in copied]
+
+            # Invalidate all cached data for these oids. We have a
+            # brand new transaction ID that's greater than any they
+            # had before. In history-preserving mode, there could
+            # still be other valid versions. See notes in packundo:
+            # In theory we could be undoing a transaction several generations in the
+            # past where the object had multiple intermediate states, but in practice
+            # we're probably just undoing the latest state. Still, play it
+            # a bit safer.
+            oid_ints = [oid_int for oid_int, _ in copied]
+            self.cache.invalidate_all(oid_ints)
 
             # Update the current object pointers immediately, so that
             # subsequent undo operations within this transaction will see
@@ -275,6 +289,9 @@ class HistoryPreserving(AbstractBegin):
 
             if not self.undone_oids:
                 self.undone_oids = set()
+            oids = [int64_to_8bytes(oid_int) for oid_int in oid_ints]
             self.undone_oids.update(oids)
+
+            return copied
         finally:
             adapter.locker.release_pack_lock(cursor)

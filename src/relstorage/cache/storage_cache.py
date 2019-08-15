@@ -123,7 +123,12 @@ class _PollingState(_InvalidationMixin):
     delta_map_type = OID_TID_MAP_TYPE
 
     def __init__(self):
-        self._lock = threading.Lock()
+        # Use this lock when we're doing normal poll updates
+        # or need to read consistent metadata.
+        self._da0_lock = threading.Lock()
+        # acquire this lock when we intend to replace
+        # checkpoints and delta maps.
+        self._checkpoint_lock = threading.Lock()
         self.checkpoints = None
         self.current_tid = None
         self.delta_after0 = self.delta_map_type()
@@ -135,8 +140,15 @@ class _PollingState(_InvalidationMixin):
     def release(self, cache):
         pass
 
+    def flush_all(self):
+        self.checkpoints = None
+        self.current_tid = None
+        self.delta_after0 = self.delta_map_type()
+        self.delta_after1 = self.delta_map_type()
+
     def close(self):
-        self._lock = None
+        self._da0_lock = None
+        self._checkpoint_lock = None
         self.checkpoints = None
         self.current_tid = None
         self.delta_after0 = None
@@ -164,10 +176,13 @@ class _PollingState(_InvalidationMixin):
             # the delta maps we've just built are actually accurate
             # as-of this particular TID we're choosing to poll from?)
             #
+            # XXX: Now that we're tracking a tid globally we can do much better.
             self.current_tid = self.checkpoints[0]
             self.delta_after0 = row_filter.delta_after0
             self.delta_after1 = row_filter.delta_after1
         else:
+            self.current_tid = None
+            self.checkpoints = None
             self.delta_after0 = self.delta_map_type()
             self.delta_after1 = self.delta_map_type()
 
@@ -184,7 +199,7 @@ class _PollingState(_InvalidationMixin):
 
         :return: A tuple ``(checkpoints, tid, da0, da1)``
         """
-        with self._lock:
+        with self._da0_lock:
             return (
                 self.checkpoints,
                 self.current_tid,
@@ -192,18 +207,349 @@ class _PollingState(_InvalidationMixin):
                 self.delta_map_type(self.delta_after1)
             )
 
-    def after_poll(self, cache): # type: StorageCache -> None
+    def after_established_checkpoints(self, cache):
+        with self._da0_lock:
+            if not self.checkpoints:
+                self.checkpoints = cache.checkpoints
+                self.current_tid = cache.current_tid
+
+    def replace_checkpoints(
+            self, cache, cursor,
+            old_checkpoints, desired_checkpoints,
+            new_tid_int
+    ):
+        with self._da0_lock:
+            stored = self.checkpoints
+            if stored and stored != old_checkpoints:
+                logger.debug(
+                    "Checkpoints already shifted to %s, not replacing.",
+                    stored
+                )
+                return old_checkpoints
+            if not self._checkpoint_lock.acquire(False):
+                # someone else is doing it
+                return old_checkpoints
+
+        # # We got it, we're going to do it.
+        try:
+            _, da0, da1 = self.__rebuild_checkpoints(cache, cursor,
+                                                     desired_checkpoints, new_tid_int)
+        finally:
+            self._checkpoint_lock.release()
+        cache.delta_after0 = da0
+        cache.delta_after1 = da1
+        cache.checkpoints = desired_checkpoints
+        return desired_checkpoints
+
+
+    def after_normal_poll(self, cache): # type: StorageCache -> None
         """
-        The *cache* calls this after it has completed all actions in its
-        `StorageCache.after_poll` method to update the global polling state.
+        Update the current TID and the ``delta_after0`` map when we
+        have incorporated changes from the database (this implies that
+        the cache's checkpoints match ours). This should be
+        the common case.
+
+        The *cache* calls this after it has completed all actions in
+        its `StorageCache.after_poll` method to update the global
+        polling state.
         """
+        with self._da0_lock:
+            if self.current_tid is not None:
+                if cache.current_tid == self.current_tid:
+                    # No changes, fairly common, at least in tests,
+                    # since each implicit transaction polls twice, I think.
+                    return
+                if cache.current_tid < self.current_tid:
+                    # No new information, for some reason they're behind us. Possibly
+                    # the poll look a long time, and transactions completed and polled
+                    # during that interval. Or possibly threads ran "out of order" on the
+                    # Python side:
+                    #
+                    # 1. Thread A polls to get TID1
+                    # 2. Somewhere the database changes to TID 2; this
+                    #    could even be happening as Thread A is running.
+                    # 3. Thread B polls to get TID2
+                    # 4. Thread B calls our after_poll.
+                    # 5. Thread A calls our after_poll.
+                    #
+                    # TODO: Signal that they should restart the load and poll again?
+                    # If the database is changing fast enough, they'll never catch up.
+                    logger.debug("Cache instance %s with polled TID %s is behind current tid %s",
+                                 cache, cache.current_tid, self.current_tid)
+                    return
+            self.current_tid = cache.current_tid
+            self.delta_after0.update(cache.delta_after0)
+
+    def after_tpc_finish(self, tid, oids):
+        """
+        Record the objects as being changed in the transaction, if
+        needed.
+
+        Does *not* increment the current TID; that only happens on
+        polls because we're not the authoritative source for current
+        TIDs. The current TID is a poll and tells us that we've seen
+        complete data for *all* previous TIDs back to cp0. That might
+        not be the case here.
+        """
+        with self._da0_lock:
+            get = self.delta_after0.get
+            da0 = self.delta_after0
+            for oid in oids:
+                if get(oid, 0) < tid:
+                    da0[oid] = tid
+
+    def __poll_into(self, cache, cursor, cp0, cp1, new_tid_int, da0, da1):
+        da0_size = len(da0)
+        da1_size = len(da1)
+        # poller.list_changes(low, high) provides an iterator of
+        # (oid, tid) where tid > cp1 and tid <= new_tid_int. It is guaranteed
+        # that each oid shows up only once.
+        change_list = cache.adapter.poller.list_changes(
+            cursor, cp1, new_tid_int)
+
+        # Put the changes in new_delta_after*.
+        # Let the backing cache know about this (this is only done
+        # for tracing).
+        updating_0 = cache.cache.updating_delta_map(da0)
+        updating_1 = cache.cache.updating_delta_map(da1)
+        try:
+            for oid_int, tid_int in change_list:
+                if tid_int <= cp1 or tid_int > new_tid_int:
+                    cache._reset(
+                        "Requested changes %d < tid <= %d "
+                        "but change %d for OID %d out of range." % (
+                            cp1, new_tid_int,
+                            tid_int, oid_int
+                        )
+                    )
+
+                d = updating_0 if tid_int > cp0 else updating_1
+                d[oid_int] = tid_int
+        except:
+            consume(change_list)
+            raise
+
+        # Everybody has a home (we didn't get duplicate entries
+        # or multiple entries for the same OID with different TID)
+        # This is guaranteed by the IPoller interface, so we don't waste
+        # time tracking it here.
+
+        # Usually, delta_after0 will be quite small. If it's large, it means
+        # we had an open connection sitting (idle?) for a long time since its
+        # last poll.
+        logger.debug(
+            "%s from cp1 %s to current_tid %s of sizes %d (0) and %d (1)",
+            "Built new deltas" if not da0_size else "Updated existing deltas",
+            cp1, new_tid_int,
+            len(da0) - da0_size, len(da1) - da1_size
+        )
+
+    def __return_empty_delta(self, cp, new_tid_int, current_tid, checkpoints):
+        logger.debug(
+            "Trying to set new checkpoints %s with tid %s "
+            "but current tid is already %s and checkpoints %s",
+            cp, new_tid_int, current_tid, checkpoints
+        )
+        return (new_tid_int, new_tid_int), self.delta_map_type(), self.delta_map_type()
+
+    def __poll_and_update(self, cache, cursor, new_checkpoints, current_tid, new_tid_int, da0, da1):
+        # current_tid, da0, da1 are snapshots.
+        # Poll into a pair of new maps so we can do this without holding a lock.
+        # This should be a very small, usual poll, so we don't hold a poll lock either.
+        new_da0 = self.delta_map_type()
+        new_da1 = self.delta_map_type()
+        assert new_tid_int >= new_checkpoints[0]
+        assert current_tid < new_tid_int
+
+        self.__poll_into(cache, cursor, new_checkpoints[0], new_tid_int, new_tid_int,
+                         new_da0, new_da1)
+
+        # Nothing to add *after* the tid we just polled; that's impossible
+        # because this connection is locked to that tid.
+        if new_da0:
+            raise CacheConsistencyError(
+                "After polling for changes between (%s, %s] found changes above the limit: %s" % (
+                    new_checkpoints[0], new_tid_int,
+                    dict(new_da0)
+                )
+            )
+
+        original_new_da1 = self.delta_map_type(new_da1) # we mutate it.
+
+        with self._da0_lock:
+            # Ok, time has marched on.
+            # We just need to merge anything we've got, letting other updates take precedence.
+            # (Our data might be old)
+            self.current_tid = max(new_tid_int, self.current_tid)
+
+            new_da1.update(self.delta_after1)
+            self.delta_after1 = new_da1
+
+            if self.current_tid <= new_tid_int:
+                # Cool, everything is good to return.
+                return (
+                    new_checkpoints,
+                    self.delta_map_type(self.delta_after0),
+                    self.delta_map_type(self.delta_after1)
+                )
+
+            # The current data could contain info that's out of range for us,
+            # so we can't use it.
+            # But we can update our older snapshot and return that.
+            original_new_da1.update(da1)
+            return new_checkpoints, da0, da1
+
+    def __rebuild_checkpoints(self, cache, cursor, new_checkpoints, new_tid_int):
+        new_delta_after0 = self.delta_map_type()
+        new_delta_after1 = self.delta_map_type()
+        # XXX: We just want to *try* to acquire the lock here. If we would
+        # block, just go ahead and send back the same stuff so the process
+        # can continue; next time it gets around to polling the lock holder
+        # may be done.
+        logger.info("About to try for checkpoint lock")
+        cp0, cp1 = new_checkpoints
+        self.__poll_into(cache, cursor, cp0, cp1, new_tid_int,
+                         new_delta_after0, new_delta_after1)
+
+        # Could our TID have crept past the checkpoint already?
+        # If so, we need to do the extra poll and bring us back to current status;
+        # but that can't be visible to this caller; we have to snapshot these things
+        # anyway, so do it now. Because we're going to replace the maps,
+        # we HAVE to do this with the lock. It should be very small query.
+        #
+        # XXX: Except, this cursor is locked to the particular TID it polled to.
+        # we *can't* update it. we will go backwards. That should be roughly ok,
+        # as the next poll this cursor performs will get us our missing.
+        # XXX: What happens in the meantime?
+        da0 = self.delta_map_type(new_delta_after0)
+        da1 = self.delta_map_type(new_delta_after1)
+        with self._da0_lock:
+            current_tid = self.current_tid or 0
+            if current_tid > new_tid_int:
+                logger.info("Current tid had already moved on")
+                # self.__poll_into(cache, cursor, cp0, new_tid_int, current_tid,
+                #                  new_delta_after0, new_delta_after1)
+
+            # Merge, being careful not to go backwards.
+            self.checkpoints = new_checkpoints
+
+            self.current_tid = new_tid_int
+            # No, this isn't right, we'll be growing forever if we do this.
+            # new_delta_after0.update(self.delta_after0)
+            # new_delta_after1.update(self.delta_after1)
+
+            self.delta_after0 = new_delta_after0
+            self.delta_after1 = new_delta_after1
+
+        return new_checkpoints, da0, da1
+
+    def after_poll_with_changed_checkpoints(self, cache, cursor, new_checkpoints, new_tid_int):
+        """
+        Called when the cache has detected that it needs to change its
+        checkpoints and rebuild its delta maps.
+
+        This returns the checkpoints, delta0 map, and delta1 map.
+
+        There are three cases to handle:
+
+        - The ``new_checkpoints`` are both equal to the ``new_tid_int``.
+
+          This means the instance saw checkpoints from the future.
+
+          We simply return empty maps and hope it catches up and polls again soon.
+
+        - Our current checkpoints match the desired new checkpoints.
+
+          If *new_tid_int* is greater or equal to our current tid,
+          we list the changes necessary to catch up to ``new_tid_int``, incorporate them
+          locally, and return the desired data.
+
+          If new_tid_int is in the past, meaning other local connections have committed
+          or polled more recently,  then we treat it like the very first case:
+          give it empty maps and hope it catches up soon.
+
+        - Our current checkpoints do *not* match the desired new checkpoints.
+
+          If the desired checkpoints are in the past, the caller is very out of date.
+          We treat this like the very first case, where ``new_checkpoints`` are both
+          equal to the ``new_tid_int``.
+
+          All that's left is for them to be in the future. We execute a poll query
+          and build new maps. A lock is held while this is done so that it only has to
+          happen once.
+        """
+        # pylint:disable=too-many-return-statements
+        cp0, cp1 = new_checkpoints
+        if cp0 == cp1 == new_tid_int:
+            return self.__return_empty_delta(new_checkpoints, new_tid_int, "<unknown>", "<unknown>")
+
+        lock = [self._da0_lock]
+        def release():
+            if lock[0] is not None:
+                lock[0].release()
+                lock[0] = None
+
+        lock[0].acquire()
+        checkpoints = self.checkpoints
+        current_tid = self.current_tid
+
+        try:
+            if not checkpoints and not current_tid:
+                self.checkpoints = checkpoints
+                self.current_tid = new_tid_int
+                return checkpoints, self.delta_map_type(), self.delta_map_type()
+
+            if checkpoints == new_checkpoints:
+                if new_tid_int < current_tid:
+                    # We just return empty maps and hope it catches up.
+                    # Note that we must return fake checkpoints so that it knows
+                    # to try checking again.
+
+                    return self.__return_empty_delta(new_checkpoints,
+                                                     new_tid_int, current_tid, checkpoints)
+
+                if new_tid_int == current_tid:
+                    # Cool, just need to snapshot the data.
+                    return (
+                        checkpoints,
+                        self.delta_map_type(self.delta_after0),
+                        self.delta_map_type(self.delta_after1)
+                    )
+
+                # It's greater. We need to catch up. But only between our
+                # tid and the new one.
+                assert new_tid_int > current_tid
+                assert new_checkpoints[0] <= new_tid_int
+                # Discard the lock; it's not necessary to hold while we poll and update
+                # if we do it carefully.
+                da0 = self.delta_map_type(self.delta_after0)
+                da1 = self.delta_map_type(self.delta_after1)
+                release()
+
+                return self.__poll_and_update(cache, cursor, new_checkpoints,
+                                              current_tid, new_tid_int, da0, da1)
+
+            # Ok, they weren't equal. They could be in the future (best) or the past (boo!)
+            # though I'm not quite sure how they could be in the past.
+            # XXX: This shouldn't be the case anymore, now that building
+            # is deterministic.
+            if checkpoints is None or cp0 > checkpoints[0]:
+                release()
+                with self._checkpoint_lock:
+                    return self.__rebuild_checkpoints(cache, cursor, new_checkpoints, new_tid_int)
+
+            # We asked for checkpoints in the past. Bad cache!
+            return self.__return_empty_delta(new_checkpoints, new_tid_int, current_tid, checkpoints)
+        finally:
+            release()
+
 
     def invalidate(self, oid_int, tid_int):
-        with self._lock:
+        with self._da0_lock:
             self._invalidate(oid_int, tid_int)
 
     def invalidate_all(self, oids):
-        with self._lock:
+        with self._da0_lock:
             self._invalidate_all(oids)
 
 @interface.implementer(IPersistentCache)
@@ -226,6 +572,7 @@ class StorageCache(_InvalidationMixin):
     def __init__(self, adapter, options, prefix, _parent=None):
         self.adapter = adapter
         self.options = options
+        self.keep_history = options.keep_history
         self.prefix = prefix or ''
         # delta_size_limit places an approximate limit on the number of
         # entries in the delta_after maps.
@@ -292,7 +639,7 @@ class StorageCache(_InvalidationMixin):
         return self.local_client.stats()
 
     def __repr__(self):
-        return "<%s at %x size=%d len=%d>" % (
+        return "<%s at 0x%x bytes=%d len=%d>" % (
             self.__class__.__name__,
             id(self),
             self.size,
@@ -362,6 +709,13 @@ class StorageCache(_InvalidationMixin):
                 # file for no good reason.
                 # TODO: Consider the correctness here, now that we have a
                 # more accurate cache. Should that maybe be AND?
+                #
+                # This is the authoritative location. We don't try as hard to
+                # store into the caches anymore.
+                # TODO: Work on the coupling here.
+                poll_cp = self.polling_state.checkpoints
+                if poll_cp:
+                    self.local_client.store_checkpoints(*poll_cp)
                 return self.local_client.save(**save_args)
             logger.debug("Cannot justify writing cache file, no hits or misses")
 
@@ -412,6 +766,7 @@ class StorageCache(_InvalidationMixin):
            keyword. This argument is provisional.
         """
         self._reset()
+        self.polling_state.flush_all()
         # After this our current_tid is probably out of sync with the
         # storage's current_tid. Whether or not we load data from
         # persistent caches, it's probably in the past of what the
@@ -532,11 +887,20 @@ class StorageCache(_InvalidationMixin):
         # network traffic, so it's no good going to memcache for what may be
         # a stale answer.
 
+        # As for load(), if we haven't polled, we can't trust our cache.
+        if not self.checkpoints:
+            return None
+
         if not self.options.keep_history:
             # For history-free, we can only have one state. If we
             # think we know what it is, but they ask for something different,
             # then there's no way it can be found.
             known_tid_int = self.delta_after0.get(oid_int)
+            if known_tid_int is None or known_tid_int != tid_int:
+                # No good. Ok, well, this is for conflict resolution, so if the
+                # state was updated by someone else in this same process,
+                # and we can find it in our shared polling state we got lucky.
+                known_tid_int = self.polling_state.delta_after0.get(oid_int)
             if known_tid_int is not None and known_tid_int != tid_int:
                 return None
 
@@ -629,6 +993,18 @@ class StorageCache(_InvalidationMixin):
             tid2 = cp1
 
         preferred_key = (oid_int, cp0)
+        # This object will get cached under this key. Until the checkpoints change,
+        # we'll be able to find it. After checkpoints have shifted forward
+        # once (cp1 becomes cp0), if we request it again we'll find it under the secondary
+        # key and the cache will automatically move it forward to this key, where, when
+        # the checkpoints change once again, we'll still be able to find it. If we don't
+        # request it after that first checkpoint change, though, then on the second one
+        # we won't be able to find it, even if it's still in memory and we'll go through
+        # this all again.
+        #
+        # TODO: Why don't we just use a specific distinguished TID
+        # such as 0 for older objects so we don't have to go through
+        # this?
 
         # Query the cache. Query multiple keys simultaneously to
         # minimize latency. The client is responsible for moving
@@ -691,17 +1067,29 @@ class StorageCache(_InvalidationMixin):
             cache[key] = (state, tid_int)
 
     def invalidate(self, oid_int, tid_int):
+        """
+        See notes in `invalidate_all`.
+        """
         del self.cache[(oid_int, tid_int)]
         self._invalidate(oid_int, tid_int)
         self.polling_state.invalidate(oid_int, tid_int)
 
     def invalidate_all(self, oids):
         """
-        In the local cache only, invalidate all cached data for the
-        given OIDs.
+        Invalidate all cached data for the given OIDs.
+
+        This isn't transactional or locked so it may still result in
+        this or others seeing invalid (ha!) states.
+
+        This is a specialized API. It allows violation of our internal
+        consistency constraints. It should only be used when the
+        database is being manipulated at a low level, such as during
+        pack or undo.
         """
-        self.local_client.invalidate_all(oids)
+        # Erase our knowledge of where to look
         self._invalidate_all(oids)
+        # Remove the data too.
+        self.cache.invalidate_all(oids)
         self.polling_state.invalidate_all(oids)
 
     def tpc_begin(self):
@@ -710,8 +1098,12 @@ class StorageCache(_InvalidationMixin):
         self.store_temp = q.store_temp
         self.read_temp = q.read_temp
 
-    def _send_queue(self, tid):
+    def after_tpc_finish(self, tid):
         """
+        Flush queued changes.
+
+        This is called after the database commit lock is released.
+
         Now that this tid is known, send all queued objects to the
         cache. The cache will have ``(oid, tid)`` entry for each object
         we have been holding on to (well, in a big transaction, some of them
@@ -719,41 +1111,91 @@ class StorageCache(_InvalidationMixin):
         """
         tid_int = u64(tid)
 
-        self.cache.set_all_for_tid(tid_int, self.temp_objects)
-        # We only do this because cache_trace_analysis uses us
-        # in ways that aren't quite accurate. We'd prefer to call clear_temp()
-        # at this point.
-        self.temp_objects.reset()
+        # In particular, it stores the data in delta_after0 so that
+        # future cache lookups for oid_int should now use the tid just
+        # committed. We're about to flush that data to the cache.
 
-    def after_tpc_finish(self, tid):
-        """
-        Flush queued changes.
+        # We can get here without having ever polled, so no
+        # checkpoints and no current_tid. So long as we're careful,
+        # that's not a problem. Being careful means being sure to
+        # keep the state of the previous polled TID matching, and avoiding
+        # unnecessary polls
 
-        This is called after the database commit lock is released,
-        but before releasing the storage lock that will allow other
-        threads to use this instance.
-        """
-        tid_int = u64(tid)
-
-        if self.checkpoints:
-            for oid_int in self.temp_objects.stored_oids:
-                # Future cache lookups for oid_int should now use
-                # the tid just committed. We're about to flush that
-                # data to the cache.
-                self.delta_after0[oid_int] = tid_int
-        # Under what circumstances would we get here (after commiting
+        # Under what circumstances would we get here (after committing
         # a transaction) without ever having polled to establish
-        # checkpoints? Turns out that database-level APIs like
-        # db.undo() use new storage instances in an unusual way, and
-        # will not necessarily have polled by the time they commit.
+        # checkpoints? Mostly this happens in test cases that directly
+        # use storage APIs, but it also turns out that database-level
+        # APIs like db.undo() use new storage instances in an unusual
+        # way, and will not necessarily have polled by the time they
+        # commit.
         #
         # Of course, if we restored from persistent cache files the master
         # could have checkpoints we copied down.
         #
         # TODO: Create a special subclass for MVCC instances and separate
         # the state handling.
+        self.cache.set_all_for_tid(tid_int, self.temp_objects)
 
-        self._send_queue(tid)
+        # If we aren't keeping history, then a previous revision of
+        # the object we happened to know about is now gone. We can
+        # pre-emptively throw that away to try to save cache room. Of
+        # course, if some in-progress transaction that's behind us
+        # (still has an older view of the database) happens to want to
+        # load that object, it'll go back in the cache. c'est la vie.
+        # (XXX: Why not do this for history preserving too? It seems
+        # like historical connections are probably rarely used? since
+        # we have a special adapter for them we could do custom logic
+        # if any of those are around.)
+        #
+        # This might seem to result in a violation of our internal
+        # constraints: even though we haven't done a poll yet, we've
+        # modified our knowledge of canonical information in
+        # delta_after0. But we've always done that, and that's because
+        # polling specifically excludes the transaction that we just
+        # committed.
+        #
+        # This has the unfortunate side-effect of causing our
+        # optimized loadSerial() method to become useless for conflict
+        # resolution, however (unless the conflict happens in the same
+        # process). See ``checkResolveConflictBetweenConnections()``
+        #
+        # TODO: Continue enhancing the smarts for this. Maybe move to
+        # __poll_update_delta0_from_changes? Maybe make the polling
+        # state responsible? It could track invalidations and current
+        # tids across all connections and only throw away data when
+        # everyone has moved on thus solving the side-effect for
+        # loadSerial --- of course, that makes having an accurately
+        # sized connection pool and/or timeout important, or at least
+        # knowing when a connection is sitting idle and not being
+        # used. ``after_tpc_finish`` isn't enough for that, we need a
+        # hook from the storage.
+        store = self.delta_after0.__setitem__
+        if not self.keep_history:
+            pop0 = self.delta_after0.pop
+            pop1 = self.delta_after1.pop
+            # Note that we don't call self.invalidate(). We don't need
+            # most of its services; many are redundant with what we're about
+            # to do.
+            invalidate = self.cache.__delitem__
+            for oid_int in self.temp_objects.stored_oids:
+                old_tid = pop0(oid_int, None)
+                if old_tid:
+                    invalidate((oid_int, old_tid))
+                old_tid = pop1(oid_int, None)
+                if old_tid:
+                    invalidate((oid_int, old_tid))
+
+                store(oid_int, tid_int)
+        else:
+            for oid_int in self.temp_objects.stored_oids:
+                # Future cache lookups for oid_int should now use
+                # the tid just committed. We're about to flush that
+                # data to the cache.
+                store(oid_int, tid_int)
+
+        self.polling_state.after_tpc_finish(tid_int, self.temp_objects.stored_oids)
+
+        self.clear_temp()
 
     def clear_temp(self):
         """Discard all transaction-specific temporary data.
@@ -791,15 +1233,25 @@ class StorageCache(_InvalidationMixin):
         OID integers from it. (Because *changes* is only required to be
         an iterable, you may not be able to iterate it again.)
         """
+        logger.info(
+            "After poll with my checkpoits %s current_tid %s incoming tid %s",
+            self.checkpoints, self.current_tid, new_tid_int
+        )
         my_prev_tid_int = self.current_tid or 0
         self.current_tid = new_tid_int
 
-        global_checkpoints = self.cache.get_checkpoints()
+
+        # Grab without a lock. Ok if slightly stale.
+        global_checkpoints = self.polling_state.checkpoints
 
         if not global_checkpoints:
             # No other instance has established an opinion yet,
-            # so I get to.
+            # so I get to. Note that this return of None will
+            # drop anything already cached
             self.__poll_establish_global_checkpoints(new_tid_int)
+            if changes is not None:
+                consume(changes)
+
             return
 
         global_checkpoints_in_future = global_checkpoints[0] > new_tid_int
@@ -807,6 +1259,10 @@ class StorageCache(_InvalidationMixin):
             # checkpoint0 is in a future that this instance can't yet
             # see. Ignore the checkpoint change for now, continue
             # with our own.
+            logger.debug(
+                "Global checkpoints (%s) are ahead of polled tid %s",
+                global_checkpoints, new_tid_int
+            )
             global_checkpoints = self.checkpoints
             if not self.checkpoints:
                 # How nice, this was our first poll, but
@@ -816,12 +1272,44 @@ class StorageCache(_InvalidationMixin):
                 # cache is now stale).
                 global_checkpoints = (new_tid_int, new_tid_int)
 
-        # We want to keep the current checkpoints for speed, but we
-        # have to replace them (to avoid consistency violations)
-        # if certain conditions happen (like emptying the ZODB Connection cache
-        # which happens when `changes` is None).
-        if (global_checkpoints == self.checkpoints # In sync with the world
-                # Poller didn't give up, and there was data in the database
+        # We want to keep the current delta maps for speed, but we
+        # have to replace them (to avoid consistency violations) if
+        # certain conditions happen. These conditions are all
+        # external, in the database. If `changes` is None, and hence
+        # we return None, the entire ZODB Connection cache will be
+        # dropped.
+
+        if (
+                # We are in sync with the world. If we don't use the
+                # same checkpoints as everyone else, then when `load`
+                # has a cache miss and needs to store an older object
+                # that hasn't changed recently enough to be in the
+                # delta maps, it uses OID:CP0 as the key. So if we
+                # don't update our checkpoints when everyone else
+                # does, we'll be writing two separate sets of keys for
+                # older objects that haven't changed, bloating the
+                # cache. This shouldn't actually be a consistency
+                # issue, just a bloat issue. (Further, it is also this
+                # changing of checkpoints that signals us to drop our
+                # delta maps, which may or may not actually be full.)
+                #
+                # TODO: That's probably not a good use of cache. We
+                # should use a distinguished key such as -1 for these
+                # "frozen" objects.
+                #
+                # This also happens when the global checkpoints are in
+                # the future. We'll throw away our delta maps *now*,
+                # making it unlikely we'll get any cache hits. Next time we poll,
+                # hopefully we'll be caught up enough to use the global maps
+                # and will rebuild our maps then.
+                #
+                # TODO: Do we really need to throw them away now? Why can't we
+                # keep them for the transaction we're about to have?
+                global_checkpoints == self.checkpoints
+                # Poller didn't give up (which it would if this was
+                # our first poll; it won't list the entire database),
+                # and there was data in the database (if there's no
+                # data, new_tid_int will be 0).
                 and changes is not None
                 # The storage had polled before and gotten a response
                 # other than 0, meaning no data in the database.
@@ -839,32 +1327,42 @@ class StorageCache(_InvalidationMixin):
                 # (possibly we switched to a replica that's out of date)
                 # and the user configured `revert-when-stale` to be on.
                 # In that case, `changes` should also be None and we really shouldn't
-                # get here.
-                and new_tid_int >= my_prev_tid_int):
-
+                # get here. Note that it could be the same if there were no
+                # changes.
+                and new_tid_int >= my_prev_tid_int
+        ):
+            logger.debug("All conditions met to save checkpoitns")
             # All the conditions for keeping the checkpoints were met,
             # so just update self.delta_after0 and self.current_tid.
-            try:
-                changes = self.__poll_update_delta0_from_changes(changes)
-            except:
-                consume(changes)
-                raise
+            changes = self.__poll_update_delta0_from_changes(changes)
+            self.polling_state.after_normal_poll(self)
         else:
             log.debug(
-                "Using new checkpoints: %s. Current cp: %s. "
-                "Too many changes? %s. prev_tid_int: %s. my_prev_tid_int: %s. "
-                "new_tid_int: %s",
+                "Replacing checkpoint deltas. {new_cp=%s, current_cp=%s, "
+                "prev_tid_int=%s, my_prev_tid_int=%s, new_tid_int=%s} "
+                "(Cause: Suggested checkpoint change? %s. Too many changes? %s. "
+                "First poll? %s. Polls mismatch? %s. "
+                "Transaction went back? %s)",
                 global_checkpoints, self.checkpoints,
-                changes is None, prev_tid_int, my_prev_tid_int,
-                new_tid_int
+                prev_tid_int, my_prev_tid_int, new_tid_int,
+                global_checkpoints != self.checkpoints, changes is None,
+                not bool(prev_tid_int), not ((my_prev_tid_int or -2) < (prev_tid_int or -1)),
+                new_tid_int < my_prev_tid_int
             )
+            # If the TID went backwards, and we didn't have `revert-when-stale` on,
+            # we *must* get a ``changes`` of None in order to signal dropping
+            # the connection cache. (A backwards TID causes the poller to raise an
+            # exception without that setting.)
+            assert new_tid_int >= my_prev_tid_int or changes is None
             if changes is not None:
                 changes = OID_SET_TYPE([oid for oid, _tid in changes])
 
             self.__poll_replace_checkpoints(cursor, global_checkpoints, new_tid_int)
 
         if not global_checkpoints_in_future and self._should_suggest_shifted_checkpoints():
-            self._suggest_shifted_checkpoints()
+            # Obviously we can't do this if we're currently behind what the checkpoints
+            # are already set to.
+            self._suggest_shifted_checkpoints(cursor)
 
         return changes
 
@@ -936,13 +1434,22 @@ class StorageCache(_InvalidationMixin):
         # means that it was our first poll, and so we shouldn't have
         # checkpoints ourself. Of course, with multi-threaded race
         # conditions, that might not actually be the case.
-
         # assert not self.checkpoints
+        # XXX: That doesn't sound right, this is a single-threaded object.
+
+        if not new_tid_int:
+            # Refuse to set 0 as a first checkpoint. This is before any data
+            # in the database.
+            logger.debug("Not using %s as initial checkpoint", new_tid_int)
+            return
 
         # Initialize the checkpoints; we've never polled before.
-        log.debug("Initializing checkpoints: %s", new_tid_int)
+        logger.debug("Initializing checkpoints: %s", new_tid_int)
 
-        self.checkpoints = self.cache.store_checkpoints(new_tid_int, new_tid_int)
+        # Storing to the cache is here just for test BWC
+        self.cache.store_checkpoints(new_tid_int, new_tid_int)
+        self.checkpoints = (new_tid_int, new_tid_int)
+        self.polling_state.after_established_checkpoints(self)
 
     @metricmethod_sampled
     def __poll_update_delta0_from_changes(self, changes):
@@ -953,69 +1460,38 @@ class StorageCache(_InvalidationMixin):
             changed_oids.add(oid_int)
             my_tid_int = m_get(oid_int, -1)
             if tid_int > my_tid_int:
+                # XXX: When would it be lower?
                 m[oid_int] = tid_int
+
         return changed_oids
 
     @metricmethod
     def __poll_replace_checkpoints(self, cursor, new_checkpoints, new_tid_int):
-        # We have to replace the checkpoints.
-        cp0, cp1 = new_checkpoints
+        # We were asked to replace our checkpoints, with the global
+        # checkpoints specified by the cache. To keep access to all
+        # our cache data, we rebuild our delta maps. The new
+        # checkpoints give us our rebuild boundaries.
 
-        # Use the checkpoints specified by the cache (or equal to new_tid_int,
-        # if the cache was in the future.)
-
-        # Rebuild delta_after0 and delta_after1, if we can.
-        # If we can't, because we don't actually have a range, do nothing.
-        # If the case that the checkpoints are (new_tid, new_tid),
-        # we'll do nothing and have no delta maps. This is because, hopefully,
-        # next time we poll we'll be able to use the global checkpoints and
-        # catch up then.
-        new_delta_after0 = self.polling_state.delta_map_type()
-        new_delta_after1 = self.polling_state.delta_map_type()
-        if cp1 < new_tid_int:
-            # poller.list_changes(cp1, new_tid_int) provides an iterator of
-            # (oid, tid) where tid > cp1 and tid <= new_tid_int. It is guaranteed
-            # that each oid shows up only once.
-            change_list = self.adapter.poller.list_changes(
-                cursor, cp1, new_tid_int)
-
-            # Put the changes in new_delta_after*.
-            # Let the backing cache know about this (this is only done
-            # for tracing).
-            updating_0 = self.cache.updating_delta_map(new_delta_after0)
-            updating_1 = self.cache.updating_delta_map(new_delta_after1)
-            try:
-                for oid_int, tid_int in change_list:
-                    if tid_int <= cp1 or tid_int > new_tid_int:
-                        self._reset(
-                            "Requested changes %d < tid <= %d "
-                            "but change %d for OID %d out of range." % (
-                                cp1, new_tid_int,
-                                tid_int, oid_int
-                            )
-                        )
-
-                    d = updating_0 if tid_int > cp0 else updating_1
-                    d[oid_int] = tid_int
-            except:
-                consume(change_list)
-                raise
-
-            # Everybody has a home (we didn't get duplicate entries
-            # or multiple entries for the same OID with different TID)
-            # This is guaranteed by the IPoller interface, so we don't waste
-            # time tracking it here.
-        logger.debug(
-            "Built new deltas from cp1 %s to current_tid %s of sizes %d (0) and %d (1)",
-            cp1, new_tid_int,
-            len(new_delta_after0), len(new_delta_after1)
+        # Note that those will both be equal to ``new_tid_int``, if
+        # the cache had checkpoints in the future. In that case, we
+        # just empty our delta maps and do nothing else (there's
+        # nothing to poll for that we could make use of). Hopefully,
+        # next time we poll we'll be able to use the global
+        # checkpoints; we'll notice that ours don't match and call this again
+        # to rebuild.
+        assert new_checkpoints is not None
+        cp, da0, da1 = self.polling_state.after_poll_with_changed_checkpoints(
+            self,
+            cursor,
+            new_checkpoints,
+            new_tid_int
         )
+        assert cp is not None
+        self.checkpoints = cp
+        self.delta_after0 = da0
+        self.delta_after1 = da1
 
-        self.checkpoints = new_checkpoints
-        self.delta_after0 = new_delta_after0
-        self.delta_after1 = new_delta_after1
-
-    def _suggest_shifted_checkpoints(self):
+    def _suggest_shifted_checkpoints(self, cursor):
         """Suggest that future polls use a new pair of checkpoints.
 
         This does nothing if another instance has already shifted
@@ -1051,9 +1527,14 @@ class StorageCache(_InvalidationMixin):
             delta_size
         )
 
-        # The poll code will later see the new checkpoints
-        # and update self.checkpoints and self.delta_after(0|1).
-        return self.cache.replace_checkpoints(expect, change_to)
+        # In the past, after setting this on the cache, the poll code
+        # will later see the new checkpoints and update
+        # self.checkpoints and self.delta_after(0|1).
+        self.cache.replace_checkpoints(expect, change_to)
+        # However, we no longer read from the cache (the set is only there
+        # for test compatibility). The polling state handles replacing things
+        # for us if necessary (no need to waste a trip around with bad checkpoints)
+        return self.polling_state.replace_checkpoints(self, cursor, expect, change_to, tid_int)
 
 
 class _PersistentRowFilter(object):
@@ -1247,7 +1728,15 @@ class _TemporaryStorage(object):
         """
         Return the bytes for a previously stored temporary item.
         """
-        startpos, endpos, _ = self._queue_contents[oid_int]
+        try:
+            startpos, endpos, _ = self._queue_contents[oid_int]
+        except KeyError:
+            # XXX: Seeing this on appveyor, only in a few tests,
+            # only on MySQL. Not sure why.
+            raise KeyError("No oid %d stored in %s" % (
+                oid_int,
+                list(self._queue_contents)
+            ))
         return self._read_temp_state(startpos, endpos)
 
     def __iter__(self):

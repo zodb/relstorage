@@ -290,6 +290,8 @@ class MockConnectionManager(object):
         if hasattr(conn, 'rollback'):
             conn.rollback()
 
+    rollback_store_quietly = rollback_quietly
+
     def rollback_and_close(self, conn, cursor):
         self.rollback_quietly(conn, cursor)
         if conn:
@@ -331,7 +333,7 @@ class MockQuery(object):
 class MockPoller(object):
 
     poll_query = MockQuery('SELECT MAX(tid) FROM object_state')
-
+    last_requested_range = None
     def __init__(self, driver=None):
         self.driver = driver or MockDriver()
         self.changes = []  # [(oid, tid)]
@@ -340,6 +342,7 @@ class MockPoller(object):
         # Return a list, because the caller is allowed
         # to assume a length. Return exactly the item in the list because
         # it may be a type other than a tuple
+        self.last_requested_range = (after_tid, last_tid)
         return [
             item
             for item in self.changes

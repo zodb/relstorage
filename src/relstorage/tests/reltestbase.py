@@ -480,16 +480,17 @@ class GenericRelStorageTests(
         oid = self._storage.new_oid()
 
         revid1 = self._dostoreNP(oid, data=zodb_pickle(obj))
-
         # These will both poll and get the state for (oid, revid1)
         # cached at that location, where it will be found during conflict
         # resolution.
         storage1 = self._storage.new_instance()
         storage1.load(oid, '')
+
         storage2 = self._storage.new_instance()
         storage2.load(oid, '')
-        # It's not there now, but root is. Clear those things
         # Remember that the cache stats are shared between instances.
+        # They were both able to get the data that the root storage put in the cache.
+
         self.assertEqual(storage1._cache.stats()['hits'], 2)
         storage1._cache.reset_stats()
         if clear_cache:
@@ -503,20 +504,31 @@ class GenericRelStorageTests(
         # revid1 that add two to _value.
         root_storage = self._storage
         try:
-            self._storage = self.__make_tryToResolveConflict_ignore_committedData(storage1)
+
+            def noConflict(*_args, **_kwargs):
+                self.fail("Should be no conflict.")
+            storage1.tryToResolveConflict = noConflict
+            self._storage = storage1
             _revid2 = self._dostoreNP(oid, revid=revid1, data=zodb_pickle(obj))
+
+            # This one had no conflicts and did no cache work
+            self.assertEqual(storage1._cache.stats()['hits'], 0)
+            self.assertEqual(storage1._cache.stats()['misses'], 0)
+
+            # This will conflict and  will have to use the cache and DB for loadSerial
             self._storage = self.__make_tryToResolveConflict_ignore_committedData(storage2)
             _revid3 = self._dostoreNP(oid, revid=revid1, data=zodb_pickle(obj))
 
-            # Both of them needed to resolve conflicts, and since we
-            # didn't pass any data up from the storage, both of them
-            # found the data in their cache (unless we cleared the
-            # cache; in which case, the first one resolved the state
-            # and saved it back to the database and cache, and the
-            # second one found it there)
+            # Since we didn't pass any data up from the storage, this
+            # would need to make two lookups, for committed data and
+            # previous data. If we're history free, we invalidated the
+            # object when the first one saved it, but we're lucky
+            # enough to find the committed data in our shared state.
+            # This happens to be the same thing as if we cleared the cache.
+
             cache_stats = storage1._cache.stats()
             __traceback_info__ = cache_stats, clear_cache
-            if clear_cache:
+            if clear_cache or not self.keep_history:
                 self.assertEqual(cache_stats['misses'], 2)
                 self.assertEqual(cache_stats['hits'], 1)
             else:
@@ -667,22 +679,35 @@ class GenericRelStorageTests(
             r1 = c1.root()
             # The root state and checkpoints should now be cached.
             # A commit count *might* be cached depending on the ZODB version.
-            self.assertTrue('zzz:checkpoints' in fakecache.data)
+            # (Checkpoints are stored in the cache for the sake of tests/monitoring,
+            # but aren't read.)
+            self.assertIn('zzz:checkpoints', fakecache.data)
+            self.assertIsNotNone(db.storage._cache.polling_state.checkpoints)
             self.assertEqual(sorted(fakecache.data.keys())[-1][:10],
                              'zzz:state:')
             r1['alpha'] = PersistentMapping()
             transaction.commit()
-            self.assertEqual(len(fakecache.data), 4)
+            cp_count = 1
+            if self.keep_history:
+                item_count = 3
+            else:
+                # The previous root state was automatically invalidated
+                item_count = 2
+            item_count += cp_count
+            self.assertEqual(len(fakecache.data), item_count)
 
             oid = r1['alpha']._p_oid
             c1._storage.load(oid, '')
-            # another state should now be cached
-            self.assertEqual(len(fakecache.data), 4)
+            # Came out of the cache, nothing new
+            self.assertEqual(len(fakecache.data), item_count)
 
             # make a change
             r1['beta'] = 0
             transaction.commit()
-            self.assertEqual(len(fakecache.data), 5)
+            if self.keep_history:
+                # Once again, history free automatically invalidated.
+                item_count += 1
+            self.assertEqual(len(fakecache.data), item_count)
 
             c1._storage.load(oid, '')
 
@@ -1255,7 +1280,12 @@ class GenericRelStorageTests(
 
         transaction.commit()
 
-        self.assertEqual(3, len(self._storage._cache))
+        if self.keep_history:
+            item_count = 3
+        else:
+            # The new state for the root invalidated the old state.
+            item_count = 2
+        self.assertEqual(item_count, len(self._storage._cache))
         self._storage._cache.clear()
         self.assertEmpty(self._storage._cache)
 
@@ -1364,6 +1394,8 @@ class AbstractRSZodbConvertTests(StorageCreatingMixin,
         <zlibstorage %s>
         <relstorage>
             %s
+            cache-prefix %s
+            cache-local-dir %s
         </relstorage>
         </zlibstorage>
         """ % (
@@ -1371,6 +1403,8 @@ class AbstractRSZodbConvertTests(StorageCreatingMixin,
             self.filestorage_file,
             self.relstorage_name,
             self.get_adapter_zconfig(),
+            self.relstorage_name,
+            os.path.abspath('.'),
         )
         self._write_cfg(cfg)
 
@@ -1406,7 +1440,7 @@ class AbstractRSDestZodbConvertTests(AbstractRSZodbConvertTests):
         return self.srcfile
 
     def _create_dest_storage(self):
-        return self._closing(self.make_storage(zap=False))
+        return self._closing(self.make_storage(cache_prefix=self.relstorage_name, zap=False))
 
 class AbstractRSSrcZodbConvertTests(AbstractRSZodbConvertTests):
 
@@ -1418,7 +1452,7 @@ class AbstractRSSrcZodbConvertTests(AbstractRSZodbConvertTests):
         return self.destfile
 
     def _create_src_storage(self):
-        return self._closing(self.make_storage(zap=False))
+        return self._closing(self.make_storage(cache_prefix=self.relstorage_name, zap=False))
 
 class AbstractIDBOptionsTest(unittest.TestCase):
 

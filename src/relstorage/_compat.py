@@ -101,6 +101,12 @@ else:
 
 metricmethod_sampled = Metric(method=True, rate=0.1)
 
+if 'zope-testrunner' in sys.argv[0] and MAC:
+    # If we're running under the testrunner,
+    # don't apply the metricmethod stuff. It makes
+    # backtraces ugly and makes stepping in the
+    # debugger annoying.
+    metricmethod = metricmethod_sampled = lambda f: f
 
 try:
     from abc import ABC

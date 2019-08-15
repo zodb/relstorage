@@ -47,6 +47,7 @@ class History(object):
     __slots__ = (
         'adapter',
         'load_connection',
+        '__dict__',
     )
 
     def __init__(self, adapter, load_connection):

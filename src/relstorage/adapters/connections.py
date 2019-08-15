@@ -41,6 +41,7 @@ class AbstractManagedConnection(object):
 
     _NEW_CONNECTION_NAME = None
     _RESTART_NAME = None
+    _ROLLBACK_NAME = 'rollback_quietly'
 
     def __init__(self, connmanager):
         self.connection = None
@@ -49,6 +50,7 @@ class AbstractManagedConnection(object):
         self.active = False
         self._new_connection = getattr(connmanager, self._NEW_CONNECTION_NAME)
         self._restart = getattr(connmanager, self._RESTART_NAME)
+        self._rollback = getattr(connmanager, self._ROLLBACK_NAME)
 
     # Hook functions
     on_opened = staticmethod(lambda conn, cursor: None)
@@ -58,7 +60,15 @@ class AbstractManagedConnection(object):
     on_first_use = on_opened
 
     def __bool__(self):
-        return self.connection is not None
+        """
+        This object is true if it has an open connection and cursor that
+        has previously been accessed and the ``on_first_use`` hook has been
+        called and so we've established a database snapshot.
+
+        This is useful to keep from polling a load connection, for example,
+        when not explicitly asked for.
+        """
+        return self.connection is not None and 'cursor' in self.__dict__
 
     __nonzero__ = __bool__
 
@@ -73,9 +83,8 @@ class AbstractManagedConnection(object):
                 cursor = self.connmanager.cursor_for_connection(self.connection)
             else:
                 _, cursor = self.open_if_needed()
-                self.active = True
-
             self.on_first_use(self.connection, cursor)
+            self.active = True
         return self._cursor
 
     def drop(self):
@@ -103,12 +112,14 @@ class AbstractManagedConnection(object):
         clean_rollback = True
         self.active = False
         if self.connection is None:
+            assert self._cursor is None
+            assert 'cursor' not in self.__dict__
             return clean_rollback
 
         conn = self.connection
         cur = self._cursor
         self.__dict__.pop('cursor', None) # force on_first_use to be called.
-        clean_rollback = self.connmanager.rollback_quietly(conn, cur)
+        clean_rollback = self._rollback(conn, cur)
         if not clean_rollback:
             self.drop()
 
@@ -129,7 +140,8 @@ class AbstractManagedConnection(object):
         self.connection, self._cursor = new_conn, new_cursor
         self.on_opened(new_conn, new_cursor)
 
-    def __noop(self, *args):
+    @staticmethod
+    def __noop(*args):
         "does nothing"
 
     def restart(self):
@@ -137,7 +149,6 @@ class AbstractManagedConnection(object):
         Restart the connection if there is any chance that it has any associated state.
         """
         if not self:
-            assert self._cursor is None
             assert not self.active
             return
 
@@ -198,7 +209,7 @@ class AbstractManagedConnection(object):
             set this to false.
         """
         fresh_connection = False
-        if not self:
+        if self.connection is None or self._cursor is None:
             # We're closed or disconnected. Start a new connection entirely.
             self.drop()
             self._open_connection()
@@ -232,9 +243,10 @@ class AbstractManagedConnection(object):
             self.connmanager.rollback_and_close(conn, cursor)
 
     def __repr__(self):
-        return "<%s at 0x%x conn=%r cur=%r>" % (
+        return "<%s at 0x%x active=%s, conn=%r cur=%r>" % (
             self.__class__.__name__,
             id(self),
+            self.active,
             self.connection,
             self._cursor
         )
@@ -256,6 +268,7 @@ class StoreConnection(AbstractManagedConnection):
 
     _NEW_CONNECTION_NAME = 'open_for_store'
     _RESTART_NAME = 'restart_store'
+    _ROLLBACK_NAME = 'rollback_store_quietly'
 
 
 @implementer(interfaces.IManagedDBConnection)

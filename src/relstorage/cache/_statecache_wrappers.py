@@ -99,6 +99,10 @@ class MultiStateCache(object):
         self.l.set_all_for_tid(tid_int, state_oid_iter)
         self.g.set_all_for_tid(tid_int, state_oid_iter)
 
+    def invalidate_all(self, oids):
+        self.l.invalidate_all(oids)
+        self.g.invalidate_all(oids)
+
     # Unlike everything else, checkpoints are on the global
     # client first and then the local one.
 
