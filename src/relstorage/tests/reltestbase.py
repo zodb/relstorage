@@ -782,9 +782,10 @@ class GenericRelStorageTests(
         del c2
 
     def checkCachePolling(self):
-        self._storage = self.make_storage(share_local_cache=False)
+        storage2 = self.make_storage(zap=False)
 
         db = DB(self._storage)
+        db2 = DB(storage2)
         try:
             # Set up the database.
             tm1 = transaction.TransactionManager()
@@ -795,12 +796,12 @@ class GenericRelStorageTests(
 
             # Load and change the object in an independent connection.
             tm2 = transaction.TransactionManager()
-            c2 = db.open(transaction_manager=tm2)
+            c2 = db2.open(transaction_manager=tm2)
             r2 = c2.root()
             r2['obj']['change'] = 1
             tm2.commit()
             # Now c2 has delta_after0.
-            self.assertEqual(len(c2._storage._cache.delta_after0), 1)
+            self.assertEqual(len(c2._storage._cache.delta_after0), 2)
             c2.close()
 
             # Change the object in the original connection.
@@ -817,9 +818,9 @@ class GenericRelStorageTests(
 
             # Open a connection, which should be the same connection
             # as c2.
-            c3 = db.open(transaction_manager=tm2)
+            c3 = db2.open(transaction_manager=tm2)
             self.assertTrue(c3 is c2)
-            self.assertEqual(len(c2._storage._cache.delta_after0), 1)
+            self.assertEqual(len(c2._storage._cache.delta_after0), 2)
 
             # Clear the caches (but not delta_after*)
             c3._resetCache()
@@ -831,6 +832,7 @@ class GenericRelStorageTests(
 
         finally:
             db.close()
+            db2.close()
 
     def checkDoubleCommitter(self):
         # Verify we can store an object that gets committed twice in

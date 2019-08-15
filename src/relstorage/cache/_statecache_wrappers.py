@@ -48,6 +48,16 @@ class MultiStateCache(object):
             self.l = None
             self.g = None
 
+    def release(self):
+        if self.l is not None:
+            self.l.release()
+            self.g.release()
+            self.l = None
+            self.g = None
+
+    def new_instance(self):
+        return type(self)(self.l.new_instance(), self.g.new_instance())
+
     def flush_all(self):
         self.l.flush_all()
         self.g.flush_all()
@@ -120,6 +130,24 @@ class TracingStateCache(object):
         self.tracer = tracer
         self._trace = tracer.trace
         self._trace_store_current = tracer.trace_store_current
+
+    def new_instance(self):
+        return type(self)(self.cache.new_instance(), self.tracer)
+
+    def release(self):
+        if self.cache is not None:
+            self.cache.release()
+            self.cache = None
+            # But keep self.tracer because it has to be closed.
+            self._trace = None
+            self._trace_store_current = None
+
+    def close(self):
+        tracer = self.tracer
+        self.release()
+        if tracer is not None:
+            tracer.close()
+        self.tracer = None
 
     def __getattr__(self, name):
         return getattr(self.cache, name)

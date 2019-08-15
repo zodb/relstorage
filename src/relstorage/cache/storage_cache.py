@@ -54,8 +54,11 @@ class _UsedAfterRelease(object):
     size = limit = 0
     def __len__(self):
         return 0
-    close = reset_stats = lambda s: None
+    def __call__(self):
+        raise NotImplementedError
+    close = reset_stats = release = lambda s: None
     stats = lambda s: {}
+    new_instance = lambda s: s
 _UsedAfterRelease = _UsedAfterRelease()
 
 
@@ -76,6 +79,12 @@ class StorageCache(object):
     # we are committing.
     store_temp = None
     read_temp = None
+
+    # Master is the root StorageCache with which
+    # we are (usually) sharing our ``local_client``. We
+    # feed back certain information to it to make its life
+    # easier.
+    master = None
 
     # checkpoints, when set, is a tuple containing the integer
     # transaction ID of the two current checkpoints. checkpoint0 is
@@ -99,12 +108,9 @@ class StorageCache(object):
     # tests.
     current_tid = None
 
-    _tracer = None
-
     _delta_map_type = OID_TID_MAP_TYPE
 
-    def __init__(self, adapter, options, prefix, local_client=None,
-                 _tracer=None):
+    def __init__(self, adapter, options, prefix, _master=None):
         self.adapter = adapter
         self.options = options
         self.prefix = prefix or ''
@@ -122,29 +128,26 @@ class StorageCache(object):
         # entries in the delta_after maps.
         self.delta_size_limit = options.cache_delta_size_limit
 
-        if local_client is None:
+        if _master is None:
+            # I must be the master!
             self.local_client = LocalClient(options, self.prefix)
-        else:
-            self.local_client = local_client
 
-        shared_cache = MemcacheStateCache.from_options(options, self.prefix)
-        if shared_cache is not None:
-            self.cache = MultiStateCache(self.local_client, shared_cache)
-        else:
-            self.cache = self.local_client
-
-        if local_client is None:
+            shared_cache = MemcacheStateCache.from_options(options, self.prefix)
+            if shared_cache is not None:
+                self.cache = MultiStateCache(self.local_client, shared_cache)
+            else:
+                self.cache = self.local_client
             self.restore()
 
-        if _tracer is None:
             tracefile = persistence.trace_file(options, self.prefix)
             if tracefile:
-                _tracer = ZEOTracer(tracefile)
-                _tracer.trace(0x00)
-
-        self._tracer = _tracer
-        if hasattr(self._tracer, 'trace_store_current'):
-            self.cache = TracingStateCache(self.cache, _tracer)
+                tracer = ZEOTracer(tracefile)
+                tracer.trace(0x00)
+                self.cache = TracingStateCache(self.cache, tracer)
+        else:
+            self.master = _master
+            self.local_client = _master.local_client.new_instance()
+            self.cache = _master.cache.new_instance()
 
     # XXX: Note that our __bool__ and __len__ are NOT consistent
     def __bool__(self):
@@ -180,15 +183,13 @@ class StorageCache(object):
     def reset_stats(self):
         self.local_client.reset_stats()
 
-    def new_instance(self):
+    def new_instance(self): # pylint:disable=method-hidden
         """
         Return a copy of this instance sharing the same local client.
         """
-        local_client = self.local_client if self.options.share_local_cache else None
-
+        master = self.master if self.master is not None else self
         cache = type(self)(self.adapter, self.options, self.prefix,
-                           local_client,
-                           _tracer=self._tracer or False)
+                           _master=master)
 
         # The delta maps get more and more stale the longer time goes on.
         # Maybe we want to try to re-create them based on the local max tids?
@@ -211,10 +212,25 @@ class StorageCache(object):
 
         This is usually memcache connections if they're in use.
         """
-        self.cache.close()
+        self.cache.release()
         # Release our clients. If we had a non-shared local cache,
         # this will also allow it to release any memory it's holding.
         self.local_client = self.cache = _UsedAfterRelease
+        # Release our master
+        if self.master is not None:
+            self.master = None
+        # We can't be used to make instances any more.
+        self.new_instance = _UsedAfterRelease
+
+    def close(self, **save_args):
+        """
+        Release resources held by this instance, and
+        save any persistent data necessary.
+        """
+        cache = self.cache
+        self.save(**save_args)
+        self.release()
+        cache.close()
 
     def save(self, **save_args):
         """
@@ -265,20 +281,6 @@ class StorageCache(object):
             self.current_tid, self.checkpoints,
             len(self.delta_after0), len(self.delta_after1)
         )
-
-    def close(self, **save_args):
-        """
-        Release resources held by this instance, and
-        save any persistent data necessary.
-        """
-        self.save(**save_args)
-        self.release()
-
-        if self._tracer:
-            # Note we can't do this in release(). Release is called on
-            # all instances, while close() is only called on the main one.
-            self._tracer.close()
-            del self._tracer
 
     def _reset(self, message=None):
         """

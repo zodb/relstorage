@@ -314,6 +314,11 @@ class LocalClient(object):
     def close(self):
         pass
 
+    release = close
+
+    def new_instance(self):
+        return self
+
     def items(self):
         return self.__bucket.items()
 

@@ -106,6 +106,7 @@ class Options(object):
     cache_local_dir = None
     #: Switch checkpoints after this many writes
     cache_delta_size_limit = 100000 if not PYPY else 50000
+
     #: Implementation of ILRUCache to use for local cache
     #: storage.
     cache_local_storage = None
@@ -119,12 +120,6 @@ class Options(object):
     create_schema = True
     #: Which database driver to use
     driver = 'auto'
-
-    # If share_local_cache is off, each storage instance has a private
-    # cache rather than a shared cache.  This option exists mainly for
-    # simulating disconnected caches in tests and can't be set from ZConfig.
-    share_local_cache = True
-
 
     # Deprecated things
     #: How many persistent cache files to keep

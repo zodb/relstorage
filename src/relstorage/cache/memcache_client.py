@@ -54,13 +54,14 @@ class MemcacheStateCache(object):
             servers = servers.split()
 
         return cls(
-            module.Client(servers),
+            lambda: module.Client(servers),
             prefix
         )
 
-    def __init__(self, client, prefix):
+    def __init__(self, constructor, prefix):
+        self._constructor = constructor
         self.prefix = prefix
-        self.client = client
+        self.client = constructor()
         # checkpoints_key holds the current checkpoints.
         self.checkpoints_key = ck = '%s:checkpoints' % self.prefix
         # no unicode on Py2
@@ -153,11 +154,17 @@ class MemcacheStateCache(object):
         return change_to
 
     def close(self):
-        self.client.disconnect_all()
-        self.client = None
+        if self.client is not None:
+            self.client.disconnect_all()
+            self.client = None
+
+    release = close
 
     def flush_all(self):
         self.client.flush_all()
 
     def updating_delta_map(self, deltas):
         return deltas
+
+    def new_instance(self):
+        return type(self)(self._constructor, self.prefix)

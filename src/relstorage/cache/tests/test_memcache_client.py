@@ -94,3 +94,8 @@ class MemcacheClientTests(AbstractStateCacheTests):
     def getClass(self):
         from relstorage.cache.storage_cache import MemcacheStateCache
         return MemcacheStateCache.from_options
+
+    def test_new_instance_is_really_new(self):
+        inst = self._makeOne()
+        new = inst.new_instance()
+        self.assertIsNot(inst, new)

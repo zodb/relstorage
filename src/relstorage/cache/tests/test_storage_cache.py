@@ -620,6 +620,20 @@ class StorageCacheTests(TestCase):
         self.assertTrue(c._should_suggest_shifted_checkpoints(lambda: 0.89))
         self.assertFalse(c._should_suggest_shifted_checkpoints(lambda: 0.9))
 
+    def test_instances_know_master(self):
+        child = self._makeOne()
+        self.assertEqual(1, len(self._instances))
+        master = self._instances[0]
+        self.assertIs(master, child.master)
+
+        # This shouldn't actually happen...
+        grandchild = child.new_instance()
+        self.assertIs(master, grandchild.master)
+
+        # releasing drops the master
+        grandchild.release()
+        self.assertIsNone(grandchild.master)
+        self.assertIs(master, child.master)
 
 class PersistentRowFilterTests(TestCase):
 
