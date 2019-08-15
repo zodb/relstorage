@@ -121,6 +121,22 @@ class IStateCache(Interface):
     def close():
         """
         Release external resources held by this object.
+
+        This object may not be usable after this.
+        """
+
+    def new_instance():
+        """
+        Create an object sharing the same underlying data, but
+        capable of operating independently, such as in a new thread.
+
+        This may return the same object.
+        """
+
+    def release():
+        """
+        Like close, but intended to be called on child objects
+        created for MVCC using a ``new_instance`` method.
         """
 
     def flush_all():

@@ -24,6 +24,15 @@ from relstorage.tests import TestCase
 from relstorage.cache import interfaces
 from relstorage.cache import _statecache_wrappers as wrappers
 
+class MockCache(object):
+    released = False
+
+    def new_instance(self):
+        return type(self)()
+
+    def release(self):
+        self.released = True
+
 class TestMultiStateCache(TestCase):
 
     def _makeOne(self, l=None, g=None):
@@ -37,6 +46,16 @@ class TestMultiStateCache(TestCase):
         c = self._makeOne({(1, 1): None}, {(1, 1): None})
         del c[(1, 1)]
 
+    def test_new_instance_and_release(self):
+        root = self._makeOne(MockCache(), MockCache())
+        child = root.new_instance()
+        self.assertIsNot(child.l, root.l)
+        self.assertIsNot(child.g, root.g)
+
+        child.release()
+        self.assertIsNone(child.l)
+        self.assertIsNone(child.g)
+
 class MockTracer(object):
     def __init__(self):
         self.trace_events = []
@@ -47,18 +66,45 @@ class MockTracer(object):
     def trace_store_current(self, tid_int, state_oid_iter):
         """Does nothing"""
 
+    def close(self):
+        self.trace_events = tuple(self.trace_events)
+
 class TestTracingCacheWrapper(TestCase):
 
     def _makeOne(self, kind=None):
         kind = kind or wrappers.MultiStateCache
 
         return wrappers.TracingStateCache(
-            kind(None, None),
+            kind(MockCache(), MockCache()),
             MockTracer())
 
     def test_provides(self):
         assert_that(self._makeOne(),
                     validly_provides(interfaces.IStateCache))
+        assert_that(self._makeOne().new_instance(),
+                    validly_provides(interfaces.IStateCache))
+
+    def test_new_instance_and_release(self):
+        root = self._makeOne()
+        child = root.new_instance()
+        self.assertIs(root.tracer, child.tracer)
+        child_cache = child.cache
+        child_cache_l = child.cache.l
+        child_cache_g = child.cache.g
+
+        child.release()
+
+        self.assertIsNotNone(child.tracer)
+        self.assertIsNone(child.cache)
+        self.assertIsNone(child_cache.l)
+        self.assertIsNone(child_cache.g)
+        self.assertTrue(child_cache_l.released)
+        self.assertTrue(child_cache_g.released)
+        self.assertFalse(root.cache.l.released)
+        self.assertFalse(root.cache.g.released)
+
+        child.close()
+        self.assertIsNone(child.tracer)
 
     def test_get_miss(self):
         from . import Cache

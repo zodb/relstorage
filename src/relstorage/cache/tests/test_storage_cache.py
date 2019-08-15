@@ -128,7 +128,7 @@ class StorageCacheTests(TestCase):
         if fname:
             self.assertTrue(os.path.exists(fname), fname)
 
-    def test_save(self):
+    def test_save_and_clear(self):
         c, oid, tid = self._setup_for_save()
         self.assertNoPersistentCache(c)
         c.save(overwrite=True, close_async=False)
@@ -149,10 +149,25 @@ class StorageCacheTests(TestCase):
         c.local_client.store_checkpoints(0, 0)
         c.save(close_async=False)
 
+        # Creating a new one loads the stored data.
         c2 = self._makeOne(cache_local_dir=c.options.cache_local_dir)
         self.assertEqual(1, len(c2))
         self.assertEqual(c2.checkpoints, (0, 0))
         self.assertEqual(dict(c2.delta_after0), {oid: tid})
+        self.assertIsEmpty(c2.delta_after1)
+
+        # Resetting also loads the stored data by default.
+        c2.clear()
+        self.assertEqual(1, len(c2))
+        self.assertEqual(c2.checkpoints, (0, 0))
+        self.assertEqual(dict(c2.delta_after0), {oid: tid})
+        self.assertIsEmpty(c2.delta_after1)
+
+        # But can be told to ignore it
+        c2.clear(load_persistent=False)
+        self.assertEqual(0, len(c2))
+        self.assertIsNone(c2.checkpoints)
+        self.assertIsEmpty(c2.delta_after0)
         self.assertIsEmpty(c2.delta_after1)
 
         c.options.cache_local_dir = None
@@ -195,7 +210,7 @@ class StorageCacheTests(TestCase):
         self.assertEmpty(c)
         self.assertNoPersistentCache(c)
 
-    def test_clear(self):
+    def test_clear_no_persistent_data(self):
         from relstorage.tests.fakecache import data
         data.clear()
         c = self._makeOne()
@@ -620,6 +635,22 @@ class StorageCacheTests(TestCase):
         self.assertTrue(c._should_suggest_shifted_checkpoints(lambda: 0.89))
         self.assertFalse(c._should_suggest_shifted_checkpoints(lambda: 0.9))
 
+    def test_instances_share_polling_state(self):
+        child = self._makeOne()
+        self.assertEqual(1, len(self._instances))
+        master = self._instances[0]
+        self.assertIs(master.polling_state, child.polling_state)
+
+        # This shouldn't actually happen...
+        grandchild = child.new_instance()
+        self.assertIs(master.polling_state, grandchild.polling_state)
+        self.assertTrue(grandchild.polling_state)
+
+        # releasing drops the master
+        grandchild.release()
+        self.assertFalse(grandchild.polling_state)
+        # Doesn't affect anything else.
+        self.assertIs(master.polling_state, child.polling_state)
 
 class PersistentRowFilterTests(TestCase):
 

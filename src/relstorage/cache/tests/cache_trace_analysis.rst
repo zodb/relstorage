@@ -33,10 +33,12 @@ Check to make sure the cache analysis scripts work.
     ...     options.cache_local_mb = size*(1<<20)
     ...     options.cache_local_dir = '.'
     ...     options.cache_local_compression = 'zlib'
-    ...     options.share_local_cache = True
     ...     # We can interleave between instances
     ...     cache = relstorage.cache.StorageCache(MockAdapter(), options, name)
     ...     new_cache = cache.new_instance()
+    ...     assert hasattr(cache.cache, 'tracer'), cache.cache
+    ...     assert hasattr(new_cache.cache, 'tracer'), new_cache.cache
+    ...     assert new_cache.cache.tracer is cache.cache.tracer
     ...     cache.checkpoints = new_cache.checkpoints = cache.local_client.store_checkpoints(0, 0)
     ...     new_cache.tpc_begin()
     ...     cache.tpc_begin()
