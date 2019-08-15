@@ -56,11 +56,134 @@ class _UsedAfterRelease(object):
         return 0
     def __call__(self):
         raise NotImplementedError
-    close = reset_stats = release = lambda s: None
+    close = reset_stats = release = lambda self, *args: None
     stats = lambda s: {}
     new_instance = lambda s: s
 _UsedAfterRelease = _UsedAfterRelease()
 
+
+class _PollingState(object):
+    """
+    Keeps track of the most recent polling data so that
+    instances don't make unnecessary polls.
+
+    Shared between all instances of a StorageCache
+    in a tree, from the master down.
+    """
+
+    # checkpoints, when set, is a tuple containing the integer
+    # transaction IDs ``(checkpoint0, checkpoint1)`` of the two current
+    # checkpoints. ``checkpoint0`` is greater than or equal to
+    # ``checkpoint1``.
+    checkpoints = None
+
+    # current_tid contains the last polled transaction ID.
+    #
+    # Invariant:
+    #
+    # when self.checkpoints is not None, self.delta_after0 has info
+    # from *all* transactions in the range:
+    #
+    #   (self.checkpoints[0], self.current_tid]
+    #
+    # (That is, `tid > self.checkpoints[0] and tid <= self.current_tid`)
+    #
+    # We assign to this *only* after executing a poll, or
+    # when reading data from the persistent cache (which happens at
+    # startup, and usually also when someone calls clear())
+    #
+    # Start with None so we can distinguish the case of never polled/
+    # no tid in persistent cache from a TID of 0, which can happen in
+    # tests.
+    current_tid = None
+
+    # delta_after0 contains {oid: tid} *after* checkpoint 0
+    # and before or at self.current_tid.
+    delta_after0 = None
+
+    # delta_after1 contains {oid: tid} *after* checkpoint 1 and
+    # *before* or at checkpoint 0. The content of delta_after1 only
+    # changes when checkpoints shift and we rebuild it.
+    delta_after1 = None
+
+    delta_map_type = OID_TID_MAP_TYPE
+
+    def __init__(self):
+        self._read_lock = threading.Lock()
+        self.checkpoints = None
+        self.current_tid = None
+        self.delta_after0 = self.delta_map_type()
+        self.delta_after1 = self.delta_map_type()
+
+    def new_instance(self):
+        return self
+
+    def release(self, cache):
+        pass
+
+    def close(self):
+        self._read_lock = None
+        self.checkpoints = None
+        self.current_tid = None
+        self.delta_after0 = None
+        self.delta_after1 = None
+
+    def restore(self, adapter, local_client):
+        # This method is not thread safe
+
+        # Note that there may have been a tiny amount of data in the
+        # file that we didn't get to actually store but that still
+        # comes back in the delta_map; that's ok.
+        row_filter = _PersistentRowFilter(adapter, self.delta_map_type)
+        local_client.restore(row_filter)
+        local_client.remove_invalid_persistent_oids(row_filter.polled_invalid_oids)
+
+        self.checkpoints = local_client.get_checkpoints()
+        if self.checkpoints:
+            # No point keeping the delta maps otherwise,
+            # we have to poll. If there were no checkpoints, it means
+            # we saved without having ever completed a poll.
+            #
+            # We choose the cp0 as our beginning TID at which to
+            # resume polling. We have information on cached data as it
+            # relates to those checkpoints. (TODO: Are we sure that
+            # the delta maps we've just built are actually accurate
+            # as-of this particular TID we're choosing to poll from?)
+            #
+            self.current_tid = self.checkpoints[0]
+            self.delta_after0 = row_filter.delta_after0
+            self.delta_after1 = row_filter.delta_after1
+        else:
+            self.delta_after0 = self.delta_map_type()
+            self.delta_after1 = self.delta_map_type()
+
+        logger.debug(
+            "Restored with current_tid %s and checkpoints %s and deltas %s %s",
+            self.current_tid, self.checkpoints,
+            len(self.delta_after0), len(self.delta_after1)
+        )
+
+
+    def snapshot(self):
+        """
+        Return a consistent view of the current values, suitable for
+        modification.
+
+        :return: A tuple ``(checkpoints, tid, da0, da1)``
+        """
+        with self._read_lock:
+            return (
+                self.checkpoints,
+                self.current_tid,
+                self.delta_map_type(self.delta_after0),
+                self.delta_map_type(self.delta_after1)
+            )
+
+    def after_poll(self, cache): # type: StorageCache -> None
+        """
+        The *cache* calls this after it has completed all actions in its
+        `StorageCache.after_poll` method to update the global polling state.
+        """
 
 
 @interface.implementer(IPersistentCache)
@@ -80,56 +203,21 @@ class StorageCache(object):
     store_temp = None
     read_temp = None
 
-    # Master is the root StorageCache with which
-    # we are (usually) sharing our ``local_client``. We
-    # feed back certain information to it to make its life
-    # easier.
-    master = None
-
-    # checkpoints, when set, is a tuple containing the integer
-    # transaction ID of the two current checkpoints. checkpoint0 is
-    # greater than or equal to checkpoint1.
-    checkpoints = None
-
-    # current_tid contains the last polled transaction ID. Invariant:
-    # when self.checkpoints is not None, self.delta_after0 has info
-    # from *all* transactions in the range:
-    #
-    #   (self.checkpoints[0], self.current_tid]
-    #
-    # (That is, `tid > self.checkpoints[0] and tid <= self.current_tid`)
-    #
-    # We assign to this *only* after executing a poll, or
-    # when reading data from the persistent cache (which happens at
-    # startup, and usually also when someone calls clear())
-    #
-    # Start with None so we can distinguish the case of never polled/
-    # no tid in persistent cache from a TID of 0, which can happen in
-    # tests.
-    current_tid = None
-
-    _delta_map_type = OID_TID_MAP_TYPE
-
-    def __init__(self, adapter, options, prefix, _master=None):
+    def __init__(self, adapter, options, prefix, _parent=None):
         self.adapter = adapter
         self.options = options
         self.prefix = prefix or ''
-
-        # delta_after0 contains {oid: tid} *after* checkpoint 0
-        # and before or at self.current_tid.
-        self.delta_after0 = self._delta_map_type()
-
-        # delta_after1 contains {oid: tid} *after* checkpoint 1 and
-        # *before* or at checkpoint 0. The content of delta_after1 only
-        # changes when checkpoints shift and we rebuild it.
-        self.delta_after1 = self._delta_map_type()
-
         # delta_size_limit places an approximate limit on the number of
         # entries in the delta_after maps.
         self.delta_size_limit = options.cache_delta_size_limit
 
-        if _master is None:
+        if _parent is None:
             # I must be the master!
+
+            # This is shared between all instances of a cache in a tree,
+            # including the master, so that they can share information about
+            # polling.
+            self.polling_state = _PollingState()
             self.local_client = LocalClient(options, self.prefix)
 
             shared_cache = MemcacheStateCache.from_options(options, self.prefix)
@@ -137,7 +225,6 @@ class StorageCache(object):
                 self.cache = MultiStateCache(self.local_client, shared_cache)
             else:
                 self.cache = self.local_client
-            self.restore()
 
             tracefile = persistence.trace_file(options, self.prefix)
             if tracefile:
@@ -145,9 +232,21 @@ class StorageCache(object):
                 tracer.trace(0x00)
                 self.cache = TracingStateCache(self.cache, tracer)
         else:
-            self.master = _master
-            self.local_client = _master.local_client.new_instance()
-            self.cache = _master.cache.new_instance()
+            self.polling_state = _parent.polling_state.new_instance()
+            self.local_client = _parent.local_client.new_instance()
+            self.cache = _parent.cache.new_instance()
+
+        # These have the same definitions as for _PollingState;
+        # whereas polling_state is shared, these are our local values.
+        cp, tid, da0, da1 = self.polling_state.snapshot()
+        self.checkpoints = cp
+        self.current_tid = tid
+        self.delta_after0 = da0
+        self.delta_after1 = da1
+
+        if _parent is None:
+            self.restore()
+
 
     # XXX: Note that our __bool__ and __len__ are NOT consistent
     def __bool__(self):
@@ -185,30 +284,20 @@ class StorageCache(object):
 
     def new_instance(self): # pylint:disable=method-hidden
         """
-        Return a copy of this instance sharing the same local client.
+        Return a copy of this instance sharing the same local client
+        and having the most current view of the database as collected
+        by any instance.
         """
-        master = self.master if self.master is not None else self
         cache = type(self)(self.adapter, self.options, self.prefix,
-                           _master=master)
-
-        # The delta maps get more and more stale the longer time goes on.
-        # Maybe we want to try to re-create them based on the local max tids?
-        # Also, if there have been enough changes that someone has shifted the
-        # checkpoints, cache.checkpoints won't match the global checkpoints
-        # and they will wind up discarding the delta maps on the first poll.
-        #
-        # Alternately, we could watch our children created here, and see
-        # which one is still alive and has the highest `current_tid` indicating the
-        # most recent poll, and copy that information.
-        cache.checkpoints = self.checkpoints
-        cache.delta_after0 = self._delta_map_type(self.delta_after0)
-        cache.delta_after1 = self._delta_map_type(self.delta_after1)
-        cache.current_tid = self.current_tid
+                           _parent=self)
         return cache
 
     def release(self):
         """
         Release resources held by this instance.
+
+        This does not corrupt shared state, and must be called
+        on each instance that's not the root.
 
         This is usually memcache connections if they're in use.
         """
@@ -216,27 +305,35 @@ class StorageCache(object):
         # Release our clients. If we had a non-shared local cache,
         # this will also allow it to release any memory it's holding.
         self.local_client = self.cache = _UsedAfterRelease
-        # Release our master
-        if self.master is not None:
-            self.master = None
+        self.polling_state.release(self)
+        self.polling_state = _UsedAfterRelease
         # We can't be used to make instances any more.
         self.new_instance = _UsedAfterRelease
+        self.delta_after0 = self.delta_after1 = None
+        self.checkpoints = None
 
     def close(self, **save_args):
         """
         Release resources held by this instance, and
         save any persistent data necessary.
+
+        This is only called on the root. If there are still instances
+        that haven't been released, they'll be broken.
         """
+        # grab things that will be reset in release()
         cache = self.cache
+        polling_state = self.polling_state
+
         self.save(**save_args)
         self.release()
         cache.close()
+        polling_state.close()
 
     def save(self, **save_args):
         """
         Store any persistent client data.
         """
-        if self.options.cache_local_dir and len(self): # pylint:disable=len-as-condition
+        if self.options.cache_local_dir and len(self) > 0: # pylint:disable=len-as-condition
             # (our __bool__ is not consistent with our len)
             stats = self.local_client.stats()
             if stats['hits'] or stats['sets']:
@@ -250,37 +347,16 @@ class StorageCache(object):
 
     def restore(self):
         # We must only restore into an empty cache.
+        state = self.polling_state
         assert not len(self.local_client) # pylint:disable=len-as-condition
         assert not self.checkpoints
+        state.restore(self.adapter, self.local_client)
 
-        # Note that there may have been a tiny amount of data in the
-        # file that we didn't get to actually store but that still
-        # comes back in the delta_map; that's ok.
-        row_filter = _PersistentRowFilter(self.adapter, self._delta_map_type)
-        self.local_client.restore(row_filter)
-        self.local_client.remove_invalid_persistent_oids(row_filter.polled_invalid_oids)
-
-        self.checkpoints = self.local_client.get_checkpoints()
-        if self.checkpoints:
-            # No point keeping the delta maps otherwise,
-            # we have to poll. If there were no checkpoints, it means
-            # we saved without having ever completed a poll.
-            #
-            # We choose the cp0 as our beginning TID at which to
-            # resume polling. We have information on cached data as it
-            # relates to those checkpoints. (TODO: Are we sure that
-            # the delta maps we've just built are actually accurate
-            # as-of this particular TID we're choosing to poll from?)
-            #
-            self.current_tid = self.checkpoints[0]
-            self.delta_after0 = row_filter.delta_after0
-            self.delta_after1 = row_filter.delta_after1
-
-        logger.debug(
-            "Restored with current_tid %s and checkpoints %s and deltas %s %s",
-            self.current_tid, self.checkpoints,
-            len(self.delta_after0), len(self.delta_after1)
-        )
+        cp, tid, da0, da1 = self.polling_state.snapshot()
+        self.checkpoints = cp
+        self.current_tid = tid
+        self.delta_after0 = da0
+        self.delta_after1 = da1
 
     def _reset(self, message=None):
         """
@@ -292,13 +368,10 @@ class StorageCache(object):
         method returns.
         """
         # As if we've never polled
-        for name in ('checkpoints', 'current_tid'):
-            try:
-                delattr(self, name)
-            except AttributeError:
-                pass
-        self.delta_after0 = self._delta_map_type()
-        self.delta_after1 = self._delta_map_type()
+        self.checkpoints = None
+        self.current_tid = None
+        self.delta_after0 = self.polling_state.delta_map_type()
+        self.delta_after1 = self.polling_state.delta_map_type()
         if message:
             raise CacheConsistencyError(message)
 
@@ -696,11 +769,11 @@ class StorageCache(object):
         there is no data at all (in which case *new_tid_int* should be
         0), or the database connection is stale.
 
-        *prev_tid_int* can be None, in which case the changes
-        parameter will be ignored. new_tid_int can not be None.
+        *prev_tid_int* can be ``None``, in which case the *changes*
+        parameter will be ignored. *new_tid_int* can not be ``None``.
 
-        If *changes* was not none, this method returns a collection of
-        OID integers from it. (Because changes is only required to be
+        If *changes* was not ``None``, this method returns a collection of
+        OID integers from it. (Because *changes* is only required to be
         an iterable, you may not be able to iterate it again.)
         """
         my_prev_tid_int = self.current_tid or 0
@@ -882,8 +955,8 @@ class StorageCache(object):
         # we'll do nothing and have no delta maps. This is because, hopefully,
         # next time we poll we'll be able to use the global checkpoints and
         # catch up then.
-        new_delta_after0 = self._delta_map_type()
-        new_delta_after1 = self._delta_map_type()
+        new_delta_after0 = self.polling_state.delta_map_type()
+        new_delta_after1 = self.polling_state.delta_map_type()
         if cp1 < new_tid_int:
             # poller.list_changes(cp1, new_tid_int) provides an iterator of
             # (oid, tid) where tid > cp1 and tid <= new_tid_int. It is guaranteed
