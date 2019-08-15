@@ -61,8 +61,22 @@ class _UsedAfterRelease(object):
     new_instance = lambda s: s
 _UsedAfterRelease = _UsedAfterRelease()
 
+class _InvalidationMixin(object):
 
-class _PollingState(object):
+    def _invalidate(self, oid_int, tid_int):
+        # TODO: Perhaps this should invalidate anything <= the tid?
+        if self.delta_after0.get(oid_int) == tid_int:
+            del self.delta_after0[oid_int]
+
+    def _invalidate_all(self, oids):
+        pop0 = self.delta_after0.pop
+        pop1 = self.delta_after1.pop
+        for oid in oids:
+            pop0(oid, None)
+            pop1(oid, None)
+
+
+class _PollingState(_InvalidationMixin):
     """
     Keeps track of the most recent polling data so that
     instances don't make unnecessary polls.
@@ -109,7 +123,7 @@ class _PollingState(object):
     delta_map_type = OID_TID_MAP_TYPE
 
     def __init__(self):
-        self._read_lock = threading.Lock()
+        self._lock = threading.Lock()
         self.checkpoints = None
         self.current_tid = None
         self.delta_after0 = self.delta_map_type()
@@ -122,7 +136,7 @@ class _PollingState(object):
         pass
 
     def close(self):
-        self._read_lock = None
+        self._lock = None
         self.checkpoints = None
         self.current_tid = None
         self.delta_after0 = None
@@ -163,7 +177,6 @@ class _PollingState(object):
             len(self.delta_after0), len(self.delta_after1)
         )
 
-
     def snapshot(self):
         """
         Return a consistent view of the current values, suitable for
@@ -171,7 +184,7 @@ class _PollingState(object):
 
         :return: A tuple ``(checkpoints, tid, da0, da1)``
         """
-        with self._read_lock:
+        with self._lock:
             return (
                 self.checkpoints,
                 self.current_tid,
@@ -185,9 +198,16 @@ class _PollingState(object):
         `StorageCache.after_poll` method to update the global polling state.
         """
 
+    def invalidate(self, oid_int, tid_int):
+        with self._lock:
+            self._invalidate(oid_int, tid_int)
+
+    def invalidate_all(self, oids):
+        with self._lock:
+            self._invalidate_all(oids)
 
 @interface.implementer(IPersistentCache)
-class StorageCache(object):
+class StorageCache(_InvalidationMixin):
     """RelStorage integration with memcached or similar.
 
     Holds a list of memcache clients in order from most local to
@@ -672,8 +692,8 @@ class StorageCache(object):
 
     def invalidate(self, oid_int, tid_int):
         del self.cache[(oid_int, tid_int)]
-        if self.delta_after0.get(oid_int) == tid_int:
-            del self.delta_after0[oid_int]
+        self._invalidate(oid_int, tid_int)
+        self.polling_state.invalidate(oid_int, tid_int)
 
     def invalidate_all(self, oids):
         """
@@ -681,13 +701,8 @@ class StorageCache(object):
         given OIDs.
         """
         self.local_client.invalidate_all(oids)
-        deltas = self.delta_after0, self.delta_after1
-        for oid in oids:
-            for delta in deltas:
-                try:
-                    del delta[oid]
-                except KeyError:
-                    pass
+        self._invalidate_all(oids)
+        self.polling_state.invalidate_all(oids)
 
     def tpc_begin(self):
         """Prepare temp space for objects to cache."""

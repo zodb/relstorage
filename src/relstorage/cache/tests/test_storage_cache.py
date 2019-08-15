@@ -144,6 +144,8 @@ class StorageCacheTests(TestCase):
         self.assertIsNone(c2.checkpoints)
         self.assertIsEmpty(c2.delta_after0)
         self.assertIsEmpty(c2.delta_after1)
+        self.assertIsEmpty(c2.polling_state.delta_after0)
+        self.assertIsEmpty(c2.polling_state.delta_after1)
 
         # This time, write the checkpoints.
         c.local_client.store_checkpoints(0, 0)
@@ -154,7 +156,16 @@ class StorageCacheTests(TestCase):
         self.assertEqual(1, len(c2))
         self.assertEqual(c2.checkpoints, (0, 0))
         self.assertEqual(dict(c2.delta_after0), {oid: tid})
+        self.assertEqual(dict(c2.polling_state.delta_after0), {oid: tid})
         self.assertIsEmpty(c2.delta_after1)
+        # Invalidating one oid invalidates the polling_state too
+        c2.invalidate(oid, tid)
+        self.assertEqual(0, len(c2))
+        self.assertIsEmpty(c2.delta_after0)
+        self.assertIsEmpty(c2.polling_state.delta_after0)
+        # We can do it again.
+        c2.invalidate(oid, tid)
+        self.assertEqual(0, len(c2))
 
         # Resetting also loads the stored data by default.
         c2.clear()
@@ -162,6 +173,14 @@ class StorageCacheTests(TestCase):
         self.assertEqual(c2.checkpoints, (0, 0))
         self.assertEqual(dict(c2.delta_after0), {oid: tid})
         self.assertIsEmpty(c2.delta_after1)
+        # Invalidating a group of oids invalidates the polling_state too
+        c2.invalidate_all((oid,))
+        self.assertEqual(0, len(c2))
+        self.assertIsEmpty(c2.delta_after0)
+        self.assertIsEmpty(c2.polling_state.delta_after0)
+        # We can do it again.
+        c2.invalidate_all((oid,))
+        self.assertEqual(0, len(c2))
 
         # But can be told to ignore it
         c2.clear(load_persistent=False)
