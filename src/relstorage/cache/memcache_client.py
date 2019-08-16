@@ -103,6 +103,12 @@ class MemcacheStateCache(object):
     def __delitem__(self, oid_tid):
         self.client.delete(self.__oid_tid_to_key(*oid_tid))
 
+    def invalidate_all(self, oids): # pylint:disable=unused-argument
+        """
+        Implemented by flushing everything.
+        """
+        self.flush_all()
+
     def _set_multi(self, keys_and_values):
         formatted = {
             '%s:state:%d:%d' % (self.prefix, tid, oid): (p64(actual_tid) + (state or b''))

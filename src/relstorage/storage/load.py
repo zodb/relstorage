@@ -86,6 +86,7 @@ class Loader(object):
         'load_connection',
         'store_connection',
         'cache',
+        '__dict__',
     )
 
     def __init__(self, adapter, load_connection, store_connection, cache):
@@ -94,10 +95,9 @@ class Loader(object):
         self.store_connection = store_connection
         self.cache = cache
 
-    def __load_using_method(self, meth, argument):
-        cursor = self.load_connection.cursor
+    def __load_using_method(self, load_cursor, meth, argument):
         try:
-            return meth(cursor, argument)
+            return meth(load_cursor, argument)
         except CacheConsistencyError:
             logger.exception("Cache consistency error; restarting load")
             self.load_connection.drop()
@@ -109,10 +109,12 @@ class Loader(object):
     def load(self, oid, version=''):
         # pylint:disable=unused-argument
         oid_int = bytes8_to_int64(oid)
-        state, tid_int = self.__load_using_method(self.cache.load, oid_int)
-
+        # TODO: Here, and in prefetch, should we check bool(load_connection)?
+        # If it's not active and had polled, we don't really want to do that, do we?
+        load_cursor = self.load_connection.cursor
+        state, tid_int = self.__load_using_method(load_cursor, self.cache.load, oid_int)
         if tid_int is None:
-            _log_keyerror(self.load_connection.cursor,
+            _log_keyerror(load_cursor,
                           self.adapter,
                           oid_int,
                           "no tid found")
@@ -122,7 +124,7 @@ class Loader(object):
             # This can happen if something attempts to load
             # an object whose creation has been undone or which was deleted
             # by IExternalGC.deleteObject().
-            _log_keyerror(self.load_connection.cursor,
+            _log_keyerror(load_cursor,
                           self.adapter,
                           oid_int,
                           "creation has been undone")
@@ -143,8 +145,11 @@ class Loader(object):
     def prefetch(self, oids):
         prefetch = self.cache.prefetch
         oid_ints = [bytes8_to_int64(oid) for oid in oids]
+        load_cursor = self.load_connection.cursor
         try:
-            self.__load_using_method(prefetch, oid_ints)
+            self.__load_using_method(load_cursor, prefetch, oid_ints)
+        except (AttributeError, TypeError, ValueError):
+            raise
         except Exception: # pylint:disable=broad-except
             # This could raise self._stale_error, or
             # CacheConsistencyError. Both of those mean that regular loads

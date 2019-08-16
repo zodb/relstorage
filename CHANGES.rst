@@ -17,6 +17,36 @@
   commits on MySQL. This could lead to ``tpc_vote`` blocking longer
   than desired. See :issue:`331`.
 
+- Fix ``undo`` to purge the objects whose transaction was revoked from
+  the cache.
+
+- History-free databases remove objects from the local cache when they
+  are replaced by a newer revision. This helps the cache size stay
+  in check. This partly rolls back the conflict resolution
+  enhancements in 3.0a7 when the updater and the conflicting updater
+  are in the same process. That will be improved.
+
+- Make new connections automatically stay up-to-date with the most
+  recent polling that's been done. In environments with a large amount
+  of write activity, this makes them much more useful immediately,
+  without having to perform large polls. Older connections, though,
+  continue to need large polls if they're used again for the first
+  time in a long time. That is expected to be improved. For now,
+  reducing the ZODB connection pool size, or enabling its idle
+  timeout, may help.
+
+- Only one connection at a time for a given database will ever perform
+  a "Using new checkpoints" poll query, which can be very expensive
+  given large cache-delta-size values. Other connections will use the
+  results of this query and make minor updates as needed.
+
+- Stop storing the current checkpoints in memcache, if one is
+  configured. Memcache integration has been discouraged since the
+  introduction of RelStorage persistent caches, which are much
+  improved in 3.0. Having checkpoint data come from there is
+  inconsistent with several of the new features that let the local
+  cache be smarter and more efficient.
+
 3.0a8 (2019-08-13)
 ==================
 

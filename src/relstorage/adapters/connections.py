@@ -58,7 +58,15 @@ class AbstractManagedConnection(object):
     on_first_use = on_opened
 
     def __bool__(self):
-        return self.connection is not None
+        """
+        This object is true if it has an open connection and cursor that
+        has previously been accessed and the ``on_first_use`` hook has been
+        called and so we've established a database snapshot.
+
+        This is useful to keep from polling a load connection, for example,
+        when not explicitly asked for.
+        """
+        return self.connection is not None and 'cursor' in self.__dict__
 
     __nonzero__ = __bool__
 
@@ -73,9 +81,8 @@ class AbstractManagedConnection(object):
                 cursor = self.connmanager.cursor_for_connection(self.connection)
             else:
                 _, cursor = self.open_if_needed()
-                self.active = True
-
             self.on_first_use(self.connection, cursor)
+            self.active = True
         return self._cursor
 
     def drop(self):
@@ -103,6 +110,8 @@ class AbstractManagedConnection(object):
         clean_rollback = True
         self.active = False
         if self.connection is None:
+            assert self._cursor is None
+            assert 'cursor' not in self.__dict__
             return clean_rollback
 
         conn = self.connection
@@ -137,7 +146,6 @@ class AbstractManagedConnection(object):
         Restart the connection if there is any chance that it has any associated state.
         """
         if not self:
-            assert self._cursor is None
             assert not self.active
             return
 

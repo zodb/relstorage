@@ -97,7 +97,8 @@ class PersistentCacheStorageTests(TestCase):
         cache = find_cache(storage)
 
         tid = self.assert_oid_known(oid, cache)
-        self.assertEqual(cache.current_tid, tid)
+        self.assertEqual(cache.current_tid, tid,
+                         "cache tid is not OID tid (expected_tid: %s)" % (expected_tid,))
         if expected_tid is not None:
             self.assertEqual(tid, expected_tid)
         return tid
@@ -197,6 +198,7 @@ class PersistentCacheStorageTests(TestCase):
         checkpoints = self.assert_checkpoints(c1)
         self.__do_check_tids(root, old_tids)
         tid_int = bytes8_to_int64(c1._storage.lastTransaction())
+        self.assertEqual(c1._storage._cache.current_tid, tid_int)
         c1.close()
         if pack:
             storage.pack(tid_int, referencesf)
@@ -232,6 +234,7 @@ class PersistentCacheStorageTests(TestCase):
         storage3 = self.__make_storage_pcache(
             orig_checkpoints,
             expected_root_tid=orig_tid)
+        self.assertEqual(storage3._cache.checkpoints, orig_checkpoints)
 
         db3 = self._closing(DB(storage3))
         c3 = db3.open()
@@ -296,6 +299,14 @@ class PersistentCacheStorageTests(TestCase):
         c1.close()
         return root_tid, mapping_tid, db1
 
+    def _force_checkpoints_in_storage_cache(self, storage, cp):
+        # We do this to simulate a second instance writing to the persistent
+        # cache file without having done a poll? Or something?
+        # This doesn't seem very realistic.
+        storage._cache.local_client.store_checkpoints(*cp)
+        storage._cache.polling_state.checkpoints = cp
+
+
     def checkNoConflictWhenChangeMissedByPersistentCacheBeforeCP1(self):
         _root_tid, _mapping_tid, db = self._populate_root_and_mapping()
 
@@ -309,7 +320,7 @@ class PersistentCacheStorageTests(TestCase):
 
         # Now move the persistent checkpoints forward, pushing the
         # last TID for the root object out of the delta ranges.
-        db.storage._cache.local_client.store_checkpoints(new_tid, new_tid)
+        self._force_checkpoints_in_storage_cache(db.storage, (new_tid, new_tid))
         # Persist
         db.close()
 
@@ -338,7 +349,7 @@ class PersistentCacheStorageTests(TestCase):
 
         # Now move the persistent checkpoints forward, pushing the
         # last TID for the root object out of the delta ranges.
-        db.storage._cache.local_client.store_checkpoints(new_tid, new_tid)
+        self._force_checkpoints_in_storage_cache(db.storage, (new_tid, new_tid))
         # persist
         db.close()
 
@@ -393,7 +404,7 @@ class PersistentCacheStorageTests(TestCase):
         # Though it is in the cache.
         self.assert_cached_exact(ROOT_OID, root_tid, c1)
 
-        # Create a new transaction that deletes an object but
+        # Create a new transaction that derefs an object but
         # that won't update the persistent cache.
         new_tid, _ = self.__set_keys_in_root_to(
             self.__make_storage_no_pcache(),
@@ -405,7 +416,7 @@ class PersistentCacheStorageTests(TestCase):
 
         # Now move the persistent checkpoints forward, pushing the
         # last TID for the root object out of the delta ranges.
-        c1._storage._cache.local_client.store_checkpoints(new_tid, new_tid)
+        self._force_checkpoints_in_storage_cache(c1._storage, (new_tid, new_tid))
         # Persist
         c1.close()
         db.close()

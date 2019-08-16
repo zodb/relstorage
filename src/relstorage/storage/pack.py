@@ -83,6 +83,11 @@ class Pack(object):
         if t > 275085010696509852:
             # Must be a TID.
 
+            # This magic number generates 'Value too large to be stored in data type' when
+            # given to time.gmtime() as used to originally generate TimeStamp values,
+            # though it can be converted back. It also happens to specify July 2019
+            # when this feature was implemented.
+
             # Turn it back into a time.time() for later logging
             ts = TimeStamp(int64_to_8bytes(t))
             logger.debug(

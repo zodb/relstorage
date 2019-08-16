@@ -134,19 +134,33 @@ class stale_aware(object):
         # these methods only once and cache them (which is what copy_storage_methods
         # does).
 
+        # Unfortunately, when a method from inside the defining class
+        # calls another method decorated like this, we derive a new
+        # type each time. e.g., ``Loader.loadBefore`` calls
+        # ``self.load`` and generates a new type. Therefore we must
+        # also cache this on the instance. This creates a reference
+        # cycle.
+
+        # Many of the instances that use this actually define __slots__
+        # so we can't put arbitrary stuff in their missing __dict__ anyway,
+        # so they must also define __dict__.
+
         stale_aware_class = type(
             'StaleAware_' + bound.__name__,
             (_StaleAwareMethodTemplate,),
             {
                 '__slots__': (),
                 '__call__': bound.__call__,
+                '__name__': bound.__name__,
+                '__module__': bound.__module__,
             }
         )
 
         stale_aware_class = implementer(IStaleAware)(stale_aware_class)
-        # update_wrapper() doesn't work on a type.
-        # stale_aware_class = functools.wraps(bound)(stale_aware_class)
-        return stale_aware_class(bound)
+        # Defining
+        meth = stale_aware_class(bound)
+        inst.__dict__[bound.__name__] = meth
+        return meth
 
 
 def _make_phase_dependent(storage, method):

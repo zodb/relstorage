@@ -330,9 +330,13 @@ class HistoryPreservingPackUndo(PackUndo):
             raise UndoError("Transaction not found or packed")
 
         # Rule: we can undo an object if the object's state in the
-        # transaction to undo matches the object's current state.
-        # If any object in the transaction does not fit that rule,
-        # refuse to undo.
+        # transaction to undo matches the object's current state. If
+        # any object in the transaction does not fit that rule, refuse
+        # to undo. In theory this means arbitrary transactions can be
+        # undone (because we actually match the state); in practice it
+        # means that it must be the most recent transaction those
+        # objects were involved in.
+
         # (Note that this prevents conflict-resolving undo as described
         # by ZODB.tests.ConflictResolution.ConflictResolvingTransUndoStorage.
         # Do people need that? If so, we can probably support it, but it

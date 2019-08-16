@@ -56,29 +56,34 @@ class HistoryFreeRelStorageTests(GenericRelStorageTests, ZODBTestCase):
         oid = obj.getoid()
         obj.value = 1
         # Commit three different revisions
-        revid1 = self._dostoreNP(oid, data=pdumps(obj))
+        tid1 = self._dostoreNP(oid, data=pdumps(obj))
         obj.value = 2
-        revid2 = self._dostoreNP(oid, revid=revid1, data=pdumps(obj))
+        tid2 = self._dostoreNP(oid, revid=tid1, data=pdumps(obj))
         obj.value = 3
-        revid3 = self._dostoreNP(oid, revid=revid2, data=pdumps(obj))
+        tid3 = self._dostoreNP(oid, revid=tid2, data=pdumps(obj))
+
+        storage = self._storage
         # Now make sure only the latest revision can be extracted
-        raises(KeyError, self._storage.loadSerial, oid, revid1)
-        raises(KeyError, self._storage.loadSerial, oid, revid2)
-        data = self._storage.loadSerial(oid, revid3)
+        for tid in tid1, tid2:
+            __traceback_info__ = tid, tid1, tid2
+            with raises(KeyError):
+                storage.loadSerial(oid, tid)
+
+        data = storage.loadSerial(oid, tid3)
         pobj = loads(data)
         eq(pobj.getoid(), oid)
         eq(pobj.value, 3)
 
-        self._storage.pack(self._storage.lastTransactionInt() + 1, referencesf)
-        self._storage.sync()
+        storage.pack(self._storage.lastTransactionInt() + 1, referencesf)
+
         # All revisions of the object should be gone, since there is no
         # reference from the root object to this object.
-        for revid in (revid1, revid2, revid3):
-            __traceback_info__ = oid, revid
+        for tid in tid1, tid2, tid3:
+            __traceback_info__ = oid, tid
             with raises(KeyError):
-                self._storage.loadSerial(oid, revid)
+                storage.loadSerial(oid, tid)
         with raises(KeyError):
-            self._storage.load(oid)
+            storage.load(oid)
 
     def checkPackJustOldRevisions(self):
         eq = self.assertEqual

@@ -144,6 +144,11 @@ class IStateCache(Interface):
         Clear cached data.
         """
 
+    def invalidate_all(oids):
+        """
+        Remove all cached data for each of the oid integers in *oids*.
+        """
+
     ##
     # Methods that are here to assist with tracing.
     ##
