@@ -1255,6 +1255,9 @@ class StorageCache(_InvalidationMixin):
             # so I get to. Note that this return of None will
             # drop anything already cached
             self.__poll_establish_global_checkpoints(new_tid_int)
+            if changes is not None:
+                consume(changes)
+
             return
 
         global_checkpoints_in_future = global_checkpoints[0] > new_tid_int

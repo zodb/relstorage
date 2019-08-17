@@ -240,9 +240,10 @@ class AbstractManagedConnection(object):
             self.connmanager.rollback_and_close(conn, cursor)
 
     def __repr__(self):
-        return "<%s at 0x%x conn=%r cur=%r>" % (
+        return "<%s at 0x%x active=%s, conn=%r cur=%r>" % (
             self.__class__.__name__,
             id(self),
+            self.active,
             self.connection,
             self._cursor
         )
