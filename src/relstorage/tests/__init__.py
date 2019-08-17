@@ -290,6 +290,8 @@ class MockConnectionManager(object):
         if hasattr(conn, 'rollback'):
             conn.rollback()
 
+    rollback_store_quietly = rollback_quietly
+
     def rollback_and_close(self, conn, cursor):
         self.rollback_quietly(conn, cursor)
         if conn:
