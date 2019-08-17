@@ -383,7 +383,7 @@ class StorageCacheTests(TestCase):
         c.store_temp(2, b'abc')
         c.store_temp(3, b'def')
         tid = p64(55)
-        c._send_queue(tid)
+        c.after_tpc_finish(tid)
         self.assertEqual(data, {
             'myprefix:state:55:2': tid + b'abc',
             'myprefix:state:55:3': tid + b'def',
@@ -399,7 +399,7 @@ class StorageCacheTests(TestCase):
         c.store_temp(2, b'abc')
         c.store_temp(3, b'def' * 100)
         tid = p64(55)
-        c._send_queue(tid)
+        c.after_tpc_finish(tid)
         self.assertEqual(data, {
             'myprefix:state:55:2': tid + b'abc',
             'myprefix:state:55:3': tid + (b'def' * 100),
@@ -410,7 +410,7 @@ class StorageCacheTests(TestCase):
         c = self._makeOne()
         c.tpc_begin()
         tid = p64(55)
-        c._send_queue(tid)
+        c.after_tpc_finish(tid)
         self.assertEqual(data, {})
 
     def test_after_tpc_finish(self):

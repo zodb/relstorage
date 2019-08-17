@@ -24,6 +24,12 @@ Check to make sure the cache analysis scripts work.
     ...         history.append((b'l', oid, serial,
     ...                        b'x'*random.randint(200,2000)))
 
+    >>> def send_queue(self, tid):
+    ...    tid_int = u64(tid)
+    ...    self.cache.set_all_for_tid(tid_int, self.temp_objects)
+    ...    self.temp_objects.reset()
+
+
     >>> def cache_run(name, size):
     ...     serial = 1
     ...     random.seed(42)
@@ -50,14 +56,14 @@ Check to make sure the cache analysis scripts work.
     ...             cache.after_poll(None, cache.current_tid, serial, [(oid, serial)])
     ...             assert cache.current_tid == serial
     ...             cache.store_temp(oid, data)
-    ...             cache._send_queue(p64(serial))
+    ...             send_queue(cache, p64(serial))
     ...             cache.adapter.mover.data[oid] = (data, serial)
     ...         else:
     ...             new_cache.current_tid = serial
     ...             v = new_cache.load(None, oid)
     ...             if v[0] is None:
     ...                 new_cache.store_temp(oid, data)
-    ...                 new_cache._send_queue(p64(serial))
+    ...                 send_queue(new_cache, p64(serial))
     ...                 cache.adapter.mover.data[oid] = (data, serial)
     ...     cache.close(close_async=False)
 

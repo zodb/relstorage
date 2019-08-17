@@ -1098,12 +1098,6 @@ class StorageCache(_InvalidationMixin):
         self.store_temp = q.store_temp
         self.read_temp = q.read_temp
 
-    def _send_queue(self, tid):
-        # BWC For tests (cache_trace_analysis.rst) only.
-        tid_int = u64(tid)
-        self.cache.set_all_for_tid(tid_int, self.temp_objects)
-        self.temp_objects.reset()
-
     def after_tpc_finish(self, tid):
         """
         Flush queued changes.
@@ -1734,7 +1728,15 @@ class _TemporaryStorage(object):
         """
         Return the bytes for a previously stored temporary item.
         """
-        startpos, endpos, _ = self._queue_contents[oid_int]
+        try:
+            startpos, endpos, _ = self._queue_contents[oid_int]
+        except KeyError:
+            # XXX: Seeing this on appveyor, only in a few tests,
+            # only on MySQL. Not sure why.
+            raise KeyError("No oid %d stored in %s" % (
+                oid_int,
+                dict(self._queue_contents)
+            ))
         return self._read_temp_state(startpos, endpos)
 
     def __iter__(self):
