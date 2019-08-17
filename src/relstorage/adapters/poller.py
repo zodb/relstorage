@@ -154,6 +154,10 @@ class Poller(object):
         """
         See ``IPoller``.
         """
+        if after_tid == last_tid:
+            # small optimization in case we're asked for the same.
+            # there can be no changes where change > X and change <= X
+            return ()
         params = {'min_tid': after_tid, 'max_tid': last_tid}
         self._list_changes_range_query.execute(cursor, params)
         # Return the cursor: let it be its own iterable. This could be a

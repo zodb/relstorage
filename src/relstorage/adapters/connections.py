@@ -206,7 +206,7 @@ class AbstractManagedConnection(object):
             set this to false.
         """
         fresh_connection = False
-        if not self:
+        if self.connection is None or self._cursor is None:
             # We're closed or disconnected. Start a new connection entirely.
             self.drop()
             self._open_connection()

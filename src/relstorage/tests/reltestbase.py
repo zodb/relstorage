@@ -679,18 +679,21 @@ class GenericRelStorageTests(
             r1 = c1.root()
             # The root state and checkpoints should now be cached.
             # A commit count *might* be cached depending on the ZODB version.
-            # (We stopped storing checkpoints in cache, they're too important.)
-            self.assertNotIn('zzz:checkpoints', fakecache.data)
+            # (Checkpoints are stored in the cache for the sake of tests/monitoring,
+            # but aren't read.)
+            self.assertIn('zzz:checkpoints', fakecache.data)
             self.assertIsNotNone(db.storage._cache.polling_state.checkpoints)
             self.assertEqual(sorted(fakecache.data.keys())[-1][:10],
                              'zzz:state:')
             r1['alpha'] = PersistentMapping()
             transaction.commit()
+            cp_count = 1
             if self.keep_history:
                 item_count = 3
             else:
                 # The previous root state was automatically invalidated
                 item_count = 2
+            item_count += cp_count
             self.assertEqual(len(fakecache.data), item_count)
 
             oid = r1['alpha']._p_oid

@@ -232,9 +232,14 @@ class _PollingState(_InvalidationMixin):
 
         # # We got it, we're going to do it.
         try:
-            self.__rebuild_checkpoints(cache, cursor, desired_checkpoints, new_tid_int)
+            _, da0, da1 = self.__rebuild_checkpoints(cache, cursor,
+                                                     desired_checkpoints, new_tid_int)
         finally:
             self._checkpoint_lock.release()
+        cache.delta_after0 = da0
+        cache.delta_after1 = da1
+        cache.checkpoints = desired_checkpoints
+        return desired_checkpoints
 
 
     def after_normal_poll(self, cache): # type: StorageCache -> None
@@ -353,20 +358,32 @@ class _PollingState(_InvalidationMixin):
         # This should be a very small, usual poll, so we don't hold a poll lock either.
         new_da0 = self.delta_map_type()
         new_da1 = self.delta_map_type()
+        assert new_tid_int >= new_checkpoints[0]
+        assert current_tid < new_tid_int
 
-        self.__poll_into(cache, cursor, new_checkpoints[0], current_tid, new_tid_int,
+        self.__poll_into(cache, cursor, new_checkpoints[0], new_tid_int, new_tid_int,
                          new_da0, new_da1)
 
-        assert not new_da1 # Nothing to add after the tid we just polled, that's impossible.
-        original_new_da0 = self.delta_map_type(new_da0) # we mutate it.
+        # Nothing to add *after* the tid we just polled; that's impossible
+        # because this connection is locked to that tid.
+        if new_da0:
+            raise CacheConsistencyError(
+                "After polling for changes between (%s, %s] found changes above the limit: %s" % (
+                    new_checkpoints[0], new_tid_int,
+                    dict(new_da0)
+                )
+            )
+
+        original_new_da1 = self.delta_map_type(new_da1) # we mutate it.
 
         with self._da0_lock:
             # Ok, time has marched on.
             # We just need to merge anything we've got, letting other updates take precedence.
             # (Our data might be old)
             self.current_tid = max(new_tid_int, self.current_tid)
-            new_da0.update(self.delta_after0)
-            self.delta_after0 = new_da0
+
+            new_da1.update(self.delta_after1)
+            self.delta_after1 = new_da1
 
             if self.current_tid <= new_tid_int:
                 # Cool, everything is good to return.
@@ -379,7 +396,7 @@ class _PollingState(_InvalidationMixin):
             # The current data could contain info that's out of range for us,
             # so we can't use it.
             # But we can update our older snapshot and return that.
-            original_new_da0.update(da0)
+            original_new_da1.update(da1)
             return new_checkpoints, da0, da1
 
     def __rebuild_checkpoints(self, cache, cursor, new_checkpoints, new_tid_int):
@@ -477,6 +494,11 @@ class _PollingState(_InvalidationMixin):
         current_tid = self.current_tid
 
         try:
+            if not checkpoints and not current_tid:
+                self.checkpoints = checkpoints
+                self.current_tid = new_tid_int
+                return checkpoints, self.delta_map_type(), self.delta_map_type()
+
             if checkpoints == new_checkpoints:
                 if new_tid_int < current_tid:
                     # We just return empty maps and hope it catches up.
@@ -496,6 +518,8 @@ class _PollingState(_InvalidationMixin):
 
                 # It's greater. We need to catch up. But only between our
                 # tid and the new one.
+                assert new_tid_int > current_tid
+                assert new_checkpoints[0] <= new_tid_int
                 # Discard the lock; it's not necessary to hold while we poll and update
                 # if we do it carefully.
                 da0 = self.delta_map_type(self.delta_after0)
@@ -1074,6 +1098,12 @@ class StorageCache(_InvalidationMixin):
         self.store_temp = q.store_temp
         self.read_temp = q.read_temp
 
+    def _send_queue(self, tid):
+        # BWC For tests (cache_trace_analysis.rst) only.
+        tid_int = u64(tid)
+        self.cache.set_all_for_tid(tid_int, self.temp_objects)
+        self.temp_objects.reset()
+
     def after_tpc_finish(self, tid):
         """
         Flush queued changes.
@@ -1170,10 +1200,8 @@ class StorageCache(_InvalidationMixin):
                 store(oid_int, tid_int)
 
         self.polling_state.after_tpc_finish(tid_int, self.temp_objects.stored_oids)
-        # We only do this because cache_trace_analysis uses us
-        # in ways that aren't quite accurate. We'd prefer to call clear_temp()
-        # at this point.
-        self.temp_objects.reset()
+
+        self.clear_temp()
 
     def clear_temp(self):
         """Discard all transaction-specific temporary data.
@@ -1421,7 +1449,8 @@ class StorageCache(_InvalidationMixin):
         # Initialize the checkpoints; we've never polled before.
         logger.debug("Initializing checkpoints: %s", new_tid_int)
 
-        # self.checkpoints = self.cache.store_checkpoints(new_tid_int, new_tid_int)
+        # Storing to the cache is here just for test BWC
+        self.cache.store_checkpoints(new_tid_int, new_tid_int)
         self.checkpoints = (new_tid_int, new_tid_int)
         self.polling_state.after_established_checkpoints(self)
 
@@ -1501,10 +1530,14 @@ class StorageCache(_InvalidationMixin):
             delta_size
         )
 
-        # The poll code will later see the new checkpoints
-        # and update self.checkpoints and self.delta_after(0|1).
-        # return self.cache.replace_checkpoints(expect, change_to)
-        self.polling_state.replace_checkpoints(self, cursor, expect, change_to, tid_int)
+        # In the past, after setting this on the cache, the poll code
+        # will later see the new checkpoints and update
+        # self.checkpoints and self.delta_after(0|1).
+        self.cache.replace_checkpoints(expect, change_to)
+        # However, we no longer read from the cache (the set is only there
+        # for test compatibility). The polling state handles replacing things
+        # for us if necessary (no need to waste a trip around with bad checkpoints)
+        return self.polling_state.replace_checkpoints(self, cursor, expect, change_to, tid_int)
 
 
 class _PersistentRowFilter(object):

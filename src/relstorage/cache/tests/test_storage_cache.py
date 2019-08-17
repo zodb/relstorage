@@ -433,14 +433,6 @@ class StorageCacheTests(TestCase):
         self.assertEqual(c.checkpoints, (50, 50))
         self.assertEqual(data['myprefix:checkpoints'], b'50 50')
 
-    def test_after_poll_ignore_garbage_checkpoints(self):
-        from relstorage.tests.fakecache import data
-        data['myprefix:checkpoints'] = 'baddata'
-        c = self._makeOne()
-        c.after_poll(None, 40, 50, [])
-        self.assertEqual(c.checkpoints, (50, 50))
-        self.assertEqual(data['myprefix:checkpoints'], b'50 50')
-
     def test_after_poll_ignore_invalid_checkpoints(self):
         from relstorage.tests.fakecache import data
         data['myprefix:checkpoints'] = b'60 70'  # bad: c0 < c1
@@ -453,6 +445,8 @@ class StorageCacheTests(TestCase):
         from relstorage.tests.fakecache import data
         data['myprefix:checkpoints'] = b'90 80'
         c = self._makeOne()
+        c.polling_state.checkpoints = (90, 80)
+        c.polling_state.current_tid = 90
         c.checkpoints = (40, 30)
         c.current_tid = 40
         c.after_poll(None, 40, 50, [(2, 45)])
@@ -464,37 +458,38 @@ class StorageCacheTests(TestCase):
         self.assertEqual(dict(c.delta_after1), {})
 
     def test_after_poll_future_checkpoints_when_cp_nonexistent(self):
-        from relstorage.tests.fakecache import data
-        data['myprefix:checkpoints'] = b'90 80'
         c = self._makeOne()
+        c.polling_state.checkpoints = (90, 80)
+        c.polling_state.current_tid = 90
+
         c.after_poll(None, 40, 50, [(2, 45)])
         # This instance can't yet see txn 90, and there aren't any
         # existing checkpoints, so fall back to the current tid.
         self.assertEqual(c.checkpoints, (50, 50))
-        self.assertEqual(data['myprefix:checkpoints'], b'90 80')
+        self.assertEqual(c.polling_state.checkpoints, (90, 80))
         self.assertEqual(dict(c.delta_after0), {})
         self.assertEqual(dict(c.delta_after1), {})
 
     def test_after_poll_retain_checkpoints(self):
-        from relstorage.tests.fakecache import data
-        data['myprefix:checkpoints'] = b'40 30'
         c = self._makeOne()
+        c.polling_state.checkpoints = (40, 30)
+        c.polling_state.current_tid = 40
         c.checkpoints = (40, 30)
         c.current_tid = 40
         c.delta_after1 = {1: 35}
         c.after_poll(None, 40, 50, [(2, 45), (2, 41)])
         self.assertEqual(c.checkpoints, (40, 30))
-        self.assertEqual(data['myprefix:checkpoints'], b'40 30')
+        self.assertEqual(c.polling_state.checkpoints, (40, 30))
         self.assertEqual(dict(c.delta_after0), {2: 45})
         self.assertEqual(dict(c.delta_after1), {1: 35})
 
     def test_after_poll_new_checkpoints_bad_changes_out_of_order(self):
-        from relstorage.tests.fakecache import data
         from relstorage.cache.interfaces import CacheConsistencyError
-        data['myprefix:checkpoints'] = b'50 40'
 
         adapter = MockAdapter()
         c = self.getClass()(adapter, MockOptionsWithFakeCache(), 'myprefix')
+        c.polling_state.checkpoints = (50, 40)
+        c.polling_state.current_tid = 40
         c.checkpoints = (40, 30)
         c.current_tid = 40
 
@@ -515,101 +510,105 @@ class StorageCacheTests(TestCase):
         self.assertIsNone(c.current_tid)
 
     def test_after_poll_new_checkpoints(self):
-        from relstorage.tests.fakecache import data
-        data['myprefix:checkpoints'] = b'50 40'
-
         # list_changes isn't required to provide changes in any particular
         # order.
-        # list_changes isn't not required to provide a list of tuples;
-        # it could provide a list of lists. That turns out to matter
-        # to the BTree constructor.
         changes = [(3, 42), (1, 35), (2, 45)]
 
-        for f in (tuple, list):
-            adapter = MockAdapter()
-            c = self.getClass()(adapter, MockOptionsWithFakeCache(), 'myprefix')
-            adapter.poller.changes = [f(t) for t in changes]
-            __traceback_info__ = adapter.poller.changes
-            c.checkpoints = (40, 30)
-            c.current_tid = 40
-
-            shifted_checkpoints = c.after_poll(None, 40, 50, None)
-
-            self.assertEqual(c.checkpoints, (50, 40))
-            self.assertIsNone(shifted_checkpoints)
-            self.assertEqual(data['myprefix:checkpoints'], b'50 40')
-            self.assertEqual(dict(c.delta_after0), {})
-            self.assertEqual(dict(c.delta_after1), {2: 45, 3: 42})
-            self.assertEqual(c.local_client.get_checkpoints(), shifted_checkpoints)
-
-    def test_after_poll_gap(self):
-        from relstorage.tests.fakecache import data
-        data['myprefix:checkpoints'] = b'40 30'
         adapter = MockAdapter()
         c = self.getClass()(adapter, MockOptionsWithFakeCache(), 'myprefix')
+        adapter.poller.changes = changes
+        __traceback_info__ = adapter.poller.changes
+        c.polling_state.checkpoints = (50, 40)
+        c.polling_state.current_tid = 40
+        c.checkpoints = (40, 30)
+        c.current_tid = 40
+
+        c.after_poll(None, 40, 50, None)
+
+        self.assertEqual(c.checkpoints, (50, 40))
+        self.assertEqual(c.polling_state.checkpoints, (50, 40))
+        # polling_state assumes it is in sync and doesn't poll history.
+        self.assertEqual(adapter.poller.last_requested_range, (50, 50))
+
+    def test_after_poll_gap(self):
+        adapter = MockAdapter()
+        c = self.getClass()(adapter, MockOptionsWithFakeCache(), 'myprefix')
+        c.polling_state.checkpoints = (40, 30)
+        c.polling_state.current_tid = 40
+        c.polling_state.delta_after0 = {2: 45, 3: 42}
+        c.polling_state.delta_after1 = {1: 35}
         adapter.poller.changes = [(3, 42), (1, 35), (2, 45)]
         c.checkpoints = (40, 30)
         c.current_tid = 40
         # provide a prev_tid_int that shows a gap in the polled
         # transaction list, forcing a rebuild of delta_after(0|1).
-        c.after_poll(None, 43, 50, [(2, 45)])
+
+
+        c.after_poll(None, prev_tid_int=43, new_tid_int=50, changes=[(2, 45)])
         self.assertEqual(c.checkpoints, (40, 30))
-        self.assertEqual(data['myprefix:checkpoints'], b'40 30')
+        self.assertEqual(c.polling_state.checkpoints, (40, 30))
         self.assertEqual(dict(c.delta_after0), {2: 45, 3: 42})
         self.assertEqual(dict(c.delta_after1), {1: 35})
 
-    def test_after_poll_shift_checkpoints(self):
-        from relstorage.tests.fakecache import data
-        data['myprefix:checkpoints'] = b'40 30'
+    def test_after_poll_shift_checkpoints_for_growth(self):
         c = self._makeOne()
-        c.delta_size_limit = 2
+        c.polling_state.checkpoints = (40, 30)
+        c.polling_state.current_tid = 40
         c.checkpoints = (40, 30)
+        c.delta_size_limit = 1
+
         c.current_tid = 40
         c.after_poll(None, 40, 314, [(1, 45), (2, 46)])
-        expected_checkpoints = (314, 40)
-        self.assertEqual(c.checkpoints, (40, 30))
-        self.assertEqual(c.local_client.get_checkpoints(), expected_checkpoints)
-        self.assertEqual(dict(c.delta_after0), {1: 45, 2: 46})
-        self.assertEqual(dict(c.delta_after1), {})
+        expected_checkpoints = (314, 314) # because we grew too much.
+        self.assertEqual(c.checkpoints, expected_checkpoints)
+        self.assertEqual(c.polling_state.checkpoints, expected_checkpoints)
+        self.assertIsEmpty(c.delta_after0)
+        self.assertIsEmpty(c.delta_after0)
 
     def test_after_poll_shift_checkpoints_already_changed(self):
         # We can arrange for the view to be inconsistent by
         # interjecting some code to change things.
-        from relstorage.tests.fakecache import data
-        data['myprefix:checkpoints'] = b'40 30'
         c = self._makeOne()
+        c.polling_state.checkpoints = (40, 30)
         c.delta_size_limit = 2
-        c.checkpoints = (40, 30)
+        orig_checkpoints = c.checkpoints = (40, 30)
         c.current_tid = 40
         shifted_checkpoints = []
         old_suggest = c._suggest_shifted_checkpoints
-        def suggest():
-            data['myprefix:checkpoints'] = b'1 1'
-            shifted_checkpoints.append(old_suggest())
+        def suggest(cur):
+            c.polling_state.checkpoints = (1, 1)
+            shifted_checkpoints.append(old_suggest(cur))
+            return shifted_checkpoints[-1]
         c._suggest_shifted_checkpoints = suggest
 
         c.after_poll(None, 40, 314, [(1, 45), (2, 46)])
         shifted_checkpoints = shifted_checkpoints[0]
         self.assertEqual(c.checkpoints, (40, 30))
-        self.assertIsNone(shifted_checkpoints)
-        self.assertEqual(c.local_client.get_checkpoints(), shifted_checkpoints)
+        self.assertIs(shifted_checkpoints, orig_checkpoints)
+        self.assertEqual(c.polling_state.checkpoints, (1, 1))
         self.assertEqual(dict(c.delta_after0), {1: 45, 2: 46})
         self.assertEqual(dict(c.delta_after1), {})
 
     def test_after_poll_shift_checkpoints_huge(self):
-        from relstorage.tests.fakecache import data
-        data['myprefix:checkpoints'] = b'40 30'
         c = self._makeOne()
-
+        c.polling_state.checkpoints = (40, 30)
+        c.polling_state.current_tid = 40
         c.delta_size_limit = 0
         c.checkpoints = (40, 30)
         c.current_tid = 40
+
         c.after_poll(None, 40, 314, [(1, 45), (2, 46)])
         expected_checkpoints = (314, 314)
-        self.assertEqual(c.checkpoints, (40, 30))
-        self.assertEqual(c.local_client.get_checkpoints(), expected_checkpoints)
-        self.assertEqual(dict(c.delta_after0), {1: 45, 2: 46})
-        self.assertEqual(dict(c.delta_after1), {})
+        self.assertEqual(c.polling_state.checkpoints, expected_checkpoints)
+        self.assertEqual(c.checkpoints, expected_checkpoints)
+
+        # self.assertEqual(dict(c.delta_after0), {1: 45, 2: 46})
+        # self.assertEqual(dict(c.delta_after1), {})
+        # Unlike in the past, updating the checkpoints had immediate effect
+        self.assertIsEmpty(c.delta_after0)
+        self.assertIsEmpty(c.delta_after1)
+        self.assertIsEmpty(c.polling_state.delta_after0)
+        self.assertIsEmpty(c.polling_state.delta_after1)
 
     def __not_called(self):
         self.fail("Should not be called")
