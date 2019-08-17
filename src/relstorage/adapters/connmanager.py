@@ -213,6 +213,8 @@ class AbstractConnectionManager(object):
     def rollback_quietly(self, conn, cursor):
         return self.__rollback(conn, cursor, True, None)
 
+    rollback_store_quietly = rollback_quietly
+
     def commit(self, conn, cursor=None, force=False):
         if self._may_need_commit(conn) or force:
             self._do_commit(conn, cursor)

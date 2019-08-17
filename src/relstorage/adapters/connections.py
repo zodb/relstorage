@@ -41,6 +41,7 @@ class AbstractManagedConnection(object):
 
     _NEW_CONNECTION_NAME = None
     _RESTART_NAME = None
+    _ROLLBACK_NAME = 'rollback_quietly'
 
     def __init__(self, connmanager):
         self.connection = None
@@ -49,6 +50,7 @@ class AbstractManagedConnection(object):
         self.active = False
         self._new_connection = getattr(connmanager, self._NEW_CONNECTION_NAME)
         self._restart = getattr(connmanager, self._RESTART_NAME)
+        self._rollback = getattr(connmanager, self._ROLLBACK_NAME)
 
     # Hook functions
     on_opened = staticmethod(lambda conn, cursor: None)
@@ -117,7 +119,7 @@ class AbstractManagedConnection(object):
         conn = self.connection
         cur = self._cursor
         self.__dict__.pop('cursor', None) # force on_first_use to be called.
-        clean_rollback = self.connmanager.rollback_quietly(conn, cur)
+        clean_rollback = self._rollback(conn, cur)
         if not clean_rollback:
             self.drop()
 
@@ -138,7 +140,8 @@ class AbstractManagedConnection(object):
         self.connection, self._cursor = new_conn, new_cursor
         self.on_opened(new_conn, new_cursor)
 
-    def __noop(self, *args):
+    @staticmethod
+    def __noop(*args):
         "does nothing"
 
     def restart(self):
@@ -265,6 +268,7 @@ class StoreConnection(AbstractManagedConnection):
 
     _NEW_CONNECTION_NAME = 'open_for_store'
     _RESTART_NAME = 'restart_store'
+    _ROLLBACK_NAME = 'rollback_store_quietly'
 
 
 @implementer(interfaces.IManagedDBConnection)

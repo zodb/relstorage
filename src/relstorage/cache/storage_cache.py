@@ -1735,7 +1735,7 @@ class _TemporaryStorage(object):
             # only on MySQL. Not sure why.
             raise KeyError("No oid %d stored in %s" % (
                 oid_int,
-                dict(self._queue_contents)
+                list(self._queue_contents)
             ))
         return self._read_temp_state(startpos, endpos)
 

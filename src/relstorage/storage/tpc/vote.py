@@ -286,7 +286,7 @@ class AbstractVote(AbstractTPCState):
         if count_conflicts:
             logger.debug("Attempting to resolve %d conflicts", count_conflicts)
 
-        __traceback_info__ = conflicts, invalidated_oid_ints
+        __traceback_info__ = conflicts, invalidated_oid_ints, cursor
 
         for conflict in conflicts:
             oid_int, committed_tid_int, tid_this_txn_saw_int, committed_state = conflict
