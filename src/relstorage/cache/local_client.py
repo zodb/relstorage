@@ -385,7 +385,7 @@ class LocalClient(object):
             items.reverse()
             return items
 
-        f = fetch_and_filter_rows.__wrapped__
+        f = getattr(fetch_and_filter_rows, '__wrapped__', None) or fetch_and_filter_rows
         f.__name__ = f.__name__ + ':' + (
             str(row_filter) if row_filter is not None else '<no filter>'
         )

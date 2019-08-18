@@ -94,11 +94,6 @@ class AbstractManagedConnection(object):
         self.__dict__.pop('cursor', None)
         self.connmanager.rollback_and_close(conn, cursor)
 
-    # TODO: Better tracking of whether we are in a transaction
-    # and need to rollback or not. We currently send lots of
-    # extra ROLLBACK commands. That costs network time, and
-    # on Postgres it results in WARNINGS in the server logs.
-
     def commit(self, force=False):
         if self.connection is not None:
             self.connmanager.commit(self.connection, self._cursor, force=force)

@@ -75,6 +75,7 @@ class TestStaleAware(TestCase):
         class Storage(object):
 
             read_only = False
+            _read_only_error = ReadOnlyError
 
             def isReadOnly(self):
                 return self.read_only

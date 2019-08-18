@@ -20,8 +20,12 @@ import threading
 
 from ZODB.utils import p64
 
+from hamcrest import assert_that
+from nti.testing.matchers import validly_provides
+
 from relstorage.tests import TestCase
 
+from ..interfaces import IStorageCache
 from . import MockOptionsWithFakeMemcache as MockOptionsWithFakeCache
 from . import MockAdapter
 
@@ -60,6 +64,8 @@ class StorageCacheTests(TestCase):
         from relstorage.tests.fakecache import Client
         from relstorage.cache.memcache_client import MemcacheStateCache
         c = self._makeOne()
+        assert_that(c, validly_provides(IStorageCache))
+
         cache = c.cache
         self.assertIsInstance(cache.g, MemcacheStateCache)
         self.assertIsInstance(cache.g.client, Client)
@@ -673,7 +679,7 @@ class StorageCacheTests(TestCase):
 class PersistentRowFilterTests(TestCase):
 
     def _makeOne(self):
-        from relstorage.cache.storage_cache import _PersistentRowFilter
+        from relstorage.cache.mvcc import _PersistentRowFilter
         adapter = MockAdapter()
         return _PersistentRowFilter(adapter, dict)
 

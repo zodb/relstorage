@@ -202,3 +202,5 @@ class Options(object):
         options = dict(self.__dict__)
         options.update(kw)
         return self.__class__(**options)
+
+    new_instance = copy

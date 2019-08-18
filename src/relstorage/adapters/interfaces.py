@@ -23,42 +23,15 @@ from zope.interface import Interface
 # pylint:disable=inherit-non-class,no-method-argument,no-self-argument
 # pylint:disable=too-many-ancestors,too-many-lines
 
-try:
-    from zope.schema import Tuple
-    from zope.schema import Object
-    from zope.schema import Bool
-    from zope.interface.common.interfaces import IException
-except ImportError: # pragma: no cover
-    # We have nti.testing -> zope.schema as a test dependency; but we
-    # don't have it as a hard-coded runtime dependency because we
-    # don't want to force a version on consumers of RelStorage.
-    def Tuple(*_args, **kwargs):
-        return Attribute(kwargs['description'])
+from relstorage.interfaces import Tuple
+from relstorage.interfaces import Object
+from relstorage.interfaces import Bool
+from relstorage.interfaces import Factory
+from relstorage.interfaces import IException
 
-    Object = Tuple
-    Bool = Tuple
-
-    def Factory(schema, description='', **_kw):
-        return Attribute(description + " (Must implement %s)" % schema)
-
-    IException = Interface
-else:
-    from zope.schema.interfaces import SchemaNotProvided as _SchemaNotProvided
-    from zope.schema import Field as _Field
-
-    class Factory(_Field):
-        def __init__(self, schema, **kw):
-            self.schema = schema
-            _Field.__init__(self, **kw)
-
-        def _validate(self, value):
-            super(Factory, self)._validate(value)
-            if not self.schema.implementedBy(value):
-                raise _SchemaNotProvided(self.schema, value).with_field_and_value(self, value)
-
-
-
-
+###
+# Abstractions to support multiple databases.
+###
 
 class IDBDialect(Interface):
     """
@@ -229,7 +202,12 @@ class IDBDriverOptions(Interface):
         The driver factories are returned in priority order, with the highest priority
         driver being first.
         """
+
 
+###
+# Creating and managing DB-API 2.0 connections.
+# (https://www.python.org/dev/peps/pep-0249/)
+###
 
 class IConnectionManager(Interface):
     """
@@ -418,8 +396,8 @@ class IManagedDBConnection(Interface):
     It is not allowed to use multiple cursors from a connection at the
     same time; not all drivers properly support that.
 
-    If the DB-API connection is not open and presumed to be good, this
-    object has a false value.
+    If the DB-API connection is not open, presumed to be good, and
+    previously accessed, this object has a false value.
 
     "Restarting" a connection means to bring it to a current view of
     the database. Typically this means a rollback so that a new
@@ -489,7 +467,6 @@ class IManagedStoreConnection(IManagedDBConnection):
     A managed connection intended for storing data.
     """
 
-
 class IReplicaSelector(Interface):
     """Selects a database replica"""
 
@@ -506,6 +483,8 @@ class IReplicaSelector(Interface):
 
         Return None if there are no more replicas defined.
         """
+
+
 
 
 class IDatabaseIterator(Interface):

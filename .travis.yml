@@ -48,6 +48,9 @@ script:
   - RELSTORAGE_GEVENT_NO_SWITCH_WHEN_LOCKED=true python -m gevent.monkey `which zope-testrunner` --test-path=src --color -vvv -t BlobCache --layer gevent
   - if [[ $TRAVIS_PYTHON_VERSION == pypy* ]]; then python $RS_TEST_CMD; fi
   - if [[ $TRAVIS_PYTHON_VERSION != pypy* ]]; then coverage run $RS_TEST_CMD; fi
+  # Make sure we can import without zope.schema, which is intended to
+  # be a test dependency, and optional for production
+  - pip uninstall -y zope.schema && python -c 'import relstorage.interfaces, relstorage.adapters.interfaces, relstorage.cache.interfaces'
 after_success:
   - coveralls
 notifications:

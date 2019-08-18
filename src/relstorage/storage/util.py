@@ -9,7 +9,6 @@ from __future__ import print_function
 
 from functools import partial
 
-from ZODB.POSException import ReadOnlyError
 from zope.interface import implementer
 
 from relstorage._compat import wraps
@@ -179,11 +178,10 @@ def _make_phase_dependent(storage, method):
             return method(storage._tpc_phase, *args, **kwargs)
     return state
 
-def _make_cannot_write(method):
-    @wraps(method)
+def make_cannot_write(storage, bound_method):
+    @wraps(bound_method)
     def read_only(*args, **kwargs):
-        raise ReadOnlyError
-    read_only.__wrapped__ = method
+        raise storage._read_only_error
     return read_only
 
 def copy_storage_methods(storage, delegate):
@@ -204,7 +202,7 @@ def copy_storage_methods(storage, delegate):
             method_is_phase_dependent = getattr(storage_meth, 'phase_dependent', False)
 
             if read_only and method_writes_to_db:
-                storage_meth = _make_cannot_write(storage_meth)
+                storage_meth = make_cannot_write(storage, storage_meth)
             elif method_is_phase_dependent:
                 storage_meth = _make_phase_dependent(storage, storage_meth)
             setattr(storage, var_name, storage_meth)

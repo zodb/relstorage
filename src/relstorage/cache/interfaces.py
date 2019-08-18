@@ -22,6 +22,9 @@ from zope.interface import Interface
 from transaction.interfaces import TransientError
 from ZODB.POSException import StorageError
 
+from relstorage.interfaces import IMVCCDatabaseViewer
+from relstorage.interfaces import IMVCCDatabaseCoordinator
+
 # Export
 from relstorage._compat import MAX_TID # pylint:disable=unused-import
 
@@ -29,6 +32,41 @@ from relstorage._compat import MAX_TID # pylint:disable=unused-import
 # pylint:disable=unexpected-special-method-signature
 # pylint:disable=signature-differs
 
+class IStorageCache(IMVCCDatabaseViewer):
+    """
+    A cache, as used by :class:`relstorage.interfaces.IRelStorage`.
+
+    Implementations do not have to be thread-safe. Use :meth:`new_instance` to
+    get an object to use concurrently.
+
+    This cache is for current objects, as viewed at the ``highest_visible_tid``
+    of this object or before. While it is possible to request older or newer
+    revisions using ``loadSerial``, such accesses are less likely to produce cache
+    hits.
+    """
+
+    def new_instance(before=None):
+        """
+        Create a new object to be used concurrently.
+
+        If *before* is given, it is an integer TID, giving the *maximum*
+        transaction that will be visible to this object (this only works
+        correctly for history-preserving storages).
+
+        .. caution::
+
+           Failing to provide *before* for a historical connection
+           will lead to consistency errors.
+        """
+
+    # TODO: Fill me in.
+
+class IStorageCacheMVCCDatabaseCoordinator(IMVCCDatabaseCoordinator):
+    """
+    Specialized cache coordinator.
+    """
+
+    # TODO: Fill me in.
 
 class IStateCache(Interface):
     """

@@ -46,7 +46,10 @@ else:
     iterkeys = dict.iterkeys
     itervalues = dict.itervalues
 
-if not PYPY:
+# These types need to be atomic for primitive operations,
+# so don't accept Python BTree implementations. (Also, on PyPy,
+# the Python BTree implementation uses more memory than a dict.)
+if BTrees.LLBTree.LLBTree is not BTrees.LLBTree.LLBTreePy:
     OID_TID_MAP_TYPE = BTrees.family64.II.BTree
     OID_OBJECT_MAP_TYPE = BTrees.family64.IO.BTree
     OID_SET_TYPE = BTrees.family64.II.TreeSet
@@ -124,6 +127,7 @@ if PY3:
     casefold = str.casefold
     from traceback import clear_frames
     clear_frames = clear_frames
+    from functools import update_wrapper
 else:
     xrange = xrange
     intern = intern
@@ -132,3 +136,9 @@ else:
     casefold = str.lower
     def clear_frames(tb): # pylint:disable=unused-argument
         "Does nothing on Py2."
+
+    from functools import update_wrapper as _update_wrapper
+    def update_wrapper(wrapper, wrapped, *args, **kwargs):
+        wrapper = _update_wrapper(wrapper, wrapped, *args, **kwargs)
+        wrapper.__wrapped__ = wrapped
+        return wrapped

@@ -7,6 +7,10 @@
 
 - Several minor logging changes.
 
+- Fix importing RelStorage when ``zope.schema`` is not installed.
+  ``zope.schema`` is intended to be a test dependency and optional for
+  production deployments. Reported in :issue:`334` by Jonathan Lung.
+
 - Make the gevent MySQL driver more efficient at avoiding needless  waits.
 
 - Due to a bug in MySQL (incorrectly rounding the 'minute' value of a
@@ -40,12 +44,16 @@
   given large cache-delta-size values. Other connections will use the
   results of this query and make minor updates as needed.
 
-- Stop storing the current checkpoints in memcache, if one is
+- Stop reading the current checkpoints from memcache, if one is
   configured. Memcache integration has been discouraged since the
   introduction of RelStorage persistent caches, which are much
   improved in 3.0. Having checkpoint data come from there is
   inconsistent with several of the new features that let the local
   cache be smarter and more efficient.
+
+- Make historical storages read-only, raising
+  ``ReadOnlyHistoryError``, during the commit process. Previously this
+  was only enforced at the ``Connection`` level.
 
 3.0a8 (2019-08-13)
 ==================
