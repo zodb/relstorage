@@ -33,7 +33,7 @@ except ImportError: # pragma: no cover
     # don't have it as a hard-coded runtime dependency because we
     # don't want to force a version on consumers of RelStorage.
     def Tuple(*_args, **kwargs):
-        return Attribute(kwargs['description'])
+        return Attribute(kwargs.get('description', ''))
 
     Object = Tuple
     Bool = Tuple
