@@ -68,6 +68,12 @@ class IStorageCacheMVCCDatabaseCoordinator(IMVCCDatabaseCoordinator):
 
     # TODO: Fill me in.
 
+    def stats():
+        """
+        Return a dictionary with interesting keys and values
+        about the global state of this object.
+        """
+
 class IStateCache(Interface):
     """
     The methods we use to store state information.

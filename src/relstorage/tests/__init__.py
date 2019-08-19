@@ -54,6 +54,8 @@ class TestCase(unittest.TestCase):
         None
     ) or _fakeSubTest
 
+    none = unittest.TestCase.assertIsNone
+
     def setUp(self):
         super(TestCase, self).setUp()
         # This is done by ZODB.tests.util.TestCase, but
@@ -118,8 +120,10 @@ class TestCase(unittest.TestCase):
         return o
 
     def tearDown(self):
-        transaction.abort()
-        super(TestCase, self).tearDown()
+        try:
+            transaction.abort()
+        finally:
+            super(TestCase, self).tearDown()
 
     def assertIsEmpty(self, container):
         self.assertLength(container, 0)

@@ -72,7 +72,7 @@ class Poller(object):
         OIDs.
 
         Returns ``(changes, new_polled_tid)``, where *changes* is
-        either a list of ``(oid_int, tid_int)`` that have changed, or
+        either an iterable of ``(oid_int, tid_int)`` that have changed, or
         ``None`` to indicate that the changes are too complex to list
         --- this must cause local storage caches to be invalidated..
         *new_polled_tid* can be 0 if there is no data in the database.

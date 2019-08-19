@@ -53,10 +53,23 @@ if BTrees.LLBTree.LLBTree is not BTrees.LLBTree.LLBTreePy:
     OID_TID_MAP_TYPE = BTrees.family64.II.BTree
     OID_OBJECT_MAP_TYPE = BTrees.family64.IO.BTree
     OID_SET_TYPE = BTrees.family64.II.TreeSet
+    OidTMap_difference = BTrees.family64.II.difference
+    OidTMap_multiunion = BTrees.family64.II.multiunion
+    OidTMap_intersection = BTrees.family64.II.intersection
 else:
     OID_TID_MAP_TYPE = dict
     OID_OBJECT_MAP_TYPE = dict
     OID_SET_TYPE = set
+    def OidTMap_difference(c1, c2):
+        for k, v in iteritems(c1):
+            if k not in c2:
+                yield (k, v)
+
+    def OidTMap_multiunion(seq):
+        return set().union(*seq)
+
+    def OidTMap_intersection(c1, c2):
+        return set(c1).intersection(set(c2))
 
 MAX_TID = BTrees.family64.maxint
 

@@ -174,7 +174,7 @@ class AbstractModuleDriver(ABC):
         meth()
         messages = self.get_messages(conn)
         for msg in messages:
-            logger.debug(msg)
+            logger.debug(msg.strip())
 
     def commit(self, conn, cursor=None): #  pylint:disable=unused-argument
         self.__transaction_boundary(conn, conn.commit)

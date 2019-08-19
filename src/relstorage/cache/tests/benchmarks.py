@@ -512,7 +512,7 @@ class StorageTraceSimulator(object):
 
         # Initialize to the current TID
         current_tid_int = 2
-        root_cache.after_poll(None, 1, current_tid_int, [])
+        root_cache.polling_state.object_index.maps[0].highest_visible_tid = current_tid_int
 
         # Each ASU is a connection, so it has its own storage cache instance.
         asu_caches = {asu: root_cache.new_instance()

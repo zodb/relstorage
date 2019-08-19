@@ -969,6 +969,9 @@ class ITransactionControl(Interface):
                         packed=False):
         """Add a transaction."""
 
+    def delete_transaction(cursor, tid):
+        """Remove a transaction."""
+
     def commit_phase1(store_connection, tid):
         """
         Begin a commit. Returns the transaction name.

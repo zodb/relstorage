@@ -369,8 +369,15 @@ class HistoryPreservingRelStorageTests(GenericRelStorageTests,
         # Doing it again will do nothing because it's already
         # gone.
         count = storage.deleteObject(obj_oid, latest_tid, t)
-        storage.tpc_vote(t)
+        invalidations = storage.tpc_vote(t)
         storage.tpc_finish(t)
+
+        # It is detected as invalidated during voting
+        self.assertEqual([obj_oid], list(invalidations))
+
+        # And not at the next poll.
+        invalidations = storage.poll_invalidations()
+        self.assertEqual([], list(invalidations))
 
         # Getting the most recent fails.
         with self.assertRaises(POSKeyError):
@@ -380,14 +387,13 @@ class HistoryPreservingRelStorageTests(GenericRelStorageTests,
         state = storage.loadSerial(obj_oid, history[1]['tid'])
         self.assertEqual(len(state), history[1]['size'])
 
-        # Length is still 2
+        # Length hasn't changed
         storage._adapter.stats.large_database_change()
         self.assertEqual(len(storage), 2)
 
-        # The most recent size is 0 too
+        # History records it as a deletion with size 0
         history_after = storage.history(obj_oid)
         self.assertEqual(0, history_after[0]['size'])
-
 
         # Now if we proceed to pack it, *without* doing a GC...
         from relstorage.storage.pack import Pack

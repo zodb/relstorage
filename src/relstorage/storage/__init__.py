@@ -81,7 +81,7 @@ __all__ = [
     'RelStorage',
 ]
 
-log = logging.getLogger("relstorage")
+log = logger = logging.getLogger("relstorage")
 
 
 class _ClosedCache(object):
@@ -91,6 +91,8 @@ class _ClosedCache(object):
         "does nothing"
 
     release = close
+    object_index = ()
+    highest_visible_tid = None
 
 @implementer(IRelStorage)
 class RelStorage(LegacyMethodsMixin,
@@ -114,12 +116,6 @@ class RelStorage(LegacyMethodsMixin,
 
     # _cache if set is a StorageCache object.
     _cache = None
-
-    # _prev_polled_tid contains the tid at the previous poll
-    # TODO: This doesn't really need to be here, we never inspect it except to
-    # pass it to both the poller and the cache. Since the cache keeps a copy of this,
-    # it probably just belongs in the cache.
-    _prev_polled_tid = None
 
     # If the blob directory is set, blobhelper is a BlobHelper.
     blobhelper = BlobHelper(None, None)
@@ -212,11 +208,6 @@ class RelStorage(LegacyMethodsMixin,
                 prefix = prefix.replace(' ', '_')
                 options.cache_prefix = prefix
             self._cache = StorageCache(adapter, options, prefix)
-
-        # Creating the storage cache may have loaded cache files, and if so,
-        # we have a previous tid state.
-        if self._cache.current_tid is not None:
-            self._prev_polled_tid = self._cache.current_tid
 
         if blobhelper is not None:
             self.blobhelper = blobhelper
@@ -367,6 +358,8 @@ class RelStorage(LegacyMethodsMixin,
         self._oids = None
         self._load_connection = ClosedConnection()
         self._store_connection = ClosedConnection()
+        if not self._instances:
+            self._closed = True
 
     def close(self):
         """Close the storage and all instances."""
@@ -385,7 +378,7 @@ class RelStorage(LegacyMethodsMixin,
             if instance is not None:
                 instance.close()
         self._instances = ()
-
+        logger.debug("Closing storage cache with stats %s", self._cache.stats())
         self._cache.close()
         self._cache = _ClosedCache()
 
@@ -511,13 +504,13 @@ class RelStorage(LegacyMethodsMixin,
             raise
 
     def lastTransaction(self):
-        if self._ltid == z64 and self._prev_polled_tid is None:
+        if self._ltid == z64 and self._cache.highest_visible_tid is None:
             # We haven't committed *or* polled for transactions,
             # so our MVCC state is "floating".
             # Read directly from the database to get the latest value,
             return int64_to_8bytes(self._adapter.txncontrol.get_tid(self._load_connection.cursor))
 
-        return max(self._ltid, int64_to_8bytes(self._prev_polled_tid or 0))
+        return max(self._ltid, int64_to_8bytes(self._cache.highest_visible_tid or 0))
 
     def lastTransactionInt(self):
         return bytes8_to_int64(self.lastTransaction())
@@ -609,14 +602,13 @@ class RelStorage(LegacyMethodsMixin,
         # __on_load_first_use is also the function we gave the LoadConnection to automatically
         # call when we access the cursor for the first time. In this situation, we optimize
         # for when the function is the same and only call it once.
-        new_polled_tid = self._load_connection.restart_and_call(
+        self._load_connection.restart_and_call(
             self.__on_load_first_use
         )
         # Now we're in a fully synced state, meaning
         # we don't need to do anything fancy with the load connection
         # anymore. Let it know that.
         self._load_connection.active = True
-        self._prev_polled_tid = new_polled_tid
 
         changed_oids = self.__queued_changes
         self.__queued_changes = OID_SET_TYPE()
@@ -690,18 +682,17 @@ class RelStorage(LegacyMethodsMixin,
         # Ignore changes made by the last transaction committed
         # by this connection, we don't want to ghost objects that we're sure
         # are up-to-date unless someone else has changed them.
-        # Note that transactions can happen between
+        # Note that transactions can happen between us committing and polling.
         if self._ltid is not None:
             ignore_tid = bytes8_to_int64(self._ltid)
         else:
             ignore_tid = None
-        prev = self._prev_polled_tid
 
         # get a list of changed OIDs and the most recent tid
         try:
-            changes, new_polled_tid = self._adapter.poller.poll_invalidations(
+            changes = self._cache.poll(
                 conn, cursor,
-                prev, ignore_tid
+                ignore_tid
             )
         except ReadConflictError as e:
             # The database connection is stale, but postpone this
@@ -725,20 +716,7 @@ class RelStorage(LegacyMethodsMixin,
             # that in self.pack() until we write more specific tests.
             log.error("ReadConflictError from polling invalidations; %s", e)
             self.__stale(e)
-            return (), prev
-
-        self._prev_polled_tid = new_polled_tid
-
-        # Inform the cache of the changes.
-        #
-        # It's not good if this raises a CacheConsistencyError, that should
-        # be a fresh connection. It's not clear that we can take any steps to
-        # recover that the cache hasn't already taken.
-        changes = self._cache.after_poll(
-            cursor,
-            prev,
-            new_polled_tid, changes
-        )
+            return
 
         if changes is None:
             # This is reset by poll_invalidations.
@@ -752,8 +730,6 @@ class RelStorage(LegacyMethodsMixin,
                 # if a connection eventually gets around to polling us, they'll
                 # need to clear their whole cache
                 self.__queued_changes = None
-
-        return new_polled_tid
 
     def temporaryDirectory(self):
         """Return a directory that should be used for uncommitted blob data.
@@ -776,8 +752,10 @@ class RelStorage(LegacyMethodsMixin,
             # test scenarios (e.g., the last transaction in the database is an object that
             # was directly stored without any connection to the object graph starting from the
             # root and hence was packed away). Not only do we need to restart our
-            # connection, we also need to restart our polling.
-            self._prev_polled_tid = None
+            # connection, we also need to restart our polling. Moreover, to prevent
+            # loadSerial() from finding cached data, we also need to flush our caches.
+            self._cache.clear(load_persistent=False)
+
         self.sync()
 
         self._pack_finished()

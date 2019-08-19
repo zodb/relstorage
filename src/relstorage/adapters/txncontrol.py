@@ -104,3 +104,15 @@ class GenericTransactionControl(AbstractTransactionControl):
                 binary(description), binary(extension)
             )
         )
+
+    _delete_transaction_query = Schema.transaction.delete(
+    ).where(
+        Schema.transaction.c.tid == Schema.transaction.orderedbindparam()
+    )
+
+    @noop_when_history_free
+    def delete_transaction(self, cursor, tid):
+        self._delete_transaction_query.execute(
+            cursor,
+            (tid,)
+        )

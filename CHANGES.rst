@@ -120,6 +120,10 @@
   officially options yet but they may become so. Feedback is
   appreciated! See :issue:`323`.
 
+  .. note::
+
+     These were removed in 3.0a9.
+
 3.0a7 (2019-08-07)
 ==================
 
