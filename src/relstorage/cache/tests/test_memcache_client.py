@@ -53,30 +53,21 @@ class AbstractStateCacheTests(TestCase):
         c = self._makeOne()
 
         c.set_all_for_tid(
-            0,
+            1,
             [(b'abc', 0, -1),
              (b'ghi', 1, -1),])
         c.set_all_for_tid(
-            1,
+            2,
             [(b'def', 0, -1)]
         )
         # Hits on primary key
-        self.assertEqual(c(0, 0),
-                         (b'abc', 0))
-        self.assertEqual(c(1, 0),
-                         (b'ghi', 0))
-        # Hits on secondary key
-        self.assertEqual(c(0, -1, 1),
-                         (b'def', 1))
-        self.assertEqual(c(1, -1, 0),
-                         (b'ghi', 0))
+        self.assertEqual(c[0, 1],
+                         (b'abc', 1))
+        self.assertEqual(c[1, 1],
+                         (b'ghi', 1))
 
-        # And those actually copied the data to the primary key, which
-        # is now a hit.
-        self.assertEqual(c(0, -1),
-                         (b'def', 1))
-        self.assertEqual(c(1, -1),
-                         (b'ghi', 0))
+        self.assertEqual(c[0, 2],
+                         (b'def', 2))
 
     def test_updating_delta_map(self):
         self.assertIs(self._makeOne().updating_delta_map(self), self)

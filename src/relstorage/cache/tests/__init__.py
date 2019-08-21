@@ -8,7 +8,6 @@ from __future__ import division
 from __future__ import print_function
 
 from relstorage.cache.lru_cffiring import CFFICache as _BaseCache
-from relstorage.cache.mapping import SizedLRUMapping as _BaseSizedLRUMapping
 from relstorage.cache.local_client import LocalClient as _BaseLocalClient
 
 from relstorage.tests import MockOptions
@@ -25,18 +24,15 @@ class Cache(_BaseCache):
     # Tweak the generation sizes to match what we developed the tests with
     _gen_protected_pct = 0.8
     _gen_eden_pct = 0.1
-
-
-class SizedLRUMapping(_BaseSizedLRUMapping):
-    _cache_type = Cache
+    _dict_type = dict
 
 
 class LocalClient(_BaseLocalClient):
-    _bucket_type = SizedLRUMapping
+    _cache_type = Cache
 
 def list_lrukeys(mapping, generation_name):
     # Remember, these lists will be from LRU to MRU
-    return [e.key for e in getattr(mapping, '_' + generation_name)]
+    return [e.key for e in getattr(mapping, generation_name)]
 
 def list_lrufreq(mapping, generation_name):
-    return [e.frequency for e in getattr(mapping, '_' + generation_name)]
+    return [e.frequency for e in getattr(mapping, generation_name)]

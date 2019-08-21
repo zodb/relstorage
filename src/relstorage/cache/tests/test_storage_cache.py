@@ -160,8 +160,6 @@ class StorageCacheTests(TestCase):
         # self.assertIsEmpty(c2.polling_state.delta_after0)
         # self.assertIsEmpty(c2.polling_state.delta_after1)
 
-        # This time, write the checkpoints.
-        c.local_client.store_checkpoints(0, 0)
         c.save(close_async=False)
 
         # Creating a new one loads the stored data.
@@ -688,7 +686,7 @@ class PersistentRowFilterTests(TestCase):
     def _makeOne(self):
         from relstorage.cache.mvcc import _PersistentRowFilter
         adapter = MockAdapter()
-        return _PersistentRowFilter(adapter, dict)
+        return _PersistentRowFilter(adapter, dict, 1000)
 
     @unittest.expectedFailure
     def test_no_checkpoints(self):

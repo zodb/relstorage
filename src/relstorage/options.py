@@ -107,10 +107,6 @@ class Options(object):
     #: Switch checkpoints after this many writes
     cache_delta_size_limit = 100000 if not PYPY else 50000
 
-    #: Implementation of ILRUCache to use for local cache
-    #: storage.
-    cache_local_storage = None
-
     #: How long to wait for a commit lock, in seconds.
     commit_lock_timeout = 30
     #: Lock ID for Oracle
@@ -161,9 +157,6 @@ class Options(object):
                 )
 
             setattr(self, key, value)
-        if isinstance(self.cache_local_storage, str):
-            from zope.dottedname import resolve as dottedname
-            self.cache_local_storage = dottedname.resolve(self.cache_local_storage)
 
     @classmethod
     def copy_valid_options(cls, other_options):

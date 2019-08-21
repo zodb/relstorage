@@ -28,6 +28,16 @@ keep-history
         ZODB-level undo, but also grows more quickly and requires extensive
         packing on a regular basis.
 
+        .. warning::
+
+           Using ZODB's time-travel feature to get historical
+           connections (``DB.open(before=a_timestamp)``) will result
+           in RDBMS connections being left open in a transaction until
+           they are removed from the ZODB historical connection pool
+           and closed. PostgreSQL refers to this state as "idle in
+           transaction", and it ties up certain MVCC resources on the
+           RDBMS server.
+
         If this option is set to false, the adapter will create and
         use a history-free database schema. Undo will not be supported,
         but the database will not grow as quickly. The database will

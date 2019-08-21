@@ -67,31 +67,22 @@ class MemcacheStateCache(object):
         # no unicode on Py2
         assert isinstance(ck, str), (ck, type(ck))
 
-    def __getitem__(self, oid_tid):
-        return self(*oid_tid)
-
     def __oid_tid_to_key(self, oid, tid):
         return '%s:state:%d:%d' % (self.prefix, tid, oid)
 
-    def __call__(self, oid, tid1, tid2=None):
-        cachekeys = [self.__oid_tid_to_key(oid, tid1)]
-        if tid2 is not None:
-            cachekeys.append(self.__oid_tid_to_key(oid, tid2))
-        response = self.client.get_multi(cachekeys)
-        preferred_data = response.get(cachekeys[0])
-        if preferred_data and len(preferred_data) >= 8:
-            actual_tid_int = u64(preferred_data[:8])
-            return preferred_data[8:], actual_tid_int
+    def __getitem__(self, oid_tid):
+        oid, tid = oid_tid
+        if tid is None:
+            # We don't support frozen keys, only those in the index
+            return None
 
-        backup_data = response.get(cachekeys[1]) if tid2 is not None else None
-        if backup_data and len(backup_data) >= 8:
-            # Hooray, at least it was there. Go ahead and move it to
-            # the preferred position
-            actual_tid_int = u64(backup_data[:8])
-            state_bytes = backup_data[8:]
-            self[(oid, tid1)] = (state_bytes, actual_tid_int)
-
-            return state_bytes, actual_tid_int
+        cachekeys = [self.__oid_tid_to_key(oid, tid)]
+        response = self.client.get_multi(cachekeys) or {}
+        for key in cachekeys:
+            data = response.get(key)
+            if data and len(data) >= 8:
+                actual_tid_int = u64(data[:8])
+                return data[8:], actual_tid_int
 
     def __setitem__(self, oid_tid, state_bytes_tid):
         oid, tid = oid_tid

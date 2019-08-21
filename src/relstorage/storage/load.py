@@ -21,63 +21,48 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-from ZODB.POSException import POSKeyError
-
 from ZODB.utils import p64 as int64_to_8bytes
 from ZODB.utils import u64 as bytes8_to_int64
 from ZODB.utils import maxtid
 
+from relstorage.interfaces import POSKeyError
 from relstorage.cache.interfaces import CacheConsistencyError
 from .._compat import metricmethod
 from .._compat import metricmethod_sampled
 from .util import storage_method
 from .util import stale_aware
 
+
 logger = __import__('logging').getLogger(__name__)
 
-def _log_keyerror(cursor, adapter, oid_int, reason):
+def _make_pke_data(cursor, adapter, oid_int, reason):
     """
-    Log just before raising POSKeyError in load().
+    Add extra info to the POSKeyError from load.
 
     KeyErrors in load() are generally not supposed to happen,
     so this is a good place to gather information.
     """
-    logfunc = logger.warning
-    msg = ["POSKeyError on oid %d: %s" % (oid_int, reason)]
+    extra = {'reason': reason}
 
     if adapter.keep_history:
         tid = adapter.txncontrol.get_tid(cursor)
-        if not tid:
-            # This happens when initializing a new database or
-            # after packing, so it's not a warning.
-            logfunc = logger.debug
-            msg.append("No previous transactions exist")
-        else:
-            msg.append("Current transaction is %d" % tid)
+        extra['current_txn'] = tid
 
         tids = []
         try:
             rows = adapter.dbiter.iter_object_history(cursor, oid_int)
-        except KeyError:
+        except KeyError as e:
             # The object has no history, at least from the point of view
             # of the current database load connection.
-            pass
+            tids = str(e)
+            del e
         else:
             for row in rows:
                 tids.append(row[0])
                 if len(tids) >= 10:
                     break
-        msg.append("Recent object tids: %s" % repr(tids))
-
-    else:
-        if oid_int == 0:
-            # This happens when initializing a new database or
-            # after packing, so it's usually not a warning.
-            logfunc = logger.debug
-        msg.append("history-free adapter")
-
-    logfunc('; '.join(msg))
-
+        extra['recent_tids'] = tids
+    return extra
 
 class Loader(object):
 
@@ -103,6 +88,16 @@ class Loader(object):
             self.load_connection.drop()
             raise
 
+    def __pke(self, oid_bytes, **extra):
+        defs = {
+            'cache': self.cache,
+            'load': self.load_connection,
+            'store': self.store_connection,
+            'adapter': self.adapter,
+        }
+        defs.update(extra)
+        return POSKeyError(oid_bytes, defs)
+
     @stale_aware
     @storage_method
     @metricmethod_sampled
@@ -114,21 +109,21 @@ class Loader(object):
         load_cursor = self.load_connection.cursor
         state, tid_int = self.__load_using_method(load_cursor, self.cache.load, oid_int)
         if tid_int is None:
-            _log_keyerror(load_cursor,
-                          self.adapter,
-                          oid_int,
-                          "no tid found")
-            raise POSKeyError(oid)
+            raise self.__pke(oid,
+                             **_make_pke_data(load_cursor,
+                                              self.adapter,
+                                              oid_int,
+                                              "no tid found"))
 
         if not state:
             # This can happen if something attempts to load
             # an object whose creation has been undone or which was deleted
             # by IExternalGC.deleteObject().
-            _log_keyerror(load_cursor,
-                          self.adapter,
-                          oid_int,
-                          "creation has been undone")
-            raise POSKeyError(oid)
+            raise self.__pke(oid,
+                             **_make_pke_data(load_cursor,
+                                              self.adapter,
+                                              oid_int,
+                                              "creation undone"))
         return state, int64_to_8bytes(tid_int)
 
     @storage_method
@@ -180,9 +175,6 @@ class Loader(object):
             return state
 
         for conn in self.store_connection, self.load_connection:
-            if not conn:
-                continue
-
             # Allow loading data from later transactions for conflict
             # resolution. In fact try that first because it's more
             # likely that our old load connection can't see this new
@@ -194,7 +186,7 @@ class Loader(object):
                 break
 
         if state is None or not state:
-            raise POSKeyError(oid)
+            raise self.__pke(oid, tid_int=tid_int, state=state)
         return state
 
     @stale_aware
@@ -236,7 +228,7 @@ class Loader(object):
         else:
             cursor = self.load_connection.cursor
         if not self.adapter.mover.exists(cursor, oid_int):
-            raise POSKeyError(oid)
+            raise self.__pke(oid, exists=False)
 
         state, start_tid = self.adapter.mover.load_before(
             cursor, oid_int, bytes8_to_int64(tid))
@@ -250,7 +242,8 @@ class Loader(object):
             # This change fixes the test in
             # TransactionalUndoStorage.checkUndoCreationBranch1
             # self._log_keyerror doesn't work here, only in certain states.
-            raise POSKeyError(oid)
+            self.__pke(oid, undone=True)
+
         end_int = self.adapter.mover.get_object_tid_after(
             cursor, oid_int, start_tid)
         if end_int is not None:

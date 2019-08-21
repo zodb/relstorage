@@ -17,13 +17,14 @@ from __future__ import print_function
 import os
 import ZODB.blob
 
-from ZODB.POSException import POSKeyError
 from ZODB.utils import p64
 
 from zope.interface import implementer
 
+from relstorage.interfaces import POSKeyError
 from .interfaces import IAuthoritativeBlobHelper
 from .abstract import AbstractBlobHelper
+
 
 logger = __import__('logging').getLogger(__name__)
 
@@ -48,7 +49,7 @@ class SharedBlobHelper(AbstractBlobHelper):
         if not blob_filename:
             # All the blobs are in a shared directory. If the file
             # isn't here, it's not anywhere.
-            raise POSKeyError("No blob file", oid, serial)
+            raise POSKeyError(oid, serial=serial, blob_filename=blob_filename)
         return blob_filename
 
     def storeBlob(self, _cursor, store_func,

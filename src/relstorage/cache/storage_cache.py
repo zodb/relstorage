@@ -24,7 +24,6 @@ import threading
 from persistent.timestamp import TimeStamp
 from ZODB.POSException import ReadConflictError
 from ZODB.utils import p64
-from ZODB.utils import u64
 from zope import interface
 
 
@@ -32,7 +31,7 @@ from relstorage.autotemp import AutoTemporaryFile
 from relstorage._compat import OID_OBJECT_MAP_TYPE
 from relstorage._compat import OID_SET_TYPE as OIDSet
 from relstorage._compat import iteroiditems
-
+from relstorage._util import bytes8_to_int64
 
 from relstorage.cache import persistence
 from relstorage.cache.interfaces import IStorageCache
@@ -57,13 +56,6 @@ class _UsedAfterRelease(object):
     stats = lambda s: {}
     new_instance = lambda s: s
 _UsedAfterRelease = _UsedAfterRelease()
-
-def _debug(*_args):
-    "Does nothing"
-if 0: # pylint:disable=using-constant-test
-    debug = print
-else:
-    debug = _debug
 
 
 @interface.implementer(IStorageCache, IPersistentCache)
@@ -96,7 +88,6 @@ class StorageCache(object):
             # including the master, so that they can share information about
             # polling.
             self.polling_state = MVCCDatabaseCoordinator(self.options)
-            self.polling_state.register(self)
             self.local_client = LocalClient(options, self.prefix)
 
 
@@ -113,7 +104,6 @@ class StorageCache(object):
                 self.cache = TracingStateCache(self.cache, tracer)
         else:
             self.polling_state = _parent.polling_state
-            self.polling_state.register(self)
             self.local_client = _parent.local_client.new_instance()
             self.cache = _parent.cache.new_instance()
 
@@ -123,6 +113,13 @@ class StorageCache(object):
         # not just assign to this object (except under careful circumstances
         # where we're sure to be single threaded.)
         self.object_index = None
+
+        # It is also important not to register with the coordinator until
+        # we are fully initialized; we could be constructing a new_instance
+        # in a separate thread while polling is going on in other threads.
+        # We can get strange AttributeError if a partially constructed instance
+        # is exposed.
+        self.polling_state.register(self)
 
         if _parent is None:
             self.restore()
@@ -179,11 +176,27 @@ class StorageCache(object):
         and having the most current view of the database as collected
         by any instance.
 
-        If *before* is given, XXX: Precisely what? Freezing and such won't
-        work well.
+        If *before* is given, the new cache will use a distinct
+        :class:`MVCCDatabaseCoordinator`  so that
+        its usage pattern does not interfere.
         """
         cache = type(self)(self.adapter, self.options, self.prefix,
                            _parent=self)
+        if before:
+            cache.tpc_begin = lambda: None
+            def poll(conn, cursor, _):
+                # Grab whatever index we have the first time we poll,
+                # and then immediately drop away from the polling state.
+                # We don't want our increasingly-stale view of the database
+                # (which isn't even really quite accurate in terms of what we
+                # need: TODO: Should we do that?) to hold up vacuums (even
+                # though it will hold up vacuum in the real RDBMS).
+                cache.polling_state.poll(cache, conn, cursor)
+                # We'll never try to poll again, so this is ok.
+                cache.polling_state.unregister(cache)
+                del cache.poll
+                return ()
+            cache.poll = poll
         return cache
 
     def release(self):
@@ -238,10 +251,6 @@ class StorageCache(object):
                 # file for no good reason.
                 # TODO: Consider the correctness here, now that we have a
                 # more accurate cache. Should that maybe be AND?
-                #
-                # This is the authoritative location. We don't try as hard to
-                # store into the caches anymore.
-                # TODO: Work on the coupling here.
                 return self.polling_state.save(self.local_client, save_args)
             logger.debug("Cannot justify writing cache file, no hits or misses")
 
@@ -378,9 +387,12 @@ class StorageCache(object):
         If that state is not available in the local cache, return
         nothing.
 
-        If we're history free, and the tid_int doesn't match our
-        knowledge of what the latest tid for the object should be,
-        return nothing.
+        This is independent of the current transaction and polling state, and
+        may return data from the future.
+
+        If the storage hasn't polled invalidations, or if there are other viewers
+        open at transactions in the past, it may also return data from the past
+        that has been overwritten (in history-free storages).
         """
         # We use only the local client because, for history-free storages,
         # it's the only one we can be reasonably sure has been
@@ -388,42 +400,21 @@ class StorageCache(object):
         # network traffic, so it's no good going to memcache for what may be
         # a stale answer.
 
-        # As for load(), if we haven't polled, we can't trust our cache.
-        # If we've polled, but we're being asked for data from the future,
-        # we can't answer.
-        if not self.highest_visible_tid or tid_int > self.highest_visible_tid:
-            #debug("Not loadSerial; my hvt:", self.highest_visible_tid,
-            #      "Requested tid", tid_int)
-            return None
-
         if not self.options.keep_history:
             # For history-free, we can only have one state. If we
             # think we know what it is, but they ask for something different,
             # then there's no way it can be found.
-            known_tid_int = self.object_index[oid_int] # Yay, it should be visible to me
-            if known_tid_int is None or known_tid_int != tid_int:
-                # No good. Ok, well, this is for conflict resolution, so if the
-                # state was updated by someone else in this same process,
-                # and we can find it in our shared polling state we got lucky.
-                known_tid_int = self.polling_state.object_index[oid_int]
+            # We use the most recent data we have because this is for conflict
+            # resolution.
+            index = self.polling_state.object_index
+            known_tid_int = index[oid_int] if index else None
             if known_tid_int is not None and known_tid_int != tid_int:
                 return None
-            #debug("Known tid for oid", oid_int, "is", known_tid_int, "need", tid_int)
 
-        # If we've seen this object, it could be in a few places:
-        # (oid, tid) (if it was ever in a delta), or (oid, cp0)
-        # if it has fallen behind. Regardless, we can only use it if
-        # the tids match.
-        #
-        # We have a multi-query method, but we don't use it because we
-        # don't want to move keys around.
         cache = self.local_client
-        for tid in (tid_int, -1):
-            if not tid:
-                break
-            cache_data = cache[(oid_int, tid)]
-            if cache_data and cache_data[1] == tid_int:
-                return cache_data[0]
+        cache_data = cache[(oid_int, tid_int)]
+        if cache_data and cache_data[1] == tid_int:
+            return cache_data[0]
 
     def load(self, cursor, oid_int):
         """
@@ -438,83 +429,51 @@ class StorageCache(object):
             # No poll has occurred yet. For safety, don't use the cache.
             # Note that without going through the cache, we can't
             # go through tracing either.
-            #debug("No index, db for", oid_int)
             return self.adapter.mover.load_current(cursor, oid_int)
 
         # Get the object from the transaction specified
         # by the following values, in order:
         #
-        #   1. delta_after0[oid_int]
-        #   2. checkpoints[0]
-        #   3. delta_after1[oid_int]
-        #   4. checkpoints[1]
-        #   5. The database.
+        #   1. self.object_index[oid_int]
         #
-        # checkpoints[0] is the preferred location.
-        #
-        # If delta_after0 contains oid_int, we should not look at any
-        # other cache keys, since the tid_int specified in
-        # delta_after0 replaces all older transaction IDs. We *know*
-        # that oid_int should be at (exactly) tid_int because we
-        # either made that change ourself (after_tpc_finish) *or* we
-        # have polled within our current database transaction (or a
-        # previous one) and been told that the oid changed in tid.
-        #
-        # Similarly, if delta_after1 contains oid_int, we should not
-        # look at checkpoints[1]. Also, when both checkpoints are set
-        # to the same transaction ID, we don't need to ask for the
-        # same key twice.
+        # An entry in object_index means we've polled for and know the exact
+        # TID for this object, either because we polled, or because someone
+        # loaded it and put it in the index. If we know a TID, we must *never*
+        # use the wildcard frozen value (it's possible to have an older frozen tid that's
+        # valid for older transactions, but out of date for this one.) That's handled
+        # internally in the clients.
+
+
         cache = self.cache
-        tid_int = self.object_index[oid_int]
-        #debug("Index for", oid_int, "is", tid_int)
-        if tid_int:
-            # This object changed after checkpoint0, so
-            # there is only one place to look for its state: the exact key.
-            key = (oid_int, tid_int)
-            cache_data = cache[key]
-            if cache_data:
-                # Cache hit.
-                #debug("Cache hit for", oid_int, "at", tid_int, self.object_index)
-                assert cache_data[1] == tid_int, (cache_data[1], key)
-                return cache_data
+        index = self.object_index
+        indexed_tid_int = index[oid_int] # Could be None
 
-            # Cache miss.
-            #debug("Cache miss for", oid_int, "at", tid_int)
-            state, actual_tid_int = self.adapter.mover.load_current(
-                cursor, oid_int)
-            if state and actual_tid_int:
-                # If either is None, the object was deleted.
-                self._check_tid_after_load(oid_int, actual_tid_int, tid_int)
+        key = (oid_int, indexed_tid_int)
+        cache_data = cache[key]
+        if cache_data and indexed_tid_int is None and cache_data[1] > self.highest_visible_tid:
+            # Cache hit on a wildcard, but we need to verify the wildcard
+            # and it didn't pass. This situation should be impossible.
+            cache_data = None
 
-                # At this point we know that tid_int == actual_tid_int
-                # XXX: Previously, we did not trace this as a store into the cache.
-                # Why?
-                cache[key] = (state, actual_tid_int)
-            return state, tid_int
-
-        # It could be a frozen object, so try there,
-        # but only locally.
-        key = (oid_int, -1)
-        cache_data = self.local_client[key]
         if cache_data:
-            #debug("Found frozen", oid_int)
-            assert cache_data[1] <= self.highest_visible_tid, (cache_data[1], key)
+            # Cache hit, non-wildcard or wildcard matched.
             return cache_data
 
         # Cache miss.
-        state, tid_int = self.adapter.mover.load_current(cursor, oid_int)
-        if tid_int:
-            self._check_tid_after_load(oid_int, tid_int)
-            complete_since = self.polling_state.complete_since_tid
-            if complete_since and tid_int < complete_since:
-                key = (oid_int, -1)
-            else:
-                key = (oid_int, tid_int)
-                self.object_index[oid_int] = tid_int
-            #debug("Storing after misses", key)
-            cache[key] = (state, tid_int)
+        state, actual_tid_int = self.adapter.mover.load_current(
+            cursor, oid_int)
+        if actual_tid_int:
+            # If either is None, the object was deleted.
+            self._check_tid_after_load(oid_int, actual_tid_int, indexed_tid_int)
 
-        return state, tid_int
+            # We may or may not have had an index entry, but make sure we do now.
+            # Eventually this will age to be frozen again if needed.
+            index[oid_int] = actual_tid_int
+            cache[(oid_int, actual_tid_int)] = (state, actual_tid_int)
+            return state, actual_tid_int
+
+        # This is in the bytecode as a LOAD_CONST
+        return None, None
 
     def prefetch(self, cursor, oid_ints):
         # Just like load(), but we only fetch the OIDs
@@ -525,14 +484,10 @@ class StorageCache(object):
 
         to_fetch = OIDSet()
         cache = self.cache
-        complete_since_tid = self.polling_state.complete_since_tid
         index = self.object_index
         for oid_int in oid_ints:
             tid_int = index[oid_int]
-            if tid_int:
-                key = (oid_int, tid_int)
-            else:
-                key = (oid_int, -1)
+            key = (oid_int, tid_int)
             cache_data = cache[key]
             if not cache_data:
                 # That was our one place, so we must fetch
@@ -542,10 +497,7 @@ class StorageCache(object):
             return
 
         for oid, state, tid_int in self.adapter.mover.load_currents(cursor, to_fetch):
-            key = (oid, tid_int) if tid_int > complete_since_tid else (oid, -1)
-            # Note that we're losing the knowledge of whether the TID
-            # in the key came from delta_after0 or not, so we're not
-            # validating that part.
+            key = (oid, tid_int)
             self._check_tid_after_load(oid, tid_int)
             cache[key] = (state, tid_int)
             index[oid] = tid_int
@@ -592,16 +544,19 @@ class StorageCache(object):
         we have been holding on to (well, in a big transaction, some of them
         might actually not get stored in the cache. But we try!)
         """
-        tid_int = u64(tid)
+        try:
+            tid_int = bytes8_to_int64(tid)
+            # Let the coordinator know ASAP that we're between transactions,
+            # and give it the opportunity to update the object index and cache
+            # if possible. Note that *we* cannot update our index: this transaction isn't
+            # visible to us until we poll.
+            self.polling_state.after_tpc_finish(self, tid_int, self.temp_objects)
+        finally:
+            self.clear_temp()
 
-        # We DO NOT store anything into our object_index: That's only
-        # updated on a poll (if we tried, it would get thrown away as being
-        # too new anyway). So how do we get cache hits on these again in the future?
-        # Simple, next time we poll, we include polling for this
-        # transaction; that way *everyone* can benefit.
-        self.cache.set_all_for_tid(tid_int, self.temp_objects)
-
+    def tpc_abort(self):
         self.clear_temp()
+        self.polling_state.after_tpc_finish(self, None, None)
 
     def clear_temp(self):
         """Discard all transaction-specific temporary data.

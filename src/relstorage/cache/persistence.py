@@ -305,7 +305,7 @@ def sqlite_files(options, prefix):
         except os.error:
             pass
 
-        fname = os.path.join(parent_dir, 'relstorage-cache-' + prefix + '.sqlite3')
+        fname = os.path.join(parent_dir, 'relstorage-cache2-' + prefix + '.sqlite3')
         wal_fname = fname + '-wal'
         shm_fname = fname + '-shm'
         def real_destroy():

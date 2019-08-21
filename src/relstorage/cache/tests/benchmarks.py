@@ -124,7 +124,6 @@ def run_and_report_funcs(runner, named_funcs):
 def local_benchmark(runner):
     # pylint:disable=too-many-statements,too-many-locals
     from relstorage.cache.local_client import LocalClient
-    from relstorage.cache.lru_sqlite import SqlMapping
     options = MockOptions()
     options.cache_local_mb = 100
     options.cache_local_compression = 'none'
@@ -180,11 +179,10 @@ def local_benchmark(runner):
     #print("Entries", len(ALL_DATA),
     #      "Data size", byte_display(sum((len(v[1][0]) for v in ALL_DATA))))
 
-    def makeOne(bucket_kind, populate=True):
-        options.cache_local_storage = bucket_kind
+    def makeOne(populate=True):
         client = LocalClient(options, 'pfx')
         if populate:
-            client._bucket0.bulk_update(ALL_DATA)
+            client._bulk_update(ALL_DATA)
         return client
 
     def populate_equal(loops, bucket_kind):
@@ -231,8 +229,8 @@ def local_benchmark(runner):
                     duration, byte_display(mem_used), len(client))
         return duration
 
-    def populate_empty(loops, bucket_kind):
-        client = makeOne(bucket_kind, populate=False)
+    def populate_empty(loops):
+        client = makeOne(populate=False)
         mem_before = get_memory_usage()
         begin = perf_counter()
         for _ in range(loops):
@@ -244,14 +242,14 @@ def local_benchmark(runner):
                     duration, byte_display(mem_used), len(client))
         return duration
 
-    def read(loops, bucket_kind):
+    def read(loops):
         # This is basically the worst-case scenario for a basic
         # segmented LRU: A repeating sequential scan, where no new
         # keys are added and all existing keys fit in the two parts of the
         # cache. Thus, entries just keep bouncing back and forth between
         # probation and protected. It so happens that this is our slowest
         # case.
-        client = makeOne(bucket_kind, populate=True)
+        client = makeOne(populate=True)
         begin = perf_counter()
         for _ in range(loops):
             for keys in key_groups:
@@ -270,8 +268,8 @@ def local_benchmark(runner):
         # print("Probation demotes", client._bucket0._probation.demote_count)
         # print("Probation removes", client._bucket0._probation.remove_count)
 
-    def mixed(loops, bucket_kind):
-        client = makeOne(bucket_kind, populate=True)
+    def mixed(loops):
+        client = makeOne(populate=True)
         hot_keys = key_groups[0]
         i = 0
         miss_count = 0
@@ -305,17 +303,14 @@ def local_benchmark(runner):
     #     print("Hit ratio", client.stats()['ratio'])
 
     groups = {}
-    for name, bucket in (
-            ('SQL', SqlMapping),
-            ('CFFI', None),
-    ):
+    for name in ('CFFI',):
         benchmarks = run_and_report_funcs(
             runner,
-            ((name + ' pop_eq', populate_equal, bucket),
-             (name + ' pop_ne', populate_not_equal, bucket),
-             (name + ' epop', populate_empty, bucket),
-             (name + ' read', read, bucket),
-             (name + ' mix ', mixed, bucket),))
+            ((name + ' pop_eq', populate_equal),
+             (name + ' pop_ne', populate_not_equal),
+             (name + ' epop', populate_empty),
+             (name + ' read', read),
+             (name + ' mix ', mixed),))
         group = {
             k[len(name) + 1:]: v for k, v in benchmarks.items()
         }
@@ -607,8 +602,6 @@ class StorageTraceSimulator(object):
 def save_load_benchmark(runner):
     # pylint:disable=too-many-locals,too-many-statements
     import io
-    from relstorage.cache.lru_sqlite import SqlMapping
-    from relstorage.cache.mapping import SizedLRUMapping
     from relstorage.cache import persistence as _Loader
     from relstorage.cache.local_client import LocalClient
 
@@ -622,7 +615,6 @@ def save_load_benchmark(runner):
     cache_options.cache_local_dir = runner.args.temp #'/tmp'
     cache_options.cache_local_dir_compress = False
     cache_options.cache_local_mb = 525
-    cache_options.cache_local_storage = SqlMapping
 
     # Note use of worker task number: This is fragile and directly relates to
     # the order in which we pass functions to run_and_report_funcs
@@ -630,7 +622,6 @@ def save_load_benchmark(runner):
         client = LocalClient(cache_options, cache_pfx)
         # Monkey with the internals so we don't have to
         # populate multiple times.
-        bucket = client._bucket0
         #print("Testing", type(bucket._dict))
 
         # Only need to populate in the workers.
@@ -643,7 +634,7 @@ def save_load_benchmark(runner):
         len_values = 0
         j = 0
         for j, datum in enumerate(data_iter):
-            if len(datum) > bucket.limit or len_values + len(datum) > bucket.limit:
+            if len(datum) > client.limit or len_values + len(datum) > client.limit:
                 break
             len_values += len(datum)
             # To ensure the pickle memo cache doesn't just write out "use object X",
@@ -658,58 +649,23 @@ def save_load_benchmark(runner):
             # if bucket[(j, j)] is datum:
             #     raise AssertionError()
         mem_before = get_memory_usage()
-        bucket.bulk_update(keys_and_values, mem_usage_before=mem_before)
-        client.store_checkpoints(j, j)
+        client._bulk_update(keys_and_values, mem_usage_before=mem_before)
         del keys_and_values
-        assert len(bucket) > 0 # pylint:disable=len-as-condition
-        assert len(bucket) == len(client)
         #print("Len", len(bucket), "size", bucket.size, "checkpoints", client.get_checkpoints())
-        return client, bucket
+        return client
 
     def _open(fd, mode):
         return io.open(fd, mode, buffering=16384)
 
-
-    def write_mapping():
-        if not runner.args.do_stream:
-            return 3
-
-        import tempfile
-        try:
-            os.makedirs(runner.args.temp)
-        except OSError:
-            pass
-        _, bucket = create_and_populate_client()
-        prefix = 'relstorage-cache-' + cache_pfx + '.'
-        suffix = '.T'
-        fd, _ = tempfile.mkstemp(prefix=prefix, suffix=suffix, dir=runner.args.temp)
-        with _open(fd, 'wb') as f:
-            begin = perf_counter()
-            bucket.write_to_stream(f, pickle_fast=True)
-            end = perf_counter()
-        return end - begin
-
-    def load_mapping():
-        if not runner.args.do_stream:
-            return 3
-        load_from_file = write_mapping() # XXX: Broken
-
-        begin = perf_counter()
-        b2 = SizedLRUMapping(bucket.limit) # pylint:disable=undefined-variable
-        with _open(load_from_file, 'rb') as f:
-            b2.read_from_stream(f)
-        end = perf_counter()
-        return end - begin
-
     def write_client():
-        client, _ = create_and_populate_client()
+        client = create_and_populate_client()
         begin = perf_counter()
         client.save(overwrite=True)
         end = perf_counter()
         return end - begin
 
     def write_client_dups():
-        client, _ = create_and_populate_client()
+        client = create_and_populate_client()
         begin = perf_counter()
         client.save(overwrite=False, close_async=False)
         end = perf_counter()
@@ -723,8 +679,6 @@ def save_load_benchmark(runner):
         return end - begin
 
     benchmarks = run_and_report_funcs(runner, (
-        ('write stream', write_mapping),
-        ('read stream', load_mapping),
         ('write client fresh', write_client),
         ('write client dups', write_client_dups),
         ('read client', read_client),

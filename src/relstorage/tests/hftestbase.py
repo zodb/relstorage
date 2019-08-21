@@ -57,14 +57,18 @@ class HistoryFreeRelStorageTests(GenericRelStorageTests, ZODBTestCase):
         obj = self._newobj()
         oid = obj.getoid()
         obj.value = 1
+        storage = self._storage
         # Commit three different revisions
         tid1 = self._dostoreNP(oid, data=pdumps(obj))
+        storage.poll_invalidations()
         obj.value = 2
         tid2 = self._dostoreNP(oid, revid=tid1, data=pdumps(obj))
+        storage.poll_invalidations()
+
         obj.value = 3
         tid3 = self._dostoreNP(oid, revid=tid2, data=pdumps(obj))
+        storage.poll_invalidations()
 
-        storage = self._storage
         # Now make sure only the latest revision can be extracted
         for tid in tid1, tid2:
             __traceback_info__ = tid, tid1, tid2
@@ -115,6 +119,7 @@ class HistoryFreeRelStorageTests(GenericRelStorageTests, ZODBTestCase):
         revid2 = self._dostoreNP(oid, revid=revid1, data=pdumps(obj))
         obj.value = 3
         revid3 = self._dostoreNP(oid, revid=revid2, data=pdumps(obj))
+        self._storage.poll_invalidations()
         # Now make sure only the latest revision can be extracted
         __traceback_info__ = [bytes8_to_int64(x) for x in (oid, revid1, revid2)]
         raises(KeyError, self._storage.loadSerial, oid, revid1)
@@ -175,6 +180,7 @@ class HistoryFreeRelStorageTests(GenericRelStorageTests, ZODBTestCase):
         revid2 = self._dostoreNP(oid1, revid=revid1, data=pdumps(obj1))
         obj1.value = 3
         revid3 = self._dostoreNP(oid1, revid=revid2, data=pdumps(obj1))
+        self._storage.poll_invalidations()
         # Now make sure only the latest revision can be extracted
         raises(KeyError, self._storage.loadSerial, oid1, revid1)
         raises(KeyError, self._storage.loadSerial, oid1, revid2)

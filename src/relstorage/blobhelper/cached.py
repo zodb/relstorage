@@ -25,7 +25,6 @@ import BTrees
 import zc.lockfile
 
 import ZODB.blob
-from ZODB.POSException import POSKeyError
 from ZODB.utils import u64
 from zope.interface import implementer
 
@@ -33,6 +32,7 @@ from relstorage._util import byte_display
 from relstorage._util import spawn
 from relstorage._util import thread_spawn
 from relstorage._util import timer
+from relstorage.interfaces import POSKeyError
 
 from .interfaces import ICachedBlobHelper
 from .abstract import AbstractBlobHelper
@@ -335,7 +335,7 @@ class CacheBlobHelper(AbstractBlobHelper):
         if os.path.exists(blob_filename):
             return self._accessed(blob_filename)
 
-        raise POSKeyError("No blob file", oid, serial)
+        raise POSKeyError(oid, serial=serial, fn=blob_filename)
 
     def upload_blob(self, cursor, oid, serial, filename):
         """

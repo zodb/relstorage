@@ -78,14 +78,6 @@ class MultiStateCache(object):
         del self.l[key]
         del self.g[key]
 
-    def __call__(self, oid, tid1, tid2):
-        result = self.l(oid, tid1, tid2)
-        if not result:
-            result = self.g(oid, tid1, tid2)
-            if result:
-                self.l[(oid, tid1)] = result
-        return result
-
     def set_all_for_tid(self, tid_int, state_oid_iter):
         # If the transaction was very large, it may have spilled
         # over to disk, in which case we will need to read it

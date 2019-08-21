@@ -531,11 +531,11 @@ class GenericRelStorageTests(
             cache_stats = storage1._cache.stats()
             __traceback_info__ = cache_stats, clear_cache
             if clear_cache:
-                self.assertEqual(cache_stats['misses'], 2)
-                self.assertEqual(cache_stats['hits'], 0)
+                self.assertEqual(cache_stats['misses'], 1)
+                self.assertEqual(cache_stats['hits'], 1)
             else:
                 self.assertEqual(cache_stats['misses'], 0)
-                self.assertEqual(cache_stats['hits'], 1)
+                self.assertEqual(cache_stats['hits'], 2 if self.keep_history else 1)
 
             data, _serialno = self._storage.load(oid, '')
             inst = zodb_unpickle(data)
@@ -1138,12 +1138,25 @@ class GenericRelStorageTests(
     # https://ci.appveyor.com/project/jamadden/relstorage/build/1.0.75/job/32uu4xdp5mubqma8
     def checkBTreesLengthStress(self):
         # BTrees.Length objects are unusual Persistent objects: they
-        # set _p_independent and they frequently invoke conflict
-        # resolution. Run a stress test on them.
+        # have a conflict resolution algorithm that cannot fail, so if
+        # we do get a failure it's due to a problem with us.
+        # Unfortunately, tryResolveConflict hides all underlying exceptions
+        # so we have to enable logging to see them.
+        from ZODB.ConflictResolution import logger as CRLogger
+        from BTrees.Length import Length
+        from six import reraise
+
+        def log_err(*args, **kwargs): # pylint:disable=unused-argument
+            import sys
+            reraise(*sys.exc_info())
+
+        CRLogger.debug = log_err
+        CRLogger.exception = log_err
+
         updates_per_thread = 50
         thread_count = 4
 
-        from BTrees.Length import Length
+
         db = DB(self._storage)
         try:
             c = db.open()
@@ -1182,6 +1195,8 @@ class GenericRelStorageTests(
 
         finally:
             db.close()
+            del CRLogger.debug
+            del CRLogger.exception
 
 
     def checkAfterCompletion(self):
@@ -1300,10 +1315,9 @@ class GenericRelStorageTests(
         item_count = 2
         self.assertEqual(item_count, len(self._storage._cache))
         tid = bytes8_to_int64(mapping._p_serial)
-        keys = list(self._storage._cache.local_client._bucket0.keys())
-        for k in keys:
-            self.assertEqual(k[1], tid)
-            self.assertIn(k[0], (0, 1))
+        d = self._storage._cache.local_client._cache.data
+        self.assertEqual(d[0].value[1], tid)
+        self.assertEqual(d[1].value[1], tid)
         self._storage._cache.clear()
 
         self.assertEmpty(self._storage._cache)

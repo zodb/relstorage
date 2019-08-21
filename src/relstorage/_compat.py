@@ -61,9 +61,9 @@ else:
     OID_OBJECT_MAP_TYPE = dict
     OID_SET_TYPE = set
     def OidTMap_difference(c1, c2):
-        for k, v in iteritems(c1):
-            if k not in c2:
-                yield (k, v)
+        # Must prevent iterating while being changed
+        c1 = dict(c1)
+        return {k: c1[k] for k in set(c1) - set(c2)}
 
     def OidTMap_multiunion(seq):
         return set().union(*seq)

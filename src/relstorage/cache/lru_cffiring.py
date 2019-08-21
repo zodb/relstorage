@@ -24,6 +24,7 @@ import itertools
 
 from zope import interface
 
+from relstorage._compat import OID_OBJECT_MAP_TYPE as OidOMap
 from relstorage.cache.interfaces import IGenerationalLRUCache
 from relstorage.cache.interfaces import IGeneration
 from relstorage.cache.interfaces import ILRUEntry
@@ -73,7 +74,7 @@ class CFFICache(GenerationalCacheBase):
     # But no more than this number.
     _preallocate_max_count = 150000 # 8 MB array
 
-    _dict_type = dict
+    _dict_type = OidOMap
 
     @classmethod
     def create_generations(cls,
@@ -92,7 +93,9 @@ class CFFICache(GenerationalCacheBase):
             generations[generation.__name__] = generation
         return generations
 
-    def __init__(self, byte_limit, key_weight=len, value_weight=len):
+    def __init__(self, byte_limit,
+                 key_weight=len, value_weight=len,
+                 empty_value=(b'', 0)):
         # This holds all the ring entries, no matter which ring they are in.
 
         # We experimented with using OOBTree and LOBTree for the type
@@ -101,7 +104,7 @@ class CFFICache(GenerationalCacheBase):
         # complexity) as a dict, but very large ones can't be pickled
         # in a single shot! The LOBTree works faster and uses less
         # memory than the OOBTree or the dict *if* all the keys are
-        # integers; which they currently are not. Plus the LOBTrees
+        # integers (which they are now). Plus the LOBTrees
         # are slower on PyPy than its own dict specializations. We
         # were hoping to be able to write faster pickles with large
         # BTrees, but since that's not the case, we abandoned the
@@ -128,17 +131,17 @@ class CFFICache(GenerationalCacheBase):
         self.cffi_cache = self.eden.cffi_cache
 
         # Setup the shared data structures for the generations
-        node_free_list = self._make_node_free_list()
+        node_free_list = self._make_node_free_list(empty_value)
         for ring in self.generations[1:]:
             setattr(ring, 'node_free_list', node_free_list)
 
-    def _make_node_free_list(self):
+    def _make_node_free_list(self, empty_value):
         "Create the node free list and preallocate any desired entries"
         node_free_list = []
         if self._preallocate_entries:
             needed_entries = self.limit // self._preallocate_avg_size
             entry_count = min(self._preallocate_max_count, needed_entries)
-            node_free_list = self.eden.init_node_free_list(entry_count)
+            node_free_list = self.eden.init_node_free_list(entry_count, empty_value)
         return node_free_list
 
 
@@ -295,9 +298,12 @@ class CacheRingEntry(object):
                          lambda self, nv: setattr(self.cffi_entry, 'frequency', nv))
 
     def set_value(self, value, weight):
-        if value == self.value:
-            return
+        old_value = self.value
         self.value = value
+        if value == old_value:
+            # don't go across the CFFI bridge to set the weight
+            # if we don't have to.
+            return
         self.weight = self.cffi_entry.weight = weight
 
     # We don't implement __len__---we want people to access .len
@@ -353,10 +359,10 @@ class Generation(object):
         node.u.head.generation = self.PARENT_CONST
         self.node_free_list = []
 
-    def init_node_free_list(self, entry_count):
+    def init_node_free_list(self, entry_count, empty_value):
         assert not self.node_free_list
         assert not self._mutated_free_list
-        keys_and_values = itertools.repeat(('', (b'', 0)), entry_count)
+        keys_and_values = itertools.repeat(('', empty_value), entry_count)
         _, nodes = self._preallocate_entries(keys_and_values, entry_count)
         self.node_free_list.extend(nodes)
         return self.node_free_list

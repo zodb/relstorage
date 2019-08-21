@@ -27,6 +27,7 @@ from zope.interface import Interface
 from zope.interface import Attribute
 
 import ZODB.interfaces
+from ZODB import POSException
 
 # pylint:disable=inherit-non-class, no-self-argument, no-method-argument
 # pylint:disable=too-many-ancestors
@@ -215,3 +216,27 @@ class IRelStorage(
     - :class:`ZODB.interfaces.IStorageUndoable` if ``keep-history`` is true.
 
     """
+
+
+class POSKeyError(POSException.POSKeyError):
+    """
+    A POSKeyError that records some extra information
+    and prints it.
+    """
+
+    extra = None
+
+    def __init__(self, oid_bytes, extra=None, **kwargs):
+        if extra is None:
+            extra = kwargs
+        self.extra = extra
+        if extra:
+            super(POSKeyError, self).__init__(oid_bytes, extra)
+        else:
+            super(POSKeyError, self).__init__(oid_bytes)
+
+    def __str__(self):
+        s = super(POSKeyError, self).__str__()
+        if self.extra:
+            s = "%s (%r)" % (s, self.extra)
+        return s

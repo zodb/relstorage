@@ -15,6 +15,7 @@ from relstorage.cache.tests import MockOptions
 class MockOptionsWithMemoryDB(MockOptions):
     cache_local_dir = ':memory:'
 
+
 class UpdateTests(TestCase):
     # Tests to specifically cover the cases that
     # UPSERTS or multi-column updates aren't available.
@@ -34,10 +35,21 @@ class UpdateTests(TestCase):
         self.db.close()
 
     def _makeOne(self):
-        return Database.from_connection(
+        db = Database.from_connection(
             self.connection,
             use_upsert=self.USE_UPSERT,
         )
+        ost = db.store_temp
+        def store_temp(rows):
+            return ost([
+                (r[0], r[1], 0, r[2], r[3])
+                for r
+                in rows
+            ])
+        db.store_temp = store_temp
+        db.real_store_temp = ost
+        return db
+
 
     def test_set_checkpoints(self):
         self.db.update_checkpoints(1, 0)
@@ -65,24 +77,24 @@ class UpdateTests(TestCase):
 
     def test_move_from_temp_mixed_updates(self):
         rows = [
-            (0, 1, b'0', 0),
-            (1, 1, b'1', 0),
-            (2, 1, b'2', 0),
+            (0, 1, 0, b'0', 0),
+            (1, 1, 0, b'1', 0),
+            (2, 1, 0, b'2', 0),
         ]
-        self.db.store_temp(rows)
+        self.db.real_store_temp(rows)
         self.db.move_from_temp()
 
         new_rows = [
             # 0 goes backwards
-            (0, 0, b'-1', 0),
+            (0, 0, 0, b'-1', 0),
             # 1 stays the same (but we use a different state
             # to verify)
-            (1, 1, b'-1', 0),
+            (1, 1, 0, b'-1', 0),
             # 2 moves forward
-            (2, 2, b'2b', 0)
+            (2, 2, 0, b'2b', 0)
         ]
 
-        self.db.store_temp(new_rows)
+        self.db.real_store_temp(new_rows)
         self.db.move_from_temp()
 
         self.connection.commit()
@@ -94,7 +106,7 @@ class UpdateTests(TestCase):
         rows_in_db = list(self.db.fetch_rows_by_priority())
         rows_in_db.sort()
         self.assertEqual(rows_in_db[0], (0, 1, b'0', 1))
-        self.assertEqual(rows_in_db[1], (1, 1, b'1', 1))
+        self.assertEqual(rows_in_db[1], (1, 1, b'-1', 1))
         self.assertEqual(rows_in_db[2], (2, 2, b'2b', 2))
 
     def test_remove_invalid_persistent_oids(self):
@@ -220,8 +232,8 @@ class MultiConnectionTests(TestCase):
 
     def test_delete_oids_other_open_transaction(self):
         rows = [
-            (0, 1, b'0', 0),
-            (1, 1, b'0', 0),
+            (0, 1, 0, b'0', 0),
+            (1, 1, 0, b'0', 0),
         ]
         self.db.store_temp(rows)
         self.db.move_from_temp()

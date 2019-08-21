@@ -68,6 +68,32 @@ class IStorageCacheMVCCDatabaseCoordinator(IMVCCDatabaseCoordinator):
 
     # TODO: Fill me in.
 
+    def poll(cache, conn, cursor):
+        """
+        Poll for invalidations since the last taken state of the viewer.
+
+        Update the state of the viewer and update the global state maintained
+        in this coordinator.
+
+        This should be the first thing done after the *conn* is opened or
+        a transaction has begun: in fact, to ensure that the global
+        state never accidentally goes backwards, no snapshot of the database
+        should have been taken with the connection yet. The queries we execute
+        in this method should establish the snapshot for the first time.
+        """
+
+    def after_tpc_finish(viewer, tid_int, temp_objects):
+        """
+        Let the coordinator know that the registered *viewer* is
+        between transactions and can release its last snapshot.
+
+        The transaction it just committed was at *tid_int*, and it contained
+        *temp_objects*.
+
+        If *tid_int* is None, then the transaction was aborted; the viewer can still
+        release its snapshot.
+        """
+
     def stats():
         """
         Return a dictionary with interesting keys and values
@@ -95,16 +121,11 @@ class IStateCache(Interface):
 
         The returned *tid_int* must match the requested tid.
 
-        If the (oid, tid) pair isn't in the cache, return None.
-        """
+        If the ``(oid, tid)`` pair isn't in the cache, return None.
 
-    def __call__(oid, tid1, tid2):
-        """
-        The same as invoking `__getitem__((oid, tid1))` followed by
-        `__getitem__((oid, tid2))` if no result was found for the first one.
-
-        If no result is found for *tid1*, but a result is found for *tid2*,
-        then this method should cache the result at (oid, tid1) before returning.
+        A special tid value of None means that the client doesn't know the TID to ask
+        for and wants the best available; they are then required to verify
+        that the returned object is visible.
         """
 
     def __setitem__(oid_tid, state_bytes_tid):
@@ -138,28 +159,6 @@ class IStateCache(Interface):
 
         As an **iterable**, *state_oid_iter* may be consumed multiple
         times.
-        """
-
-    def store_checkpoints(cp0_tid, cp1_tid):
-        """
-        Store the suggested pair of checkpoints.
-        """
-
-    def get_checkpoints():
-        """
-        Return the current checkpoints as (cp0_tid, cp1_tid).
-
-        If not found, return None.
-        """
-
-    def replace_checkpoints(expected, desired):
-        """
-        Replace the current checkpoints with *desired*.
-
-        This should be as atomic as possible. If the currently stored checkpoints
-        do not match *expected*, nothing should be done.
-
-        Return a true value if the checkpoints were replaced, false otherwise.
         """
 
     def close():

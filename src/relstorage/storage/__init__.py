@@ -93,6 +93,7 @@ class _ClosedCache(object):
     release = close
     object_index = ()
     highest_visible_tid = None
+    stats = lambda s: {'closed': True}
 
 @implementer(IRelStorage)
 class RelStorage(LegacyMethodsMixin,
@@ -314,9 +315,10 @@ class RelStorage(LegacyMethodsMixin,
         # rollback...which, since we're not joined to a transaction,
         # should never happen...except for afterCompletion(), which
         # the ZODB connection has called on it for every transaction
-        # whether it's joined or not. So we *will* rollback the
-        # connection and then open it and poll on the next load.
-
+        # whether it's joined or not...but the HistoricalStorageAdapter
+        # doesn't implement that *either*, so it never makes it down to
+        # this level. This means our load connection can stay open and
+        # un-rolled-back for quite a long time, which is probably not great.
         i = self.new_instance(before=before)
         x = HistoricalStorageAdapter(i, before)
         return x

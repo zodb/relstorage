@@ -200,8 +200,14 @@ class TestMVCCDatabaseCorrdinator(TestCase):
         # Start us off.
         self.test_poll_no_index_begins()
 
+        # Put something in here that can get frozen.
+        self.viewer.local_client[(0, 1)] = (b'cached data', 1)
+        self.viewer.object_index[0] = 1
+
         # Move forward
         for poll_num in range(3, 20):
+            __traceback_info__ = poll_num
+            prev_poll = self.expected_poll_last_tid
             oid = poll_num
             tid = poll_num
             self.viewer.local_client[(oid, 1)] = (b'cached data', 1)
@@ -213,11 +219,16 @@ class TestMVCCDatabaseCorrdinator(TestCase):
             self.assertLength(self.viewer.object_index.maps, 1)
             self.assertEqual(self.coord.minimum_highest_visible_tid, poll_num)
             self.assertEqual(self.coord.maximum_highest_visible_tid, poll_num)
-            self.assertEqual(self.viewer.object_index.complete_since_tid, 1)
+            # Our completion is our last poll.
+            self.assertEqual(self.viewer.object_index.complete_since_tid, prev_poll)
 
         # All of the OIDs I put in the local client got invalidated
-        # as we went
-        self.assertIsEmpty(self.viewer.local_client)
+        # as we went, except for the first one, which got frozen
+        # while remaining accessible at the old key without actually increasing
+        # the number of entries in the cache or its byte size.
+        self.assertEqual(len(self.viewer.local_client), 1)
+        self.assertIn((0, None), self.viewer.local_client)
+        self.assertIn((0, 1), self.viewer.local_client)
 
 
     def test_poll_many_times_vacuums_two_viewer(self):
