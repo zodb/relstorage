@@ -29,6 +29,9 @@ from .util import DEFAULT_DATABASE_SERVER_HOST
 from . import StorageCreatingMixin
 from . import TestCase
 
+stop_threads = False
+
+
 class PostgreSQLAdapterMixin(object):
 
     def make_adapter(self, options, db=None):
@@ -203,6 +206,117 @@ class TestGenerateTIDPG(PostgreSQLAdapterMixin,
             expected_tid_int
         )
 
+class TestPackStressTest(PostgreSQLAdapterMixin,
+                     StorageCreatingMixin,
+                     TestCase,
+                     StorageTestBase.StorageTestBase):
+    # pylint:disable=too-many-ancestors
+
+    def setUp(self):
+        self.keep_history = False
+        super(TestPackStressTest, self).setUp()
+        self._populate_db()
+
+    def _populate_db(self):
+        from ZODB.DB import DB
+        import transaction
+        from persistent.mapping import PersistentMapping
+        storage = self._closing(self.make_storage())
+        db = self._closing(DB(storage))
+        conn = db.open()
+        container = PersistentMapping()
+        conn.root()['container'] = container
+        for i in range(1000):
+            container[i] = PersistentMapping()
+        transaction.commit()
+        conn.close()
+        db.close()
+
+    def test_stress_and_pack(self):
+        from threading import Thread
+        from ZODB.DB import DB
+        from ZODB.POSException import POSKeyError
+        from persistent.mapping import PersistentMapping
+        import transaction
+        
+        def pack():
+            global stop_threads
+            storage = self._closing(self.make_storage(zap=False))
+            db = self._closing(DB(storage))
+            while True:
+                if stop_threads:
+                    break
+                print('pack **********')
+                db.pack()
+                time.sleep(1)
+
+        def stress():
+            global stop_threads
+            storage = self._closing(self.make_storage(zap=False))
+            db = self._closing(DB(storage))
+            for n in range(1):
+                conn = db.open()
+                container = conn.root()['container']
+                for i in container.keys():
+                    if stop_threads:
+                        break
+                    container[i] = PersistentMapping()
+                    transaction.commit()
+                    conn.sync()
+                    if i % 100 == 0:
+                        print('stress **********')
+                conn.close()
+                time.sleep(0.1)
+
+            # It seems like everything's fine. stop all threads if verify()
+            # does not fail after 3 loops
+
+            stop_threads = True
+
+        def verify():
+            global stop_threads
+            storage = self._closing(self.make_storage(zap=False))
+            db = self._closing(DB(storage))
+            conn = db.open()
+            while True:
+                print('verify **********')
+                if stop_threads: 
+                    break
+                container = conn.root()['container']
+                for i in container.keys():
+                    oid = container[i]._p_oid
+                    try:
+                        conn._storage.load(oid)
+                    except POSKeyError:
+                        stop_threads = True
+                        print('verify POSKeyError **********')
+                        raise
+                conn.sync()
+                time.sleep(1)
+
+        global stop_threads 
+        stop_threads = False
+        
+        t1 = Thread(target=stress)
+        t2 = Thread(target=pack)
+
+        t1.daemon = True
+        t1.start()
+        t2.daemon = True
+        t2.start()
+        
+        try:
+            print('verify *****')
+            verify()
+        except KeyboardInterrupt:
+            import sys
+            sys.exit()
+        except POSKeyError:
+            stop_threads = True
+            t1.join()
+            t2.join()
+            raise
+        
 # Timing shows that we spend 6.9s opening database connections to a
 # local PostgreSQL 11 server when using Python 3.7 and psycopg2 2.8
 # during a total test run of 2:27. I had thought that maybe connection
@@ -218,7 +332,7 @@ class PostgreSQLTestSuiteBuilder(AbstractTestSuiteBuilder):
         super(PostgreSQLTestSuiteBuilder, self).__init__(
             drivers,
             PostgreSQLAdapterMixin,
-            extra_test_classes=(TestBlobMerge, TestGenerateTIDPG)
+            extra_test_classes=(TestBlobMerge, TestGenerateTIDPG, TestPackStressTest)
         )
 
     def _compute_large_blob_size(self, use_small_blobs):
