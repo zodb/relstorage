@@ -265,6 +265,7 @@ class TestPackStressTest(PostgreSQLAdapterMixin,
                     conn.sync()
                     if i % 100 == 0:
                         print('stress **********')
+                        time.sleep(0.01)
                 conn.close()
                 time.sleep(0.1)
 
