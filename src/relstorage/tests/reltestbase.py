@@ -1169,6 +1169,7 @@ class GenericRelStorageTests(
             def updater():
                 for _ in range(updates_per_thread):
                     thread_c = db.open()
+                    __traceback_info__ = thread_c._storage
                     try:
                         thread_c.root()['length'].change(1)
                         time.sleep(random.random() * 0.05)

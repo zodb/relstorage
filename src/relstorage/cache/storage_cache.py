@@ -112,6 +112,8 @@ class StorageCache(object):
         # letting it know about them. In particular, that means we must
         # not just assign to this object (except under careful circumstances
         # where we're sure to be single threaded.)
+        # This object can be None, or it can be an object that is False
+        # but still can provide a highest_visible_tid.
         self.object_index = None
 
         # It is also important not to register with the coordinator until
@@ -127,7 +129,7 @@ class StorageCache(object):
     @property
     def highest_visible_tid(self):
         index = self.object_index
-        return index.highest_visible_tid if index else None
+        return index.highest_visible_tid if index is not None else None
 
     current_tid = highest_visible_tid
 
@@ -425,7 +427,7 @@ class StorageCache(object):
         Returns (state_bytes, tid_int).
         """
         # pylint:disable=too-many-statements,too-many-branches,too-many-locals
-        if not self.highest_visible_tid:
+        if not self.object_index:
             # No poll has occurred yet. For safety, don't use the cache.
             # Note that without going through the cache, we can't
             # go through tracing either.
@@ -556,7 +558,11 @@ class StorageCache(object):
 
     def tpc_abort(self):
         self.clear_temp()
-        self.polling_state.after_tpc_finish(self, None, None)
+        self.polling_state.tpc_abort(self)
+
+    def afterCompletion(self, load_connection):
+        load_connection.rollback_quietly()
+        self.polling_state.afterCompletion(self)
 
     def clear_temp(self):
         """Discard all transaction-specific temporary data.

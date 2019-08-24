@@ -30,7 +30,7 @@ from . import LocalClient
 class MockObjectIndex(object):
 
     maps = ()
-    invalid = False
+    disconnected = False
     highest_visible_tid = None
     complete_since_tid = None
 
@@ -114,6 +114,9 @@ class TestMVCCDatabaseCorrdinator(TestCase):
     def do_poll(self, viewer=None):
         viewer = viewer or self.viewer
         result = self.coord.poll(viewer, None, None)
+        if result:
+            result = list(result)
+
         self.assertEqual(result, self.expected_poll_result)
         if self.polled_tid:
             # Only change if we expect a different poll to come in;
@@ -151,7 +154,7 @@ class TestMVCCDatabaseCorrdinator(TestCase):
 
     def test_invalid_ignored_for_min(self):
         self.test_poll_no_index_begins()
-        self.viewer.object_index.invalid = True
+        self.viewer.object_index.disconnected = True
         self.none(self.coord.minimum_highest_visible_tid)
 
     def test_tid_goes_0_after_begin(self):
@@ -177,7 +180,7 @@ class TestMVCCDatabaseCorrdinator(TestCase):
         self.assertNoPollingState()
 
         # Other registered viewers were marked invalid.
-        self.assertTrue(second_viewer.object_index.invalid)
+        self.assertTrue(second_viewer.object_index.disconnected)
 
         # Poll the first guy again, begin getting state.
         self.expected_poll_last_tid = None
@@ -198,9 +201,11 @@ class TestMVCCDatabaseCorrdinator(TestCase):
         # Only one viewer, so state management is simple.
 
         # Start us off.
-        self.test_poll_no_index_begins()
+        self.test_poll_no_index_begins(2)
 
         # Put something in here that can get frozen.
+        # Before we began polling.
+        self.assertEqual(self.viewer.object_index.highest_visible_tid, 2)
         self.viewer.local_client[(0, 1)] = (b'cached data', 1)
         self.viewer.object_index[0] = 1
 
@@ -240,7 +245,7 @@ class TestMVCCDatabaseCorrdinator(TestCase):
         # Second guy will actually ask for changes;
         # give him the same TID.
         self.polled_changes = ()
-        self.expected_poll_result = []
+        self.expected_poll_result = None
         self.do_poll(viewer=second_viewer)
 
         # They have the same index to start with.
@@ -276,9 +281,10 @@ class TestMVCCDatabaseCorrdinator(TestCase):
 
         self.test_poll_no_index_begins()
         # Second guy will actually ask for changes;
-        # give him the same TID.
+        # give him the same TID. Because its his first time,
+        # though, we return no changes to him.
         self.polled_changes = ()
-        self.expected_poll_result = []
+        self.expected_poll_result = None
         self.do_poll(viewer=second_viewer)
 
         # Third guy exists, hasn't actually
@@ -313,7 +319,8 @@ class TestMVCCDatabaseCorrdinator(TestCase):
         # Now plop the third viewer down right in the middle of this sequence
         # and then go again.
         self.polled_tid = poll_num
-        self.polled_changes = self.expected_poll_result = []
+        self.polled_changes = ()
+        self.expected_poll_result = None
         self.do_poll(viewer=third_viewer)
         self.assertIs(self.viewer.object_index, third_viewer.object_index)
         for poll_num in range(20, 30):
@@ -337,7 +344,7 @@ class TestMVCCDatabaseCorrdinator(TestCase):
         self.polled_changes = self.expected_poll_result = [(oid, tid)]
         self.do_poll()
         # The oldest reader is now invalid
-        self.assertTrue(second_viewer.object_index.invalid)
+        self.assertTrue(second_viewer.object_index.disconnected)
         # And the maps have been combined, back to the third_viewer
         # 12 = third_viewer + 10 intermediates + most recent poll
         self.assertLength(self.viewer.object_index.maps, 12)
@@ -348,7 +355,7 @@ class TestMVCCDatabaseCorrdinator(TestCase):
         self.polled_changes = self.expected_poll_result = [(oid, tid)]
         self.do_poll()
 
-        self.assertTrue(third_viewer.object_index.invalid)
+        self.assertTrue(third_viewer.object_index.disconnected)
         self.assertLength(self.viewer.object_index.maps, 1)
 
 

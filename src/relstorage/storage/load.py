@@ -174,20 +174,32 @@ class Loader(object):
         if state:
             return state
 
-        for conn in (self.store_connection, self.load_connection):
-            # Allow loading data from later transactions for conflict
-            # resolution. In fact try that first because it's more
-            # likely that our old load connection can't see this new
-            # state (because this method is used only for conflict resolution).
-            state = self.adapter.mover.load_revision(
-                conn.cursor, oid_int, tid_int)
+        # Allow loading data from later transactions for conflict
+        # resolution. There are three states involved in conflict resolution:
+        # the original state (our load connection should be able to see that),
+        # the committed state (our store connection can see that, and we returned it
+        # when we detected the conflict) and the state we're trying to commit
+        # (stored in the temporary cache data). So if we get here, mostly we
+        # should need to use the load connection.
 
-            if state is not None:
-                break
+        state = self.adapter.mover.load_revision(
+            self.load_connection.cursor,
+            oid_int,
+            tid_int)
 
-        if state is None or not state:
-            raise self.__pke(oid, tid_int=tid_int, state=state)
-        return state
+        if state:
+            return state
+
+        state = self.adapter.mover.load_revision(
+            self.store_connection.cursor,
+            oid_int,
+            tid_int)
+
+        if state:
+            return state
+
+        raise self.__pke(oid, tid_int=tid_int, state=state)
+
 
     @stale_aware
     @storage_method

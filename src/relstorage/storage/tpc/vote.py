@@ -175,6 +175,7 @@ class AbstractVote(AbstractTPCState):
         # It is assumed that self._lock.acquire was called before this
         # method was called.
         cursor = self.store_connection.cursor
+        __traceback_info__ = self.store_connection, cursor
         assert cursor is not None
         adapter = self.adapter
 

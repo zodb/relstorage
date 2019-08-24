@@ -28,6 +28,7 @@ from relstorage._compat import OID_TID_MAP_TYPE as OidTMap
 from relstorage._compat import OidTMap_difference
 from relstorage._compat import OidTMap_multiunion
 from relstorage._compat import OidTMap_intersection
+from relstorage._compat import iteroiditems
 from relstorage._util import log_timed
 from relstorage.options import Options
 
@@ -312,10 +313,12 @@ class _ObjectIndex(object):
 
     __slots__ = (
         'maps',
-        # Set this when we know that the index is invalid
-        # for some external reason.
-        'invalid',
+        # Set this when it is no longer part of
+        # the active set.
+        'disconnected',
     )
+
+    inactive = False
 
     def __init__(self, highest_visible_tid, complete_since_tid=None, data=()):
         """
@@ -323,7 +326,7 @@ class _ObjectIndex(object):
         initial TID. It may optionally have data retrieved from
         previously saving the map.
         """
-        self.invalid = False
+        self.disconnected = False
         initial_bucket = _TransactionRangeObjectIndex(highest_visible_tid, None, ())
         initial_bucket.update(data)
         initial_bucket.complete_since_tid = complete_since_tid
@@ -332,20 +335,20 @@ class _ObjectIndex(object):
         self.maps = [initial_bucket]
 
     def __repr__(self):
-        return '<%s at 0x%x maxhvt=%s minhvt=%s cst=%s depth=%s invalid=%s>' % (
+        return '<%s at 0x%x maxhvt=%s minhvt=%s cst=%s depth=%s disconnected=%s>' % (
             self.__class__.__name__,
             id(self),
             self.maximum_highest_visible_tid,
             self.minimum_highest_visible_tid,
             self.complete_since_tid,
             self.depth,
-            self.invalid,
+            self.disconnected,
         )
 
     def stats(self):
         return {
             'depth': self.depth,
-            'invalid': self.invalid,
+            'disconnected': self.disconnected,
             'hvt': self.maximum_highest_visible_tid,
             'total OIDS': self.total_size,
             'unique OIDs': len(self.keys()),
@@ -381,8 +384,8 @@ class _ObjectIndex(object):
         # Something like loadSerial for conflict resolution might do this;
         # we'll see the object from the future when we poll for changes.
 
-        # We need to store this as far forward as we can reasonably go
-        # so that it has the most complete information for as long as possible.
+        # Because each successive map is supposed to be a delta, we only
+        # store this in the first possible map.
 
         # TODO: Maybe this should always store into the master object?
 
@@ -400,9 +403,9 @@ class _ObjectIndex(object):
                 assert oid in mapping, (oid, tid, mapping)
                 assert mapping[oid] == tid, mapping
                 continue
-
             assert mapping.complete_since_tid is None or tid <= mapping.complete_since_tid
             mapping[oid] = tid
+            break
 
 
     @property
@@ -489,14 +492,11 @@ class _ObjectIndex(object):
 
         # Was this our first poll?
         if newest_bucket is oldest_bucket and oldest_bucket.complete_since_tid is None:
-            #debug("First poll. Oldest bucket:", oldest_bucket, dict(oldest_bucket),
-            #      "Incoming:", incoming_bucket, dict(incoming_bucket))
             # Merge the two together and replace ourself.
             assert highest_visible_tid >= oldest_bucket.highest_visible_tid
             if highest_visible_tid == oldest_bucket.highest_visible_tid:
                 # Overwrite the incomplete data with the new data, which *may be* complete
                 # back to a point. The make the incomplete data become the complete data
-                #debug("Oldest bucket", oldest_bucket, "completing to", incoming_bucket)
                 oldest_bucket.complete_to(incoming_bucket)
                 #debug("Oldest bucket is now", oldest_bucket, dict(oldest_bucket))
                 oldest_bucket.verify()
@@ -505,10 +505,11 @@ class _ObjectIndex(object):
             # Copy forward any old data we've got and maintain our completion status.
             # But we don't want to lose our connection to the older
             # bucket, because that represents the oldest thing we have indexed.
-            incoming_bucket.merge_older_tid(oldest_bucket)
+            # Why merge? That doesn't make much sense. We're no longer a delta.
+            # incoming_bucket.merge_older_tid(oldest_bucket)
             other = _ObjectIndex.__new__(_ObjectIndex)
             other.maps = [incoming_bucket, oldest_bucket]
-            other.invalid = False
+            other.disconnected = False
             #debug("New index is", other)
             other.verify()
             return other
@@ -537,10 +538,11 @@ class _ObjectIndex(object):
         # all that's left is to put the new bucket on front of a new object.
         other = _ObjectIndex.__new__(_ObjectIndex)
         other.maps = [incoming_bucket]
-        other.invalid = False
+        other.disconnected = False
         other.maps.extend(self.maps)
         other.verify() # XXX: Remove before release.
         return other
+
 
 class _AlreadyClosedLock(object):
 
@@ -610,7 +612,7 @@ class MVCCDatabaseCoordinator(InvalidationMixin):
         # Visible to *any* connection.
         return None if self.object_index is None else self.object_index.maximum_highest_visible_tid
 
-    def __viewers_with_older_tids(self, tid):
+    def __viewers_with_tids_at_least_as_old(self, tid):
         """
         Return all the viewers with tids at least as old as the
         given tid.
@@ -619,12 +621,14 @@ class MVCCDatabaseCoordinator(InvalidationMixin):
         even if that value is None. If that value is None, it's because we
         have no viewers, or the viewers we do have haven't looked at the
         database; they'll be ignored.
+
+        Viewers that are already explicitly disconnected are also ignored.
         """
         with self._da0_lock:
             return [
                 viewer for viewer in self.registered_viewers
                 if viewer.object_index
-                and not viewer.object_index.invalid
+                and not viewer.object_index.disconnected
                 and viewer.object_index.highest_visible_tid
                 and viewer.object_index.highest_visible_tid <= tid
             ]
@@ -636,11 +640,11 @@ class MVCCDatabaseCoordinator(InvalidationMixin):
             min_tid = None
             for viewer in self.registered_viewers:
                 ix = viewer.object_index
-                if ix is None:
+                if not ix: # Ignore inactive or None
                     continue
-                if min_tid is None and not ix.invalid:
+                if min_tid is None and not ix.disconnected:
                     min_tid = ix.highest_visible_tid # Could still be None
-                ix_tid = ix.highest_visible_tid if not ix.invalid else None
+                ix_tid = ix.highest_visible_tid if not ix.disconnected else None
                 if ix_tid is not None and min_tid is not None and ix_tid < min_tid:
                     min_tid = ix_tid
 
@@ -651,7 +655,7 @@ class MVCCDatabaseCoordinator(InvalidationMixin):
         for viewer in self.registered_viewers:
             ix = viewer.object_index
             if ix is not None:
-                ix.invalid = True
+                ix.disconnected = True
 
     @property
     def complete_since_tid(self):
@@ -668,26 +672,20 @@ class MVCCDatabaseCoordinator(InvalidationMixin):
             cache.object_index = None
 
     def after_tpc_finish(self, cache, tid_int, temp_objects):
-        with self._da0_lock:
-            # TODO: The cache is supposed to be calling
-            # ``after_tpc_finish`` on us so that we know when it can
-            # release its snapshot between transactions; but that
-            # isn't great for the ZODB connection cache: We'll miss
-            # some invalidations, because we'll be polling from the
-            # global most recent polled instead of something local to
-            # its ZODB Connection cache. We need a separate queue of
-            # invalidations, or the ability to enter an 'inactive'
-            # state for just this one object so that we know not to
-            # consider its snapshot active. Now, this only happens on
-            # connections that do a write; read-only connections never
-            # call ``after_tpc_finish`` (which is its own problem) so in practice
-            # this probably doesn't matter too much?
-            self.reset_viewer(cache)
-
         # Note that unless we've polled, this data is not yet
         # going to be visible to anyone.
-        if tid_int is not None and temp_objects is not None:
-            cache.cache.set_all_for_tid(tid_int, temp_objects)
+        cache.cache.set_all_for_tid(tid_int, temp_objects)
+
+    def afterCompletion(self, cache):
+        # We briefly thought this would be a good time to take the viewer
+        # out of consideration as far as minimum visible TID is concerned,
+        # but if we do that we wind up polling with different, overlapping, big
+        # polls for each client, instead of moving linearly forward with small
+        # polls. The small polls are much more predictable. We count on our
+        # _vacuum method to keep the history from growing too large.
+        pass
+
+    tpc_abort = afterCompletion
 
     def poll(self, cache, conn, cursor):
         # For now, we'll do it all while locked, ensuring a linear history
@@ -705,34 +703,29 @@ class MVCCDatabaseCoordinator(InvalidationMixin):
         #debug("Entering poll")
         assert self.is_registered(cache)
         if self.object_index is None:
-            #debug("Initial poll for", cache)
             # Initial poll for the world. Do this locked to be sure we
             # have a consistent state.
             change_iter, tid = cache.adapter.poller.poll_invalidations(conn, cursor, None, None)
             assert change_iter is None
             if tid > 0:
-                #debug("Found data; can begin caching", cache, tid)
                 # tid 0 is empty database, no data.
                 self.object_index = _ObjectIndex(tid)
-            #debug("Initial got tid", tid, self.object_index)
             self.__set_viewer_state_locked(cache)
             return change_iter
-
 
         # We have begun keeping an object index. But the cache
         # may not yet. (See comments in _ObjectIndex docstring about
         # possible optimizations for that case, or the case when it can use
         # a different poll range.)
         cache_was_invalid = False
-        if cache.object_index and cache.object_index.invalid:
+        if cache.object_index is None or cache.object_index.disconnected:
             # Snarf. Old state. Whelp, it needs to invalidate all its
             # cached objects (so we must return None), but it can still use our index
-            # and poll state; we don't need to go backwards.
+            # and poll state going forward; we don't need to go backwards.
             cache_was_invalid = True
-            polling_since = self.maximum_highest_visible_tid
-        else:
-            polling_since = cache.highest_visible_tid or self.maximum_highest_visible_tid
+        polling_since = self.maximum_highest_visible_tid
 
+        # Do a small poll
         change_iter, tid = cache.adapter.poller.poll_invalidations(
             conn, cursor,
             polling_since,
@@ -751,17 +744,34 @@ class MVCCDatabaseCoordinator(InvalidationMixin):
         # Ok cool, we got data to move us forward.
         # Let's do it.
         # Will need to be able to iterate this more than once.
-        change_iter = list(change_iter)
-        #debug("Changes since", polling_since, "now at", tid, "are", change_iter)
         prev_index = self.object_index
         assert prev_index is not None
         self.object_index = prev_index.with_polled_changes(
             tid,
             polling_since,
-            change_iter
+            list(change_iter)
         )
-        __traceback_info__ = prev_index, self.object_index
-        #debug("Object index now", self.object_index)
+
+        if not cache_was_invalid:
+            # Somewhere in the index is a map with the highest visible tid
+            # matching the last time this viewer polled. Everything from there
+            # forward is a change
+            # Note there could be no changes.
+            last_poll_time = cache.highest_visible_tid
+            changes = OidTMap()
+            change_dicts = []
+            for m in self.object_index.maps:
+                if m.highest_visible_tid == last_poll_time:
+                    break
+                change_dicts.append(m)
+
+            assert change_dicts or tid == last_poll_time
+            while change_dicts:
+                # In reverse order.
+                changes.update(change_dicts.pop())
+
+            change_iter = iteroiditems(changes)
+
         self.__set_viewer_state_locked(cache)
 
         self._vacuum(cache.local_client)
@@ -792,7 +802,6 @@ class MVCCDatabaseCoordinator(InvalidationMixin):
         # This is called for every transaction. It needs to be fast, and mindful
         # of what it logs.
 
-        stats_before = self.stats()
         # TODO: This strategy can easily develop "gaps", where
         # one lone reader is at the back and all the other readers are
         # up front somewhere, with that chain of maps in between doing
@@ -805,8 +814,9 @@ class MVCCDatabaseCoordinator(InvalidationMixin):
                 self.object_index.depth > self.max_allowed_index_depth
                 or self.object_index.total_size > self.max_allowed_index_size
         ):
-            for viewer in self.__viewers_with_older_tids(self.minimum_highest_visible_tid):
-                viewer.object_index.invalid = True
+            for viewer in self.__viewers_with_tids_at_least_as_old(
+                    self.minimum_highest_visible_tid):
+                viewer.object_index.disconnected = True
 
         object_index = self.object_index
         while object_index.depth > 1 and not self._is_oldest_tid_still_required():
@@ -845,15 +855,10 @@ class MVCCDatabaseCoordinator(InvalidationMixin):
             # useful to have in this last bucket and we can throw it away. Note that
             # we do *not* remove the index entries; they're needed to keep
             # the CST in sync for newer transactions that might still be open.
-            logger.debug("Vacuum: Freezing %s old OIDs", obsolete_bucket)
+            logger.debug("Vacuum: Freezing %s old OIDs", len(obsolete_bucket))
             if obsolete_bucket:
                 local_cache.freeze(obsolete_bucket)
 
-        stats_after = self.stats()
-        if stats_before != stats_after:
-            logger.debug("Vacuum: Stats Before: %s After: %s", stats_before, self.stats())
-        else:
-            logger.debug("Vacuum: Stats: No change: %s", stats_before)
 
     def _is_oldest_tid_still_required(self):
         oldest_indexed = self.object_index.minimum_highest_visible_tid
@@ -893,10 +898,9 @@ class MVCCDatabaseCoordinator(InvalidationMixin):
             logger.debug("No index or HVT; nothing to save %s", self.stats())
             return
         # Vacuum, disposing of uninteresting and duplicate data.
-        # We should have no viewers, so we eliminated all except the final map
-        for viewer in self.registered_viewers:
-            if viewer.object_index:
-                viewer.object_index.invalid = True
+        # We should have no viewers, so we eliminated all except the final map.
+        # (We don't actually hold the lock here, but we should be single-threaded.)
+        self.__invalidate_viewers_locked()
         self._vacuum(local_client)
         # At this point, we now have processed all the extent invalidations
 

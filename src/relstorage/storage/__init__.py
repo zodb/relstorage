@@ -94,6 +94,7 @@ class _ClosedCache(object):
     object_index = ()
     highest_visible_tid = None
     stats = lambda s: {'closed': True}
+    afterCompletion = lambda s, c: None
 
 @implementer(IRelStorage)
 class RelStorage(LegacyMethodsMixin,
@@ -530,20 +531,27 @@ class RelStorage(LegacyMethodsMixin,
         # Note that this method exists mainly to deal with read-only
         # transactions that don't go through 2-phase commit (although
         # it's called for all transactions). For this reason, we only
-        # have to roll back the load connection. The store connection
+        # have to roll back the load connection. (The store connection
         # is completed during normal write-transaction commit or
-        # abort.
+        # abort.)
 
         # The next time we use the load connection, it will need to poll
         # and will call our __on_first_use.
         # Typically our next call from the ZODB Connection will be from its
         # `newTransaction` method, a forced `sync` followed by `poll_invalidations`.
 
+        # As with `poll_invalidations`, the cache needs to know about transaction
+        # boundaries like this to optimize polling for changes and invalidations.
+        # If we were a write transaction, that's already done by the call to ``after_tpc_finish``,
+        # but for a read-only transaction, it wouldn't happen. So for this reason,
+        # as with `poll_invalidations`, the cache is in charge.
+
         # This doesn't use restart_and_call() or even just restart() because we don't
         # need to do those checks yet, we just want to quietly rollback.
         # They both rollback; the difference is that restart_load checks for replicas,
         # and calls any hooks needed.
-        self._load_connection.rollback_quietly()
+        self._cache.afterCompletion(self._load_connection)
+
 
     def sync(self, force=True):
         """
