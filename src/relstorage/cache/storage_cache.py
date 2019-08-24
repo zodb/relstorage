@@ -258,7 +258,7 @@ class StorageCache(object):
         # We must only restore into an empty cache.
         state = self.polling_state
         assert not len(self.local_client) # pylint:disable=len-as-condition
-        state.restore(self.adapter, self.local_client)
+        state.restore(self.local_client)
 
     def _reset(self, message=None):
         """

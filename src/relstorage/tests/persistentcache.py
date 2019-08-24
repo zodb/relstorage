@@ -60,7 +60,10 @@ class PersistentCacheStorageTests(TestCase):
         #     self.assertEqual(cache.checkpoints, expected_checkpoints)
 
         if expected_root_tid is not None:
-            tid = self.assert_oid_known(ROOT_OID, storage)
+            # Nothing is actually in the index
+            self.assert_oid_not_known(ROOT_OID, storage)
+            # because everything is frozen.
+            _state, tid = cache.local_client[(ROOT_OID, None)]
             self.assertEqual(tid, expected_root_tid)
         else:
             self.assert_oid_not_known(ROOT_OID, storage)
@@ -84,6 +87,7 @@ class PersistentCacheStorageTests(TestCase):
     def assert_oid_known(self, oid, storage):
         cache = find_cache(storage)
         index = cache.object_index or cache.polling_state.object_index or ()
+        __traceback_info__ = index.keys()
         self.assertIn(oid, index)
         return index[oid]
 

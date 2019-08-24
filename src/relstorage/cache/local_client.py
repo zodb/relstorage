@@ -413,14 +413,12 @@ class LocalClient(object):
             # something.
             return 1
 
-    def restore(self, row_filter=None):
+    def restore(self):
         """
         Load the data from the persistent database.
 
-        If *row_filter* is given, it is a ``callable(checkpoints, row_iter)``
-        that should return an iterator of four-tuples: ``(oid, key_tid, state, state_tid)``
-        from the input rows ``(oid, state_tid, actual_tid)``. It is guaranteed
-        that you won't see the same oid more than once.
+        Returns the checkpoint data last saved, which may be None if
+        there was no data.
         """
         options = self.options
         if options.cache_local_dir:
@@ -430,7 +428,7 @@ class LocalClient(object):
                 logger.exception("Failed to read data from sqlite")
                 return
             with closing(conn):
-                self.read_from_sqlite(conn, row_filter)
+                return self.read_from_sqlite(conn)
 
     @_log_timed
     def remove_invalid_persistent_oids(self, bad_oids):
@@ -711,7 +709,7 @@ class LocalClient(object):
 
 
     @_log_timed
-    def read_from_sqlite(self, connection, row_filter=None):
+    def read_from_sqlite(self, connection):
         import gc
         gc.collect() # Free memory, we're about to make big allocations.
         mem_before = get_memory_usage()
@@ -737,7 +735,8 @@ class LocalClient(object):
         # In practice, we can assume that the limit hasn't changed between this
         # run and the last run, so the database will already have been trimmed
         # to fit the desired size, so essentially all the rows in the database
-        # should go in our cache.
+        # should go in our cache. However, the order matters: The DB gives them to us in
+        # priority order, and those are the ones we want to add to the memory cache.
         @_log_timed
         def fetch_and_filter_rows():
             # Do this here so that we don't have the result
@@ -752,30 +751,19 @@ class LocalClient(object):
             # We make one call into sqlite and let it handle the iterating.
             # Items are (oid, key_tid, state, actual_tid).
             # key_tid may equal the actual tid, or be -1 when the row was previously
-            # frozen.
-            items = db.list_rows_by_priority()
-            # row_filter produces the sequence ((oid, key_tid) (state, actual_tid))
-            if row_filter is not None:
-                row_iter = row_filter(checkpoints, items)
-                items = [
-                    (r[0][0], _SingleValue(*r[1]) if r[0][1] != -1 else _FrozenValue(*r[1]))
-                    for r in row_iter
-                ]
-            else:
-                items = [
-                    (r[0], _SingleValue(*r[2:]) if r[1] != -1 else _FrozenValue(*r[2:]))
-                    for r in items
-                ]
+            # frozen;
+            # That doesn't matter to us, we always freeze all rows.
+            size = 0
+            limit = self.limit
+            items = []
+            for oid, _, state, actual_tid in db.list_rows_by_priority():
+                size += len(state)
+                if size > limit:
+                    break
+                items.append((oid, _FrozenValue(state, actual_tid)))
 
-            # Look at them from most to least recent,
-            # but insert them the other way.
             items.reverse()
             return items
-
-        f = getattr(fetch_and_filter_rows, '__wrapped__', None) or fetch_and_filter_rows
-        f.__name__ = f.__name__ + ':' + (
-            str(row_filter) if row_filter is not None else '<no filter>'
-        )
 
         # In the large benchmark, this is 25% of the total time.
         # 18% of the total time is preallocating the entry nodes.

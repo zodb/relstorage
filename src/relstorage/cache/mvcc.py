@@ -893,7 +893,7 @@ class MVCCDatabaseCoordinator(InvalidationMixin):
             logger.debug("No index or HVT; nothing to save %s", self.stats())
             return
         # Vacuum, disposing of uninteresting and duplicate data.
-       # We should have no viewers, so we eliminated all except the final map
+        # We should have no viewers, so we eliminated all except the final map
         for viewer in self.registered_viewers:
             if viewer.object_index:
                 viewer.object_index.invalid = True
@@ -913,7 +913,7 @@ class MVCCDatabaseCoordinator(InvalidationMixin):
         return local_client.save(object_index=self.object_index.maps[0],
                                  checkpoints=checkpoints, **save_args)
 
-    def restore(self, adapter, local_client):
+    def restore(self, local_client):
         # This method is not thread safe
 
         # Note that there may have been an arbitrary amount of data in
@@ -922,81 +922,12 @@ class MVCCDatabaseCoordinator(InvalidationMixin):
         # database changes we will start dropping this off pretty quickly.
         # TODO: maybe we want to split the incoming data up by transaction,
         # just like we built it that way in memory.
-        row_filter = _PersistentRowFilter(adapter,
-                                          OidTMap,
-                                          self.max_allowed_index_size)
-        local_client.restore(row_filter)
 
-        if row_filter.complete_range:
+        checkpoints = local_client.restore()
+        highest_visible_tid = checkpoints[0] if checkpoints else None
+
+        if highest_visible_tid:
             # We will thus begin polling at the last poll location
-            # stored in the data.
-            self.object_index = _ObjectIndex(
-                row_filter.highest_visible_tid,
-                # But we can't truly claim to be complete before that,
-                # based on the present schema. Our data is based on what's in the
-                # cache, not what our object_index has. The index may be complete,
-                # but the data still in the cache memory may not be.
-                None, # row_filter.complete_since_tid,
-                row_filter.complete_range)
-        else:
-            self.object_index = None
-
-
-class _PersistentRowFilter(object):
-
-    def __init__(self, adapter, delta_type, delta_size_limit):
-        self.adapter = adapter
-        self.complete_range = delta_type()
-        self.highest_visible_tid = 0
-        self.complete_since_tid = 0
-        self.delta_size_limit = delta_size_limit
-
-    def __str__(self):
-        return "<PersistentRowFilter>"
-
-    def __call__(self, checkpoints, row_iter):
-        # The 'checkpoints' are actually
-        # (max_highest_visible_tid, complete_since_tid)
-        # where complete_since_tid could actually be == max_hvt if
-        # we didn't have that information.
-        if not checkpoints:
-            #debug("No checkpoints")
-            checkpoints = (0, 0)
-
-        #debug("Using checkpoints", checkpoints)
-        complete_range = self.complete_range
-        highest_visible_tid, complete_since_tid = checkpoints
-        self.highest_visible_tid = highest_visible_tid
-        self.complete_since_tid = complete_since_tid
-
-        # Right now, we only keep things in the complete range.
-        # The 'frozen' data is still to come.
-
-        for row in row_iter:
-            # Rows are (oid, key tid, state, tid),
-            # The key tid will be -1 if the row was frozen.
-            oid = row[0]
-            key_tid = row[1]
-            value = row[2:]
-            actual_tid = value[1]
-
-            # If we had a transaction where we added/updated items, and then
-            # closed down before polling, we could have things in the cache file
-            # that have an actual_tid > highest_visible_tid.
-
-            # We'll begin polling at the highest_visible_tid
-            # which we will set such that we do a single fairly large poll
-            # up front by only storing items into our map until we hit the delta size limit,
-            if len(complete_range) < self.delta_size_limit:
-                #debug('Restoring', oid, "at", actual_tid)
-                complete_range[oid] = actual_tid
-                key_tid = actual_tid
-            elif key_tid > 0:
-                continue
-                # No point storing things with their actual tid if we don't have them
-                # in the map...
-
-            yield (oid, key_tid), value
-
-        if complete_range:
-            self.highest_visible_tid = max(complete_range.values())
+            # stored in the data. All loaded rows are treated as frozen.
+            # We won't write them back out.
+            self.object_index = _ObjectIndex(highest_visible_tid)

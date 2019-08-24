@@ -74,16 +74,13 @@ class AbstractManagedConnection(object):
 
     @Lazy
     def cursor(self):
-        if not self.active or not self._cursor:
+        if not self.active or self._cursor is None:
             # XXX: If we've been explicitly dropped, do we always want to
             # automatically re-open? Probably not; bad things could happen:
             # a load connection could skip into the future, and a store connection
             # could lose temp tables.
-            if self.connection:
-                cursor = self.connmanager.cursor_for_connection(self.connection)
-            else:
-                _, cursor = self.open_if_needed()
-            self.on_first_use(self.connection, cursor)
+            conn, cursor = self.open_if_needed()
+            self.on_first_use(conn, cursor)
             self.active = True
         return self._cursor
 
@@ -97,6 +94,7 @@ class AbstractManagedConnection(object):
     def commit(self, force=False):
         if self.connection is not None:
             self.connmanager.commit(self.connection, self._cursor, force=force)
+            self.__dict__.pop('cursor', None)
 
     def rollback_quietly(self):
         """
@@ -122,7 +120,7 @@ class AbstractManagedConnection(object):
         return clean_rollback
 
     def open_if_needed(self):
-        if not self:
+        if self.connection is None or self._cursor is None:
             self.drop()
             self._open_connection()
         return self.connection, self._cursor

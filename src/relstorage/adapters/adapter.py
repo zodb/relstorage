@@ -73,6 +73,15 @@ class AbstractAdapter(object):
             self.driver_options
         )
 
+    def __repr__(self):
+        return "<%s.%s at 0x%x keep_history=%s driver=%s>" % (
+            self.__class__.__module__,
+            self.__class__.__name__,
+            id(self),
+            self.keep_history,
+            self.driver,
+        )
+
     @metricmethod_sampled
     def lock_database_and_choose_next_tid(self, cursor,
                                           username,

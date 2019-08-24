@@ -16,7 +16,7 @@ from __future__ import division
 from __future__ import print_function
 
 import threading
-import unittest
+
 
 from ZODB.utils import p64
 
@@ -680,91 +680,3 @@ class StorageCacheTests(TestCase):
         self.assertFalse(grandchild.polling_state)
         # Doesn't affect anything else.
         self.assertIs(master.polling_state, child.polling_state)
-
-class PersistentRowFilterTests(TestCase):
-
-    def _makeOne(self):
-        from relstorage.cache.mvcc import _PersistentRowFilter
-        adapter = MockAdapter()
-        return _PersistentRowFilter(adapter, dict, 1000)
-
-    @unittest.expectedFailure
-    def test_no_checkpoints(self):
-        f = self._makeOne()
-        # pylint:disable=no-member
-        rows = [(1, 2, 3, 2)]
-        results = list(f(None, rows))
-        self.assertEqual(results, [((1, 2), (3, 2))])
-        self.assertEmpty(f.delta_after0)
-        self.assertEmpty(f.delta_after1)
-
-    @unittest.expectedFailure
-    def test_deltas(self):
-        # pylint:disable=no-member
-        f = self._makeOne()
-
-        cp0 = 5000
-        cp1 = 4000
-
-        tid_after0 = 5001
-        tid_after1 = 4001
-        # The old_tid, outside the checkpoint range,
-        # will get completely dropped.
-        old_tid = 3999
-
-        rows = [
-            (0, tid_after0, b'0', tid_after0),
-            (1, cp0, b'1', cp0),
-            (2, tid_after1, b'2', tid_after1),
-            (3, cp1, b'3', cp1),
-            (4, old_tid, b'4', old_tid)
-        ]
-
-        results = list(f((cp0, cp1), rows))
-
-        self.assertEqual(results, [
-            (rows[0][:2], rows[0][2:]),
-            (rows[1][:2], rows[1][2:]),
-            (rows[2][:2], rows[2][2:]),
-        ])
-
-        self.assertEqual(dict(f.delta_after0), {0: 5001})
-        # We attempted validation on this, and we found nothing,
-        # so we can't claim knowledge.
-        self.assertEqual(dict(f.delta_after1), {})
-        # 1 and 2 were polled because they would go in delta_after_1,
-        # 3 and 4 were polled because they fall outside the checkpoint ranges
-        self.assertEqual(set(f.polled_invalid_oids), {1, 2, 3, 4})
-
-        # Let's verify we can find things we poll for.
-        f = self._makeOne()
-        f.adapter.mover.data[2] = (b'', tid_after1)
-        f.adapter.mover.data[4] = (b'', old_tid)
-        results = list(f((cp0, cp1), rows))
-
-        self.assertEqual(results, [
-            (rows[0][:2], rows[0][2:]),
-            (rows[1][:2], rows[1][2:]),
-            (rows[2][:2], rows[2][2:]),
-            ((4, 5000), rows[4][2:]),
-        ])
-
-        self.assertEqual(dict(f.delta_after0), {0: tid_after0})
-        self.assertEqual(dict(f.delta_after1), {2: tid_after1})
-        self.assertEqual(set(f.polled_invalid_oids), {1, 3})
-
-        # Test when the tid doesn't match
-        f = self._makeOne()
-        f.adapter.mover.data[2] = (b'', tid_after1 + 2)
-        f.adapter.mover.data[4] = (b'', old_tid + 1)
-        results = list(f((cp0, cp1), rows))
-
-        self.assertEqual(results, [
-            (rows[0][:2], rows[0][2:]),
-            (rows[1][:2], rows[1][2:]),
-            (rows[2][:2], rows[2][2:]),
-        ])
-
-        self.assertEqual(dict(f.delta_after0), {0: tid_after0})
-        self.assertEqual(dict(f.delta_after1), {2: tid_after1 + 2})
-        self.assertEqual(set(f.polled_invalid_oids), {1, 2, 3, 4})

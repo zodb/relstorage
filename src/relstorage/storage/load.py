@@ -174,7 +174,7 @@ class Loader(object):
         if state:
             return state
 
-        for conn in self.store_connection, self.load_connection:
+        for conn in (self.store_connection, self.load_connection):
             # Allow loading data from later transactions for conflict
             # resolution. In fact try that first because it's more
             # likely that our old load connection can't see this new
