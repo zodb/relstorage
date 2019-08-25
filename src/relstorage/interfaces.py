@@ -131,6 +131,8 @@ class IMVCCDatabaseViewer(Interface):
     exist.
 
     The highest available TID is updated between transactions.
+
+    Viewers are associated with a :class:`IMVCCDatabaseCoordinator`.
     """
 
     highest_visible_tid = TID(
@@ -142,6 +144,31 @@ class IMVCCDatabaseViewer(Interface):
             """),
         required=False)
 
+class IDetachableMVCCDatabaseViewer(IMVCCDatabaseViewer):
+    """
+    An MVCC database viewer that can optionally be marked as detached
+    from ongoing MVCC operations.
+
+    Viewer may be detached when their coordinator projects it to
+    become too expensive to keep them updated (for example, they have
+    fallen too far behind the leading edge of the database, possibly
+    due to sitting idle). Views are detached instead of destroying
+    their ``highest_visible_tid`` because it's possible they may
+    actively be working on their view of the database (for example, a
+    long running read transaction --- this is exactly what ZODB
+    historical connections become).
+
+    Once detached, such a view cannot be updated to a more current
+    state. Instead, it must be recreated and all of its cached state
+    thrown away.
+
+    Detached viewers are not counted in their coordinator's
+    ``minimum_highest_visible_tid``.
+    """
+
+    detached = Bool(
+        description=u"Is this object detached?"
+    )
 
 class IMVCCDatabaseCoordinator(Interface):
     """
@@ -188,8 +215,8 @@ class IMVCCDatabaseCoordinator(Interface):
         description=(
             u"""
              Across all tracked components, report the current minimum
-             highest visible tid. This is the oldest transaction being
-             viewed in this process.
+             highest visible tid. This is the oldest transaction potentially
+             being viewed in this process.
              """),
         required=False)
 

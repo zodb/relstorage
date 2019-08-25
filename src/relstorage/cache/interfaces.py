@@ -22,7 +22,7 @@ from zope.interface import Interface
 from transaction.interfaces import TransientError
 from ZODB.POSException import StorageError
 
-from relstorage.interfaces import IMVCCDatabaseViewer
+from relstorage.interfaces import IDetachableMVCCDatabaseViewer
 from relstorage.interfaces import IMVCCDatabaseCoordinator
 
 # Export
@@ -32,7 +32,7 @@ from relstorage._compat import MAX_TID # pylint:disable=unused-import
 # pylint:disable=unexpected-special-method-signature
 # pylint:disable=signature-differs
 
-class IStorageCache(IMVCCDatabaseViewer):
+class IStorageCache(IDetachableMVCCDatabaseViewer):
     """
     A cache, as used by :class:`relstorage.interfaces.IRelStorage`.
 
@@ -191,16 +191,6 @@ class IStateCache(Interface):
         """
         Remove all cached data for each of the oid integers in *oids*.
         """
-
-    ##
-    # Methods that are here to assist with tracing.
-    ##
-
-    def updating_delta_map(oid_tid_map):
-        """
-        Return a new map that can (temporarily) observe set actions.
-        """
-
 
 class IPersistentCache(Interface):
     """

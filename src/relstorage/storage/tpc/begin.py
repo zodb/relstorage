@@ -214,7 +214,7 @@ class AbstractBegin(AbstractTPCState):
         # delete a specific verison? Etc.
         oid_int = bytes8_to_int64(oid)
         tid_int = bytes8_to_int64(oldserial)
-        self.cache.invalidate(oid_int, tid_int)
+        self.cache.remove_cached_data(oid_int, tid_int)
 
         # We delegate the actual operation to the adapter's packundo,
         # just like native pack
@@ -316,7 +316,7 @@ class HistoryPreserving(AbstractBegin):
             # we're probably just undoing the latest state. Still, play it
             # a bit safer.
             oid_ints = [oid_int for oid_int, _ in copied]
-            self.cache.invalidate_all(oid_ints)
+            self.cache.remove_all_cached_data_for_oids(oid_ints)
 
             # Update the current object pointers immediately, so that
             # subsequent undo operations within this transaction will see

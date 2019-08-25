@@ -341,6 +341,11 @@ class MockPoller(object):
     def __init__(self, driver=None):
         self.driver = driver or MockDriver()
         self.changes = []  # [(oid, tid)]
+        self.poll_tid = 1
+        self.poll_changes = None
+
+    def poll_invalidations(self, _conn, _cursor, _since, _ignore):
+        return self.poll_changes, self.poll_tid
 
     def list_changes(self, _cursor, after_tid, last_tid):
         # Return a list, because the caller is allowed

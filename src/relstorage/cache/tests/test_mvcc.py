@@ -30,7 +30,7 @@ from . import LocalClient
 class MockObjectIndex(object):
 
     maps = ()
-    disconnected = False
+    detached = False
     highest_visible_tid = None
     complete_since_tid = None
 
@@ -40,16 +40,13 @@ class MockObjectIndex(object):
 class MockViewer(object):
 
     object_index = None # type: MockObjectIndex
+    highest_visible_tid = None
+    detached = False
 
     def __init__(self, options=None):
         options = options or Options()
         self.adapter = MockAdapter()
         self.local_client = LocalClient(options)
-
-    @property
-    def highest_visible_tid(self):
-        # pylint:disable=no-member
-        return self.object_index.highest_visible_tid if self.object_index else None
 
     def __repr__(self):
         return "<MockViewer at 0x%x index=%r>" % (
@@ -98,13 +95,6 @@ class TestMVCCDatabaseCorrdinator(TestCase):
         assert_that(self._makeOne(),
                     validly_provides(interfaces.IStorageCacheMVCCDatabaseCoordinator))
 
-    def test_register(self):
-        c = self._makeOne()
-        c.register(self)
-        self.assertTrue(c.is_registered(self))
-        c.unregister(self)
-        self.assertFalse(c.is_registered(self))
-
     def assertNoPollingState(self):
         self.none(self.coord.object_index)
         self.none(self.viewer.object_index)
@@ -152,11 +142,6 @@ class TestMVCCDatabaseCorrdinator(TestCase):
         self.assertEqual(polled_tid, coord.maximum_highest_visible_tid)
         self.assertEqual(polled_tid, coord.minimum_highest_visible_tid)
 
-    def test_invalid_ignored_for_min(self):
-        self.test_poll_no_index_begins()
-        self.viewer.object_index.disconnected = True
-        self.none(self.coord.minimum_highest_visible_tid)
-
     def test_tid_goes_0_after_begin(self):
         self.test_poll_no_index_begins()
         # zap the database
@@ -180,7 +165,7 @@ class TestMVCCDatabaseCorrdinator(TestCase):
         self.assertNoPollingState()
 
         # Other registered viewers were marked invalid.
-        self.assertTrue(second_viewer.object_index.disconnected)
+        self.assertTrue(second_viewer.detached)
 
         # Poll the first guy again, begin getting state.
         self.expected_poll_last_tid = None
@@ -344,7 +329,7 @@ class TestMVCCDatabaseCorrdinator(TestCase):
         self.polled_changes = self.expected_poll_result = [(oid, tid)]
         self.do_poll()
         # The oldest reader is now invalid
-        self.assertTrue(second_viewer.object_index.disconnected)
+        self.assertTrue(second_viewer.detached)
         # And the maps have been combined, back to the third_viewer
         # 12 = third_viewer + 10 intermediates + most recent poll
         self.assertLength(self.viewer.object_index.maps, 12)
@@ -355,8 +340,61 @@ class TestMVCCDatabaseCorrdinator(TestCase):
         self.polled_changes = self.expected_poll_result = [(oid, tid)]
         self.do_poll()
 
-        self.assertTrue(third_viewer.object_index.disconnected)
+        self.assertTrue(third_viewer.detached)
         self.assertLength(self.viewer.object_index.maps, 1)
+
+    def test_poll_produces_gap_vacuum(self):
+        # TIDs do not always strictly go up; if there's a delay polling,
+        # one viewer may not poll as far forward as everyone else and so
+        # will produce a divergent index. vacuum need sto handle that.
+
+        self.test_poll_no_index_begins()
+
+        second_viewer = self.add_viewer()
+        # Second guy will actually ask for changes;
+        # give him the same TID. Because its his first time,
+        # though, we return no changes to him.
+        self.polled_changes = ()
+        self.expected_poll_result = None
+        self.do_poll(viewer=second_viewer)
+
+        # Both now have the same min
+        self.assertEqual(self.viewer.highest_visible_tid, second_viewer.highest_visible_tid)
+        self.assertEqual(self.viewer.highest_visible_tid, self.coord.minimum_highest_visible_tid)
+        orig_index = self.coord.object_index
+
+        # Pull the first one out ahead
+        changes_5 = (1, 5)
+        changes_10 = (2, 10)
+        self.polled_tid = 10
+        self.polled_changes = self.expected_poll_result = [changes_5, changes_10]
+        self.do_poll()
+        index_10 = self.coord.object_index
+        self.assertIsNot(orig_index, index_10)
+        self.assertEqual(1, self.coord.minimum_highest_visible_tid)
+
+        # Pull the other one to the middle, gapping the index.
+        # In order to do this, we have to pretend that we started with
+        # the old index and got interrupted before we finished.
+        self.coord.object_index = orig_index
+        self.expected_poll_last_tid = orig_index.minimum_highest_visible_tid
+        self.polled_tid = 5
+        self.polled_changes = self.expected_poll_result = [changes_5]
+        self.do_poll(viewer=second_viewer)
+
+        # Now the first one goes ahead and polls farther to the future.
+        # Vacuum happens, but doesn't remove the original transaction index
+        # we still need.
+        self.coord.object_index = index_10
+        self.assertEqual(self.coord.minimum_highest_visible_tid, 5)
+        self.assertEqual(self.coord.object_index.depth, 2)
+        self.expected_poll_last_tid = 10
+        self.polled_tid = 15
+        self.polled_changes = self.expected_poll_result = [(1, 15)]
+        self.do_poll()
+        # We vacuumed as far forward as we could.
+        self.assertEqual(self.coord.minimum_highest_visible_tid, 5)
+        self.assertEqual(self.coord.object_index.depth, 3)
 
 
 class TestTransactionRangeObjectIndex(TestCase):

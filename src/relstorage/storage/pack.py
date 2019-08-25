@@ -166,7 +166,7 @@ class Pack(object):
             # by directly verifying that loadSerial() doesn't return data,
             # when in a real use we could only get there through detecting a conflict
             # in the database at commit time, with locks involved.
-            cache.invalidate(oid_int, tid_int)
+            cache.remove_cached_data(oid_int, tid_int)
             # Clean up blob files. This currently does nothing
             # if we're a blob cache, but it could.
             blob_invalidate(oid_int, tid_int)
@@ -178,7 +178,7 @@ class Pack(object):
 
         self.packundo.pack(tid_int,
                            packed_func=invalidate_cached_data)
-        self.cache.invalidate_all(oids_removed)
+        self.cache.remove_all_cached_data_for_oids(oids_removed)
 
     @writable_storage_method
     @metricmethod

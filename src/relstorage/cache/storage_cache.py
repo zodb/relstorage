@@ -32,6 +32,7 @@ from relstorage._compat import OID_OBJECT_MAP_TYPE
 from relstorage._compat import OID_SET_TYPE as OIDSet
 from relstorage._compat import iteroiditems
 from relstorage._util import bytes8_to_int64
+from relstorage._mvcc import DetachableMVCCDatabaseViewer
 
 from relstorage.cache import persistence
 from relstorage.cache.interfaces import IStorageCache
@@ -59,7 +60,7 @@ _UsedAfterRelease = _UsedAfterRelease()
 
 
 @interface.implementer(IStorageCache, IPersistentCache)
-class StorageCache(object):
+class StorageCache(DetachableMVCCDatabaseViewer):
     """RelStorage integration with memcached or similar.
 
     Holds a list of memcache clients in order from most local to
@@ -68,18 +69,36 @@ class StorageCache(object):
     """
     # pylint:disable=too-many-instance-attributes,too-many-public-methods
 
-    # queue is a _TemporaryStorage used during commit
-    temp_objects = None
-    # store_temp and read_temp are methods copied from the queue while
-    # we are committing.
-    store_temp = None
-    read_temp = None
+    __slots__ = (
+        'adapter',
+        'options',
+        'keep_history',
+        'prefix',
+        'polling_state',
+        'local_client',
+        'cache',
+        'object_index',
+
+        # Things used during commit
+        'temp_objects',
+        'store_temp',
+        'read_temp',
+    )
+
+
 
     def __init__(self, adapter, options, prefix, _parent=None):
+        super(StorageCache, self).__init__()
         self.adapter = adapter
         self.options = options
         self.keep_history = options.keep_history
         self.prefix = prefix or ''
+        # queue is a _TemporaryStorage used during commit
+        self.temp_objects = None # type: _TemporaryStorage
+        # store_temp and read_temp are methods copied from the queue while
+        # we are committing.
+        self.store_temp = None
+        self.read_temp = None
 
         if _parent is None:
             # I must be the master!
@@ -112,8 +131,7 @@ class StorageCache(object):
         # letting it know about them. In particular, that means we must
         # not just assign to this object (except under careful circumstances
         # where we're sure to be single threaded.)
-        # This object can be None, or it can be an object that is False
-        # but still can provide a highest_visible_tid.
+        # This object can be None
         self.object_index = None
 
         # It is also important not to register with the coordinator until
@@ -126,12 +144,11 @@ class StorageCache(object):
         if _parent is None:
             self.restore()
 
-    @property
-    def highest_visible_tid(self):
-        index = self.object_index
-        return index.highest_visible_tid if index is not None else None
 
-    current_tid = highest_visible_tid
+    @property
+    def current_tid(self):
+        # testing
+        return self.highest_visible_tid
 
     # XXX: Note that our __bool__ and __len__ are NOT consistent
     def __bool__(self):
@@ -182,23 +199,9 @@ class StorageCache(object):
         :class:`MVCCDatabaseCoordinator`  so that
         its usage pattern does not interfere.
         """
-        cache = type(self)(self.adapter, self.options, self.prefix,
-                           _parent=self)
-        if before:
-            cache.tpc_begin = lambda: None
-            def poll(conn, cursor, _):
-                # Grab whatever index we have the first time we poll,
-                # and then immediately drop away from the polling state.
-                # We don't want our increasingly-stale view of the database
-                # (which isn't even really quite accurate in terms of what we
-                # need: TODO: Should we do that?) to hold up vacuums (even
-                # though it will hold up vacuum in the real RDBMS).
-                cache.polling_state.poll(cache, conn, cursor)
-                # We'll never try to poll again, so this is ok.
-                cache.polling_state.unregister(cache)
-                del cache.poll
-                return ()
-            cache.poll = poll
+        klass = type(self) if before is None else _BeforeStorageCache
+        cache = klass(self.adapter, self.options, self.prefix,
+                      _parent=self)
         return cache
 
     def release(self):
@@ -216,9 +219,8 @@ class StorageCache(object):
         self.local_client = self.cache = _UsedAfterRelease
         self.polling_state.unregister(self)
         self.polling_state = _UsedAfterRelease
-        # We can't be used to make instances any more.
-        self.new_instance = _UsedAfterRelease
         self.object_index = None
+        self.highest_visible_tid = None
 
     def close(self, **save_args):
         """
@@ -253,7 +255,7 @@ class StorageCache(object):
                 # file for no good reason.
                 # TODO: Consider the correctness here, now that we have a
                 # more accurate cache. Should that maybe be AND?
-                return self.polling_state.save(self.local_client, save_args)
+                return self.polling_state.save(self, save_args)
             logger.debug("Cannot justify writing cache file, no hits or misses")
 
     def restore(self):
@@ -310,7 +312,7 @@ class StorageCache(object):
     def _check_tid_after_load(self, oid_int, actual_tid_int,
                               expect_tid_int=None):
         """Verify the tid of an object loaded from the database is sane."""
-        if actual_tid_int > self.object_index.highest_visible_tid:
+        if actual_tid_int > self.highest_visible_tid:
             # Strangely, the database just gave us data from a future
             # transaction. We can't give the data to ZODB because that
             # would be a consistency violation. However, the cause is
@@ -318,13 +320,13 @@ class StorageCache(object):
             # hope that the application retries successfully.
             msg = ("Got data for OID 0x%(oid_int)x from "
                    "future transaction %(actual_tid_int)d (%(got_ts)s).  "
-                   "Current transaction is %(current_tid)d (%(current_ts)s)."
+                   "Current transaction is %(hvt)s (%(current_ts)s)."
                    % {
                        'oid_int': oid_int,
                        'actual_tid_int': actual_tid_int,
-                       'current_tid': self.current_tid,
+                       'hvt': self.highest_visible_tid,
                        'got_ts': str(TimeStamp(p64(actual_tid_int))),
-                       'current_ts': str(TimeStamp(p64(self.current_tid))),
+                       'current_ts': str(TimeStamp(p64(self.highest_visible_tid))),
                    })
             raise ReadConflictError(msg)
 
@@ -373,7 +375,7 @@ class StorageCache(object):
                        'oid_int': oid_int,
                        'expect_tid_int': expect_tid_int,
                        'actual_tid_int': actual_tid_int,
-                       'current_tid': self.current_tid,
+                       'current_tid': self.highest_visible_tid,
                        'pid': os.getpid(),
                        'thread_ident': threading.current_thread(),
                    })
@@ -504,14 +506,13 @@ class StorageCache(object):
             cache[key] = (state, tid_int)
             index[oid] = tid_int
 
-    def invalidate(self, oid_int, tid_int):
+    def remove_cached_data(self, oid_int, tid_int):
         """
         See notes in `invalidate_all`.
         """
         del self.cache[(oid_int, tid_int)]
-        self.polling_state.invalidate(oid_int, tid_int)
 
-    def invalidate_all(self, oids):
+    def remove_all_cached_data_for_oids(self, oids):
         """
         Invalidate all cached data for the given OIDs.
 
@@ -527,7 +528,6 @@ class StorageCache(object):
         # self._invalidate_all(oids)
         # Remove the data too.
         self.cache.invalidate_all(oids)
-        self.polling_state.invalidate_all(oids)
 
     def tpc_begin(self):
         """Prepare temp space for objects to cache."""
@@ -580,6 +580,22 @@ class StorageCache(object):
         if changes is not None:
             return OIDSet(oid for oid, tid in changes if tid != ignore_tid)
 
+
+class _BeforeStorageCache(StorageCache):
+
+    __slots__ = ()
+
+    def poll(self, conn, cursor, _):
+        # Grab whatever index we have the first time we poll,
+        # and then immediately drop away from the polling state.
+        # We don't want our increasingly-stale view of the database
+        # (which isn't even really quite accurate in terms of what we
+        # need: TODO: Should we do that?) to hold up vacuums (even
+        # though it will hold up vacuum in the real RDBMS).
+        self.polling_state.poll(self, conn, cursor)
+        # We'll never try to poll again, so this is ok.
+        self.polling_state.unregister(self)
+        return ()
 
 class _TemporaryStorage(object):
     def __init__(self):

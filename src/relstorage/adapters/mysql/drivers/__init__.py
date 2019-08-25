@@ -63,11 +63,15 @@ class AbstractMySQLDriver(AbstractModuleDriver):
     # everywhere.
     MY_CHARSET_STMT = 'SET character_set_results = binary'
 
-
     # Make the default timezone UTC. That way UTC_TIMESTAMP()
     # and UNIX_TIMESTAMP() and FROM_UNIXTIME are all self-consistent.
     # Subclasses can set to None if they don't need to do this.
     MY_TIMEZONE_STMT = "SET time_zone = '+00:00'"
+
+    CURSOR_INIT_STMTS = (
+        MY_CHARSET_STMT,
+        MY_TIMEZONE_STMT,
+    )
 
     # TODO: MySQLdb (mysqlclient) and PyMySQL support an
     # ``init_command`` argument to connect() that could be used to
@@ -76,10 +80,9 @@ class AbstractMySQLDriver(AbstractModuleDriver):
 
     def cursor(self, conn):
         cursor = AbstractModuleDriver.cursor(self, conn)
-        if self.MY_CHARSET_STMT:
-            cursor.execute(self.MY_CHARSET_STMT)
-        if self.MY_TIMEZONE_STMT:
-            cursor.execute(self.MY_TIMEZONE_STMT)
+        for stmt in self.CURSOR_INIT_STMTS:
+            cursor.execute(stmt)
+            cursor.fetchall()
         return cursor
 
     def synchronize_cursor_for_rollback(self, cursor):

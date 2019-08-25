@@ -96,7 +96,8 @@ class AbstractTPCState(object):
             # This block (elided from the bytecode)
             # is for pylint static analysis
             self.adapter = self.load_connection = self.store_connection = self.transaction = None
-            self.prepared_txn = self.blobhelper = self.cache = None
+            self.prepared_txn = self.blobhelper = None
+            self.cache = None # type: relstorage.cache.storage_cache.StorageCache
             self.read_only = False
         for attr in AbstractTPCState.__slots__:
             val = getattr(previous_state, attr)

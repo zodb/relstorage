@@ -67,7 +67,7 @@ class PersistentCacheStorageTests(TestCase):
             self.assertEqual(tid, expected_root_tid)
         else:
             self.assert_oid_not_known(ROOT_OID, storage)
-        self.assertIsNotNone(cache.polling_state.maximum_highest_visible_tid)
+        self.assertIsNotNone(cache.polling_state.object_index.maximum_highest_visible_tid)
         return storage
 
     def __make_storage_no_pcache(self):
