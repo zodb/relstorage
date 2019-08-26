@@ -263,9 +263,10 @@ class TestPackStressTest(PostgreSQLAdapterMixin,
                     container[i] = PersistentMapping()
                     transaction.commit()
                     conn.sync()
+                    time.sleep(0.1)
                     if i % 100 == 0:
                         print('stress **********')
-                        time.sleep(0.01)
+
                 conn.close()
                 time.sleep(0.1)
 
