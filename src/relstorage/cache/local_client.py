@@ -500,7 +500,7 @@ class LocalClient(object):
         entry = self._peek(oid)
         return entry is not None and entry % tid is not None
 
-    def __getitem__(self, oid_tid):
+    def get(self, oid_tid, update_mru=True):
         oid, tid = oid_tid
         assert tid is None or tid >= 0
         decompress = self._decompress
@@ -512,7 +512,8 @@ class LocalClient(object):
                 value = entry % tid
             if value is not None:
                 self._hits += 1
-                self._cache_mru(oid) # Make an actual hit.
+                if update_mru:
+                    self._cache_mru(oid) # Make an actual hit.
             else:
                 self._misses += 1
 
@@ -521,6 +522,8 @@ class LocalClient(object):
         if value is not None:
             state, tid = value
             return decompress(state) if state else state, tid
+
+    __getitem__ = get
 
     def _age(self):
         # Age only when we're full and would thus need to evict; this

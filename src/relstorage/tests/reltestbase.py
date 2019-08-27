@@ -525,8 +525,9 @@ class GenericRelStorageTests(
             # would need to make two lookups, for committed data and
             # previous data. If we're history free, we invalidated the
             # object when the first one saved it, but we're lucky
-            # enough to find the committed data in our shared state.
-            # This happens to be the same thing as if we cleared the cache.
+            # enough to find the committed data in our shared state, as well
+            # as the previous state: we've got a storage open to a previous
+            # transaction that's letting that data stay in memory.
 
             cache_stats = storage1._cache.stats()
             __traceback_info__ = cache_stats, clear_cache
@@ -535,7 +536,7 @@ class GenericRelStorageTests(
                 self.assertEqual(cache_stats['hits'], 1)
             else:
                 self.assertEqual(cache_stats['misses'], 0)
-                self.assertEqual(cache_stats['hits'], 2 if self.keep_history else 1)
+                self.assertEqual(cache_stats['hits'], 2)
 
             data, _serialno = self._storage.load(oid, '')
             inst = zodb_unpickle(data)

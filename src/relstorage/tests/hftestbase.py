@@ -48,6 +48,13 @@ class HistoryFreeRelStorageTests(GenericRelStorageTests, ZODBTestCase):
     # This overrides certain tests so they work with a storage that
     # collects garbage but does not retain old versions.
 
+    def _dostore(self, *args, **kwargs): # pylint:disable=arguments-differ
+        result = super(HistoryFreeRelStorageTests, self)._dostore(*args, **kwargs)
+        # Finish the transaction and update our view of the database.
+        self._storage.afterCompletion()
+        self._storage.poll_invalidations()
+        return result
+
     def checkPackAllRevisions(self):
         from relstorage._compat import loads
         self._initroot()
@@ -119,7 +126,6 @@ class HistoryFreeRelStorageTests(GenericRelStorageTests, ZODBTestCase):
         revid2 = self._dostoreNP(oid, revid=revid1, data=pdumps(obj))
         obj.value = 3
         revid3 = self._dostoreNP(oid, revid=revid2, data=pdumps(obj))
-        self._storage.poll_invalidations()
         # Now make sure only the latest revision can be extracted
         __traceback_info__ = [bytes8_to_int64(x) for x in (oid, revid1, revid2)]
         raises(KeyError, self._storage.loadSerial, oid, revid1)
@@ -180,7 +186,6 @@ class HistoryFreeRelStorageTests(GenericRelStorageTests, ZODBTestCase):
         revid2 = self._dostoreNP(oid1, revid=revid1, data=pdumps(obj1))
         obj1.value = 3
         revid3 = self._dostoreNP(oid1, revid=revid2, data=pdumps(obj1))
-        self._storage.poll_invalidations()
         # Now make sure only the latest revision can be extracted
         raises(KeyError, self._storage.loadSerial, oid1, revid1)
         raises(KeyError, self._storage.loadSerial, oid1, revid2)
@@ -245,12 +250,12 @@ class HistoryFreeRelStorageTests(GenericRelStorageTests, ZODBTestCase):
         # pickle is to commit two different transactions relative to
         # revid1 that add two to _value.
 
-        # open s1
+        # open s1 at this point of time.
         s1 = self._storage.new_instance()
         # start a load transaction in s1
         s1.poll_invalidations()
 
-        # commit a change
+        # commit a change not visible to s1
         _revid2 = self._dostoreNP(oid, revid=revid1, data=zodb_pickle(obj))
 
         # commit a conflicting change using s1
@@ -264,6 +269,13 @@ class HistoryFreeRelStorageTests(GenericRelStorageTests, ZODBTestCase):
         finally:
             self._storage = main_storage
 
+        # If we don't restart our load connection,
+        # we will still read the old state.
+        data, _serialno = self._storage.load(oid, '')
+        inst = zodb_unpickle(data)
+        self.assertEqual(inst._value, 3)
+
+        self._storage.poll_invalidations()
         data, _serialno = self._storage.load(oid, '')
         inst = zodb_unpickle(data)
         self.assertEqual(inst._value, 5)

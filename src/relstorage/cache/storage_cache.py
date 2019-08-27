@@ -404,19 +404,10 @@ class StorageCache(DetachableMVCCDatabaseViewer):
         # network traffic, so it's no good going to memcache for what may be
         # a stale answer.
 
-        if not self.options.keep_history:
-            # For history-free, we can only have one state. If we
-            # think we know what it is, but they ask for something different,
-            # then there's no way it can be found.
-            # We use the most recent data we have because this is for conflict
-            # resolution.
-            index = self.polling_state.object_index
-            known_tid_int = index[oid_int] if index else None
-            if known_tid_int is not None and known_tid_int != tid_int:
-                return None
-
         cache = self.local_client
-        cache_data = cache[(oid_int, tid_int)]
+        # Don't take this as an MRU hit; if we succeed, we'll
+        # put new cached data in for this OID and do that anyway.
+        cache_data = cache.get((oid_int, tid_int), False)
         if cache_data and cache_data[1] == tid_int:
             return cache_data[0]
 

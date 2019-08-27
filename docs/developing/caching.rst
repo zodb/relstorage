@@ -4,6 +4,14 @@
  Caching with checkpoints
 ==========================
 
+.. caution::
+
+   This information only applies to RelStorage 3.0a8
+   and earlier. 3.0a9 and later use a more precise system;
+   see
+   :class:`~relstorage.cache.interfaces.IStorageCacheMVCCDatabaseCoordinator`.
+
+
 The caching strategy (both local in :class:`~relstorage.cache.storage_cache.StorageCache` and in
 memcache) includes checkpoints. Checkpoint management is a bit
 complex, but important for achieving a decent cache hit rate.
@@ -72,14 +80,15 @@ adding data very quickly.  If that happens, the instance should
 ignore the checkpoint update, with the expectation that the new checkpoint
 will be visible after the next update.
 
+API Reference
+=============
 
 .. toctree::
 
    ../relstorage.cache
    ../relstorage.cache.interfaces
-   ../relstorage.cache.cache_ring
    ../relstorage.cache.local_client
-   ../relstorage.cache.mapping
    ../relstorage.cache.persistence
    ../relstorage.cache.storage_cache
    ../relstorage.cache.trace
+   ../relstorage.cache.mvcc
