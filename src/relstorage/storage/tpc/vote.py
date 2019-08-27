@@ -134,9 +134,12 @@ class AbstractVote(AbstractTPCState):
         self.max_stored_oid = begin_state.max_stored_oid
         self.ude = begin_state.ude
         self.committing_tid_lock = committing_tid_lock # type: Optional[DatabaseLockedForTid]
-        self.invalidated_oids = set() # type: Set[bytes]
         self.count_conflicts = None
         self.lock_and_vote_times = [None, None]
+
+        # Anything that we've undone or deleted is also invalidated.
+        self.invalidated_oids = begin_state.invalidated_oids or set() # type: Set[bytes]
+
 
     def _tpc_state_extra_repr_info(self):
         return {
@@ -146,7 +149,7 @@ class AbstractVote(AbstractTPCState):
         }
 
     def enter(self, storage):
-        resolved_in_vote_oid_ints = self.__vote(storage)
+        resolved_in_vote_oid_ints = self._vote(storage)
         self.invalidated_oids.update({int64_to_8bytes(i) for i in resolved_in_vote_oid_ints})
         self.lock_and_vote_times[1] = time.time()
 
@@ -155,7 +158,7 @@ class AbstractVote(AbstractTPCState):
         mover = self.adapter.mover
         mover.store_temps(cursor, self.cache.temp_objects)
 
-    def __vote(self, storage):
+    def _vote(self, storage):
         """
         Prepare the transaction for final commit.
 
@@ -172,6 +175,7 @@ class AbstractVote(AbstractTPCState):
         # It is assumed that self._lock.acquire was called before this
         # method was called.
         cursor = self.store_connection.cursor
+        __traceback_info__ = self.store_connection, cursor
         assert cursor is not None
         adapter = self.adapter
 
@@ -233,7 +237,7 @@ class AbstractVote(AbstractTPCState):
             # It is crucial to do this only after locking the current
             # object rows in order to prevent deadlock. (The same order as a regular
             # transaction, just slightly sooner.)
-            self.__lock_and_move(vote_only=True)
+            self._lock_and_move(vote_only=True)
 
         # New storage protocol
         return invalidated_oid_ints
@@ -286,6 +290,8 @@ class AbstractVote(AbstractTPCState):
         if count_conflicts:
             logger.debug("Attempting to resolve %d conflicts", count_conflicts)
 
+        __traceback_info__ = conflicts, invalidated_oid_ints, cursor
+
         for conflict in conflicts:
             oid_int, committed_tid_int, tid_this_txn_saw_int, committed_state = conflict
             if tid_this_txn_saw_int is None:
@@ -327,7 +333,7 @@ class AbstractVote(AbstractTPCState):
         return invalidated_oid_ints
 
     @log_timed
-    def __lock_and_move(self, vote_only=False):
+    def _lock_and_move(self, vote_only=False):
         # Here's where we take the global commit lock, and
         # allocate the next available transaction id, storing it
         # into history-preserving DBs. But if someone passed us
@@ -388,7 +394,7 @@ class AbstractVote(AbstractTPCState):
         finish_entry = time.time()
         # Handle the finishing. We cannot/must not fail now.
         # TODO: Move most of this into the Finish class/module.
-        did_commit = self.__lock_and_move()
+        did_commit = self._lock_and_move()
         if did_commit:
             locks_released = time.time()
         assert self.committing_tid_lock is not None, self
@@ -452,10 +458,36 @@ class HistoryPreserving(AbstractVote):
     __slots__ = ()
 
     def __init__(self, begin_state):
-         # Using undo() requires a new TID, so if we had already begun
+        # Using undo() requires a new TID, so if we had already begun
         # a transaction by locking the database and allocating a TID,
         # we must preserve that.
         super(HistoryPreserving, self).__init__(begin_state,
                                                 begin_state.committing_tid_lock)
-        # Anything that we've undone is also invalidated.
-        self.invalidated_oids.update(begin_state.undone_oids)
+
+
+class HistoryPreservingDeleteOnly(HistoryPreserving):
+    __slots__ = ()
+
+    def _vote(self, storage):
+        if self.cache.temp_objects and self.cache.temp_objects.stored_oids:
+            raise StorageTransactionError("Cannot store and delete at the same time.")
+        # We only get here if we've deleted objects, meaning we hold their row locks.
+        # We only delete objects once we hold the commit lock.
+        assert self.committing_tid_lock
+        # Holding the commit lock put an entry in the transaction table,
+        # but we don't want to bump the TID or store that data.
+        self.adapter.txncontrol.delete_transaction(
+            self.store_connection.cursor,
+            self.committing_tid_lock.tid_int
+        )
+        self.lock_and_vote_times[0] = time.time()
+        return ()
+
+    def _lock_and_move(self, vote_only=False):
+        # We don't do the final commit,
+        # we just prepare.
+        self.prepared_txn = self.adapter.txncontrol.commit_phase1(
+            self.store_connection,
+            self.committing_tid_lock.tid_int
+        )
+        return False

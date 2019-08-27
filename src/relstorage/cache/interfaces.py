@@ -22,6 +22,9 @@ from zope.interface import Interface
 from transaction.interfaces import TransientError
 from ZODB.POSException import StorageError
 
+from relstorage.interfaces import IDetachableMVCCDatabaseViewer
+from relstorage.interfaces import IMVCCDatabaseCoordinator
+
 # Export
 from relstorage._compat import MAX_TID # pylint:disable=unused-import
 
@@ -29,6 +32,73 @@ from relstorage._compat import MAX_TID # pylint:disable=unused-import
 # pylint:disable=unexpected-special-method-signature
 # pylint:disable=signature-differs
 
+class IStorageCache(IDetachableMVCCDatabaseViewer):
+    """
+    A cache, as used by :class:`relstorage.interfaces.IRelStorage`.
+
+    Implementations do not have to be thread-safe. Use :meth:`new_instance` to
+    get an object to use concurrently.
+
+    This cache is for current objects, as viewed at the ``highest_visible_tid``
+    of this object or before. While it is possible to request older or newer
+    revisions using ``loadSerial``, such accesses are less likely to produce cache
+    hits.
+    """
+
+    def new_instance(before=None):
+        """
+        Create a new object to be used concurrently.
+
+        If *before* is given, it is an integer TID, giving the *maximum*
+        transaction that will be visible to this object (this only works
+        correctly for history-preserving storages).
+
+        .. caution::
+
+           Failing to provide *before* for a historical connection
+           will lead to consistency errors.
+        """
+
+    # TODO: Fill me in.
+
+class IStorageCacheMVCCDatabaseCoordinator(IMVCCDatabaseCoordinator):
+    """
+    Specialized cache coordinator.
+    """
+
+    # TODO: Fill me in.
+
+    def poll(cache, conn, cursor):
+        """
+        Poll for invalidations since the last taken state of the viewer.
+
+        Update the state of the viewer and update the global state maintained
+        in this coordinator.
+
+        This should be the first thing done after the *conn* is opened or
+        a transaction has begun: in fact, to ensure that the global
+        state never accidentally goes backwards, no snapshot of the database
+        should have been taken with the connection yet. The queries we execute
+        in this method should establish the snapshot for the first time.
+        """
+
+    def after_tpc_finish(viewer, tid_int, temp_objects):
+        """
+        Let the coordinator know that the registered *viewer* is
+        between transactions and can release its last snapshot.
+
+        The transaction it just committed was at *tid_int*, and it contained
+        *temp_objects*.
+
+        If *tid_int* is None, then the transaction was aborted; the viewer can still
+        release its snapshot.
+        """
+
+    def stats():
+        """
+        Return a dictionary with interesting keys and values
+        about the global state of this object.
+        """
 
 class IStateCache(Interface):
     """
@@ -51,16 +121,11 @@ class IStateCache(Interface):
 
         The returned *tid_int* must match the requested tid.
 
-        If the (oid, tid) pair isn't in the cache, return None.
-        """
+        If the ``(oid, tid)`` pair isn't in the cache, return None.
 
-    def __call__(oid, tid1, tid2):
-        """
-        The same as invoking `__getitem__((oid, tid1))` followed by
-        `__getitem__((oid, tid2))` if no result was found for the first one.
-
-        If no result is found for *tid1*, but a result is found for *tid2*,
-        then this method should cache the result at (oid, tid1) before returning.
+        A special tid value of None means that the client doesn't know the TID to ask
+        for and wants the best available; they are then required to verify
+        that the returned object is visible.
         """
 
     def __setitem__(oid_tid, state_bytes_tid):
@@ -96,31 +161,25 @@ class IStateCache(Interface):
         times.
         """
 
-    def store_checkpoints(cp0_tid, cp1_tid):
-        """
-        Store the suggested pair of checkpoints.
-        """
-
-    def get_checkpoints():
-        """
-        Return the current checkpoints as (cp0_tid, cp1_tid).
-
-        If not found, return None.
-        """
-
-    def replace_checkpoints(expected, desired):
-        """
-        Replace the current checkpoints with *desired*.
-
-        This should be as atomic as possible. If the currently stored checkpoints
-        do not match *expected*, nothing should be done.
-
-        Return a true value if the checkpoints were replaced, false otherwise.
-        """
-
     def close():
         """
         Release external resources held by this object.
+
+        This object may not be usable after this.
+        """
+
+    def new_instance():
+        """
+        Create an object sharing the same underlying data, but
+        capable of operating independently, such as in a new thread.
+
+        This may return the same object.
+        """
+
+    def release():
+        """
+        Like close, but intended to be called on child objects
+        created for MVCC using a ``new_instance`` method.
         """
 
     def flush_all():
@@ -128,15 +187,10 @@ class IStateCache(Interface):
         Clear cached data.
         """
 
-    ##
-    # Methods that are here to assist with tracing.
-    ##
-
-    def updating_delta_map(oid_tid_map):
+    def invalidate_all(oids):
         """
-        Return a new map that can (temporarily) observe set actions.
+        Remove all cached data for each of the oid integers in *oids*.
         """
-
 
 class IPersistentCache(Interface):
     """

@@ -31,6 +31,8 @@ from ZODB.tests.StorageTestBase import zodb_unpickle
 # so we need to explicitly place it at the back of the MRO.
 from ZODB.tests.util import TestCase as ZODBTestCase
 
+from relstorage._util import bytes8_to_int64
+
 from relstorage.tests.RecoveryStorage import BasicRecoveryStorage
 from relstorage.tests.RecoveryStorage import UndoableRecoveryStorage
 from relstorage.tests.reltestbase import GenericRelStorageTests
@@ -46,6 +48,13 @@ class HistoryFreeRelStorageTests(GenericRelStorageTests, ZODBTestCase):
     # This overrides certain tests so they work with a storage that
     # collects garbage but does not retain old versions.
 
+    def _dostore(self, *args, **kwargs): # pylint:disable=arguments-differ
+        result = super(HistoryFreeRelStorageTests, self)._dostore(*args, **kwargs)
+        # Finish the transaction and update our view of the database.
+        self._storage.afterCompletion()
+        self._storage.poll_invalidations()
+        return result
+
     def checkPackAllRevisions(self):
         from relstorage._compat import loads
         self._initroot()
@@ -55,30 +64,39 @@ class HistoryFreeRelStorageTests(GenericRelStorageTests, ZODBTestCase):
         obj = self._newobj()
         oid = obj.getoid()
         obj.value = 1
+        storage = self._storage
         # Commit three different revisions
-        revid1 = self._dostoreNP(oid, data=pdumps(obj))
+        tid1 = self._dostoreNP(oid, data=pdumps(obj))
+        storage.poll_invalidations()
         obj.value = 2
-        revid2 = self._dostoreNP(oid, revid=revid1, data=pdumps(obj))
+        tid2 = self._dostoreNP(oid, revid=tid1, data=pdumps(obj))
+        storage.poll_invalidations()
+
         obj.value = 3
-        revid3 = self._dostoreNP(oid, revid=revid2, data=pdumps(obj))
+        tid3 = self._dostoreNP(oid, revid=tid2, data=pdumps(obj))
+        storage.poll_invalidations()
+
         # Now make sure only the latest revision can be extracted
-        raises(KeyError, self._storage.loadSerial, oid, revid1)
-        raises(KeyError, self._storage.loadSerial, oid, revid2)
-        data = self._storage.loadSerial(oid, revid3)
+        for tid in tid1, tid2:
+            __traceback_info__ = tid, tid1, tid2
+            with raises(KeyError):
+                storage.loadSerial(oid, tid)
+
+        data = storage.loadSerial(oid, tid3)
         pobj = loads(data)
         eq(pobj.getoid(), oid)
         eq(pobj.value, 3)
 
-        self._storage.pack(self._storage.lastTransactionInt() + 1, referencesf)
-        self._storage.sync()
+        storage.pack(self._storage.lastTransactionInt() + 1, referencesf)
+
         # All revisions of the object should be gone, since there is no
         # reference from the root object to this object.
-        for revid in (revid1, revid2, revid3):
-            __traceback_info__ = oid, revid
+        for tid in tid1, tid2, tid3:
+            __traceback_info__ = oid, tid
             with raises(KeyError):
-                self._storage.loadSerial(oid, revid)
+                storage.loadSerial(oid, tid)
         with raises(KeyError):
-            self._storage.load(oid)
+            storage.load(oid)
 
     def checkPackJustOldRevisions(self):
         eq = self.assertEqual
@@ -109,6 +127,7 @@ class HistoryFreeRelStorageTests(GenericRelStorageTests, ZODBTestCase):
         obj.value = 3
         revid3 = self._dostoreNP(oid, revid=revid2, data=pdumps(obj))
         # Now make sure only the latest revision can be extracted
+        __traceback_info__ = [bytes8_to_int64(x) for x in (oid, revid1, revid2)]
         raises(KeyError, self._storage.loadSerial, oid, revid1)
         raises(KeyError, self._storage.loadSerial, oid, revid2)
         data = self._storage.loadSerial(oid, revid3)
@@ -117,10 +136,7 @@ class HistoryFreeRelStorageTests(GenericRelStorageTests, ZODBTestCase):
         eq(pobj.value, 3)
         # Now pack.  The object should stay alive because it's pointed
         # to by the root.
-        now = packtime = time.time()
-        while packtime <= now:
-            packtime = time.time()
-        self._storage.pack(packtime, referencesf)
+        self._storage.pack(self._storage.lastTransactionInt(), referencesf)
         # Make sure the revisions are gone, but that object zero and revision
         # 3 are still there and correct
         data, revid = self._storage.load(ZERO, '')
@@ -234,12 +250,12 @@ class HistoryFreeRelStorageTests(GenericRelStorageTests, ZODBTestCase):
         # pickle is to commit two different transactions relative to
         # revid1 that add two to _value.
 
-        # open s1
+        # open s1 at this point of time.
         s1 = self._storage.new_instance()
         # start a load transaction in s1
         s1.poll_invalidations()
 
-        # commit a change
+        # commit a change not visible to s1
         _revid2 = self._dostoreNP(oid, revid=revid1, data=zodb_pickle(obj))
 
         # commit a conflicting change using s1
@@ -253,6 +269,13 @@ class HistoryFreeRelStorageTests(GenericRelStorageTests, ZODBTestCase):
         finally:
             self._storage = main_storage
 
+        # If we don't restart our load connection,
+        # we will still read the old state.
+        data, _serialno = self._storage.load(oid, '')
+        inst = zodb_unpickle(data)
+        self.assertEqual(inst._value, 3)
+
+        self._storage.poll_invalidations()
         data, _serialno = self._storage.load(oid, '')
         inst = zodb_unpickle(data)
         self.assertEqual(inst._value, 5)

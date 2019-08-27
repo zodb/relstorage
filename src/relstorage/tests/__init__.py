@@ -54,6 +54,8 @@ class TestCase(unittest.TestCase):
         None
     ) or _fakeSubTest
 
+    none = unittest.TestCase.assertIsNone
+
     def setUp(self):
         super(TestCase, self).setUp()
         # This is done by ZODB.tests.util.TestCase, but
@@ -118,8 +120,10 @@ class TestCase(unittest.TestCase):
         return o
 
     def tearDown(self):
-        transaction.abort()
-        super(TestCase, self).tearDown()
+        try:
+            transaction.abort()
+        finally:
+            super(TestCase, self).tearDown()
 
     def assertIsEmpty(self, container):
         self.assertLength(container, 0)
@@ -290,6 +294,8 @@ class MockConnectionManager(object):
         if hasattr(conn, 'rollback'):
             conn.rollback()
 
+    rollback_store_quietly = rollback_quietly
+
     def rollback_and_close(self, conn, cursor):
         self.rollback_quietly(conn, cursor)
         if conn:
@@ -331,15 +337,21 @@ class MockQuery(object):
 class MockPoller(object):
 
     poll_query = MockQuery('SELECT MAX(tid) FROM object_state')
-
+    last_requested_range = None
     def __init__(self, driver=None):
         self.driver = driver or MockDriver()
         self.changes = []  # [(oid, tid)]
+        self.poll_tid = 1
+        self.poll_changes = None
+
+    def poll_invalidations(self, _conn, _cursor, _since, _ignore):
+        return self.poll_changes, self.poll_tid
 
     def list_changes(self, _cursor, after_tid, last_tid):
         # Return a list, because the caller is allowed
         # to assume a length. Return exactly the item in the list because
         # it may be a type other than a tuple
+        self.last_requested_range = (after_tid, last_tid)
         return [
             item
             for item in self.changes

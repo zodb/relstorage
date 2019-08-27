@@ -7,6 +7,10 @@
 
 - Several minor logging changes.
 
+- Fix importing RelStorage when ``zope.schema`` is not installed.
+  ``zope.schema`` is intended to be a test dependency and optional for
+  production deployments. Reported in :issue:`334` by Jonathan Lung.
+
 - Make the gevent MySQL driver more efficient at avoiding needless  waits.
 
 - Due to a bug in MySQL (incorrectly rounding the 'minute' value of a
@@ -16,6 +20,65 @@
 - Fix leaking an internal value for ``innodb_lock_timeout`` across
   commits on MySQL. This could lead to ``tpc_vote`` blocking longer
   than desired. See :issue:`331`.
+
+- Fix ``undo`` to purge the objects whose transaction was revoked from
+  the cache.
+
+- Make historical storages read-only, raising
+  ``ReadOnlyHistoryError``, during the commit process. Previously this
+  was only enforced at the ``Connection`` level.
+
+- Rewrite the cache to understand the MVCC nature of the connections
+  that use it.
+
+  This eliminates the use of "checkpoints." Checkpoints established a
+  sort of index for objects to allow them to be found in the cache
+  without necessarily knowing their ``_p_serial`` value. To achieve
+  good hit rates in large databases, large values for the
+  ``cache-delta-size-limit`` were needed, but if there were lots of
+  writes, polling to update those large checkpoints could become very
+  expensive. Because checkpoints were separate in each ZODB connection
+  in a process, and because when one connection changed its
+  checkpoints every other connection would also change its checkpoints
+  on the next access, this could quickly become a problem in highly
+  concurrent environments (many connections making many large database
+  queries at the same time). See :issue:`311`.
+
+  The new system uses a series of chained maps representing polling
+  points to build the same index data. All connections can share all
+  the maps for their view of the database and earlier. New polls add
+  new maps to the front of the list as needed, and old mapps are
+  removed once they are no longer needed by any active transaction.
+  This simulates the underlying database's MVCC approach.
+
+  Other benefits of this approach include:
+
+  - No more large polls. While each connection still polls for each
+    transaction it enters, they now share state and only poll against
+    the last time a poll occurred, not the last time they were used.
+    The result should be smaller, more predictable polling.
+
+  - Having a model of object visibility allows the cache to use more
+    efficient data structures: it can now use the smaller LOBTree to
+    reduce the memory occupied by the cache. It also requires
+    fewer cache entries overall to store multiple revisions of an
+    object, reducing the overhead. And there are no more key copies
+    required after a checkpoint change, again reducing overhead and
+    making the LRU algorithm more efficient.
+
+  - The cache's LRU algorithm is now at the object level, not the
+    object/serial pair.
+
+  - Objects that are known to have been changed but whose old revision
+    is still in the cache are preemptively removed when no references
+    to them are possible, reducing cache memory usage.
+
+  - The persistent cache can now guarantee not to write out data that
+    it knows to be stale.
+
+  Dropping checkpoints probably makes memcache less effective, but
+  memcache hasn't been recommended for awhile.
+
 
 3.0a8 (2019-08-13)
 ==================
@@ -81,6 +144,10 @@
   It's not clear whether these will be useful, so they are not
   officially options yet but they may become so. Feedback is
   appreciated! See :issue:`323`.
+
+  .. note::
+
+     These were removed in 3.0a9.
 
 3.0a7 (2019-08-07)
 ==================

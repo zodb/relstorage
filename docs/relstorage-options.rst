@@ -28,6 +28,16 @@ keep-history
         ZODB-level undo, but also grows more quickly and requires extensive
         packing on a regular basis.
 
+        .. warning::
+
+           Using ZODB's time-travel feature to get historical
+           connections (``DB.open(before=a_timestamp)``) will result
+           in RDBMS connections being left open in a transaction until
+           they are removed from the ZODB historical connection pool
+           and closed. PostgreSQL refers to this state as "idle in
+           transaction", and it ties up certain MVCC resources on the
+           RDBMS server.
+
         If this option is set to false, the adapter will create and
         use a history-free database schema. Undo will not be supported,
         but the database will not grow as quickly. The database will
@@ -415,25 +425,36 @@ cache-local-compression
         .. versionadded:: 1.6
 
 cache-delta-size-limit
-        This is an advanced option. RelStorage uses :ref:`a system of
-        checkpoints <caching-checkpoints>` to improve the cache hit rate. This option
-        configures how many new objects should be stored before creating a
-        new checkpoint.
-
-        For write heavy workloads, increasing this can be very
-        beneficial. The cost is about 300K of memory for every 10000
-        on CPython.
+        This is an advanced option related to the MVCC implementation
+        used by RelStorage's cache.
 
         The default is 100,000 on CPython, 50,000 on PyPy.
+
+        .. versionchanged:: 3.0a9
+           This parameter has changed meanings. Previously, it
+           controlled a memory allocation per-ZODB connection, and it
+           also controlled how often each connection would have to
+           make an expensive database query. Smaller values of around
+           20,000 are appropriate on these older versions.
+
+           In 3.0a9 this is a global value shared among all
+           connections. It is no longer directly related to polling,
+           but if a read connection is open for more new or changed
+           objects than this limit, the next time the connection is
+           used it will drop its ZODB object cache rather than attempt
+           to pick through the invalidations. Idle connections like
+           that may indicate a ZODB connection pool that's too large;
+           consider enabling the idle connection timeout.
+
+        .. versionchanged:: 3.0a3
+           Increase the sizes again. With better persistent caching,
+           these become increasingly important.
 
         .. versionchanged:: 2.0b7
            Double the default size from 10000 to 20000 on CPython. The
            use of LLBTree for the internal data structure means we use
            much less memory than we did before.
 
-        .. versionchanged:: 3.0a3
-           Increase the sizes again. With better persistent caching,
-           these become increasingly important.
 
 Persistent Local Caching
 ~~~~~~~~~~~~~~~~~~~~~~~~

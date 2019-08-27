@@ -21,6 +21,7 @@ from .dialect import DialectAware
 
 from .select import Selectable
 from .insert import Insertable
+from .insert import Deletable
 
 class Column(ExpressionOperatorMixin,
              Resolvable):
@@ -71,6 +72,7 @@ class SchemaItem(object):
 
 class Table(Selectable,
             Insertable,
+            Deletable,
             ParamMixin,
             SchemaItem):
     """

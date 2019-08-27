@@ -8,48 +8,15 @@ from __future__ import division
 from __future__ import print_function
 
 from .query import Query
-from .query import Clause
 from .query import ColumnList
+from .query import where as _where
+from .query import OrderBy
 from ._util import copy
 
 from .ast import TextNode
 from .ast import resolved_against
 
-from .expressions import And
 from .expressions import EmptyExpression
-
-class WhereClause(Clause):
-
-    def __init__(self, expression):
-        self.expression = expression
-
-    def and_(self, expression):
-        expression = And(self.expression, expression)
-        new = copy(self)
-        new.expression = expression
-        return new
-
-    def __compile_visit__(self, compiler):
-        compiler.emit_keyword(' WHERE')
-        compiler.visit_grouped(self.expression)
-
-class OrderBy(Clause):
-
-    def __init__(self, expression, dir):
-        self.expression = expression
-        self.dir = dir
-
-    def __compile_visit__(self, compiler):
-        compiler.emit(' ORDER BY ')
-        compiler.visit(self.expression)
-        if self.dir:
-            compiler.emit(' ' + self.dir)
-
-
-def _where(expression):
-    if expression:
-        return WhereClause(expression)
-
 
 class _SelectColumns(ColumnList):
 

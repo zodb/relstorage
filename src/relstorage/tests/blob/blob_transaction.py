@@ -143,14 +143,14 @@ class TestBlobTransactionMixin(TestBlobMixin):
         # transaction, and we can write to a single blob using
         # multiple handles.
         blob1, conn1 = self._make_and_commit_blob(close=False)
+        root = conn1.root()
         with blob1.open('a') as f:
             f.write(b'woot')
 
-        root = conn1.root()
         blob1_second_object = root['blob1']
-        assert blob1_second_object._p_oid == blob1._p_oid
-        # in fact it's actually the same object.
-        assert blob1_second_object is blob1
+        self.assertEqual(blob1_second_object._p_oid, blob1._p_oid)
+        self.assertIs(blob1_second_object, blob1)
+
         with blob1_second_object.open('a') as f:
             f.write(b'!')
 

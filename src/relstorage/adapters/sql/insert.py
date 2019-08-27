@@ -10,6 +10,7 @@ from __future__ import print_function
 from zope.interface import implementer
 
 from .query import Query
+from .query import where
 from ._util import copy
 from .query import ColumnList
 from .ast import resolved_against
@@ -87,3 +88,27 @@ class Insertable(object):
 
     def insert(self, *columns):
         return Insert(self, *columns)
+
+@implementer(ITypedParams)
+class Delete(Query):
+
+    def __init__(self, table):
+        super(Delete, self).__init__()
+        self.table = table
+        self._where = None
+
+    def __compile_visit__(self, compiler):
+        compiler.emit_keyword('DELETE FROM')
+        compiler.visit(self.table)
+        if self._where:
+            compiler.visit(self._where)
+
+    def where(self, expression):
+        expression = expression.resolve_against(self.table)
+        s = copy(self)
+        s._where = where(expression)
+        return s
+
+class Deletable(object):
+    def delete(self):
+        return Delete(self)

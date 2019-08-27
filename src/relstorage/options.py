@@ -106,9 +106,6 @@ class Options(object):
     cache_local_dir = None
     #: Switch checkpoints after this many writes
     cache_delta_size_limit = 100000 if not PYPY else 50000
-    #: Implementation of ILRUCache to use for local cache
-    #: storage.
-    cache_local_storage = None
 
     #: How long to wait for a commit lock, in seconds.
     commit_lock_timeout = 30
@@ -119,12 +116,6 @@ class Options(object):
     create_schema = True
     #: Which database driver to use
     driver = 'auto'
-
-    # If share_local_cache is off, each storage instance has a private
-    # cache rather than a shared cache.  This option exists mainly for
-    # simulating disconnected caches in tests and can't be set from ZConfig.
-    share_local_cache = True
-
 
     # Deprecated things
     #: How many persistent cache files to keep
@@ -166,9 +157,6 @@ class Options(object):
                 )
 
             setattr(self, key, value)
-        if isinstance(self.cache_local_storage, str):
-            from zope.dottedname import resolve as dottedname
-            self.cache_local_storage = dottedname.resolve(self.cache_local_storage)
 
     @classmethod
     def copy_valid_options(cls, other_options):
@@ -207,3 +195,5 @@ class Options(object):
         options = dict(self.__dict__)
         options.update(kw)
         return self.__class__(**options)
+
+    new_instance = copy

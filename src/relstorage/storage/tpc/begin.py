@@ -34,6 +34,7 @@ from . import AbstractTPCState
 from .vote import DatabaseLockedForTid
 from .vote import HistoryFree as HFVoteFactory
 from .vote import HistoryPreserving as HPVoteFactory
+from .vote import HistoryPreservingDeleteOnly as HPDeleteOnlyVoteFactory
 
 
 class TransactionConflictsWithItselfError(ReadConflictError):
@@ -64,13 +65,17 @@ class AbstractBegin(AbstractTPCState):
         # The factory we call to produce a voting state. Must return
         # an object with an enter() method.
         'tpc_vote_factory',
+
+        # OIDs of things we have deleted or undone.
+        # Stored in their 8 byte form
+        'invalidated_oids',
     )
 
     _DEFAULT_TPC_VOTE_FACTORY = _BadFactory # type: Callable[..., AbstractTPCState]
 
     def __init__(self, previous_state, transaction):
         super(AbstractBegin, self).__init__(previous_state, transaction)
-        #self.getTid = None
+        self.invalidated_oids = ()
         self.max_stored_oid = 0 # type: int
         # We'll replace this later with the right type when it's needed.
         self.required_tids = {} # type: Dict[int, int]
@@ -166,6 +171,12 @@ class AbstractBegin(AbstractTPCState):
         # just before tpc_vote(), so there's no real reason not to
         # just defer it a bit until we do it in bulk for vote.
 
+    def _invalidated_oids(self, *oid_bytes):
+        if not self.invalidated_oids:
+            self.invalidated_oids = set()
+        self.invalidated_oids.update(oid_bytes)
+
+
     def deleteObject(self, oid, oldserial, transaction):
         """
         This method operates directly against the ``object_state`` table;
@@ -174,6 +185,17 @@ class AbstractBegin(AbstractTPCState):
         This method is only expected to be called when performing
         ``IExternalGC`` operations (e.g., from zc.zodbdgc
         or from ZODB/tests/IExternalGC.test).
+
+        In history-free mode, deleting objects does not allocate
+        a new tid (well, it allocates it, but there's no place to store
+        it). In history preserving mode, it will wind up allocating a tid
+        to store the empty transaction (only previous states were undone)
+
+        TODO: This needs a better, staged implementation. I think it is
+           highly likely to deadlock now if anything happened to be reading
+           those rows.
+        XXX: If we have blobs in a non-shared disk location, this does not
+           remove them.
         """
         if transaction is not self.transaction: # pragma: no cover
             raise StorageTransactionError(self, transaction)
@@ -187,9 +209,12 @@ class AbstractBegin(AbstractTPCState):
         # process, and in case we do have other transactions that could theoretically
         # see this state, and to relieve memory pressure on local/global caches,
         # we do go ahead and invalidate a cached entry.
+        # TODO: We need a distinct name for invalidate, so we can differentiate
+        # between why we're doing it. Did we write a newer version? Did we
+        # delete a specific verison? Etc.
         oid_int = bytes8_to_int64(oid)
         tid_int = bytes8_to_int64(oldserial)
-        self.cache.invalidate(oid_int, tid_int)
+        self.cache.remove_cached_data(oid_int, tid_int)
 
         # We delegate the actual operation to the adapter's packundo,
         # just like native pack
@@ -198,7 +223,9 @@ class AbstractBegin(AbstractTPCState):
         # and a tpc_finish.
         # The interface doesn't specify a return value, so for testing
         # we return the count of rows deleted (should be 1 if successful)
-        return self.adapter.packundo.deleteObject(cursor, oid, oldserial)
+        deleted = self.adapter.packundo.deleteObject(cursor, oid, oldserial)
+        self._invalidated_oids(oid)
+        return deleted
 
 
 class HistoryFree(AbstractBegin):
@@ -211,10 +238,7 @@ class HistoryFree(AbstractBegin):
 class HistoryPreserving(AbstractBegin):
 
     __slots__ = (
-        # Stored in their 8 byte form
-        'undone_oids',
-
-        # If we use undo(), we have to allocate a TID, which means
+        # If we use undo() or deleteObject(), we have to allocate a TID, which means
         # we have to lock the database. Not cool.
         'committing_tid_lock',
     )
@@ -223,14 +247,40 @@ class HistoryPreserving(AbstractBegin):
 
     def __init__(self, storage, transaction):
         AbstractBegin.__init__(self, storage, transaction)
-        self.undone_oids = ()
         self.committing_tid_lock = None
+
+    def _obtain_commit_lock(self, cursor):
+        if self.committing_tid_lock is None:
+            # Note that _prepare_tid acquires the commit lock.
+            # The commit lock must be acquired after the pack lock
+            # because the database adapters also acquire in that
+            # order during packing.
+            tid_lock = DatabaseLockedForTid.lock_database_for_next_tid(
+                cursor, self.adapter, self.ude)
+            self.committing_tid_lock = tid_lock
+
+    def deleteObject(self, oid, oldserial, transaction):
+        # XXX: Maybe we don't need the commit lock at all? Since
+        # theoretically these are unreachable? Our custom
+        # vote stage just removes this transaction anyway; maybe it
+        # can skip the committing.
+        self._obtain_commit_lock(self.store_connection.cursor)
+        # A transaction that deletes objects can *only* delete objects.
+        # That way we don't need to store an entry in the transaction table
+        # (and add extra bloat to the DB; that kind of defeats the point of
+        # deleting objects).
+        self.tpc_vote_factory = HPDeleteOnlyVoteFactory
+        return super(HistoryPreserving, self).deleteObject(oid, oldserial, transaction)
 
     def undo(self, transaction_id, transaction):
         """
         This method temporarily holds the pack lock, releasing it when
         done, and it also holds the commit lock, keeping it held for
         the next phase.
+
+        Returns an iterable of ``(oid_int, tid_int)`` pairs giving the
+        items that were restored and are now current. All of those oids that
+        had any data stored for ``transaction_id`` are now invalid.
         """
         # Typically if this is called, the store/restore methods will *not* be
         # called, but there's not a strict guarantee about that.
@@ -251,19 +301,22 @@ class HistoryPreserving(AbstractBegin):
         adapter.locker.hold_pack_lock(cursor)
         try:
             adapter.packundo.verify_undoable(cursor, undo_tid_int)
-            if self.committing_tid_lock is None:
-                # Note that _prepare_tid acquires the commit lock.
-                # The commit lock must be acquired after the pack lock
-                # because the database adapters also acquire in that
-                # order during packing.
-                tid_lock = DatabaseLockedForTid.lock_database_for_next_tid(
-                    cursor, adapter, self.ude)
-                self.committing_tid_lock = tid_lock
+            self._obtain_commit_lock(cursor)
 
             self_tid_int = self.committing_tid_lock.tid_int
             copied = adapter.packundo.undo(
                 cursor, undo_tid_int, self_tid_int)
-            oids = [int64_to_8bytes(oid_int) for oid_int, _ in copied]
+
+            # Invalidate all cached data for these oids. We have a
+            # brand new transaction ID that's greater than any they
+            # had before. In history-preserving mode, there could
+            # still be other valid versions. See notes in packundo:
+            # In theory we could be undoing a transaction several generations in the
+            # past where the object had multiple intermediate states, but in practice
+            # we're probably just undoing the latest state. Still, play it
+            # a bit safer.
+            oid_ints = [oid_int for oid_int, _ in copied]
+            self.cache.remove_all_cached_data_for_oids(oid_ints)
 
             # Update the current object pointers immediately, so that
             # subsequent undo operations within this transaction will see
@@ -273,8 +326,9 @@ class HistoryPreserving(AbstractBegin):
             self.blobhelper.copy_undone(copied,
                                         self.committing_tid_lock.tid)
 
-            if not self.undone_oids:
-                self.undone_oids = set()
-            self.undone_oids.update(oids)
+            oids = [int64_to_8bytes(oid_int) for oid_int in oid_ints]
+            self._invalidated_oids(*oids)
+
+            return copied
         finally:
             adapter.locker.release_pack_lock(cursor)

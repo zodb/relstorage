@@ -31,6 +31,8 @@ from ZODB import ConflictResolution
 from ZODB.mvccadapter import HistoricalStorageAdapter
 
 from ZODB.POSException import ReadConflictError
+from ZODB.POSException import ReadOnlyError
+from ZODB.POSException import ReadOnlyHistoryError
 
 from ZODB.utils import z64
 from zope import interface
@@ -50,7 +52,7 @@ from .._compat import clear_frames
 from .._compat import metricmethod
 from .._util import int64_to_8bytes
 from .._util import bytes8_to_int64
-
+from .._compat import OID_SET_TYPE
 
 from .transaction_iterator import TransactionIterator
 
@@ -72,13 +74,14 @@ from .tpc.begin import HistoryPreserving
 from .tpc.restore import Restore
 
 from .util import copy_storage_methods
+from .util import make_cannot_write
 from .interfaces import StorageDisconnectedDuringCommit
 
 __all__ = [
     'RelStorage',
 ]
 
-log = logging.getLogger("relstorage")
+log = logger = logging.getLogger("relstorage")
 
 
 class _ClosedCache(object):
@@ -88,6 +91,10 @@ class _ClosedCache(object):
         "does nothing"
 
     release = close
+    object_index = ()
+    highest_visible_tid = None
+    stats = lambda s: {'closed': True}
+    afterCompletion = lambda s, c: None
 
 @implementer(IRelStorage)
 class RelStorage(LegacyMethodsMixin,
@@ -102,6 +109,7 @@ class RelStorage(LegacyMethodsMixin,
     _adapter = None
     _options = None
     _is_read_only = False
+    _read_only_error = ReadOnlyError
     # _ltid is the ID of the last transaction committed by this instance.
     _ltid = z64
 
@@ -110,9 +118,6 @@ class RelStorage(LegacyMethodsMixin,
 
     # _cache if set is a StorageCache object.
     _cache = None
-
-    # _prev_polled_tid contains the tid at the previous poll
-    _prev_polled_tid = None
 
     # If the blob directory is set, blobhelper is a BlobHelper.
     blobhelper = BlobHelper(None, None)
@@ -128,8 +133,8 @@ class RelStorage(LegacyMethodsMixin,
     # to the same database.
     _instances = ()
 
-    _load_connection = None
-    _store_connection = None
+    _load_connection = ClosedConnection()
+    _store_connection = ClosedConnection()
     _tpc_begin_factory = None
 
     _oids = ReadOnlyOIDs()
@@ -188,10 +193,10 @@ class RelStorage(LegacyMethodsMixin,
         self._instances = []
 
         self._load_connection = LoadConnection(self._adapter.connmanager)
-        # This creates a reference cycle that won't go away until we release()
-        # or close()
         self._load_connection.on_first_use = self.__on_load_first_use
-        self._store_connection = StoreConnection(self._adapter.connmanager)
+        self.__queued_changes = OID_SET_TYPE()
+        if not self._is_read_only:
+            self._store_connection = StoreConnection(self._adapter.connmanager)
 
         if cache is not None:
             self._cache = cache
@@ -205,11 +210,6 @@ class RelStorage(LegacyMethodsMixin,
                 prefix = prefix.replace(' ', '_')
                 options.cache_prefix = prefix
             self._cache = StorageCache(adapter, options, prefix)
-
-        # Creating the storage cache may have loaded cache files, and if so,
-        # we have a previous tid state.
-        if self._cache.current_tid is not None:
-            self._prev_polled_tid = self._cache.current_tid
 
         if blobhelper is not None:
             self.blobhelper = blobhelper
@@ -268,17 +268,23 @@ class RelStorage(LegacyMethodsMixin,
             self._cache
         )
 
-    def new_instance(self):
+    def new_instance(self, before=None):
         """Creates and returns another storage instance.
 
         See ZODB.interfaces.IMVCCStorage.
         """
+        options = self._options
+        if before and not self._options.read_only:
+            options = self._options.new_instance(read_only=True)
         adapter = self._adapter.new_instance()
-        cache = self._cache.new_instance()
+        cache = self._cache.new_instance(before=before)
         blobhelper = self.blobhelper.new_instance(adapter=adapter)
         other = type(self)(adapter=adapter, name=self.__name__,
-                           create=False, options=self._options, cache=cache,
+                           create=False, options=options, cache=cache,
                            blobhelper=blobhelper)
+        if before:
+            other._read_only_error = ReadOnlyHistoryError
+            other.tpc_begin = make_cannot_write(other, other.tpc_begin)
         # NOTE: We're depending on the GIL (or list implementation)
         # for thread safety here.
         self._instances.append(weakref.ref(other, self._instances.remove))
@@ -293,15 +299,37 @@ class RelStorage(LegacyMethodsMixin,
         return other
 
     def before_instance(self, before):
-        # Implement this method of MVCCAdapterInstance
-        # (possibly destined for IMVCCStorage) as a small optimization
-        # in ZODB5 that can eventually simplify ZODB.Connection.Connection
-        # XXX: 5.0a2 doesn't forward the release method, so we leak
-        # open connections.
-        i = self.new_instance()
+        """
+        Return a historical connection for the given *before* tid.
+
+        The connection is read-only, and that is enforced at this level.
+        """
+        # XXX This might need some work to better adapt the cache? We
+        # can *know* that we're pinned to see older transactions, so
+        # our TID doesn't need to move forward, and we don't need to
+        # poll. We're read-only so we'll never be joined to a
+        # transaction or commit, we'll never have invalidations. The
+        # HistoricalStorageAdapter blocks sync() and
+        # poll_invalidations() from being called on this instance, but
+        # our load connection is going to do that automatically the
+        # first time it's accessed after a transaction
+        # rollback...which, since we're not joined to a transaction,
+        # should never happen...except for afterCompletion(), which
+        # the ZODB connection has called on it for every transaction
+        # whether it's joined or not...but the HistoricalStorageAdapter
+        # doesn't implement that *either*, so it never makes it down to
+        # this level. This means our load connection can stay open and
+        # un-rolled-back for quite a long time, which is probably not great.
+        i = self.new_instance(before=before)
         x = HistoricalStorageAdapter(i, before)
-        x.release = i.release
         return x
+
+    @property
+    def highest_visible_tid(self):
+        cache_tid = self._cache.highest_visible_tid or 0
+        committed_tid = bytes8_to_int64(self._ltid)
+        # In case we haven't polled yet.
+        return max(cache_tid, committed_tid)
 
     def zap_all(self, **kwargs):
         """Clear all objects and transactions out of the database.
@@ -333,6 +361,8 @@ class RelStorage(LegacyMethodsMixin,
         self._oids = None
         self._load_connection = ClosedConnection()
         self._store_connection = ClosedConnection()
+        if not self._instances:
+            self._closed = True
 
     def close(self):
         """Close the storage and all instances."""
@@ -351,7 +381,7 @@ class RelStorage(LegacyMethodsMixin,
             if instance is not None:
                 instance.close()
         self._instances = ()
-
+        logger.debug("Closing storage cache with stats %s", self._cache.stats())
         self._cache.close()
         self._cache = _ClosedCache()
 
@@ -477,13 +507,13 @@ class RelStorage(LegacyMethodsMixin,
             raise
 
     def lastTransaction(self):
-        if self._ltid == z64 and self._prev_polled_tid is None:
+        if self._ltid == z64 and self._cache.highest_visible_tid is None:
             # We haven't committed *or* polled for transactions,
             # so our MVCC state is "floating".
             # Read directly from the database to get the latest value,
             return int64_to_8bytes(self._adapter.txncontrol.get_tid(self._load_connection.cursor))
 
-        return max(self._ltid, int64_to_8bytes(self._prev_polled_tid or 0))
+        return max(self._ltid, int64_to_8bytes(self._cache.highest_visible_tid or 0))
 
     def lastTransactionInt(self):
         return bytes8_to_int64(self.lastTransaction())
@@ -501,20 +531,27 @@ class RelStorage(LegacyMethodsMixin,
         # Note that this method exists mainly to deal with read-only
         # transactions that don't go through 2-phase commit (although
         # it's called for all transactions). For this reason, we only
-        # have to roll back the load connection. The store connection
+        # have to roll back the load connection. (The store connection
         # is completed during normal write-transaction commit or
-        # abort.
+        # abort.)
 
         # The next time we use the load connection, it will need to poll
         # and will call our __on_first_use.
         # Typically our next call from the ZODB Connection will be from its
         # `newTransaction` method, a forced `sync` followed by `poll_invalidations`.
 
+        # As with `poll_invalidations`, the cache needs to know about transaction
+        # boundaries like this to optimize polling for changes and invalidations.
+        # If we were a write transaction, that's already done by the call to ``after_tpc_finish``,
+        # but for a read-only transaction, it wouldn't happen. So for this reason,
+        # as with `poll_invalidations`, the cache is in charge.
+
         # This doesn't use restart_and_call() or even just restart() because we don't
         # need to do those checks yet, we just want to quietly rollback.
         # They both rollback; the difference is that restart_load checks for replicas,
         # and calls any hooks needed.
-        self._load_connection.rollback_quietly()
+        self._cache.afterCompletion(self._load_connection)
+
 
     def sync(self, force=True):
         """
@@ -575,14 +612,16 @@ class RelStorage(LegacyMethodsMixin,
         # __on_load_first_use is also the function we gave the LoadConnection to automatically
         # call when we access the cursor for the first time. In this situation, we optimize
         # for when the function is the same and only call it once.
-        changed_oids, new_polled_tid = self._load_connection.restart_and_call(
+        self._load_connection.restart_and_call(
             self.__on_load_first_use
         )
         # Now we're in a fully synced state, meaning
         # we don't need to do anything fancy with the load connection
         # anymore. Let it know that.
         self._load_connection.active = True
-        self._prev_polled_tid = new_polled_tid
+
+        changed_oids = self.__queued_changes
+        self.__queued_changes = OID_SET_TYPE()
 
         if changed_oids is None:
             oids = None
@@ -592,7 +631,7 @@ class RelStorage(LegacyMethodsMixin,
         return oids
 
     def __stale(self, stale_error):
-        # Allow GC to do its thing with the locals
+        # Allow GC to do its thing with the locals, don't hold them indefinitely
         clear_frames(sys.exc_info()[2])
         replacements = {}
         my_ns = vars(self)
@@ -642,42 +681,65 @@ class RelStorage(LegacyMethodsMixin,
 
         Move the component objects of this object into or out of the
         stale state as appropriate.
+
+        Primarily in tests which directly use storage APIs, this may
+        be called automatically, between transactions, when a
+        Connection is not in use to receive invalidations. For that
+        reason, we queue changes seen here as we keep moving forward
+        and can apply them all when a connection asks us.
         """
+
         # Ignore changes made by the last transaction committed
-        # by this connection.
+        # by this connection, we don't want to ghost objects that we're sure
+        # are up-to-date unless someone else has changed them.
+        # Note that transactions can happen between us committing and polling.
         if self._ltid is not None:
             ignore_tid = bytes8_to_int64(self._ltid)
         else:
             ignore_tid = None
-        prev = self._prev_polled_tid
 
         # get a list of changed OIDs and the most recent tid
         try:
-            changes, new_polled_tid = self._adapter.poller.poll_invalidations(
+            changes = self._cache.poll(
                 conn, cursor,
-                prev, ignore_tid
+                ignore_tid
             )
         except ReadConflictError as e:
             # The database connection is stale, but postpone this
             # error until the application tries to read or write something.
             # XXX: We probably need to drop our pickle cache? At least the local
             # delta_after* maps/current_tid/checkpoints?
+
+            # XXX: Answer: Yes, yes we do. This was observed as an
+            # issue in the zodbconvert tests, when the destination
+            # storage configuration loaded to do the conversion and
+            # zapping on didn't have matching persistent cache
+            # information as the storage configuration that had
+            # initially populated the destination (in order to verify
+            # zapping). As our cache implementation got better and
+            # better, we suddenly found that without zapping the cache
+            # files, we would report this RCE, based on info from the
+            # persistent cache from before the conversion, with no way
+            # to fix it (short of zapping those cache files). This can
+            # also come up with packing in history-free databases
+            # (checkPackAllRevisions). We have a temporary fix for
+            # that in self.pack() until we write more specific tests.
             log.error("ReadConflictError from polling invalidations; %s", e)
             self.__stale(e)
-            return (), prev
+            return
 
-        # Inform the cache of the changes.
-        #
-        # It's not good if this raises a CacheConsistencyError, that should
-        # be a fresh connection. It's not clear that we can take any steps to
-        # recover that the cache hasn't already taken.
-        changes = self._cache.after_poll(
-            cursor,
-            prev,
-            new_polled_tid, changes
-        )
-
-        return changes, new_polled_tid
+        if changes is None:
+            # This is reset by poll_invalidations.
+            self.__queued_changes = None
+        elif self.__queued_changes is not None:
+            self.__queued_changes.update(changes)
+            if len(self.__queued_changes) > self._options.cache_delta_size_limit:
+                # Hmm, ok, the Connection isn't polling us in a timely fashion.
+                # Maybe we're the root storage? Maybe our APIs are being used
+                # independently? At any rate, we're going to stop tracking now;
+                # if a connection eventually gets around to polling us, they'll
+                # need to clear their whole cache
+                self.__queued_changes = None
 
     def temporaryDirectory(self):
         """Return a directory that should be used for uncommitted blob data.
@@ -693,6 +755,17 @@ class RelStorage(LegacyMethodsMixin,
     def pack(self, t, referencesf, prepack_only=False, skip_prepack=False):
         pack = Pack(self._options, self._adapter, self.blobhelper, self._cache)
         pack.pack(t, referencesf, prepack_only, skip_prepack)
+        if not self._options.keep_history:
+            # In a history free database, it's *possible*
+            # that the database's last transaction ID could now have actually
+            # gone backwards! I strongly suspect this only happens in fabricated
+            # test scenarios (e.g., the last transaction in the database is an object that
+            # was directly stored without any connection to the object graph starting from the
+            # root and hence was packed away). Not only do we need to restart our
+            # connection, we also need to restart our polling. Moreover, to prevent
+            # loadSerial() from finding cached data, we also need to flush our caches.
+            self._cache.clear(load_persistent=False)
+
         self.sync()
 
         self._pack_finished()

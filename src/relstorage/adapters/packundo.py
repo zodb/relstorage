@@ -195,20 +195,24 @@ class PackUndo(DatabaseHelpersMixin):
         if batch:
             upload_batch()
 
-    # The only things to worry about are object_state and blob_chuck.
-    # blob chunks are deleted automatically by a foreign key.
+    # The only things to worry about are object_state and blob_chuck
+    # and, in history-preserving, transaction. blob chunks are deleted
+    # automatically by a foreign key; transaction we'll handle with a
+    # pack. (We don't do anything with current_object; a state of NULL
+    # represents a deleted object; it shouldn't be reachable anyway
+    # and will be packed away next time we pack (without GC))
 
     # We shouldn't *have* to verify the oldserial in the delete statement,
     # because our only consumer is zc.zodbdgc which only calls us for
     # unreachable objects, so they shouldn't be modified and get a new
     # TID. But it's safer to do so.
-    _delete_object_stmt = None
+    _script_delete_object = None
 
     def deleteObject(self, cursor, oid, oldserial):
         params = {'oid': u64(oid), 'tid': u64(oldserial)}
         self.runner.run_script_stmt(
             cursor,
-            self._delete_object_stmt,
+            self._script_delete_object,
             params)
         return cursor.rowcount
 
@@ -316,6 +320,15 @@ class HistoryPreservingPackUndo(PackUndo):
     )
     """
 
+    _script_delete_object = """
+    UPDATE object_state
+    SET state = NULL,
+        state_size = 0,
+        md5 = ''
+    WHERE zoid = %(oid)s
+    AND    tid = %(tid)s
+    """
+
     @metricmethod
     def verify_undoable(self, cursor, undo_tid):
         """Raise UndoError if it is not safe to undo the specified txn."""
@@ -330,9 +343,13 @@ class HistoryPreservingPackUndo(PackUndo):
             raise UndoError("Transaction not found or packed")
 
         # Rule: we can undo an object if the object's state in the
-        # transaction to undo matches the object's current state.
-        # If any object in the transaction does not fit that rule,
-        # refuse to undo.
+        # transaction to undo matches the object's current state. If
+        # any object in the transaction does not fit that rule, refuse
+        # to undo. In theory this means arbitrary transactions can be
+        # undone (because we actually match the MD5 of the state); in practice it
+        # means that it must be the most recent transaction those
+        # objects were involved in.
+
         # (Note that this prevents conflict-resolving undo as described
         # by ZODB.tests.ConflictResolution.ConflictResolvingTransUndoStorage.
         # Do people need that? If so, we can probably support it, but it
@@ -960,15 +977,6 @@ class HistoryPreservingPackUndo(PackUndo):
             stmt = '%(TRUNCATE)s ' + _table
             self.runner.run_script_stmt(cursor, stmt)
 
-    _delete_object_stmt = """
-    UPDATE object_state
-    SET state = NULL,
-        state_size = 0,
-        md5 = ''
-    WHERE zoid = %(oid)s
-    and tid = %(tid)s
-    """
-
 
 @implementer(IPackUndo)
 class HistoryFreePackUndo(PackUndo):
@@ -994,6 +1002,12 @@ class HistoryFreePackUndo(PackUndo):
         );
         CREATE INDEX temp_pack_keep_tid ON temp_pack_visit (keep_tid)
         """
+
+    _script_delete_object = """
+    DELETE FROM object_state
+    WHERE zoid = %(oid)s
+    and tid = %(tid)s
+    """
 
     def verify_undoable(self, cursor, undo_tid):
         """Raise UndoError if it is not safe to undo the specified txn."""
@@ -1313,10 +1327,3 @@ class HistoryFreePackUndo(PackUndo):
         %(TRUNCATE)s pack_object
         """
         self.runner.run_script(cursor, stmt)
-
-
-    _delete_object_stmt = """
-    DELETE FROM object_state
-    WHERE zoid = %(oid)s
-    and tid = %(tid)s
-    """

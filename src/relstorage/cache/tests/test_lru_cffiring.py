@@ -81,7 +81,7 @@ class EdenTests(TestCase):
         lru = self._makeOne(100)
         too_many = [(str(i), 'a' * i) for i in range(50)]
         # Make sure we have more then enough on the free list.
-        lru.init_node_free_list(len(too_many) + 1)
+        lru.init_node_free_list(len(too_many) + 1, (b'', 0))
         # They just exceed the limit
         added = lru.add_MRUs(too_many)
         # Much less got added.

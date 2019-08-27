@@ -48,6 +48,16 @@ class MultiStateCache(object):
             self.l = None
             self.g = None
 
+    def release(self):
+        if self.l is not None:
+            self.l.release()
+            self.g.release()
+            self.l = None
+            self.g = None
+
+    def new_instance(self):
+        return type(self)(self.l.new_instance(), self.g.new_instance())
+
     def flush_all(self):
         self.l.flush_all()
         self.g.flush_all()
@@ -68,14 +78,6 @@ class MultiStateCache(object):
         del self.l[key]
         del self.g[key]
 
-    def __call__(self, oid, tid1, tid2):
-        result = self.l(oid, tid1, tid2)
-        if not result:
-            result = self.g(oid, tid1, tid2)
-            if result:
-                self.l[(oid, tid1)] = result
-        return result
-
     def set_all_for_tid(self, tid_int, state_oid_iter):
         # If the transaction was very large, it may have spilled
         # over to disk, in which case we will need to read it
@@ -89,24 +91,10 @@ class MultiStateCache(object):
         self.l.set_all_for_tid(tid_int, state_oid_iter)
         self.g.set_all_for_tid(tid_int, state_oid_iter)
 
-    # Unlike everything else, checkpoints are on the global
-    # client first and then the local one.
+    def invalidate_all(self, oids):
+        self.l.invalidate_all(oids)
+        self.g.invalidate_all(oids)
 
-    def get_checkpoints(self):
-        return self.g.get_checkpoints() or self.l.get_checkpoints()
-
-    def store_checkpoints(self, c0, c1):
-        # TODO: Is there really much value in storing the checkpoints
-        # globally (as opposed to just on a single process)?
-        self.g.store_checkpoints(c0, c1)
-        return self.l.store_checkpoints(c0, c1)
-
-    def updating_delta_map(self, deltas):
-        return self.l.updating_delta_map(deltas)
-
-    def replace_checkpoints(self, expected, desired):
-        if self.g.replace_checkpoints(expected, desired):
-            return self.l.replace_checkpoints(expected, desired)
 
 @interface.implementer(IStateCache)
 class TracingStateCache(object):
@@ -120,6 +108,24 @@ class TracingStateCache(object):
         self.tracer = tracer
         self._trace = tracer.trace
         self._trace_store_current = tracer.trace_store_current
+
+    def new_instance(self):
+        return type(self)(self.cache.new_instance(), self.tracer)
+
+    def release(self):
+        if self.cache is not None:
+            self.cache.release()
+            self.cache = None
+            # But keep self.tracer because it has to be closed.
+            self._trace = None
+            self._trace_store_current = None
+
+    def close(self):
+        tracer = self.tracer
+        self.release()
+        if tracer is not None:
+            tracer.close()
+        self.tracer = None
 
     def __getattr__(self, name):
         return getattr(self.cache, name)
@@ -143,29 +149,24 @@ class TracingStateCache(object):
         self._trace(0x52, oid_int, tid_int, dlen=len(state) if state else 0)
         self.cache[key] = value
 
-    def __call__(self, oid_int, tid1, tid2):
-        response = self.cache(oid_int, tid1, tid2)
-        if response:
-            state, actual_tid = response
-            self._trace(0x22, oid_int, actual_tid, dlen=len(state))
-        else:
-            self._trace(0x20, oid_int)
-        return response
-
     def __delitem__(self, key):
         # TODO: Figure out an event for an explicit invalidation
-        pass
+        del self.cache[key]
 
     def set_all_for_tid(self, tid_int, state_oid_iter):
         self._trace_store_current(tid_int, state_oid_iter)
         self.cache.set_all_for_tid(tid_int, state_oid_iter)
 
-    def updating_delta_map(self, deltas):
-        return _MapWrapper(self.cache.updating_delta_map(deltas),
-                           self._trace)
 
 
-class _MapWrapper(object):
+class _MapWrapper(object): # pragma: no cover
+    # This was used for updating the old "checkpoint" style maps
+    # but we don't use those anymore. Naively dropping this into
+    # mvcc._vacuum() around obsolete_bucket produced unreadable
+    # trace files --- but that's probably an artifact of our
+    # artifical test, or the artificial way we implemented
+    # __delitem__
+
     # Every setitem generates 0x1c invalidate (hit, saving non-current)
     __slots__ = ('data', 'get', 'trace')
     def __init__(self, data, trace):

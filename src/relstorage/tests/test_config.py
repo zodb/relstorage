@@ -116,8 +116,3 @@ class TestOptions(unittest.TestCase):
 
             self.assertEqual(1, len(caught))
             self.assertIn(name, str(caught[0].message))
-
-    def test_resolve_storage(self):
-        from relstorage.cache.lru_sqlite import SqlMapping
-        o = options.Options(cache_local_storage='relstorage.cache.lru_sqlite.SqlMapping')
-        self.assertIs(o.cache_local_storage, SqlMapping)

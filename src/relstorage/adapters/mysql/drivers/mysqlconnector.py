@@ -172,8 +172,14 @@ class PyMySQLConnectorDriver(AbstractMySQLDriver):
         # but the prepared cursor doesn't gain us anything anyway.
         return con
 
+    CURSOR_INIT_STMTS = (
+        # We're not setting the ``character_set_results`` to binary;
+        # is that fully intentional?
+        AbstractMySQLDriver.MY_TIMEZONE_STMT,
+    )
+
     def cursor(self, conn):
-        cur = conn.cursor()
+        cur = super(PyMySQLConnectorDriver, self).cursor(conn)
         cur.connection = conn
         return cur
 

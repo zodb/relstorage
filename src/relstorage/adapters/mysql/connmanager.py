@@ -131,3 +131,14 @@ class MySQLdbConnectionManager(AbstractConnectionManager):
             isolation=self.isolation_load,
             read_only=True,
             replica_selector=self.ro_replica_selector)
+
+    def rollback_store_quietly(self, conn, cur):
+        # MySQL leaks state in temporary tables across
+        # transactions, so if we don't drop the connection,
+        # we need to clean up temp tables (if they exist!)
+        if self.rollback_quietly(conn, cur):
+            try:
+                cur.execute('CALL clean_temp_state(true)')
+                cur.fetchall()
+            except self.driver.driver_module.Error:
+                log.debug("Failed to clean temp state; maybe not exists yet?")

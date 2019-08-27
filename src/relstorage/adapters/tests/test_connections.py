@@ -120,7 +120,7 @@ class TestConnection(TestConnectionCommon):
             if not fresh:
                 raise manager.connmanager.driver.disconnected_exceptions[0]
 
-        manager.call(f, True)
+        manager.call(f, can_reconnect=True)
 
         self.assertEqual(called, [False, True])
 

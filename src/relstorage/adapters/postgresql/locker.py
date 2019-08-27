@@ -29,10 +29,10 @@ class PostgreSQLLocker(AbstractLocker):
 
     def _on_store_opened_set_row_lock_timeout(self, cursor, restart=False):
         # This only lasts beyond the current transaction if it
-        # commits. If we have a rollback, then our effect is lost. Thus,
-        # we can't be sure if it actually has taken effect, so even on a restart
-        # we need to perform it.
+        # commits. If we have a rollback, then our effect is lost.
+        # Luckily, right here is a fine time to commit.
         self._set_row_lock_timeout(cursor, self.commit_lock_timeout)
+        cursor.connection.commit()
 
     def _set_row_lock_timeout(self, cursor, timeout):
         # This will rollback if the transaction rolls back,

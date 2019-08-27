@@ -102,6 +102,7 @@ class Database(ABC):
     CREATE TABLE IF NOT EXISTS object_state (
         zoid INTEGER PRIMARY KEY,
         tid INTEGER NOT NULL ,
+        was_frozen INT(1) NOT NULL DEFAULT 0,
         frequency INTEGER NOT NULL,
         state BLOB
     );
@@ -115,7 +116,7 @@ class Database(ABC):
 
     _schema = _state_table_schema + '\n' + _temp_table_schema + """
     CREATE TABLE IF NOT EXISTS checkpoints (
-        id INTEGER PRIMARY KEY, cp0 INTEGER, cp1 INTEGER
+        id INTEGER PRIMARY KEY, max_hvt INTEGER, complete_since INTEGER
     );
 
     CREATE INDEX IF NOT EXISTS IX_object_state_f_tid
@@ -150,7 +151,7 @@ class Database(ABC):
         """
         The checkpoints in the database, or None if there are none.
         """
-        self.cursor.execute("SELECT cp0, cp1 FROM checkpoints")
+        self.cursor.execute("SELECT max_hvt, complete_since FROM checkpoints")
         return self.cursor.fetchone()
 
     def _remove_invalid_persistent_oids(self, bad_oids, cur):
@@ -190,12 +191,15 @@ class Database(ABC):
 
     def fetch_rows_by_priority(self):
         """
-        The returned cursor will iterate ``(zoid, tid, state, tid)``
+        The returned cursor will iterate ``(zoid, key tid, state, tid)``
         from most useful to least useful.
 
         The extra tid is to allow for a uniform row syntax when we
         don't want to do any key tid transforms. The row can neatly be
         sliced as ``[r:2], r[2:]`` to get ``(key, value)`` pairs.
+
+        The *key tid* is -1 if the row was frozen, and equal to the actual tid
+        otherwise.
         """
         # Do this in a new cursor so it can interleave.
 
@@ -216,7 +220,7 @@ class Database(ABC):
         # at all the rows (it doesn't understand that cum_size can only increase.)
         # Plus, window functions were only added to sqlite 3.25
         cur = self.connection.execute("""
-        SELECT zoid, tid, state, tid
+        SELECT zoid, CASE was_frozen WHEN 1 THEN -1 ELSE tid END, state, tid
         FROM object_state
         ORDER BY frequency DESC, tid DESC
         """)
@@ -237,7 +241,7 @@ class Database(ABC):
 
     def store_temp(self, rows):
         """
-        Given an iterator of ``(oid, tid, state, frequency)`` values,
+        Given an iterator of ``(oid, tid, frozen, state, frequency)`` values,
         store them in a temporary table for this session.
         """
         # The batch size depends on how many params a stored proc can
@@ -254,8 +258,8 @@ class Database(ABC):
         # I'm Not entirely sure what that means.
         rows = list(rows) # materialize
         self.cursor.executemany(
-            'INSERT INTO temp_state(zoid, tid, state, frequency) '
-            'VALUES (?, ?, ?, ?)',
+            'INSERT INTO temp_state(zoid, tid, was_frozen, state, frequency) '
+            'VALUES (?, ?, ?, ?, ?)',
             rows
         )
 
@@ -371,15 +375,16 @@ class _UpsertUpdateDatabase(Database):
 
     def move_from_temp(self):
         self.cursor.execute("""
-        INSERT INTO object_state (zoid, tid, frequency, state)
-        SELECT zoid, tid, frequency, state
+        INSERT INTO object_state (zoid, tid, was_frozen, frequency, state)
+        SELECT zoid, tid, was_frozen, frequency, state
         FROM temp_state
         WHERE true
         ON CONFLICT(zoid) DO UPDATE
         SET tid = excluded.tid,
+            was_frozen = excluded.was_frozen,
             state = excluded.state,
             frequency = excluded.frequency + object_state.frequency
-        WHERE excluded.tid > tid
+        WHERE excluded.tid >= tid
         """)
         rows_inserted = self.cursor.rowcount
         self.cursor.execute("DELETE FROM temp_state")
@@ -387,10 +392,11 @@ class _UpsertUpdateDatabase(Database):
 
     def update_checkpoints(self, cp0, cp1):
         self.cursor.execute("""
-        INSERT INTO checkpoints (id, cp0, cp1)
+        INSERT INTO checkpoints (id, max_hvt, complete_since)
         VALUES (0, ?, ?)
-        ON CONFLICT(id) DO UPDATE SET cp0 = excluded.cp0, cp1 = excluded.cp1
-        WHERE excluded.cp0 > cp0
+        ON CONFLICT(id) DO UPDATE
+            SET max_hvt = excluded.max_hvt, complete_since = excluded.complete_since
+        WHERE excluded.max_hvt >= max_hvt
         """, (cp0, cp1))
 
 class _InsertReplaceDatabase(Database):
@@ -407,15 +413,15 @@ class _InsertReplaceDatabase(Database):
             SELECT 1
             FROM object_state
             WHERE object_state.zoid = temp_state.zoid
-            AND object_state.tid >= temp_state.tid
+            AND object_state.tid > temp_state.tid
         )
         """)
         self.cursor.execute('SELECT COUNT(*) FROM temp_state')
         rows_inserted = self.cursor.fetchall()[0][0]
 
         self.cursor.execute("""
-        INSERT OR REPLACE INTO object_state (zoid, tid, state, frequency)
-        SELECT zoid, tid, state, frequency
+        INSERT OR REPLACE INTO object_state (zoid, tid, was_frozen, state, frequency)
+        SELECT zoid, tid, was_frozen, state, frequency
         FROM temp_state
         """)
 
@@ -425,10 +431,10 @@ class _InsertReplaceDatabase(Database):
     def update_checkpoints(self, cp0, cp1):
         cur = self.cursor
         cur.execute("""
-        INSERT OR REPLACE INTO checkpoints(id, cp0, cp1)
+        INSERT OR REPLACE INTO checkpoints(id, max_hvt, complete_since)
         SELECT 0, ?, ?
         FROM checkpoints
-        WHERE cp0 < ?
+        WHERE max_hvt <= ?
         UNION
         SELECT 0, ?, ?
         WHERE NOT EXISTS (SELECT id FROM checkpoints)

@@ -9,7 +9,6 @@ from __future__ import print_function
 
 from functools import partial
 
-from ZODB.POSException import ReadOnlyError
 from zope.interface import implementer
 
 from relstorage._compat import wraps
@@ -134,19 +133,33 @@ class stale_aware(object):
         # these methods only once and cache them (which is what copy_storage_methods
         # does).
 
+        # Unfortunately, when a method from inside the defining class
+        # calls another method decorated like this, we derive a new
+        # type each time. e.g., ``Loader.loadBefore`` calls
+        # ``self.load`` and generates a new type. Therefore we must
+        # also cache this on the instance. This creates a reference
+        # cycle.
+
+        # Many of the instances that use this actually define __slots__
+        # so we can't put arbitrary stuff in their missing __dict__ anyway,
+        # so they must also define __dict__.
+
         stale_aware_class = type(
             'StaleAware_' + bound.__name__,
             (_StaleAwareMethodTemplate,),
             {
                 '__slots__': (),
                 '__call__': bound.__call__,
+                '__name__': bound.__name__,
+                '__module__': bound.__module__,
             }
         )
 
         stale_aware_class = implementer(IStaleAware)(stale_aware_class)
-        # update_wrapper() doesn't work on a type.
-        # stale_aware_class = functools.wraps(bound)(stale_aware_class)
-        return stale_aware_class(bound)
+        # Defining
+        meth = stale_aware_class(bound)
+        inst.__dict__[bound.__name__] = meth
+        return meth
 
 
 def _make_phase_dependent(storage, method):
@@ -165,11 +178,10 @@ def _make_phase_dependent(storage, method):
             return method(storage._tpc_phase, *args, **kwargs)
     return state
 
-def _make_cannot_write(method):
-    @wraps(method)
+def make_cannot_write(storage, bound_method):
+    @wraps(bound_method)
     def read_only(*args, **kwargs):
-        raise ReadOnlyError
-    read_only.__wrapped__ = method
+        raise storage._read_only_error
     return read_only
 
 def copy_storage_methods(storage, delegate):
@@ -190,7 +202,7 @@ def copy_storage_methods(storage, delegate):
             method_is_phase_dependent = getattr(storage_meth, 'phase_dependent', False)
 
             if read_only and method_writes_to_db:
-                storage_meth = _make_cannot_write(storage_meth)
+                storage_meth = make_cannot_write(storage, storage_meth)
             elif method_is_phase_dependent:
                 storage_meth = _make_phase_dependent(storage, storage_meth)
             setattr(storage, var_name, storage_meth)

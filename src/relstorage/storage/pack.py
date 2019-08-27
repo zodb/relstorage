@@ -83,6 +83,11 @@ class Pack(object):
         if t > 275085010696509852:
             # Must be a TID.
 
+            # This magic number generates 'Value too large to be stored in data type' when
+            # given to time.gmtime() as used to originally generate TimeStamp values,
+            # though it can be converted back. It also happens to specify July 2019
+            # when this feature was implemented.
+
             # Turn it back into a time.time() for later logging
             ts = TimeStamp(int64_to_8bytes(t))
             logger.debug(
@@ -161,7 +166,7 @@ class Pack(object):
             # by directly verifying that loadSerial() doesn't return data,
             # when in a real use we could only get there through detecting a conflict
             # in the database at commit time, with locks involved.
-            cache.invalidate(oid_int, tid_int)
+            cache.remove_cached_data(oid_int, tid_int)
             # Clean up blob files. This currently does nothing
             # if we're a blob cache, but it could.
             blob_invalidate(oid_int, tid_int)
@@ -173,7 +178,7 @@ class Pack(object):
 
         self.packundo.pack(tid_int,
                            packed_func=invalidate_cached_data)
-        self.cache.invalidate_all(oids_removed)
+        self.cache.remove_all_cached_data_for_oids(oids_removed)
 
     @writable_storage_method
     @metricmethod

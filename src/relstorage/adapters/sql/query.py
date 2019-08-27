@@ -16,7 +16,7 @@ from ._util import Columns
 from .dialect import DialectAware
 
 from .expressions import ParamMixin
-
+from .expressions import And
 
 class Clause(DialectAware):
     """
@@ -32,6 +32,38 @@ class ColumnList(Columns):
 
     # This class exists for semantics, it currently doesn't
     # do anything different than the super.
+
+class WhereClause(Clause):
+
+    def __init__(self, expression):
+        self.expression = expression
+
+    def and_(self, expression):
+        expression = And(self.expression, expression)
+        new = copy(self)
+        new.expression = expression
+        return new
+
+    def __compile_visit__(self, compiler):
+        compiler.emit_keyword(' WHERE')
+        compiler.visit_grouped(self.expression)
+
+class OrderBy(Clause):
+
+    def __init__(self, expression, dir):
+        self.expression = expression
+        self.dir = dir
+
+    def __compile_visit__(self, compiler):
+        compiler.emit(' ORDER BY ')
+        compiler.visit(self.expression)
+        if self.dir:
+            compiler.emit(' ' + self.dir)
+
+
+def where(expression):
+    if expression:
+        return WhereClause(expression)
 
 
 class Query(ParamMixin,

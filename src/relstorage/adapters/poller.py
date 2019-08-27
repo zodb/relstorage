@@ -72,13 +72,17 @@ class Poller(object):
         OIDs.
 
         Returns ``(changes, new_polled_tid)``, where *changes* is
-        either a list of ``(oid_int, tid_int)`` that have changed, or
-        ``None`` to indicate that the changes are too complex to li
+        either an iterable of ``(oid_int, tid_int)`` that have changed, or
+        ``None`` to indicate that the changes are too complex to list
         --- this must cause local storage caches to be invalidated..
         *new_polled_tid* can be 0 if there is no data in the database.
         """
         # pylint:disable=unused-argument
         # find out the tid of the most recent transaction.
+        # TODO: We could do this all in a single query if we add an order-by
+        # tid. We'd want to take care to only read the first row here, and then
+        # return a generator or itertools.chain to yield the row we popped first,
+        # followed by the remaining rows.
         self.poll_query.execute(cursor)
         rows = cursor.fetchall()
         if not rows or not rows[0][0]:
@@ -154,6 +158,10 @@ class Poller(object):
         """
         See ``IPoller``.
         """
+        if after_tid == last_tid:
+            # small optimization in case we're asked for the same.
+            # there can be no changes where change > X and change <= X
+            return ()
         params = {'min_tid': after_tid, 'max_tid': last_tid}
         self._list_changes_range_query.execute(cursor, params)
         # Return the cursor: let it be its own iterable. This could be a
