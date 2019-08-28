@@ -19,6 +19,7 @@ from __future__ import print_function
 
 import importlib
 import sys
+import os
 
 from zope.interface import directlyProvides
 from zope.interface import implementer
@@ -26,6 +27,7 @@ from zope.interface import implementer
 from .._compat import ABC
 from .._compat import PYPY
 from .._compat import casefold
+from .._util import positive_integer
 
 from .interfaces import IDBDriver
 from .interfaces import IDBDriverFactory
@@ -102,6 +104,15 @@ class AbstractModuleDriver(ABC):
     # Only checked if _GEVENT_CAPABLE is set to True.
     _GEVENT_NEEDS_SOCKET_PATCH = True
 
+    #: The size we request cursor's from our :meth:`cursor` method
+    #: to fetch from ``fetchmany`` and (hopefully) iteration (which is a
+    #: DB-API extension. We default to 1024, but the environment variable
+    #: RS_CURSOR_ARRAYSIZE can be set to an int to change this default.
+    #: Individual drivers *might* choose a different default.
+    cursor_arraysize = positive_integer(
+        os.environ.get('RS_CURSOR_ARRAYSIZE', '1024')
+    )
+
     def __init__(self):
         if PYPY and not self.AVAILABLE_ON_PYPY:
             raise DriverNotAvailableError(self.__name__)
@@ -156,8 +167,6 @@ class AbstractModuleDriver(ABC):
 
     def set_autocommit(self, conn, value):
         conn.autocommit(value)
-
-    cursor_arraysize = 1024
 
     def cursor(self, conn):
         cur = conn.cursor()

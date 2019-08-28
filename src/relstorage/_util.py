@@ -24,6 +24,7 @@ import time
 import traceback
 import os
 
+import logging
 from logging import DEBUG
 from logging import INFO
 from logging import WARN
@@ -31,15 +32,20 @@ from logging import ERROR
 
 from persistent.timestamp import TimeStamp
 
+from ZConfig.datatypes import asBoolean
+from ZConfig.datatypes import integer
+from ZConfig.datatypes import RangeCheckedConversion
+
 from ZODB.utils import p64
 from ZODB.utils import u64
+# Trace is beneath (less important than) DEBUG.
+# It is "extremely verbose"
 from ZODB.loglevels import TRACE
 
-from relstorage._compat import MAC
 from relstorage._compat import wraps
 from relstorage._compat import update_wrapper
 
-logger = __import__('logging').getLogger(__name__)
+logger = logging.getLogger(__name__)
 perf_logger = logger.getChild('timing')
 
 int64_to_8bytes = p64
@@ -60,7 +66,19 @@ __all__ = [
     'CachedIn',
     'to_utf8',
     'consume',
+    'TRACE',
+    'parse_boolean',
+    'positive_integer',
 ]
+
+positive_integer = RangeCheckedConversion(integer, min=1)
+
+def parse_boolean(val):
+    if val == '0':
+        return False
+    if val == '1':
+        return True
+    return asBoolean(val)
 
 def timestamp_at_unixtime(now):
     """
@@ -107,25 +125,42 @@ class timer(object):
         self.__end = self.counter()
         self.duration = self.__end - self.__begin
 
-_LOG_TIMED_DEBUG_DURATION = 0.31
-_LOG_TIMED_INFO_DURATION = 1.31
-_LOG_TIMED_WARN_DURATION = 5.71
-_LOG_TIMED_ERROR_DURATION = 20.01
 
-_LOG_TIMED_DEFAULT_DURATIONS = (
-        (DEBUG, _LOG_TIMED_DEBUG_DURATION),
-        (INFO, _LOG_TIMED_INFO_DURATION),
-        (WARN, _LOG_TIMED_WARN_DURATION),
-        (ERROR, _LOG_TIMED_ERROR_DURATION)
-    )
-_LOG_TIMED_DEFAULT_DETAILS_THRESHOLD = WARN
+def _get_log_time_level(level_int, default):
+    level_name = logging.getLevelName(level_int)
+    val = os.environ.get('RS_PERF_LOG_%s_MIN' % level_name, default)
+    return (level_int, float(val))
 
-_LOG_TIMED_COMPILETIME_ENABLE = True
+# A list of tuples (level_int, min_duration), ordered by increasing
+# min_duration. If you modify this list at runtime, be sure to keep it
+# sorted. A quick way to completely disable logging is to clear this
+# list. Modify this list in place to apply to all functions; make a
+# copy and place in `func.__wrapped__.log_levels` or
+# `Class.meth.__wrapped__.log_levels` to change for an individual
+# function.
+_LOG_TIMED_DEFAULT_DURATIONS = [
+    _get_log_time_level(TRACE, 0.31),
+    _get_log_time_level(DEBUG, 1.24),
+    _get_log_time_level(INFO, 3.03),
+    _get_log_time_level(WARN, 9.24),
+    _get_log_time_level(ERROR, 20.10)
+]
 
-if 'zope-testrunner' in sys.argv[0] and MAC:
-    # Disable the actual wrapping to get it out of stack traces
-    # and make debugging easier.
-    _LOG_TIMED_COMPILETIME_ENABLE = False
+_LOG_TIMED_DEFAULT_DURATIONS.sort(key=lambda x: x[1])
+
+# timed events above this threshold will include detail information.
+# The 'log_details_threshold' property of the function can be
+# assigned to make it different than the default.
+_LOG_TIMED_DEFAULT_DETAILS_THRESHOLD = logging.getLevelName(
+    os.environ.get('RS_PERF_LOG_DETAILS_LEVEL', 'WARN')
+)
+
+
+# If this is true when a module is imported, timer decorations
+# are omitted.
+_LOG_TIMED_COMPILETIME_ENABLE = parse_boolean(
+    os.environ.get('RS_PERF_LOG_ENABLE', 'on')
+)
 
 def do_log_duration_info(basic_msg, func,
                          args, kwargs,
@@ -135,7 +170,7 @@ def do_log_duration_info(basic_msg, func,
         # Timing was disabled at compile time
         return
 
-    log_level = TRACE
+    log_level = 0
     # Defer capturing the name; it might get changed at
     # runtime.
     log_msg = basic_msg
@@ -145,7 +180,10 @@ def do_log_duration_info(basic_msg, func,
             break
         log_level = level
 
-    if log_level >= func.log_details_threshold and log.isEnabledFor(log_level):
+    if not log.isEnabledFor(log_level):
+        return
+
+    if log_level >= func.log_details_threshold:
         # This will capture 'self' as the first argument,
         # so you can put useful things into that repr if you'd
         # like.
@@ -167,8 +205,23 @@ def do_log_duration_info(basic_msg, func,
     log.log(log_level, log_msg, *log_args)
 
 def log_timed(func):
+    # Store these on each individual function so they can be
+    # tweaked later: Class.func.__wrapped__.min_duration_to_log = X
+    # Do this even if we've disabled the wrappers for a consistent
+    # interface.
+    func.log_levels = _LOG_TIMED_DEFAULT_DURATIONS
+    func.log_details_threshold = _LOG_TIMED_DEFAULT_DETAILS_THRESHOLD
+    if not _LOG_TIMED_COMPILETIME_ENABLE:
+        # One more we're possibly missing
+        if getattr(func, '__wrapped__', func) is func:
+            func.__wrapped__ = None
+        return func
+
     counter = _counter
     log = do_log_duration_info
+    func_logger = logging.getLogger(func.__module__).getChild('timing')
+
+
     @wraps(func)
     def f(*args, **kwargs):
         begin = counter()
@@ -179,21 +232,12 @@ def log_timed(func):
             duration = end - begin
 
             log_msg = "Function %s took %.3fs."
-            log(log_msg, func, args, kwargs, duration)
+            log(log_msg, func, args, kwargs, duration,
+                log=func_logger)
 
         return result
 
-    # Store these on each individual function so they can be
-    # tweaked later: Class.func.__wrapped__.min_duration_to_log = X
-    func.log_levels = _LOG_TIMED_DEFAULT_DURATIONS
-    func.log_details_threshold = _LOG_TIMED_DEFAULT_DETAILS_THRESHOLD
-
-    if _LOG_TIMED_COMPILETIME_ENABLE:
-        return f
-
-    if getattr(func, '__wrapped__', func) is func:
-        func.__wrapped__ = None
-    return func
+    return f
 
 
 def log_timed_only_self(func):

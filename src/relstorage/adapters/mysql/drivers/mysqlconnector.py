@@ -211,6 +211,7 @@ class CMySQLConnectorDriver(PyMySQLConnectorDriver):
     # mode, with assertion failures about doing things without the GIL
     # that crash the interpreter. That's pretty risky, so we don't currently
     # recommend it.
+    # TODO: 8.0.17 claims to have fixed issues with Python 3. Verify this.
     PRIORITY = 1000
     PRIORITY_PYPY = 4000
 

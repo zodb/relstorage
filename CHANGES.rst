@@ -5,7 +5,12 @@
 3.0a9 (unreleased)
 ==================
 
-- Several minor logging changes.
+- Several minor logging improvements.
+
+- Allow many internal constants to be set with environment variables
+  at startup for experimentation. These are presently undocumented; if
+  they prove useful to adjust in different environments they may be
+  promoted to full configuration options.
 
 - Fix importing RelStorage when ``zope.schema`` is not installed.
   ``zope.schema`` is intended to be a test dependency and optional for

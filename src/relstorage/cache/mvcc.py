@@ -19,6 +19,8 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import os
+
 from zope.interface import implementer
 
 from relstorage._compat import iterkeys
@@ -28,6 +30,8 @@ from relstorage._compat import OidTMap_multiunion
 from relstorage._compat import OidTMap_intersection
 from relstorage._compat import iteroiditems
 from relstorage._util import log_timed
+from relstorage._util import positive_integer
+from relstorage._util import TRACE
 from relstorage._mvcc import DetachableMVCCDatabaseCoordinator
 from relstorage.options import Options
 from relstorage.interfaces import IMVCCDatabaseViewer
@@ -36,12 +40,6 @@ from .interfaces import IStorageCacheMVCCDatabaseCoordinator
 
 logger = __import__('logging').getLogger(__name__)
 
-def _debug(*_args):
-    "Does nothing"
-if 0: # pylint:disable=using-constant-test
-    debug = print
-else:
-    debug = _debug
 
 ###
 # Notes on in-process concurrency:
@@ -341,16 +339,9 @@ class _ObjectIndex(object):
         return {
             'depth': self.depth,
             'hvt': self.maximum_highest_visible_tid,
+            'min hvt': self.minimum_highest_visible_tid,
             'total OIDS': self.total_size,
             'unique OIDs': len(self.keys()),
-            'transactions': [
-                {
-                    'hvt': tx.highest_visible_tid,
-                    'total OIDS': len(tx),
-                    'cst': tx.complete_since_tid,
-                }
-                for tx in self.maps
-            ]
         }
 
     def keys(self):
@@ -535,8 +526,13 @@ class MVCCDatabaseCoordinator(DetachableMVCCDatabaseCoordinator):
 
     # Essentially how many transactions any one viewer is allowed to
     # get behind the leading edge before we cut it off. The next time it polls,
-    # it will drop its ZODB object cache.
-    max_allowed_index_depth = 100
+    # it will drop its ZODB object cache. This probably indicates an idle connection
+    # without a connection pool idle timeout configured, or a very long-duration
+    # read transaction.
+    max_allowed_index_depth = positive_integer(
+        os.environ.get('RS_CACHE_MVCC_MAX_DEPTH', '100')
+    )
+
     # The total number of entries in the object index we allow
     # before we start cutting off old viewers. This gets set from
     # Options.cache_delta_size_limit
@@ -563,6 +559,7 @@ class MVCCDatabaseCoordinator(DetachableMVCCDatabaseCoordinator):
         # each new one will drop more old viewers, though, and it will start to be reclaimed.
         # Also, lots of it is shared across the connections.
         self.max_allowed_index_size = options.cache_delta_size_limit * 2
+        self.log = logger.log
 
     def stats(self):
         return {
@@ -599,7 +596,7 @@ class MVCCDatabaseCoordinator(DetachableMVCCDatabaseCoordinator):
     def poll(self, cache, conn, cursor):
         with self._lock:
             cur_ix = self.object_index
-            # this can mutate without changing the object!
+            # this can mutate without changing the object identity!
             cur_ix_hvt = cur_ix.highest_visible_tid if cur_ix else None
 
         return self._poll(cache, conn, cursor, cur_ix, cur_ix_hvt)
@@ -649,7 +646,9 @@ class MVCCDatabaseCoordinator(DetachableMVCCDatabaseCoordinator):
 
         polling_since = current_index_hvt
 
-        # Do a small poll
+        # Do a small poll.
+        # NOTE: See comment in __init__ about tensions about locking
+        # and overlapping polls.
         change_iter, polled_tid = cache.adapter.poller.poll_invalidations(
             conn, cursor,
             polling_since,
@@ -670,6 +669,11 @@ class MVCCDatabaseCoordinator(DetachableMVCCDatabaseCoordinator):
         # We must be careful to always consume the iterator, even if we exit early.
         # So we do that now.
         change_iter = list(change_iter)
+        self.log(
+            TRACE,
+            "Polled new tid %s since %s with %s changes",
+            polled_tid, polling_since, len(change_iter)
+        )
 
         # The *change_index* is the index we'll provide to the viewer; it
         # *must* be built from the data we polled, or at least, from an
@@ -697,11 +701,12 @@ class MVCCDatabaseCoordinator(DetachableMVCCDatabaseCoordinator):
                     polling_since,
                     change_iter
                 )
+                change_iter = ()
                 should_vacuum = True
             elif installed_index.highest_visible_tid == polled_tid:
                 # Cool, no work for us!
                 # we can simply discard our poll data.
-                change_iter = []
+                change_iter = ()
                 change_index = installed_index
             # Otherwise, the data they have is in the future. Whoops!
             # We must build our own change data.
@@ -837,6 +842,12 @@ class MVCCDatabaseCoordinator(DetachableMVCCDatabaseCoordinator):
 
         required_tid = self.minimum_highest_visible_tid # This won't change during our invocation
         local_client = cache.local_client
+        self.log(
+            TRACE,
+            "Attempting vacuum from %s up to %s",
+            object_index.minimum_highest_visible_tid,
+            required_tid,
+        )
         while True:
             if object_index.depth == 1:
                 # Nothing left to vacuum
@@ -859,8 +870,12 @@ class MVCCDatabaseCoordinator(DetachableMVCCDatabaseCoordinator):
             obsolete_bucket.accepts_writes = False
             newer_oids = object_index.keys()
             in_both = OidTMap_intersection(newer_oids, obsolete_bucket)
-            logger.debug("Examining %d old OIDs to see if they've been replaced",
-                         len(in_both))
+
+            self.log(
+                TRACE,
+                "Examining %d old OIDs to see if they've been replaced",
+                len(in_both)
+            )
             for oid in in_both:
                 old_tid = obsolete_bucket[oid]
                 newer_tid = object_index[oid]
@@ -889,7 +904,7 @@ class MVCCDatabaseCoordinator(DetachableMVCCDatabaseCoordinator):
             # useful to have in this last bucket and we can throw it away. Note that
             # we do *not* remove the index entries; they're needed to keep
             # the CST in sync for newer transactions that might still be open.
-            logger.debug("Vacuum: Freezing %s old OIDs", len(obsolete_bucket))
+            self.log(TRACE, "Vacuum: Freezing %s old OIDs", len(obsolete_bucket))
             if obsolete_bucket:
                 local_client.freeze(obsolete_bucket)
 

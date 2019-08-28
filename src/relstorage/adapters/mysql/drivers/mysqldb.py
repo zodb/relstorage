@@ -25,8 +25,8 @@ from zope.interface import implementer
 from relstorage.adapters.interfaces import IDBDriver
 from relstorage.adapters._abstract_drivers import AbstractModuleDriver
 
-from relstorage.zodburi_resolver import convert_int as parse_bool
 from relstorage._util import Lazy
+from relstorage._util import parse_boolean
 
 from . import AbstractMySQLDriver
 
@@ -101,15 +101,16 @@ class GeventMySQLdbDriver(MySQLdbDriver):
     # will still be returned to the caller for processing in one
     # batch. Plain iteration will yield after this many rows, and return
     # rows to the caller one at a time.
-    cursor_arraysize = 1024
+    # cursor_arraysize = 1024 # We inherit cursor_arraysize from the abstract driver.
 
     # Set this to false to allow switching on queries and fetches
     # after we've made some sort of lock call. If you rarely have conflicts, then this
     # provides the best throughput. Set it to true to stop gevent from switching
     # on network traffic when locked; if you have conflicts and load issues, by
     # allowing a single greenlet to commit faster, you may gain improvements.
-    use_critical_phase_when_locked = parse_bool(
-        os.environ.get('RELSTORAGE_GEVENT_NO_SWITCH_WHEN_LOCKED', "false")
+    # NOTE: This does not currently work as intended.
+    use_critical_phase_when_locked = parse_boolean(
+        os.environ.get('RS_GEVENT_NO_SWITCH_WHEN_LOCKED', "false")
     )
 
     def __init__(self):

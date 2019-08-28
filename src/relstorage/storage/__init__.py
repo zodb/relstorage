@@ -626,7 +626,12 @@ class RelStorage(LegacyMethodsMixin,
         if changed_oids is None:
             oids = None
         else:
-            # The value is ignored, only key matters
+            # The Connection doesn't care about this, it just passes it
+            # to the PickleCache. The Python implementation of the PickleCache
+            # takes any iterable of oid bytes, but the C implementation deals only
+            # with an actual dict(), or something that is a sequence and can be
+            # iterated using integer indices. If you give it a dict, all it cares
+            # about are the keys.
             oids = {int64_to_8bytes(oid_int): 1 for oid_int in changed_oids}
         return oids
 
@@ -729,6 +734,7 @@ class RelStorage(LegacyMethodsMixin,
             return
 
         if changes is None:
+            # Stop tracking invalidations and reset the ZODB object cache.
             # This is reset by poll_invalidations.
             self.__queued_changes = None
         elif self.__queued_changes is not None:

@@ -117,8 +117,14 @@ class Connection(BaseConnection):
     def enter_critical_phase_until_transaction_end(self, cursor):
         assert self.cursor_in_critical is None
         self.cursor_in_critical = cursor
-        # The queries need to go through and allow switches without blocking.
-        # Otherwise we can deadlock.
+        # The queries, unfortunately, need to go through and allow switches without blocking.
+        # Otherwise we can deadlock. So this makes it not very useful for our intention
+        # of granting priority to a single greenlet and avoiding switches: other
+        # greenlets can still come in and lock objects and hold those locks for a
+        # period of time --- though, in testing, if we *do* make query() blocking,
+        # under 60 greenlets committing 100 objects, we stop getting the 1.5s warning
+        # about objects being locked too long: it does seem that the lock does something
+        # there, but the overall time doesn't change much.
         self.commit = self._critical_commit
         self.rollback = self._critical_rollback
 

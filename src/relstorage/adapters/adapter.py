@@ -31,6 +31,7 @@ from ZODB.utils import u64 as bytes8_to_int64
 from relstorage.storage.interfaces import VoteReadConflictError
 from .._compat import metricmethod_sampled
 from .._util import timestamp_at_unixtime
+from .._util import TRACE
 from ..options import Options
 
 from ._abstract_drivers import _select_driver
@@ -102,7 +103,7 @@ class AbstractAdapter(object):
 
         tid_int = bytes8_to_int64(tid)
         self.txncontrol.add_transaction(cursor, tid_int, username, description, extension)
-        logger.debug("Picked next tid locally: %s", tid_int)
+        logger.log(TRACE, "Picked next tid locally: %s", tid_int)
         return tid_int
 
     @metricmethod_sampled

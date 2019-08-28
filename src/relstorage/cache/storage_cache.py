@@ -31,6 +31,7 @@ from relstorage.autotemp import AutoTemporaryFile
 from relstorage._compat import OID_OBJECT_MAP_TYPE
 from relstorage._compat import OID_SET_TYPE as OIDSet
 from relstorage._compat import iteroiditems
+from relstorage._compat import IN_TESTRUNNER
 from relstorage._util import bytes8_to_int64
 from relstorage._mvcc import DetachableMVCCDatabaseViewer
 
@@ -86,6 +87,11 @@ class StorageCache(DetachableMVCCDatabaseViewer):
     )
 
 
+    if IN_TESTRUNNER:
+        class MVCCInternalConsistencyError(Exception):
+            "This can never be raised or caught."
+    else:
+        MVCCInternalConsistencyError = AssertionError
 
     def __init__(self, adapter, options, prefix, _parent=None):
         super(StorageCache, self).__init__()
@@ -122,7 +128,7 @@ class StorageCache(DetachableMVCCDatabaseViewer):
                 tracer.trace(0x00)
                 self.cache = TracingStateCache(self.cache, tracer)
         else:
-            self.polling_state = _parent.polling_state
+            self.polling_state = _parent.polling_state # type: MVCCDatabaseCoordinator
             self.local_client = _parent.local_client.new_instance()
             self.cache = _parent.cache.new_instance()
 
@@ -275,6 +281,7 @@ class StorageCache(DetachableMVCCDatabaseViewer):
         """
         # As if we've never polled
         self.polling_state.reset_viewer(self)
+        self.polling_state.flush_all()
         if message:
             raise CacheConsistencyError(message)
 
@@ -567,7 +574,17 @@ class StorageCache(DetachableMVCCDatabaseViewer):
             self.temp_objects = None
 
     def poll(self, conn, cursor, ignore_tid):
-        changes = self.polling_state.poll(self, conn, cursor)
+        try:
+            changes = self.polling_state.poll(self, conn, cursor)
+        except self.MVCCInternalConsistencyError: # pragma: no cover
+            logger.critical(
+                "Internal consistency violation in the MVCC coordinator. "
+                "Please report a bug to the RelStorage maintainers. "
+                "Flushing caches for safety. ",
+                exc_info=True
+            )
+            self._reset("Unknown internal violation")
+
         if changes is not None:
             return OIDSet(oid for oid, tid in changes if tid != ignore_tid)
 

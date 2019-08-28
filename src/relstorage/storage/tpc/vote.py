@@ -31,6 +31,7 @@ from ZODB.utils import u64 as bytes8_to_int64
 from relstorage._util import log_timed
 from relstorage._util import log_timed_only_self
 from relstorage._util import do_log_duration_info
+from relstorage._util import TRACE
 from ..interfaces import VoteReadConflictError
 
 from . import LOCK_EARLY
@@ -39,6 +40,7 @@ from .finish import Finish
 
 
 logger = __import__('logging').getLogger(__name__)
+perf_logger = logger.getChild('timing')
 
 class DatabaseLockedForTid(object):
 
@@ -233,7 +235,7 @@ class AbstractVote(AbstractTPCState):
             blobs_must_be_moved_now = True
 
         if blobs_must_be_moved_now or LOCK_EARLY:
-            logger.debug("Locking early (for blobs? %s)", blobs_must_be_moved_now)
+            logger.log(TRACE, "Locking early (for blobs? %s)", blobs_must_be_moved_now)
             # It is crucial to do this only after locking the current
             # object rows in order to prevent deadlock. (The same order as a regular
             # transaction, just slightly sooner.)
@@ -296,6 +298,9 @@ class AbstractVote(AbstractTPCState):
             oid_int, committed_tid_int, tid_this_txn_saw_int, committed_state = conflict
             if tid_this_txn_saw_int is None:
                 # A readCurrent entry. Did it conflict?
+                # Note that some database adapters (MySQL) may have already raised a
+                # UnableToLockRowsToReadCurrentError indicating a conflict. That's a type
+                # of ReadConflictError like this.
                 expect_tid_int = required_tids[oid_int]
                 if committed_tid_int != expect_tid_int:
                     raise VoteReadConflictError(
@@ -373,16 +378,17 @@ class AbstractVote(AbstractTPCState):
         committing_tid_lock = self.committing_tid_lock
         assert committing_tid_lock is None or committing_tid_int == committing_tid_lock.tid_int, (
             committing_tid_int, committing_tid_lock)
+
+        log_msg = "Database lock and tid already allocated: %s"
         if committing_tid_lock is None:
             self.committing_tid_lock = DatabaseLockedForTid(
                 int64_to_8bytes(committing_tid_int),
                 committing_tid_int,
                 self.adapter
             )
-            logger.debug("Adapter locked database and allocated tid %s",
-                         self.committing_tid_lock)
-        else:
-            logger.debug("Database lock and tid already done", self.committing_tid_lock)
+            log_msg = "Adapter locked database and allocated tid: %s"
+
+        logger.log(TRACE, log_msg, self.committing_tid_lock)
 
         return kwargs['commit']
 
@@ -420,7 +426,7 @@ class AbstractVote(AbstractTPCState):
             # If something failed to move, that's not really a problem:
             # if we did any moving now, we're just a cache.
             logger.exception(
-                "Failed to update blob-cache"
+                "Failed to update blob-cache; ignoring (will re-download)"
             )
 
         try:
@@ -436,13 +442,15 @@ class AbstractVote(AbstractTPCState):
                 "Objects were locked by %s for %.3fs",
                 AbstractVote.tpc_finish.__wrapped__, # pylint:disable=no-member
                 self, None,
-                locked_duration
+                locked_duration,
+                perf_logger
             )
             do_log_duration_info(
                 "Time between vote exiting and %s entering was %.3fs",
                 AbstractVote.tpc_finish.__wrapped__, # pylint:disable=no-member
                 self, None,
-                between_vote_and_finish
+                between_vote_and_finish,
+                perf_logger
             )
 
             return next_phase, self.committing_tid_lock.tid

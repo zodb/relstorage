@@ -194,7 +194,7 @@ class AbstractSchemaInstaller(DatabaseHelpersMixin,
 
         generic_proc_dir = os.path.join(self_dir, 'procs')
         specific_proc_dir = os.path.join(generic_proc_dir, 'hp' if self.keep_history else 'hf')
-        logger.info(
+        logger.debug(
             "Reading stored procedures from %s and %s",
             generic_proc_dir, specific_proc_dir
         )

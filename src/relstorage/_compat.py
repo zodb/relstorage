@@ -7,11 +7,10 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-# pylint:disable=unused-import,invalid-name,no-member,undefined-variable
-# pylint:disable=no-name-in-module
 
 import platform
 import sys
+import os
 
 import BTrees
 # XXX: This is a private module in ZODB, but it has a lot
@@ -25,6 +24,49 @@ from ZODB._compat import dump
 from ZODB._compat import dumps
 from ZODB._compat import loads
 
+__all__ = [
+    # ZODB exports
+    'HIGHEST_PROTOCOL',
+    'Pickler',
+    'Unpickler',
+    'dump',
+    'dumps',
+    'loads',
+
+    # Constants
+    'PY3',
+    'PY2',
+    'PYPY',
+    'WIN',
+    'MAC',
+    'IN_TESTRUNNER',
+
+    # dicts
+    'list_values',
+    'iteritems',
+    'iterkeys',
+    'itervalues',
+
+    "OID_TID_MAP_TYPE",
+    'OID_OBJECT_MAP_TYPE',
+    'OID_SET_TYPE',
+    'OidTMap_difference',
+    'OidTMap_multiunion',
+    'OidTMap_intersection',
+
+    'MAX_TID',
+    'iteroiditems',
+    'string_types',
+    'NStringIO',
+    'metricmethod',
+    'metricmethod_sampled',
+    'wraps',
+    'ABC',
+    'base64_encodebytes',
+    'base64_decodebytes',
+    'update_wrapper',
+
+]
 
 PY3 = sys.version_info[0] == 3
 PY2 = not PY3
@@ -42,20 +84,20 @@ if PY3:
     itervalues = dict.values
 else:
     list_values = dict.values
-    iteritems = dict.iteritems
-    iterkeys = dict.iterkeys
-    itervalues = dict.itervalues
+    iteritems = dict.iteritems  # pylint:disable=no-member
+    iterkeys = dict.iterkeys  # pylint:disable=no-member
+    itervalues = dict.itervalues  # pylint:disable=no-member
 
 # These types need to be atomic for primitive operations,
 # so don't accept Python BTree implementations. (Also, on PyPy,
 # the Python BTree implementation uses more memory than a dict.)
-if BTrees.LLBTree.LLBTree is not BTrees.LLBTree.LLBTreePy:
+if BTrees.LLBTree.LLBTree is not BTrees.LLBTree.LLBTreePy: # pylint:disable=no-member
     OID_TID_MAP_TYPE = BTrees.family64.II.BTree
     OID_OBJECT_MAP_TYPE = BTrees.family64.IO.BTree
     OID_SET_TYPE = BTrees.family64.II.TreeSet
-    OidTMap_difference = BTrees.family64.II.difference
-    OidTMap_multiunion = BTrees.family64.II.multiunion
-    OidTMap_intersection = BTrees.family64.II.intersection
+    OidTMap_difference = BTrees.family64.II.difference  # pylint:disable=no-member
+    OidTMap_multiunion = BTrees.family64.II.multiunion  # pylint:disable=no-member
+    OidTMap_intersection = BTrees.family64.II.intersection  # pylint:disable=no-member
 else:
     OID_TID_MAP_TYPE = dict
     OID_OBJECT_MAP_TYPE = dict
@@ -89,9 +131,9 @@ if PY3:
     from perfmetrics import Metric
     from functools import wraps
 else:
-    string_types = (basestring,)
+    string_types = (basestring,) # pylint:disable=undefined-variable
     unicode = unicode
-    number_types = (int, long, float)
+    number_types = (int, long, float) # pylint:disable=undefined-variable
     from io import BytesIO as NStringIO
     # On Python 2, functools.update_wrapper doesn't set the '__wrapped__'
     # attribute, and we need that.
@@ -117,7 +159,15 @@ else:
 
 metricmethod_sampled = Metric(method=True, rate=0.1)
 
-if 'zope-testrunner' in sys.argv[0] and MAC:
+IN_TESTRUNNER = (
+    # zope-testrunner --test-path ...
+    'zope-testrunner' in sys.argv[0]
+    # python -m zope.testrunner --test-path ...
+    or os.path.join('zope', 'testrunner') in sys.argv[0]
+)
+
+
+if IN_TESTRUNNER:
     # If we're running under the testrunner,
     # don't apply the metricmethod stuff. It makes
     # backtraces ugly and makes stepping in the

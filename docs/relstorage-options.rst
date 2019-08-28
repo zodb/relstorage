@@ -365,7 +365,9 @@ Database Caching
 In addition to the ZODB Connection object caches, RelStorage uses
 pickle caches to reduce the number of queries to the database server.
 (This is similar to ZEO.) Caches can be both local to a process
-(within its memory) and remote (and shared between many processes).
+(within its memory) and remote (and shared between many processes) but
+outside of special circumstances this is not recommended.
+
 These options affect all caching operations.
 
 cache-prefix
@@ -609,10 +611,16 @@ Remote Caching
 --------------
 
 RelStorage can use Memcached servers as a secondary, semi-persistent
-database cache. They are most useful if the ration of writes to reads is
-relatively low (because they add overhead to each write operation).
-They can also be useful if the database server is behind a
-high-latency connection or otherwise responds slowly.
+database cache. This is generally not recommended; most RelStorage
+queries are simple enough that even in extremely large databases
+Memcached is not faster than the database. The need for a cache that
+persists across restarts is better met with local persistent caches.
+
+However, if local persistent caches are not an option, memcache may be
+useful if the ratio of writes to reads is extremely low (because they
+add substantial overhead to each write operation), and if the database
+server is behind a high-latency connection or otherwise responds
+slowly.
 
 cache-servers
         Specifies a list of memcached servers. Using memcached with

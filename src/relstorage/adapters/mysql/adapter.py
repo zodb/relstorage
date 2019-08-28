@@ -57,6 +57,7 @@ from zope.interface import implementer
 
 from relstorage._compat import iteritems
 from relstorage._compat import metricmethod_sampled
+from relstorage._util import TRACE
 
 from ..adapter import AbstractAdapter
 
@@ -81,7 +82,7 @@ from .schema import MySQLVersionDetector
 from .stats import MySQLStats
 from .txncontrol import MySQLTransactionControl
 
-log = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
 @implementer(IRelStorageAdapter)
@@ -218,7 +219,7 @@ class MySQLAdapter(AbstractAdapter):
 
         multi_results = self.driver.callproc_multi_result(cursor, proc, args)
         tid, = multi_results[0][0]
-        log.debug("Locked database only to choose tid %s", tid)
+        logger.log(TRACE, "Locked database only to choose tid %s", tid)
         return tid
 
     @metricmethod_sampled
@@ -256,7 +257,7 @@ class MySQLAdapter(AbstractAdapter):
 
         tid_int, = multi_results[0][0]
         after_selecting_tid(tid_int)
-        log.debug("Locked database and moved rows for tid %s", tid_int)
+        logger.log(TRACE, "Locked database and moved rows for tid %s", tid_int)
         return tid_int, "-"
 
     DEFAULT_LOCK_OBJECTS_AND_DETECT_CONFLICTS_INTERLEAVABLE = False
