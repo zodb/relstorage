@@ -2,7 +2,7 @@
  Changes
 =========
 
-3.0a9 (unreleased)
+3.0a9 (2019-08-28)
 ==================
 
 - Several minor logging improvements.
