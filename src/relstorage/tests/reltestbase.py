@@ -977,6 +977,76 @@ class GenericRelStorageTests(
         finally:
             db.close()
 
+    def checkPackAwarenessWhileReferringObjectChanges(self):
+        # Packing should not remove objects referenced by an object
+        # that changes during packing. References are analyzed step by
+        # step in different transaction isolations to avoid long
+        # lasting row-level locks in the object_states table.  All
+        # changes of references between the consecutive transactions
+        # of the pre_pack method must be taken into account. Otherwise
+        # visting the object graph has not the complete information
+        # about all dependencies between the objects. This leads to an
+        # inconsistency of the ZODB (POSKeyError) due to deleted
+        # objects that were incorrectly marked as not referenced.
+
+
+        from persistent.timestamp import TimeStamp
+        db = self._closing(DB(self._storage))
+        try:
+            # add some data to be packed
+            c = self._closing(db.open())
+            root = c.root()
+            child = PersistentMapping()
+            root['child'] = child
+            transaction.commit()
+            expect_oids = [child._p_oid]
+
+            child1 = PersistentMapping()
+            root['child'][1] = child1
+            transaction.commit()
+            expect_oids.append(child1._p_oid)
+
+            def fill_object_refs(self, conn, cursor, get_references):
+
+                # call original method
+                self.__fill_object_refs_orig(conn, cursor, get_references)
+
+                # Change the database just after the release of row-level locks
+                child2 = PersistentMapping()
+                root['child'][2] = child2
+                transaction.commit()
+                expect_oids.append(child2._p_oid)
+
+                child3 = PersistentMapping()
+                root['child'][3] = child3
+                transaction.commit()
+                expect_oids.append(child3._p_oid)
+
+            # monkey patch fill_object_refs
+            packundo = self._storage._adapter.packundo
+            func = packundo.fill_object_refs
+            packundo.__fill_object_refs_orig = func
+            packundo.fill_object_refs = \
+                fill_object_refs.__get__(packundo, packundo.__class__)
+
+            # Pack to the current time based on the TID in the database
+            last_tid = self._storage.lastTransaction()
+            last_tid_time = TimeStamp(last_tid).timeTime()
+            packtime = last_tid_time + 1
+            self._storage.pack(packtime, referencesf)
+
+            # The monkey patch of fill_object_refs
+            # should have been called once
+            self.assertEqual(len(expect_oids), 4, expect_oids)
+
+            # All children should still exist.
+            for oid in expect_oids:
+                self._storage.load(oid, '')
+
+        finally:
+            db.close()
+
+
     def checkPackBrokenPickle(self):
         # Verify the pack stops with the right exception if it encounters
         # a broken pickle.
