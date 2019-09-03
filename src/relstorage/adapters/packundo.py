@@ -161,9 +161,11 @@ class PackUndo(DatabaseHelpersMixin):
             rows = cursor.fetchmany(10000)
             if not rows:
                 break
+
             marker.mark(oid for (oid,) in rows)
 
         marker.free_refs()
+
 
         # Upload the TreeMarker results to the database.
 
@@ -1167,6 +1169,7 @@ class HistoryFreePackUndo(PackUndo):
     def _pre_pack_main(self, conn, cursor, pack_tid, get_references):
         """Determine what to garbage collect.
         """
+
         stmt = self._script_create_temp_pack_visit
         if stmt:
             self.runner.run_script(cursor, stmt)
@@ -1192,6 +1195,13 @@ class HistoryFreePackUndo(PackUndo):
         UPDATE pack_object
         SET keep = %(TRUE)s
         WHERE keep_tid > %(pack_tid)s;
+
+        -- Keep objects that are still referenced by objects that
+        -- have been revised since pack_tid.
+        UPDATE pack_object
+        SET keep = %(TRUE)s
+        FROM object_ref WHERE pack_object.zoid = object_ref.to_zoid AND
+                              object_ref.tid >= %(pack_tid)s;
         """
         self.runner.run_script(cursor, stmt, {'pack_tid': pack_tid})
 
