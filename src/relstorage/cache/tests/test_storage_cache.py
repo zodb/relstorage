@@ -48,9 +48,12 @@ class StorageCacheTests(TestCase):
         from relstorage.cache import StorageCache
         return StorageCache
 
-    def _makeOne(self, **kwargs):
+    def _makeOne(self, current_oids=None, **kwargs):
         options = MockOptionsWithFakeCache.from_args(**kwargs)
-        inst = self.getClass()(MockAdapter(), options,
+        adapter = MockAdapter()
+        if current_oids:
+            adapter.mover.data.update({oid: (b'', tid) for oid, tid in current_oids.items()})
+        inst = self.getClass()(adapter, options,
                                'myprefix')
         self._instances.append(inst)
         inst = inst.new_instance() # coverage and sharing testing
@@ -145,13 +148,15 @@ class StorageCacheTests(TestCase):
         self.assertPersistentCache(c)
 
         # Creating one in the same place automatically loads it.
-        c2 = self._makeOne(cache_local_dir=c.options.cache_local_dir)
+        c2 = self._makeOne(current_oids={oid: tid},
+                           cache_local_dir=c.options.cache_local_dir)
         self.assertEqual(1, len(c2))
 
         c.save(close_async=False)
 
         # Creating a new one loads the stored data.
-        c2 = self._makeOne(cache_local_dir=c.options.cache_local_dir)
+        c2 = self._makeOne(current_oids={oid: tid},
+                           cache_local_dir=c.options.cache_local_dir)
         self.assertEqual(1, len(c2))
         # Invalidating one oid invalidates the polling_state too
         c2.remove_cached_data(oid, tid)

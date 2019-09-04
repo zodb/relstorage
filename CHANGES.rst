@@ -5,8 +5,12 @@
 3.0a10 (unreleased)
 ===================
 
-- Nothing changed yet.
+- Fix a bug where the persistent cache might not properly detect
+  object invalidations if the MVCC index pulled too far ahead at save
+  time. Now it explicitly checks for invalidations at load time, as
+  earlier versions did.
 
+- Require perfmetrics 3.0.
 
 3.0a9 (2019-08-28)
 ==================

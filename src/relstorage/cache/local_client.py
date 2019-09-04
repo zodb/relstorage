@@ -378,6 +378,9 @@ class LocalClient(object):
             else:
                 yield (oid, value[1])
 
+    def keys(self):
+        return self._cache.data.keys()
+
     def _decompress(self, data):
         pfx = data[:2]
         if pfx not in self._decompression_functions:
@@ -442,10 +445,12 @@ class LocalClient(object):
         count_removed = 0
         conn = '(no oids to remove)'
         if bad_oids:
+            self.invalidate_all(bad_oids)
             conn = sqlite_connect(options, self.prefix, close_async=False)
             with closing(conn):
                 db = Database.from_connection(conn)
                 count_removed = db.remove_invalid_persistent_oids(bad_oids)
+
         logger.debug("Removed %d invalid OIDs from %s", count_removed, conn)
 
     def zap_all(self):
