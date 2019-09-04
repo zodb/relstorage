@@ -993,59 +993,60 @@ class GenericRelStorageTests(
         from persistent.timestamp import TimeStamp
         db = self._closing(DB(self._storage))
         try:
+            e = threading.Event()
+
             # add some data to be packed
             c = self._closing(db.open())
             root = c.root()
-            child = PersistentMapping()
-            root['child'] = child
+            root['child'] = child = PersistentMapping()
             transaction.commit()
-            expect_oids = [child._p_oid]
 
-            child1 = PersistentMapping()
-            root['child'][1] = child1
-            transaction.commit()
-            expect_oids.append(child1._p_oid)
-
-            def fill_object_refs(self, conn, cursor, get_references):
-
-                # call original method
-                self.__fill_object_refs_orig(conn, cursor, get_references)
-
-                # Change the database just after the release of row-level locks
-                child2 = PersistentMapping()
-                root['child'][2] = child2
+            # init
+            container_size = 20
+            for i in range(container_size):
+                root['child'][i] = PersistentMapping()
+                root['child'][i][0] = PersistentMapping()
                 transaction.commit()
-                expect_oids.append(child2._p_oid)
 
-                child3 = PersistentMapping()
-                root['child'][3] = child3
-                transaction.commit()
-                expect_oids.append(child3._p_oid)
+            def inject_changes(storage, e):
+                db = self._closing(DB(storage))
+                c = self._closing(db.open())
+                root = c.root()
+                try:
+                    for i in root['child'].keys():
+                        root['child'][i] = child = PersistentMapping()
+                        transaction.commit()
+                        time.sleep(0.01)
+                        if i == 10:
+                            e.set()
+                finally:
+                    c.close()
+                    db.close()
 
-            # monkey patch fill_object_refs
-            packundo = self._storage._adapter.packundo
-            func = packundo.fill_object_refs
-            packundo.__fill_object_refs_orig = func
-            packundo.fill_object_refs = \
-                fill_object_refs.__get__(packundo, packundo.__class__)
+            t1 = threading.Thread(name='inject_changes',
+                                  target=inject_changes,
+                                  args=(self._storage.new_instance(), e,))
+            t1.start()
+            e.wait()
 
             # Pack to the current time based on the TID in the database
             last_tid = self._storage.lastTransaction()
             last_tid_time = TimeStamp(last_tid).timeTime()
             packtime = last_tid_time + 1
+
             self._storage.pack(packtime, referencesf)
 
-            # The monkey patch of fill_object_refs
-            # should have been called once
-            self.assertEqual(len(expect_oids), 4, expect_oids)
+            c.sync()
 
+            self.assertEqual(len(root['child']), container_size)
             # All children should still exist.
-            for oid in expect_oids:
+            for i in root['child'].keys():
+                oid = root['child'][i]._p_oid
                 self._storage.load(oid, '')
 
+            t1.join()
         finally:
             db.close()
-
 
     def checkPackBrokenPickle(self):
         # Verify the pack stops with the right exception if it encounters
