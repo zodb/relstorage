@@ -125,13 +125,14 @@ class TestCase(unittest.TestCase):
         finally:
             super(TestCase, self).tearDown()
 
-    def assertIsEmpty(self, container):
-        self.assertLength(container, 0)
+    def assertIsEmpty(self, container, msg=None):
+        self.assertLength(container, 0, msg)
 
     assertEmpty = assertIsEmpty
 
-    def assertLength(self, container, length):
-        self.assertEqual(len(container), length, container)
+    def assertLength(self, container, length, msg=None):
+        self.assertEqual(len(container), length,
+                         '%s -- %s' % (msg, container) if msg else container)
 
 class StorageCreatingMixin(ABC):
 

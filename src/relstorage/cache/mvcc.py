@@ -28,6 +28,7 @@ from relstorage._compat import OID_TID_MAP_TYPE as OidTMap
 from relstorage._compat import OidTMap_difference
 from relstorage._compat import OidTMap_multiunion
 from relstorage._compat import OidTMap_intersection
+from relstorage._compat import OID_SET_TYPE as OidSet
 from relstorage._compat import iteroiditems
 from relstorage._util import log_timed
 from relstorage._util import positive_integer
@@ -929,10 +930,13 @@ class MVCCDatabaseCoordinator(DetachableMVCCDatabaseCoordinator):
         # We should have no viewers, so we eliminated all except the final map.
         self.detach_all()
         self._vacuum(cache, self.object_index)
-        # At this point, we now have processed all the extent invalidations
+        # At this point, we now have processed all the extent invalidations.
+        # Note that if there was previously saved data that we invalidated,
+        # and have vacuumed away from our index now, we won't know to remove it from
+        # the cache file. We do that at load time.
 
         assert self.object_index.depth == 1, (self.object_index, self._registered_viewers)
-        # We giv that last map to the local client so it knows to write only
+        # We give that last map to the local client so it knows to write only
         # known-valid data and to dispose of anything invalid.
 
         checkpoints = None
@@ -945,7 +949,7 @@ class MVCCDatabaseCoordinator(DetachableMVCCDatabaseCoordinator):
         return local_client.save(object_index=self.object_index.maps[0],
                                  checkpoints=checkpoints, **save_args)
 
-    def restore(self, local_client):
+    def restore(self, adapter, local_client):
         # This method is not thread safe
 
         # Note that there may have been an arbitrary amount of data in
@@ -962,4 +966,30 @@ class MVCCDatabaseCoordinator(DetachableMVCCDatabaseCoordinator):
             # We will thus begin polling at the last poll location
             # stored in the data. All loaded rows are treated as frozen.
             # We won't write them back out.
+
             self.object_index = _ObjectIndex(highest_visible_tid)
+            self.__poll_old_oids_and_remove(adapter, local_client)
+
+    @log_timed
+    def __poll_old_oids_and_remove(self, adapter, local_client):
+        oids = OidSet(local_client.keys())
+        # In local tests, this function executes against PostgreSQL 11 in .78s
+        # for 133,002 older OIDs; or, .35s for 57,002 OIDs against MySQL 5.7.
+        logger.debug("Polling %d oids stored in cache", len(oids))
+        def poll_old_oids(_conn, cursor):
+            return adapter.mover.current_object_tids(cursor, oids)
+        poll_old_oids.transaction_isolation_level = adapter.connmanager.isolation_load
+        poll_old_oids.transaction_read_only = True
+        current_tids_for_oids = adapter.connmanager.open_and_call(poll_old_oids).get
+        polled_invalid_oids = OidSet()
+        peek = local_client._peek
+
+        for oid in oids:
+            current_tid = current_tids_for_oids(oid)
+            if (current_tid is None
+                    or peek(oid)[1] != current_tid):
+                polled_invalid_oids.add(oid)
+
+        logger.debug("Polled %d older oids stored in cache; %d survived",
+                     len(oids), len(oids) - len(polled_invalid_oids))
+        local_client.remove_invalid_persistent_oids(polled_invalid_oids)

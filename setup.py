@@ -100,7 +100,7 @@ setup(
     ],
     install_requires=[
         'cffi',
-        'perfmetrics',
+        'perfmetrics >= 3.0.0',
         'zope.interface',
         'zope.dottedname',
         'zc.lockfile',

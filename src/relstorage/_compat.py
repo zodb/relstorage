@@ -148,12 +148,7 @@ else:
             replacement.__wrapped__ = self._orig
             return replacement
 
-    from perfmetrics import Metric as _PMetric
-    class Metric(_PMetric):
-        def __call__(self, f):
-            new_f = _PMetric.__call__(self, f)
-            new_f.__wrapped__ = f
-            return new_f
+    from perfmetrics import Metric
 
     metricmethod = Metric(method=True)
 

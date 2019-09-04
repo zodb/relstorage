@@ -35,6 +35,11 @@ def find_cache(obj):
     cache = getattr(storage, '_cache', storage)
     return cache
 
+def as_int(oid):
+    if isinstance(oid, bytes):
+        oid = bytes8_to_int64(oid)
+    return oid
+
 class PersistentCacheStorageTests(TestCase):
     # pylint:disable=abstract-method
 
@@ -84,12 +89,19 @@ class PersistentCacheStorageTests(TestCase):
         cache = find_cache(storage)
         self.assertNotIn(oid, cache.object_index or ())
 
-    def assert_oid_known(self, oid, storage):
+    def assert_exact_tid_in_oid_index(self, oid, storage, expected_tid=None):
+        oid = as_int(oid)
+        expected_tid = as_int(expected_tid)
         cache = find_cache(storage)
         index = cache.object_index or cache.polling_state.object_index or ()
         __traceback_info__ = index.keys()
         self.assertIn(oid, index)
-        return index[oid]
+        tid = index[oid]
+        if expected_tid:
+            self.assertEqual(tid, expected_tid)
+        return tid
+
+    assert_oid_known = assert_exact_tid_in_oid_index
 
     def assert_tid_after(self, oid, tid, storage):
         cache = find_cache(storage)
@@ -98,6 +110,10 @@ class PersistentCacheStorageTests(TestCase):
         return new_tid
 
     def assert_oid_current(self, oid, storage, expected_tid=None):
+        """
+        Check that *oid* is in the object index; if *expected_tid* is given,
+        make sure it matches that value.
+        """
         cache = find_cache(storage)
 
         tid = self.assert_oid_known(oid, cache)
@@ -114,7 +130,9 @@ class PersistentCacheStorageTests(TestCase):
     #         self.assertEqual(cache.checkpoints, expected_checkpoints)
     #     return cache.checkpoints
 
-    def assert_cached(self, oid, tid, storage):
+    def assert_cached(self, oid, tid, storage, msg=None):
+        oid = as_int(oid)
+        tid = as_int(tid)
         cache = find_cache(storage)
         cache_data = cache.local_client[(oid, tid)]
         __traceback_info__ = (
@@ -125,19 +143,21 @@ class PersistentCacheStorageTests(TestCase):
              for k in cache.local_client
              if k[0] == oid]
         )
-        self.assertIsNotNone(cache_data)
+        self.assertIsNotNone(cache_data,
+                             msg or "Unable to find cache for (%s, %s)" % (oid, tid))
         return cache_data
 
-    def assert_cached_exact(self, oid, tid, storage):
-        data = self.assert_cached(oid, tid, storage)
-        self.assertEqual(data[1], tid)
+    def assert_cached_exact(self, oid, tid, storage, msg=None):
+        data = self.assert_cached(oid, tid, storage, msg)
+        self.assertEqual(data[1], as_int(tid), msg)
         return data
 
-    def assert_oid_not_cached(self, oid, storage):
+    def assert_oid_not_cached(self, oid, storage, msg=None):
+        oid = as_int(oid)
         cache = find_cache(storage)
         keys = [k for k in cache.local_client if k[0] == oid]
         __traceback_info__ = (oid, keys)
-        self.assertEmpty(keys)
+        self.assertEmpty(keys, msg)
 
 
     def __do_sets(self, root, new_data, old_tids, old_data):
@@ -190,10 +210,16 @@ class PersistentCacheStorageTests(TestCase):
                               old_data,
                               pack=False):
         """
+        Set the values for *new_data* in the root object of the storage.
+
         And return the transaction ID of when we mad the change,
         and the transaction ID of the last time the root changed.
 
         Uses an independent transaction.
+
+        *old_tids* is a map from the keys in *new_data* to an expected TID
+        that should be cached. *old_value* is the same for the expected
+        current values on the root.
 
         Closes *storage*.
         """
@@ -207,7 +233,6 @@ class PersistentCacheStorageTests(TestCase):
         self.__do_sets(root, new_data, old_tids, old_data)
         tx.commit()
 
-        # checkpoints = self.assert_checkpoints(c1)
         self.__do_check_tids(root, old_tids)
         tid_int = bytes8_to_int64(c1._storage.lastTransaction())
         self.assertEqual(c1._storage._cache.current_tid, tid_int)
@@ -241,12 +266,9 @@ class PersistentCacheStorageTests(TestCase):
         self.assertGreater(new_tid, orig_tid)
 
         # Now a new storage that will read the persistent cache.
-        # It has the correct checkpoints, and the root oid is found in
-        # delta_after0, where we will poll for it.
+        # It has the correct checkpoints,
         storage3 = self.__make_storage_pcache(
-            orig_checkpoints,
-            expected_root_tid=orig_tid)
-        # self.assertEqual(storage3._cache.checkpoints, orig_checkpoints)
+            orig_checkpoints)
 
         db3 = self._closing(DB(storage3))
         c3 = db3.open()
@@ -263,23 +285,35 @@ class PersistentCacheStorageTests(TestCase):
         db3.close()
 
     def _populate_root_and_mapping(self):
+        """
+        Creates the following structure in ``self._storage``::
+
+            root.myobj1 = PersistentMapping()
+            root.myobj1.key = PersistentMapping()
+            root.myobj = 3
+
+        Does this over several transactions. Returns
+        the tid of the last time the root changed, and the tid
+        of ``root.myobj1``, which is later than the root TID and which
+        is current, and the database opened on the storage.
+        """
         tx1 = transaction.TransactionManager()
         storage1 = self._storage
         db1 = self._closing(DB(storage1))
         c1 = db1.open(tx1)
-        root = c1.root()
-        root.myobj1 = mapping = PersistentMapping()
-        root.myobj = 1
+        root = c1.root
+        root().myobj1 = root.myobj1 = mapping = PersistentMapping()
+        root().myobj = root.myobj = 1
         tx1.commit()
         c1._storage._cache.clear(load_persistent=False)
 
         c1._storage.poll_invalidations()
-        root.myobj = 2
+        root().myobj = root.myobj = 2
         tx1.commit()
         c1._storage._cache.clear(load_persistent=False)
 
         c1._storage.poll_invalidations()
-        root.myobj = 3
+        root().myobj = root.myobj = 3
         tx1.commit()
         root_tid = self.assert_oid_known(ROOT_OID, c1)
         c1._storage._cache.clear(load_persistent=False)
@@ -289,7 +323,7 @@ class PersistentCacheStorageTests(TestCase):
         # modified. This transaction will be included in
         # a persistent cache.
         c1._storage.poll_invalidations()
-        root.myobj1.key = PersistentMapping()
+        root().myobj1.key = root.myobj1.key = PersistentMapping()
         mapping_oid = mapping._p_oid
         mapping_oid_int = bytes8_to_int64(mapping_oid)
         tx1.commit()
@@ -311,17 +345,8 @@ class PersistentCacheStorageTests(TestCase):
         c1.close()
         return root_tid, mapping_tid, db1
 
-    def _force_checkpoints_in_storage_cache(self, storage, cp): # pylint:disable=unused-argument
-        # We do this to simulate a second instance writing to the persistent
-        # cache file without having done a poll? Or something?
-        # This doesn't seem very realistic.
-        return
-        # storage._cache.local_client.store_checkpoints(*cp)
-        # storage._cache.polling_state.checkpoints = cp
-
-
     def checkNoConflictWhenChangeMissedByPersistentCacheBeforeCP1(self):
-        root_tid, _mapping_tid, db = self._populate_root_and_mapping()
+        _root_tid, _mapping_tid, db = self._populate_root_and_mapping()
 
         # Make some changes to the root in a storage that will not
         # read or update the persistent cache.
@@ -331,9 +356,6 @@ class PersistentCacheStorageTests(TestCase):
             old_tid=None,
         )
 
-        # Now move the persistent checkpoints forward, pushing the
-        # last TID for the root object out of the delta ranges.
-        self._force_checkpoints_in_storage_cache(db.storage, (new_tid, new_tid))
         # Persist
         db.close()
 
@@ -342,8 +364,8 @@ class PersistentCacheStorageTests(TestCase):
             expected_checkpoints=(new_tid, new_tid),
             expected_root_tid=None,
         )
-        # The root object is cached still
-        self.assert_cached(ROOT_OID, root_tid, storage3)
+        # The root object is not cached, it was rejected.
+        self.assert_oid_not_cached(ROOT_OID, storage3)
 
         # We can successfully open and edit the root object.
         self.__set_key_in_root_to(storage3, 180, old_tid=new_tid, old_value=420)
@@ -359,9 +381,6 @@ class PersistentCacheStorageTests(TestCase):
             key='myobj1.key',
         )
 
-        # Now move the persistent checkpoints forward, pushing the
-        # last TID for the root object out of the delta ranges.
-        self._force_checkpoints_in_storage_cache(db.storage, (new_tid, new_tid))
         # persist
         db.close()
 
@@ -426,9 +445,6 @@ class PersistentCacheStorageTests(TestCase):
             pack=True
         )
 
-        # Now move the persistent checkpoints forward, pushing the
-        # last TID for the root object out of the delta ranges.
-        self._force_checkpoints_in_storage_cache(c1._storage, (new_tid, new_tid))
         # Persist
         c1.close()
         db.close()
@@ -454,3 +470,193 @@ class PersistentCacheStorageTests(TestCase):
             {'': root_tid},
             {'myobj': 3, 'myobj1.key': None}
         )
+
+
+    def checkNoConflictWhenOverlappedModificationNotInCache(self):
+        # A storage writes a current state of an object O1 at TID1
+        # to persistent cache.
+        # Meanwhile, an unconnected storage writes O1
+        # to the database at TID2.
+        # A third storage polls, and sees the change for O1, but has
+        # never had O1 in its cache. It writes the persistent cache.
+
+        # When we open and read the persistent cache, we don't use the old
+        # state for O1.
+
+        # First storage caches this state.
+        root_tid, _mapping_tid, db = self._populate_root_and_mapping()
+        conn = db.open()
+        nested_tid = conn.root.myobj1.key._p_serial
+        nested_oid = conn.root.myobj1.key._p_oid
+        conn.close()
+        # Persist.
+        db.close()
+
+        # Second storage, disconnected, mutates.
+        # Third storage is around to observe this.
+        storage2 = self.__make_storage_no_pcache()
+        txm2 = transaction.TransactionManager(True)
+        db2 = DB(storage2)
+
+        storage3 = self.__make_storage_pcache()
+        find_cache(storage3).clear(load_persistent=False)
+        storage3.poll_invalidations()
+
+        conn2 = db2.open(txm2)
+        txm2.begin()
+        conn2.root.myobj1.key['foo'] = 'bar'
+
+        # A fourth storage is opened right now, loading the old state.
+        storage_with_old_state = self.__make_storage_pcache()
+
+        txm2.commit()
+        _, new_nested_tid = conn2._storage.load(nested_oid)
+        self.assertNotEqual(nested_tid, new_nested_tid)
+        conn2.close()
+        db2.close()
+
+
+        # Storage 3 observes the change, but has never had that object cached.
+        storage3.poll_invalidations()
+        self.assert_exact_tid_in_oid_index(nested_oid, storage3, new_nested_tid)
+        self.assert_oid_not_cached(nested_oid, storage3)
+        # Persist. Make it have a hit first so that it actually does want to save.
+        storage3.load(z64)
+        self.assertEqual(1, find_cache(storage3).save())
+        storage3.close()
+
+        storage4 = self.__make_storage_pcache()
+        # When storage3 saved, it removed that data from the cache, so
+        # storage4 doesn't have it.
+        self.assert_oid_not_cached(
+            nested_oid, storage4,
+            "OID %s should not be cached except with TID %s" % (
+                bytes8_to_int64(nested_oid),
+                bytes8_to_int64(new_nested_tid)
+            ))
+        self.assert_cached(ROOT_OID, root_tid, storage4)
+
+        def _check_nested(storage):
+            db4 = DB(storage)
+            txm4 = transaction.TransactionManager(True)
+            conn4 = db4.open(txm4)
+            txm4.begin()
+            self.assertEqual(
+                conn4.root.myobj1.key['foo'],
+                'bar'
+            )
+            conn4.close()
+            db4.close()
+        _check_nested(storage4)
+
+        # The one opened in between has it, but won't use it.
+        self.assert_cached_exact(nested_oid, nested_tid, storage_with_old_state)
+
+        # However, when it polls, it won't use the old state.
+        _check_nested(storage_with_old_state)
+
+    def checkNoConflictWhenOverlappedModificationNotInCache2(self):
+        # pylint:disable=too-many-statements
+        # Like checkNoConflictWhenOverlappedModificationNotInCache,
+        # but the storage that does the invalidation polls
+        # several times and loses the invalidation data from its object index.
+
+        # First storage caches this state.
+        root_tid, _mapping_tid, db = self._populate_root_and_mapping()
+        conn = db.open()
+        nested_tid = conn.root.myobj1.key._p_serial
+        nested_oid = conn.root.myobj1.key._p_oid
+        conn.close()
+        # Persist.
+        db.close()
+
+        # Second storage, disconnected, mutates.
+        # Third storage is around to observe this.
+        storage2 = self.__make_storage_no_pcache()
+        txm2 = transaction.TransactionManager(True)
+        db2 = DB(storage2)
+
+        storage3 = self.__make_storage_pcache()
+        find_cache(storage3).clear(load_persistent=False)
+        storage3.poll_invalidations()
+
+        conn2 = db2.open(txm2)
+        txm2.begin()
+        conn2.root.myobj1.key['foo'] = 'bar'
+
+        # A fourth storage is opened right now, loading the old state.
+        storage_with_old_state = self.__make_storage_pcache()
+
+        txm2.commit()
+        _, new_nested_tid = conn2._storage.load(nested_oid)
+        self.assertNotEqual(nested_tid, new_nested_tid)
+        conn2.close()
+        db2.close()
+
+
+        # Storage 3 observes the change, but has never had that object cached.
+        storage3.poll_invalidations()
+        self.assert_exact_tid_in_oid_index(nested_oid, storage3, new_nested_tid)
+        self.assert_oid_not_cached(nested_oid, storage3)
+
+        # Storage 3 makes some changes of its own and polls forward, losing
+        # the old object index.
+        def _make_change(storage):
+            db = DB(storage)
+            tx = transaction.TransactionManager(True)
+            conn = db.open(tx)
+            tx.begin()
+            conn.root.another_obj = 42
+            tx.commit()
+            tid = conn.root()._p_serial
+            tx.begin()
+            tx.commit()
+            conn.close()
+            return tid, db
+
+        root_tid, db = _make_change(storage3)
+        storage3.poll_invalidations()
+        # We still have this data in our map because the DB object and its open
+        # connection still have that around.
+        self.assert_exact_tid_in_oid_index(nested_oid, storage3, new_nested_tid)
+        self.assert_oid_not_cached(nested_oid, storage3)
+
+
+        # Persist. Make it have a hit first so that it actually does want to save.
+        storage3.load(z64)
+        self.assertEqual(1, find_cache(storage3).save())
+        # We detached everything and vacuumed in order to save. So
+        # we've lost the tid data, and couldn't invalidate it based on
+        # the object_index. So unless we do validation based on
+        # something else, we'd still save and use incorrect data.
+        self.assert_oid_not_known(nested_oid, storage3)
+        storage3.close()
+
+        storage4 = self.__make_storage_pcache()
+        # We still figured out to drop this data, though.
+        self.assert_oid_not_cached(
+            nested_oid, storage4,
+            "OID %s should not be cached except with TID %s" % (
+                bytes8_to_int64(nested_oid),
+                bytes8_to_int64(new_nested_tid)
+            ))
+        self.assert_cached(ROOT_OID, root_tid, storage4)
+
+        def _check_nested(storage):
+            db4 = DB(storage)
+            txm4 = transaction.TransactionManager(True)
+            conn4 = db4.open(txm4)
+            txm4.begin()
+            self.assertEqual(
+                conn4.root.myobj1.key['foo'],
+                'bar'
+            )
+            conn4.close()
+            db4.close()
+        _check_nested(storage4)
+
+        # The one opened in between has it, but won't use it.
+        self.assert_cached_exact(nested_oid, nested_tid, storage_with_old_state)
+
+        # However, when it polls, it won't use the old state.
+        _check_nested(storage_with_old_state)
