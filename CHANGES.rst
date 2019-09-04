@@ -2,7 +2,7 @@
  Changes
 =========
 
-3.0a10 (unreleased)
+3.0a10 (2019-09-04)
 ===================
 
 - Fix a bug where the persistent cache might not properly detect
