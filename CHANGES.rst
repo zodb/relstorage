@@ -8,7 +8,7 @@
 - Fix a bug where the persistent cache might not properly detect
   object invalidations if the MVCC index pulled too far ahead at save
   time. Now it explicitly checks for invalidations at load time, as
-  earlier versions did.
+  earlier versions did. See :pr:`343`.
 
 - Require perfmetrics 3.0.
 
