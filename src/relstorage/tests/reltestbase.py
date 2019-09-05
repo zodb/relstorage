@@ -1013,13 +1013,15 @@ class GenericRelStorageTests(
                 root = c.root()
                 try:
                     for i in root['child'].keys():
-                        root['child'][i] = PersistentMapping()
+                        root['child'][i] = child = PersistentMapping()
                         transaction.commit()
+                        print('inject %s' % bytes8_to_int64(child._p_oid))
                         time.sleep(0.01)
                         if i == 10:
                             # Send event for packing
                             e.set()
                 finally:
+                    print('inject finshed...')
                     c.close()
                     db.close()
 
@@ -1036,12 +1038,12 @@ class GenericRelStorageTests(
             last_tid = self._storage.lastTransaction()
             last_tid_time = TimeStamp(last_tid).timeTime()
             packtime = last_tid_time + 1
-
+            print('start pack...')
             self._storage.pack(packtime, referencesf)
             
             # Wait until inject_changes has finished
             t1.join(99)
-            time.sleep(3)
+
             # import pdb; pdb.set_trace()
             # self._storage.sync()
             c.sync()
