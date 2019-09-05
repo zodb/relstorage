@@ -1043,6 +1043,7 @@ class GenericRelStorageTests(
             
             # Wait until inject_changes has finished
             t1.join(99)
+            time.sleep(1)
 
             # reinitialize new connection for consistency check
             c = self._closing(db.open())
