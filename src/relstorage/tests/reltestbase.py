@@ -1047,6 +1047,7 @@ class GenericRelStorageTests(
             # reinitialize new connection for consistency check
             c = self._closing(db.open())
             root = c.root()
+            self._storage.sync()
             
             self.assertEqual(len(root['child']), container_size)
             # Verify. All children should still exist.
