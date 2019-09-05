@@ -989,19 +989,18 @@ class GenericRelStorageTests(
         # inconsistency of the ZODB (POSKeyError) due to deleted
         # objects that were incorrectly marked as not referenced.
 
-
         from persistent.timestamp import TimeStamp
         db = self._closing(DB(self._storage))
         try:
             e = threading.Event()
 
-            # add some data to be packed
+            # Add some data to be packed
             c = self._closing(db.open())
             root = c.root()
-            root['child'] = child = PersistentMapping()
+            root['child'] = PersistentMapping()
             transaction.commit()
 
-            # init
+            # Init
             container_size = 20
             for i in range(container_size):
                 root['child'][i] = PersistentMapping()
@@ -1014,20 +1013,26 @@ class GenericRelStorageTests(
                 root = c.root()
                 try:
                     for i in root['child'].keys():
-                        root['child'][i] = child = PersistentMapping()
+                        root['child'][i] = PersistentMapping()
                         transaction.commit()
                         time.sleep(0.01)
                         if i == 10:
+                            # Send event for packing
                             e.set()
                 finally:
                     c.close()
                     db.close()
+                    # Send event for verify
+                    e.set()
 
+            # Thread for inject_changes
             t1 = threading.Thread(name='inject_changes',
                                   target=inject_changes,
                                   args=(self._storage.new_instance(), e,))
             t1.start()
-            e.wait()
+
+            # Wait until inject_changes sends event
+            e.wait(99)
 
             # Pack to the current time based on the TID in the database
             last_tid = self._storage.lastTransaction()
@@ -1036,15 +1041,19 @@ class GenericRelStorageTests(
 
             self._storage.pack(packtime, referencesf)
 
+            # Wait until inject_changes sends event
+            e.wait(99)
+
+            # Sync connection
             c.sync()
 
             self.assertEqual(len(root['child']), container_size)
-            # All children should still exist.
+            # Verify. All children should still exist.
             for i in root['child'].keys():
                 oid = root['child'][i]._p_oid
                 self._storage.load(oid, '')
 
-            t1.join()
+            t1.join(99)
         finally:
             db.close()
 
