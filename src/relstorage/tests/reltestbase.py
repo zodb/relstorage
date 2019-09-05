@@ -1040,11 +1040,12 @@ class GenericRelStorageTests(
 
             self._storage.pack(packtime, referencesf)
 
+            
             # Wait until inject_changes has finished
             t1.join(99)
 
-            # Sync connection
-            c.sync()
+            # reinitialize new connection for consistency check
+            c = self._closing(db.open())
             root = c.root()
             
             self.assertEqual(len(root['child']), container_size)
