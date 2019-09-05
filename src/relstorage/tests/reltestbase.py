@@ -1022,8 +1022,7 @@ class GenericRelStorageTests(
                 finally:
                     c.close()
                     db.close()
-                    # Send event for verify
-                    e.set()
+
 
             # Thread for inject_changes
             t1 = threading.Thread(name='inject_changes',
@@ -1041,19 +1040,19 @@ class GenericRelStorageTests(
 
             self._storage.pack(packtime, referencesf)
 
-            # Wait until inject_changes sends event
-            e.wait(99)
+            # Wait until inject_changes has finished
+            t1.join(99)
 
             # Sync connection
             c.sync()
-
+            root = c.root()
+            
             self.assertEqual(len(root['child']), container_size)
             # Verify. All children should still exist.
             for i in root['child'].keys():
                 oid = root['child'][i]._p_oid
                 self._storage.load(oid, '')
 
-            t1.join(99)
         finally:
             db.close()
 
