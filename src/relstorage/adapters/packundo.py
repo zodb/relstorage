@@ -1171,10 +1171,13 @@ class HistoryFreePackUndo(PackUndo):
         if stmt:
             self.runner.run_script(cursor, stmt)
 
-        self.fill_object_refs(conn, cursor, get_references)
-
         log.info("pre_pack: filling the pack_object table")
-        # Fill the pack_object table with all known OIDs.
+
+        #  Fill the pack_object table with all known OIDs.
+        #  Operations on object_state must be run in a single
+        #  transaction isolation to avoid inconsistent
+        #  information about object references.
+
         stmt = """
         %(TRUNCATE)s pack_object;
 
@@ -1193,7 +1196,12 @@ class HistoryFreePackUndo(PackUndo):
         SET keep = %(TRUE)s
         WHERE keep_tid > %(pack_tid)s;
         """
+
         self.runner.run_script(cursor, stmt, {'pack_tid': pack_tid})
+
+        log.info("pre_pack: filling the object_refs table")
+
+        self.fill_object_refs(conn, cursor, get_references)
 
         # Traverse the graph, setting the 'keep' flags in pack_object
         self._traverse_graph(cursor)
