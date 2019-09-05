@@ -5,7 +5,9 @@
 3.0a11 (unreleased)
 ===================
 
-- Nothing changed yet.
+- Make ``poll_invalidations`` handle other retryable internal
+  exceptions besides just ``ReadConflictError`` so they don't
+  propagate out to ``transaction.begin()``.
 
 
 3.0a10 (2019-09-04)

@@ -43,6 +43,7 @@ from ..blobhelper.interfaces import IBlobHelper
 from ..blobhelper.interfaces import INoBlobHelper
 
 from ..cache import StorageCache
+from ..cache.interfaces import CacheConsistencyError
 from ..options import Options
 from ..interfaces import IRelStorage
 from ..adapters.connections import LoadConnection
@@ -636,8 +637,12 @@ class RelStorage(LegacyMethodsMixin,
         return oids
 
     def __stale(self, stale_error):
+        # Reset the Connection cache. This makes it more likely we'll be called to
+        # load an object and the application can notice the issue.
+        self.__queued_changes = None
         # Allow GC to do its thing with the locals, don't hold them indefinitely
         clear_frames(sys.exc_info()[2])
+
         replacements = {}
         my_ns = vars(self)
         for k, v in my_ns.items():
@@ -709,29 +714,51 @@ class RelStorage(LegacyMethodsMixin,
                 conn, cursor,
                 ignore_tid
             )
-        except ReadConflictError as e:
-            # The database connection is stale, but postpone this
-            # error until the application tries to read or write something.
-            # XXX: We probably need to drop our pickle cache? At least the local
-            # delta_after* maps/current_tid/checkpoints?
+        except (ReadConflictError, CacheConsistencyError) as e:
+            # The database connection or cache is stale, but postpone
+            # this error until the application tries to read or write
+            # something and is better equipped to deal with it. (This
+            # is called from transaction.begin() ->
+            # Connection.newTransaction ->
+            # RelStorage.poll_invalidations, and no one is prepared
+            # for transaction.begin() to fail, or to handle it
+            # gracefully if it does.)
 
-            # XXX: Answer: Yes, yes we do. This was observed as an
-            # issue in the zodbconvert tests, when the destination
-            # storage configuration loaded to do the conversion and
-            # zapping on didn't have matching persistent cache
-            # information as the storage configuration that had
-            # initially populated the destination (in order to verify
-            # zapping). As our cache implementation got better and
-            # better, we suddenly found that without zapping the cache
-            # files, we would report this RCE, based on info from the
-            # persistent cache from before the conversion, with no way
-            # to fix it (short of zapping those cache files). This can
-            # also come up with packing in history-free databases
+            # If we were configured to revert-when-stale, we wouldn't
+            # get a ReadConflictError, we'd have a return of None and
+            # our cache would restart polling. Eventually the RCE
+            # should stop as the replica catches up. But if we clear
+            # the caches on the RCE, they'll lose their polling state
+            # and essentially revert-when-stale even though we weren't
+            # configured to do so.
+
+            # At a minimum, though, we must reset our Connection's
+            # object cache. If we fail do do this, then we see issue
+            # in the zodbconvert tests, when the destination storage
+            # configuration loaded to do the conversion and zapping on
+            # didn't have matching persistent cache information as the
+            # storage configuration that had initially populated the
+            # destination (in order to verify zapping). As our cache
+            # implementation got better and better, we suddenly found
+            # that without zapping the cache files, we would report
+            # this RCE, based on info from the persistent cache from
+            # before the conversion, with no way to fix it (short of
+            # zapping those cache files). This can also come up with
+            # packing in history-free databases
             # (checkPackAllRevisions). We have a temporary fix for
             # that in self.pack() until we write more specific tests.
-            log.error("ReadConflictError from polling invalidations; %s", e)
+            #
+            # TODO: We need a way to distinguish RCE from packing
+            # vs RCE from a replica switch.
+
+            # A CCE, on the other hand, means the cache has already
+            # reset its own internal state, we outght to do the same for
+            # the Connection. See above for why this shouldn't
+            # propagate.
+            log.error("Reading from stale replica or leading transactions packed away; %s", e)
             self.__stale(e)
-            return
+            changes = None
+
 
         if changes is None:
             # Stop tracking invalidations and reset the ZODB object cache.
