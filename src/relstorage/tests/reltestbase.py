@@ -1023,7 +1023,6 @@ class GenericRelStorageTests(
                     c.close()
                     db.close()
 
-
             # Thread for inject_changes
             t1 = threading.Thread(name='inject_changes',
                                   target=inject_changes,
@@ -1039,18 +1038,22 @@ class GenericRelStorageTests(
             packtime = last_tid_time + 1
 
             self._storage.pack(packtime, referencesf)
-
             
             # Wait until inject_changes has finished
             t1.join(99)
-            time.sleep(1)
- 
+            time.sleep(3)
+            # import pdb; pdb.set_trace()
             # self._storage.sync()
             c.sync()
+
+            self.assertEqual(c._storage.lastTransactionInt(),
+                             self._storage.lastTransactionInt())
+
             # self.assertEqual(len(root['child']), container_size)
             # Verify. All children should still exist.
             for i in root['child'].keys():
                 oid = root['child'][i]._p_oid
+                print('verify %s' % bytes8_to_int64(oid))
                 self._storage.load(oid, '')
 
         finally:
