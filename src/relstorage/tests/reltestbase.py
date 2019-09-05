@@ -1046,7 +1046,10 @@ class GenericRelStorageTests(
 
             # import pdb; pdb.set_trace()
             # self._storage.sync()
-            c.sync()
+            for i in range(10):
+                c.sync()
+                print('sync %s %s' % (i, c._storage.lastTransactionInt()))
+                time.sleep(1)
 
             self.assertEqual(c._storage.lastTransactionInt(),
                              self._storage.lastTransactionInt())
