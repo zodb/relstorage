@@ -1045,6 +1045,7 @@ class GenericRelStorageTests(
             # Wait until inject_changes has finished
             t1.join(99)
 
+            c.sync()
             c._storage.sync()
             self._storage.sync()
             print('sync c: %s s: %s' % (c._storage.lastTransactionInt(),
