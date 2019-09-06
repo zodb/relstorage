@@ -990,7 +990,8 @@ class GenericRelStorageTests(
         # objects that were incorrectly marked as not referenced.
 
         from persistent.timestamp import TimeStamp
-        db = self._closing(DB(self._storage))
+        storage = self._storage.new_instance()
+        db = self._closing(DB(storage))
         try:
             e = threading.Event()
 
@@ -1045,23 +1046,27 @@ class GenericRelStorageTests(
             # Wait until inject_changes has finished
             t1.join(99)
 
-            c.sync()
-            c._storage.sync()
-            self._storage.sync()
-            print('sync c: %s s: %s' % (c._storage.lastTransactionInt(),
-                                        self._storage.lastTransactionInt()))
+            c.close()
 
-            self.assertEqual(c._storage.lastTransactionInt(),
-                             self._storage.lastTransactionInt(),'last tid of connection != last tid of storage')
+            c = self._closing(db.open())
+
+            c_ltid = c._storage.lastTransactionInt()
+            s_ltid = storage.lastTransactionInt()
+            print('sync c: %s s: %s' % (c_ltid, s_ltid))
+            self.assertEqual(c_ltid,
+                             s_ltid,
+                             'connection last tid (%s) != storage '
+                             'last tid (%s)' % (c_ltid, s_ltid))
 
             self.assertEqual(len(root['child']), container_size)
             # Verify. All children should still exist.
             for i in root['child'].keys():
                 oid = root['child'][i]._p_oid
                 print('verify %s' % bytes8_to_int64(oid))
-                self._storage.load(oid, '')
+                storage.load(oid, '')
 
         finally:
+            c.close()
             db.close()
 
     def checkPackBrokenPickle(self):
