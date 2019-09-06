@@ -1016,8 +1016,8 @@ class GenericRelStorageTests(
                     for i in root['child'].keys():
                         root['child'][i] = child = PersistentMapping()
                         transaction.commit()
-                        print('inject %s %s' % bytes8_to_int64(child._p_oid
-                                                               child._p_serial))
+                        print('inject %s %s' % (bytes8_to_int64(child._p_oid),
+                                                bytes8_to_int64(child._p_serial)))
                         time.sleep(0.01)
                         if i == 10:
                             # Send event for packing
