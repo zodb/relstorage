@@ -990,7 +990,7 @@ class GenericRelStorageTests(
         # objects that were incorrectly marked as not referenced.
 
         from persistent.timestamp import TimeStamp
-        storage = self._storage
+        storage = self._storage.new_instance()
         db = self._closing(DB(storage))
         try:
             e = threading.Event()
