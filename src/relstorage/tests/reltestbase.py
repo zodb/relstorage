@@ -1000,12 +1000,14 @@ class GenericRelStorageTests(
             root['child'] = PersistentMapping()
             transaction.commit()
 
-            # Init
+            # Init content
             container_size = 20
             for i in range(container_size):
                 root['child'][i] = PersistentMapping()
                 root['child'][i][0] = PersistentMapping()
                 transaction.commit()
+
+            c.sync()
 
             def inject_changes(db, e):
                 c = self._closing(db.open())
@@ -1014,7 +1016,8 @@ class GenericRelStorageTests(
                     for i in root['child'].keys():
                         root['child'][i] = child = PersistentMapping()
                         transaction.commit()
-                        print('inject %s' % bytes8_to_int64(child._p_oid))
+                        print('inject %s %s' % bytes8_to_int64(child._p_oid
+                                                               child._p_serial))
                         time.sleep(0.01)
                         if i == 10:
                             # Send event for packing
@@ -1042,17 +1045,15 @@ class GenericRelStorageTests(
             # Wait until inject_changes has finished
             t1.join(99)
 
-            # import pdb; pdb.set_trace()
-            # self._storage.sync()
-
-            c.sync()
+            c._storage.sync()
+            self._storage.sync()
             print('sync c: %s s: %s' % (c._storage.lastTransactionInt(),
                                         self._storage.lastTransactionInt()))
 
             self.assertEqual(c._storage.lastTransactionInt(),
-                             self._storage.lastTransactionInt())
+                             self._storage.lastTransactionInt(),'last tid of connection != last tid of storage')
 
-            # self.assertEqual(len(root['child']), container_size)
+            self.assertEqual(len(root['child']), container_size)
             # Verify. All children should still exist.
             for i in root['child'].keys():
                 oid = root['child'][i]._p_oid
