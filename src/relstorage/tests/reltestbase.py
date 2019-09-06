@@ -990,7 +990,7 @@ class GenericRelStorageTests(
         # objects that were incorrectly marked as not referenced.
 
         from persistent.timestamp import TimeStamp
-        storage = self._storage.new_instance()
+        storage = self._storage
         db = self._closing(DB(storage))
         try:
             e = threading.Event()
@@ -1008,23 +1008,18 @@ class GenericRelStorageTests(
                 root['child'][i][0] = PersistentMapping()
                 transaction.commit()
 
-            c.sync()
-
             def inject_changes(db, e):
                 c = self._closing(db.open())
                 root = c.root()
                 try:
                     for i in root['child'].keys():
-                        root['child'][i] = child = PersistentMapping()
+                        root['child'][i] = PersistentMapping()
                         transaction.commit()
-                        print('inject %s %s' % (bytes8_to_int64(child._p_oid),
-                                                bytes8_to_int64(child._p_serial)))
                         time.sleep(0.01)
                         if i == 10:
                             # Send event for packing
                             e.set()
                 finally:
-                    print('inject finshed...')
                     c.close()
 
             # Thread for inject_changes
@@ -1040,29 +1035,36 @@ class GenericRelStorageTests(
             last_tid = self._storage.lastTransaction()
             last_tid_time = TimeStamp(last_tid).timeTime()
             packtime = last_tid_time + 1
-            print('start pack...')
+
             self._storage.pack(packtime, referencesf)
 
             # Wait until inject_changes has finished
             t1.join(99)
 
+            # Close connection
             c.close()
 
+            # Reopen connection for verification
             c = self._closing(db.open())
 
             c_ltid = c._storage.lastTransactionInt()
             s_ltid = storage.lastTransactionInt()
-            print('sync c: %s s: %s' % (c_ltid, s_ltid))
+
             self.assertEqual(c_ltid,
                              s_ltid,
                              'connection last tid (%s) != storage '
                              'last tid (%s)' % (c_ltid, s_ltid))
 
+            # Check length of child container
             self.assertEqual(len(root['child']), container_size)
+
+            # Check serial of child container
+            self.assertEqual(bytes8_to_int64(root['child']._p_serial),
+                             c_ltid)
+
             # Verify. All children should still exist.
             for i in root['child'].keys():
                 oid = root['child'][i]._p_oid
-                print('verify %s' % bytes8_to_int64(oid))
                 storage.load(oid, '')
 
         finally:
