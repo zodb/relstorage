@@ -1007,8 +1007,7 @@ class GenericRelStorageTests(
                 root['child'][i][0] = PersistentMapping()
                 transaction.commit()
 
-            def inject_changes(storage, e):
-                db = self._closing(DB(storage))
+            def inject_changes(db, e):
                 c = self._closing(db.open())
                 root = c.root()
                 try:
@@ -1023,12 +1022,11 @@ class GenericRelStorageTests(
                 finally:
                     print('inject finshed...')
                     c.close()
-                    db.close()
 
             # Thread for inject_changes
             t1 = threading.Thread(name='inject_changes',
                                   target=inject_changes,
-                                  args=(self._storage.new_instance(), e,))
+                                  args=(db, e,))
             t1.start()
 
             # Wait until inject_changes sends event
@@ -1040,16 +1038,16 @@ class GenericRelStorageTests(
             packtime = last_tid_time + 1
             print('start pack...')
             self._storage.pack(packtime, referencesf)
-            
+
             # Wait until inject_changes has finished
             t1.join(99)
 
             # import pdb; pdb.set_trace()
             # self._storage.sync()
-            for i in range(10):
-                c.sync()
-                print('sync %s %s' % (i, c._storage.lastTransactionInt()))
-                time.sleep(1)
+
+            c.sync()
+            print('sync c: %s s: %s' % (c._storage.lastTransactionInt(),
+                                        self._storage.lastTransactionInt()))
 
             self.assertEqual(c._storage.lastTransactionInt(),
                              self._storage.lastTransactionInt())
