@@ -56,12 +56,22 @@ class Copy(object):
         restore = self.restore
 
         logger.info("Counting the transactions to copy.")
-        num_txns = 0
-        for _ in other.iterator():
-            num_txns += 1
+        other_it = other.iterator()
+        try:
+            num_txns = len(other_it)
+            if num_txns == 0:
+                # Hmm, that shouldn't really be right, should it?
+                # Try the other path.
+                raise TypeError()
+        except TypeError:
+            num_txns = 0
+            for _ in other_it:
+                num_txns += 1
+            other_it.close()
+            other_it = other.iterator()
         logger.info("Copying %d transactions", num_txns)
 
-        for trans in other.iterator():
+        for trans in other_it:
             txnum += 1
             num_txn_records = 0
 

@@ -71,6 +71,14 @@ class _DefaultStartStorageIteration(object):
     def __getattr__(self, name):
         return getattr(self._source, name)
 
+def open_storages(options):
+    schema = ZConfig.loadSchemaFile(StringIO(schema_xml))
+    config, _ = ZConfig.loadConfigFile(schema, options.config_file)
+    source = config.source.open()
+    destination = config.destination.open()
+
+    return source, destination
+
 def main(argv=None):
     # pylint:disable=too-many-branches,too-many-statements
     if argv is None:
@@ -92,7 +100,7 @@ def main(argv=None):
              "and resume copying from the last transaction. WARNING: no "
              "effort is made to verify that the destination holds the same "
              "transaction data before this point! Use at your own risk. ")
-    parser.add_argument("config_file")
+    parser.add_argument("config_file", type=argparse.FileType('r'))
 
     options = parser.parse_args(argv[1:])
 
@@ -100,10 +108,7 @@ def main(argv=None):
         level=logging.INFO,
         format="%(asctime)s [%(name)s] %(levelname)s %(message)s")
 
-    schema = ZConfig.loadSchemaFile(StringIO(schema_xml))
-    config, _ = ZConfig.loadConfig(schema, options.config_file)
-    source = config.source.open()
-    destination = config.destination.open()
+    source, destination = open_storages(options)
 
     def cleanup_and_exit(exit_msg=None):
         source.close()

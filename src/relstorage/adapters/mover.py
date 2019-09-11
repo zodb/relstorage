@@ -95,7 +95,7 @@ class AbstractObjectMover(ABC):
 
     @metricmethod_sampled
     def load_currents(self, cursor, oids):
-        """Returns the current {oid: tid} for specified object ids."""
+        """Returns the current (oid, state, tid) for specified object ids."""
         columns, table, filter_column = self._load_currents_query
         binary_column_as_state_type = self.driver.binary_column_as_state_type
         batcher = self.make_batcher(cursor, row_limit=1000)

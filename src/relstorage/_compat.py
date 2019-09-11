@@ -98,6 +98,7 @@ if BTrees.LLBTree.LLBTree is not BTrees.LLBTree.LLBTreePy: # pylint:disable=no-m
     OidTMap_difference = BTrees.family64.II.difference  # pylint:disable=no-member
     OidTMap_multiunion = BTrees.family64.II.multiunion  # pylint:disable=no-member
     OidTMap_intersection = BTrees.family64.II.intersection  # pylint:disable=no-member
+    OidSet_difference = OidTMap_difference
 else:
     OID_TID_MAP_TYPE = dict
     OID_OBJECT_MAP_TYPE = dict
@@ -112,6 +113,9 @@ else:
 
     def OidTMap_intersection(c1, c2):
         return set(c1).intersection(set(c2))
+
+    def OidSet_difference(c1, c2):
+        return set(c1) - set(c2)
 
 MAX_TID = BTrees.family64.maxint
 

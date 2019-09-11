@@ -19,7 +19,7 @@ except ImportError:
 
 #################################################
 # Utility to interpret inputs, talen from zodburi
-
+# XXX: Perhaps we should use the ZConfig versions.
 
 TRUETYPES = ('1', 'on', 'true', 't', 'yes')
 FALSETYPES = ('', '0', 'off', 'false', 'f', 'no')

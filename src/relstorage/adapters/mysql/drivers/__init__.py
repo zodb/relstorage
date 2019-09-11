@@ -66,6 +66,7 @@ class AbstractMySQLDriver(AbstractModuleDriver):
     # Make the default timezone UTC. That way UTC_TIMESTAMP()
     # and UNIX_TIMESTAMP() and FROM_UNIXTIME are all self-consistent.
     # Subclasses can set to None if they don't need to do this.
+    # Starting in 8.0.17 this is hintable using SET_VAR.
     MY_TIMEZONE_STMT = "SET time_zone = '+00:00'"
 
     CURSOR_INIT_STMTS = (
