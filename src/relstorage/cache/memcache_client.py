@@ -84,6 +84,9 @@ class MemcacheStateCache(object):
                 actual_tid_int = u64(data[:8])
                 return data[8:], actual_tid_int
 
+    def __contains__(self, oid_tid):
+        return self[oid_tid] is not None
+
     def __setitem__(self, oid_tid, state_bytes_tid):
         oid, tid = oid_tid
         key = self.__oid_tid_to_key(oid, tid)

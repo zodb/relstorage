@@ -62,6 +62,10 @@ class MultiStateCache(object):
         self.l.flush_all()
         self.g.flush_all()
 
+    def __contains__(self, key):
+        # This has race conditions, but that's ok.
+        return key in self.l or key in self.g
+
     def __getitem__(self, key):
         result = self.l[key]
         if not result:

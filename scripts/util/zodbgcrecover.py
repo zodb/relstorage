@@ -20,8 +20,8 @@ It also needs a list of missing OIDs (oids that generate POSKeyError).
 These may or may not exist in the *source* database. This should be
 given on stdin, one missing OID per line, in integer ('u64' or
 'bytes8_to_int64') format. As a special case, piping the output from
-zc.zodbdgc's ``multi-zodb-check-refs`` script is supported. It may also be
-given from a file specified with ``--oid-list``.
+zc.zodbdgc's ``multi-zodb-check-refs`` script is supported. It may
+also be given from a file specified with ``--oid-list``.
 
 The strategy uses the same underlying infrastructure that zodbconvert
 does, so it is tested and stable, if not necessarily fast. The
@@ -46,6 +46,14 @@ and commit for the same TID, multiple times.
     5. Pass this to destination.copyTransactionsFrom().
 
     6. Profit.
+
+The original input list forms the starting "roots". Because the missing
+objects may themselves refer to other objects which were also
+incorrectly garbage collected (because their only referer was this
+object) to an arbitrary depth, the above steps from 3 to 5 must be repeated
+using as input the list of missing references defined by all the stats collected
+in stage 3 of the previous iteration. Care is taken to avoid running into
+problems with references that the source database simply doesn't have.
 """
 # TODO: Should we disable the taking of the commit lock; we probably
 # don't need it.
@@ -66,15 +74,24 @@ from __future__ import print_function
 import argparse
 import logging
 import sys
+import zlib
 
 from ZODB.BaseStorage import DataRecord
 from ZODB.BaseStorage import TransactionRecord
+from ZODB.POSException import POSKeyError
+from ZODB.blob import is_blob_record
+# This function only returns strong same-database references,
+# ignoring weak and cross-database references. We shouldn't have
+# the latter, and the former were weak so if they're gone that's
+# ok.
+from ZODB.serialize import referencesf as get_oids_referenced_by_pickle
 
 from relstorage.zodbconvert import open_storages
 from relstorage.interfaces import IRelStorage
 from relstorage._compat import OID_SET_TYPE as OidSet
 from relstorage._compat import OID_OBJECT_MAP_TYPE as OidMap
 from relstorage._compat import OidSet_difference
+from relstorage._compat import OidSet_discard
 from relstorage._util import int64_to_8bytes
 from relstorage._util import bytes8_to_int64
 
@@ -195,6 +212,121 @@ class RecordIterator(object):
 
     next = __next__ # Python 2
 
+def _find_missing_references_from_pickles(destination, pickles, permanently_gone):
+    # Return a set of objects missing from the database given the
+    # pickle states of other objects.
+    # *permanently_gone* is a set of oid byte strings that are
+    # known to be missing and shouldn't be investigated and returned.
+    oids = []
+    for pickle in pickles:
+        # Support zc.zlibstorage wrappers.
+        if pickle.startswith(b'.z'):
+            pickle = zlib.decompress(pickle[2:])
+        get_oids_referenced_by_pickle(pickle, oids)
+
+    logger.info(
+        "Given %d pickles, there are %d unique references.",
+        len(pickles), len(oids)
+    )
+
+    missing_oids = OidSet()
+    destination.prefetch(oids)
+    for oid in oids:
+        if oid in permanently_gone:
+            continue
+        try:
+            state, tid = destination.load(oid, b'')
+            if is_blob_record(state):
+                destination.loadBlob(oid, tid)
+        except POSKeyError:
+            missing_oids.add(bytes8_to_int64(oid))
+    logger.info(
+        "Given %d pickles, there are %d missing references.",
+        len(pickles), len(missing_oids)
+    )
+    return missing_oids
+
+def _restore_missing_oids(source, destination, missing_oids, permanently_gone):
+    # Implements steps 3 through 5.
+
+    # Returns a set of oid ints that are missing from the database
+    # considering only the objects that were restored.
+
+    # 3. Get backup data
+    # (oid, state, tid)
+    backup_data = source._adapter.mover.load_currents(
+        source._load_connection.cursor,
+        missing_oids
+    )
+
+    # {oid: (state, tid)}
+    backup_state_by_oid = OidMap()
+    tids_to_oids = OidMap()
+    for oid, state, tid in backup_data:
+        if tid not in tids_to_oids:
+            tids_to_oids[tid] = OidSet()
+        tids_to_oids[tid].add(oid)
+        backup_state_by_oid[oid] = (state, tid)
+
+    found_oids = OidSet(backup_state_by_oid)
+    oids_required_but_not_in_backup = OidSet_difference(missing_oids, found_oids)
+    if oids_required_but_not_in_backup:
+        logger.warning(
+            "The backup storage is missing %d OIDs needed",
+            len(oids_required_but_not_in_backup)
+        )
+        permanently_gone.update(oids_required_but_not_in_backup)
+    del found_oids
+    del oids_required_but_not_in_backup
+
+    # 3b. Compare with destination.
+    current_data = destination._adapter.mover.load_currents(
+        destination._load_connection.cursor,
+        backup_state_by_oid
+    )
+    current_data = list(current_data)
+    for oid, _, tid in current_data:
+        if oid not in backup_state_by_oid:
+            # Common, expected case.
+            continue
+
+        _, backup_tid = backup_state_by_oid[oid]
+
+        logger.warning(
+            "Destination already contains data for %d. Check your OID list. "
+            "Refusing to overwrite. (Source TID: %d; Destination TID: %d)",
+            oid, backup_tid, tid
+        )
+        # If we're doing a dry-run, it's probably in here.
+        OidSet_discard(permanently_gone, oid)
+        del backup_state_by_oid[oid]
+        tids_to_oids[backup_tid].remove(oid)
+        if not tids_to_oids[backup_tid]:
+            del tids_to_oids[backup_tid]
+        continue
+
+    if not tids_to_oids:
+        logger.warning("All OIDs already present in destination; nothing to do.")
+        return
+
+    # 4. Produce phony storage that iterates the backup data.
+    logger.info(
+        "Beginning restore of %d OIDs in %d transactions.",
+        len(backup_state_by_oid),
+        len(tids_to_oids)
+    )
+    copy_from = MissingObjectStorage(backup_state_by_oid, tids_to_oids, source)
+
+    # 5. Hand it over to be copied.
+    destination.copyTransactionsFrom(copy_from)
+
+    # Find anything still missing, after having stored what we could.
+    newly_missing = _find_missing_references_from_pickles(
+        destination,
+        [x[0] for x in backup_state_by_oid.values()],
+        permanently_gone)
+    return newly_missing
+
 def main(argv=None):
     logging.basicConfig(
         level=logging.INFO,
@@ -218,84 +350,40 @@ def main(argv=None):
     parser.add_argument("config_file", type=argparse.FileType('r'))
 
     options = parser.parse_args(argv[1:])
+    permanently_gone = OidSet()
 
     source, destination = open_storages(options)
     check_db_compat(source)
     check_db_compat(destination)
 
+    if options.dry_run:
+        # Make sure we can't commit.
+        destination.tpc_finish = destination.tpc_abort
+
+
     # 2. Read incoming OIDs.
     missing_oids = read_missing_oids(options.oid_list)
+    if not missing_oids:
+        sys.exit("Unable to read any missing OIDs.")
 
-    # 3. Get backup data
-    # (oid, state, tid)
-    backup_data = source._adapter.mover.load_currents(
-        source._load_connection.cursor,
-        missing_oids
-    )
-
-    backup_state_by_oid = OidMap()
-    tids_to_oids = OidMap()
-    for oid, state, tid in backup_data:
-        if tid not in tids_to_oids:
-            tids_to_oids[tid] = OidSet()
-        tids_to_oids[tid].add(oid)
-        backup_state_by_oid[oid] = (state, tid)
-
-    found_oids = OidSet(backup_state_by_oid)
-    lost_oids = OidSet_difference(missing_oids, found_oids)
-    if set(found_oids) != set(missing_oids): # XXX: LLTreeSet doesn't compare equal?
-        logger.warning(
-            "The backup storage is missing %d OIDs needed",
-            len(lost_oids)
-        )
-    del found_oids
-    del lost_oids
-
-    # 3b. Compare with destination.
-    current_data = destination._adapter.mover.load_currents(
-        destination._load_connection.cursor,
-        backup_state_by_oid
-    )
-    current_data = list(current_data)
-    for oid, _, tid in current_data:
-        if oid not in backup_state_by_oid:
-            # Common, expected case.
-            continue
-
-        _, backup_tid = backup_state_by_oid[oid]
-
-        logger.warning(
-            "Destination already contains data for %d. Check your OID list. "
-            "Refusing to overwrite. (Source TID: %d; Destination TID: %d)",
-            oid, backup_tid, tid
-        )
-        del backup_state_by_oid[oid]
-        tids_to_oids[backup_tid].remove(oid)
-        if not tids_to_oids[backup_tid]:
-            del tids_to_oids[backup_tid]
-        continue
-
-    if not tids_to_oids:
-        logger.warning("All OIDs already present in destination; nothing to do.")
-        return
-
-    # 4. Produce phony storage that iterates the backup data.
-    logger.info(
-        "Beginning restore of %d OIDs in %d transactions.",
-        len(backup_state_by_oid),
-        len(tids_to_oids)
-    )
-    copy_from = MissingObjectStorage(backup_state_by_oid, tids_to_oids, source)
-
-    # 5. Hand it over to be copied.
     if options.dry_run:
-        # Except make it not actually modify anything.
-        destination.tpc_finish = destination.tpc_abort
+        # And since we can't commit, the starting set of objects
+        # known to be permanently gone are...the set we start with!
+        permanently_gone.update(missing_oids)
+
     try:
-        destination.copyTransactionsFrom(copy_from)
+        while missing_oids:
+            missing_oids = _restore_missing_oids(source, destination,
+                                                 missing_oids, permanently_gone)
     finally:
         source.close()
         destination.close()
+
+    if permanently_gone:
+        logger.warning(
+            "The following referenced OIDs could not be recovered: %s",
+            list(permanently_gone)
+        )
 
 if __name__ == '__main__':
     main()
