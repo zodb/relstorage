@@ -190,6 +190,34 @@ class UpdateTests(TestCase):
         )
         self.assertEqual(dict(self.db.oid_to_tid), {0: 1})
 
+    def test_total_state_len_with_embedded_nulls(self):
+        # automatic text-infinity breaks LONGETH()
+        # when there are embedded nul characters.
+        # https://github.com/zodb/relstorage/issues/317
+        #
+        # In case the differences depend on the type of the parameter,
+        # (they don't, not exactly)
+        # we explicitly test bytes, unicode, and native
+        # strings. What they do depend on is the version of Python.
+        # In Python 2, the type and length of the five rows are
+        #     text(1), text(1), text(1), text(3), text(3)
+        # In Python 3, the type and length are
+        #     blob(3), text(1), text(1), text(3), blob(3)
+        rows = [
+            (0, 1, b'1\x003', 0),
+            (1, 1, u'2\x003', 0),
+            (2, 2, '3\x003', 0),
+            (3, 3, '303', 0),
+            (4, 3, b'403', 0),
+        ]
+        self.db.store_temp(rows)
+        self.db.move_from_temp()
+
+        self.assertEqual(sum(len(row[2]) for row in rows),
+                         15)
+
+        self.assertEqual(self.db.total_state_len,
+                         sum(len(row[2]) for row in rows))
 
 @unittest.skipIf(not local_database.SUPPORTS_UPSERT,
                  "Requires upserts")
