@@ -123,8 +123,13 @@ class Database(ABC):
     ON object_state (frequency DESC, tid DESC);
     """
 
+    # Without the CAST AS BLOB, if a value went in with text affinity,
+    # (which happens essentially always under Python 2 but if we've done
+    # things right never under Python 3) LENGTH will stop at an embedded
+    # NUL. Those are common in pickles, so our size calculation will be
+    # very wrong.
     total_state_len = SimpleQueryProperty(
-        "SELECT TOTAL(LENGTH(state)) FROM object_state"
+        "SELECT TOTAL(LENGTH(CAST(state AS blob))) FROM object_state"
     )
 
     total_state_count = SimpleQueryProperty(
@@ -355,7 +360,7 @@ class Database(ABC):
         fetch_cur.execute("""
         SELECT zoid, LENGTH(state)
         FROM object_state
-        ORDER BY frequency ASC, tid ASC, LENGTH(state) DESC, zoid ASC
+        ORDER BY frequency ASC, tid ASC, LENGTH(CAST(state AS BLOB)) DESC, zoid ASC
         """)
         batch = RowBatcher(batch_cur,
                            row_limit=999 // 1,

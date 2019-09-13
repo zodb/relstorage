@@ -23,6 +23,11 @@
   query like ``?read_only=12345&cache_local_mb=yes`` would have been
   interpreted as ``True`` and ``1``, respectively. Now it produces errors.
 
+- Fix the calculation of the persistent cache size, especially on
+  Python 2. This is used to determine when to shrink the disk cache.
+  See :issue:`317`.
+
+
 3.0a10 (2019-09-04)
 ===================
 

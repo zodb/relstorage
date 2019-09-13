@@ -52,6 +52,7 @@ SQ3_SUPPORTS_CTE = sqlite3.sqlite_version_info >= (3, 8, 3) # 2014-02-03
 # Because we use a CTE in our default queries. In principle,
 # we could probably re-write queries and run on 3.7.11; 3.7.0 was the
 # oldest to support WAL mode, and 3.7.11 added multiple VALUE syntax.
+# Prior to 3.7.6, you can't use LENGTH() on a BLOB column.
 SQ3_MIN_VERSION = (3, 8, 3)
 SQ3_IS_MIN_VERSION = sqlite3.sqlite_version_info >= SQ3_MIN_VERSION
 
