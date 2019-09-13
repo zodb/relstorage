@@ -11,7 +11,6 @@ from relstorage.storage import RelStorage
 try:
     from urllib import parse as urlparse
     from urllib.parse import parse_qsl
-    from functools import reduce
 except ImportError:
     # Py2
     import urlparse
