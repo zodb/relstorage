@@ -3,10 +3,7 @@ from __future__ import print_function
 
 import unittest
 
-from pkg_resources import DistributionNotFound
-
 from relstorage.zodburi_resolver import RelStorageURIResolver
-from relstorage.zodburi_resolver import SuffixMultiplier
 
 from . import mock
 
@@ -89,6 +86,19 @@ class AbstractURIResolverTestBase(unittest.TestCase):
         self.RelStorage.assert_called_once_with(
             adapter=self.DBAdapter(), options=expected_options)
 
+    def test_invoke_factory_driver_auto(self, driver_name='auto'):
+        from relstorage.options import Options
+        resolver = self._makeOne()
+        factory, _dbkw = resolver(
+            self.prefix + '://someuser:somepass@somehost:5432/somedb'
+            '?driver=' + driver_name
+        )
+        factory()
+        expected_options = Options(driver=driver_name)
+        self.DBAdapter.assert_called_once_with(
+            options=expected_options,
+            **self._format_db())
+
     def test_invoke_factory_demostorage(self):
         from ZODB.DemoStorage import DemoStorage
         resolver = self._makeOne()
@@ -149,6 +159,20 @@ class TestMySQLURIResolver(AbstractURIResolverTestBase):
         del args['self']
         return args
 
+class TestOracleURIResolver(AbstractURIResolverTestBase):
+    adapter_name = 'relstorage.adapters.oracle.OracleAdapter'
+    prefix = 'oracle'
+
+    def _get_helper(self):
+        from relstorage.zodburi_resolver import OracleAdapterHelper
+        return OracleAdapterHelper
+
+    # The default URI the test uses puts user and password and host into
+    # the URI proper, but oracle expects them in the query params.
+    def _format_db(self, dbname='somedb', user='someuser', password='somepass',
+                   host='somehost', port='5432', **kwargs):
+        return {}
+
 del AbstractURIResolverTestBase # So it doesn't get discovered as a test
 
 class TestEntryPoints(unittest.TestCase):
@@ -156,20 +180,9 @@ class TestEntryPoints(unittest.TestCase):
     def _check_entry_point(self, name, cls, helper_cls):
         from pkg_resources import load_entry_point
 
-        try:
-            target = load_entry_point('relstorage', 'zodburi.resolvers', name)
-        except DistributionNotFound as e:
-            if e.args[0] == 'relstorage':
-                # Yikes, the main distribution. Not good.
-                raise
-
-            raise unittest.SkipTest(
-                '%s not found, skipping the zodburi test for %s (%s)' %
-                (e.args[0], name, e)
-            )
-        else:
-            self.assertIsInstance(target, cls)
-            self.assertIsInstance(target.adapter_helper, helper_cls)
+        target = load_entry_point('relstorage', 'zodburi.resolvers', name)
+        self.assertIsInstance(target, cls)
+        self.assertIsInstance(target.adapter_helper, helper_cls)
 
     def test_postgres(self):
         from relstorage.zodburi_resolver import PostgreSQLAdapterHelper
@@ -182,26 +195,3 @@ class TestEntryPoints(unittest.TestCase):
     def test_oracle(self):
         from relstorage.zodburi_resolver import OracleAdapterHelper
         self._check_entry_point('oracle', RelStorageURIResolver, OracleAdapterHelper)
-
-
-class TestSuffixMultiplier(unittest.TestCase):
-
-    def test_call_bytesize(self):
-        from relstorage.zodburi_resolver import convert_bytesize
-        self.assertEqual(1024, convert_bytesize('1kb'))
-        self.assertEqual(1024, convert_bytesize('1Kb'))
-
-        self.assertEqual(1024*1024, convert_bytesize('1Mb'))
-        self.assertEqual(1024*1024*6, convert_bytesize('6MB'))
-
-        self.assertEqual(42, convert_bytesize('42'))
-
-    def test_bad_size(self):
-        self.assertRaises(ValueError, SuffixMultiplier, {'ab': 1, 'bc': 2, 'def': 3})
-        self.assertRaises(ValueError, SuffixMultiplier, {'ab': 1, 'def': 3})
-
-def test_suite():
-    return unittest.defaultTestLoader.loadTestsFromName(__name__)
-
-if __name__ == '__main__':
-    unittest.main(defaultTest='test_suite')

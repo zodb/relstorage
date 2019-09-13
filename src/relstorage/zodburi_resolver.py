@@ -1,6 +1,8 @@
+# -*- coding: utf-8 -*-
 from __future__ import absolute_import
 from __future__ import print_function
 
+import ZConfig.datatypes
 from ZODB.DemoStorage import DemoStorage
 
 from relstorage.options import Options
@@ -16,58 +18,20 @@ except ImportError:
     from urlparse import parse_qsl
 
 
+datatypes = ZConfig.datatypes.stock_datatypes.copy()
+datatypes['string-list'] = lambda s: tuple(s.split(','))
 
-#################################################
-# Utility to interpret inputs, talen from zodburi
-# XXX: Perhaps we should use the ZConfig versions.
+def asBoolean(s):
+    if s == '0':
+        return False
+    if s == '1':
+        return True
+    return ZConfig.datatypes.stock_datatypes['boolean'](s)
 
-TRUETYPES = ('1', 'on', 'true', 't', 'yes')
-FALSETYPES = ('', '0', 'off', 'false', 'f', 'no')
-
-
-class SuffixMultiplier(object):
-    # d is a dictionary of suffixes to integer multipliers.  If no suffixes
-    # match, default is the multiplier.  Matches are case insensitive.  Return
-    # values are in the fundamental unit.
-    def __init__(self, d, default=1):
-        self._d = dict(d)
-        self._default = default
-
-        # all keys must be the same size
-        def check(a, b):
-            if len(a) != len(b):
-                raise ValueError("suffix length mismatch")
-            return a
-        self._keysz = len(reduce(check, d))
-
-    def __call__(self, v):
-        v = v.lower()
-        for s, m in self._d.items():
-            if v[-self._keysz:] == s:
-                return int(v[:-self._keysz]) * m
-        return int(v) * self._default
-
-convert_bytesize = SuffixMultiplier({
-    'kb': 1024,
-    'mb': 1024 * 1024,
-    'gb': 1024 * 1024 * 1024,
-})
-
-
-def convert_int(value):
-    # boolean values are also treated as integers
-    value = value.lower()
-    if value in FALSETYPES:
-        return 0
-    if value in TRUETYPES:
-        return 1
-    return int(value)
-
-def convert_tuple(value):
-    return tuple(value.split(','))
-
+datatypes['boolean'] = asBoolean
 
 class Resolver(object):
+    _bool_args = ()
     _int_args = ()
     _string_args = ()
     _bytesize_args = ()
@@ -77,13 +41,14 @@ class Resolver(object):
     def interpret_kwargs(self, kw):
         unused = kw.copy()
         new = {}
-        convert_string = lambda s: s
+
         converters = [
-            (convert_int, self._int_args),
-            (convert_string, self._string_args),
-            (convert_bytesize, self._bytesize_args),
-            (float, self._float_args),
-            (convert_tuple, self._tuple_args),
+            (datatypes['boolean'], self._bool_args),
+            (datatypes['integer'], self._int_args),
+            (datatypes['string'], self._string_args),
+            (datatypes['byte-size'], self._bytesize_args),
+            (datatypes['float'], self._float_args),
+            (datatypes['string-list'], self._tuple_args),
         ]
         for convert, arg_names in converters:
             for arg_name in arg_names:
@@ -160,15 +125,30 @@ class OracleAdapterHelper(Resolver):
 # The relstorage support is inspired by django-zodb.
 
 class RelStorageURIResolver(Resolver):
-    _int_args = ('cache_local_mb', 'commit_lock_timeout',
-                 'commit_lock_id', 'read_only', 'shared_blob_dir',
-                 'keep_history', 'pack_gc', 'pack_dry_run',
-                 'create', 'demostorage',)
-    _string_args = ('name', 'blob_dir', 'replica_conf',
-                    'cache_module_name', 'cache_prefix',
-                    'cache_delta_size_limit', 'cache_local_compression')
-    _bytesize_args = ('blob_cache_size', 'blob_cache_size_check',
-                      'blob_cache_chunk_size', 'cache_local_object_max')
+    _bool_args = (
+        'read_only',
+        'keep_history',
+        'pack_gc',
+        'pack_dry_run',
+        'shared_blob_dir',
+        'demostorage',
+    )
+    _int_args = (
+        'cache_local_mb',
+        'commit_lock_timeout',
+        'commit_lock_id',
+    )
+    _string_args = (
+        'name', 'blob_dir', 'replica_conf',
+        'cache_module_name', 'cache_prefix',
+        'cache_delta_size_limit', 'cache_local_compression',
+        'driver',
+    )
+    _bytesize_args = (
+        'blob_cache_size', 'blob_cache_size_check',
+        'blob_cache_chunk_size',
+        'cache_local_object_max',
+    )
     _float_args = ('replica_timeout', 'pack_batch_timeout',
                    'pack_duty_cycle', 'pack_max_delay')
     _tuple_args = ('cache_servers',)

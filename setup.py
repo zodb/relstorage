@@ -209,10 +209,9 @@ setup(
             'zodbpack = relstorage.zodbpack:main',
         ],
         'zodburi.resolvers': [
-            ('postgres = '
-             'relstorage.zodburi_resolver:postgresql_resolver [postgresql]'),
-            'mysql = relstorage.zodburi_resolver:mysql_resolver [mysql]',
-            'oracle = relstorage.zodburi_resolver:oracle_resolver [oracle]'
+            'postgres = relstorage.zodburi_resolver:postgresql_resolver',
+            'mysql = relstorage.zodburi_resolver:mysql_resolver',
+            'oracle = relstorage.zodburi_resolver:oracle_resolver'
         ]
     },
 )

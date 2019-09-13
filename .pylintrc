@@ -56,11 +56,11 @@ disable=
 
 
 [IMPORTS]
-# It's common to have ZODB installed in the virtual environment
-# with us. That causes it to be recognized as first party, meaning
-# that it is suddenly sorted incorrectly compared to other third party
-# imports such as zope.
-known-third-party=ZODB
+# It's common to have ZODB and a few closely related dependencies
+# installed in the virtual environment with us. That causes it to be
+# recognized as first party, meaning that it is suddenly sorted
+# incorrectly compared to other third party imports such as zope.
+known-third-party=ZODB,transaction
 
 [FORMAT]
 # duplicated from setup.cfg

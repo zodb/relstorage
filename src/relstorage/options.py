@@ -180,7 +180,12 @@ class Options(object):
         )
 
     def __repr__(self):
-        return 'relstorage.options.Options(**' + repr(self.__dict__) + ')'
+        opts = []
+        for k, v in sorted(self.__dict__.items()):
+            opt = '%s=%r' % (k, v)
+            opts.append(opt)
+        opts = ', '.join(opts)
+        return 'relstorage.options.Options(%s)' % (opts,)
 
     def __eq__(self, other):
         if not isinstance(other, Options):

@@ -46,7 +46,7 @@ class Copy(object):
         self.restore = restore
 
     def copyTransactionsFrom(self, other):
-        # pylint:disable=too-many-locals
+        # pylint:disable=too-many-locals,too-many-statements
         # adapted from ZODB.blob.BlobStorageMixin
         begin_time = time.time()
         txnum = 0

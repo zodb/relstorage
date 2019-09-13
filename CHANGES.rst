@@ -9,6 +9,19 @@
   exceptions besides just ``ReadConflictError`` so they don't
   propagate out to ``transaction.begin()``.
 
+- Make the zodburi resolver entry points not require a specific
+  RelStorage extra such as 'postgres', in case there is a desire to
+  use a different database driver than the default that's installed
+  with that extra. See :issue:`342`, reported by Éloi Rivard.
+
+- Make the zodburi resolvers accept the 'driver' query paramater to
+  allow selecting a specific driver to use. This functions the same as
+  in a ZConfig configuration.
+
+- Make the zodburi resolvers more strict on the distinction between
+  boolean arguments and arbitrary integer arguments. Previously, a
+  query like ``?read_only=12345&cache_local_mb=yes`` would have been
+  interpreted as ``True`` and ``1``, respectively. Now it produces errors.
 
 3.0a10 (2019-09-04)
 ===================
