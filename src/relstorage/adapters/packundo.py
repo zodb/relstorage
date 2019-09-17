@@ -37,12 +37,16 @@ log = logging.getLogger(__name__)
 class PackUndo(DatabaseHelpersMixin):
     """Abstract base class for pack/undo"""
 
-    verify_sane_database = False
-
     _script_choose_pack_transaction = None
 
     _lock_for_share = 'FOR SHARE'
     _lock_for_update = 'FOR UPDATE'
+
+    driver = None
+    connmanager = None
+    runner = None
+    locker = None
+    options = None
 
     def __init__(self, database_driver, connmanager, runner, locker, options):
         self.driver = database_driver
@@ -94,7 +98,7 @@ class PackUndo(DatabaseHelpersMixin):
     # them).
     #
     # The alternate comment syntax for Oracle hints, --+ ..., isn't a
-    # valid MySQL comment (it requires whitespace after --) and raises
+    # valid MySQL comment (MySQL requires whitespace after --) and raises
     # a syntax error.
     #
     # PostgreSQL doesn't have hints, so this is a no-op there.
@@ -986,6 +990,16 @@ class HistoryFreePackUndo(PackUndo):
 
     keep_history = False
 
+    # How often, in seconds, to commit work in progress.
+    # This is a variable here for testing.
+    fill_object_refs_commit_frequency = 60
+
+    # How many object states to find references in at any one time.
+    # This is a control on the amount of memory used by the Python
+    # process during packing, especially if the database driver
+    # doesn't use server-side cursors.
+    fill_object_refs_batch_size = 100
+
     _script_choose_pack_transaction = """
         SELECT tid
         FROM object_state
@@ -1008,6 +1022,9 @@ class HistoryFreePackUndo(PackUndo):
     WHERE zoid = %(oid)s
     and tid = %(tid)s
     """
+
+    def on_fill_object_ref_batch(self, oid_batch, refs_found):
+        """Hook for testing."""
 
     def verify_undoable(self, cursor, undo_tid):
         """Raise UndoError if it is not safe to undo the specified txn."""
@@ -1050,6 +1067,8 @@ class HistoryFreePackUndo(PackUndo):
 
 
         # Recall pre_pack can be run many times.
+        # We order by ZOID to be compatible with other transactions that
+        # are locking objects.
         stmt = """
         SELECT object_state.zoid FROM object_state
         LEFT OUTER JOIN object_refs_added
@@ -1059,9 +1078,12 @@ class HistoryFreePackUndo(PackUndo):
         ORDER BY object_state.zoid
         """ + self._lock_for_share
         self.runner.run_script_stmt(cursor, stmt)
-        oids = list(r[0] for r in cursor)
+        # XXX: maybe this should be an OidSet (to save memory)?
+        # Or, using an array.array('Q') (on Python 3; on Python 2,
+        # array.array('L') if .itemsize == 8) preserves the order properties.
+        oids = [zoid for (zoid,) in cursor]
         self.connmanager.commit(conn, cursor) # Release row locks
-        log_at = time.time() + 60
+        log_at = time.time() + self.fill_object_refs_commit_frequency
         self.on_filling_object_refs_added(oids=oids)
         if oids:
             oid_count = len(oids)
@@ -1070,15 +1092,22 @@ class HistoryFreePackUndo(PackUndo):
                 "pre_pack: analyzing references from %d object(s)",
                 oid_count)
             while oids:
-                batch = oids[:100]
-                oids = oids[100:]
-                self._add_refs_for_oids(cursor, batch, get_references)
+                # XXX: This turns into O(n^2), at least for CPython lists.
+                # Each index operation allocates a new list, and copies
+                # into it (including INCREF). Even with the O(n^2) algorithm,
+                # array.array('Q') benchmarks ~5x faster for these two operations,
+                # probably because it's just memory movements, not loops that have to
+                # INCREF/DECREF.
+                batch = oids[:self.fill_object_refs_batch_size]
+                oids = oids[self.fill_object_refs_batch_size:]
+                refs_found = self._add_refs_for_oids(cursor, batch, get_references)
+                self.on_fill_object_ref_batch(oid_batch=batch, refs_found=refs_found)
                 oids_done += len(batch)
                 now = time.time()
                 if now >= log_at:
                     # Save the work done so far.
                     self.connmanager.commit(conn, cursor)
-                    log_at = now + 60
+                    log_at = now + self.fill_object_refs_commit_frequency
                     log.info(
                         "pre_pack: objects analyzed: %d/%d",
                         oids_done, oid_count)
@@ -1122,7 +1151,8 @@ class HistoryFreePackUndo(PackUndo):
                     add_refs.append((from_oid, tid, to_oid))
 
         if not add_objects:
-            return 0
+            assert not add_refs
+            return add_refs
 
         # TODO: RowBatcher for all of these
         stmt = "DELETE FROM object_refs_added WHERE zoid IN (%s)" % oid_list
@@ -1140,7 +1170,7 @@ class HistoryFreePackUndo(PackUndo):
         """
         self.runner.run_many(cursor, stmt, add_objects)
 
-        return len(add_refs)
+        return add_refs
 
     @metricmethod
     def pre_pack(self, pack_tid, get_references):

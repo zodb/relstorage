@@ -19,6 +19,7 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import functools
 import unittest
 
 from persistent.mapping import PersistentMapping
@@ -41,14 +42,36 @@ class TestPackBase(RelStorageTestBase):
         self.main_db = None
         super(TestPackBase, self).tearDown()
 
+    OID_ROOT = 0
+    OID_A = 1
+    OID_B = 2
+    OID_C = 3
+    OID_D = 4
+
+    OID_INITIAL_SET = (OID_ROOT, OID_A, OID_B, OID_C)
+
     def _create_initial_state(self):
+        # Given a set of referencing objects present at the beginning
+        # of the pre pack:
+        #          0    1    2    3
+        #   T1: root -> A -> B -> C
+        #
+        # If a new transaction is committed such that the graph becomes:
+        #
+        #         0    1
+        #  T2: root -> A
+        #          \-> B -> D -> C
+        #              2    4    3
+        #
+        # That is, C is no longer referenced from B but a new object
+        # D, B is referenced not from A but from the root.
         txm = transaction.TransactionManager(explicit=True)
         conn = self.main_db.open(txm)
         txm.begin()
 
-        A = conn.root.A = PersistentMapping()
-        B = A['B'] = PersistentMapping()
-        C = B['C'] = PersistentMapping()
+        A = conn.root.A = PersistentMapping() # OID 0x1
+        B = A['B'] = PersistentMapping() # OID 0x2
+        C = B['C'] = PersistentMapping() # OID 0x3
 
         txm.commit()
         oids = {
@@ -60,17 +83,36 @@ class TestPackBase(RelStorageTestBase):
 
         return oids
 
-    def _inject_changes_after_object_refs_added_and_check_objects_present(
+    def _mutate_state(self, initial_oids, *_args, **_kwargs):
+        txm = transaction.TransactionManager(explicit=True)
+        conn = self.main_db.open(txm)
+        txm.begin()
+
+        A = conn.root.A
+        B = A['B']
+        del A['B']
+        D = B['D'] = PersistentMapping() # OID 0x4
+        C = B['C']
+        del B['C']
+        D['C'] = C
+
+        txm.commit()
+
+        initial_oids['D'] = D._p_oid
+        conn.close()
+
+    def _check_inject_changes(
             self,
             initial_oids, # type: Dict[str, bytes]
             inject_changes,
             delta=1,
+            hook='on_filling_object_refs_added'
     ):
         # We expect inject_changes to mutate *initial_oids* by *delta*
         len_initial_oids = len(initial_oids)
 
         adapter = self._storage._adapter
-        adapter.packundo.on_filling_object_refs_added = inject_changes
+        setattr(adapter.packundo, hook, inject_changes)
 
         # Pack to the current TID (RelStorage extension)
         packtime = None
@@ -82,50 +124,31 @@ class TestPackBase(RelStorageTestBase):
                          initial_oids)
 
         # All children should still exist.
+        missing = {}
         for name, oid in initial_oids.items():
-            __traceback_info__ = name, oid
-            state, _tid = self._storage.load(oid, '')
-            self.assertIsNotNone(state)
+            try:
+                state, _tid = self._storage.load(oid, '')
+            except KeyError as e:
+                missing[name] = e
+            else:
+                self.assertIsNotNone(state)
+
+        self.assertEmpty(missing)
+
 
     def test_pack_when_object_ref_moved_during_prepack(self):
-        # Given a set of referencing objects present at the beginning
-        # of the pre pack:
-        #
-        #   T1: root -> A -> B -> C
-        #
-        # If a new transaction is committed after we gather the initial list of
-        # objects but before we start examining their state such that
-        # the graph now becomes:
-        #
-        #  T2: root -> A
-        #          \-> B -> D -> C
-        #
-        # That is, C is no longer referenced from B but a new object D, B is referenced
-        # not from A but from the root.
-        #
-        # Then when we pack with GC, no objects are removed.
+        # If we mutate after we gather the initial list of
+        # objects but before we start examining their state
+        # we shouldn't collect any objects.
         expect_oids = self._create_initial_state()
 
-        def inject_changes(**_kwargs):
-            txm = transaction.TransactionManager(explicit=True)
-            conn = self.main_db.open(txm)
-            txm.begin()
+        inject_changes = functools.partial(
+            self._mutate_state,
+            expect_oids
+        )
 
-            A = conn.root.A
-            B = A['B']
-            del A['B']
-            D = B['D'] = PersistentMapping()
-            C = B['C']
-            del B['C']
-            D['C'] = C
-
-            txm.commit()
-
-            expect_oids['D'] = D._p_oid
-            conn.close()
-
-        self._inject_changes_after_object_refs_added_and_check_objects_present(expect_oids,
-                                                                               inject_changes)
+        self._check_inject_changes(expect_oids,
+                                   inject_changes)
 
     # https://ci.appveyor.com/project/jamadden/relstorage/build/1.0.19/job/a1vq619n84ss1s9a
     def test_pack_when_referring_object_mutates_during_prepack(self):
@@ -149,8 +172,8 @@ class TestPackBase(RelStorageTestBase):
             expect_oids['Added'] = Added._p_oid
             conn.close()
 
-        self._inject_changes_after_object_refs_added_and_check_objects_present(expect_oids,
-                                                                               inject_changes)
+        self._check_inject_changes(expect_oids,
+                                   inject_changes)
 
 class HistoryFreeTestPack(TestPackBase):
     # pylint:disable=abstract-method
@@ -158,7 +181,64 @@ class HistoryFreeTestPack(TestPackBase):
 
     @unittest.expectedFailure
     def test_pack_when_object_ref_moved_during_prepack(self):
+        # This currently fails because we're in different transactions
+        # and can't see the new reference to the object.
         TestPackBase.test_pack_when_object_ref_moved_during_prepack(self)
+
+    @unittest.expectedFailure
+    def test_pack_when_object_ref_moved_after_ref_finding_first_batch(self):
+        # If we mutate after gather the initial list of objects, and after
+        # finding references in the first batch (of all objects), we should not
+        # collect anything.
+        #
+        # Even though this would seem to be similar to the 'ref_moved_during_prepack' case,
+        # it is different. This currently fails because even though we find a reference
+        # to the object, it's from a state that doesn't exist anymore
+        # and we don't bother to look at it.
+        expect_oids = self._create_initial_state()
+
+        def inject_changes(oid_batch, refs_found):
+            # We're examining the root and the first three objects
+            self.assertEqual(oid_batch, list(self.OID_INITIAL_SET))
+            self.assertEqual(len(refs_found), 3)
+            # We're only called once: a single batch
+            self.assertNotIn('D', expect_oids)
+            self._mutate_state(expect_oids)
+
+        self._check_inject_changes(
+            expect_oids,
+            inject_changes,
+            hook='on_fill_object_ref_batch',
+        )
+
+        self.assertIn('D', expect_oids) # hook was called.
+
+    @unittest.expectedFailure
+    def test_pack_when_object_ref_moved_just_before_examine_prev_reference(self):
+        # We mutate just before we examine the state for the B object.
+        expect_oids = self._create_initial_state()
+        seen_oids = []
+        def inject_changes(oid_batch, refs_found): # pylint:disable=unused-argument
+            seen_oids.extend(oid_batch)
+            self.assertEqual(1, len(oid_batch))
+            if oid_batch == [self.OID_A]:
+                # Next batch will be B.
+                self._mutate_state(expect_oids)
+
+        # Limit batch size and force commits.
+        packundo = self._storage._adapter.packundo
+        packundo.fill_object_refs_batch_size = 1
+        packundo.fill_object_refs_commit_frequency = 0
+
+        try:
+            self._check_inject_changes(
+                expect_oids,
+                inject_changes,
+                hook='on_fill_object_ref_batch',
+            )
+        finally:
+            self.assertEqual(seen_oids, list(self.OID_INITIAL_SET))
+            self.assertIn('D', expect_oids) # hook was called.
 
 
 class HistoryPreservingTestPack(TestPackBase):
