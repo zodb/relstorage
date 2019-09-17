@@ -216,6 +216,9 @@ class PackUndo(DatabaseHelpersMixin):
             params)
         return cursor.rowcount
 
+    def on_filling_object_refs_added(self, oids=None, tids=None):
+        """Test injection point for packing."""
+
 @implementer(IPackUndo)
 class HistoryPreservingPackUndo(PackUndo):
     """
@@ -460,9 +463,6 @@ class HistoryPreservingPackUndo(PackUndo):
 
         return res
 
-    def on_filling_object_refs(self):
-        """Test injection point"""
-
     def fill_object_refs(self, conn, cursor, get_references):
         """Update the object_refs table by analyzing new transactions."""
         stmt = """
@@ -478,8 +478,8 @@ class HistoryPreservingPackUndo(PackUndo):
         log_at = time.time() + 60
         tid_count = len(tids)
         txns_done = 0
+        self.on_filling_object_refs_added(tids=tids)
         if tids:
-            self.on_filling_object_refs()
             log.info(
                 "pre_pack: analyzing references from objects in %d new "
                 "transaction(s)", tid_count)
@@ -1023,9 +1023,6 @@ class HistoryFreePackUndo(PackUndo):
         """
         raise UndoError("Undo is not supported by this storage")
 
-    def on_filling_object_refs(self):
-        """Test injection point"""
-
     def fill_object_refs(self, conn, cursor, get_references):
         """
         Update the object_refs table by analyzing new object states.
@@ -1065,8 +1062,8 @@ class HistoryFreePackUndo(PackUndo):
         oids = list(r[0] for r in cursor)
         self.connmanager.commit(conn, cursor) # Release row locks
         log_at = time.time() + 60
+        self.on_filling_object_refs_added(oids=oids)
         if oids:
-            self.on_filling_object_refs()
             oid_count = len(oids)
             oids_done = 0
             log.info(

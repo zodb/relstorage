@@ -1,3 +1,4 @@
+# -*- coding: utf-8; -*-
 ##############################################################################
 #
 # Copyright (c) 2008 Zope Foundation and Contributors.
@@ -962,49 +963,6 @@ class GenericRelStorageTests(
             # extra2 and extra3 should both still exist
             self._storage.load(extra2._p_oid, '')
             self._storage.load(extra3._p_oid, '')
-        finally:
-            db.close()
-
-    @util.skipOnAppveyor("Random failures")
-    # https://ci.appveyor.com/project/jamadden/relstorage/build/1.0.19/job/a1vq619n84ss1s9a
-    def checkPackWhileReferringObjectChanges(self):
-        # Packing should not remove objects referenced by an
-        # object that changes during packing.
-        from persistent.timestamp import TimeStamp
-        db = self._closing(DB(self._storage))
-        try:
-            # add some data to be packed
-            c = self._closing(db.open())
-            root = c.root()
-            child = PersistentMapping()
-            root['child'] = child
-            transaction.commit()
-            expect_oids = [child._p_oid]
-
-            def inject_changes():
-                # Change the database just after the list of objects
-                # to analyze has been determined.
-                child2 = PersistentMapping()
-                root['child2'] = child2
-                transaction.commit()
-                expect_oids.append(child2._p_oid)
-
-
-            adapter = self._storage._adapter
-            adapter.packundo.on_filling_object_refs = inject_changes
-
-            # Pack to the current time based on the TID in the database
-            last_tid = self._storage.lastTransaction()
-            last_tid_time = TimeStamp(last_tid).timeTime()
-            packtime = last_tid_time + 1
-            self._storage.pack(packtime, referencesf)
-
-            # "The on_filling_object_refs hook should have been called once")
-            self.assertEqual(len(expect_oids), 2, expect_oids)
-
-            # Both children should still exist.
-            self._storage.load(expect_oids[0], '')
-            self._storage.load(expect_oids[1], '')
         finally:
             db.close()
 
