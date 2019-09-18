@@ -20,7 +20,7 @@ from __future__ import division
 from __future__ import print_function
 
 import functools
-import unittest
+
 
 from persistent.mapping import PersistentMapping
 import transaction
@@ -109,6 +109,7 @@ class TestPackBase(RelStorageTestBase):
             hook='on_filling_object_refs_added'
     ):
         # We expect inject_changes to mutate *initial_oids* by *delta*
+        # (see _mutate_state)
         len_initial_oids = len(initial_oids)
 
         adapter = self._storage._adapter
@@ -118,7 +119,7 @@ class TestPackBase(RelStorageTestBase):
         packtime = None
         self._storage.pack(packtime, referencesf)
 
-        # "The on_filling_object_refs_added hook should have been called once"
+        # The on_filling_object_refs_added hook should have been called once
         self.assertEqual(len(initial_oids),
                          len_initial_oids + delta,
                          initial_oids)
@@ -134,7 +135,6 @@ class TestPackBase(RelStorageTestBase):
                 self.assertIsNotNone(state)
 
         self.assertEmpty(missing)
-
 
     def test_pack_when_object_ref_moved_during_prepack(self):
         # If we mutate after we gather the initial list of
@@ -179,13 +179,6 @@ class HistoryFreeTestPack(TestPackBase):
     # pylint:disable=abstract-method
     keep_history = False
 
-    @unittest.expectedFailure
-    def test_pack_when_object_ref_moved_during_prepack(self):
-        # This currently fails because we're in different transactions
-        # and can't see the new reference to the object.
-        TestPackBase.test_pack_when_object_ref_moved_during_prepack(self)
-
-    @unittest.expectedFailure
     def test_pack_when_object_ref_moved_after_ref_finding_first_batch(self):
         # If we mutate after gather the initial list of objects, and after
         # finding references in the first batch (of all objects), we should not
@@ -213,7 +206,6 @@ class HistoryFreeTestPack(TestPackBase):
 
         self.assertIn('D', expect_oids) # hook was called.
 
-    @unittest.expectedFailure
     def test_pack_when_object_ref_moved_just_before_examine_prev_reference(self):
         # We mutate just before we examine the state for the B object.
         expect_oids = self._create_initial_state()

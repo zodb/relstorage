@@ -110,10 +110,4 @@ class MySQLHistoryPreservingPackUndo(_LockStmt, HistoryPreservingPackUndo):
         """
 
 class MySQLHistoryFreePackUndo(_LockStmt, HistoryFreePackUndo):
-
-    _script_create_temp_pack_visit = """
-        CREATE TEMPORARY TABLE temp_pack_visit (
-            zoid BIGINT UNSIGNED NOT NULL PRIMARY KEY,
-            keep_tid BIGINT UNSIGNED NOT NULL
-        );
-        """
+    pass

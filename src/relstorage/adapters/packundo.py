@@ -26,6 +26,9 @@ from zope.interface import implementer
 from .._compat import metricmethod
 from ..iter import fetchmany
 from ..treemark import TreeMarker
+
+from .connections import LoadConnection
+from .connections import StoreConnection
 from .interfaces import IPackUndo
 from ._util import DatabaseHelpersMixin
 
@@ -105,9 +108,17 @@ class PackUndo(DatabaseHelpersMixin):
     _traverse_graph_optimizer_hint = ''
 
     def _traverse_graph(self, cursor):
-        """Visit the entire object graph to find out what should be kept.
+        """
+        Visit the entire object graph to find out what should be
+        kept.
 
         Sets the pack_object.keep flags.
+
+        Must not read from the ``object_state`` table or any other table that
+        could be inconsistent with the original snapshot view of references
+        established by :meth:`pre_pack`.
+
+        *cursor* is a writable store connection cursor.
         """
         log.info("pre_pack: downloading pack_object and object_ref.")
 
@@ -124,9 +135,9 @@ class PackUndo(DatabaseHelpersMixin):
         # against that table here
         stmt = """
         SELECT {}
-            object_ref.zoid, object_ref.to_zoid
+            zoid, object_ref.to_zoid
         FROM object_ref
-            JOIN pack_object ON (object_ref.zoid = pack_object.zoid)
+            INNER JOIN pack_object USING (zoid)
         WHERE object_ref.tid >= pack_object.keep_tid
         ORDER BY object_ref.zoid, object_ref.to_zoid
         """.format(self._traverse_graph_optimizer_hint)
@@ -1009,13 +1020,15 @@ class HistoryFreePackUndo(PackUndo):
         LIMIT 1
         """
 
-    _script_create_temp_pack_visit = """
-        CREATE TEMPORARY TABLE temp_pack_visit (
-            zoid BIGINT NOT NULL PRIMARY KEY,
-            keep_tid BIGINT NOT NULL
-        );
-        CREATE INDEX temp_pack_keep_tid ON temp_pack_visit (keep_tid)
-        """
+    # history-free packing doesn't use temp_pack_visit, unlike
+    # history-preserving.
+    # _script_create_temp_pack_visit = """
+    #     CREATE TEMPORARY TABLE temp_pack_visit (
+    #         zoid BIGINT NOT NULL PRIMARY KEY,
+    #         keep_tid BIGINT NOT NULL
+    #     );
+    #     CREATE INDEX temp_pack_keep_tid ON temp_pack_visit (keep_tid)
+    #     """
 
     _script_delete_object = """
     DELETE FROM object_state
@@ -1040,88 +1053,85 @@ class HistoryFreePackUndo(PackUndo):
         """
         raise UndoError("Undo is not supported by this storage")
 
-    def fill_object_refs(self, conn, cursor, get_references):
+    def fill_object_refs(self, load_connection, store_connection, get_references):
         """
         Update the object_refs table by analyzing new object states.
-        """
-        # XXX: We open the prepack connection in at most READ
-        # COMMITTED isolation mode, which is why the state can be
-        # changing and hence we need a share lock. Why do we do that and not use
-        # a stronger isolation mode? Is the share lock even needed? We just
-        # need to be consistent with a single point in time
-        #
-        # Before we used shared locks, we would repeat the query a few
-        # times, watching for changes, and if we kept getting changes,
-        # we would hold the commit lock for an iteration; but we'd
-        # still release the commit lock at the end of this method, so
-        # they'd be free to mutate again.
-        #
-        # TODO: Maybe use 'SKIP LOCKED' here? As it stands, the shared
-        # locks are still going to prevent modifications to existing objects,
-        # just as if we held the commit lock.
-        #
-        # XXX: The above is outdated. There seems to be no need to rely on
-        # multiple retries or locks at all, so long as we get an initial
-        # consistent snapshot. An optimization, though, might be to
-        # collect the TID here and then discard later?
 
+        See :meth:`pre_pack` for a description of the parameters.
+
+        Because *load_connection* is read-only and repeatable read,
+        we don't need to do any object-level locking.
+        """
+        # Begin by ensuring we have a snapshot reflecting anything
+        # committed up to this point, including the contents of
+        # ``pack_object``, which determines the visible objects
+        # we will examine.
+        load_connection.restart()
 
         # Recall pre_pack can be run many times.
         # We order by ZOID to be compatible with other transactions that
         # are locking objects.
+        load_cursor = load_connection.cursor
         stmt = """
-        SELECT object_state.zoid FROM object_state
+        SELECT zoid
+        FROM pack_object
+        INNER JOIN object_state USING (zoid)
         LEFT OUTER JOIN object_refs_added
-            ON (object_state.zoid = object_refs_added.zoid)
+            USING (zoid)
         WHERE object_refs_added.tid IS NULL
           OR object_refs_added.tid != object_state.tid
-        ORDER BY object_state.zoid
-        """ + self._lock_for_share
-        self.runner.run_script_stmt(cursor, stmt)
+        ORDER BY zoid
+        """
+        self.runner.run_script_stmt(load_cursor, stmt)
         # XXX: maybe this should be an OidSet (to save memory)?
         # Or, using an array.array('Q') (on Python 3; on Python 2,
         # array.array('L') if .itemsize == 8) preserves the order properties.
-        oids = [zoid for (zoid,) in cursor]
-        self.connmanager.commit(conn, cursor) # Release row locks
+        oids = [zoid for (zoid,) in load_cursor]
+
         log_at = time.time() + self.fill_object_refs_commit_frequency
         self.on_filling_object_refs_added(oids=oids)
-        if oids:
-            oid_count = len(oids)
-            oids_done = 0
-            log.info(
-                "pre_pack: analyzing references from %d object(s)",
-                oid_count)
-            while oids:
-                # XXX: This turns into O(n^2), at least for CPython lists.
-                # Each index operation allocates a new list, and copies
-                # into it (including INCREF). Even with the O(n^2) algorithm,
-                # array.array('Q') benchmarks ~5x faster for these two operations,
-                # probably because it's just memory movements, not loops that have to
-                # INCREF/DECREF.
-                batch = oids[:self.fill_object_refs_batch_size]
-                oids = oids[self.fill_object_refs_batch_size:]
-                refs_found = self._add_refs_for_oids(cursor, batch, get_references)
-                self.on_fill_object_ref_batch(oid_batch=batch, refs_found=refs_found)
-                oids_done += len(batch)
-                now = time.time()
-                if now >= log_at:
-                    # Save the work done so far.
-                    self.connmanager.commit(conn, cursor)
-                    log_at = now + self.fill_object_refs_commit_frequency
-                    log.info(
-                        "pre_pack: objects analyzed: %d/%d",
-                        oids_done, oid_count)
-            self.connmanager.commit(conn, cursor) # Release all the share locks.
-            log.info(
-                "pre_pack: objects analyzed: %d/%d", oids_done, oid_count)
 
-    def _add_refs_for_oids(self, cursor, oids, get_references):
+        oid_count = len(oids)
+        oids_done = 0
+        log.info(
+            "pre_pack: analyzing references from %d object(s)",
+            oid_count)
+        while oids:
+            # XXX: This turns into O(n^2), at least for CPython lists.
+            # Each index operation allocates a new list, and copies
+            # into it (including INCREF). Even with the O(n^2) algorithm,
+            # array.array('Q') benchmarks ~5x faster for these two operations,
+            # probably because it's just memory movements, not loops that have to
+            # INCREF/DECREF.
+            batch = oids[:self.fill_object_refs_batch_size]
+            oids = oids[self.fill_object_refs_batch_size:]
+
+            refs_found = self._add_refs_for_oids(load_connection, store_connection,
+                                                 batch, get_references)
+            self.on_fill_object_ref_batch(oid_batch=batch, refs_found=refs_found)
+
+            oids_done += len(batch)
+            now = time.time()
+            if now >= log_at:
+                # Save the work done so far.
+                store_connection.commit()
+                log_at = now + self.fill_object_refs_commit_frequency
+                log.info(
+                    "pre_pack: objects analyzed: %d/%d",
+                    oids_done, oid_count)
+        store_connection.commit()
+        log.info(
+            "pre_pack: objects analyzed: %d/%d", oids_done, oid_count)
+
+    def _add_refs_for_oids(self, load_connection, store_connection,
+                           oids, get_references):
         """Fill object_refs with the states for some objects.
 
         Returns the number of references added.
         """
         # XXX PY3: This could be tricky
         # TODO: Use the row batcher's SELECT FROM
+        load_cursor = load_connection.cursor
         oid_list = ','.join(str(oid) for oid in oids)
         stmt = """
             SELECT zoid, tid, state
@@ -1129,17 +1139,15 @@ class HistoryFreePackUndo(PackUndo):
             WHERE zoid IN (%s)
             ORDER BY zoid
             """ % oid_list
-        self.runner.run_script_stmt(cursor, stmt)
+        self.runner.run_script_stmt(load_cursor, stmt)
 
         add_objects = []
         add_refs = []
 
-        for from_oid, tid, state in self._fetchmany(cursor):
+        for from_oid, tid, state in load_cursor:
             state = self.driver.binary_column_as_state_type(state)
             add_objects.append((from_oid, tid))
             if state:
-                assert isinstance(state, self.driver.state_types), type(state)
-                # XXX PY3 state = str(state)
                 try:
                     to_oids = get_references(state)
                 except:
@@ -1149,101 +1157,131 @@ class HistoryFreePackUndo(PackUndo):
                     raise
                 for to_oid in to_oids:
                     add_refs.append((from_oid, tid, to_oid))
-
         if not add_objects:
             assert not add_refs
             return add_refs
 
         # TODO: RowBatcher for all of these
+        store_cursor = store_connection.cursor
         stmt = "DELETE FROM object_refs_added WHERE zoid IN (%s)" % oid_list
-        self.runner.run_script_stmt(cursor, stmt)
+        self.runner.run_script_stmt(store_cursor, stmt)
         stmt = "DELETE FROM object_ref WHERE zoid IN (%s)" % oid_list
-        self.runner.run_script_stmt(cursor, stmt)
+        self.runner.run_script_stmt(store_cursor, stmt)
 
         stmt = """
         INSERT INTO object_ref (zoid, tid, to_zoid) VALUES (%s, %s, %s)
         """
-        self.runner.run_many(cursor, stmt, add_refs)
+        self.runner.run_many(store_cursor, stmt, add_refs)
 
         stmt = """
         INSERT INTO object_refs_added (zoid, tid) VALUES (%s, %s)
         """
-        self.runner.run_many(cursor, stmt, add_objects)
+        self.runner.run_many(store_cursor, stmt, add_objects)
 
         return add_refs
 
     @metricmethod
     def pre_pack(self, pack_tid, get_references):
-        """Decide what the garbage collector should delete.
+        """
+        Decide what the garbage collector should delete.
 
-        Objects created or modified after pack_tid will not be
-        garbage collected.
+        Objects created or modified after pack_tid will not be garbage
+        collected.
 
         get_references is a function that accepts a pickled state and
         returns a set of OIDs that state refers to.
 
         The self.options.pack_gc flag indicates whether to run garbage
-        collection.  If pack_gc is false, this method does nothing.
+        collection. If pack_gc is false, this method does nothing.
         """
         if not self.options.pack_gc:
             log.warning("pre_pack: garbage collection is disabled on a "
                         "history-free storage, so doing nothing")
             return
 
-        conn, cursor = self.connmanager.open_for_pre_pack()
+        load_connection = LoadConnection(self.connmanager)
+        store_connection = StoreConnection(self.connmanager)
         try:
             try:
-                self._pre_pack_main(conn, cursor, pack_tid, get_references)
+                self._pre_pack_main(load_connection, store_connection,
+                                    pack_tid, get_references)
             except:
                 log.exception("pre_pack: failed")
-                self.connmanager.rollback_quietly(conn, cursor)
+                store_connection.rollback_quietly()
                 raise
             else:
-                self.connmanager.commit(conn, cursor)
+                store_connection.commit()
                 log.info("pre_pack: finished successfully")
         finally:
-            self.connmanager.close(conn, cursor)
+            load_connection.drop()
+            store_connection.drop()
 
 
-    def _pre_pack_main(self, conn, cursor, pack_tid, get_references):
-        """Determine what to garbage collect.
+    def _pre_pack_main(self, load_connection, store_connection,
+                       pack_tid, get_references):
         """
-        stmt = self._script_create_temp_pack_visit
-        if stmt:
-            self.runner.run_script(cursor, stmt)
+        Determine what to garbage collect.
 
-        self.fill_object_refs(conn, cursor, get_references)
+        *load_connection* is a
+        :class:`relstorage.adapters.connections.LoadConnection`; this
+        connection is in "snapshot" mode and is used to read a
+        consistent view of the database. Although this connection is
+        never committed or rolled back while this method is running
+        (which may take a long time), because load connections are
+        declared to be read-only the database engines can make certain
+        optimizations that reduce the overhead of them (e.g.,
+        https://dev.mysql.com/doc/refman/5.7/en/innodb-performance-ro-txn.html),
+        making long-running transactions less problematic. For
+        example, while packing a 60 million row single MySQL storage
+        with ``zc.zodbdgc``, a load transaction was open and actively
+        reading for over 8 hours while the database continued to be
+        heavily written to without causing any problems.
 
+        *store_connection* is a standard read-committed store connection;
+        it will be periodically committed.
+        """
+        # First, fill the ``pack_object`` table with all known OIDs
+        # as they currently exist in the database, regardless of
+        # what the load_connection snapshot can see (which is no later
+        # and possibly earlier, than what the store connection can see).
+        #
+        # Mark things that need to be kept:
+        # - the root object;
+        # - anything that has changed since ``pack_tid``;
+        # Note that we do NOT add items that have been newly added since
+        # ``pack_tid``; no need to traverse into them, they couldn't possibly
+        # have a reference to an older object that's not also referenced
+        # by an object in the snapshot (without the app doing something seriously
+        # wrong): plus, we didn't find references from that item anyway.
         log.info("pre_pack: filling the pack_object table")
-        # Fill the pack_object table with all known OIDs.
         stmt = """
         %(TRUNCATE)s pack_object;
 
         INSERT INTO pack_object (zoid, keep, keep_tid)
-        SELECT zoid, %(FALSE)s, tid
+        SELECT zoid, CASE WHEN tid > %(pack_tid)s THEN %(TRUE)s ELSE %(FALSE)s END, tid
         FROM object_state
         ORDER BY zoid;
 
-        -- Keep the root object.
+        -- Also keep the root
         UPDATE pack_object
         SET keep = %(TRUE)s
         WHERE zoid = 0;
-
-        -- Keep objects that have been revised since pack_tid.
-        UPDATE pack_object
-        SET keep = %(TRUE)s
-        WHERE keep_tid > %(pack_tid)s;
         """
-        self.runner.run_script(cursor, stmt, {'pack_tid': pack_tid})
+        self.runner.run_script(store_connection.cursor, stmt, {'pack_tid': pack_tid})
+        store_connection.commit()
 
-        # Traverse the graph, setting the 'keep' flags in pack_object
-        self._traverse_graph(cursor)
+        # Chase down all the references using a consistent snapshot, including
+        # only the objects that were visible in ``pack_object``.
+        self.fill_object_refs(load_connection, store_connection, get_references)
+
+        # Traverse the graph, setting the 'keep' flags in ``pack_object``
+        self._traverse_graph(store_connection.cursor)
 
 
     def _find_pack_tid(self):
         """If pack was not completed, find our pack tid again"""
 
-        # pack (below) ignores it's pack_tid argument, so we can safely
+        # pack (below) ignores its pack_tid argument, so we can safely
         # return None here
         return None
 
