@@ -192,10 +192,11 @@ class Pack(object):
         if prepack_only and skip_prepack:
             raise ValueError('Pick either prepack_only or skip_prepack.')
 
-        # Use a private connection (lock_conn and lock_cursor) to
-        # hold the pack lock.  Have the adapter open temporary
-        # connections to do the actual work, allowing the adapter
-        # to use special transaction modes for packing.
+        # Use a private connection (lock_conn and lock_cursor) to hold
+        # the pack lock. Have the adapter open temporary connections
+        # to do the actual work, allowing the adapter to use special
+        # transaction modes for packing, and to commit at will without
+        # losing the lock.
         lock_conn, lock_cursor = self.connmanager.open()
         try:
             self.locker.hold_pack_lock(lock_cursor)

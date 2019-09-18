@@ -27,6 +27,15 @@
   Python 2. This is used to determine when to shrink the disk cache.
   See :issue:`317`.
 
+- Fix several race conditions when packing history-free storages
+  through a combination of changes in ordering and more strongly
+  consistent (``READ ONLY REPEATABLE READ``) transactions.
+  Reported in :issue:`325` by krissik with initial PR by Andreas
+  Gabriel.
+
+- Make ``zodbpack`` pass RelStorage specific options like
+  ``--prepack`` and ``--use-prepack-state`` to the RelStorage, even
+  when it has been wrapped in a ``zc.zlibstorage``.
 
 3.0a10 (2019-09-04)
 ===================

@@ -33,7 +33,7 @@ schema_xml = u"""
 </schema>
 """
 
-log = logging.getLogger("zodbpack")
+logger = logging.getLogger("zodbpack")
 
 
 def main(argv=None):
@@ -42,8 +42,8 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
 
     parser.add_argument(
-        "-d", "--days", dest="days", default=0,
-        help="Days of history to keep (default 0)",
+        "-d", "--days", dest="days", default=1,
+        help="Days of history to keep (default: %(default)s)",
         type=float,
     )
     parser.add_argument(
@@ -59,22 +59,23 @@ def main(argv=None):
         "Requires that a pre-pack has been run, or that packing was aborted "
         "before it was completed.",
     )
-    parser.add_argument("config_file")
+    parser.add_argument("config_file", type=argparse.FileType('r'))
     options = parser.parse_args(argv[1:])
 
     logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(name)s] %(levelname)s %(message)s")
+        level=logging.DEBUG,
+        format="%(asctime)s [%(name)s] %(levelname)s %(message)s"
+    )
 
     schema = ZConfig.loadSchemaFile(StringIO(schema_xml))
-    config, _ = ZConfig.loadConfig(schema, options.config_file)
+    config, _ = ZConfig.loadConfigFile(schema, options.config_file)
 
     t = time.time() - options.days * 86400.0
     for s in config.storages:
         name = '%s (%s)' % ((s.name or 'storage'), s.__class__.__name__)
-        log.info("Opening %s...", name)
+        logger.info("Opening %s...", name)
         storage = s.open()
-        log.info("Packing %s.", name)
+        logger.info("Packing %s.", name)
         if options.prepack or options.reuse_prepack:
             storage.pack(t, ZODB.serialize.referencesf,
                          prepack_only=options.prepack,
@@ -83,7 +84,7 @@ def main(argv=None):
             # Be non-relstorage Storages friendly
             storage.pack(t, ZODB.serialize.referencesf)
         storage.close()
-        log.info("Packed %s.", name)
+        logger.info("Packed %s.", name)
 
 if __name__ == '__main__':
     main()

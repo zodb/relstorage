@@ -247,6 +247,21 @@ class AbstractTestSuiteBuilder(object):
 
         return klass
 
+    _default_make_test_class = _default_make_check_class
+
+    def __make_test_class(self, base, extra_bases, maker_base_name, maker_default, klass_dict=None):
+        name = self.__name__ + base.__name__
+        maker = getattr(
+            self,
+            maker_base_name + base.__name__,
+            maker_default
+        )
+        __traceback_info__ = maker, base
+        klass = maker((base,) + extra_bases, name, klass_dict)
+        klass.__module__ = self.__module__
+        klass.__name__ = name
+        return klass
+
     def _make_check_classes(self):
         # The classes that inherit from ZODB tests and use 'check' instead of 'test_'
 
@@ -272,14 +287,33 @@ class AbstractTestSuiteBuilder(object):
                         HistoryPreservingRelStorageTests))
         ):
             for base in bases:
-                name = self.__name__ + base.__name__
-                maker = getattr(self, '_make_check_class_' + base.__name__,
-                                self._default_make_check_class)
-                __traceback_info__ = maker, base
-                klass = maker((base, ZODBTestCase), name)
-                klass.__module__ = self.__module__
-                klass.__name__ = name
-                classes.append(klass)
+                classes.append(self.__make_test_class(
+                    base,
+                    (ZODBTestCase,),
+                    '_make_check_class_',
+                    self._default_make_check_class,
+                ))
+
+        return classes
+
+    def _make_test_classes(self):
+        # Classes that inherit from RelStorageTestBase and not the ZODB
+        # tests. These use the standard convention of 'test_' methods instead
+        # of 'check' and don't have ridiculous class hierarchies.
+        from .packundo import HistoryFreeTestPack
+        from .packundo import HistoryPreservingTestPack
+
+        classes = []
+
+
+        for base in (HistoryFreeTestPack, HistoryPreservingTestPack):
+            classes.append(self.__make_test_class(
+                base,
+                (),
+                '_make_test_class_',
+                self._default_make_test_class,
+            ))
+
         return classes
 
     def _make_zodbconvert_classes(self):
@@ -316,6 +350,10 @@ class AbstractTestSuiteBuilder(object):
         for klass in self._make_check_classes():
             klass = self._new_class_for_driver(klass, driver_available)
             suite.addTest(unittest.makeSuite(klass, "check"))
+
+        for klass in self._make_test_classes():
+            klass = self._new_class_for_driver(klass, driver_available)
+            suite.addTest(unittest.makeSuite(klass))
 
         for klass in self._make_zodbconvert_classes():
             suite.addTest(unittest.makeSuite(

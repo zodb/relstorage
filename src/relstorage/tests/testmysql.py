@@ -196,17 +196,16 @@ class MySQLTestSuiteBuilder(AbstractTestSuiteBuilder):
         # both values default to 1MB. So keep it small.)
         return Options().blob_chunk_size
 
-    def _make_check_class_HistoryFreeRelStorageTests(self, bases, name):
+    def _make_check_class_HistoryFreeRelStorageTests(self, bases, name, klass_dict=None):
         bases = (GenericMySQLTestsMixin, ) + bases
 
-        klass_dict = {
-        }
+        klass_dict = {}
 
         return self._default_make_check_class(bases, name, klass_dict=klass_dict)
 
     # pylint:disable=line-too-long
-    def _make_check_class_HistoryPreservingRelStorageTests(self, bases, name):
-        return self._make_check_class_HistoryFreeRelStorageTests(bases, name)
+    def _make_check_class_HistoryPreservingRelStorageTests(self, bases, name, klass_dict=None):
+        return self._make_check_class_HistoryFreeRelStorageTests(bases, name, klass_dict)
 
 
 class GenericMySQLTestsMixin(object):
