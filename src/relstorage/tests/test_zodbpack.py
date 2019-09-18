@@ -41,7 +41,7 @@ class ZODBPackScriptTests(unittest.TestCase):
         if os.path.exists(self.cfg_fn):
             os.remove(self.cfg_fn)
 
-    def test_pack_defaults(self):
+    def test_pack_with_0_day(self):
         from ZODB.DB import DB
         from ZODB.FileStorage import FileStorage
         from ZODB.POSException import POSKeyError
@@ -64,14 +64,14 @@ class ZODBPackScriptTests(unittest.TestCase):
         db.close()
         storage = None
 
-        main(['', self.cfg_fn])
+        main(['', '--days=0', self.cfg_fn])
 
         # packing should have removed the old state.
         storage = FileStorage(self.db_fn)
         self.assertRaises(POSKeyError, storage.loadSerial, oid, serial)
         storage.close()
 
-    def test_pack_with_1_day(self):
+    def test_pack_defaults(self):
         from ZODB.DB import DB
         from ZODB.FileStorage import FileStorage
         import time

@@ -337,7 +337,7 @@ def get_memory_usage():
 
 def byte_display(size):
     """
-    Returns a size with the correct unit (KB, MB), given the size in bytes.
+    Returns a string with the correct unit (KB, MB), given the size in bytes.
     """
     if size == 0:
         return '0 KB'
@@ -346,7 +346,6 @@ def byte_display(size):
     if size > 1048576:
         return '%0.02f MB' % (size / 1048576.0)
     return '%0.02f KB' % (size / 1024.0)
-
 
 class Lazy(object):
     "Property-like descriptor that calls func only once per instance."

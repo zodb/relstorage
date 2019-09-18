@@ -192,7 +192,7 @@ class HistoryFreeTestPack(TestPackBase):
 
         def inject_changes(oid_batch, refs_found):
             # We're examining the root and the first three objects
-            self.assertEqual(oid_batch, list(self.OID_INITIAL_SET))
+            self.assertEqual(sorted(oid_batch), sorted(self.OID_INITIAL_SET))
             self.assertEqual(len(refs_found), 3)
             # We're only called once: a single batch
             self.assertNotIn('D', expect_oids)
@@ -229,7 +229,7 @@ class HistoryFreeTestPack(TestPackBase):
                 hook='on_fill_object_ref_batch',
             )
         finally:
-            self.assertEqual(seen_oids, list(self.OID_INITIAL_SET))
+            self.assertEqual(sorted(seen_oids), sorted(self.OID_INITIAL_SET))
             self.assertIn('D', expect_oids) # hook was called.
 
 

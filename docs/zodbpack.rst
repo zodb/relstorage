@@ -19,18 +19,19 @@ the storages to pack, in ZConfig format. An example configuration file::
 Options for ``zodbpack``
 ========================
 
-  ``--days`` or ``-d``
-    Specifies how many days of historical data to keep. Defaults to 0,
-    meaning no history is kept. This is meaningful even for
-    history-free storages, since unreferenced objects are not removed
-    from the database until the specified number of days have passed.
+``--days`` or ``-d``
+    Specifies how many days of historical data to
+    keep. Defaults to 1, meaning all objects newer than 1 day are
+    considered reachable. This is meaningful even for history-free
+    storages, since unreferenced objects are not removed from the
+    database until the specified number of days have passed.
 
-  ``--prepack``
+``--prepack``
     Instructs the storage to only run the pre-pack phase of the pack but not
     actually delete anything.  This is equivalent to specifying
     ``pack-prepack-only true`` in the storage options.
 
-  ``--use-prepack-state``
+``--use-prepack-state``
     Instructs the storage to only run the deletion (packing) phase, skipping
     the pre-pack analysis phase. This is equivalent to specifying
     ``pack-skip-prepack true`` in the storage options.

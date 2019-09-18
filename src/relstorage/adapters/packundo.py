@@ -24,6 +24,8 @@ from ZODB.utils import u64
 from zope.interface import implementer
 
 from .._compat import metricmethod
+from .._util import byte_display
+from .._util import get_memory_usage
 from ..iter import fetchmany
 from ..treemark import TreeMarker
 
@@ -35,7 +37,7 @@ from ._util import DatabaseHelpersMixin
 # pylint:disable=too-many-lines,unused-argument
 
 
-log = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 class PackUndo(DatabaseHelpersMixin):
     """Abstract base class for pack/undo"""
@@ -120,7 +122,7 @@ class PackUndo(DatabaseHelpersMixin):
 
         *cursor* is a writable store connection cursor.
         """
-        log.info("pre_pack: downloading pack_object and object_ref.")
+        logger.info("pre_pack: downloading pack_object and object_ref.")
 
         marker = TreeMarker()
 
@@ -164,8 +166,8 @@ class PackUndo(DatabaseHelpersMixin):
         #
         # - In history free *with* gc, this is all objects that have
         #   been modified after the pack time.
-        log.info("pre_pack: traversing the object graph "
-                 "to find reachable objects.")
+        logger.info("pre_pack: traversing the object graph "
+                    "to find reachable objects.")
         stmt = """
         SELECT zoid
         FROM pack_object
@@ -182,7 +184,7 @@ class PackUndo(DatabaseHelpersMixin):
 
         # Upload the TreeMarker results to the database.
 
-        log.info(
+        logger.info(
             "pre_pack: marking objects reachable: %d",
             marker.reachable_count)
 
@@ -495,7 +497,7 @@ class HistoryPreservingPackUndo(PackUndo):
         txns_done = 0
         self.on_filling_object_refs_added(tids=tids)
         if tids:
-            log.info(
+            logger.info(
                 "pre_pack: analyzing references from objects in %d new "
                 "transaction(s)", tid_count)
             for tid in tids:
@@ -506,18 +508,18 @@ class HistoryPreservingPackUndo(PackUndo):
                     # save the work done so far
                     self.connmanager.commit(conn, cursor)
                     log_at = now + 60
-                    log.info(
+                    logger.info(
                         "pre_pack: transactions analyzed: %d/%d",
                         txns_done, tid_count)
         self.connmanager.commit(conn, cursor)
-        log.info("pre_pack: transactions analyzed: %d/%d", txns_done, tid_count)
+        logger.info("pre_pack: transactions analyzed: %d/%d", txns_done, tid_count)
 
     def _add_refs_for_tid(self, cursor, tid, get_references):
         """Fill object_refs with all states for a transaction.
 
         Returns the number of references added.
         """
-        log.debug("pre_pack: transaction %d: computing references ", tid)
+        logger.debug("pre_pack: transaction %d: computing references ", tid)
         from_count = 0
         stmt = """
         SELECT zoid, state
@@ -536,7 +538,7 @@ class HistoryPreservingPackUndo(PackUndo):
                 try:
                     to_oids = get_references(state)
                 except:
-                    log.error(
+                    logger.exception(
                         "pre_pack: can't unpickle "
                         "object %d in transaction %d; state length = %d",
                         from_oid, tid, len(state))
@@ -565,8 +567,8 @@ class HistoryPreservingPackUndo(PackUndo):
         self.runner.run_script_stmt(cursor, stmt, {'tid': tid})
 
         to_count = len(add_rows)
-        log.debug("pre_pack: transaction %d: has %d reference(s) "
-                  "from %d object(s)", tid, to_count, from_count)
+        logger.debug("pre_pack: transaction %d: has %d reference(s) "
+                     "from %d object(s)", tid, to_count, from_count)
         return to_count
 
     @metricmethod
@@ -594,15 +596,15 @@ class HistoryPreservingPackUndo(PackUndo):
             # essentially with the distinct list of all objects and their
             # maximum (newest) transaction ids.
             if self.options.pack_gc:
-                log.info("pre_pack: start with gc enabled")
+                logger.info("pre_pack: start with gc enabled")
                 self._pre_pack_with_gc(
                     conn, cursor, pack_tid, get_references)
             else:
-                log.info("pre_pack: start without gc")
+                logger.info("pre_pack: start without gc")
                 self._pre_pack_without_gc(
                     conn, cursor, pack_tid)
 
-            log.info("pre_pack: enumerating states to pack")
+            logger.info("pre_pack: enumerating states to pack")
             stmt = "%(TRUNCATE)s pack_state"
             self.runner.run_script_stmt(cursor, stmt)
             to_remove = 0
@@ -660,7 +662,7 @@ class HistoryPreservingPackUndo(PackUndo):
             to_remove += cursor.rowcount
 
             # Make a simple summary of the transactions to examine.
-            log.info("pre_pack: enumerating transactions to pack")
+            logger.info("pre_pack: enumerating transactions to pack")
             stmt = "%(TRUNCATE)s pack_state_tid"
             self.runner.run_script_stmt(cursor, stmt)
             stmt = """
@@ -670,10 +672,10 @@ class HistoryPreservingPackUndo(PackUndo):
             """
             cursor.execute(stmt)
 
-            log.info("pre_pack: will remove %d object state(s)",
-                     to_remove)
+            logger.info("pre_pack: will remove %d object state(s)",
+                        to_remove)
 
-            log.info("pre_pack: finished successfully")
+            logger.info("pre_pack: finished successfully")
             self.connmanager.commit(conn, cursor)
         except:
             self.connmanager.rollback_quietly(conn, cursor)
@@ -741,7 +743,7 @@ class HistoryPreservingPackUndo(PackUndo):
         """
         # Fill the pack_object table with OIDs, but configure them
         # all to be kept by setting keep to true.
-        log.debug("pre_pack: populating pack_object")
+        logger.debug("pre_pack: populating pack_object")
         self.__initial_populate_pack_object(conn, cursor, pack_tid, keep=True)
 
     def _pre_pack_with_gc(self, conn, cursor, pack_tid, get_references):
@@ -754,7 +756,7 @@ class HistoryPreservingPackUndo(PackUndo):
 
         self.fill_object_refs(conn, cursor, get_references)
 
-        log.info("pre_pack: filling the pack_object table")
+        logger.info("pre_pack: filling the pack_object table")
         # Fill the pack_object table with OIDs that either will be
         # removed (if nothing references the OID) or whose history will
         # be cut.
@@ -845,7 +847,7 @@ class HistoryPreservingPackUndo(PackUndo):
                 tid_rows = list(self._fetchmany(cursor)) # oldest first, sorted in SQL
 
                 total = len(tid_rows)
-                log.info("pack: will pack %d transaction(s)", total)
+                logger.info("pack: will pack %d transaction(s)", total)
 
                 stmt = self._script_create_temp_pack_visit
                 if stmt:
@@ -874,10 +876,10 @@ class HistoryPreservingPackUndo(PackUndo):
                                 packed_func(poid, ptid)
                         statecounter += len(packed_list)
                         if counter >= lastreport + reportstep:
-                            log.info("pack: packed %d (%.1f%%) transaction(s), "
-                                     "affecting %d states",
-                                     counter, counter / float(total) * 100,
-                                     statecounter)
+                            logger.info("pack: packed %d (%.1f%%) transaction(s), "
+                                        "affecting %d states",
+                                        counter, counter / float(total) * 100,
+                                        statecounter)
                             lastreport = counter / reportstep * reportstep
                         del packed_list[:]
                         start = time.time()
@@ -889,12 +891,12 @@ class HistoryPreservingPackUndo(PackUndo):
                 self._pack_cleanup(conn, cursor)
 
             except:
-                log.exception("pack: failed")
+                logger.exception("pack: failed")
                 self.connmanager.rollback_quietly(conn, cursor)
                 raise
 
             else:
-                log.info("pack: finished successfully")
+                logger.info("pack: finished successfully")
                 self.connmanager.commit(conn, cursor)
 
         finally:
@@ -909,7 +911,7 @@ class HistoryPreservingPackUndo(PackUndo):
         If *has_removable* is true, then we have object states and current
         object pointers to remove.
         """
-        log.debug("pack: transaction %d: packing", tid)
+        logger.debug("pack: transaction %d: packing", tid)
         removed_objects = 0
         removed_states = 0
 
@@ -956,7 +958,7 @@ class HistoryPreservingPackUndo(PackUndo):
         stmt += " WHERE tid = %(tid)s"
         self.runner.run_script_stmt(cursor, stmt, {'tid': tid})
 
-        log.debug(
+        logger.debug(
             "pack: transaction %d (%s): removed %d object(s) and %d state(s)",
             tid, state, removed_objects, removed_states)
 
@@ -965,17 +967,17 @@ class HistoryPreservingPackUndo(PackUndo):
         """Remove unneeded table rows after packing"""
         # commit the work done so far, releasing row-level locks.
         self.connmanager.commit(conn, cursor)
-        log.info("pack: cleaning up")
+        logger.info("pack: cleaning up")
 
         # This section does not need to hold the commit lock, as it only
         # touches pack-specific tables. We already hold a pack lock for that.
-        log.debug("pack: removing unused object references")
+        logger.debug("pack: removing unused object references")
         stmt = self._script_pack_object_ref
         self.runner.run_script(cursor, stmt)
 
         # We need a commit lock when touching the transaction table though.
         # We'll do it in batches of 1000 rows.
-        log.debug("pack: removing empty packed transactions")
+        logger.debug("pack: removing empty packed transactions")
         while True:
             stmt = self._script_delete_empty_transactions_batch
             self.runner.run_script_stmt(cursor, stmt)
@@ -987,7 +989,7 @@ class HistoryPreservingPackUndo(PackUndo):
                 break
 
         # perform cleanup that does not require the commit lock
-        log.debug("pack: clearing temporary pack state")
+        logger.debug("pack: clearing temporary pack state")
         for _table in ('pack_object', 'pack_state', 'pack_state_tid'):
             stmt = '%(TRUNCATE)s ' + _table
             self.runner.run_script_stmt(cursor, stmt)
@@ -1067,10 +1069,12 @@ class HistoryFreePackUndo(PackUndo):
         # ``pack_object``, which determines the visible objects
         # we will examine.
         load_connection.restart()
-
+        mem_begin = get_memory_usage()
+        logger.debug("pre_pack: Collecting objects to examine.")
         # Recall pre_pack can be run many times.
-        # We order by ZOID to be compatible with other transactions that
-        # are locking objects.
+        # Ordering should be immaterial as we are in a read-only snapshot view
+        # of the database; we shouldn't run into locking issues with other
+        # transactions.
         load_cursor = load_connection.cursor
         stmt = """
         SELECT zoid
@@ -1080,22 +1084,25 @@ class HistoryFreePackUndo(PackUndo):
             USING (zoid)
         WHERE object_refs_added.tid IS NULL
           OR object_refs_added.tid != object_state.tid
-        ORDER BY zoid
         """
         self.runner.run_script_stmt(load_cursor, stmt)
+        logger.debug(
+            "pre_pack: Selected objects to examine (memory delta: %s)",
+            byte_display(get_memory_usage() - mem_begin)
+        )
         # XXX: maybe this should be an OidSet (to save memory)?
         # Or, using an array.array('Q') (on Python 3; on Python 2,
         # array.array('L') if .itemsize == 8) preserves the order properties.
         oids = [zoid for (zoid,) in load_cursor]
-
         log_at = time.time() + self.fill_object_refs_commit_frequency
         self.on_filling_object_refs_added(oids=oids)
 
         oid_count = len(oids)
         oids_done = 0
-        log.info(
-            "pre_pack: analyzing references from %d object(s)",
-            oid_count)
+        num_refs_found = 0
+        logger.info(
+            "pre_pack: analyzing references from %d object(s) (memory delta: %s)",
+            oid_count, byte_display(get_memory_usage() - mem_begin))
         while oids:
             # XXX: This turns into O(n^2), at least for CPython lists.
             # Each index operation allocates a new list, and copies
@@ -1108,6 +1115,7 @@ class HistoryFreePackUndo(PackUndo):
 
             refs_found = self._add_refs_for_oids(load_connection, store_connection,
                                                  batch, get_references)
+            num_refs_found += len(refs_found)
             self.on_fill_object_ref_batch(oid_batch=batch, refs_found=refs_found)
 
             oids_done += len(batch)
@@ -1116,11 +1124,11 @@ class HistoryFreePackUndo(PackUndo):
                 # Save the work done so far.
                 store_connection.commit()
                 log_at = now + self.fill_object_refs_commit_frequency
-                log.info(
-                    "pre_pack: objects analyzed: %d/%d",
-                    oids_done, oid_count)
+                logger.info(
+                    "pre_pack: objects analyzed: %d/%d (%d total references)",
+                    oids_done, oid_count, num_refs_found)
         store_connection.commit()
-        log.info(
+        logger.info(
             "pre_pack: objects analyzed: %d/%d", oids_done, oid_count)
 
     def _add_refs_for_oids(self, load_connection, store_connection,
@@ -1151,9 +1159,11 @@ class HistoryFreePackUndo(PackUndo):
                 try:
                     to_oids = get_references(state)
                 except:
-                    log.error("pre_pack: can't unpickle "
-                              "object %d in transaction %d; state length = %d",
-                              from_oid, tid, len(state))
+                    logger.exception(
+                        "pre_pack: can't unpickle "
+                        "object %d in transaction %d; state length = %d",
+                        from_oid, tid, len(state)
+                    )
                     raise
                 for to_oid in to_oids:
                     add_refs.append((from_oid, tid, to_oid))
@@ -1195,8 +1205,8 @@ class HistoryFreePackUndo(PackUndo):
         collection. If pack_gc is false, this method does nothing.
         """
         if not self.options.pack_gc:
-            log.warning("pre_pack: garbage collection is disabled on a "
-                        "history-free storage, so doing nothing")
+            logger.warning("pre_pack: garbage collection is disabled on a "
+                           "history-free storage, so doing nothing")
             return
 
         load_connection = LoadConnection(self.connmanager)
@@ -1206,12 +1216,12 @@ class HistoryFreePackUndo(PackUndo):
                 self._pre_pack_main(load_connection, store_connection,
                                     pack_tid, get_references)
             except:
-                log.exception("pre_pack: failed")
+                logger.exception("pre_pack: failed")
                 store_connection.rollback_quietly()
                 raise
             else:
                 store_connection.commit()
-                log.info("pre_pack: finished successfully")
+                logger.info("pre_pack: finished successfully")
         finally:
             load_connection.drop()
             store_connection.drop()
@@ -1253,7 +1263,7 @@ class HistoryFreePackUndo(PackUndo):
         # have a reference to an older object that's not also referenced
         # by an object in the snapshot (without the app doing something seriously
         # wrong): plus, we didn't find references from that item anyway.
-        log.info("pre_pack: filling the pack_object table")
+        logger.info("pre_pack: filling the pack_object table")
         stmt = """
         %(TRUNCATE)s pack_object;
 
@@ -1269,6 +1279,7 @@ class HistoryFreePackUndo(PackUndo):
         """
         self.runner.run_script(store_connection.cursor, stmt, {'pack_tid': pack_tid})
         store_connection.commit()
+        logger.info("pre_pack: Filled the pack_object table")
 
         # Chase down all the references using a consistent snapshot, including
         # only the objects that were visible in ``pack_object``.
@@ -1307,7 +1318,7 @@ class HistoryFreePackUndo(PackUndo):
                 to_remove = list(self._fetchmany(cursor))
 
                 total = len(to_remove)
-                log.info("pack: will remove %d object(s)", total)
+                logger.info("pack: will remove %d object(s)", total)
 
                 # Hold the commit lock while packing to prevent deadlocks.
                 # Pack in small batches of transactions only after we are able
@@ -1342,8 +1353,8 @@ class HistoryFreePackUndo(PackUndo):
                         del packed_list[:]
                         counter = total - len(to_remove)
                         if counter >= lastreport + reportstep:
-                            log.info("pack: removed %d (%.1f%%) state(s)",
-                                     counter, counter / float(total) * 100)
+                            logger.info("pack: removed %d (%.1f%%) state(s)",
+                                        counter, counter / float(total) * 100)
                             lastreport = counter / reportstep * reportstep
                         start = time.time()
 
@@ -1355,12 +1366,12 @@ class HistoryFreePackUndo(PackUndo):
                 self._pack_cleanup(conn, cursor)
 
             except:
-                log.exception("pack: failed")
+                logger.exception("pack: failed")
                 self.connmanager.rollback_quietly(conn, cursor)
                 raise
 
             else:
-                log.info("pack: finished successfully")
+                logger.info("pack: finished successfully")
                 self.connmanager.commit(conn, cursor)
         finally:
             self.connmanager.close(conn, cursor)
@@ -1370,7 +1381,7 @@ class HistoryFreePackUndo(PackUndo):
         # commit the work done so far
         self.connmanager.commit(conn, cursor)
         self.locker.release_commit_lock(cursor)
-        log.info("pack: cleaning up")
+        logger.info("pack: cleaning up")
 
         # This section does not need to hold the commit lock, as it only
         # touches pack-specific tables. We already hold a pack lock for that.

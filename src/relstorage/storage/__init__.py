@@ -417,7 +417,8 @@ class RelStorage(LegacyMethodsMixin,
             # We special-case zlibstorage for speed
             if hasattr(wrapper, 'base') and hasattr(wrapper, 'copied_methods'):
                 type(wrapper).new_instance = _zlibstorage_new_instance
-                # NOTE that zlibstorage has a custom copyTransactionsFrom that overrides
+                type(wrapper).pack = _zlibstorage_pack
+                # NOTE that zlibstorage has a custom copyTransactionsFrom that hides
                 # our own implementation.
             else:
                 wrapper.new_instance = lambda s: type(wrapper)(self.new_instance())
@@ -819,3 +820,9 @@ def _zlibstorage_new_instance(self):
         if v is not None:
             setattr(new_self, name, v)
     return new_self
+
+def _zlibstorage_pack(self, pack_time, referencesf, *args, **kwargs):
+    untransform = self._untransform
+    def refs(state, oids=None):
+        return referencesf(untransform(state), oids)
+    return self.base.pack(pack_time, refs, *args, **kwargs)

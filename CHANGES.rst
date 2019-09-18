@@ -33,6 +33,10 @@
   Reported in :issue:`325` by krissik with initial PR by Andreas
   Gabriel.
 
+- Make ``zodbpack`` pass RelStorage specific options like
+  ``--prepack`` and ``--use-prepack-state`` to the RelStorage, even
+  when it has been wrapped in a ``zc.zlibstorage``.
+
 3.0a10 (2019-09-04)
 ===================
 
