@@ -1110,6 +1110,13 @@ class HistoryFreePackUndo(PackUndo):
             # array.array('Q') benchmarks ~5x faster for these two operations,
             # probably because it's just memory movements, not loops that have to
             # INCREF/DECREF.
+            #
+            # A simple profile while this is running with 30 MM rows
+            # (taking 3GB of memory on CPython 2, which rapidly drops
+            # to ~1.2GB) shows at least 37% of the time spent in the C
+            # ``list_slice`` function and 31% in ``list_dealloc``.
+            #
+            # Averaging about 15,000 objects per minute.
             batch = oids[:self.fill_object_refs_batch_size]
             oids = oids[self.fill_object_refs_batch_size:]
 
@@ -1269,8 +1276,7 @@ class HistoryFreePackUndo(PackUndo):
 
         INSERT INTO pack_object (zoid, keep, keep_tid)
         SELECT zoid, CASE WHEN tid > %(pack_tid)s THEN %(TRUE)s ELSE %(FALSE)s END, tid
-        FROM object_state
-        ORDER BY zoid;
+        FROM object_state;
 
         -- Also keep the root
         UPDATE pack_object
