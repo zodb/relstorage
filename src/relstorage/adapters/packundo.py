@@ -121,7 +121,13 @@ class PackUndo(DatabaseHelpersMixin):
         *cursor* is a writable store connection cursor.
         """
         logger.info("pre_pack: downloading pack_object and object_ref.")
-        load_connection.restart() # Ensure we're up-to-date
+        # Ensure we're up-to-date and can view the data in pack_object.
+        # Note that we don't just use restart() here: if we haven't actually
+        # opened the cursor yet, restart() won't do anything. But on MySQL,
+        # (because we TRUNCATE'd the pack_object table?) if we don't actually
+        # rollback, we get
+        #   OperationalError: 1412, 'Table definition has changed, please retry transaction'
+        load_connection.rollback_quietly()
 
         marker = TreeMarker()
 
@@ -1301,9 +1307,14 @@ class HistoryFreePackUndo(PackUndo):
         # have a reference to an older object that's not also referenced
         # by an object in the snapshot (without the app doing something seriously
         # wrong): plus, we didn't find references from that item anyway.
-        # Copying 30MM objects takes almost 10 minutes against mysql 8 running on an
-        # SSD, and heaven forgive you if you kill the transaction and roll back
-        # --- the undo info is insane. What if we CREATE AS SELECT a table?
+        #
+        # TODO: Copying 30MM objects takes almost 10 minutes (600s)
+        # against mysql 8 running on an SSD, and heaven forgive you if
+        # you kill the transaction and roll back --- the undo info is
+        # insane. What if we CREATE AS SELECT a table? Doing 'CREATE
+        # TEMPORARY TABLE AS' takes 173s; doing 'CREATE TABLE AS'
+        # takes 277s.
+        #
         # On PostgreSQL we could use unlogged tables.
         logger.info("pre_pack: filling the pack_object table")
         stmt = """
