@@ -37,10 +37,12 @@
   ``--prepack`` and ``--use-prepack-state`` to the RelStorage, even
   when it has been wrapped in a ``zc.zlibstorage``.
 
-- Reduce the amount of memory required to pack a RelStorage. On
-  CPython 3, the peak memory usage of the prepack phase can be up to 9
-  times less.
+- Reduce the amount of memory required to pack a RelStorage through
+  more careful datastructure choices. On CPython 3, the peak
+  memory usage of the prepack phase can be up to 9 times less.
 
+- Use server-side cursors during packing when available, further
+  reducing the amount of memory required. See :issue:`165`.
 
 3.0a10 (2019-09-04)
 ===================

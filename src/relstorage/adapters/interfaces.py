@@ -79,7 +79,8 @@ class IDBDriver(Interface):
 
     dialect = Object(IDBDialect, description=u"The IDBDialect for this driver.")
 
-    cursor_arraysize = Attribute("The value to assign to each new cursor's ``arraysize`` attribute.")
+    cursor_arraysize = Attribute(
+        "The value to assign to each new cursor's ``arraysize`` attribute.")
 
     def connect(*args, **kwargs):
         """
@@ -111,6 +112,9 @@ class IDBDriver(Interface):
         maximum amount of memory needed to handle results, if done
         carefully.
 
+        For compatibility, server_side cursors can only be used
+        to execute a single query.
+
         Most drivers (``psycopg2``, ``psycopg2cffi``, ``pg8000``,
         ``mysqlclient``) default to buffering the entire results
         client side before returning from the ``execute`` method. This
@@ -122,6 +126,11 @@ class IDBDriver(Interface):
         that request. At this writing, this includes ``pg8000``. Some
         drivers (at this writing, only ``gevent MySQLdb``) always use
         server-side cursors. The ``cx_Oracle`` driver is unevaluated.
+
+        ``psycopg2`` and ``psycopg2cffi`` both iterate in chunks of
+        ``cur.itersize`` by default. PyMySQL seems to iterate one row at a time.
+        ``mysqlclient`` defaults to also iterating one row at a time, but
+        we patch that to operate in chunks of ``cur.arraysize``.
         """
 
     def binary_column_as_state_type(db_column_data):

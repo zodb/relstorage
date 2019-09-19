@@ -29,6 +29,7 @@ from relstorage._util import Lazy
 from relstorage._util import parse_boolean
 
 from . import AbstractMySQLDriver
+from . import IterateFetchmanyMixin
 
 __all__ = [
     'MySQLdbDriver',
@@ -50,7 +51,9 @@ class MySQLdbDriver(AbstractMySQLDriver):
     @Lazy
     def _server_side_cursor(self):
         from MySQLdb.cursors import SSCursor # pylint:disable=no-name-in-module,import-error
-        return SSCursor
+        class Cursor(IterateFetchmanyMixin, SSCursor):
+            pass
+        return Cursor
 
     @Lazy
     def _strict_cursor(self):

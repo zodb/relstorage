@@ -46,6 +46,24 @@ class MySQLDialect(DefaultDialect):
     def compiler_class(self):
         return MySQLCompiler
 
+class IterateFetchmanyMixin(object):
+    """
+    Mixin to cause us to fetch in batches using fetchmany().
+    """
+    sleep = None
+    def __iter__(self):
+        fetch = self.fetchmany
+        sleep = self.sleep
+        batch = fetch()
+        while batch:
+            for row in batch:
+                yield row
+            if sleep is not None:
+                sleep() # pylint:disable=not-callable
+            batch = fetch()
+
+    next = __next__ = None
+
 class AbstractMySQLDriver(AbstractModuleDriver):
 
     # Don't try to decode pickle states as UTF-8 (or whatever the

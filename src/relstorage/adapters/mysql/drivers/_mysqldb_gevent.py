@@ -26,8 +26,9 @@ wait = socket.wait # pylint:disable=no-member
 from MySQLdb.connections import Connection as BaseConnection
 from MySQLdb.cursors import SSCursor
 
+from . import IterateFetchmanyMixin
 
-class Cursor(SSCursor):
+class Cursor(IterateFetchmanyMixin, SSCursor):
     # Internally this calls mysql_use_result(). The source
     # code for that function has this comment: "There
     # shouldn't be much processing per row because mysql
@@ -82,15 +83,6 @@ class Cursor(SSCursor):
                 break
             self.sleep()
         return result
-
-    def __iter__(self):
-        fetch = self.fetchmany
-        batch = fetch()
-        while batch:
-            for row in batch:
-                yield row
-            self.sleep()
-            batch = fetch()
 
     def enter_critical_phase_until_transaction_end(self):
         # May make multiple enters.

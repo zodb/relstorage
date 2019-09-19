@@ -89,6 +89,8 @@ class PyMySQLDriver(AbstractMySQLDriver):
     @Lazy
     def _server_side_cursor(self):
         # This appears like it might only read one row at a time, which is probably not
-        # great.
+        # great. But the usual solution, falling back to fetchmany(),
+        # doesn't do any good: fetchmany is implemented in terms of fetchone().
         from pymysql.cursors import SSCursor # pylint:disable=no-name-in-module,import-error
+
         return SSCursor
