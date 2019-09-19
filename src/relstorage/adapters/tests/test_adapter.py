@@ -20,17 +20,21 @@ from hamcrest import assert_that
 from nti.testing.matchers import validly_provides
 from zope.schema.interfaces import IObject
 
+from relstorage.options import Options
 from relstorage.tests import TestCase
 
 from .. import interfaces
 
 class AdapterTestBase(TestCase):
 
-    def _makeOne(self):
+    driver = 'auto'
+
+    def _makeOne(self, options):
         raise NotImplementedError
 
     def test_implements(self):
-        adapter = self._makeOne()
+        options = Options(driver=self.driver)
+        adapter = self._makeOne(options)
         assert_that(adapter, validly_provides(interfaces.IRelStorageAdapter))
 
         # pylint:disable=no-value-for-parameter

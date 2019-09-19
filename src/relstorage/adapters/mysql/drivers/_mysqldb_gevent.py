@@ -24,10 +24,10 @@ wait = socket.wait # pylint:disable=no-member
 
 # pylint:disable=wrong-import-position,no-name-in-module,import-error
 from MySQLdb.connections import Connection as BaseConnection
-from MySQLdb.cursors import SSCursor as BaseCursor
+from MySQLdb.cursors import SSCursor
 
 
-class Cursor(BaseCursor):
+class Cursor(SSCursor):
     # Internally this calls mysql_use_result(). The source
     # code for that function has this comment: "There
     # shouldn't be much processing per row because mysql

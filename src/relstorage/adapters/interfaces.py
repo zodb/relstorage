@@ -79,6 +79,51 @@ class IDBDriver(Interface):
 
     dialect = Object(IDBDialect, description=u"The IDBDialect for this driver.")
 
+    cursor_arraysize = Attribute("The value to assign to each new cursor's ``arraysize`` attribute.")
+
+    def connect(*args, **kwargs):
+        """
+        Create and return a new connection object.
+
+        This connection, and all objects created from it such as cursors,
+        should be used within a single thread only.
+        """
+
+    def cursor(connection, server_side=False):
+        """
+        Create and return a new cursor sharing the state of the given
+        *connection*.
+
+        The cursor should be closed when it is no longer needed. The
+        cursor should be considered forward-only (no backward
+        scrolling) and ephemeral (results go away when the attached
+        transaction is committed or rolled back).
+
+        For compatibility, previous cursors should not have
+        outstanding results pending when this is called and while the
+        returned cursor is used (not all drivers permit multiple
+        active cursors).
+
+        If *server_side* is true (not the default), request that the
+        driver creates a cursor that will **not** buffer the complete
+        results of a query on the client. Instead, the results should
+        be streamed from the server in batches. This can reduce the
+        maximum amount of memory needed to handle results, if done
+        carefully.
+
+        Most drivers (``psycopg2``, ``psycopg2cffi``, ``pg8000``,
+        ``mysqlclient``) default to buffering the entire results
+        client side before returning from the ``execute`` method. This
+        can reduce latency and increase overall throughput, but at the
+        cost of memory, especially if the results will be copied into
+        different data structures.
+
+        Not all drivers support server-side cursors; they will ignore
+        that request. At this writing, this includes ``pg8000``. Some
+        drivers (at this writing, only ``gevent MySQLdb``) always use
+        server-side cursors. The ``cx_Oracle`` driver is unevaluated.
+        """
+
     def binary_column_as_state_type(db_column_data):
         """
         Turn *db_column_data* into something that's a valid pickle

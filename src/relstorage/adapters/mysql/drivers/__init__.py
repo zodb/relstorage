@@ -79,8 +79,18 @@ class AbstractMySQLDriver(AbstractModuleDriver):
     # automatically handle both these statements (``SET names binary,
     # time_zone = X``).
 
-    def cursor(self, conn):
-        cursor = AbstractModuleDriver.cursor(self, conn)
+    _server_side_cursor = None
+
+    def _make_cursor(self, conn, server_side=False):
+        if server_side:
+            cursor = conn.cursor(self._server_side_cursor)
+            cursor.arraysize = self.cursor_arraysize
+        else:
+            cursor = super(AbstractMySQLDriver, self).cursor(conn, server_side=False)
+        return cursor
+
+    def cursor(self, conn, server_side=False):
+        cursor = self._make_cursor(conn, server_side=server_side)
         for stmt in self.CURSOR_INIT_STMTS:
             cursor.execute(stmt)
             cursor.fetchall()

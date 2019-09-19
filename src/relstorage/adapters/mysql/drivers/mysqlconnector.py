@@ -161,6 +161,9 @@ class PyMySQLConnectorDriver(AbstractMySQLDriver):
         converter_class = self._get_converter_class()
         kwargs['converter_class'] = converter_class
         kwargs['get_warnings'] = True
+        # By default, make it fetch all rows for the cursor,
+        # like most drivers do.
+        kwargs['buffered'] = True
 
         con = self.driver_module.connect(*args, **kwargs)
 
@@ -178,10 +181,14 @@ class PyMySQLConnectorDriver(AbstractMySQLDriver):
         AbstractMySQLDriver.MY_TIMEZONE_STMT,
     )
 
-    def cursor(self, conn):
-        cur = super(PyMySQLConnectorDriver, self).cursor(conn)
-        cur.connection = conn
-        return cur
+    def cursor(self, conn, server_side=False):
+        if server_side:
+            cursor = conn.cursor(buffered=False)
+            cursor.arraysize = self.cursor_arraysize
+        else:
+            cursor = super(PyMySQLConnectorDriver, self).cursor(conn, server_side=server_side)
+        cursor.connection = conn
+        return cursor
 
     def set_autocommit(self, conn, value):
         # This implementation uses a property instead of a method.

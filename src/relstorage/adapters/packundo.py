@@ -27,7 +27,7 @@ from .._compat import metricmethod
 from .._compat import OidList
 from .._util import byte_display
 from .._util import get_memory_usage
-from ..iter import fetchmany
+
 from ..treemark import TreeMarker
 
 from .connections import LoadConnection
@@ -60,9 +60,6 @@ class PackUndo(DatabaseHelpersMixin):
         self.runner = runner
         self.locker = locker
         self.options = options
-
-    def _fetchmany(self, cursor):
-        return fetchmany(cursor)
 
     def with_options(self, options):
         """
@@ -536,7 +533,7 @@ class HistoryPreservingPackUndo(PackUndo):
         self.runner.run_script_stmt(cursor, stmt, {'tid': tid})
 
         add_rows = []  # [(from_oid, tid, to_oid)]
-        for from_oid, state in self._fetchmany(cursor):
+        for from_oid, state in cursor:
             state = self.driver.binary_column_as_state_type(state)
             if state:
                 assert isinstance(state, self.driver.state_types), type(state)
@@ -850,7 +847,7 @@ class HistoryPreservingPackUndo(PackUndo):
                 """
                 self.runner.run_script_stmt(
                     cursor, stmt, {'pack_tid': pack_tid})
-                tid_rows = list(self._fetchmany(cursor)) # oldest first, sorted in SQL
+                tid_rows = list(cursor) # oldest first, sorted in SQL
 
                 total = len(tid_rows)
                 logger.info("pack: will pack %d transaction(s)", total)
@@ -945,7 +942,7 @@ class HistoryPreservingPackUndo(PackUndo):
             WHERE pack_state.tid = %(tid)s
             """
             self.runner.run_script_stmt(cursor, stmt, {'tid': tid})
-            for (oid,) in self._fetchmany(cursor):
+            for (oid,) in cursor:
                 packed_list.append((oid, tid))
 
         # Find out whether the transaction is empty
@@ -1343,7 +1340,7 @@ class HistoryFreePackUndo(PackUndo):
                 ORDER BY zoid
                 """
                 self.runner.run_script_stmt(cursor, stmt)
-                to_remove = list(self._fetchmany(cursor))
+                to_remove = list(cursor)
 
                 total = len(to_remove)
                 logger.info("pack: will remove %d object(s)", total)
