@@ -24,6 +24,7 @@ from ZODB.utils import u64
 from zope.interface import implementer
 
 from .._compat import metricmethod
+from .._compat import OidList
 from .._util import byte_display
 from .._util import get_memory_usage
 from ..iter import fetchmany
@@ -183,7 +184,9 @@ class PackUndo(DatabaseHelpersMixin):
         marker.free_refs()
 
         # Upload the TreeMarker results to the database.
-
+        # TODO: It probably makes more sense to mark *unreachable* objects?
+        # There should generally be fewer of them than reachable objects
+        # if the database is regularly GC'd.
         logger.info(
             "pre_pack: marking objects reachable: %d",
             marker.reachable_count)
@@ -191,9 +194,13 @@ class PackUndo(DatabaseHelpersMixin):
         batch = []
 
         def upload_batch():
+            # This would be easily done in parallel.
+            # Marking 30 MM objects, even in batches, takes at least
+            # 30 minutes.
             # XXX: No, this is very wrong. Use the RowBatcher
             # Alternately, flush to a table and then join
             # against that at the end.
+            # TODO: If we're batching, we need to log progress
             oids_str = ','.join(str(oid) for oid in batch)
             del batch[:]
             stmt = """
@@ -490,27 +497,26 @@ class HistoryPreservingPackUndo(PackUndo):
         WHERE object_refs_added.tid IS NULL
         ORDER BY transaction.tid
         """
-        self.runner.run_script_stmt(cursor, stmt)
-        tids = [tid for (tid,) in cursor]
+        self.runner.run_script_stmt(cursor, stmt) # TODO: server-side cursor
+        tids = OidList((tid for (tid,) in cursor))
         log_at = time.time() + 60
         tid_count = len(tids)
         txns_done = 0
         self.on_filling_object_refs_added(tids=tids)
-        if tids:
-            logger.info(
-                "pre_pack: analyzing references from objects in %d new "
-                "transaction(s)", tid_count)
-            for tid in tids:
-                self._add_refs_for_tid(cursor, tid, get_references)
-                txns_done += 1
-                now = time.time()
-                if now >= log_at:
-                    # save the work done so far
-                    self.connmanager.commit(conn, cursor)
-                    log_at = now + 60
-                    logger.info(
-                        "pre_pack: transactions analyzed: %d/%d",
-                        txns_done, tid_count)
+        logger.info(
+            "pre_pack: analyzing references from objects in %d new "
+            "transaction(s)", tid_count)
+        for tid in tids:
+            self._add_refs_for_tid(cursor, tid, get_references)
+            txns_done += 1
+            now = time.time()
+            if now >= log_at:
+                # save the work done so far
+                self.connmanager.commit(conn, cursor)
+                log_at = now + 60
+                logger.info(
+                    "pre_pack: transactions analyzed: %d/%d",
+                    txns_done, tid_count)
         self.connmanager.commit(conn, cursor)
         logger.info("pre_pack: transactions analyzed: %d/%d", txns_done, tid_count)
 
@@ -1085,15 +1091,13 @@ class HistoryFreePackUndo(PackUndo):
         WHERE object_refs_added.tid IS NULL
           OR object_refs_added.tid != object_state.tid
         """
-        self.runner.run_script_stmt(load_cursor, stmt)
+        self.runner.run_script_stmt(load_cursor, stmt) # TODO: Use a server-side cursor
         logger.debug(
             "pre_pack: Selected objects to examine (memory delta: %s)",
             byte_display(get_memory_usage() - mem_begin)
         )
-        # XXX: maybe this should be an OidSet (to save memory)?
-        # Or, using an array.array('Q') (on Python 3; on Python 2,
-        # array.array('L') if .itemsize == 8) preserves the order properties.
-        oids = [zoid for (zoid,) in load_cursor]
+
+        oids = OidList((row[0] for row in load_cursor))
         log_at = time.time() + self.fill_object_refs_commit_frequency
         self.on_filling_object_refs_added(oids=oids)
 
@@ -1103,29 +1107,43 @@ class HistoryFreePackUndo(PackUndo):
         logger.info(
             "pre_pack: analyzing references from %d object(s) (memory delta: %s)",
             oid_count, byte_display(get_memory_usage() - mem_begin))
-        while oids:
-            # XXX: This turns into O(n^2), at least for CPython lists.
-            # Each index operation allocates a new list, and copies
-            # into it (including INCREF). Even with the O(n^2) algorithm,
-            # array.array('Q') benchmarks ~5x faster for these two operations,
-            # probably because it's just memory movements, not loops that have to
-            # INCREF/DECREF.
+        while oids_done < oid_count:
+            # Previously, we iterated like this:
+            #
+            # while oids:
+            #    batch = oids[:batch_size]
+            #    oids =  oids[batch_size:]
+            #
+            # However, that turns into O(n^2) operations with a large
+            # overhead, especially on CPython. Each slice operation
+            # allocates a new list, and copies into it (including
+            # INCREF). Even with the O(n^2) algorithm,
+            # array.array('Q') benchmarks ~5x faster for these two
+            # operations, probably because it's just memory movements,
+            # not loops that have to INCREF/DECREF.
             #
             # A simple profile while this is running with 30 MM rows
-            # (taking 3GB of memory on CPython 2, which rapidly drops
-            # to ~1.2GB) shows at least 37% of the time spent in the C
-            # ``list_slice`` function and 31% in ``list_dealloc``.
+            # shows at least 37% of the time spent in the C
+            # ``list_slice`` function and 31% in ``list_dealloc``,
+            # averaging about 15,000 objects per minute.
             #
-            # Averaging about 15,000 objects per minute.
-            batch = oids[:self.fill_object_refs_batch_size]
-            oids = oids[self.fill_object_refs_batch_size:]
+            # Switching just to array.array and leaving the slicing, I
+            # was getting 44,000 objects per minute, but 99% time
+            # spent in memmove().
+            #
+            # Using manual indexing of arrays, CPU usage of less than
+            # 35%; for the first time, 35% of profile time is spent in
+            # talking to MySQL (over gigabit switch); clearly parallel
+            # pre-fetching would be useful.
+
+            batch = oids[oids_done:oids_done + self.fill_object_refs_batch_size]
+            oids_done += len(batch)
 
             refs_found = self._add_refs_for_oids(load_connection, store_connection,
                                                  batch, get_references)
             num_refs_found += len(refs_found)
             self.on_fill_object_ref_batch(oid_batch=batch, refs_found=refs_found)
 
-            oids_done += len(batch)
             now = time.time()
             if now >= log_at:
                 # Save the work done so far.
@@ -1134,6 +1152,7 @@ class HistoryFreePackUndo(PackUndo):
                 logger.info(
                     "pre_pack: objects analyzed: %d/%d (%d total references)",
                     oids_done, oid_count, num_refs_found)
+        # Those 30MM objects wound up with about 48,976,835 references.
         store_connection.commit()
         logger.info(
             "pre_pack: objects analyzed: %d/%d", oids_done, oid_count)
@@ -1144,7 +1163,6 @@ class HistoryFreePackUndo(PackUndo):
 
         Returns the number of references added.
         """
-        # XXX PY3: This could be tricky
         # TODO: Use the row batcher's SELECT FROM
         load_cursor = load_connection.cursor
         oid_list = ','.join(str(oid) for oid in oids)
@@ -1270,6 +1288,10 @@ class HistoryFreePackUndo(PackUndo):
         # have a reference to an older object that's not also referenced
         # by an object in the snapshot (without the app doing something seriously
         # wrong): plus, we didn't find references from that item anyway.
+        # Copying 30MM objects takes almost 10 minutes against mysql 8 running on an
+        # SSD, and heaven forgive you if you kill the transaction and roll back
+        # --- the undo info is insane. What if we CREATE AS SELECT a table?
+        # On PostgreSQL we could use unlogged tables.
         logger.info("pre_pack: filling the pack_object table")
         stmt = """
         %(TRUNCATE)s pack_object;
@@ -1391,6 +1413,9 @@ class HistoryFreePackUndo(PackUndo):
 
         # This section does not need to hold the commit lock, as it only
         # touches pack-specific tables. We already hold a pack lock for that.
+        # XXX: Shouldn't we keep this? Unless there's a huge amount of churn,
+        # older state info might be valid from previous packs. I guess we
+        # want to avoid backing these things up.
         stmt = """
         DELETE FROM object_refs_added
         WHERE zoid IN (

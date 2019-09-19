@@ -211,6 +211,7 @@ class HistoryFreeTestPack(TestPackBase):
         expect_oids = self._create_initial_state()
         seen_oids = []
         def inject_changes(oid_batch, refs_found): # pylint:disable=unused-argument
+            oid_batch = list(oid_batch)
             seen_oids.extend(oid_batch)
             self.assertEqual(1, len(oid_batch))
             if oid_batch == [self.OID_A]:
