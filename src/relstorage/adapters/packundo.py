@@ -54,6 +54,8 @@ class PackUndo(DatabaseHelpersMixin):
     locker = None
     options = None
 
+    cursor_arraysize = 10000
+
     def __init__(self, database_driver, connmanager, runner, locker, options):
         self.driver = database_driver
         self.connmanager = connmanager
@@ -152,7 +154,7 @@ class PackUndo(DatabaseHelpersMixin):
             ss_load_cursor.execute(stmt)
 
             while True:
-                rows = ss_load_cursor.fetchmany(10000)
+                rows = ss_load_cursor.fetchmany(self.cursor_arraysize)
                 if not rows:
                     break
                 marker.add_refs(rows)
@@ -187,7 +189,7 @@ class PackUndo(DatabaseHelpersMixin):
             """
             self.runner.run_script_stmt(ss_load_cursor, stmt)
             while True:
-                rows = ss_load_cursor.fetchmany(10000)
+                rows = ss_load_cursor.fetchmany(self.cursor_arraysize)
                 if not rows:
                     break
                 marker.mark(oid for (oid,) in rows)
@@ -501,6 +503,7 @@ class HistoryPreservingPackUndo(PackUndo):
     def fill_object_refs(self, load_connection, store_connection, get_references):
         """Update the object_refs table by analyzing new transactions."""
         with load_connection.server_side_cursor() as ss_load_cursor:
+            ss_load_cursor.itersize = ss_load_cursor.arraysize = self.cursor_arraysize
             stmt = """
             SELECT transaction.tid
             FROM transaction
@@ -1100,6 +1103,7 @@ class HistoryFreePackUndo(PackUndo):
         # of the database; we shouldn't run into locking issues with other
         # transactions.
         with load_connection.server_side_cursor() as ss_load_cursor:
+            ss_load_cursor.itersize = ss_load_cursor.arraysize = self.cursor_arraysize
             stmt = """
             SELECT zoid
             FROM pack_object
@@ -1123,6 +1127,19 @@ class HistoryFreePackUndo(PackUndo):
         oid_count = len(oids)
         oids_done = 0
         num_refs_found = 0
+        # Against 30 MM rows with MySQL on Python 2.7 with the
+        # server-side cursor on mysqlclient, the SELECT takes
+        # negligible time and memory; transforming into the
+        # array.array and pulling rows takes 5 minutes and a total of
+        # 231MB with a batch size of 1024; that's about the resident
+        # size of the process, too. Using a fetch size of 10000 didn't reduce
+        # the time substantially though curiously it did report just 165.9MB
+        # memory delta.
+        #
+        # Previously, using a list and a buffered cursor for the same setup,
+        # the SELECT takes 3.5 minutes and a memory delta of 2.5GB; transforming into
+        # the list takes a few more seconds and a final delta of 3GB. When the cursor
+        # is closed, the resident size of the process shrinks to around 1.2GB.
         logger.info(
             "pre_pack: analyzing references from %d object(s) (memory delta: %s)",
             oid_count, byte_display(get_memory_usage() - mem_begin))

@@ -98,6 +98,7 @@ class AbstractMySQLDriver(AbstractModuleDriver):
     # time_zone = X``).
 
     _server_side_cursor = None
+    _ignored_fetchall_on_set_exception = ()
 
     def _make_cursor(self, conn, server_side=False):
         if server_side:
@@ -111,7 +112,10 @@ class AbstractMySQLDriver(AbstractModuleDriver):
         cursor = self._make_cursor(conn, server_side=server_side)
         for stmt in self.CURSOR_INIT_STMTS:
             cursor.execute(stmt)
-            cursor.fetchall()
+            try:
+                cursor.fetchall()
+            except self._ignored_fetchall_on_set_exception:
+                pass
         return cursor
 
     def synchronize_cursor_for_rollback(self, cursor):

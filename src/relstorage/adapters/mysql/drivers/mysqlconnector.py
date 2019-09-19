@@ -56,7 +56,9 @@ class PyMySQLConnectorDriver(AbstractMySQLDriver):
         # conn.close() -> InternalError: Unread result found
         # By the time we get to a close(), it's too late to do anything about it.
         self.close_exceptions += (self.driver_module.InternalError,)
-
+        # Ignore "no result set to fetch from" when we do our init
+        # statements.
+        self._ignored_fetchall_on_set_exception = (self.driver_module.InterfaceError,)
         if self.Binary is str:
             self.Binary = bytearray
 
