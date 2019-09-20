@@ -55,7 +55,8 @@ from .._util import int64_to_8bytes
 from .._util import bytes8_to_int64
 from .._compat import OID_SET_TYPE
 
-from .transaction_iterator import TransactionIterator
+from .transaction_iterator import HistoryFreeTransactionIterator
+from .transaction_iterator import HistoryPreservingTransactionIterator
 
 from .copy import Copy
 from .history import History
@@ -259,11 +260,15 @@ class RelStorage(LegacyMethodsMixin,
             storer = BlobStorer(self.blobhelper, self._store_connection)
             copy_storage_methods(self, storer)
 
+    @property
+    def keep_history(self):
+        return self._options.keep_history
+
     def __repr__(self):
         return "<%s at %x keep_history=%s phase=%r blobhelper=%r cache=%r>" % (
             self.__class__.__name__,
             id(self),
-            self._options.keep_history,
+            self.keep_history,
             self._tpc_phase,
             self.blobhelper,
             self._cache
@@ -527,7 +532,11 @@ class RelStorage(LegacyMethodsMixin,
     def iterator(self, start=None, stop=None):
         # XXX: This is broken for purposes of copyTransactionsFrom() because
         # it can only be iterated over once. zodbconvert works around this.
-        return TransactionIterator(self._adapter, start, stop)
+        if self.keep_history:
+            return HistoryPreservingTransactionIterator(self._adapter, start, stop)
+        return HistoryFreeTransactionIterator(
+            self._adapter, self._load_connection.cursor, start, stop)
+
 
     def afterCompletion(self):
         # Note that this method exists mainly to deal with read-only
@@ -789,7 +798,7 @@ class RelStorage(LegacyMethodsMixin,
     def pack(self, t, referencesf, prepack_only=False, skip_prepack=False):
         pack = Pack(self._options, self._adapter, self.blobhelper, self._cache)
         pack.pack(t, referencesf, prepack_only, skip_prepack)
-        if not self._options.keep_history:
+        if not self.keep_history:
             # In a history free database, it's *possible*
             # that the database's last transaction ID could now have actually
             # gone backwards! I strongly suspect this only happens in fabricated
