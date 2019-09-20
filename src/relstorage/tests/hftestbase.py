@@ -313,6 +313,41 @@ class HistoryFreeRelStorageTests(GenericRelStorageTests, ZODBTestCase):
         conn.close()
         db.close()
 
+    def checkIteratorIsConsistent(self):
+        # History free iterators should be consistent
+        # until a sync() is done.
+        # https://github.com/zodb/relstorage/issues/344
+        root = Root()
+        self._dostoreNP(ZERO, data=dumps(root))
+
+        storage = self._storage
+        it = self._storage.iterator()
+        self.assertEqual(1, len(it))
+        it.close()
+
+        obj1 = self._newobj()
+        oid1 = obj1.getoid()
+        storage2 = self._storage.new_instance()
+        self._storage = storage2
+        self._dostoreNP(oid1, data=dumps(obj1))
+        self._storage = storage
+
+        it2 = storage2.iterator()
+        self.assertEqual(2, len(it2))
+        it2.close()
+
+        it = self._storage.iterator()
+        self.assertEqual(1, len(it))
+        it.close()
+
+        self._storage.sync()
+        it = self._storage.iterator()
+        self.assertEqual(2, len(it))
+        it.close()
+
+        storage2.close()
+
+
 
 class HistoryFreeToFileStorage(AbstractToFileStorage,
                                BasicRecoveryStorage,

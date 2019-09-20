@@ -31,21 +31,22 @@ from relstorage._compat import loads
 logger = __import__('logging').getLogger(__name__)
 
 
-class TransactionIterator(object):
-    """Iterate over the transactions in a RelStorage instance."""
+class _TransactionIterator(object):
+    """
+    Iterate over the transactions in a RelStorage instance.
+    """
 
     __slots__ = (
         '_adapter',
-        '_conn',
         '_cursor',
         '_closed',
         '_transactions',
         '_index',
     )
 
-    def __init__(self, adapter, start, stop):
+    def __init__(self, adapter, cursor, start, stop):
         self._adapter = adapter
-        self._conn, self._cursor = self._adapter.connmanager.open_for_load()
+        self._cursor = cursor
         self._closed = False
 
         if start is not None:
@@ -63,12 +64,9 @@ class TransactionIterator(object):
         self._index = 0
 
     def close(self):
-        if self._closed:
-            return
-        self._adapter.connmanager.close(self._conn, self._cursor)
         self._closed = True
-        self._conn = None
         self._cursor = None
+        self._transactions = ()
 
     def __del__(self):
         # belt-and-suspenders, effective on CPython
@@ -100,6 +98,91 @@ class TransactionIterator(object):
         return res
 
     __next__ = next
+
+
+class HistoryPreservingTransactionIterator(_TransactionIterator):
+    """
+    Opens a distinct load connection to read transactions.
+
+    Closes this connection when it is closed.
+    """
+    __slots__ = (
+        '_conn',
+    )
+
+    def __init__(self, adapter, start, stop):
+        self._conn, cursor = adapter.connmanager.open_for_load()
+        super(HistoryPreservingTransactionIterator, self).__init__(
+            adapter, cursor, start, stop)
+
+    def close(self):
+        try:
+            if self._conn is not None:
+                self._adapter.connmanager.close(self._conn, self._cursor)
+        finally:
+            self._conn = None
+            super(HistoryPreservingTransactionIterator, self).close()
+
+class HistoryFreeTransactionIterator(_TransactionIterator):
+    """
+    Uses the given load connection cursor. Does not close the
+    connection or cursor. This way multiple iterators can be
+    consistent with each other.
+
+    If we do not do this, then multiple iterators may be inconsistent
+    and see different subsets of data.
+
+    Suppose an iterator is opened from a storage, and slightly later a
+    second iterator is also opened. The two iterators may produce very
+    different data, and attempting to compare them or treat the later
+    one as a strict superset of the former will break in a
+    history-free storage.
+
+    For both history-free and history-preserving databases, the second
+    iterator can include transactions not in the first one.
+
+    In a history-preserving database, absent a pack, that's fine: the
+    second iterator will be a strict superset of the first one.
+
+    In a history-free database, however, when an object is changed, it is
+    effectively *deleted* from its old transaction; its new state is
+    only visible as a record in its new transaction.
+
+    That's also fine: the second iterator will include that new state
+    (eventually).
+
+    Where it's not fine is when the `stop` parameter is used. **HF
+    RelStorage is only fully consistent as-of the most recent
+    committed transaction visible to any given connection.**
+
+    Suppose the first iterator is opened and returns transactions 1,
+    2, 3, 4, 5, where 5 is now the highest visible transaction at the
+    time it is opened. In transaction 5, the state of object A
+    references object C.
+
+    Open a second iterator, which lets the view of the database move
+    forward. This time, there's a new transaction, 6: the state of A
+    has changed, but still contains a reference to C. If you pass
+    `stop=5`, though, you won't see *any* state for A because it's
+    only found in transaction 6. If A was the only reference to object
+    C, object C now appears to be garbage.
+
+    This comes up in ``zc.zodbdgc``, which does exactly that sequence by
+    default, or if you pass ``--days <non-zero>``. If you pass ``--days
+    0``, it only uses one iterator, but it still passes an arbitrary
+    ``stop`` parameter, making that unsafe as well (it tries to use the
+    current time as the value to stop at, in order to view all
+    committed transactions consistently as-of this date, but that's
+    insufficient and there could be committed transactions more recent
+    than that; consider clock differences among machines).
+
+    This causes data loss.
+
+    To avoid this, pass in the storage's load cursor consistently. Only if
+    the storage has been `sync()` or committed a transaction would the
+    two differ.
+    """
+    __slots__ = ()
 
 
 class RelStorageTransactionRecord(TransactionRecord):

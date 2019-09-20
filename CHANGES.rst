@@ -46,6 +46,11 @@
 - Use server-side cursors during packing when available, further
   reducing the amount of memory required. See :issue:`165`.
 
+- Make history-free database iterators from the same storage use a
+  consistent view of the database (until a transaction is committed
+  using the storage or ``sync()`` is called). This prevents data loss
+  in some cases. See :issue:`344`.
+
 3.0a10 (2019-09-04)
 ===================
 

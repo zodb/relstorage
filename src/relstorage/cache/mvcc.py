@@ -826,6 +826,9 @@ class MVCCDatabaseCoordinator(DetachableMVCCDatabaseCoordinator):
         """
         # This is called for every transaction. It needs to be fast, and mindful
         # of what it logs.
+        #
+        # TODO: In production, we've seen this function sometimes take
+        # up to 1.9s. Profile and figure out where that is and fix it.
 
         # MVCC can easily develop "gaps", where one lone reader is at
         # the back and all the other readers are up front somewhere,
