@@ -46,6 +46,24 @@ class MySQLDialect(DefaultDialect):
     def compiler_class(self):
         return MySQLCompiler
 
+class IterateFetchmanyMixin(object):
+    """
+    Mixin to cause us to fetch in batches using fetchmany().
+    """
+    sleep = None
+    def __iter__(self):
+        fetch = self.fetchmany
+        sleep = self.sleep
+        batch = fetch()
+        while batch:
+            for row in batch:
+                yield row
+            if sleep is not None:
+                sleep() # pylint:disable=not-callable
+            batch = fetch()
+
+    next = __next__ = None
+
 class AbstractMySQLDriver(AbstractModuleDriver):
 
     # Don't try to decode pickle states as UTF-8 (or whatever the
@@ -79,11 +97,25 @@ class AbstractMySQLDriver(AbstractModuleDriver):
     # automatically handle both these statements (``SET names binary,
     # time_zone = X``).
 
-    def cursor(self, conn):
-        cursor = AbstractModuleDriver.cursor(self, conn)
+    _server_side_cursor = None
+    _ignored_fetchall_on_set_exception = ()
+
+    def _make_cursor(self, conn, server_side=False):
+        if server_side:
+            cursor = conn.cursor(self._server_side_cursor)
+            cursor.arraysize = self.cursor_arraysize
+        else:
+            cursor = super(AbstractMySQLDriver, self).cursor(conn, server_side=False)
+        return cursor
+
+    def cursor(self, conn, server_side=False):
+        cursor = self._make_cursor(conn, server_side=server_side)
         for stmt in self.CURSOR_INIT_STMTS:
             cursor.execute(stmt)
-            cursor.fetchall()
+            try:
+                cursor.fetchall()
+            except self._ignored_fetchall_on_set_exception:
+                pass
         return cursor
 
     def synchronize_cursor_for_rollback(self, cursor):

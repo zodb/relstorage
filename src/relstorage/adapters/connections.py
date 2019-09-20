@@ -235,6 +235,15 @@ class AbstractManagedConnection(object):
         finally:
             self.connmanager.rollback_and_close(conn, cursor)
 
+    @contextlib.contextmanager
+    def server_side_cursor(self):
+        conn, _ = self.open_if_needed()
+        ss_cursor = self.connmanager.driver.cursor(conn, server_side=True)
+        try:
+            yield ss_cursor
+        finally:
+            ss_cursor.close()
+
     def __repr__(self):
         return "<%s at 0x%x active=%s, conn=%r cur=%r>" % (
             self.__class__.__name__,

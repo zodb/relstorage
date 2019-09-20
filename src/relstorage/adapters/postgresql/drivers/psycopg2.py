@@ -89,6 +89,15 @@ class Psycopg2Driver(AbstractPostgreSQLDriver):
             conn.commit()
         return conn
 
+    def cursor(self, conn, server_side=False):
+        if server_side:
+            cursor = conn.cursor(name=str(id(conn)))
+            cursor.arraysize = self.cursor_arraysize
+            cursor.itersize = self.cursor_arraysize
+        else:
+            cursor = super(Psycopg2Driver, self).cursor(conn)
+        return cursor
+
     def debug_connection(self, conn, *extra): # pragma: no cover
         print(conn,
               'ts', conn.info.transaction_status,

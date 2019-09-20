@@ -29,6 +29,7 @@ from relstorage._util import Lazy
 from relstorage._util import parse_boolean
 
 from . import AbstractMySQLDriver
+from . import IterateFetchmanyMixin
 
 __all__ = [
     'MySQLdbDriver',
@@ -48,8 +49,15 @@ class MySQLdbDriver(AbstractMySQLDriver):
         AbstractModuleDriver.synchronize_cursor_for_rollback(self, cursor)
 
     @Lazy
-    def _strict_cursor(self):
+    def _server_side_cursor(self):
         from MySQLdb.cursors import SSCursor # pylint:disable=no-name-in-module,import-error
+        class Cursor(IterateFetchmanyMixin, SSCursor):
+            pass
+        return Cursor
+
+    @Lazy
+    def _strict_cursor(self):
+        SSCursor = self._server_side_cursor
         # Using MySQLdb.cursors.SSCursor can get us some legitimate
         # errors (ProgrammingError: (2014, "Commands out of sync; you
         # can't run this command now")), although it adds some overhead
@@ -65,7 +73,7 @@ class MySQLdbDriver(AbstractMySQLDriver):
             from relstorage._util import NeedsFetchallBeforeCloseCursor
 
             def cursor_factory(conn):
-                cur = SSCursor(conn)
+                cur = SSCursor(conn) # pylint:disable=too-many-function-args
                 cur = NeedsFetchallBeforeCloseCursor(cur)
                 return cur
         else:
@@ -140,3 +148,7 @@ class GeventMySQLdbDriver(MySQLdbDriver):
     def _get_connection_class(cls):
         from ._mysqldb_gevent import Connection
         return Connection
+
+    @Lazy
+    def _server_side_cursor(self):
+        return self._get_connection_class().default_cursor

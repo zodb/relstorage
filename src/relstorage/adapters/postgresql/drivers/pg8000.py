@@ -215,10 +215,13 @@ class PG8000Driver(AbstractPostgreSQLDriver):
 
         self._connect = Connection
 
-    def connect(self, dsn): # pylint:disable=arguments-differ
+    def connect(self, *args, **kwargs): # pylint:disable=arguments-differ
         # Parse the DSN into parts to pass as keywords.
         # We don't do this psycopg2 because a real DSN supports more options than
         # we do and we don't want to limit it.
+        assert len(args) == 1
+        assert not kwargs
+        dsn = args[0]
         kwds = {}
         parts = dsn.split(' ')
         for part in parts:

@@ -20,6 +20,7 @@ from __future__ import print_function
 
 from zope.interface import implementer
 
+from relstorage._util import Lazy
 from relstorage.adapters.interfaces import IDBDriver
 
 from . import AbstractMySQLDriver
@@ -84,3 +85,12 @@ class PyMySQLDriver(AbstractMySQLDriver):
         # to avoid warnings about invalid character sequences.
         kwargs['binary_prefix'] = True
         return AbstractMySQLDriver.connect(self, *args, **kwargs)
+
+    @Lazy
+    def _server_side_cursor(self):
+        # This appears like it might only read one row at a time, which is probably not
+        # great. But the usual solution, falling back to fetchmany(),
+        # doesn't do any good: fetchmany is implemented in terms of fetchone().
+        from pymysql.cursors import SSCursor # pylint:disable=no-name-in-module,import-error
+
+        return SSCursor

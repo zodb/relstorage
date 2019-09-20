@@ -23,5 +23,5 @@ from ...tests import test_adapter
 
 class TestAdapter(test_adapter.AdapterTestBase):
 
-    def _makeOne(self):
-        return Adapter()
+    def _makeOne(self, options):
+        return Adapter(options=options)

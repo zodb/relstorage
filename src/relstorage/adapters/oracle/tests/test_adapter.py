@@ -30,7 +30,8 @@ class Adapter(BaseAdapter):
 
     def _select_driver(self, options=None):
         d = MockDriver()
-        d.connect = None
+        d.connect = lambda *args, **kwargs: None
+        d.cursor = lambda conn, server_side=False: None
         d.NUMBER = None
         d.BLOB = None
         d.BINARY = None
@@ -45,5 +46,5 @@ class Adapter(BaseAdapter):
 
 class TestAdapter(test_adapter.AdapterTestBase):
 
-    def _makeOne(self):
-        return Adapter()
+    def _makeOne(self, options):
+        return Adapter(options)

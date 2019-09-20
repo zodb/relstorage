@@ -94,6 +94,8 @@ class _Availability(object):
     """
     Has a boolean value telling whether the driver or database is available,
     and a string explaining why it is/is not.
+
+    Note that this includes checking whether we can connect to the database.
     """
 
     def __init__(self, factory, drivers, max_priority, use_adapter, db_name):
@@ -139,7 +141,6 @@ class _Availability(object):
         "Does nothing"
 
     __check_db_access_cb.transaction_read_only = True
-
 
     def __check_db_access(self, use_adapter, db_name):
         # We need to get an adapter to get a connmanager to try to connect.
@@ -193,9 +194,9 @@ class AbstractTestSuiteBuilder(object):
         raise NotImplementedError
 
     def test_suite(self):
-
         from .reltestbase import AbstractIDBDriverTest
         from .reltestbase import AbstractIDBOptionsTest
+
         suite = unittest.TestSuite()
         suite.addTest(unittest.makeSuite(type(
             self.__name__ + 'DBOptionsTest',
@@ -222,7 +223,7 @@ class AbstractTestSuiteBuilder(object):
                             (AbstractIDBDriverTest,),
                             {'driver': available.driver}
                         ),
-                        available)))
+                        available.driver is not None)))
 
                 # We put the various drivers into a zope.testrunner layer
                 # for ease of selection by name, e.g.,
@@ -306,7 +307,10 @@ class AbstractTestSuiteBuilder(object):
         classes = []
 
 
-        for base in (HistoryFreeTestPack, HistoryPreservingTestPack):
+        for base in (
+                HistoryFreeTestPack,
+                HistoryPreservingTestPack,
+        ):
             classes.append(self.__make_test_class(
                 base,
                 (),
@@ -344,6 +348,7 @@ class AbstractTestSuiteBuilder(object):
             (base,),
             {'driver_name': driver_available.driver_name}
         )
+
         return self.__skipping_if_not_available(klass, driver_available)
 
     def _add_driver_to_suite(self, suite, layer_prefix, driver_available):

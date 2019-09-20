@@ -168,7 +168,7 @@ class AbstractModuleDriver(ABC):
     def set_autocommit(self, conn, value):
         conn.autocommit(value)
 
-    def cursor(self, conn):
+    def cursor(self, conn, server_side=False): # pylint:disable=unused-argument
         cur = conn.cursor()
         cur.arraysize = self.cursor_arraysize
         return cur
