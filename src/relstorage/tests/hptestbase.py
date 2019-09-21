@@ -40,6 +40,11 @@ from relstorage.tests.reltestbase import GenericRelStorageTests
 from relstorage.tests.reltestbase import AbstractFromFileStorage
 from relstorage.tests.reltestbase import AbstractToFileStorage
 
+# Prior to https://github.com/zopefoundation/ZODB/pull/281, ZODB's
+# tests had some previous transaction ids as native strings, not
+# bytes. Correct that.
+RevisionStorage.ZERO = b'\0' * 8
+TransactionalUndoStorage.ZERO = b'\0' * 8
 
 class HistoryPreservingRelStorageTests(GenericRelStorageTests,
                                        TransactionalUndoStorage.TransactionalUndoStorage,
@@ -56,6 +61,25 @@ class HistoryPreservingRelStorageTests(GenericRelStorageTests,
         # pylint:disable=arguments-differ
         # 4.2.3 and above add this. it's an exotic feature according to jimfulton.
         raise unittest.SkipTest("conflict-resolving undo not supported")
+
+    def checkIterationIntraTransaction(self):
+        # XXX: This test overrides the broken version from
+        # IteratorStorage; prior to
+        # https://github.com/zopefoundation/ZODB/pull/281 it passed a
+        # native str, not bytes, as the previous tid.
+        oid = self._storage.new_oid()
+        t = TransactionMetaData()
+        data = zodb_pickle(MinPO(0))
+        try:
+            self._storage.tpc_begin(t)
+            self._storage.store(oid, RevisionStorage.ZERO, data, '', t)
+            self._storage.tpc_vote(t)
+            # Don't do tpc_finish yet
+            it = self._storage.iterator()
+            for x in it:
+                self.assertIsNotNone(x)
+        finally:
+            self._storage.tpc_finish(t)
 
     def checkTransactionalUndoIterator(self):
         # this test overrides the broken version in TransactionalUndoStorage.

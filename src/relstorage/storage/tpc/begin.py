@@ -22,6 +22,7 @@ from ZODB.POSException import ReadConflictError
 from ZODB.POSException import StorageTransactionError
 from ZODB.utils import p64 as int64_to_8bytes
 from ZODB.utils import u64 as bytes8_to_int64
+from ZODB.utils import z64 as NO_PREV_TID
 
 
 from relstorage._compat import base64_decodebytes
@@ -117,16 +118,13 @@ class AbstractBegin(AbstractTPCState):
 
         cache = self.cache
         oid_int = bytes8_to_int64(oid)
-        if previous_tid:
+        if previous_tid and previous_tid != NO_PREV_TID:
             # previous_tid is the tid of the state that the
-            # object was loaded from.
-
-            # XXX PY3: ZODB.tests.IteratorStorage passes a str (non-bytes) value for oid
-            prev_tid_int = bytes8_to_int64(
-                previous_tid
-                if isinstance(previous_tid, bytes)
-                else previous_tid.encode('ascii')
-            )
+            # object was loaded from. cPersistent objects return a brand
+            # new bytes object each time even if it's all zeros; Python implementation
+            # returns a private constant. It would be nice if they all returned a public
+            # interned constant so we could compare with `is`.
+            prev_tid_int = bytes8_to_int64(previous_tid)
         else:
             prev_tid_int = 0
 
