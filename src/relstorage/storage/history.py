@@ -61,26 +61,26 @@ class History(object):
         cursor = self.load_connection.cursor
         oid_int = bytes8_to_int64(oid)
         try:
-            rows = self.adapter.dbiter.iter_object_history(
+            history = self.adapter.dbiter.iter_object_history(
                 cursor, oid_int)
         except KeyError:
             raise POSKeyError(oid)
 
         res = []
-        for tid_int, username, description, extension, length in rows:
-            tid = int64_to_8bytes(tid_int)
-            if extension:
-                d = loads(extension)
+        for entry in history:
+            tid = int64_to_8bytes(entry.tid_int)
+            if entry.extension:
+                d = loads(entry.extension)
             else:
                 d = {}
             d.update({
                 "time": TimeStamp(tid).timeTime(),
-                "user_name": username or b'',
-                "description": description or b'',
+                "user_name": entry.username or b'',
+                "description": entry.description or b'',
                 "tid": tid,
                 "version": '',
-                "size": length,
-                "rs_tid_int": tid_int,
+                "size": entry.pickle_size,
+                "rs_tid_int": entry.tid_int,
                 "rs_oid_int": oid_int,
             })
             if filter is None or filter(d):
@@ -123,11 +123,11 @@ class UndoableHistory(History):
         adapter = self.adapter
         conn, cursor = adapter.connmanager.open()
         try:
-            rows = adapter.dbiter.iter_transactions(cursor)
+            tx_iter = adapter.dbiter.iter_transactions(cursor)
             i = 0
             res = []
-            for tid_int, user, desc, ext in rows:
-                tid = int64_to_8bytes(tid_int)
+            for tx in tx_iter:
+                tid = int64_to_8bytes(tx.tid_int)
                 # Note that user and desc are schizophrenic. The transaction
                 # interface specifies that they are a Python str, *probably*
                 # meaning bytes. But code in the wild and the ZODB test suite
@@ -138,11 +138,11 @@ class UndoableHistory(History):
                 d = {
                     'id': base64_encodebytes(tid)[:-1],  # pylint:disable=deprecated-method
                     'time': TimeStamp(tid).timeTime(),
-                    'user_name':  user or b'',
-                    'description': desc or b'',
+                    'user_name':  tx.username or b'',
+                    'description': tx.description or b'',
                 }
-                if ext:
-                    d.update(loads(ext))
+                if tx.extension:
+                    d.update(loads(tx.extension))
 
                 if filter is None or filter(d):
                     if i >= first:

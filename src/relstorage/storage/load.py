@@ -50,15 +50,15 @@ def _make_pke_data(cursor, adapter, oid_int, reason):
 
         tids = []
         try:
-            rows = adapter.dbiter.iter_object_history(cursor, oid_int)
+            history = adapter.dbiter.iter_object_history(cursor, oid_int)
         except KeyError as e:
             # The object has no history, at least from the point of view
             # of the current database load connection.
             tids = str(e)
             del e
         else:
-            for row in rows:
-                tids.append(row[0])
+            for entry in history:
+                tids.append(entry.tid_int)
                 if len(tids) >= 10:
                     break
         extra['recent_tids'] = tids

@@ -423,8 +423,12 @@ class RelStorage(LegacyMethodsMixin,
             if hasattr(wrapper, 'base') and hasattr(wrapper, 'copied_methods'):
                 type(wrapper).new_instance = _zlibstorage_new_instance
                 type(wrapper).pack = _zlibstorage_pack
-                # NOTE that zlibstorage has a custom copyTransactionsFrom that hides
-                # our own implementation.
+                from zc.zlibstorage import _Iterator
+                _Iterator.__len__ = _zlibstorage_Iterator_len
+                # zc.zlibstorage has a custom copyTransactionsFrom that hides
+                # our own implementation. It just uses ZODb.blob.copyTransactionsFromTo.
+                # Use our implementation.
+                wrapper.copyTransactionsFrom = self.copyTransactionsFrom
             else:
                 wrapper.new_instance = lambda s: type(wrapper)(self.new_instance())
 
@@ -535,7 +539,7 @@ class RelStorage(LegacyMethodsMixin,
         if self.keep_history:
             return HistoryPreservingTransactionIterator(self._adapter, start, stop)
         return HistoryFreeTransactionIterator(
-            self._adapter, self._load_connection.cursor, start, stop)
+            self._adapter, self._load_connection, start, stop)
 
 
     def afterCompletion(self):
@@ -835,3 +839,6 @@ def _zlibstorage_pack(self, pack_time, referencesf, *args, **kwargs):
     def refs(state, oids=None):
         return referencesf(untransform(state), oids)
     return self.base.pack(pack_time, refs, *args, **kwargs)
+
+def _zlibstorage_Iterator_len(self):
+    return len(self._base_it)
