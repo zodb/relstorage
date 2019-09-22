@@ -51,6 +51,16 @@
   using the storage or ``sync()`` is called). This prevents data loss
   in some cases. See :issue:`344`.
 
+- Make copying transactions *from* a history-free RelStorage (e.g., with
+  ``zodbconvert``) require substantially less memory (75% less).
+
+- Make copying transactions *to* a RelStorage clean up temporary blob
+  files.
+
+- Make ``zodbconvert`` log progress at intervals instead of for every
+  transaction. Logging every transaction could add significant overhead
+  unless stdout was redirected to a file.
+
 3.0a10 (2019-09-04)
 ===================
 

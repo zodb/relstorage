@@ -27,6 +27,7 @@ from ZODB.utils import p64 as int64_to_8bytes
 from ZODB.utils import u64 as bytes8_to_int64
 
 from relstorage._compat import loads
+from relstorage.adapters.connections import LoadConnection
 
 logger = __import__('logging').getLogger(__name__)
 
@@ -44,9 +45,9 @@ class _TransactionIterator(object):
         '_index',
     )
 
-    def __init__(self, adapter, cursor, start, stop):
+    def __init__(self, adapter, load_connection, start, stop):
         self._adapter = adapter
-        self._cursor = cursor
+        self._cursor = load_connection.cursor
         self._closed = False
 
         if start is not None:
@@ -59,8 +60,9 @@ class _TransactionIterator(object):
             stop_int = None
 
         # _transactions: [(tid, username, description, extension, packed)]
-        self._transactions = list(adapter.dbiter.iter_transactions_range(
-            self._cursor, start_int, stop_int))
+        with load_connection.server_side_cursor() as cursor:
+            self._transactions = adapter.dbiter.iter_transactions_range(
+                cursor, start_int, stop_int)
         self._index = 0
 
     def close(self):
@@ -93,7 +95,14 @@ class _TransactionIterator(object):
         if self._closed:
             raise IOError("TransactionIterator already closed")
         params = self._transactions[self._index]
-        res = RelStorageTransactionRecord(self, *params)
+        res = RelStorageTransactionRecord(
+            self,
+            params.tid_int,
+            params.username,
+            params.description,
+            params.extension,
+            params.packed
+        )
         self._index += 1
         return res
 
@@ -111,14 +120,14 @@ class HistoryPreservingTransactionIterator(_TransactionIterator):
     )
 
     def __init__(self, adapter, start, stop):
-        self._conn, cursor = adapter.connmanager.open_for_load()
+        self._conn = load_connection = LoadConnection(adapter.connmanager)
         super(HistoryPreservingTransactionIterator, self).__init__(
-            adapter, cursor, start, stop)
+            adapter, load_connection, start, stop)
 
     def close(self):
         try:
             if self._conn is not None:
-                self._adapter.connmanager.close(self._conn, self._cursor)
+                self._conn.drop()
         finally:
             self._conn = None
             super(HistoryPreservingTransactionIterator, self).close()

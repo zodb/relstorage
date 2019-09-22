@@ -551,26 +551,34 @@ class IDatabaseIterator(Interface):
         """
 
     def iter_transactions(cursor):
-        """Iterate over the transaction log, newest first.
+        """
+        Iterate over the transaction log, newest first.
 
-        Skips packed transactions.
-        Yields (tid, username, description, extension) for each transaction.
+        Skips packed transactions. Yields (tid, username, description,
+        extension) for each transaction.
         """
 
     def iter_transactions_range(cursor, start=None, stop=None):
-        """Iterate over the transactions in the given range, oldest first.
+        """
+        Return an indexable object over the transactions in the given range, oldest
+        first.
 
         Includes packed transactions.
-        Yields (tid, username, description, extension, packed)
-        for each transaction.
+
+        Has an object with the properties ``tid_int``, ``username``
+        (bytes) ``description`` (bytes) ``extension`` (bytes) and
+        ``packed`` (boolean) for each transaction.
         """
 
     def iter_object_history(cursor, oid):
-        """Iterate over an object's history.
+        """
+        Iterate over an object's history.
 
-        Raises KeyError if the object does not exist.
-        Yields (tid, username, description, extension, state_size)
-        for each modification.
+        Yields an object with the properties ``tid_int``, ``username``
+        (bytes) ``description`` (bytes) ``extension`` (bytes) and
+        ``pickle_size`` (int) for each transaction.
+
+        :raises KeyError: if the object does not exist
         """
 
 

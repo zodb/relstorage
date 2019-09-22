@@ -130,12 +130,12 @@ else:
 
     OidSet_discard = set.discard
 
-# Lists of OIDs. These could be simple list() objects, or we can treat
-# them as numbers and store them in array.array objects, if we have an
-# unsigned 64-bit element type. array.array, just like the C version
-# of BTrees, uses less memory or CPython, but has a cost converting
-# back and forth between objects and native values. What's the cost?
-# Let's measure.
+# Lists of OIDs or TIDs. These could be simple list() objects, or we
+# can treat them as numbers and store them in array.array objects, if
+# we have an unsigned 64-bit element type. array.array, just like the
+# C version of BTrees, uses less memory or CPython, but has a cost
+# converting back and forth between objects and native values. What's
+# the cost? Let's measure.
 #
 # Test: list(xrange(30000000)) vs array.array('L', xrange(30000000))
 #  on Python 2, with minor modifications (range and 'Q') on Python 3.
@@ -211,7 +211,7 @@ if _64bit_array and not PYPY:
     OidList = _64bit_array
 else:
     OidList = list
-
+TidList = OidList
 MAX_TID = BTrees.family64.maxint
 
 def iteroiditems(d):

@@ -22,6 +22,7 @@ class Context(object):
 
 class Driver(object):
     dialect = OracleDialect()
+    binary_column_as_state_type = binary_column_as_bytes = lambda b: b
 
 class TestOracleDialect(TestCase):
 
@@ -170,7 +171,7 @@ class TestDatabaseIteratorQueries(TestCase):
 
         self.assertEqual(
             stmt,
-            'SELECT tid, username, description, extension '
+            'SELECT tid, username, description, extension, 0 '
             'FROM transaction '
             "WHERE ((packed = 'N' AND tid <> :literal_0)) "
             'ORDER BY tid DESC'

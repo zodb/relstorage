@@ -14,9 +14,13 @@
 from __future__ import absolute_import
 from __future__ import print_function
 
+from collections import namedtuple
+
 from zope.interface import implementer
 
 from relstorage._compat import MAX_TID
+from relstorage._compat import TidList
+from relstorage._util import Lazy
 
 from .interfaces import IDatabaseIterator
 from .schema import Schema
@@ -33,6 +37,14 @@ class DatabaseIterator(object):
         """
         self.driver = database_driver
 
+    @Lazy
+    def _as_state(self):
+        return self.driver.binary_column_as_state_type
+
+    @Lazy
+    def _as_bytes(self):
+        return self.driver.binary_column_as_bytes
+
     _iter_objects_query = Schema.object_state.select(
         it.c.zoid,
         it.c.state
@@ -48,9 +60,20 @@ class DatabaseIterator(object):
         Yields ``(oid, state)`` for each object in the transaction.
         """
         self._iter_objects_query.execute(cursor, {'tid': tid})
+        as_state = self._as_state
         for oid, state in cursor:
-            state = self.driver.binary_column_as_state_type(state)
+            state = as_state(state) # pylint:disable=too-many-function-args
             yield oid, state
+
+class _HistoryPreservingTransactionRecord(namedtuple(
+        '_HistoryPreservingTransactionRecord',
+        ('tid_int', 'username', 'description', 'extension', 'packed')
+)):
+    __slots__ = ()
+
+    @property
+    def pickle_size(self):
+        return self.packed
 
 
 @implementer(IDatabaseIterator)
@@ -62,8 +85,7 @@ class HistoryPreservingDatabaseIterator(DatabaseIterator):
         """
         Iterate over a list of transactions returned from the database.
 
-        Each row begins with ``(tid, username, description, extension)``
-        and may have other columns.
+        Each row is ``(tid, username, description, extension, X)``
         """
         # Iterating the cursor itself in a generator is not safe if
         # the cursor doesn't actually buffer all the rows *anyway*. If
@@ -71,19 +93,28 @@ class HistoryPreservingDatabaseIterator(DatabaseIterator):
         # rows, a subsequent query or close operation can lead to
         # things like MySQL Connector/Python raising
         # InternalError(unread results)
-        rows = cursor.fetchall()
-        for row in rows:
-            tid, username, description, ext = row[:4]
-            # Although the transaction interface for username and description are
-            # defined as strings, this layer works with bytes. PY3.
-            username = self.driver.binary_column_as_bytes(username)
-            description = self.driver.binary_column_as_bytes(description)
-            ext = self.driver.binary_column_as_bytes(ext)
+        # Because we have it all in memory anyway, there's not much point in
+        # making this a generator.
 
-            yield (tid, username, description, ext) + tuple(row[4:])
+        # Although the transaction interface for username and description are
+        # defined as strings, this layer works with bytes. The ZODB layer
+        # does the conversion.
+        as_bytes = self._as_bytes
+        # pylint:disable=too-many-function-args
+        return [
+            _HistoryPreservingTransactionRecord(
+                tid,
+                as_bytes(username),
+                as_bytes(description),
+                as_bytes(ext),
+                packed
+            )
+            for (tid, username, description, ext, packed)
+            in cursor
+        ]
 
     _iter_transactions_query = Schema.transaction.select(
-        it.c.tid, it.c.username, it.c.description, it.c.extension
+        it.c.tid, it.c.username, it.c.description, it.c.extension, 0
     ).where(
         it.c.packed == False # pylint:disable=singleton-comparison
     ).and_(
@@ -116,11 +147,8 @@ class HistoryPreservingDatabaseIterator(DatabaseIterator):
     )
 
     def iter_transactions_range(self, cursor, start=None, stop=None):
-        """Iterate over the transactions in the given range, oldest first.
-
-        Includes packed transactions.
-        Yields (tid, username, description, extension, packed)
-        for each transaction.
+        """
+        See `IDatabaseIterator`.
         """
         params = {
             'min_tid': start if start else 0,
@@ -149,11 +177,9 @@ class HistoryPreservingDatabaseIterator(DatabaseIterator):
     )
 
     def iter_object_history(self, cursor, oid):
-        """Iterate over an object's history.
-
+        """
+        See `IDatabaseIterator`
         Raises KeyError if the object does not exist.
-        Yields (tid, username, description, extension, pickle_size)
-        for each modification.
         """
         params = {'oid': oid}
         self._object_exists_query.execute(cursor, params)
@@ -163,6 +189,42 @@ class HistoryPreservingDatabaseIterator(DatabaseIterator):
         self._object_history_query.execute(cursor, params)
         return self._transaction_iterator(cursor)
 
+class _HistoryFreeTransactionRecord(object):
+    __slots__ = ('tid_int',)
+
+    username = b''
+    description = b''
+    extension = b''
+    packed = True
+
+    def __init__(self, tid):
+        self.tid_int = tid
+
+
+class _HistoryFreeObjectHistoryRecord(_HistoryFreeTransactionRecord):
+    __slots__ = ('pickle_size',)
+
+    def __init__(self, tid, size):
+        _HistoryFreeTransactionRecord.__init__(self, tid)
+        self.pickle_size = size
+
+
+class _HistoryFreeTransactionRange(object):
+    # By storing just the int, and materializing the records on demand, we
+    # save substantial amounts of memory. For example, 18MM records on PyPy
+    # went from about 3.5GB to about 0.5GB
+    __slots__ = (
+        'tid_ints',
+    )
+
+    def __init__(self, tid_ints):
+        self.tid_ints = tid_ints
+
+    def __len__(self):
+        return len(self.tid_ints)
+
+    def __getitem__(self, ix):
+        return _HistoryFreeTransactionRecord(self.tid_ints[ix])
 
 @implementer(IDatabaseIterator)
 class HistoryFreeDatabaseIterator(DatabaseIterator):
@@ -170,15 +232,11 @@ class HistoryFreeDatabaseIterator(DatabaseIterator):
     keep_history = False
 
     def iter_transactions(self, cursor):
-        """Iterate over the transaction log, newest first.
-
-        Skips packed transactions.
-        Yields ``(tid, username, description, extension)`` for each transaction.
-
+        """
         This always returns an empty iterable.
         """
         # pylint:disable=unused-argument
-        return []
+        return ()
 
     _iter_transactions_range_query = Schema.object_state.select(
         it.c.tid,
@@ -191,18 +249,15 @@ class HistoryFreeDatabaseIterator(DatabaseIterator):
     ).distinct()
 
     def iter_transactions_range(self, cursor, start=None, stop=None):
-        """Iterate over the transactions in the given range, oldest first.
-
-        Includes packed transactions.
-        Yields ``(tid, username, description, extension, packed)``
-        for each transaction.
+        """
+        See `IDatabaseIterator`.
         """
         params = {
             'min_tid': start if start else 0,
             'max_tid': stop if stop else MAX_TID
         }
         self._iter_transactions_range_query.execute(cursor, params)
-        return ((tid, b'', b'', b'', True) for (tid,) in cursor)
+        return _HistoryFreeTransactionRange(TidList((tid for (tid,) in cursor)))
 
     _iter_object_history_query = Schema.object_state.select(
         it.c.tid, it.c.state_size
@@ -212,15 +267,14 @@ class HistoryFreeDatabaseIterator(DatabaseIterator):
 
     def iter_object_history(self, cursor, oid):
         """
-        Iterate over an object's history.
+        See `IDatabaseIterator`
 
-        Raises KeyError if the object does not exist.
-        Yields a single row,
-        ``(tid, username, description, extension, pickle_size)``
+        Yields a single row.
         """
         self._iter_object_history_query.execute(cursor, {'oid': oid})
         rows = cursor.fetchall()
         if not rows:
             raise KeyError(oid)
         assert len(rows) == 1
-        return [(tid, '', '', b'', size) for (tid, size) in rows]
+        tid, size = rows[0]
+        return [_HistoryFreeObjectHistoryRecord(tid, size)]
