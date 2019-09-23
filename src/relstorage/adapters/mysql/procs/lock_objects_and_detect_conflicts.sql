@@ -120,6 +120,7 @@ label_proc:BEGIN
   FROM {CURRENT_OBJECT} o FORCE INDEX (PRIMARY)
   INNER JOIN temp_store t FORCE INDEX (PRIMARY)
       ON o.zoid = t.zoid
+  WHERE t.prev_tid <> 0
   ORDER BY t.zoid
   FOR UPDATE;
 

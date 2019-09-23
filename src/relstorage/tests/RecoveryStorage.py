@@ -22,8 +22,8 @@ import time
 
 import transaction
 import ZODB.POSException
-from transaction import Transaction
 from ZODB import DB
+from ZODB.Connection import TransactionMetaData as Transaction
 from ZODB.blob import is_blob_record
 from ZODB.serialize import referencesf
 from ZODB.tests.StorageTestBase import MinPO
@@ -232,7 +232,7 @@ class BasicRecoveryStorage(IteratorDeepCompare):
         data1 = zodb_pickle(MinPO(11))
         data2 = zodb_pickle(MinPO(12))
         # Begin the transaction
-        t = transaction.Transaction()
+        t = Transaction()
         try:
             self._storage.tpc_begin(t)
             # Store an object
