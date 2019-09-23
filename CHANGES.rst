@@ -61,6 +61,8 @@
   transaction. Logging every transaction could add significant overhead
   unless stdout was redirected to a file.
 
+- Avoid attempting to lock objects being created. See :issue:`329`.
+
 3.0a10 (2019-09-04)
 ===================
 

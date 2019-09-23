@@ -49,14 +49,36 @@ BEGIN
   -- Unlike MySQL, we can simply do the SELECT (with PERFORM) for its
   -- side effects to lock the rows.
   -- This one will block.
+
+  -- A note on the query: PostgreSQL will typcially choose a
+  -- sequential scan on the temp_store table and do a nested loop join
+  -- against the object_state_pkey index culminating in a sort after
+  -- the join. This is the same whether we write a WHERE IN (SELECT)
+  -- or a INNER JOIN. (This is without a WHERE prev_tid <> 0 clause.)
+
+  -- That changes substantially if we ANALYZE the temp table;
+  -- depending on the data, it might do an MERGE join with an index
+  -- scan on temp_store_pkey (lots of data) or it might do a
+  -- sequential scan and sort in memory before doing a MERGE join
+  -- (little data). (Again without the WHERE prev_tid clause.)
+
+  -- However, ANALYZE takes time, often more time than it takes to actually
+  -- do the nested loop join.
+
+  -- If we add a WHERE prev_tid clause, even if we ANALYZE, it will
+  -- choose a sequential scan on temp_store with a FILTER. Given that most
+  -- transactions contain relatively few objects, and that it would do a
+  -- sequential scan /anyway/, this is fine, and worth it to avoid probing
+  -- the main index for new objects.
+  -- TODO: Is it worth doing partitioning and putting prev_tid = 0 in their own
+  -- partition?
+
   PERFORM {CURRENT_OBJECT}.zoid
   FROM {CURRENT_OBJECT}
-  WHERE {CURRENT_OBJECT}.zoid IN (
-      SELECT temp_store.zoid
-      FROM temp_store
-  )
+  INNER JOIN temp_store USING (zoid)
+  WHERE temp_store.prev_tid <> 0
   ORDER BY {CURRENT_OBJECT}.zoid
-  FOR UPDATE;
+  FOR UPDATE OF {CURRENT_OBJECT};
 
   RETURN QUERY
   SELECT cur.zoid, cur.tid,
