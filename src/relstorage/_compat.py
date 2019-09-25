@@ -223,7 +223,6 @@ def iteroiditems(d):
 
 if PY3:
     string_types = (str,)
-    unicode = str
     number_types = (int, float)
     from io import StringIO as NStringIO
     from perfmetrics import metricmethod
@@ -231,7 +230,6 @@ if PY3:
     from functools import wraps
 else:
     string_types = (basestring,) # pylint:disable=undefined-variable
-    unicode = unicode
     number_types = (int, long, float) # pylint:disable=undefined-variable
     from io import BytesIO as NStringIO
     # On Python 2, functools.update_wrapper doesn't set the '__wrapped__'
@@ -283,11 +281,11 @@ if PY3:
     from base64 import decodebytes as base64_decodebytes
     casefold = str.casefold
     from traceback import clear_frames
-    clear_frames = clear_frames
+    clear_frames = clear_frames # pylint:disable=self-assigning-variable
     from functools import update_wrapper
 else:
-    xrange = xrange
-    intern = intern
+    xrange = xrange # pylint:disable=self-assigning-variable
+    intern = intern # pylint:disable=self-assigning-variable
     from base64 import encodestring as base64_encodebytes
     from base64 import decodestring as base64_decodebytes
     casefold = str.lower

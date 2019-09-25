@@ -15,11 +15,11 @@ from relstorage.options import Options
 from relstorage.adapters.sql import DefaultDialect
 
 try:
-    from unittest import mock
+    from unittest import mock as _mock
 except ImportError: # Python 2
-    import mock
+    import mock as _mock
 
-mock = mock
+mock = _mock
 
 @contextlib.contextmanager
 def _fakeSubTest(*_args, **_kwargs):

@@ -26,24 +26,7 @@ import os
 import os.path
 import sqlite3
 
-from relstorage._compat import PY3
 from relstorage._util import log_timed
-
-if PY3:
-    # On Py3, use the built-in pickle, so that we can get
-    # protocol 4 when available. It is *much* faster at writing out
-    # individual large objects such as the cache dict (about 3-4x faster)
-    from pickle import Unpickler
-    from pickle import Pickler
-else:
-    # On Py2, zodbpickle gives us protocol 3, but we don't
-    # use its special binary type
-    from relstorage._compat import Unpickler
-    from relstorage._compat import Pickler
-
-# Export
-Unpickler = Unpickler
-Pickler = Pickler
 
 SQ3_SUPPORTS_WINDOW = sqlite3.sqlite_version_info >= (3, 25) # 2018-09-15
 SQ3_SUPPORTS_UPSERT = sqlite3.sqlite_version_info >= (3, 24) # 2018-06-04
