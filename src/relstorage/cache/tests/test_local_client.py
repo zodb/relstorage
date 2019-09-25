@@ -301,7 +301,7 @@ class LocalClientOIDTests(AbstractStateCacheTests):
 
     def test_set_and_get_object_too_large(self):
         c = self._makeOne(cache_local_compression='none')
-        c[self.key] = (b'abcdefgh' * 10000, 1)
+        c[self.key] = (b'abcdefgh' * 10000, self.key_tid)
         self.assertEqual(c[self.key], None)
 
     def test_set_with_zero_space(self):

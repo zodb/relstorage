@@ -827,9 +827,6 @@ class MVCCDatabaseCoordinator(DetachableMVCCDatabaseCoordinator):
         # This is called for every transaction. It needs to be fast, and mindful
         # of what it logs.
         #
-        # TODO: In production, we've seen this function sometimes take
-        # up to 1.9s. Profile and figure out where that is and fix it.
-
         # MVCC can easily develop "gaps", where one lone reader is at
         # the back and all the other readers are up front somewhere,
         # with that chain of maps in between doing no one any good. We
@@ -852,7 +849,8 @@ class MVCCDatabaseCoordinator(DetachableMVCCDatabaseCoordinator):
             object_index.minimum_highest_visible_tid,
             required_tid,
         )
-        while True:
+        oids_tids_to_del = OidTMap()
+        while 1:
             if object_index.depth == 1:
                 # Nothing left to vacuum
                 break
@@ -880,6 +878,7 @@ class MVCCDatabaseCoordinator(DetachableMVCCDatabaseCoordinator):
                 "Examining %d old OIDs to see if they've been replaced",
                 len(in_both)
             )
+
             for oid in in_both:
                 old_tid = obsolete_bucket[oid]
                 newer_tid = object_index[oid]
@@ -893,12 +892,11 @@ class MVCCDatabaseCoordinator(DetachableMVCCDatabaseCoordinator):
                     # data, because the object changed in the future.
                     # This particular transaction chunk won't be complete, but
                     # it's inaccessible.
-                    # TODO: A bulk call for this.
                     # This is where we should hook in the 'invalidation' tracing.
                     del obsolete_bucket[oid]
+                    oids_tids_to_del[oid] = old_tid # These will just keep going up
                     # If we have a shared memcache, we can't be sure everyone
                     # else is done with this key, so we just leave it alone.
-                    del local_client[(oid, old_tid)]
 
             # Now at this point, the obsolete_bucket contains data that we know is
             # either not present in a future map, or is present with exactly the
@@ -908,9 +906,12 @@ class MVCCDatabaseCoordinator(DetachableMVCCDatabaseCoordinator):
             # useful to have in this last bucket and we can throw it away. Note that
             # we do *not* remove the index entries; they're needed to keep
             # the CST in sync for newer transactions that might still be open.
-            self.log(TRACE, "Vacuum: Freezing %s old OIDs", len(obsolete_bucket))
             if obsolete_bucket:
+                self.log(TRACE, "Vacuum: Freezing %s old OIDs", len(obsolete_bucket))
                 local_client.freeze(obsolete_bucket)
+
+        if oids_tids_to_del:
+            local_client.delitems(oids_tids_to_del)
 
 
     def flush_all(self):

@@ -572,31 +572,52 @@ class LocalClient(object):
         # A state of 'None' happens for undone transactions.
         oid, key_tid = oid_tid
         state_bytes, actual_tid = state_bytes_tid
+
         assert isinstance(state_bytes, bytes) or state_bytes is None, type(state_bytes)
-        compress = self._compress
-        cvalue = compress(state_bytes) if compress else state_bytes # pylint:disable=not-callable
-        del state_bytes
-
-        if cvalue and len(cvalue) >= self._value_limit:
-            # This value is too big, so don't cache it.
-            return
-
         # Really key_tid should be > 0; we allow >= for tests.
         assert key_tid == actual_tid and key_tid >= 0
-        value = _SingleValue(cvalue, actual_tid)
+        self.__set_many([
+            (oid, key_tid, state_bytes)
+        ])
 
-        with self._lock:
-            existing = self._peek(oid)
-            if existing:
-                existing += value
-                value = existing
+    def __set_many(self, oid_tid_state_iter):
+        if not self.limit:
+            # don't bother
+            return
 
-            self._cache[oid] = value # possibly evicts
-            if actual_tid > self._min_allowed_writeback.get(oid, MAX_TID):
-                self._min_allowed_writeback[oid] = actual_tid
+        compress = self._compress
+        peek = self._peek
+        value_limit = self._value_limit
+        min_allowed = self._min_allowed_writeback
+        lock = self._lock
+        store = self._cache.__setitem__
+        sets = 0
 
-            self._sets += 1
+        for oid, tid, state_bytes in oid_tid_state_iter:
+            # A state of 'None' happens for undone transactions.
+            state_bytes = compress(state_bytes) if compress else state_bytes # pylint:disable=not-callable
 
+            if state_bytes and len(state_bytes) >= value_limit:
+                # This value is too big, so don't cache it.
+                continue
+
+            value = _SingleValue(state_bytes, tid)
+
+            with lock:
+                existing = peek(oid)
+                if existing:
+                    existing += value
+                    value = existing
+
+                store(oid, value) # possibly evicts
+
+                if tid > min_allowed.get(oid, MAX_TID):
+                    min_allowed[oid] = tid
+
+                sets += 1
+
+        with lock:
+            self._sets += sets
             # Do we need to move this up above the eviction choices?
             # Inline some of the logic about whether to age or not; avoiding the
             # call helps speed
@@ -604,31 +625,41 @@ class LocalClient(object):
                 self._age()
 
     def set_all_for_tid(self, tid_int, state_oid_iter):
-        for state, oid_int, _ in state_oid_iter:
-            self[(oid_int, tid_int)] = (state, tid_int)
+        self.__set_many((
+            (oid_int, tid_int, state)
+            for (state, oid_int, _)
+            in state_oid_iter
+        ))
 
     def __delitem__(self, oid_tid):
-        oid, expected_tid = oid_tid
+        self.delitems({oid_tid[0]: oid_tid[1]})
+
+    def delitems(self, oids_tids):
+        """
+        For each OID/TID pair in the items, remove all cached values
+        for OID that are older than TID.
+        """
+        peek = self._peek
+        replace = self._cache.replace_or_remove_smaller_value
+        min_allowed = self._min_allowed_writeback
         with self._lock:
-            entry = self._peek(oid)
-            if entry is not None:
-                entry -= expected_tid
-                if not entry:
-                    del self._cache[oid]
-                else:
-                    # XXX: Messing with LRU. We just want to update the
-                    # value and size calculation.
-                    self._cache[oid] = entry
-            if expected_tid > self._min_allowed_writeback.get(oid, MAX_TID):
-                self._min_allowed_writeback[oid] = expected_tid
+            for oid, expected_tid in iteroiditems(oids_tids):
+                entry = peek(oid)
+                if entry is not None:
+                    entry -= expected_tid
+                    replace(oid, entry)
+                if expected_tid > min_allowed.get(oid, MAX_TID):
+                    min_allowed[oid] = expected_tid
 
     def invalidate_all(self, oids):
+        min_allowed = self._min_allowed_writeback
+        peek = self._peek
+        delitem = self._cache.__delitem__
         with self._lock:
-            min_allowed = self._min_allowed_writeback
             for oid in oids:
-                entry = self._peek(oid)
-                if entry:
-                    del self._cache[oid]
+                entry = peek(oid)
+                if entry is not None:
+                    delitem(oid)
                     tid = entry.max_tid
                     if tid > min_allowed.get(oid, MAX_TID):
                         min_allowed[oid] = tid
@@ -636,20 +667,16 @@ class LocalClient(object):
     def freeze(self, oids_tids):
         # The idea is to *move* the data, or make it available,
         # *without* copying it.
+        replace = self._cache.replace_or_remove_smaller_value
+        peek = self._peek
         with self._lock:
             # This shuffles them around the LRU order. We probably don't actually
             # want to do that.
-            store = self._cache.__setitem__
-            delitem = self._cache.__delitem__
-            peek = self._peek
-            for oid, tid in oids_tids.items():
-                orig = entry = peek(oid)
+            for oid, tid in iteroiditems(oids_tids):
+                entry = peek(oid)
                 if entry is not None:
                     entry <<= tid
-                    if entry is None:
-                        delitem(oid)
-                    elif entry is not orig:
-                        store(oid, entry)
+                    replace(oid, entry)
 
     def close(self):
         pass

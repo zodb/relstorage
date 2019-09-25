@@ -63,6 +63,8 @@
 
 - Avoid attempting to lock objects being created. See :issue:`329`.
 
+- Make cache vacuuming faster.
+
 3.0a10 (2019-09-04)
 ===================
 

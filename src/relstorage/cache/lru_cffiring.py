@@ -178,18 +178,15 @@ class CFFICache(GenerationalCacheBase):
 
     # Cache-specific operations.
 
-    def get_from_key_or_backup_key(self, pref_key, backup_key):
-        entry = self.get(pref_key)
-        if entry is None:
-            entry = self.get(backup_key)
-            if entry is not None:
-                # Swap the key (which we assume has the same weight).
-                entry.key = pref_key
-                del self.data[backup_key]
-                self.data[pref_key] = entry
-        if entry is not None:
-            self.on_hit(entry)
-            return entry.value
+    def replace_or_remove_smaller_value(self, key, value):
+        # We're shrinking a value, or at least not making it bigger.
+        assert key in self.data
+        if value is None:
+            del self[key]
+            return
+        # values can be mutable lists
+        entry = self.get(key)
+        self.generations[entry.cffi_entry.r_parent].change_value(entry, value)
 
     def peek(self, key):
         entry = self.get(key)
@@ -434,11 +431,15 @@ class Generation(object):
         # Only for testing
         _ring_move_to_head(self.ring_home, entry.cffi_ring_node)
 
-    @_mutates_free_list
-    def update_MRU(self, entry, value):
+    def change_value(self, entry, value):
         old_size = entry.weight
         new_size = self.key_weight(entry.key) + self.value_weight(value)
         entry.set_value(value, new_size)
+        return old_size, new_size
+
+    @_mutates_free_list
+    def update_MRU(self, entry, value):
+        old_size, new_size = self.change_value(entry, value)
 
         if old_size == new_size:
             # Treat it as a simple hit; nothing could get evicted.
