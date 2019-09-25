@@ -2,7 +2,7 @@
  Changes
 =========
 
-3.0a11 (unreleased)
+3.0a11 (2019-09-25)
 ===================
 
 - Make ``poll_invalidations`` handle other retryable internal
