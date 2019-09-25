@@ -200,29 +200,6 @@ class GenericLRUCacheTests(TestCase):
         self.assertIsNone(cache[(1, 0)])
         self.assertEqual(list(cache), [])
 
-    def test_get_backup_not_found(self):
-        c = self._makeOne(100)
-        r = c.get_from_key_or_backup_key((1, 0), None)
-        self.assertIsNone(r)
-
-    def test_get_backup_at_pref(self):
-        c = self._makeOne(100)
-        c[(1, 0)] = (b'1', 0)
-        c[(1, 1)] = (b'2', 0)
-
-        result = c.get_from_key_or_backup_key((1, 0), None)
-        self.assertEqual(result, (b'1', 0))
-
-    def test_get_backup_at_backup(self):
-        c = self._makeOne(100)
-        c[(1, 1)] = (b'2', 0)
-
-        result = c.get_from_key_or_backup_key((1, 0), (1, 1))
-        self.assertEqual(result, (b'2', 0))
-        self.assertEqual(len(c), 1)
-        self.assertIn((1, 0), c)
-        self.assertNotIn((1, 1), c)
-
     def test_entries(self):
         cache = self._makeOne(20)
         cache[(1, 0)] = (b'abc', 0)

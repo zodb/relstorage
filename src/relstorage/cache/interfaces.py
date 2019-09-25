@@ -298,20 +298,13 @@ class ILRUCache(Interface):
     # Cache-specific operations.
     ###
 
-    def get_from_key_or_backup_key(pref_key, backup_key):
+    def replace_or_remove_smaller_value(key, value):
         """
-        Get a value stored at either *pref_key* or, failing that,
-        *backup_key*.
+        Given a key that's already present, either removes it
+        if *value* is none, or changes its stored value to be *value*.
 
-        *backup_key* may be None if there is no second key.
-
-        If a value is found at *backup_key*, then it is
-        moved to be stored at *pref_key*, while retaining its
-        frequency information.
-
-        Counts as  a hit on whichever key matches.
-
-        This is used to implement ``IStateCache.__call__``.
+        Does this without counting as a hit or otherwise changing the MRU
+        status of key.
         """
 
     def peek(key):
