@@ -38,6 +38,9 @@ class AbstractPostgreSQLDriver(AbstractModuleDriver):
     # "SELECT 1; COMMIT;"
     supports_multiple_statement_execute = True
 
+    # Can we use the COPY command (copy_export)?
+    supports_copy = True
+
     def connect_with_isolation(self, dsn,
                                isolation=None,
                                read_only=False,

@@ -22,12 +22,15 @@ from __future__ import print_function
 from zope.interface import implementer
 
 from relstorage._compat import PY3
-from ...interfaces import IDBDriver
-from . import AbstractPostgreSQLDriver
 
+from ...interfaces import IDBDriver
+
+from . import AbstractPostgreSQLDriver
+from ._lobject import LobConnectionMixin
 
 __all__ = [
     'Psycopg2Driver',
+    'GeventPsycopg2Driver',
 ]
 
 
@@ -63,12 +66,15 @@ class Psycopg2Driver(AbstractPostgreSQLDriver):
         self.TS_NOT_NEEDROLLBACK = psycopg2.extensions.TRANSACTION_STATUS_IDLE
 
     def _create_connection(self, mod, *extra_slots):
-        class Psycopg2Connection(mod.extensions.connection):
-            # The replica attribute holds the name of the replica this
-            # connection is bound to.
-            __slots__ = ('replica',) + extra_slots
+        if getattr(mod, 'RSPsycopg2Connection', self) is self:
+            class Psycopg2Connection(mod.extensions.connection):
+                # The replica attribute holds the name of the replica this
+                # connection is bound to.
+                __slots__ = ('replica',) + extra_slots
 
-        return Psycopg2Connection
+            mod.RSPsycopg2Connection = Psycopg2Connection
+
+        return mod.RSPsycopg2Connection
 
     def connect_with_isolation(self, dsn,
                                isolation=None,
@@ -147,3 +153,72 @@ class Psycopg2Driver(AbstractPostgreSQLDriver):
         # Sadly we can't do anything except commit. The .status
         # variable is untouchable
         self.commit(conn)
+
+
+class GeventPsycopg2Driver(Psycopg2Driver):
+    __name__ = 'gevent ' + Psycopg2Driver.__name__
+
+    _GEVENT_CAPABLE = True
+    _GEVENT_NEEDS_SOCKET_PATCH = False
+
+    supports_copy = False
+
+    def _create_connection(self, mod, *extra_slots):
+        if getattr(mod, 'RSGeventPsycopg2Connection', self) is self:
+            Base = super(GeventPsycopg2Driver, self)._create_connection(mod, *extra_slots)
+
+            class RSGeventPsycopg2Connection(LobConnectionMixin, Base):
+                RSDriverBinary = self.Binary
+
+            mod.RSGeventPsycopg2Connection = RSGeventPsycopg2Connection
+
+        return mod.RSGeventPsycopg2Connection
+
+
+    def get_driver_module(self):
+        # Make sure we can use gevent; if we can't the ImportError
+        # will prevent this driver from being used.
+        __import__('gevent')
+
+        mod = super(GeventPsycopg2Driver, self).get_driver_module()
+        from psycopg2 import extensions # pylint:disable=no-name-in-module
+
+        if extensions.get_wait_callback() is None: # pragma: no cover
+            raise ImportError("No wait callback installed")
+        return mod
+
+
+
+class _GeventPsycopg2WaitCallback(object):
+
+    def __init__(self):
+        from gevent.socket import wait_read
+        from gevent.socket import wait_write
+        self.wait_read = wait_read
+        self.wait_write = wait_write
+        # pylint:disable=import-error,no-name-in-module
+        from psycopg2.extensions import POLL_OK
+        from psycopg2.extensions import POLL_WRITE
+        from psycopg2.extensions import POLL_READ
+        self.poll_ok = POLL_OK
+        self.poll_write = POLL_WRITE
+        self.poll_read = POLL_READ
+
+    def __call__(self, conn):
+        while 1:
+            state = conn.poll()
+            if state == self.poll_ok:
+                return
+            if state == self.poll_read:
+                self.wait_read(conn.fileno())
+            else:
+                self.wait_write(conn.fileno())
+
+def _gevent_did_patch(_event):
+    try:
+        from psycopg2.extensions import set_wait_callback
+    except ImportError:
+
+        pass
+    else:
+        set_wait_callback(_GeventPsycopg2WaitCallback())

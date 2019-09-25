@@ -88,11 +88,15 @@ bold** are the recommended adapter installed with the extra.
    |          | 2. MySQL Connector  | 2.  pg8000          |              |
    +----------+---------------------+---------------------+--------------+
 
+gevent
+------
 
 mysqlclient can be used with gevent by explicitly choosing a
-gevent-aware driver. PyMySQL, MySQL Connector/Python (without its C
-extension), and pg8000 are compatible (cooperative) with gevent
-when the system is monkey-patched.
+gevent-aware driver; so can psycopg2 if a wait callback (such as
+``psycogreen``) is installed; RelStorage will install one
+automatically if the system is monkey-patched. PyMySQL, MySQL
+Connector/Python (without its C extension), and pg8000 are compatible
+(cooperative) with gevent when the system is monkey-patched.
 
 For additional details and warnings, see the "driver" section for each database in
 :doc:`db-specific-options`.
