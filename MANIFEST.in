@@ -15,4 +15,4 @@ recursive-include docs *.py *.rst *.png Makefile
 recursive-exclude docs relstorage.*.rst _build
 
 recursive-include repltest *.cfg *.conf *.in *.patch *.sql
-recursive-include scripts *.sh make-manylinux
+recursive-include scripts *.sh make-manylinux *.py
