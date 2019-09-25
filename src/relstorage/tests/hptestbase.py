@@ -102,6 +102,7 @@ class HistoryPreservingRelStorageTests(GenericRelStorageTests,
             s.tpc_vote(t)
             s.tpc_finish(t)
 
+        # pylint:disable=unnecessary-comprehension
         orig = [(tid, oid, s.getTid(oid)) for tid, oid in orig]
 
         i = 0

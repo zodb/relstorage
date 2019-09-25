@@ -32,6 +32,7 @@
 #   do Py2/Py3 stuff is to put it here. Sadly this means that we might get better but not realize it.
 # chained-comparison: It wants you to rewrite `x > 2 and x < 3` using something like `2 < x < 3`,
 #   which I don't like, I find that less readable.
+# import-outside-toplevel: New in pylint 2.4. We have a large number of deferred imports.
 disable=
     invalid-name,
     missing-docstring,
@@ -51,7 +52,8 @@ disable=
     inconsistent-return-statements,
     useless-object-inheritance,
     chained-comparison,
-    too-many-ancestors
+    too-many-ancestors,
+    import-outside-toplevel
 #   undefined-all-variable
 
 
