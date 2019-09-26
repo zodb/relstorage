@@ -28,7 +28,9 @@ PostgreSQL Adapter Options
 ==========================
 
 RelStorage 3.0 requires PostgreSQL 9.6 or above. PostgreSQL 12,
-currently in development, is not supported.
+currently in development, is **not** supported and attempting to use
+it is likely to result in errors locking objects and database
+corruption.
 
 .. tip::
 
@@ -48,7 +50,8 @@ The PostgreSQL adapter accepts:
 
 driver
     All of these drivers use the name of the corresponding PyPI
-    package. The possible options are:
+    package. All drivers support uploading objects using PostgreSQL's
+    fast binary COPY protocol (except where noted). The possible options are:
 
     psycopg2
       A C-based driver that requires the PostgreSQL development
@@ -57,6 +60,16 @@ driver
       ``psycopg2-binary`` package to be able to use this driver
       without `needing a C compiler
       <http://initd.org/psycopg/docs/install.html#binary-packages>`_.
+
+    gevent psycopg2
+      The same as ``psycopg2``, but made to be gevent compatible
+      through the use of a wait callback. If the system is
+      monkey-patched by gevent, RelStorage will automatically install
+      a wait callback (which is global to all connections created by
+      psycopg2). Otherwise, you must install a compatible wait
+      callback (perhaps using `psycogreen
+      <https://pypi.org/project/psycogreen/>`__). This driver forfeits
+      use of the COPY protocol and use of the C-accelerated BLOBs.
 
     psycopg2cffi
       A C-based driver that requires the PostgreSQL development

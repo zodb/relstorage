@@ -30,89 +30,12 @@ from ...sql import Compiler
 
 from . import AbstractPostgreSQLDriver
 from . import PostgreSQLDialect
+from ._lobject import LobConnectionMixin
+
 
 __all__ = [
     'PG8000Driver',
 ]
-
-# Just enough lobject functionality for everything to work. This is
-# not threadsafe or useful outside of relstorage, it implements
-# exactly our requirements.
-
-class _WriteBlob(object):
-    closed = False
-
-    def __init__(self, conn, binary):
-        self._binary = binary
-        self._cursor = conn.cursor()
-        self._offset = 0
-        try:
-            self._cursor.execute("SELECT lo_creat(-1)")
-            row = self._cursor.fetchone()
-            self.oid = row[0]
-        except:
-            self._cursor.close()
-            raise
-
-    def close(self):
-        self._cursor.close()
-        self.closed = True
-
-    def write(self, data):
-        self._cursor.execute("SELECT lo_put(%(oid)s, %(off)s, %(data)s)",
-                             {'oid': self.oid, 'off': self._offset, 'data': self._binary(data)})
-        self._offset += len(data)
-        return len(data)
-
-class _UploadBlob(object):
-    closed = False
-    fetch_size = 1024 * 1024 * 9
-
-    def __init__(self, conn, new_file, binary):
-        blob = _WriteBlob(conn, binary)
-        self.oid = blob.oid
-        try:
-            with open(new_file, 'rb') as f:
-                while 1:
-                    data = f.read(self.fetch_size)
-                    if not data:
-                        break
-                    blob.write(data)
-        finally:
-            blob.close()
-
-    def close(self):
-        self.closed = True
-
-class _ReadBlob(object):
-    closed = False
-    fetch_size = 1024 * 1024 * 9
-
-    def __init__(self, conn, oid):
-        self._cursor = conn.cursor()
-        self.oid = oid
-        self.offset = 0
-
-    def export(self, filename):
-        with open(filename, 'wb') as f:
-            while 1:
-                data = self.read(self.fetch_size)
-                if not data:
-                    break
-                f.write(data)
-        self.close()
-
-    def read(self, size):
-        self._cursor.execute("SELECT lo_get(%(oid)s, %(off)s, %(cnt)s)",
-                             {'oid': self.oid, 'off': self.offset, 'cnt': size})
-        row = self._cursor.fetchone()
-        data = row[0]
-        self.offset += len(data)
-        return data
-
-    def close(self):
-        self._cursor.close()
-        self.closed = True
 
 
 class _tuple_deque(deque):
@@ -163,57 +86,52 @@ class PG8000Driver(AbstractPostgreSQLDriver):
         self.illegal_operation_exceptions = ()
         Binary = self.Binary
 
-        class Cursor(self.driver_module.Cursor):
-            def __init__(self, conn):
-                super(Cursor, self).__init__(conn)
-                # pylint:disable=access-member-before-definition
-                assert isinstance(self._cached_rows, deque)
-                # Make sure rows are tuples, not lists.
-                # BTrees don't like lists.
-                self._cached_rows = _tuple_deque()
+        if getattr(self.driver_module, 'RSConnection', self) is self:
+            class Cursor(self.driver_module.Cursor):
+                def __init__(self, conn):
+                    super(Cursor, self).__init__(conn)
+                    # pylint:disable=access-member-before-definition
+                    assert isinstance(self._cached_rows, deque)
+                    # Make sure rows are tuples, not lists.
+                    # BTrees don't like lists.
+                    self._cached_rows = _tuple_deque()
 
-            @property
-            def connection(self):
-                # silence the warning it wants to generate:
-                # "UserWarning: DB-API extension cursor.connection used"
-                return self._c
+                @property
+                def connection(self):
+                    # silence the warning it wants to generate:
+                    # "UserWarning: DB-API extension cursor.connection used"
+                    return self._c
 
-            def copy_expert(self, sql, stream):
-                return self.execute(sql, stream=stream)
+                def copy_expert(self, sql, stream):
+                    return self.execute(sql, stream=stream)
 
-        class Connection(self.driver_module.Connection):
-            readonly = False
+            class Connection(LobConnectionMixin,
+                             self.driver_module.Connection):
+                readonly = False
+                RSDriverBinary = staticmethod(Binary)
 
-            def __init__(self,
-                         user, host='localhost',
-                         unix_sock=None,
-                         port=5432, database=None,
-                         password=None, ssl=None,
-                         timeout=None, application_name=None,
-                         max_prepared_statements=1000,
-                         tcp_keepalive=True):
-                # pylint:disable=useless-super-delegation
-                # We have to do this because the super class requires
-                # all these arguments and doesn't have defaults
-                super(Connection, self).__init__(
-                    user, host, unix_sock,
-                    port, database, password, ssl, timeout, application_name,
-                    max_prepared_statements, tcp_keepalive)
+                def __init__(self,
+                             user, host='localhost',
+                             unix_sock=None,
+                             port=5432, database=None,
+                             password=None, ssl=None,
+                             timeout=None, application_name=None,
+                             max_prepared_statements=1000,
+                             tcp_keepalive=True):
+                    # pylint:disable=useless-super-delegation
+                    # We have to do this because the super class requires
+                    # all these arguments and doesn't have defaults
+                    super(Connection, self).__init__(
+                        user, host, unix_sock,
+                        port, database, password, ssl, timeout, application_name,
+                        max_prepared_statements, tcp_keepalive)
 
-            def cursor(self):
-                return Cursor(self)
+                def cursor(self):
+                    return Cursor(self)
 
-            def lobject(self, oid=0, mode='', new_oid=0, new_file=None):
-                if oid == 0 and new_oid == 0 and mode == 'wb':
-                    if new_file:
-                        # Upload the whole file right now.
-                        return _UploadBlob(self, new_file, Binary)
-                    return _WriteBlob(self, Binary)
-                if oid != 0 and mode == 'rb':
-                    return _ReadBlob(self, oid)
-                raise AssertionError("Unsupported params", dict(locals()))
+            self.driver_module.RSConnection = Connection
 
-        self._connect = Connection
+        self._connect = self.driver_module.RSConnection
 
     def connect(self, *args, **kwargs): # pylint:disable=arguments-differ
         # Parse the DSN into parts to pass as keywords.

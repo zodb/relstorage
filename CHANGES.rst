@@ -5,7 +5,8 @@
 3.0a12 (unreleased)
 ===================
 
-- Nothing changed yet.
+- Add the ``gevent psycopg2`` driver to allow using the fast psycopg2
+  driver with gevent.
 
 
 3.0a11 (2019-09-25)

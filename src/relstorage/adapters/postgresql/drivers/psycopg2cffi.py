@@ -44,19 +44,22 @@ class Psycopg2cffiDriver(Psycopg2Driver):
         # or we can directly make the same low-level call that is missing;
         # we choose the later.
 
-        class Cursor(mod.extensions.cursor):
+        if getattr(mod, 'RSPsycopg2cffiConnection', self) is self:
+            class Cursor(mod.extensions.cursor):
 
-            def copy_expert(self, *args, **kwargs):
-                self.connection._begin_transaction()
-                return super(Cursor, self).copy_expert(*args, **kwargs)
+                def copy_expert(self, *args, **kwargs):
+                    self.connection._begin_transaction()
+                    return super(Cursor, self).copy_expert(*args, **kwargs)
 
-        class Connection(super(Psycopg2cffiDriver, self)._create_connection(mod, 'readonly')):
-            def __init__(self, dsn, **kwargs):
-                super(Connection, self).__init__(dsn, **kwargs)
-                self.cursor_factory = Cursor
-                self.readonly = None
+            class Connection(super(Psycopg2cffiDriver, self)._create_connection(mod, 'readonly')):
+                def __init__(self, dsn, **kwargs):
+                    super(Connection, self).__init__(dsn, **kwargs)
+                    self.cursor_factory = Cursor
+                    self.readonly = None
 
-        return Connection
+            mod.RSPsycopg2cffiConnection = Connection
+
+        return mod.RSPsycopg2cffiConnection
 
     # as of psycopg2cffi 2.8.1 connection has no '.info' attribute.
 

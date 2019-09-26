@@ -101,6 +101,10 @@ class PostgreSQLObjectMover(AbstractObjectMover):
                 cursor.execute(stmt)
             cursor.connection.commit()
 
+            if not self.driver.supports_copy:
+                self.replace_temps = super(PostgreSQLObjectMover, self).replace_temps
+                self.store_temps = super(PostgreSQLObjectMover, self).store_temps
+
         AbstractObjectMover.on_store_opened(self, cursor, restart)
 
 
@@ -240,7 +244,7 @@ class PostgreSQLObjectMover(AbstractObjectMover):
             cursor.copy_expert(buf.COPY_COMMAND, buf)
 
     @metricmethod_sampled
-    def _store_temps(self, cursor, state_oid_tid_iter):
+    def store_temps(self, cursor, state_oid_tid_iter):
         self._do_store_temps(cursor, state_oid_tid_iter, 'temp_store')
 
     @metricmethod_sampled
