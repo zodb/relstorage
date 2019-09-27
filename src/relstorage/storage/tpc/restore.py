@@ -100,6 +100,7 @@ class Restore(object):
                              _b=batcher):
             return _f(state, _c, _b)
         begin_state.tpc_vote_factory = tpc_vote_factory
+        begin_state.temp_storage = _TempStorageWrapper(begin_state.temp_storage)
 
     def restore(self, oid, this_tid, data, prev_txn, transaction):
         # Similar to store() (see comments in FileStorage.restore for
@@ -118,10 +119,10 @@ class Restore(object):
         oid_int = bytes8_to_int64(oid)
         tid_int = bytes8_to_int64(this_tid)
 
-        state.max_stored_oid = max(state.max_stored_oid, oid_int)
         # Save the `data`.  Note that `data` can be None.
         # Note also that this doesn't go through the cache.
-
+        state.temp_storage.max_restored_oid = max(state.temp_storage.max_restored_oid,
+                                                  oid_int)
         # TODO: Make it go through the cache, or at least the same
         # sort of queing thing, so that we can do a bulk COPY.
         # The way we do it now complicates restoreBlob() and it complicates voting.
@@ -141,6 +142,29 @@ class Restore(object):
         cursor = state.store_connection.cursor
         state.blobhelper.restoreBlob(cursor, oid, serial, blobfilename)
 
+class _TempStorageWrapper(object):
+
+    __slots__ = (
+        'temp_storage',
+        'max_restored_oid',
+    )
+
+    def __init__(self, temp_storage):
+        self.temp_storage = temp_storage
+        self.max_restored_oid = 0
+
+    @property
+    def max_stored_oid(self):
+        return max(self.temp_storage.max_stored_oid, self.max_restored_oid)
+
+    def __len__(self):
+        return len(self.temp_storage)
+
+    def __iter__(self):
+        return iter(self.temp_storage)
+
+    def __getattr__(self, name):
+        return getattr(self.temp_storage, name)
 
 class _VoteFactoryMixin(object):
     __slots__ = ()

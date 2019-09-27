@@ -578,22 +578,6 @@ class MVCCDatabaseCoordinator(DetachableMVCCDatabaseCoordinator):
         cache.object_index = None
         self.change(cache, None)
 
-    def after_tpc_finish(self, cache, tid_int, temp_objects):
-        # Note that unless we've polled, this data is not yet
-        # going to be visible to anyone.
-        cache.cache.set_all_for_tid(tid_int, temp_objects)
-
-    def afterCompletion(self, cache):
-        # We briefly thought this would be a good time to take the viewer
-        # out of consideration as far as minimum visible TID is concerned,
-        # but if we do that we wind up polling with different, overlapping, big
-        # polls for each client, instead of moving linearly forward with small
-        # polls. The small polls are much more predictable. We count on our
-        # _vacuum method to keep the history from growing too large.
-        pass
-
-    tpc_abort = afterCompletion
-
     def poll(self, cache, conn, cursor):
         with self._lock:
             cur_ix = self.object_index

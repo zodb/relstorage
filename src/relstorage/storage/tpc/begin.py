@@ -32,6 +32,7 @@ from relstorage._compat import OID_TID_MAP_TYPE
 from relstorage._util import to_utf8
 
 from . import AbstractTPCState
+from .temporary_storage import TemporaryStorage
 from .vote import DatabaseLockedForTid
 from .vote import HistoryFree as HFVoteFactory
 from .vote import HistoryPreserving as HPVoteFactory
@@ -56,9 +57,9 @@ class AbstractBegin(AbstractTPCState):
         # (user, description, extension) from the transaction.
         # byte objects.
         'ude',
-        # max_stored_oid is the highest OID stored by the current
-        # transaction
-        'max_stored_oid',
+        # The location of the temporary data.
+        'temp_storage',
+
         # required_tids: {oid_int: tid_int}; confirms that certain objects
         # have not changed at commit. May be a BTree
         'required_tids',
@@ -77,10 +78,10 @@ class AbstractBegin(AbstractTPCState):
     def __init__(self, previous_state, transaction):
         super(AbstractBegin, self).__init__(previous_state, transaction)
         self.invalidated_oids = ()
-        self.max_stored_oid = 0 # type: int
         # We'll replace this later with the right type when it's needed.
         self.required_tids = {} # type: Dict[int, int]
         self.tpc_vote_factory = self._DEFAULT_TPC_VOTE_FACTORY # type: ignore
+        self.temp_storage = TemporaryStorage()
 
         user = to_utf8(transaction.user)
         desc = to_utf8(transaction.description)
@@ -96,8 +97,11 @@ class AbstractBegin(AbstractTPCState):
         # if we do deleteObject() or store a blob (which we're not fully in
         # control of)
         self.store_connection.restart()
-        self.cache.tpc_begin()
         self.blobhelper.begin()
+
+    def _clear_temp(self):
+        # Clear all attributes used for transaction commit.
+        self.temp_storage.close()
 
     def tpc_vote(self, transaction, storage):
         if transaction is not self.transaction:
@@ -116,7 +120,6 @@ class AbstractBegin(AbstractTPCState):
         if transaction is not self.transaction:
             raise StorageTransactionError(self, transaction)
 
-        cache = self.cache
         oid_int = bytes8_to_int64(oid)
         if previous_tid and previous_tid != NO_PREV_TID:
             # previous_tid is the tid of the state that the
@@ -128,11 +131,10 @@ class AbstractBegin(AbstractTPCState):
         else:
             prev_tid_int = 0
 
-        self.max_stored_oid = max(self.max_stored_oid, oid_int)
         # Save the data locally in a temporary place. Later, closer to commit time,
         # we'll send it all over at once. This lets us do things like use
         # COPY in postgres.
-        cache.store_temp(oid_int, data, prev_tid_int)
+        self.temp_storage.store_temp(oid_int, data, prev_tid_int)
 
 
     @metricmethod_sampled

@@ -105,9 +105,8 @@ class AbstractVote(AbstractTPCState):
     __slots__ = (
         # (user, description, extension) from the transaction. byte objects.
         'ude',
-        # max_stored_oid is the highest OID stored by the current
-        # transaction
-        'max_stored_oid',
+        # The TemporaryStorage.
+        'temp_storage',
         # required_tids: {oid_int: tid_int}; confirms that certain objects
         # have not changed at commit. May be a BTree
         'required_tids',
@@ -133,7 +132,7 @@ class AbstractVote(AbstractTPCState):
         super(AbstractVote, self).__init__(begin_state, begin_state.transaction)
 
         self.required_tids = begin_state.required_tids or {} # type: Dict[int, int]
-        self.max_stored_oid = begin_state.max_stored_oid
+        self.temp_storage = begin_state.temp_storage # type: .temporary_storage.TemporaryStorage
         self.ude = begin_state.ude
         self.committing_tid_lock = committing_tid_lock # type: Optional[DatabaseLockedForTid]
         self.count_conflicts = None
@@ -142,6 +141,9 @@ class AbstractVote(AbstractTPCState):
         # Anything that we've undone or deleted is also invalidated.
         self.invalidated_oids = begin_state.invalidated_oids or set() # type: Set[bytes]
 
+    def _clear_temp(self):
+        # Clear all attributes used for transaction commit.
+        self.temp_storage.close()
 
     def _tpc_state_extra_repr_info(self):
         return {
@@ -158,7 +160,7 @@ class AbstractVote(AbstractTPCState):
     @log_timed
     def _flush_temps_to_db(self, cursor):
         mover = self.adapter.mover
-        mover.store_temps(cursor, self.cache.temp_objects)
+        mover.store_temps(cursor, self.temp_storage)
 
     def _vote(self, storage):
         """
@@ -208,7 +210,7 @@ class AbstractVote(AbstractTPCState):
         # used, or whether we're updating existing objects and avoid a
         # bit more overhead, but benchmarking suggests that it's not
         # worth it in common cases.
-        storage._oids.set_min_oid(self.max_stored_oid)
+        storage._oids.set_min_oid(self.temp_storage.max_stored_oid)
 
         # Lock objects being modified and those registered with
         # readCurrent(). This could raise ReadConflictError or locking
@@ -260,7 +262,8 @@ class AbstractVote(AbstractTPCState):
         # pylint:disable=too-many-locals
         cursor = self.store_connection.cursor
         adapter = self.adapter
-        cache = self.cache
+        read_temp = self.temp_storage.read_temp
+        store_temp = self.temp_storage.store_temp
         tryToResolveConflict = storage.tryToResolveConflict
 
         # Detect conflicting changes.
@@ -309,7 +312,7 @@ class AbstractVote(AbstractTPCState):
                                  int64_to_8bytes(expect_tid_int)))
                 continue
 
-            state_from_this_txn = cache.read_temp(oid_int)
+            state_from_this_txn = read_temp(oid_int)
             oid = int64_to_8bytes(oid_int)
             prev_tid = int64_to_8bytes(committed_tid_int)
             serial = int64_to_8bytes(tid_this_txn_saw_int)
@@ -326,13 +329,13 @@ class AbstractVote(AbstractTPCState):
 
             # resolved
             invalidated_oid_ints.add(oid_int)
-            cache.store_temp(oid_int, resolved_state, committed_tid_int)
+            store_temp(oid_int, resolved_state, committed_tid_int)
 
         if invalidated_oid_ints:
             # We resolved some conflicts, so we need to send them over to the database.
             adapter.mover.replace_temps(
                 cursor,
-                self.cache.temp_objects.iter_for_oids(invalidated_oid_ints)
+                self.temp_storage.iter_for_oids(invalidated_oid_ints)
             )
 
         return invalidated_oid_ints
@@ -397,39 +400,40 @@ class AbstractVote(AbstractTPCState):
         if transaction is not self.transaction:
             raise StorageTransactionError(
                 "tpc_finish called with wrong transaction")
-        finish_entry = time.time()
-        # Handle the finishing. We cannot/must not fail now.
-        # TODO: Move most of this into the Finish class/module.
-        did_commit = self._lock_and_move()
-        if did_commit:
-            locks_released = time.time()
-        assert self.committing_tid_lock is not None, self
-
-
-        # The IStorage docs say that f() "must be called while the
-        # storage transaction lock is held." We don't really have a
-        # "storage transaction lock", just the global database lock,
-        # that we want to drop as quickly as possible, so it would be
-        # nice to drop the commit lock and then call f(). This
-        # probably doesn't really matter, though, as ZODB.Connection
-        # doesn't use f().
-        #
-        # If we called `lock_and_move` for the first time in this
-        # method, then the adapter will have been asked to go ahead
-        # and commit, releasing any locks it can (some adapters do,
-        # some don't). So we may or may not have a database lock at
-        # this point.
-        assert not self.blobhelper.NEEDS_DB_LOCK_TO_FINISH
         try:
-            self.blobhelper.finish(self.committing_tid_lock.tid)
-        except (IOError, OSError):
-            # If something failed to move, that's not really a problem:
-            # if we did any moving now, we're just a cache.
-            logger.exception(
-                "Failed to update blob-cache; ignoring (will re-download)"
-            )
+            finish_entry = time.time()
+            # Handle the finishing. We cannot/must not fail now.
+            # TODO: Move most of this into the Finish class/module.
+            did_commit = self._lock_and_move()
+            if did_commit:
+                locks_released = time.time()
+            assert self.committing_tid_lock is not None, self
 
-        try:
+
+            # The IStorage docs say that f() "must be called while the
+            # storage transaction lock is held." We don't really have a
+            # "storage transaction lock", just the global database lock,
+            # that we want to drop as quickly as possible, so it would be
+            # nice to drop the commit lock and then call f(). This
+            # probably doesn't really matter, though, as ZODB.Connection
+            # doesn't use f().
+            #
+            # If we called `lock_and_move` for the first time in this
+            # method, then the adapter will have been asked to go ahead
+            # and commit, releasing any locks it can (some adapters do,
+            # some don't). So we may or may not have a database lock at
+            # this point.
+            assert not self.blobhelper.NEEDS_DB_LOCK_TO_FINISH
+            try:
+                self.blobhelper.finish(self.committing_tid_lock.tid)
+            except (IOError, OSError):
+                # If something failed to move, that's not really a problem:
+                # if we did any moving now, we're just a cache.
+                logger.exception(
+                    "Failed to update blob-cache; ignoring (will re-download)"
+                )
+
+
             if f is not None:
                 f(self.committing_tid_lock.tid)
             next_phase = Finish(self, not did_commit)
@@ -477,7 +481,7 @@ class HistoryPreservingDeleteOnly(HistoryPreserving):
     __slots__ = ()
 
     def _vote(self, storage):
-        if self.cache.temp_objects and self.cache.temp_objects.stored_oids:
+        if self.temp_storage and self.temp_storage.stored_oids:
             raise StorageTransactionError("Cannot store and delete at the same time.")
         # We only get here if we've deleted objects, meaning we hold their row locks.
         # We only delete objects once we hold the commit lock.

@@ -30,7 +30,7 @@ import random2
 import relstorage.cache
 
 from relstorage.cache.tests import MockOptions, MockAdapter
-
+from relstorage.storage.tpc.temporary_storage import TemporaryStorage
 
 def _build_history():
     random = random2.Random(42)
@@ -47,9 +47,9 @@ def _build_history():
                             b'x' * random.randint(200, 2000)))
     return history
 
-def _send_queue(self, tid_int):
-    self.cache.set_all_for_tid(tid_int, self.temp_objects)
-    self.temp_objects.reset()
+def _send_queue(self, tid_int, temp_objects):
+    self.cache.set_all_for_tid(tid_int, temp_objects)
+    temp_objects.reset()
 
 now = 0
 
@@ -89,16 +89,16 @@ def cache_run(name, size):
         poller.poll_changes = []
         new_cache.poll(None, None, None)
 
-        new_cache.tpc_begin()
-        cache.tpc_begin()
+        new_cache_ts = TemporaryStorage()
+        cache_ts = TemporaryStorage()
         data_tot = 0
         for action, oid, serial, data in history:
             data_tot += len(data)
             now += 1
             if action == b's':
-                cache.store_temp(oid, data)
+                cache_ts.store_temp(oid, data)
                 #print("Storing", oid, serial)
-                _send_queue(cache, serial)
+                _send_queue(cache, serial, cache_ts)
                 cache.adapter.mover.data[oid] = (data, serial)
                 poller.poll_tid = serial
                 poller.poll_changes = [(oid, serial)]
@@ -110,8 +110,8 @@ def cache_run(name, size):
                 v = new_cache.load(None, oid)
                 if v[0] is None:
                     #print("Store after miss", oid, 1)
-                    new_cache.store_temp(oid, data)
-                    _send_queue(new_cache, 1)
+                    new_cache_ts.store_temp(oid, data)
+                    _send_queue(new_cache, 1, new_cache_ts)
                     cache.adapter.mover.data[oid] = (data, 1)
     finally:
         cache.close(close_async=False)

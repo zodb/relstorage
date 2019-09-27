@@ -38,6 +38,7 @@ def Finish(vote_state, needs_store_commit=True):
             txn)
 
     vote_state.committing_tid_lock.release_commit_lock(vote_state.store_connection.cursor)
-    vote_state.cache.after_tpc_finish(vote_state.committing_tid_lock.tid)
+    vote_state.cache.after_tpc_finish(vote_state.committing_tid_lock.tid,
+                                      vote_state.temp_storage)
 
     return NotInTransaction(vote_state)
