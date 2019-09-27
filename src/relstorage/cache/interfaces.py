@@ -82,18 +82,6 @@ class IStorageCacheMVCCDatabaseCoordinator(IMVCCDatabaseCoordinator):
         in this method should establish the snapshot for the first time.
         """
 
-    def after_tpc_finish(viewer, tid_int, temp_objects):
-        """
-        Let the coordinator know that the registered *viewer* is
-        between transactions and can release its last snapshot.
-
-        The transaction it just committed was at *tid_int*, and it contained
-        *temp_objects*.
-
-        If *tid_int* is None, then the transaction was aborted; the viewer can still
-        release its snapshot.
-        """
-
     def stats():
         """
         Return a dictionary with interesting keys and values

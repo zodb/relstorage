@@ -26,12 +26,8 @@ from ZODB.POSException import ReadConflictError
 from ZODB.utils import p64
 from zope import interface
 
-
-from relstorage.autotemp import AutoTemporaryFile
-from relstorage._compat import OID_OBJECT_MAP_TYPE
-from relstorage._compat import OID_SET_TYPE as OIDSet
-from relstorage._compat import iteroiditems
 from relstorage._compat import IN_TESTRUNNER
+from relstorage._compat import OID_SET_TYPE as OIDSet
 from relstorage._util import bytes8_to_int64
 from relstorage._mvcc import DetachableMVCCDatabaseViewer
 
@@ -79,11 +75,6 @@ class StorageCache(DetachableMVCCDatabaseViewer):
         'local_client',
         'cache',
         'object_index',
-
-        # Things used during commit
-        'temp_objects',
-        'store_temp',
-        'read_temp',
     )
 
 
@@ -99,12 +90,6 @@ class StorageCache(DetachableMVCCDatabaseViewer):
         self.options = options
         self.keep_history = options.keep_history
         self.prefix = prefix or ''
-        # queue is a _TemporaryStorage used during commit
-        self.temp_objects = None # type: _TemporaryStorage
-        # store_temp and read_temp are methods copied from the queue while
-        # we are committing.
-        self.store_temp = None
-        self.read_temp = None
 
         if _parent is None:
             # I must be the master!
@@ -533,51 +518,20 @@ class StorageCache(DetachableMVCCDatabaseViewer):
         # Remove the data too.
         self.cache.invalidate_all(oids)
 
-    def tpc_begin(self):
-        """Prepare temp space for objects to cache."""
-        q = self.temp_objects = _TemporaryStorage()
-        self.store_temp = q.store_temp
-        self.read_temp = q.read_temp
-
-    def after_tpc_finish(self, tid):
+    def after_tpc_finish(self, tid, temp_storage):
         """
         Flush queued changes.
 
-        This is called after the database commit lock is released.
+        This is called after the database commit lock is released,
+        but before control is returned to the Connection.
 
         Now that this tid is known, send all queued objects to the
         cache. The cache will have ``(oid, tid)`` entry for each object
         we have been holding on to (well, in a big transaction, some of them
         might actually not get stored in the cache. But we try!)
         """
-        try:
-            tid_int = bytes8_to_int64(tid)
-            # Let the coordinator know ASAP that we're between transactions,
-            # and give it the opportunity to update the object index and cache
-            # if possible. Note that *we* cannot update our index: this transaction isn't
-            # visible to us until we poll.
-            self.polling_state.after_tpc_finish(self, tid_int, self.temp_objects)
-        finally:
-            self.clear_temp()
-
-    def tpc_abort(self):
-        self.clear_temp()
-        self.polling_state.tpc_abort(self)
-
-    def afterCompletion(self, load_connection):
-        load_connection.rollback_quietly()
-        self.polling_state.afterCompletion(self)
-
-    def clear_temp(self):
-        """Discard all transaction-specific temporary data.
-
-        Called after transaction finish or abort.
-        """
-        if self.temp_objects is not None:
-            self.store_temp = None
-            self.read_temp = None
-            self.temp_objects.close()
-            self.temp_objects = None
+        tid_int = bytes8_to_int64(tid)
+        self.cache.set_all_for_tid(tid_int, temp_storage)
 
     def poll(self, conn, cursor, ignore_tid):
         try:
@@ -610,85 +564,3 @@ class _BeforeStorageCache(StorageCache):
         # We'll never try to poll again, so this is ok.
         self.polling_state.unregister(self)
         return ()
-
-class _TemporaryStorage(object):
-    def __init__(self):
-        # start with a fresh in-memory buffer instead of reusing one that might
-        # already be spooled to disk.
-        # TODO: An alternate idea would be a temporary sqlite database.
-        self._queue = AutoTemporaryFile()
-        # {oid: (startpos, endpos, prev_tid_int)}
-        self._queue_contents = OID_OBJECT_MAP_TYPE()
-
-    def reset(self):
-        self._queue_contents.clear()
-        self._queue.seek(0)
-
-    def store_temp(self, oid_int, state, prev_tid_int=0):
-        """
-        Queue an object for caching.
-
-        Typically, we can't actually cache the object yet, because its
-        transaction ID is not yet chosen.
-        """
-        assert isinstance(state, bytes)
-        queue = self._queue
-        queue.seek(0, 2)  # seek to end
-        startpos = queue.tell()
-        queue.write(state)
-        endpos = queue.tell()
-        self._queue_contents[oid_int] = (startpos, endpos, prev_tid_int)
-
-    def __len__(self):
-        # How many distinct OIDs have been stored?
-        return len(self._queue_contents)
-
-    def __bool__(self):
-        return True
-
-    __nonzero__ = __bool__
-
-    @property
-    def stored_oids(self):
-        return self._queue_contents
-
-    def _read_temp_state(self, startpos, endpos):
-        self._queue.seek(startpos)
-        length = endpos - startpos
-        state = self._queue.read(length)
-        if len(state) != length:
-            raise AssertionError("Queued cache data is truncated")
-        return state
-
-    def read_temp(self, oid_int):
-        """
-        Return the bytes for a previously stored temporary item.
-        """
-        startpos, endpos, _ = self._queue_contents[oid_int]
-        return self._read_temp_state(startpos, endpos)
-
-    def __iter__(self):
-        return self.iter_for_oids(None)
-
-    def iter_for_oids(self, oids):
-        read_temp_state = self._read_temp_state
-        for startpos, endpos, oid_int, prev_tid_int in self.items(oids):
-            state = read_temp_state(startpos, endpos)
-            yield state, oid_int, prev_tid_int
-
-    def items(self, oids=None):
-        # Order the queue by file position, which should help
-        # if the file is large and needs to be read
-        # sequentially from disk.
-        items = [
-            (startpos, endpos, oid_int, prev_tid_int)
-            for (oid_int, (startpos, endpos, prev_tid_int)) in iteroiditems(self._queue_contents)
-            if oids is None or oid_int in oids
-        ]
-        items.sort()
-        return items
-
-    def close(self):
-        self._queue.close()
-        self._queue = None
-        self._queue_contents = None

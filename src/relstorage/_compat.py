@@ -110,6 +110,11 @@ if BTrees.LLBTree.LLBTree is not BTrees.LLBTree.LLBTreePy: # pylint:disable=no-m
             s.remove(val)
         except KeyError:
             pass
+
+    def OidObjectMap_max_key(bt):
+        if not bt:
+            return 0
+        return bt.maxKey()
 else:
     OID_TID_MAP_TYPE = dict
     OID_OBJECT_MAP_TYPE = dict
@@ -129,6 +134,11 @@ else:
         return set(c1) - set(c2)
 
     OidSet_discard = set.discard
+
+    def OidObjectMap_max_key(mapping):
+        if not mapping:
+            return 0
+        return max(iterkeys(mapping))
 
 # Lists of OIDs or TIDs. These could be simple list() objects, or we
 # can treat them as numbers and store them in array.array objects, if

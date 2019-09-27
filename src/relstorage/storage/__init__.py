@@ -565,8 +565,7 @@ class RelStorage(LegacyMethodsMixin,
         # need to do those checks yet, we just want to quietly rollback.
         # They both rollback; the difference is that restart_load checks for replicas,
         # and calls any hooks needed.
-        self._cache.afterCompletion(self._load_connection)
-
+        self._load_connection.rollback_quietly()
 
     def sync(self, force=True):
         """

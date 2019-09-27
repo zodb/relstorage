@@ -110,7 +110,7 @@ class AbstractTPCState(object):
             type(self).__name__,
             id(self),
             self.blobhelper,
-            len(self.cache.temp_objects) if self.cache.temp_objects is not None else None,
+            len(getattr(self, 'temp_storage', ()) or ()),
             self._tpc_state_transaction_data(),
         )
 
@@ -170,7 +170,6 @@ class AbstractTPCState(object):
 
         try:
             self.load_connection.rollback_quietly()
-            self.cache.tpc_abort()
 
             self.adapter.txncontrol.abort(
                 self.store_connection,
@@ -186,10 +185,11 @@ class AbstractTPCState(object):
         return NotInTransaction(self)
 
     def _clear_temp(self):
-        # Clear all attributes used for transaction commit.
-        # It is assumed that self._lock.acquire was called before this
-        # method was called.
-        self.cache.clear_temp()
+        """
+        Clear all attributes used for transaction commit.
+        Subclasses should override. Called on tpc_abort; subclasses
+        should call on other exit states.
+        """
 
     def tpc_begin(self, transaction, begin_factory):
         if transaction is self.transaction:

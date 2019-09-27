@@ -24,6 +24,7 @@ from hamcrest import assert_that
 from nti.testing.matchers import validly_provides
 
 from relstorage.tests import TestCase
+from relstorage.storage.tpc.temporary_storage import TemporaryStorage
 
 from ..interfaces import IStorageCache
 from . import MockOptionsWithFakeMemcache as MockOptionsWithFakeCache
@@ -102,15 +103,15 @@ class StorageCacheTests(TestCase):
         import shutil
 
         c = self._makeOne()
-        c.tpc_begin()
+        temp_storage = TemporaryStorage()
         # tid is 2016-09-29 11:35:58,120
         # (That used to matter when we stored that information as a
         # filesystem modification time.)
         tid = 268595726030645777
         oid = 2
-        c.store_temp(oid, b'abc')
+        temp_storage.store_temp(oid, b'abc')
         # Flush to the cache.
-        c.after_tpc_finish(p64(tid))
+        c.after_tpc_finish(p64(tid), temp_storage)
 
         key = list(iter(c.local_client))[0]
         self.assertEqual((2, tid), key)
@@ -237,28 +238,29 @@ class StorageCacheTests(TestCase):
 
     def test_store_temp(self):
         c = self._makeOne()
-        c.tpc_begin()
-        c.store_temp(2, b'abc')
-        c.store_temp(1, b'def')
-        c.store_temp(2, b'ghi')
-        self.assertEqual(b'ghi', c.read_temp(2))
-        self.assertEqual(dict(c.temp_objects.stored_oids),
+        temp_storage = TemporaryStorage()
+        temp_storage.store_temp(2, b'abc')
+        temp_storage.store_temp(1, b'def')
+        temp_storage.store_temp(2, b'ghi')
+        self.assertEqual(b'ghi', temp_storage.read_temp(2))
+        self.assertEqual(dict(temp_storage.stored_oids),
                          {1: (3, 6, 0), 2: (6, 9, 0)})
-        f = c.temp_objects._queue
+        self.assertEqual(temp_storage.max_stored_oid, 2)
+        f = temp_storage._queue
         f.seek(0)
         self.assertEqual(f.read(), b'abcdefghi')
-        c.after_tpc_finish(p64(3))
+        c.after_tpc_finish(p64(3), temp_storage)
 
         # self.assertEqual(dict(c.delta_after0), {2: 3, 1: 3})
 
     def test_send_queue_small(self):
         from relstorage.tests.fakecache import data
         c = self._makeOne()
-        c.tpc_begin()
-        c.store_temp(2, b'abc')
-        c.store_temp(3, b'def')
+        temp_storage = TemporaryStorage()
+        temp_storage.store_temp(2, b'abc')
+        temp_storage.store_temp(3, b'def')
         tid = p64(55)
-        c.after_tpc_finish(tid)
+        c.after_tpc_finish(tid, temp_storage)
         self.assertEqual(data, {
             'myprefix:state:55:2': tid + b'abc',
             'myprefix:state:55:3': tid + b'def',
@@ -270,11 +272,11 @@ class StorageCacheTests(TestCase):
         c = self._makeOne()
         self.assertEqual(c.cache.g.send_limit, 1024 * 1024)
         c.cache.g.send_limit = 100
-        c.tpc_begin()
-        c.store_temp(2, b'abc')
-        c.store_temp(3, b'def' * 100)
+        temp_storage = TemporaryStorage()
+        temp_storage.store_temp(2, b'abc')
+        temp_storage.store_temp(3, b'def' * 100)
         tid = p64(55)
-        c.after_tpc_finish(tid)
+        c.after_tpc_finish(tid, temp_storage)
         self.assertEqual(data, {
             'myprefix:state:55:2': tid + b'abc',
             'myprefix:state:55:3': tid + (b'def' * 100),
@@ -283,23 +285,10 @@ class StorageCacheTests(TestCase):
     def test_send_queue_none(self):
         from relstorage.tests.fakecache import data
         c = self._makeOne()
-        c.tpc_begin()
+        temp_storage = TemporaryStorage()
         tid = p64(55)
-        c.after_tpc_finish(tid)
+        c.after_tpc_finish(tid, temp_storage)
         self.assertEqual(data, {})
-
-    def test_after_tpc_finish(self):
-        c = self._makeOne()
-        c.tpc_begin()
-        c.after_tpc_finish(p64(55))
-        # XXX: This test doesn't actually assert anything. It used to check
-        # the commit-count key, but we don't use that anymore.
-
-    def test_clear_temp(self):
-        c = self._makeOne()
-        c.tpc_begin()
-        c.clear_temp()
-        self.assertIsNone(c.temp_objects)
 
     def __not_called(self):
         self.fail("Should not be called")
