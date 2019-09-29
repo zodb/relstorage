@@ -187,7 +187,7 @@ class GeventPsycopg2Driver(Psycopg2Driver):
             raise ImportError("No wait callback installed")
         return mod
 
-
+    # TODO: Implement enter_critical_phase_until_transaction_end
 
 class _GeventPsycopg2WaitCallback(object):
 

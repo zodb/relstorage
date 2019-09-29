@@ -8,6 +8,14 @@
 - Add the ``gevent psycopg2`` driver to allow using the fast psycopg2
   driver with gevent.
 
+- Conflict resolution prefetches data for conflicted objects, reducing
+  the number of database queries and locks needed.
+
+- Introduce a driver-agnostic framework for elevating database
+  connection priority during critical times of two-phase commit, and
+  implement it for the ``gevent MySQLdb`` driver. This reduces the
+  amount of gevent switches that occur while database locks are held.
+  See :issue:`339`.
 
 3.0a11 (2019-09-25)
 ===================

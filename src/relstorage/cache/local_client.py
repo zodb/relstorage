@@ -511,16 +511,25 @@ class LocalClient(object):
         decompress = self._decompress
         value = None
 
-        with self._lock:
+        if not update_mru:
+            # Avoid the lock. We assume the underlying
+            # operations (dict.__getitem__, entry.__mod__)
+            # are thread-safe, when compared to other operations
+            # that might mutate.
             entry = self._peek(oid)
             if entry is not None:
                 value = entry % tid
-            if value is not None:
-                self._hits += 1
-                if update_mru:
-                    self._cache_mru(oid) # Make an actual hit.
-            else:
-                self._misses += 1
+        else:
+            with self._lock:
+                entry = self._peek(oid)
+                if entry is not None:
+                    value = entry % tid
+                if value is not None:
+                    self._hits += 1
+                    if update_mru:
+                        self._cache_mru(oid) # Make an actual hit.
+                else:
+                    self._misses += 1
 
         # Finally, while not holding the lock, decompress if needed.
         # Recall that for deleted objects, `state` can be None.

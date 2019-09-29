@@ -464,14 +464,6 @@ class GenericRelStorageTests(
         finally:
             db.close()
 
-    def __make_tryToResolveConflict_ignore_committedData(self, storage):
-        orig = storage.tryToResolveConflict
-        def resolve(oid, ctid, ptid, newpickle, committed_data): # pylint:disable=unused-argument
-            return orig(oid, ctid, ptid, newpickle)
-        storage.tryToResolveConflict = resolve
-        return storage
-
-
     def checkResolveConflictBetweenConnections(self, clear_cache=False):
         # Verify that conflict resolution works between storage instances
         # bound to connections.
@@ -518,26 +510,21 @@ class GenericRelStorageTests(
             self.assertEqual(storage1._cache.stats()['hits'], 0)
             self.assertEqual(storage1._cache.stats()['misses'], 0)
 
-            # This will conflict and  will have to use the cache and DB for loadSerial
-            self._storage = self.__make_tryToResolveConflict_ignore_committedData(storage2)
+            # This will conflict; we will prefetch everything through the cache,
+            # or database, and not the storage's loadSerial.
+            def noLoadSerial(*_args, **_kwargs):
+                self.fail("loadSerial on the storage should never be called")
+            storage2.loadSerial = noLoadSerial
+            self._storage = storage2
             _revid3 = self._dostoreNP(oid, revid=revid1, data=zodb_pickle(obj))
 
-            # Since we didn't pass any data up from the storage, this
-            # would need to make two lookups, for committed data and
-            # previous data. If we're history free, we invalidated the
-            # object when the first one saved it, but we're lucky
-            # enough to find the committed data in our shared state, as well
-            # as the previous state: we've got a storage open to a previous
-            # transaction that's letting that data stay in memory.
-
+            # We don't actually update cache stats at all, however,
+            # despite the prefetching.
             cache_stats = storage1._cache.stats()
             __traceback_info__ = cache_stats, clear_cache
-            if clear_cache:
-                self.assertEqual(cache_stats['misses'], 1)
-                self.assertEqual(cache_stats['hits'], 1)
-            else:
-                self.assertEqual(cache_stats['misses'], 0)
-                self.assertEqual(cache_stats['hits'], 2)
+
+            self.assertEqual(cache_stats['misses'], 0)
+            self.assertEqual(cache_stats['hits'], 0)
 
             data, _serialno = self._storage.load(oid, '')
             inst = zodb_unpickle(data)

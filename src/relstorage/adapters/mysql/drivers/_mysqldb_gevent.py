@@ -36,8 +36,6 @@ class Cursor(IterateFetchmanyMixin, SSCursor):
     # will not wait more than 30 sec/packet)." Empirically
     # that doesn't seem to be true.
 
-    def _noop(self):
-        """Does nothing."""
 
     # Somewhat surprisingly, if we just wait on read,
     # we end up blocking forever. This is because of the buffers
@@ -66,9 +64,12 @@ class Cursor(IterateFetchmanyMixin, SSCursor):
     #
     # We do this *after* fetching results, not before, just in case
     # we only needed to make one fetch.
-    sleep = staticmethod(gevent_sleep)
 
     def fetchall(self):
+        sleep = self.connection.sleep
+        if sleep is _noop:
+            return SSCursor.fetchall(self)
+
         result = []
         fetch = self.fetchmany # calls _fetch_row with the arraysize
         while 1:
@@ -81,52 +82,36 @@ class Cursor(IterateFetchmanyMixin, SSCursor):
             if self.rownumber == self.rowcount:
                 # Avoid a useless extra trip at the end.
                 break
-            self.sleep()
+            sleep()
         return result
-
-    def enter_critical_phase_until_transaction_end(self):
-        # May make multiple enters.
-        if 'sleep' not in self.__dict__:
-            self.sleep = self._noop
-            self.connection.enter_critical_phase_until_transaction_end(self)
-
-    def exit_critical_phase_at_transaction_end(self):
-        del self.sleep
 
 
 # Prior to mysqlclient 1.4, there was a 'waiter' Connection
 # argument that could be used to do this, but it was removed.
 # So we implement it ourself.
+def _noop():
+    "Does nothing"
+
 class Connection(BaseConnection):
     default_cursor = Cursor
     gevent_read_watcher = None
     gevent_write_watcher = None
     gevent_hub = None
-    cursor_in_critical = None
+    sleep = staticmethod(gevent_sleep)
 
     # pylint:disable=method-hidden
 
-    def enter_critical_phase_until_transaction_end(self, cursor):
-        assert self.cursor_in_critical is None
-        self.cursor_in_critical = cursor
-        # The queries, unfortunately, need to go through and allow switches without blocking.
-        # Otherwise we can deadlock. So this makes it not very useful for our intention
-        # of granting priority to a single greenlet and avoiding switches: other
-        # greenlets can still come in and lock objects and hold those locks for a
-        # period of time --- though, in testing, if we *do* make query() blocking,
-        # under 60 greenlets committing 100 objects, we stop getting the 1.5s warning
-        # about objects being locked too long: it does seem that the lock does something
-        # there, but the overall time doesn't change much.
+    def enter_critical_phase_until_transaction_end(self):
         self.commit = self._critical_commit
         self.rollback = self._critical_rollback
+        self.query = self._critical_query
+        self.sleep = _noop
 
     def exit_critical_phase_at_transaction_end(self):
         del self.rollback
         del self.commit
-        cur = self.cursor_in_critical
-        del self.cursor_in_critical
-        cur.exit_critical_phase_at_transaction_end()
-        assert self.cursor_in_critical is None
+        del self.query
+        del self.sleep
 
     def check_watchers(self):
         # We can be used from more than one thread in a sequential
@@ -145,6 +130,9 @@ class Connection(BaseConnection):
             self.gevent_read_watcher.close()
             self.gevent_write_watcher.close()
             self.gevent_hub = None
+
+    def _critical_query(self, query):
+        return BaseConnection.query(self, query)
 
     def query(self, query):
         # From the mysqlclient implementation:

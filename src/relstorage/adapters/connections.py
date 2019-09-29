@@ -84,6 +84,17 @@ class AbstractManagedConnection(object):
             self.active = True
         return self._cursor
 
+    def enter_critical_phase_until_transaction_end(self):
+        """
+        Given an already opened connection, cause it to attempt to
+        raise it's priority and return results faster.
+
+        This mostly has meaning for gevent drivers.
+        """
+        self.connmanager.driver.enter_critical_phase_until_transaction_end(
+            *self.open_if_needed()
+        )
+
     def drop(self):
         self.active = False
         conn, cursor = self.connection, self._cursor

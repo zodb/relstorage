@@ -196,7 +196,6 @@ class AbstractModuleDriver(ABC):
 
     connection_may_need_commit = connection_may_need_rollback
 
-
     def synchronize_cursor_for_rollback(self, cursor):
         """Exceptions here are ignored, we don't know what state the cursor is in."""
         # psycopg2 raises ProgrammingError if we rollback when no results
@@ -246,6 +245,8 @@ class AbstractModuleDriver(ABC):
         __traceback_info__ = data, type(data)
         return bytes(data)
 
+    def enter_critical_phase_until_transaction_end(self, connection, cursor):
+        """Default implementation; does nothing."""
 
 @implementer(IDBDriverFactory)
 class _ClassDriverFactory(object):
