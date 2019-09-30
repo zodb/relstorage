@@ -57,7 +57,7 @@ RSR_SINLINE int ring_is_empty(RSRing ring)
 
 RSR_SINLINE int cache_oversize(RSCache* cache)
 {
-    return ring_oversize(cache->eden) && ring_oversize(cache->probation) && ring_oversize(cache->protected);
+    return ring_oversize(cache->ring_eden) && ring_oversize(cache->ring_probation) && ring_oversize(cache->ring_protected);
 }
 
 RSR_SINLINE int lru_will_fit(RSRingNode* ring, RSRingNode* entry)
@@ -67,7 +67,7 @@ RSR_SINLINE int lru_will_fit(RSRingNode* ring, RSRingNode* entry)
 
 RSR_SINLINE int cache_will_fit(RSCache* cache, RSRingNode* entry)
 {
-    return lru_will_fit(cache->eden, entry) || lru_will_fit(cache->probation, entry) || lru_will_fit(cache->protected, entry);
+    return lru_will_fit(cache->ring_eden, entry) || lru_will_fit(cache->ring_probation, entry) || lru_will_fit(cache->ring_protected, entry);
 }
 
 RSR_INLINE void
@@ -269,8 +269,8 @@ RSRingNode _spill_from_ring_to_ring(RSRing updated_ring,
 void rsc_probation_on_hit(RSCache* cache,
                           RSRingNode* entry)
 {
-    RSRing protected_ring = cache->protected;
-    RSRing probation_ring = cache->probation;
+    RSRing protected_ring = cache->ring_protected;
+    RSRing probation_ring = cache->ring_probation;
     int protected_oversize = ring_move_to_head_from_foreign(probation_ring, protected_ring, entry);
 
     entry->u.entry.frequency++;
@@ -299,9 +299,9 @@ RSRingNode _eden_add(RSCache* cache,
                      RSRingNode* entry,
                      int allow_victims)
 {
-    RSRingNode* eden_ring = cache->eden;
-    RSRingNode* protected_ring = cache->protected;
-    RSRingNode* probation_ring = cache->probation;
+    RSRingNode* eden_ring = cache->ring_eden;
+    RSRingNode* protected_ring = cache->ring_protected;
+    RSRingNode* probation_ring = cache->ring_probation;
     RSRingNode* eden_oldest = NULL;
 
     RSRingNode rejects = {0};
@@ -426,9 +426,9 @@ RSRingNode rsc_update_mru(RSCache* cache,
     // XXX: All this checking of ring equality isn't very elegant.
     // Should we have three functions? But then we'd have three places
     // to remember to resize the ring
-    RSRing protected_ring = cache->protected;
-    RSRing probation_ring = cache->probation;
-    RSRing eden_ring = cache->eden;
+    RSRing protected_ring = cache->ring_protected;
+    RSRing probation_ring = cache->ring_probation;
+    RSRing eden_ring = cache->ring_eden;
     int protected_ring_oversize = 0;
     RSRingNode result = {0};
 
@@ -487,7 +487,7 @@ RSR_SINLINE void lru_age_list(RSRingNode* ring)
 
 void rsc_age_lists(RSCache* cache)
 {
-    lru_age_list(cache->eden);
-    lru_age_list(cache->probation);
-    lru_age_list(cache->protected);
+    lru_age_list(cache->ring_eden);
+    lru_age_list(cache->ring_probation);
+    lru_age_list(cache->ring_protected);
 }

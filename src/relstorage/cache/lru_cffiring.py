@@ -24,13 +24,11 @@ import itertools
 
 from zope import interface
 
-from relstorage._compat import IN_TESTRUNNER
-from relstorage._compat import OID_OBJECT_MAP_TYPE as OidOMap
 from relstorage.cache.interfaces import IGenerationalLRUCache
 from relstorage.cache.interfaces import IGeneration
 from relstorage.cache.interfaces import ILRUEntry
-from relstorage.cache.interfaces import GenerationalCacheBase
-from . import _cache_ring
+
+from . import cache
 
 try:
     izip = itertools.izip
@@ -38,117 +36,34 @@ except AttributeError:
     # Python 3
     izip = zip
 
-ffi = _cache_ring.ffi # pylint:disable=no-member
-_FFI_RING = _cache_ring.lib # pylint:disable=no-member
-
-_ring_move_to_head = _FFI_RING.rsc_ring_move_to_head
-_ring_del = _FFI_RING.rsc_ring_del
-_ring_add = _FFI_RING.rsc_ring_add
-
-
-ffi_new = ffi.new
-ffi_new_handle = ffi.new_handle
-ffi_from_handle = ffi.from_handle
-
-_lru_update_mru = _FFI_RING.rsc_update_mru
-_lru_probation_on_hit = _FFI_RING.rsc_probation_on_hit
-_eden_add = _FFI_RING.rsc_eden_add
-_lru_on_hit = _FFI_RING.rsc_on_hit
-_lru_age_lists = _FFI_RING.rsc_age_lists
-_eden_add_many = _FFI_RING.rsc_eden_add_many
-
-
 
 @interface.implementer(IGenerationalLRUCache)
-class CFFICache(GenerationalCacheBase):
+class Cache(cache.CCache):
+    # Percentage of our byte limit that should be dedicated
+    # to the main "protected" generation
+    _gen_protected_pct = 0.8
+    # Percentage of our byte limit that should be dedicated
+    # to the initial "eden" generation
+    _gen_eden_pct = 0.1
+    # Percentage of our byte limit that should be dedicated
+    # to the "probationary"generation
+    _gen_probation_pct = 0.1
+    # By default these numbers add up to 1.0, but it would be possible to
+    # overcommit by making them sum to more than 1.0. (For very small
+    # limits, the rounding will also make them overcommit).
 
-    # Should we allocate some nodes in a contiguous block on startup?
-    # NOTE: For large cache sizes, this can be slow. It actually makes
-    # the zodbshootout 'cold' tests look bad (for small object counts
-    # especially, or large cache sizes) because when zodbshootout clears caches,
-    # our implementation throws this object all away, and then allocates again.
-    # Meanwhile, all the old objects have to be GC'd.
-    # So we disable it (unless explicitly requested) in test mode, where it
-    # was accounting for about 42s out of 142s
-    _preallocate_entries = not IN_TESTRUNNER
-    # If so, how many? Try to get enough to fill the cache assuming objects are
-    # this size on average
-    _preallocate_avg_size = 512
-    # But no more than this number.
-    _preallocate_max_count = 150000 # 8 MB array
+    __slots__ = ()
 
-    _dict_type = OidOMap
-
-    @classmethod
-    def create_generations(cls,
-                           eden_limit=0,
-                           protected_limit=0,
-                           probation_limit=0,
-                           key_weight=len, value_weight=len):
-        cffi_cache = ffi_new("RSCache*")
-
-        generations = {}
-        for klass, limit in ((Eden, eden_limit),
-                             (Protected, protected_limit),
-                             (Probation, probation_limit)):
-            generation = klass(limit, cffi_cache, key_weight, value_weight)
-            setattr(cffi_cache, generation.__name__, generation.ring_home)
-            generations[generation.__name__] = generation
-        return generations
-
-    def __init__(self, byte_limit,
-                 key_weight=len, value_weight=len,
-                 empty_value=(b'', 0),
-                 preallocate_nodes=None):
-        # This holds all the ring entries, no matter which ring they are in.
-
-        # We experimented with using OOBTree and LOBTree for the type
-        # of self.data. The OOBTree has a similar but slightly slower
-        # performance profile (as would be expected given the big-O
-        # complexity) as a dict, but very large ones can't be pickled
-        # in a single shot! The LOBTree works faster and uses less
-        # memory than the OOBTree or the dict *if* all the keys are
-        # integers (which they are now). Plus the LOBTrees
-        # are slower on PyPy than its own dict specializations. We
-        # were hoping to be able to write faster pickles with large
-        # BTrees, but since that's not the case, we abandoned the
-        # idea.
-        #
-        # Maybe a two-level index, like fsIndex?
-
-        self.data = self._dict_type()
-        self.get = self.data.get
-        if preallocate_nodes is not None:
-            self._preallocate_entries = preallocate_nodes
-
-        generations = self.create_generations(
-            eden_limit=int(byte_limit * self._gen_eden_pct),
-            protected_limit=int(byte_limit * self._gen_protected_pct),
-            probation_limit=int(byte_limit * self._gen_probation_pct),
-            key_weight=key_weight,
-            value_weight=value_weight
+    def __new__(cls, byte_limit):
+        return super(Cache, cls).__new__(
+            cls,
+            byte_limit * cls._gen_eden_pct,
+            byte_limit * cls._gen_protected_pct,
+            byte_limit * cls._gen_probation_pct
         )
 
-        super(CFFICache, self).__init__(byte_limit,
-                                        generations['eden'],
-                                        generations['protected'],
-                                        generations['probation'])
-
-        self.cffi_cache = self.eden.cffi_cache
-
-        # Setup the shared data structures for the generations
-        node_free_list = self._make_node_free_list(empty_value)
-        for ring in self.generations[1:]:
-            setattr(ring, 'node_free_list', node_free_list)
-
-    def _make_node_free_list(self, empty_value):
-        "Create the node free list and preallocate any desired entries"
-        node_free_list = []
-        if self._preallocate_entries:
-            needed_entries = self.limit // self._preallocate_avg_size
-            entry_count = min(self._preallocate_max_count, needed_entries)
-            node_free_list = self.eden.init_node_free_list(entry_count, empty_value)
-        return node_free_list
+    def __init__(self, byte_limit):
+        pass
 
 
     # mapping operations, operating on user-level key/value pairs.
@@ -156,34 +71,34 @@ class CFFICache(GenerationalCacheBase):
     def __iter__(self):
         return iter(self.data)
 
-    def __contains__(self, key):
-        return key in self.data
+    # def __contains__(self, key):
+    #     return key in self.data
 
-    def __bool__(self):
-        return bool(self.data)
+    # def __bool__(self):
+    #     return bool(self.data)
 
-    def __setitem__(self, key, value):
-        entry = self.get(key)
-        if entry is not None:
-            # This bumps its frequency, and potentially ejects other items.
-            self.update_MRU(entry, value)
-        else:
-            # New values have a frequency of 1 and might evict other
-            # items.
-            self.add_MRU(key, value)
+    # def __setitem__(self, key, value):
+    #     entry = self.get(key)
+    #     if entry is not None:
+    #         # This bumps its frequency, and potentially ejects other items.
+    #         self.update_MRU(entry, value)
+    #     else:
+    #         # New values have a frequency of 1 and might evict other
+    #         # items.
+    #         self.add_MRU(key, value)
 
-        assert key in self
+    #     assert key in self
 
-    def __delitem__(self, key):
-        entry = self.data[key]
-        del self.data[key]
-        self.generations[entry.cffi_entry.r_parent].remove(entry)
+    # def __delitem__(self, key):
+    #     entry = self.data[key]
+    #     del self.data[key]
+    #     self.generations[entry.cffi_entry.r_parent].remove(entry)
 
-    def __getitem__(self, key):
-        entry = self.get(key)
-        if entry is not None:
-            self.on_hit(entry)
-            return entry.value
+    # def __getitem__(self, key):
+    #     entry = self.get(key)
+    #     if entry is not None:
+    #         self.on_hit(entry)
+    #         return entry.value
 
     # Cache-specific operations.
 
@@ -197,22 +112,22 @@ class CFFICache(GenerationalCacheBase):
         entry = self.get(key)
         self.generations[entry.cffi_entry.r_parent].change_value(entry, value)
 
-    def peek(self, key):
-        entry = self.get(key)
-        if entry is not None:
-            return entry.value
+    # def peek(self, key):
+    #     entry = self.get(key)
+    #     if entry is not None:
+    #         return entry.value
 
-    def age_frequencies(self):
-        _lru_age_lists(self.cffi_cache)
+    # def age_frequencies(self):
+    #     _lru_age_lists(self.cffi_cache)
 
-    age_lists = age_frequencies # BWC
+    # age_lists = age_frequencies # BWC
 
-    def add_MRU(self, key, value):
-        item, evicted_items = self.eden.add_MRU(key, value)
-        for k, _ in evicted_items:
-            del self.data[k]
-        self.data[key] = item
-        return item
+    # def add_MRU(self, key, value):
+    #     item, evicted_items = self.eden.add_MRU(key, value)
+    #     for k, _ in evicted_items:
+    #         del self.data[k]
+    #     self.data[key] = item
+    #     return item
 
     def add_MRUs(self, ordered_keys, return_count_only=False):
         added_entries = self.eden.add_MRUs(ordered_keys)
@@ -220,10 +135,10 @@ class CFFICache(GenerationalCacheBase):
             self.data[entry.key] = entry
         return added_entries if not return_count_only else len(added_entries)
 
-    def update_MRU(self, entry, value):
-        evicted_items = self.generations[entry.cffi_entry.r_parent].update_MRU(entry, value)
-        for k, _ in evicted_items:
-            del self.data[k]
+    # def update_MRU(self, entry, value):
+    #     evicted_items = self.generations[entry.cffi_entry.r_parent].update_MRU(entry, value)
+    #     for k, _ in evicted_items:
+    #         del self.data[k]
 
     def on_hit(self, entry):
         self.generations[entry.cffi_entry.r_parent].on_hit(entry)
@@ -246,9 +161,11 @@ class CFFICache(GenerationalCacheBase):
             'prob_stats': self.probation.stats(),
         }
 
-    def entries(self):
-        return getattr(self.data, 'itervalues', self.data.values)()
+    # def entries(self):
+    #     return getattr(self.data, 'itervalues', self.data.values)()
 
+# BWC
+CFFICache = Cache
 
 @interface.implementer(ILRUEntry)
 class CacheRingEntry(object):
@@ -365,35 +282,35 @@ class Generation(object):
         node.u.head.generation = self.PARENT_CONST
         self.node_free_list = []
 
-    def init_node_free_list(self, entry_count, empty_value):
-        assert not self.node_free_list
-        assert not self._mutated_free_list
-        keys_and_values = itertools.repeat(('', empty_value), entry_count)
-        _, nodes = self._preallocate_entries(keys_and_values, entry_count)
-        self.node_free_list.extend(nodes)
-        return self.node_free_list
+    # def init_node_free_list(self, entry_count, empty_value):
+    #     assert not self.node_free_list
+    #     assert not self._mutated_free_list
+    #     keys_and_values = itertools.repeat(('', empty_value), entry_count)
+    #     _, nodes = self._preallocate_entries(keys_and_values, entry_count)
+    #     self.node_free_list.extend(nodes)
+    #     return self.node_free_list
 
-    def _preallocate_entries(self, ordered_keys_and_values, count=None):
-        """
-        Create and return *count* CacheRingNode values.
+    # def _preallocate_entries(self, ordered_keys_and_values, count=None):
+    #     """
+    #     Create and return *count* CacheRingNode values.
 
-        The underlying RSRingNode structs will be allocated in a single contiguous
-        C array.
+    #     The underlying RSRingNode structs will be allocated in a single contiguous
+    #     C array.
 
-        Return the RSRingNode pointer and the CacheRingNodes.
-        """
-        count = len(ordered_keys_and_values) if count is None else count
-        nodes = ffi.new('RSRingNode[]', count)
-        entries = []
-        key_weight = self.key_weight
-        value_weight = self.value_weight
-        for i, (k, v) in enumerate(ordered_keys_and_values):
-            node = nodes + i # pointer arithmetic gets RSRingNode*; nodes[i] returns the struct
-            weight = key_weight(k) + value_weight(v)
-            entry = CacheRingEntry(k, v, weight, node)
-            entry._cffi_owning_node = nodes
-            entries.append(entry)
-        return nodes, entries
+    #     Return the RSRingNode pointer and the CacheRingNodes.
+    #     """
+    #     count = len(ordered_keys_and_values) if count is None else count
+    #     nodes = ffi.new('RSRingNode[]', count)
+    #     entries = []
+    #     key_weight = self.key_weight
+    #     value_weight = self.value_weight
+    #     for i, (k, v) in enumerate(ordered_keys_and_values):
+    #         node = nodes + i # pointer arithmetic gets RSRingNode*; nodes[i] returns the struct
+    #         weight = key_weight(k) + value_weight(v)
+    #         entry = CacheRingEntry(k, v, weight, node)
+    #         entry._cffi_owning_node = nodes
+    #         entries.append(entry)
+    #     return nodes, entries
 
     def iteritems(self):
         head = self.ring_home
@@ -432,52 +349,52 @@ class Generation(object):
         _ring_add(self.ring_home, new_entry.cffi_ring_node)
         return new_entry
 
-    def get_LRU(self):
-        # Only for testing
-        return ffi_from_handle(self.ring_home.r_next.user_data)
+    # def get_LRU(self):
+    #     # Only for testing
+    #     return ffi_from_handle(self.ring_home.r_next.user_data)
 
-    def make_MRU(self, entry):
-        # Only for testing
-        _ring_move_to_head(self.ring_home, entry.cffi_ring_node)
+    # def make_MRU(self, entry):
+    #     # Only for testing
+    #     _ring_move_to_head(self.ring_home, entry.cffi_ring_node)
 
-    def change_value(self, entry, value):
-        old_size = entry.weight
-        new_size = self.key_weight(entry.key) + self.value_weight(value)
-        entry.set_value(value, new_size)
-        return old_size, new_size
+    # def change_value(self, entry, value):
+    #     old_size = entry.weight
+    #     new_size = self.key_weight(entry.key) + self.value_weight(value)
+    #     entry.set_value(value, new_size)
+    #     return old_size, new_size
 
-    @_mutates_free_list
-    def update_MRU(self, entry, value):
-        old_size, new_size = self.change_value(entry, value)
+    # @_mutates_free_list
+    # def update_MRU(self, entry, value):
+    #     old_size, new_size = self.change_value(entry, value)
 
-        if old_size == new_size:
-            # Treat it as a simple hit; nothing could get evicted.
-            self.on_hit(entry)
-            return ()
+    #     if old_size == new_size:
+    #         # Treat it as a simple hit; nothing could get evicted.
+    #         self.on_hit(entry)
+    #         return ()
 
-        evicted_ring = _lru_update_mru(self.cffi_cache,
-                                       self.ring_home,
-                                       entry.cffi_ring_node,
-                                       old_size, new_size)
+    #     evicted_ring = _lru_update_mru(self.cffi_cache,
+    #                                    self.ring_home,
+    #                                    entry.cffi_ring_node,
+    #                                    old_size, new_size)
 
-        if not evicted_ring.r_next:
-            # Nothing rejected.
-            return ()
+    #     if not evicted_ring.r_next:
+    #         # Nothing rejected.
+    #         return ()
 
-        node = evicted_ring.r_next
-        evicted_items = []
-        node_free_list = self.node_free_list
-        while node:
-            old_entry = ffi_from_handle(node.user_data)
-            evicted_items.append((old_entry.key, old_entry.value))
-            old_entry.reset_for_free_list()
-            node_free_list.append(old_entry)
+    #     node = evicted_ring.r_next
+    #     evicted_items = []
+    #     node_free_list = self.node_free_list
+    #     while node:
+    #         old_entry = ffi_from_handle(node.user_data)
+    #         evicted_items.append((old_entry.key, old_entry.value))
+    #         old_entry.reset_for_free_list()
+    #         node_free_list.append(old_entry)
 
-            node = node.r_next
-        return evicted_items
+    #         node = node.r_next
+    #     return evicted_items
 
-    def on_hit(self, entry):
-        _lru_on_hit(self.ring_home, entry.cffi_ring_node)
+    # def on_hit(self, entry):
+    #     _lru_on_hit(self.ring_home, entry.cffi_ring_node)
 
     def delete(self, entry):
         its_node = entry.cffi_ring_node
@@ -592,53 +509,53 @@ class Eden(Generation):
                 added_entries.append(e)
         return added_entries
 
-    @_mutates_free_list
-    def add_MRU(self, key, value):
-        """
-        Returns ``(added_entry, (evicted_key, evicted_value))``
+    # @_mutates_free_list
+    # def add_MRU(self, key, value):
+    #     """
+    #     Returns ``(added_entry, (evicted_key, evicted_value))``
 
-        You *must* keep the ``added_entry`` object alive while it
-        remains in the ring, until it is explicitly removed or
-        it is evicted.
-        """
-        node_free_list = self.node_free_list
-        weight = self.key_weight(key) + self.value_weight(value)
-        if node_free_list:
-            new_entry = node_free_list.pop()
-            new_entry.reset(key, value, weight)
-        else:
-            new_entry = CacheRingEntry(key, value, weight)
+    #     You *must* keep the ``added_entry`` object alive while it
+    #     remains in the ring, until it is explicitly removed or
+    #     it is evicted.
+    #     """
+    #     node_free_list = self.node_free_list
+    #     weight = self.key_weight(key) + self.value_weight(value)
+    #     if node_free_list:
+    #         new_entry = node_free_list.pop()
+    #         new_entry.reset(key, value, weight)
+    #     else:
+    #         new_entry = CacheRingEntry(key, value, weight)
 
-        evicted_ring = _eden_add(self.cffi_cache,
-                                 new_entry.cffi_ring_node)
+    #     evicted_ring = _eden_add(self.cffi_cache,
+    #                              new_entry.cffi_ring_node)
 
-        if not evicted_ring.r_next:
-            # Nothing rejected.
-            return new_entry, ()
+    #     if not evicted_ring.r_next:
+    #         # Nothing rejected.
+    #         return new_entry, ()
 
-        node = evicted_ring.r_next
-        evicted_items = []
-        while node:
-            old_entry = ffi_from_handle(node.user_data)
+    #     node = evicted_ring.r_next
+    #     evicted_items = []
+    #     while node:
+    #         old_entry = ffi_from_handle(node.user_data)
 
-            evicted_items.append((old_entry.key, old_entry.value))
-            # TODO: Should we avoid this if _cffi_owning_node is set?
-            # To allow that big array to get GC'd sooner
-            old_entry.reset_for_free_list()
-            node_free_list.append(old_entry)
-            node = node.r_next
-        return new_entry, evicted_items
+    #         evicted_items.append((old_entry.key, old_entry.value))
+    #         # TODO: Should we avoid this if _cffi_owning_node is set?
+    #         # To allow that big array to get GC'd sooner
+    #         old_entry.reset_for_free_list()
+    #         node_free_list.append(old_entry)
+    #         node = node.r_next
+    #     return new_entry, evicted_items
 
-class Protected(Generation):
-    __name__ = 'protected'
-    PARENT_CONST = generation_number = 2
+# class Protected(Generation):
+#     __name__ = 'protected'
+#     PARENT_CONST = generation_number = 2
 
 
-class Probation(Generation):
-    __name__ = 'probation'
-    PARENT_CONST = generation_number = 3
+# class Probation(Generation):
+#     __name__ = 'probation'
+#     PARENT_CONST = generation_number = 3
 
-    def on_hit(self, entry):
-        # Move the entry to the protected LRU on its very first hit, where
-        # it becomes the MRU.
-        _lru_probation_on_hit(self.cffi_cache, entry.cffi_ring_node)
+#     def on_hit(self, entry):
+#         # Move the entry to the protected LRU on its very first hit, where
+#         # it becomes the MRU.
+#         _lru_probation_on_hit(self.cffi_cache, entry.cffi_ring_node)

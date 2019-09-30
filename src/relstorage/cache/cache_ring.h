@@ -75,9 +75,9 @@ typedef RSRingNode* RSRing;
  * or the Python code for information about how items move between rings.
  */
 typedef struct RSCache_struct {
-    RSRing eden;
-    RSRing protected;
-    RSRing probation;
+    RSRing ring_eden;
+    RSRing ring_protected;
+    RSRing ring_probation;
 } RSCache;
 
 /*********

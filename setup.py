@@ -15,7 +15,8 @@
 import os
 from setuptools import setup
 from setuptools import find_packages
-
+from setuptools import Extension
+from Cython.Build import cythonize
 
 def read_file(*path):
     base_dir = os.path.dirname(__file__)
@@ -120,6 +121,22 @@ setup(
     cffi_modules=[
         'src/relstorage/cache/_cache_ring_build.py:ffi',
     ],
+    ext_modules=cythonize(
+        [
+            Extension(name="relstorage.cache.cache_values",
+                      sources=['src/relstorage/cache/cache_values.pyx']),
+            Extension(name="relstorage.cache.cache",
+                      sources=['src/relstorage/cache/cache.pyx']),
+
+        ],
+        annotate=True,
+        compiler_directives={
+            'language_level': '3str',
+            'always_allow_keywords': False,
+            'infer_types': False,
+            'nonecheck': False
+        }
+    ),
     tests_require=tests_require,
     extras_require={
         # We previously used MySQL-python (C impl) on CPython 2.7,

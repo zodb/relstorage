@@ -144,143 +144,148 @@ class ICachedValue(interface.Interface):
         were removed and the cached entry should be removed.
         """
 
-@interface.implementer(ICachedValue)
-class _MultipleValues(list):
-    __slots__ = ()
+# @interface.implementer(ICachedValue)
+# class _MultipleValues(list):
+#     __slots__ = ()
 
-    frozen = False
+#     frozen = False
 
-    def __init__(self, *values):
-        list.__init__(self, values)
+#     def __init__(self, *values):
+#         list.__init__(self, values)
 
-    @property
-    def weight(self):
-        return sum(
-            len(value[0])
-            for value in self
-            if value[0]
-        )
+#     @property
+#     def weight(self):
+#         return sum(
+#             len(value[0])
+#             for value in self
+#             if value[0]
+#         )
 
-    @property
-    def max_tid(self):
-        return max(x[1] for x in self)
+#     @property
+#     def max_tid(self):
+#         return max(x[1] for x in self)
 
-    @property
-    def newest_value(self):
-        value = (None, -1)
-        for entry in self:
-            if entry[1] > value[1]:
-                value = entry
-        return value
+#     @property
+#     def newest_value(self):
+#         value = (None, -1)
+#         for entry in self:
+#             if entry[1] > value[1]:
+#                 value = entry
+#         return value
 
-    def __mod__(self, tid):
-        for entry in self:
-            entry = entry % tid
-            if entry is not None:
-                return entry
+#     def __mod__(self, tid):
+#         for entry in self:
+#             entry = entry % tid
+#             if entry is not None:
+#                 return entry
 
-    def __ilshift__(self, tid):
-        # If we have the TID, everything else should be older,
-        # unless we just overwrote and haven't made the transaction visible yet.
-        # By (almost) definition, nothing newer, but if there is, we shouldn't
-        # drop it.
-        # So this works like invalidation: drop everything older than the
-        # tid; if we still have anything left, find and freeze the tid;
-        # if that's the *only* thing left, return that, otherwise return ourself.
-        to_save = [v for v in self if v[1] >= tid]
-        if not to_save:
-            return None
+#     def __ilshift__(self, tid):
+#         # If we have the TID, everything else should be older,
+#         # unless we just overwrote and haven't made the transaction visible yet.
+#         # By (almost) definition, nothing newer, but if there is, we shouldn't
+#         # drop it.
+#         # So this works like invalidation: drop everything older than the
+#         # tid; if we still have anything left, find and freeze the tid;
+#         # if that's the *only* thing left, return that, otherwise return ourself.
+#         to_save = [v for v in self if v[1] >= tid]
+#         if not to_save:
+#             return None
 
-        if len(to_save) == 1:
-            # One item, either it or not
-            result = to_save[0]
-            result <<= tid
-            return result
+#         if len(to_save) == 1:
+#             # One item, either it or not
+#             result = to_save[0]
+#             result <<= tid
+#             return result
 
-        # Multiple items, possibly in the future.
-        self[:] = to_save
-        for i, entry in enumerate(self):
-            if entry[1] == tid:
-                self[i] <<= tid
-                break
-        return self
+#         # Multiple items, possibly in the future.
+#         self[:] = to_save
+#         for i, entry in enumerate(self):
+#             if entry[1] == tid:
+#                 self[i] <<= tid
+#                 break
+#         return self
 
-    def __iadd__(self, value):
-        self.append(value)
-        return self
+#     def __iadd__(self, value):
+#         self.append(value)
+#         return self
 
-    def __isub__(self, tid):
-        to_save = [v for v in self if v[1] > tid]
-        if not to_save:
-            del self[:]
-            return None
+#     def __isub__(self, tid):
+#         to_save = [v for v in self if v[1] > tid]
+#         if not to_save:
+#             del self[:]
+#             return None
 
-        if len(to_save) == 1:
-            return to_save[0]
-        self[:] = to_save
-        return self
+#         if len(to_save) == 1:
+#             return to_save[0]
+#         self[:] = to_save
+#         return self
 
 
-@interface.implementer(ICachedValue)
-class _SingleValue(collections.namedtuple('_ValueBase', ('state_pickle', 'tid'))):
-    __slots__ = ()
-    # TODO: Maybe we should represent simple values as just byte strings;
-    # the key will match the TID in that case.
-    frozen = False
+# @interface.implementer(ICachedValue)
+# class _SingleValue(collections.namedtuple('_ValueBase', ('state_pickle', 'tid'))):
+#     __slots__ = ()
+#     # TODO: Maybe we should represent simple values as just byte strings;
+#     # the key will match the TID in that case.
+#     frozen = False
 
-    @property
-    def max_tid(self):
-        return self[1]
+#     @property
+#     def max_tid(self):
+#         return self[1]
 
-    @property
-    def newest_value(self):
-        return self
+#     @property
+#     def newest_value(self):
+#         return self
 
-    @property
-    def weight(self):
-        return len(self[0]) if self[0] else 0
+#     @property
+#     def weight(self):
+#         return len(self[0]) if self[0] else 0
 
-    def __mod__(self, tid):
-        if tid == self[1]:
-            return self
+#     def __mod__(self, tid):
+#         if tid == self[1]:
+#             return self
 
-    def __ilshift__(self, tid):
-        # We could be newer
-        if self[1] > tid:
-            return self
-        if tid == self[1]:
-            return _FrozenValue(*self)
-        # if we're older, fall off the end and discard.
+#     def __ilshift__(self, tid):
+#         # We could be newer
+#         if self[1] > tid:
+#             return self
+#         if tid == self[1]:
+#             return _FrozenValue(*self)
+#         # if we're older, fall off the end and discard.
 
-    def __iadd__(self, value):
-        if value == self:
-            return value # Let us become frozen if desired.
-        if value[1] == self[1] and value[0] != self[0]:
-            raise CacheConsistencyError(
-                "Detected two different values for same TID",
-                self,
-                value
-            )
-        return _MultipleValues(self, value)
+#     def __iadd__(self, value):
+#         if value == self:
+#             assert isinstance(value, _SingleValue)
+#             return value # Let us become frozen if desired.
+#         if value[1] == self[1] and value[0] != self[0]:
+#             raise CacheConsistencyError(
+#                 "Detected two different values for same TID",
+#                 self,
+#                 value
+#             )
+#         return _MultipleValues(self, value)
 
-    def __isub__(self, tid):
-        if tid <= self[1]:
-            return None
-        return self
+#     def __isub__(self, tid):
+#         if tid <= self[1]:
+#             return None
+#         return self
 
-class _FrozenValue(_SingleValue):
-    __slots__ = ()
-    frozen = True
+# class _FrozenValue(_SingleValue):
+#     __slots__ = ()
+#     frozen = True
 
-    def __mod__(self, tid):
-        if tid in (None, self[1]):
-            return self
+#     def __mod__(self, tid):
+#         if tid in (None, self[1]):
+#             return self
 
-    def __ilshift__(self, tid):
-        # This method can get called if two different transaction views
-        # tried to load an object at the same time and store it in the cache.
-        if tid == self[1]:
-            return self
+#     def __ilshift__(self, tid):
+#         # This method can get called if two different transaction views
+#         # tried to load an object at the same time and store it in the cache.
+#         if tid == self[1]:
+#             return self
+
+from .cache_values import SingleValue
+from .cache_values import FrozenValue
+from .cache_values import _MultipleValues as MultipleValues
 
 
 @interface.implementer(IStateCache,
@@ -372,7 +377,7 @@ class LocalClient(object):
     def __iter__(self):
         for oid, lru_entry in iteroiditems(self._cache.data):
             value = lru_entry.value
-            if isinstance(value, _MultipleValues):
+            if isinstance(value, MultipleValues):
                 for entry in value:
                     yield (oid, entry[1])
             else:
@@ -484,7 +489,7 @@ class LocalClient(object):
                     self.limit,
                     key_weight=self.key_weight,
                     value_weight=self.value_weight,
-                    empty_value=_SingleValue(b'', 0),
+                    empty_value=SingleValue(b'', 0),
                     preallocate_nodes=preallocate_nodes,
                 )
             self._peek = self._cache.peek
@@ -620,8 +625,7 @@ class LocalClient(object):
                 # This value is too big, so don't cache it.
                 continue
 
-            value = _SingleValue(state_bytes, tid)
-
+            value = SingleValue(state_bytes, tid)
             with lock:
                 existing = peek(oid)
                 if existing:
@@ -814,7 +818,7 @@ class LocalClient(object):
                 size += len(state)
                 if size > limit:
                     break
-                items.append((oid, _FrozenValue(state, actual_tid)))
+                items.append((oid, FrozenValue(state, actual_tid)))
 
             items.reverse()
             return items
