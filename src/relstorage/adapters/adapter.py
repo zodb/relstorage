@@ -34,7 +34,7 @@ from .._util import timestamp_at_unixtime
 from .._util import TRACE
 from ..options import Options
 
-from ._abstract_drivers import _select_driver
+from .drivers import _select_driver
 from .interfaces import UnableToLockRowsToModifyError
 from .interfaces import UnableToLockRowsToReadCurrentError
 

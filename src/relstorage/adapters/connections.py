@@ -308,3 +308,4 @@ class ClosedConnection(object):
         raise NotImplementedError
 
     restart_and_call = isolated_connection
+    enter_critical_phase_until_transaction_end = isolated_connection

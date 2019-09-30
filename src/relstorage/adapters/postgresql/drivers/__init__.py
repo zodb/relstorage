@@ -21,8 +21,8 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-from ..._abstract_drivers import implement_db_driver_options
-from ..._abstract_drivers import AbstractModuleDriver
+from ...drivers import implement_db_driver_options
+from ...drivers import AbstractModuleDriver
 from ...sql import DefaultDialect
 
 logger = __import__('logging').getLogger(__name__)

@@ -21,7 +21,8 @@ from __future__ import print_function
 from zope.interface import implementer
 
 from relstorage.adapters.interfaces import IDBDriver
-from relstorage.adapters._abstract_drivers import AbstractModuleDriver
+from relstorage.adapters.interfaces import IDBDriverSupportsCritical
+from relstorage.adapters.drivers import AbstractModuleDriver
 
 from relstorage._util import Lazy
 
@@ -93,6 +94,7 @@ class MySQLdbDriver(AbstractMySQLDriver):
             return False
         return True
 
+@implementer(IDBDriverSupportsCritical)
 class GeventMySQLdbDriver(MySQLdbDriver):
     __name__ = 'gevent MySQLdb'
 

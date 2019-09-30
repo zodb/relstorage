@@ -155,7 +155,7 @@ class IDBDriver(Interface):
         like that produced by `p64`.
         """
 
-    def enter_critical_phase_until_transaction_end(self, connection, cursor):
+    def enter_critical_phase_until_transaction_end(connection, cursor):
         """
         Given a connection and cursor opened by this driver, cause it
         to attempt to raise its priority and return results faster.
@@ -167,6 +167,14 @@ class IDBDriver(Interface):
         commits or aborts is sent.
         """
 
+class IDBDriverSupportsCritical(IDBDriver):
+    """
+    A marker for database drivers that support
+    critical phases.
+
+    They promise that :meth:`enter_critical_phase_until_transaction_end`
+    will do something useful.
+    """
 
 class IDBDriverFactory(Interface):
     """

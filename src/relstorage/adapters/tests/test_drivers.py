@@ -27,7 +27,7 @@ from ..interfaces import NoDriversAvailableError
 from ..interfaces import UnknownDriverError
 from ..interfaces import IDBDriverOptions
 
-from .. import _abstract_drivers as abstract_drivers
+from .. import drivers as abstract_drivers
 
 @implementer(IDBDriverOptions)
 class MockDrivers(object):

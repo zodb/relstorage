@@ -107,8 +107,8 @@ class TestTracingCacheWrapper(TestCase):
         self.assertIsNone(child.tracer)
 
     def test_get_miss(self):
-        from . import Cache
-        c = self._makeOne(lambda *args: Cache(100))
+        from . import LocalClient
+        c = self._makeOne(lambda *args: LocalClient(100))
 
         self.assertIsNone(c[(1, 0)])
 
@@ -118,14 +118,12 @@ class TestTracingCacheWrapper(TestCase):
         )
 
     def test_get_hit(self):
-        from . import Cache
-        c = self._makeOne(lambda *args: Cache(100))
-        # Deliberately mismatched tids in key and value;
-        # not the concern at this level.
-        c.cache[(1, 0)] = (b'abc', 1)
-        self.assertEqual(c[(1, 0)], (b'abc', 1))
+        from . import LocalClient
+        c = self._makeOne(lambda *args: LocalClient(100))
+        c.cache[(1, 1)] = (b'abc', 1)
+        self.assertEqual(c[(1, 1)], (b'abc', 1))
 
         self.assertEqual(
             c.tracer.trace_events,
-            [(0x22, 1, 0, 0, 3,)]
+            [(0x22, 1, 1, 0, 3,)]
         )

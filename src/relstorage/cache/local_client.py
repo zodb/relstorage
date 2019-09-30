@@ -505,13 +505,13 @@ class LocalClient(object):
         entry = self._peek(oid)
         return entry is not None and entry % tid is not None
 
-    def get(self, oid_tid, update_mru=True):
+    def get(self, oid_tid, peek=False):
         oid, tid = oid_tid
         assert tid is None or tid >= 0
         decompress = self._decompress
         value = None
 
-        if not update_mru:
+        if peek:
             # Avoid the lock. We assume the underlying
             # operations (dict.__getitem__, entry.__mod__)
             # are thread-safe, when compared to other operations
@@ -526,8 +526,7 @@ class LocalClient(object):
                     value = entry % tid
                 if value is not None:
                     self._hits += 1
-                    if update_mru:
-                        self._cache_mru(oid) # Make an actual hit.
+                    self._cache_mru(oid) # Make an actual hit.
                 else:
                     self._misses += 1
 

@@ -70,7 +70,7 @@ class MemcacheStateCache(object):
     def __oid_tid_to_key(self, oid, tid):
         return '%s:state:%d:%d' % (self.prefix, tid, oid)
 
-    def __getitem__(self, oid_tid):
+    def __getitem__(self, oid_tid, peek=False):
         oid, tid = oid_tid
         if tid is None:
             # We don't support frozen keys, only those in the index
@@ -83,6 +83,8 @@ class MemcacheStateCache(object):
             if data and len(data) >= 8:
                 actual_tid_int = u64(data[:8])
                 return data[8:], actual_tid_int
+
+    get = __getitem__
 
     def __contains__(self, oid_tid):
         return self[oid_tid] is not None

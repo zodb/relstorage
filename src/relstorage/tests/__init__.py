@@ -382,6 +382,9 @@ class MockDriver(object):
         return True
     connection_may_need_commit = connection_may_need_rollback
 
+    def enter_critical_phase_until_transaction_end(self, connection, cursor):
+        "Does nothing"
+
     def commit(self, conn):
         conn.commit()
 

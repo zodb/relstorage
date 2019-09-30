@@ -163,6 +163,11 @@ class AbstractVote(AbstractTPCState):
         mover = self.adapter.mover
         mover.store_temps(cursor, self.temp_storage)
 
+    def __enter_critical_phase_until_transaction_end(self):
+        self.load_connection.enter_critical_phase_until_transaction_end()
+        self.store_connection.enter_critical_phase_until_transaction_end()
+
+
     def _vote(self, storage):
         """
         Prepare the transaction for final commit.
@@ -232,9 +237,8 @@ class AbstractVote(AbstractTPCState):
         # boost their priority until commit so that any queries we do
         # make get serviced ASAP (some gevent drivers can actually
         # guarantee this).
-        self.load_connection.enter_critical_phase_until_transaction_end()
-        self.store_connection.enter_critical_phase_until_transaction_end()
-
+        if conflicts:
+            self.__enter_critical_phase_until_transaction_end()
         invalidated_oid_ints = self.__check_and_resolve_conflicts(storage, conflicts)
 
 
@@ -255,6 +259,8 @@ class AbstractVote(AbstractTPCState):
 
         if blobs_must_be_moved_now or LOCK_EARLY:
             logger.log(TRACE, "Locking early (for blobs? %s)", blobs_must_be_moved_now)
+            if not conflicts:
+                self.__enter_critical_phase_until_transaction_end()
             # It is crucial to do this only after locking the current
             # object rows in order to prevent deadlock. (The same order as a regular
             # transaction, just slightly sooner.)
@@ -284,7 +290,6 @@ class AbstractVote(AbstractTPCState):
            a conflict error is raised.
         """
         # pylint:disable=too-many-locals
-        cursor = self.store_connection.cursor
         adapter = self.adapter
         read_temp = self.temp_storage.read_temp
         store_temp = self.temp_storage.store_temp

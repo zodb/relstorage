@@ -507,7 +507,7 @@ class StorageCache(DetachableMVCCDatabaseViewer):
             # we're just about to overwrite it; we'd have to have multiple writers
             # all with the same initial starting TID lined up to write to the object
             # for that to have any benefit.
-            cache_data = cache_get(key, False)
+            cache_data = cache_get(key, peek=True)
             if not cache_data:
                 to_fetch.add(key[0])
             else:

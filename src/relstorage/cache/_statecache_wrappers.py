@@ -74,6 +74,14 @@ class MultiStateCache(object):
                 self.l[key] = result
         return result
 
+    def get(self, key, peek=False):
+        result = self.l.get(key, peek)
+        if not result:
+            result = self.g.get(key, peek)
+            if result:
+                self.l[key] = result
+        return result
+
     def __setitem__(self, key, value):
         self.l[key] = value
         self.g[key] = value
@@ -134,9 +142,9 @@ class TracingStateCache(object):
     def __getattr__(self, name):
         return getattr(self.cache, name)
 
-    def __getitem__(self, key):
+    def __getitem__(self, key, peek=False):
         oid_int, tid_int = key
-        cache_data = self.cache[key]
+        cache_data = self.cache.get(key, peek)
         if cache_data:
             # Note that we trace all cache hits, not just the local cache hit.
             # This makes the simulation less useful, but the stats might still have
@@ -145,6 +153,8 @@ class TracingStateCache(object):
         else:
             self._trace(0x20, oid_int)
         return cache_data
+
+    get = __getitem__
 
     def __setitem__(self, key, value):
         oid_int, _ = key
