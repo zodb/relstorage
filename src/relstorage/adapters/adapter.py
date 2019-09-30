@@ -34,7 +34,7 @@ from .._util import timestamp_at_unixtime
 from .._util import TRACE
 from ..options import Options
 
-from ._abstract_drivers import _select_driver
+from .drivers import _select_driver
 from .interfaces import UnableToLockRowsToModifyError
 from .interfaces import UnableToLockRowsToReadCurrentError
 
@@ -209,6 +209,12 @@ class AbstractAdapter(object):
         conflicts = self.mover.detect_conflict(cursor)
         return conflicts
 
+    #: Subclasses that have the ability to implement
+    #: :meth:`lock_objects_and_detect_conflicts` in a single database
+    #: call, or otherwise do better than our
+    #: :meth:`_composed_lock_objects_and_detect_conflicts` implementation,
+    #: should override this method. It *must* return a materialized list
+    #: of conflicts that supports len() and iterating multiple times.
     _best_lock_objects_and_detect_conflicts = _composed_lock_objects_and_detect_conflicts
 
     def _describe_best_lock_objects_and_detect_conflicts(self):

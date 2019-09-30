@@ -30,6 +30,11 @@ class Cache(_BaseCache):
 class LocalClient(_BaseLocalClient):
     _cache_type = Cache
 
+    def __init__(self, options, prefix=None):
+        if isinstance(options, int):
+            options = MockOptions(cache_local_mb=options)
+        super(LocalClient, self).__init__(options, prefix=prefix)
+
 def list_lrukeys(mapping, generation_name):
     # Remember, these lists will be from LRU to MRU
     return [e.key for e in getattr(mapping, generation_name)]

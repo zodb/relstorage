@@ -113,7 +113,15 @@ class IStateCache(Interface):
 
         A special tid value of None means that the client doesn't know the TID to ask
         for and wants the best available; they are then required to verify
-        that the returned object is visible.
+        that the returned object is visible (that is, within the ranges of TIDs
+        the MVCC state permits).
+        """
+
+    def get(oid_tid, peek=False): # pylint:disable=arguments-differ
+        """
+        As for :meth:`__getitem__`, but allows the caller to specify that this is
+        a "peek" operation and shouldn't affect any internal bookkeeping
+        such as statistics or most/least recently used lists.
         """
 
     def __setitem__(oid_tid, state_bytes_tid):

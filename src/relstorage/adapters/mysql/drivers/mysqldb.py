@@ -18,15 +18,13 @@ MySQLdb IDBDriver implementations.
 from __future__ import absolute_import
 from __future__ import print_function
 
-import os
-
 from zope.interface import implementer
 
 from relstorage.adapters.interfaces import IDBDriver
-from relstorage.adapters._abstract_drivers import AbstractModuleDriver
+from relstorage.adapters.interfaces import IDBDriverSupportsCritical
+from relstorage.adapters.drivers import AbstractModuleDriver
 
 from relstorage._util import Lazy
-from relstorage._util import parse_boolean
 
 from . import AbstractMySQLDriver
 from . import IterateFetchmanyMixin
@@ -96,6 +94,7 @@ class MySQLdbDriver(AbstractMySQLDriver):
             return False
         return True
 
+@implementer(IDBDriverSupportsCritical)
 class GeventMySQLdbDriver(MySQLdbDriver):
     __name__ = 'gevent MySQLdb'
 
@@ -110,16 +109,6 @@ class GeventMySQLdbDriver(MySQLdbDriver):
     # batch. Plain iteration will yield after this many rows, and return
     # rows to the caller one at a time.
     # cursor_arraysize = 1024 # We inherit cursor_arraysize from the abstract driver.
-
-    # Set this to false to allow switching on queries and fetches
-    # after we've made some sort of lock call. If you rarely have conflicts, then this
-    # provides the best throughput. Set it to true to stop gevent from switching
-    # on network traffic when locked; if you have conflicts and load issues, by
-    # allowing a single greenlet to commit faster, you may gain improvements.
-    # NOTE: This does not currently work as intended.
-    use_critical_phase_when_locked = parse_boolean(
-        os.environ.get('RS_GEVENT_NO_SWITCH_WHEN_LOCKED', "false")
-    )
 
     def __init__(self):
         super(GeventMySQLdbDriver, self).__init__()
@@ -136,13 +125,9 @@ class GeventMySQLdbDriver(MySQLdbDriver):
 
     _Connection = None
 
-    def callproc_multi_result(self, cursor, proc, args=()):
-        if self.use_critical_phase_when_locked and 'lock' in proc:
-            # We're entering a critical phase. We actually *don't* want to yield,
-            # we want to get our results back as fast as possible
-            # because other people will be waiting on us.
-            cursor.enter_critical_phase_until_transaction_end()
-        return MySQLdbDriver.callproc_multi_result(self, cursor, proc, args)
+    def enter_critical_phase_until_transaction_end(self, connection, cursor):
+        # pylint:disable=unused-argument
+        connection.enter_critical_phase_until_transaction_end()
 
     @classmethod
     def _get_connection_class(cls):

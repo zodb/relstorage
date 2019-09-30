@@ -35,6 +35,7 @@ from persistent.timestamp import TimeStamp
 from ZConfig.datatypes import asBoolean
 from ZConfig.datatypes import integer
 from ZConfig.datatypes import RangeCheckedConversion
+from ZConfig.datatypes import stock_datatypes
 
 from ZODB.utils import p64
 from ZODB.utils import u64
@@ -68,6 +69,7 @@ __all__ = [
     'consume',
     'TRACE',
     'parse_boolean',
+    'parse_byte_size',
     'positive_integer',
 ]
 
@@ -79,6 +81,8 @@ def parse_boolean(val):
     if val == '1':
         return True
     return asBoolean(val)
+
+parse_byte_size = stock_datatypes['byte-size']
 
 def timestamp_at_unixtime(now):
     """

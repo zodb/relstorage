@@ -23,6 +23,7 @@ from __future__ import print_function
 
 import time
 
+from ZODB.ConflictResolution import ConflictResolvingStorage
 from ZODB.POSException import ConflictError
 from ZODB.POSException import StorageTransactionError
 from ZODB.utils import p64 as int64_to_8bytes
@@ -162,6 +163,11 @@ class AbstractVote(AbstractTPCState):
         mover = self.adapter.mover
         mover.store_temps(cursor, self.temp_storage)
 
+    def __enter_critical_phase_until_transaction_end(self):
+        self.load_connection.enter_critical_phase_until_transaction_end()
+        self.store_connection.enter_critical_phase_until_transaction_end()
+
+
     def _vote(self, storage):
         """
         Prepare the transaction for final commit.
@@ -217,9 +223,22 @@ class AbstractVote(AbstractTPCState):
         # errors. See ``IRelStorageAdapter`` for details.
         conflicts = adapter.lock_objects_and_detect_conflicts(cursor, self.required_tids)
         self.lock_and_vote_times[0] = time.time()
-
+        # Ok, we have now taken database locks: exclusive for each old
+        # object we are updating and shared for each we wanted to
+        # read-current. From now through ``tpc_finish`` we should do
+        # our best to avoid anything that introduces unpredictable,
+        # arbitrary latencies or delays. This is especially the case
+        # if we're gevent monkey-patched: switching greenlets could
+        # take an arbitrary amount of time to get back to *this*
+        # greenlet so we can finish the job and release our locks.
+        # That means we should limit opportunities that involve IO
+        # (database queries) or even taking internal locks that may be
+        # contended. We ask both our load and store connections to
+        # boost their priority until commit so that any queries we do
+        # make get serviced ASAP (some gevent drivers can actually
+        # guarantee this), but only right before we're about to do something
+        # that could potentially be unbounded or allow switching.
         invalidated_oid_ints = self.__check_and_resolve_conflicts(storage, conflicts)
-
 
         blobs_must_be_moved_now = False
         blobhelper = self.blobhelper
@@ -258,48 +277,63 @@ class AbstractVote(AbstractTPCState):
 
         All the rows needed for detecting conflicts should be locked against
         concurrent changes.
+
+        :param conflicts: A sequence of information needed for detecting
+           and resolving conflicts:
+           ``(oid_int, committed_tid_int, tid_this_txn_saw_int, committed_state)``.
+           If ``tid_this_txn_saw_int`` is None, it was a read-current check,
+           and unless the ``committed_tid_int`` matches the expected value,
+           a conflict error is raised.
         """
         # pylint:disable=too-many-locals
-        cursor = self.store_connection.cursor
-        adapter = self.adapter
-        read_temp = self.temp_storage.read_temp
-        store_temp = self.temp_storage.store_temp
-        tryToResolveConflict = storage.tryToResolveConflict
-
-        # Detect conflicting changes.
-        # Try to resolve the conflicts.
         invalidated_oid_ints = set()
+        if not conflicts:
+            return invalidated_oid_ints
+
+        self.count_conflicts = count_conflicts = len(conflicts)
 
         # In the past, we didn't load all conflicts from the DB at
         # once, just one at a time. This was because we also fetched
         # the new state data from the DB, and it could be large (if
         # lots of conflicts). But now we use the state we have in our
         # local temp cache for the new state, so we don't need to
-        # fetch it, meaning this result will be small.
+        # fetch it, meaning this result will be small...
         #
-        # The resolution process needs three pickles: the one we tried
-        # to save, the one we're based off of, and the one currently
-        # committed. The new one is passed as a parameter; the one
-        # currently committed can optionally be passed (if not,
-        # loadSerial() is used to get it), and the one we were based
-        # off of is always loaded with loadSerial(). We *probably*
-        # have the one we're based off of already in our storage
-        # cache; the one that's currently committed is, I think, less
-        # likely to be there, so there may be some benefit from
-        # returning it in the conflict query. If we have a cache miss
-        # and have to go to the database, that's bad: we're holding
-        # object locks at this point so we're potentially blocking
-        # other transactions.
+        # ...almost. The resolution process needs three pickles: the
+        # one we tried to save, the one we're based off of, and the
+        # one currently committed. Remember we have locked objects at
+        # this point, so we need to finish ASAP to not block other
+        # transactions; in gevent, we need to also avoid giving up
+        # control to the event loop for arbitrary periods of time too
+        # as it could take a long time to get back to us.
+
+        # - The one we tried to save (the new one) is passed as a
+        # parameter. We read this from our local storage, which is
+        # probably in memory and thus fast.
+        #
+        # - The one currently committed can optionally be passed, and
+        # if not, loadSerial() is used to get it. It seems somewhat
+        # unlikely that it's not in the local pickle cache, so we
+        # probably benefit from returning it in the conflict query.
+        #
+        # - The one we were based off of is always loaded with
+        # loadSerial(). We *possibly* have the one we're based off of
+        # already in our storage cache, but there's no guarantee. So
+        # it's best to prefetch all these things in order to limit the
+        # number of database round-trips and the opportunity to block
+        # for arbitrary periods of time.
+        logger.debug("Attempting to resolve %d conflicts", count_conflicts)
+
         required_tids = self.required_tids
-        self.count_conflicts = count_conflicts = len(conflicts)
-        if count_conflicts:
-            logger.debug("Attempting to resolve %d conflicts", count_conflicts)
-
-        __traceback_info__ = conflicts, invalidated_oid_ints, cursor
-
+        old_states_to_prefetch = []
+        actual_conflicts = []
         for conflict in conflicts:
             oid_int, committed_tid_int, tid_this_txn_saw_int, committed_state = conflict
-            if tid_this_txn_saw_int is None:
+            if tid_this_txn_saw_int is not None:
+                # An actual conflict. We need the state.
+                actual_conflicts.append(conflict)
+                old_states_to_prefetch.append((oid_int, tid_this_txn_saw_int))
+            else:
                 # A readCurrent entry. Did it conflict?
                 # Note that some database adapters (MySQL) may have already raised a
                 # UnableToLockRowsToReadCurrentError indicating a conflict. That's a type
@@ -310,33 +344,57 @@ class AbstractVote(AbstractTPCState):
                         oid=int64_to_8bytes(oid_int),
                         serials=(int64_to_8bytes(committed_tid_int),
                                  int64_to_8bytes(expect_tid_int)))
-                continue
 
-            state_from_this_txn = read_temp(oid_int)
+        if not actual_conflicts:
+            # Nothing to prefetch or resolve. No need to go critical,
+            # we have no other opportunities to switch.
+            return invalidated_oid_ints
+
+        # We're probably going to need to make a database query. Elevate our
+        # priority and regain control ASAP.
+        self.__enter_critical_phase_until_transaction_end()
+        old_states_and_tids = self.cache.prefetch_for_conflicts(
+            self.load_connection.cursor,
+            old_states_to_prefetch
+        )
+
+        tryToResolveConflict = _CachedConflictResolver(
+            storage, old_states_and_tids
+        ).tryToResolveConflict
+
+        adapter = self.adapter
+        read_temp = self.temp_storage.read_temp
+        store_temp = self.temp_storage.store_temp
+
+        __traceback_info__ = conflicts, invalidated_oid_ints
+
+        for conflict in actual_conflicts:
+            oid_int, committed_tid_int, tid_this_txn_saw_int, committed_state = conflict
+            # Match the names of the arguments used
             oid = int64_to_8bytes(oid_int)
-            prev_tid = int64_to_8bytes(committed_tid_int)
-            serial = int64_to_8bytes(tid_this_txn_saw_int)
-            resolved_state = tryToResolveConflict(oid, prev_tid, serial,
-                                                  state_from_this_txn, committed_state)
+            committedSerial = int64_to_8bytes(committed_tid_int)
+            oldSerial = int64_to_8bytes(tid_this_txn_saw_int)
+            newpickle = read_temp(oid_int)
+            resolved_state = tryToResolveConflict(oid, committedSerial, oldSerial,
+                                                  newpickle, committed_state)
 
             if resolved_state is None:
                 # unresolvable; kill the whole transaction
                 raise ConflictError(
                     oid=oid,
-                    serials=(prev_tid, serial),
-                    data=state_from_this_txn
+                    serials=(oldSerial, committedSerial),
+                    data=newpickle,
                 )
 
             # resolved
             invalidated_oid_ints.add(oid_int)
             store_temp(oid_int, resolved_state, committed_tid_int)
 
-        if invalidated_oid_ints:
-            # We resolved some conflicts, so we need to send them over to the database.
-            adapter.mover.replace_temps(
-                cursor,
-                self.temp_storage.iter_for_oids(invalidated_oid_ints)
-            )
+        # We resolved some conflicts, so we need to send them over to the database.
+        adapter.mover.replace_temps(
+            self.store_connection.cursor,
+            self.temp_storage.iter_for_oids(invalidated_oid_ints)
+        )
 
         return invalidated_oid_ints
 
@@ -370,6 +428,13 @@ class AbstractVote(AbstractTPCState):
             kwargs['after_selecting_tid'] = lambda tid_int: blob_meth(int64_to_8bytes(tid_int))
             kwargs['commit'] = False
 
+        if vote_only or self.adapter.DEFAULT_LOCK_OBJECTS_AND_DETECT_CONFLICTS_INTERLEAVABLE:
+            # If we're going to have to make two trips to the database, one to lock it and get a
+            # tid and then one to commit and release locks, either because we're
+            # just voting right now, not committing, or because the database doesn't
+            # support doing that in a single operation, we need to go critical and
+            # regain control ASAP so we can complete the operation.
+            self.__enter_critical_phase_until_transaction_end()
         committing_tid_int, prepared_txn = self.adapter.lock_database_and_move(
             self.store_connection,
             self.blobhelper,
@@ -503,3 +568,18 @@ class HistoryPreservingDeleteOnly(HistoryPreserving):
             self.committing_tid_lock.tid_int
         )
         return False
+
+
+class _CachedConflictResolver(ConflictResolvingStorage):
+
+    def __init__(self, storage, old_states_and_tids):
+        self._old_states_and_tids = old_states_and_tids
+        self._crs_transform_record_data = storage._crs_transform_record_data
+        self._crs_untransform_record_data = storage._crs_untransform_record_data
+
+    def loadSerial(self, oid, serial):
+        state, tid = self._old_states_and_tids[bytes8_to_int64(oid)]
+        if not bytes8_to_int64(serial) == tid: # pragma: no cover
+            # This should not be possible
+            raise AssertionError("Load connection got invalid old state.")
+        return state

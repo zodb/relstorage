@@ -155,6 +155,30 @@ class IDBDriver(Interface):
         like that produced by `p64`.
         """
 
+    def enter_critical_phase_until_transaction_end(connection, cursor):
+        """
+        Given a connection and cursor opened by this driver, cause it
+        to attempt to raise its priority and return results faster.
+
+        This mostly has meaning for gevent drivers, which may limit
+        the amount of time they spend in the hub.
+
+        This phase continues until *after* the ultimate call that
+        commits or aborts is sent.
+
+        This method must be idempotent (have the same effect if called more than
+        once) within a given transaction.
+        """
+
+class IDBDriverSupportsCritical(IDBDriver):
+    """
+    A marker for database drivers that support
+    critical phases.
+
+    They promise that :meth:`enter_critical_phase_until_transaction_end`
+    will do something useful.
+    """
+
 class IDBDriverFactory(Interface):
     """
     Information about, and a way to get, an `IDBDriver`
@@ -509,6 +533,11 @@ class IManagedDBConnection(Interface):
             on the first try.
 
         :return: The return value of ``f``.
+        """
+
+    def enter_critical_phase_until_transaction_end():
+        """
+        As for :meth:`IDBDriver.enter_critical_phase_until_transaction_end`.
         """
 
 class IManagedLoadConnection(IManagedDBConnection):

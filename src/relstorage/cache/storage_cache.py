@@ -495,6 +495,31 @@ class StorageCache(DetachableMVCCDatabaseViewer):
             cache[key] = (state, tid_int)
             index[oid] = tid_int
 
+    def prefetch_for_conflicts(self, cursor, oid_tid_pairs):
+        results = {}
+        to_fetch = OIDSet()
+        cache_get = self.cache.get
+
+        for key in oid_tid_pairs:
+            # Don't update stats/MRU, just as with normal prefetch().
+            # It's also important here to avoid taking the lock.
+            # We don't store this prefetched data back into the cache because
+            # we're just about to overwrite it; we'd have to have multiple writers
+            # all with the same initial starting TID lined up to write to the object
+            # for that to have any benefit.
+            cache_data = cache_get(key, peek=True)
+            if not cache_data:
+                to_fetch.add(key[0])
+            else:
+                results[key[0]] = cache_data
+
+        if to_fetch:
+            for oid, state, tid_int in self.adapter.mover.load_currents(cursor, to_fetch):
+                results[oid] = (state, tid_int)
+
+        return results
+
+
     def remove_cached_data(self, oid_int, tid_int):
         """
         See notes in `invalidate_all`.

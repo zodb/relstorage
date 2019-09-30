@@ -23,8 +23,8 @@ from __future__ import print_function
 from zope.interface import implementer
 
 
-from .._abstract_drivers import AbstractModuleDriver
-from .._abstract_drivers import implement_db_driver_options
+from ..drivers import AbstractModuleDriver
+from ..drivers import implement_db_driver_options
 from ..interfaces import IDBDriver
 from .dialect import OracleDialect
 
