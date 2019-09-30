@@ -102,6 +102,7 @@ class Connection(BaseConnection):
     # pylint:disable=method-hidden
 
     def enter_critical_phase_until_transaction_end(self):
+        # Must be idempotent
         self.commit = self._critical_commit
         self.rollback = self._critical_rollback
         self.query = self._critical_query

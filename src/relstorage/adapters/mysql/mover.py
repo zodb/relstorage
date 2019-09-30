@@ -106,6 +106,9 @@ class MySQLObjectMover(AbstractObjectMover):
     # more similar to what PostgreSQL uses, possibly allowing more
     # query sharing (with a smarter query runner/interpreter).
 
+    # TODO: Some drivers (mysqlclient) have a pretty good executemany()
+    # implementation that works with iterators. We could use that
+    # instead of our generic RowBatcher here.
     def store_temp(self, cursor, batcher, oid, prev_tid, data):
         suffix = """
         ON DUPLICATE KEY UPDATE

@@ -236,11 +236,9 @@ class AbstractVote(AbstractTPCState):
         # contended. We ask both our load and store connections to
         # boost their priority until commit so that any queries we do
         # make get serviced ASAP (some gevent drivers can actually
-        # guarantee this).
-        if conflicts:
-            self.__enter_critical_phase_until_transaction_end()
+        # guarantee this), but only right before we're about to do something
+        # that could potentially be unbounded or allow switching.
         invalidated_oid_ints = self.__check_and_resolve_conflicts(storage, conflicts)
-
 
         blobs_must_be_moved_now = False
         blobhelper = self.blobhelper
@@ -259,8 +257,6 @@ class AbstractVote(AbstractTPCState):
 
         if blobs_must_be_moved_now or LOCK_EARLY:
             logger.log(TRACE, "Locking early (for blobs? %s)", blobs_must_be_moved_now)
-            if not conflicts:
-                self.__enter_critical_phase_until_transaction_end()
             # It is crucial to do this only after locking the current
             # object rows in order to prevent deadlock. (The same order as a regular
             # transaction, just slightly sooner.)
@@ -290,14 +286,11 @@ class AbstractVote(AbstractTPCState):
            a conflict error is raised.
         """
         # pylint:disable=too-many-locals
-        adapter = self.adapter
-        read_temp = self.temp_storage.read_temp
-        store_temp = self.temp_storage.store_temp
-        tryToResolveConflict = storage.tryToResolveConflict
-
-        # Detect conflicting changes.
-        # Try to resolve the conflicts.
         invalidated_oid_ints = set()
+        if not conflicts:
+            return invalidated_oid_ints
+
+        self.count_conflicts = count_conflicts = len(conflicts)
 
         # In the past, we didn't load all conflicts from the DB at
         # once, just one at a time. This was because we also fetched
@@ -329,42 +322,49 @@ class AbstractVote(AbstractTPCState):
         # it's best to prefetch all these things in order to limit the
         # number of database round-trips and the opportunity to block
         # for arbitrary periods of time.
+        logger.debug("Attempting to resolve %d conflicts", count_conflicts)
 
         required_tids = self.required_tids
-        self.count_conflicts = count_conflicts = len(conflicts)
-        if not count_conflicts:
-            actual_conflicts = ()
-        else:
-            logger.debug("Attempting to resolve %d conflicts", count_conflicts)
-            old_states_to_prefetch = []
-            actual_conflicts = []
-            for conflict in conflicts:
-                oid_int, committed_tid_int, tid_this_txn_saw_int, committed_state = conflict
-                if tid_this_txn_saw_int is not None:
-                    # An actual conflict. We need the state.
-                    actual_conflicts.append(conflict)
-                    old_states_to_prefetch.append((oid_int, tid_this_txn_saw_int))
-                else:
-                    # A readCurrent entry. Did it conflict?
-                    # Note that some database adapters (MySQL) may have already raised a
-                    # UnableToLockRowsToReadCurrentError indicating a conflict. That's a type
-                    # of ReadConflictError like this.
-                    expect_tid_int = required_tids[oid_int]
-                    if committed_tid_int != expect_tid_int:
-                        raise VoteReadConflictError(
-                            oid=int64_to_8bytes(oid_int),
-                            serials=(int64_to_8bytes(committed_tid_int),
-                                     int64_to_8bytes(expect_tid_int)))
+        old_states_to_prefetch = []
+        actual_conflicts = []
+        for conflict in conflicts:
+            oid_int, committed_tid_int, tid_this_txn_saw_int, committed_state = conflict
+            if tid_this_txn_saw_int is not None:
+                # An actual conflict. We need the state.
+                actual_conflicts.append(conflict)
+                old_states_to_prefetch.append((oid_int, tid_this_txn_saw_int))
+            else:
+                # A readCurrent entry. Did it conflict?
+                # Note that some database adapters (MySQL) may have already raised a
+                # UnableToLockRowsToReadCurrentError indicating a conflict. That's a type
+                # of ReadConflictError like this.
+                expect_tid_int = required_tids[oid_int]
+                if committed_tid_int != expect_tid_int:
+                    raise VoteReadConflictError(
+                        oid=int64_to_8bytes(oid_int),
+                        serials=(int64_to_8bytes(committed_tid_int),
+                                 int64_to_8bytes(expect_tid_int)))
 
-            old_states_and_tids = self.cache.prefetch_for_conflicts(
-                self.load_connection.cursor,
-                old_states_to_prefetch
-            )
+        if not actual_conflicts:
+            # Nothing to prefetch or resolve. No need to go critical,
+            # we have no other opportunities to switch.
+            return invalidated_oid_ints
 
-            tryToResolveConflict = _CachedConflictResolver(
-                storage, old_states_and_tids
-            ).tryToResolveConflict
+        # We're probably going to need to make a database query. Elevate our
+        # priority and regain control ASAP.
+        self.__enter_critical_phase_until_transaction_end()
+        old_states_and_tids = self.cache.prefetch_for_conflicts(
+            self.load_connection.cursor,
+            old_states_to_prefetch
+        )
 
+        tryToResolveConflict = _CachedConflictResolver(
+            storage, old_states_and_tids
+        ).tryToResolveConflict
+
+        adapter = self.adapter
+        read_temp = self.temp_storage.read_temp
+        store_temp = self.temp_storage.store_temp
 
         __traceback_info__ = conflicts, invalidated_oid_ints
 
@@ -390,12 +390,11 @@ class AbstractVote(AbstractTPCState):
             invalidated_oid_ints.add(oid_int)
             store_temp(oid_int, resolved_state, committed_tid_int)
 
-        if invalidated_oid_ints:
-            # We resolved some conflicts, so we need to send them over to the database.
-            adapter.mover.replace_temps(
-                self.store_connection.cursor,
-                self.temp_storage.iter_for_oids(invalidated_oid_ints)
-            )
+        # We resolved some conflicts, so we need to send them over to the database.
+        adapter.mover.replace_temps(
+            self.store_connection.cursor,
+            self.temp_storage.iter_for_oids(invalidated_oid_ints)
+        )
 
         return invalidated_oid_ints
 
@@ -429,6 +428,13 @@ class AbstractVote(AbstractTPCState):
             kwargs['after_selecting_tid'] = lambda tid_int: blob_meth(int64_to_8bytes(tid_int))
             kwargs['commit'] = False
 
+        if vote_only or self.adapter.DEFAULT_LOCK_OBJECTS_AND_DETECT_CONFLICTS_INTERLEAVABLE:
+            # If we're going to have to make two trips to the database, one to lock it and get a
+            # tid and then one to commit and release locks, either because we're
+            # just voting right now, not committing, or because the database doesn't
+            # support doing that in a single operation, we need to go critical and
+            # regain control ASAP so we can complete the operation.
+            self.__enter_critical_phase_until_transaction_end()
         committing_tid_int, prepared_txn = self.adapter.lock_database_and_move(
             self.store_connection,
             self.blobhelper,

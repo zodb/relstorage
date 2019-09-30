@@ -17,6 +17,7 @@ from collections import defaultdict
 import itertools
 
 from relstorage._compat import iteritems
+from relstorage._util import parse_byte_size
 
 
 class RowBatcher(object):
@@ -30,8 +31,12 @@ class RowBatcher(object):
     can be set in the ``delete_placeholder`` attribute.
     """
 
-    row_limit = 100
-    size_limit = 1 << 20
+    row_limit = 1024
+    # The default max_allowed_packet in MySQL is 4MB,
+    # so the data, including encoding and the rest of the query structure,
+    # must be less than that (unless we dynamically query to find out
+    # what value we have)
+    size_limit = parse_byte_size('2 MB')
     delete_placeholder = '%s'
     # For testing, force the delete order to be deterministic
     # when multiple columns are involved

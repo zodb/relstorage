@@ -165,6 +165,9 @@ class IDBDriver(Interface):
 
         This phase continues until *after* the ultimate call that
         commits or aborts is sent.
+
+        This method must be idempotent (have the same effect if called more than
+        once) within a given transaction.
         """
 
 class IDBDriverSupportsCritical(IDBDriver):

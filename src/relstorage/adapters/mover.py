@@ -241,7 +241,7 @@ class AbstractObjectMover(ABC):
             "%s, %s, %s, %s",
             (oid, prev_tid, md5sum, self.driver.Binary(data)),
             rowkey=oid,
-            size=len(data),
+            size=len(data) + 32,
             command=command,
             suffix=suffix
         )
