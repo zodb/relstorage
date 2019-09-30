@@ -24,6 +24,7 @@ import itertools
 
 from zope import interface
 
+from relstorage._compat import IN_TESTRUNNER
 from relstorage._compat import OID_OBJECT_MAP_TYPE as OidOMap
 from relstorage.cache.interfaces import IGenerationalLRUCache
 from relstorage.cache.interfaces import IGeneration
@@ -67,7 +68,9 @@ class CFFICache(GenerationalCacheBase):
     # especially, or large cache sizes) because when zodbshootout clears caches,
     # our implementation throws this object all away, and then allocates again.
     # Meanwhile, all the old objects have to be GC'd.
-    _preallocate_entries = True
+    # So we disable it (unless explicitly requested) in test mode, where it
+    # was accounting for about 42s out of 142s
+    _preallocate_entries = not IN_TESTRUNNER
     # If so, how many? Try to get enough to fill the cache assuming objects are
     # this size on average
     _preallocate_avg_size = 512
@@ -95,7 +98,8 @@ class CFFICache(GenerationalCacheBase):
 
     def __init__(self, byte_limit,
                  key_weight=len, value_weight=len,
-                 empty_value=(b'', 0)):
+                 empty_value=(b'', 0),
+                 preallocate_nodes=None):
         # This holds all the ring entries, no matter which ring they are in.
 
         # We experimented with using OOBTree and LOBTree for the type
@@ -114,6 +118,8 @@ class CFFICache(GenerationalCacheBase):
 
         self.data = self._dict_type()
         self.get = self.data.get
+        if preallocate_nodes is not None:
+            self._preallocate_entries = preallocate_nodes
 
         generations = self.create_generations(
             eden_limit=int(byte_limit * self._gen_eden_pct),
@@ -152,6 +158,9 @@ class CFFICache(GenerationalCacheBase):
 
     def __contains__(self, key):
         return key in self.data
+
+    def __bool__(self):
+        return bool(self.data)
 
     def __setitem__(self, key, value):
         entry = self.get(key)

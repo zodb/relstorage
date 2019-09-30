@@ -138,6 +138,7 @@ class StorageCreatingMixin(ABC):
 
     keep_history = None # Override
     driver_name = None # Override.
+    zap_slow = False # Override
 
     @abc.abstractmethod
     def make_adapter(self, options):
@@ -202,15 +203,7 @@ class StorageCreatingMixin(ABC):
         adapter = self.make_adapter(options)
         storage = RelStorage(adapter, options=options)
         if zap:
-            # XXX: Some ZODB tests, possibly check4ExtStorageThread
-            # and check7StorageThreads don't close storages when done
-            # with them? This leads to connections remaining open with
-            # locks on PyPy, so on PostgreSQL we can't TRUNCATE tables
-            # and have to go the slow route.
-            #
-            # As of 2019-06-20 with PyPy 7.1.1, I'm no longer able to replicate
-            # a problem like that locally, so we go back to the fast way.
-            storage.zap_all()
+            storage.zap_all(slow=self.zap_slow)
         return self._wrap_storage(storage)
 
 class MockConnection(object):

@@ -35,6 +35,14 @@ from .util import DEFAULT_DATABASE_SERVER_HOST
 
 class MySQLAdapterMixin(object):
 
+    # The MySQL schema adapter uses DROP TABLE
+    # and then CREATE TABLE to zap when ``zap_all(slow=True)``.
+    # This is *much* faster than ``DELETE FROM`` on large
+    # databases (since we can't use truncate.). But for small databases,
+    # it adds lots of extra overhead to re-create those tables all the
+    # time, and ``DELETE FROM`` is the way to go.
+    zap_slow = True
+
     def __get_db_name(self):
         if self.keep_history:
             db = self.base_dbname

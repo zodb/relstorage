@@ -48,7 +48,7 @@ class Client(object):
         data[key] = value
         return value
 
-    def flush_all(self):
+    def flush_all(self, **_kwargs):
         data.clear()
 
     def disconnect_all(self):

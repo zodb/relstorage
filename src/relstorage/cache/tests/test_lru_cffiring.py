@@ -99,11 +99,12 @@ class GenericLRUCacheTests(TestCase):
         from . import Cache
         return Cache
 
-    def _makeOne(self, limit, kind=None):
+    def _makeOne(self, limit, kind=None, preallocate_nodes=True):
         kind = kind or self._getClass()
         return kind(limit,
                     key_weight=self.key_weight,
-                    value_weight=self.value_weight)
+                    value_weight=self.value_weight,
+                    preallocate_nodes=preallocate_nodes)
 
     def _getIface(self):
         return interfaces.ILRUCache

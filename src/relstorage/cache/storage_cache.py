@@ -252,7 +252,7 @@ class StorageCache(DetachableMVCCDatabaseViewer):
     def restore(self):
         # We must only restore into an empty cache.
         state = self.polling_state
-        assert not len(self.local_client) # pylint:disable=len-as-condition
+        assert not self.local_client
         state.restore(self.adapter, self.local_client)
 
     def _reset(self, message=None):
@@ -298,8 +298,8 @@ class StorageCache(DetachableMVCCDatabaseViewer):
         other instances, and globally); in addition, remove any
         persistent cache files on disk.
         """
-        self.clear(load_persistent=False)
         self.local_client.zap_all()
+        self.clear(load_persistent=False)
 
     def _check_tid_after_load(self, oid_int, actual_tid_int,
                               expect_tid_int=None):

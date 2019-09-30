@@ -240,15 +240,22 @@ class AbstractTestSuiteBuilder(object):
         return suite
 
     def _default_make_check_class(self, bases, name, klass_dict=None):
+        base_klass_dict = self._make_base_klass_dict()
+        if klass_dict:
+            base_klass_dict.update(klass_dict)
+
         klass = type(
             name,
             (self.use_adapter,) + bases,
-            klass_dict or {}
+            base_klass_dict
         )
 
         return klass
 
     _default_make_test_class = _default_make_check_class
+
+    def _make_base_klass_dict(self):
+        return {}
 
     def __make_test_class(self, base, extra_bases, maker_base_name, maker_default, klass_dict=None):
         name = self.__name__ + base.__name__

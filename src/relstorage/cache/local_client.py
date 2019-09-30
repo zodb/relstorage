@@ -456,6 +456,10 @@ class LocalClient(object):
     def zap_all(self):
         _, destroy = sqlite_files(self.options, self.prefix)
         destroy()
+        # zapping happens frequently during test runs,
+        # and during zodbconvert when the process will exist
+        # only for a short time.
+        self.flush_all(False)
 
     @staticmethod
     def key_weight(_):
@@ -468,14 +472,21 @@ class LocalClient(object):
         # weight is the size of the state
         return value.weight
 
-    def flush_all(self):
+    def flush_all(self, preallocate_nodes=None):
         with self._lock:
-            self._cache = self._cache_type(
-                self.limit,
-                key_weight=self.key_weight,
-                value_weight=self.value_weight,
-                empty_value=_SingleValue(b'', 0)
-            )
+            if self._cache or self._cache is None:
+                # Only actually abandon the cache object
+                # if it has data. Otherwise let it keep the
+                # preallocated CFFI objects it may have
+                # (those are expensive to create and tests call
+                # this a LOT)
+                self._cache = self._cache_type(
+                    self.limit,
+                    key_weight=self.key_weight,
+                    value_weight=self.value_weight,
+                    empty_value=_SingleValue(b'', 0),
+                    preallocate_nodes=preallocate_nodes,
+                )
             self._peek = self._cache.peek
             self._cache_mru = self._cache.__getitem__
             self._min_allowed_writeback = OidTMap()
