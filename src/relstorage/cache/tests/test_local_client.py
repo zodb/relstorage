@@ -75,8 +75,7 @@ class LocalClientStrKeysValuesGenerationalTests(TestCase):
         # and probation each can hold one item, while protected can hold 4,
         # so our max size will be 60
         c.limit = 51
-
-        c._cache = 1
+        setattr(c, '_cache', True) # Avoid type inference warnings
         c.flush_all(preallocate_nodes=True)
 
         list_lrukeys = partial(list_lrukeys_, c._cache)
