@@ -17,25 +17,57 @@ from cython.operator cimport dereference as deref
 from cython.operator import postincrement as postinc
 
 from libcpp.memory cimport shared_ptr
+from libcpp.memory cimport make_shared
+from libcpp.memory cimport dynamic_pointer_cast
+from libcpp.pair cimport pair
+from libcpp.string cimport string
 
 from relstorage.cache.lru_cache cimport TID_t
 from relstorage.cache.lru_cache cimport OID_t
+from relstorage.cache.lru_cache cimport Pickle_t
 from relstorage.cache.lru_cache cimport SingleValueEntry
 from relstorage.cache.lru_cache cimport SingleValueEntry_p
+from relstorage.cache.lru_cache cimport AbstractEntry
+from relstorage.cache.lru_cache cimport AbstractEntry_p
 from relstorage.cache.lru_cache cimport MultipleValueEntry
 
 from relstorage.cache.interfaces import CacheConsistencyError
 
-cdef SingleValue value_from_entry(SingleValueEntry_p entry):
+cdef object value_from_entry(const AbstractEntry_p& entry):
+    cdef SingleValueEntry_p sve_p
+    cdef MultipleValueEntry_p mve_p
+
     cdef SingleValue sv
-    cdef FrozenValue fv
-    if entry.get().frozen:
-        fv = FrozenValue.__new__(FrozenValue, -1, SingleValue, 0, True)
-        sv = fv
-    else:
-        sv = SingleValue.__new__(SingleValue, -1, SingleValue, 0, False)
-    sv.entry = entry
-    return sv
+    cdef MultipleValues mv
+
+    sve_p = dynamic_pointer_cast[SingleValueEntry, AbstractEntry](entry)
+    if sve_p:
+        if sve_p.get().frozen:
+            sv = FrozenValue.from_entry(sve_p)
+        else:
+            sv = SingleValue.from_entry(sve_p)
+        return sv
+
+    mve_p = dynamic_pointer_cast[MultipleValueEntry, AbstractEntry](entry)
+    if not mve_p:
+        print("Unable to get object type", entry.get().key)
+        raise AssertionError("Invalid pointer cast", entry.get().key)
+    return MultipleValues.from_entry(mve_p)
+
+cdef object python_from_sve(SingleValueEntry_p& entry):
+    cdef AbstractEntry_p ae = dynamic_pointer_cast[AbstractEntry, SingleValueEntry](entry)
+    return value_from_entry(ae)
+
+cdef AbstractEntry_p entry_from_python(object value) except *:
+    cdef SingleValue sv
+    cdef MultipleValues mv
+    if isinstance(value, SingleValue):
+        sv = <SingleValue>value
+        return dynamic_pointer_cast[AbstractEntry, SingleValueEntry](sv.entry)
+    if isinstance(value, MultipleValues):
+        mv = <MultipleValues>value
+        return dynamic_pointer_cast[AbstractEntry, MultipleValueEntry](mv.entry)
+    raise TypeError("Object %r is not a cache value" % (value,))
 
 # Memory management notes:
 #
@@ -49,21 +81,33 @@ cdef SingleValue value_from_entry(SingleValueEntry_p entry):
 # So we could use them between SingleValue and FrozenValue if we
 # implemented the later with composition.
 
+@cython.internal
 cdef class SingleValue:
+    cdef SingleValueEntry_p entry
     frozen = False
 
-    def __cinit__(self, OID_t oid, object state, TID_t tid, bint frozen):
-        cdef SingleValueEntry* entry
+    def __cinit__(self, OID_t oid, object state, TID_t tid, bint frozen=False):
         if state is SingleValue:
             # Marker passed in from value_from_entry
             # not to do anything, we're shared.
             return
+
+
+        # implicit cast and copy state from bytes to std::string.
+        self.entry = SingleValue.make_shared(oid, state, tid, frozen)
+
+    @staticmethod
+    cdef SingleValueEntry_p make_shared(OID_t oid, object state, TID_t tid, bint frozen=False):
         if state is None:
             state = b''
 
-        # implicit cast and copy state from bytes to std::string.
-        entry = new SingleValueEntry(oid, state, tid, frozen)
-        self.entry.reset(entry)
+        return make_shared[SingleValueEntry](oid, pair[Pickle_t, TID_t](state, tid), frozen)
+
+    @staticmethod
+    cdef SingleValue from_entry(const SingleValueEntry_p& entry):
+        cdef SingleValue sv = SingleValue.__new__(SingleValue, 0, SingleValue, 0, 0)
+        sv.entry = entry
+        return sv
 
     def __iter__(self):
         value = self.entry.get()
@@ -71,6 +115,18 @@ cdef class SingleValue:
             value.state,
             value.tid
         ))
+
+    @property
+    def frequency(self):
+        return self.entry.get().frequency()
+
+    @property
+    def state(self):
+        return self.entry.get().state
+
+    @property
+    def tid(self):
+        return self.entry.get().tid
 
     @property
     def max_tid(self):
@@ -114,25 +170,32 @@ cdef class SingleValue:
         if entry.tid > tid:
             return self
         if tid == entry.tid:
-            fv = FrozenValue.__new__(FrozenValue, b'', 0)
-            fv.entry = self.entry
+            fv = FrozenValue.from_entry(self.entry)
+            # We are discarding ourself now, but preserving this item's
+            # location in the generations. This is the only reason that
+            # Entry.frozen is mutable.
+            fv.entry.get().frozen = True
             return fv
         # if we're older, fall off the end and discard.
 
-    def __iadd__(self, SingleValue value):
-        if (self.entry.get().state == value.entry.get().state
-            and self.entry.get().tid == value.entry.get().tid):
-            return value # Let us become frozen if desired.
+    def __iadd__(self, tuple value):
+        cdef bytes state = value[0] or b''
+        cdef TID_t tid = value[1]
+        cdef SingleValueEntry* sve = self.entry.get()
+        cdef bint state_equal = state == <bytes>sve.state
+        cdef bint tid_equal = tid == sve.tid
 
-        if (value.entry.get().tid == self.entry.get().tid and
-            value.entry.get().state != self.entry.get().state):
+        if (state_equal and tid_equal):
+            return self
+
+        if (not state_equal and tid_equal):
             raise CacheConsistencyError(
                 "Detected two different values for same TID",
                 self,
                 value
             )
 
-        return _MultipleValues.__new__(_MultipleValues, self, value)
+        return MultipleValues.__new__(MultipleValues, self, state, tid)
 
     def __isub__(self, TID_t tid):
         if tid <= self.entry.get().tid:
@@ -147,12 +210,25 @@ cdef class SingleValue:
         raise IndexError
 
     def __repr__(self):
-        return repr(tuple(self))
+        return "%s(%r, %s, frozen=%s)" % (
+            self.__class__.__name__,
+            self.state,
+            self.tid,
+            self.frozen,
+        )
 
 @cython.final
+@cython.internal
 cdef class FrozenValue(SingleValue):
 
     frozen = True
+
+    @staticmethod
+    cdef SingleValue from_entry(const SingleValueEntry_p& entry):
+        cdef FrozenValue sv = FrozenValue.__new__(FrozenValue, 0, SingleValue, 0, 0)
+        sv.entry = entry
+        return sv
+
 
     def __mod__(self, tid):
         cdef SingleValue me
@@ -170,18 +246,32 @@ cdef class FrozenValue(SingleValue):
         if tid == self.entry.get().tid:
             return self
 
-cdef class _MultipleValues:
+@cython.final
+@cython.freelist(100)
+@cython.internal
+cdef class MultipleValues:
+    cdef MultipleValueEntry_p entry
 # TODO: we should keep this sorted by tid, yes?
 # A std::map<tid, SingleValueEntry_p> sounds almost ideal
 # for accessing max_tid and newest_value, except for whatever space
 # overhead that adds.
-    cdef shared_ptr[MultipleValueEntry] entry
 
-    def __cinit__(self, SingleValue mv1, SingleValue mv2):
-        entry = new MultipleValueEntry(mv1.entry.get().key)
-        self.entry.reset(entry)
-        entry.push_back(mv1.entry)
-        entry.push_back(mv2.entry)
+    def __cinit__(self, SingleValue mv1, bytes state2, TID_t tid2):
+        if mv1 is not None:
+            self.entry = make_shared[MultipleValueEntry](mv1.entry.get().key)
+            self.entry.get().push_back(mv1.entry)
+            self.entry.get().push_back(SingleValue.make_shared(mv1.entry.get().key,
+                                                               state2, tid2))
+
+    @staticmethod
+    cdef MultipleValues from_entry(const MultipleValueEntry_p& entry):
+        cdef MultipleValues mv = MultipleValues.__new__(MultipleValues, None, None, 0)
+        mv.entry = entry
+        return mv
+
+    @property
+    def frequency(self):
+        return self.entry.get().frequency()
 
     @property
     def weight(self):
@@ -207,14 +297,14 @@ cdef class _MultipleValues:
         for p in values:
             if p.get().tid > entry.get().tid:
                 entry = p
-        return value_from_entry(entry)
+        return python_from_sve(entry)
 
     def __mod__(self, tid):
-        cdef _MultipleValues me = <_MultipleValues>self
+        cdef MultipleValues me = <MultipleValues>self
         cdef SingleValue result
         values = me.entry.get().p_values
         for entry in values:
-            result = value_from_entry(entry).__mod__(tid)
+            result = python_from_sve(entry).__mod__(tid)
             if result is not None:
                 return result
         return None
@@ -236,7 +326,7 @@ cdef class _MultipleValues:
         if entry.p_values.size() == 1:
             # One item, either it or not
             sve_p = entry.p_values.front()
-            result = value_from_entry(sve_p)
+            result = python_from_sve(sve_p)
             result <<= tid
             return result
 
@@ -247,15 +337,16 @@ cdef class _MultipleValues:
             sve_p = deref(begin)
             if sve_p.get().tid == tid:
                 entry.p_values.erase(begin)
-                value = value_from_entry(sve_p)
+                value = python_from_sve(sve_p)
                 value <<= tid
                 entry.p_values.insert(begin, (<SingleValue>value).entry)
                 break
             postinc(begin)
         return self
 
-    def __iadd__(self, SingleValue value):
-        self.entry.get().push_back(value.entry)
+    def __iadd__(self, tuple value):
+
+        self.entry.get().push_back(SingleValue.make_shared(self.key, value[0], value[1]))
         return self
 
     def __isub__(self, TID_t tid):
@@ -265,13 +356,13 @@ cdef class _MultipleValues:
             return None
 
         if self.entry.get().p_values.size() == 1:
-            return value_from_entry(self.entry.get().p_values.front())
+            return python_from_sve(self.entry.get().p_values.front())
 
         return self
 
     def __iter__(self):
         return iter([
-            value_from_entry(v)
+            python_from_sve(v)
             for v
             in self.entry.get().p_values
         ])

@@ -283,9 +283,9 @@ class ICachedValue(interface.Interface):
 #         if tid == self[1]:
 #             return self
 
-from .cache_values import SingleValue
-from .cache_values import FrozenValue
-from .cache_values import _MultipleValues as MultipleValues
+# from .cache_values import SingleValue
+# from .cache_values import FrozenValue
+# from .cache_values import _MultipleValues as MultipleValues
 
 
 @interface.implementer(IStateCache,
@@ -375,13 +375,7 @@ class LocalClient(object):
         return len(self._cache)
 
     def __iter__(self):
-        for oid, lru_entry in iteroiditems(self._cache.data):
-            value = lru_entry.value
-            if isinstance(value, MultipleValues):
-                for entry in value:
-                    yield (oid, entry[1])
-            else:
-                yield (oid, value[1])
+        return iter(self._cache)
 
     def keys(self):
         return self._cache.data.keys()
@@ -466,17 +460,6 @@ class LocalClient(object):
         # only for a short time.
         self.flush_all(False)
 
-    @staticmethod
-    def key_weight(_):
-        # All keys are equally weighted, and we don't count them.
-        return 0
-
-    @staticmethod
-    def value_weight(value):
-        # Values are the (state, actual_tid) pairs, or lists of the same, and their
-        # weight is the size of the state
-        return value.weight
-
     def flush_all(self, preallocate_nodes=None):
         with self._lock:
             if self._cache or self._cache is None:
@@ -487,10 +470,6 @@ class LocalClient(object):
                 # this a LOT)
                 self._cache = self._cache_type(
                     self.limit,
-                    key_weight=self.key_weight,
-                    value_weight=self.value_weight,
-                    empty_value=SingleValue(b'', 0),
-                    preallocate_nodes=preallocate_nodes,
                 )
             self._peek = self._cache.peek
             self._cache_mru = self._cache.__getitem__
@@ -625,7 +604,7 @@ class LocalClient(object):
                 # This value is too big, so don't cache it.
                 continue
 
-            value = SingleValue(state_bytes, tid)
+            value = (state_bytes, tid)
             with lock:
                 existing = peek(oid)
                 if existing:
@@ -662,17 +641,7 @@ class LocalClient(object):
         For each OID/TID pair in the items, remove all cached values
         for OID that are older than TID.
         """
-        peek = self._peek
-        replace = self._cache.replace_or_remove_smaller_value
-        min_allowed = self._min_allowed_writeback
-        with self._lock:
-            for oid, expected_tid in iteroiditems(oids_tids):
-                entry = peek(oid)
-                if entry is not None:
-                    entry -= expected_tid
-                    replace(oid, entry)
-                if expected_tid > min_allowed.get(oid, MAX_TID):
-                    min_allowed[oid] = expected_tid
+        self._cache.delitems(oids_tids)
 
     def invalidate_all(self, oids):
         min_allowed = self._min_allowed_writeback
@@ -688,18 +657,7 @@ class LocalClient(object):
                         min_allowed[oid] = tid
 
     def freeze(self, oids_tids):
-        # The idea is to *move* the data, or make it available,
-        # *without* copying it.
-        replace = self._cache.replace_or_remove_smaller_value
-        peek = self._peek
-        with self._lock:
-            # This shuffles them around the LRU order. We probably don't actually
-            # want to do that.
-            for oid, tid in iteroiditems(oids_tids):
-                entry = peek(oid)
-                if entry is not None:
-                    entry <<= tid
-                    replace(oid, entry)
+        self._cache.freeze(oids_tids)
 
     def close(self):
         pass
@@ -818,8 +776,9 @@ class LocalClient(object):
                 size += len(state)
                 if size > limit:
                     break
-                items.append((oid, FrozenValue(state, actual_tid)))
-
+                # XXX: Get these in as Frozen
+                # items.append((oid, FrozenValue(state, actual_tid)))
+                items.append((oid, (state, actual_tid)))
             items.reverse()
             return items
 
@@ -882,11 +841,11 @@ class LocalClient(object):
         # this function shows as about 3% of the total time to save
         # in a very large database.
         with _timer() as t:
-            for oid, lru_entry in iteroiditems(self._cache.data):
-                newest_value = lru_entry.value.newest_value
+            for oid, lru_entry in self._cache.iteritems():
+                newest_value = lru_entry.newest_value
                 # We must have something at least this fresh
                 # to consider writing it out
-                actual_tid = newest_value[1]
+                actual_tid = newest_value.tid
                 min_allowed = get_min_required_tid(oid, -1)
                 if min_allowed > actual_tid:
                     min_allowed_count += 1
@@ -900,7 +859,8 @@ class LocalClient(object):
                     matching_tid_count += 1
                     continue
 
-                yield (oid, actual_tid, newest_value.frozen, newest_value[0], lru_entry.frequency)
+                yield (oid, actual_tid, newest_value.frozen, newest_value.state,
+                       lru_entry.frequency)
 
                 # We're able to satisfy this, so we don't need to consider
                 # it in our min_allowed set anymore.

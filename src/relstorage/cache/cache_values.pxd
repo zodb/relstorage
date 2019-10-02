@@ -18,12 +18,10 @@ from cython.operator import postincrement as postinc
 
 from libcpp.memory cimport shared_ptr
 
-from relstorage.cache.lru_cache cimport TID_t
-from relstorage.cache.lru_cache cimport OID_t
-from relstorage.cache.lru_cache cimport SingleValueEntry
-from relstorage.cache.lru_cache cimport SingleValueEntry_p
-from relstorage.cache.lru_cache cimport MultipleValueEntry
 
-cdef SingleValue value_from_entry(SingleValueEntry_p entry)
-cdef class SingleValue:
-    cdef SingleValueEntry_p entry
+from relstorage.cache.lru_cache cimport AbstractEntry_p
+from relstorage.cache.lru_cache cimport SingleValueEntry_p
+from relstorage.cache.lru_cache cimport MultipleValueEntry_p
+
+cdef object value_from_entry(const AbstractEntry_p& entry)
+cdef AbstractEntry_p entry_from_python(object value) except *

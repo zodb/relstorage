@@ -115,18 +115,13 @@ setup(
         # relaxed those requirements.
         'transaction >= 2.4.0',
     ],
-    # If a new-enough CFFI is installed, build the module as part of installation.
-    # Otherwise, we'll build it at import time. The wheels we distribute should have
-    # cffi installed so we distribute the built binaries.
-    cffi_modules=[
-        'src/relstorage/cache/_cache_ring_build.py:ffi',
-    ],
     ext_modules=cythonize(
         [
             Extension(name="relstorage.cache.cache_values",
                       sources=['src/relstorage/cache/cache_values.pyx']),
             Extension(name="relstorage.cache.cache",
-                      sources=['src/relstorage/cache/cache.pyx']),
+                      sources=['src/relstorage/cache/cache.pyx',
+                               'src/relstorage/cache/cache_ring.c']),
 
         ],
         annotate=True,
