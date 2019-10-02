@@ -345,8 +345,7 @@ cdef class MultipleValues:
         return self
 
     def __iadd__(self, tuple value):
-
-        self.entry.get().push_back(SingleValue.make_shared(self.key, value[0], value[1]))
+        self.entry.get().push_back(SingleValue.make_shared(self.entry.get().key, value[0], value[1]))
         return self
 
     def __isub__(self, TID_t tid):
