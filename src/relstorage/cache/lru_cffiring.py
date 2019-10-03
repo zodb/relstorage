@@ -68,12 +68,14 @@ class Cache(cache.CCache):
     # mapping operations, operating on user-level key/value pairs.
 
     def add_MRUs(self, ordered_keys, return_count_only=False):
-        import unittest
-        raise unittest.SkipTest("Adding MRUs in bulk not implemented")
-        added_entries = self.eden.add_MRUs(ordered_keys)
-        for entry in added_entries:
-            self.data[entry.key] = entry
-        return added_entries if not return_count_only else len(added_entries)
+        # XXX: This is not right
+        for k, v in ordered_keys:
+            self[k] = v
+
+        # added_entries = self.eden.add_MRUs(ordered_keys)
+        # for entry in added_entries:
+        #     self.data[entry.key] = entry
+        # return added_entries if not return_count_only else len(added_entries)
 
     @property
     def size(self): # Also, rename to weight to be consistent.

@@ -82,7 +82,7 @@ cdef class CCache:
             # to get a raw value passed down from Python.
             assert key not in self
             state, tid = value
-            state_str = state
+            state_str = (state or b'')
             self.cache.add_to_eden(make_shared[SingleValueEntry](key, state_str, tid))
         else:
             # This could either be a merged value created
@@ -92,6 +92,43 @@ cdef class CCache:
 
     def __delitem__(self, OID_t key):
         self.cache.delitem(key)
+
+    def __iter__(self):
+        """
+        Iterate across all the contained OID/TID pairs (the keys).
+
+        Note that the number of items in the iterator may exceed
+        the number of items in the cache due to aliasing.
+
+        This is not thread safe.
+        """
+        for pair in self.cache.getData():
+            # XXX: we shouldn't have to go to python to get this.
+            python = value_from_entry(pair.second)
+            oid = pair.first
+            if pair.second.get().len() > 1:
+                for entry in python:
+                    yield (oid, entry.tid)
+            else:
+                yield (oid, python.tid)
+
+    def iteritems(self):
+        """
+        Iterate across the oid/cache_value pairs.
+
+        Not thread safe.
+        """
+        for thing in self.cache.getData():
+            yield (thing.first, value_from_entry(thing.second))
+
+    def keys(self):
+        """
+        Iterate across the OIDs in the cache.
+
+        Not thread safe.
+        """
+        for oid, _ in self:
+            yield oid
 
     # Cache specific operations
 
@@ -144,30 +181,7 @@ cdef class CCache:
                         orig_weight
                     )
 
-    def __iter__(self):
-        """
-        Iterate across all the contained OID/TID pairs (the keys).
 
-        This is not thread safe.
-        """
-        for pair in self.cache.getData():
-            # XXX: we shouldn't have to go to python to get this.
-            python = value_from_entry(pair.second)
-            oid = pair.first
-            if pair.second.get().len() > 1:
-                for entry in python:
-                    yield (oid, entry.tid)
-            else:
-                yield (oid, python.tid)
-
-    def iteritems(self):
-        """
-        Iterate across the oid/cache_value pairs.
-
-        Not thread safe.
-        """
-        for thing in self.cache.getData():
-            yield (thing.first, value_from_entry(thing.second))
 
     @property
     def weight(self):

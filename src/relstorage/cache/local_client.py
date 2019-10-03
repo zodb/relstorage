@@ -378,7 +378,7 @@ class LocalClient(object):
         return iter(self._cache)
 
     def keys(self):
-        return self._cache.data.keys()
+        return self._cache.keys()
 
     def _decompress(self, data):
         pfx = data[:2]
