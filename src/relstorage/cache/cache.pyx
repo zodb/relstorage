@@ -49,7 +49,11 @@ cdef class CCache:
     def __bool__(self):
         return self.cache.len() > 0
 
-    __nonzero__ = __bool__
+    def __nonzero__(self):
+        # Cython doesn't allow aliasing on Py27. We shouldn't
+        # need to declare both but we do in case code is calling
+        # by name.
+        return self.cache.len() > 0
 
     def __contains__(self, OID_t key):
         return self.cache.contains(key)
