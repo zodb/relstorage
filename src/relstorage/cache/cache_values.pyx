@@ -22,14 +22,14 @@ from libcpp.memory cimport dynamic_pointer_cast
 from libcpp.pair cimport pair
 from libcpp.string cimport string
 
-from relstorage.cache.lru_cache cimport TID_t
-from relstorage.cache.lru_cache cimport OID_t
-from relstorage.cache.lru_cache cimport Pickle_t
-from relstorage.cache.lru_cache cimport SingleValueEntry
-from relstorage.cache.lru_cache cimport SingleValueEntry_p
-from relstorage.cache.lru_cache cimport AbstractEntry
-from relstorage.cache.lru_cache cimport AbstractEntry_p
-from relstorage.cache.lru_cache cimport MultipleValueEntry
+from relstorage.cache.c_cache cimport TID_t
+from relstorage.cache.c_cache cimport OID_t
+from relstorage.cache.c_cache cimport Pickle_t
+from relstorage.cache.c_cache cimport SingleValueEntry
+from relstorage.cache.c_cache cimport SingleValueEntry_p
+from relstorage.cache.c_cache cimport AbstractEntry
+from relstorage.cache.c_cache cimport AbstractEntry_p
+from relstorage.cache.c_cache cimport MultipleValueEntry
 
 from relstorage.cache.interfaces import CacheConsistencyError
 
@@ -81,8 +81,13 @@ cdef AbstractEntry_p entry_from_python(object value) except *:
 # So we could use them between SingleValue and FrozenValue if we
 # implemented the later with composition.
 
-@cython.internal
-cdef class SingleValue:
+cdef class CachedValue:
+    """
+    The base class for cached values.
+    """
+
+
+cdef class SingleValue(CachedValue):
     cdef SingleValueEntry_p entry
     frozen = False
 
@@ -117,8 +122,16 @@ cdef class SingleValue:
         ))
 
     @property
+    def value(self):
+        return self.state
+
+    @property
+    def key(self):
+        return self.entry.get().key
+
+    @property
     def frequency(self):
-        return self.entry.get().frequency()
+        return self.entry.get().frequency
 
     @property
     def state(self):
@@ -151,6 +164,8 @@ cdef class SingleValue:
                 and my_entry.tid == other_entry.tid
                 and self.frozen == other.frozen
             )
+        if isinstance(other, tuple):
+            return len(other) == 2 and other[1] == self.tid and other[0] == self.value
         return NotImplemented
 
     def __mod__(self, tid):
@@ -217,6 +232,8 @@ cdef class SingleValue:
             self.frozen,
         )
 
+
+
 @cython.final
 @cython.internal
 cdef class FrozenValue(SingleValue):
@@ -247,9 +264,7 @@ cdef class FrozenValue(SingleValue):
             return self
 
 @cython.final
-@cython.freelist(100)
-@cython.internal
-cdef class MultipleValues:
+cdef class MultipleValues(CachedValue):
     cdef MultipleValueEntry_p entry
 # TODO: we should keep this sorted by tid, yes?
 # A std::map<tid, SingleValueEntry_p> sounds almost ideal
@@ -270,8 +285,16 @@ cdef class MultipleValues:
         return mv
 
     @property
+    def value(self):
+        return list(self)
+
+    @property
+    def key(self):
+        return self.entry.get().key
+
+    @property
     def frequency(self):
-        return self.entry.get().frequency()
+        return self.entry.get().frequency
 
     @property
     def weight(self):

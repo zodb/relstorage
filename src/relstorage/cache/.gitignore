@@ -1,2 +1,3 @@
-*.cpp
+cache.cpp
+cache_values.cpp
 *.html

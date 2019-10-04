@@ -10,22 +10,40 @@ from libcpp cimport bool
 from libcpp.unordered_map cimport unordered_map
 
 
-cdef extern from "lru_cache.h":
+cdef extern from "c_cache.h":
     ctypedef signed long int64_t # Size doesn't actually matter.
     ctypedef unsigned long uint64_t
     ctypedef int64_t TID_t
     ctypedef int64_t OID_t
     ctypedef string Pickle_t
 
+cdef extern from "c_ring.h":
+    ctypedef size_t rs_counter_t
+    ctypedef enum generation_num:
+        GEN_UNKNOWN,
+        GEN_EDEN,
+        GEN_PROTECTED,
+        GEN_PROBATION
 
-cdef extern from "lru_cache.h" namespace "relstorage::cache":
+    cdef cppclass RSRingNode:
+        RSRingNode* r_prev
+        RSRingNode* r_next
+        generation_num generation
 
-    cdef cppclass AbstractEntry:
+    cdef cppclass RSCache(RSRingNode):
+        pass
+
+    int rsc_eden_add_many[T](RSCache& cache, T* entry_array, int entry_count)
+
+
+cdef extern from "c_cache.h" namespace "relstorage::cache":
+
+    cdef cppclass AbstractEntry(RSRingNode):
         AbstractEntry(OID_t key)
         OID_t key
         size_t weight() except +
         size_t len() except +
-        size_t frequency()
+        size_t frequency
     ctypedef shared_ptr[AbstractEntry] AbstractEntry_p
 
     cdef cppclass SingleValueEntry(AbstractEntry):
@@ -48,7 +66,18 @@ cdef extern from "lru_cache.h" namespace "relstorage::cache":
 
     ctypedef shared_ptr[MultipleValueEntry] MultipleValueEntry_p
 
+
+    cdef cppclass Generation(RSRingNode):
+        size_t max_weight
+        size_t sum_weights
+        size_t len
+        int generation
+        bool ring_is_empty()
+
     cdef cppclass Cache:
+        Generation* ring_eden
+        Generation* ring_protected
+        Generation* ring_probation
         Cache(uint64_t eden, uint64_t protected, uint64_t probation)
         void add_to_eden(SingleValueEntry_p sve_p) except +
         void update_MRU(AbstractEntry_p entry) except +

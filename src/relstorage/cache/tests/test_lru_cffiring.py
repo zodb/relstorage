@@ -24,56 +24,31 @@ from relstorage.cache import interfaces
 
 class GenerationTests(TestCase):
 
+    def _makeCache(self, limit):
+        from . import Cache
+        return Cache(limit)
+
     def _makeOne(self, limit):
-        self.skipTest("Generation not around yet")
-        from relstorage.cache.lru_cffiring import Generation
-        return Generation(limit, None)
-
-    def test_mru_lru_ring(self):
-        lru = self._makeOne(100)
-        entrya = lru.add_MRU(b'a', b'1')
-        self.assertEqual(lru.get_LRU(), entrya)
-
-        entryb = lru.add_MRU(b'b', b'2')
-        self.assertEqual(lru.get_LRU(), entrya)
-
-        entryc = lru.add_MRU(b'c', b'3')
-        self.assertEqual(lru.get_LRU(), entrya)
-
-        lru.make_MRU(entryb)
-        self.assertEqual(lru.get_LRU(), entrya)
-
-        lru.make_MRU(entrya)
-        self.assertEqual(lru.get_LRU(), entryc)
-
-        self.assertEqual(len(lru), 3)
-        self.assertEqual(len(list(lru)), 3)
+        return self._makeCache(limit).eden
 
     def test_bool(self):
-        lru = self._makeOne(100)
+        cache = self._makeCache(100)
+        lru = cache.eden
         self.assertFalse(lru)
-        entrya = lru.add_MRU('a', b'b')
+
+        cache[1] = (b'', 0)
         self.assertTrue(lru)
-        lru.remove(entrya)
+        self.assertEqual(1, len(lru))
+
+        del cache[1]
         self.assertFalse(lru)
 
 class EdenTests(TestCase):
 
-    def setUp(self):
-        self._generations = []
-
-    tearDown = setUp
-
-    def _makeOne(self, limit, key_weight=len, value_weight=len):
+    def _makeOne(self, limit):
         from . import Cache
-        # Must hold on to *all* of them, or they get deallocated
-        # and bad things happen.
-        self.skipTest("Generation not around yet")
-        generations = Cache.create_generations(eden_limit=limit,
-                                               key_weight=key_weight,
-                                               value_weight=value_weight)
-        self._generations.append(generations)
-        return generations['eden']
+
+        return Cache(limit)
 
     def test_add_MRUs_empty(self):
         lru = self._makeOne(100)
@@ -81,13 +56,11 @@ class EdenTests(TestCase):
 
     def test_add_MRUs_too_many(self):
         lru = self._makeOne(100)
-        too_many = [(str(i), 'a' * i) for i in range(50)]
-        # Make sure we have more then enough on the free list.
-        lru.init_node_free_list(len(too_many) + 1, (b'', 0))
+        too_many = [(i, (b'a' * i, 0)) for i in range(50)]
         # They just exceed the limit
         added = lru.add_MRUs(too_many)
         # Much less got added.
-        self.assertEqual(len(added), 13)
+        self.assertEqual(len(added), 14)
 
 class GenericLRUCacheTests(TestCase):
     """
@@ -101,25 +74,12 @@ class GenericLRUCacheTests(TestCase):
         from . import Cache
         return Cache
 
-    def _makeOne(self, limit, kind=None, preallocate_nodes=True):
-        self.skipTest("Not re-implemented")
+    def _makeOne(self, limit, kind=None):
         kind = kind or self._getClass()
-        return kind(limit,
-                    key_weight=self.key_weight,
-                    value_weight=self.value_weight,
-                    preallocate_nodes=preallocate_nodes)
+        return kind(limit)
 
     def _getIface(self):
         return interfaces.ILRUCache
-
-    @staticmethod
-    def key_weight(_):
-        return 0
-
-    @staticmethod
-    def value_weight(v):
-        state, _ = v
-        return len(state)
 
     def test_implements(self):
         cache = self._makeOne(100)
@@ -128,33 +88,36 @@ class GenericLRUCacheTests(TestCase):
         self.assertIsInstance(cache.stats(), dict)
         return cache
 
+    def test_eden_implements(self):
+        cache = self._makeOne(100)
+        assert_that(cache.eden,
+                    validly_provides(interfaces.IGeneration))
+
     def test_item_implements(self):
         cache = self._makeOne(20)
-        entrya = cache.add_MRU((1, 0), (b'', 0))
+        cache[1] = (b'', 0)
+        entrya = cache[1]
         assert_that(entrya, validly_provides(interfaces.ILRUEntry))
 
     def test_add_too_many(self):
         class _Cache(self._getClass()):
-            _preallocate_entries = False
-        self.skipTest("key/value weight not supported")
-        cache = _Cache(20,
-                       key_weight=GenericLRUCacheTests.key_weight,
-                       value_weight=GenericLRUCacheTests.value_weight)
+            pass
+        cache = _Cache(20)
 
         entries = cache.add_MRUs([
-            ((1, 0), (b'abcde', 0)),
-            ((2, 0), (b'abcde', 0)),
-            ((3, 0), (b'abcde', 0)),
-            ((4, 0), (b'abcde', 0)),
-            ((5, 0), (b'abcde', 0)),
-            ((6, 0), (b'abcde', 0)),
+            (1, (b'abcde', 0)),
+            (2, (b'abcde', 0)),
+            (3, (b'abcde', 0)),
+            (4, (b'abcde', 0)),
+            (5, (b'abcde', 0)),
+            (6, (b'abcde', 0)),
         ])
 
         self.assertEqual(
             [5] * len(entries),
             [e.weight for e in entries])
         self.assertEqual(
-            [(1, 0), (2, 0), (3, 0), (4, 0)],
+            [1, 2, 3, 4],
             [e.key for e in entries]
         )
         self.assertEqual(4, len(cache))
@@ -164,14 +127,14 @@ class GenericLRUCacheTests(TestCase):
         cache = self._makeOne(100)
 
         entries = cache.add_MRUs([
-            ((1, 0), (b'abcde', 0)),
-            ((2, 0), (b'abcde', 0)),
-            ((3, 0), (b'abcde', 0)),
-            ((4, 0), (b'abcde', 0)),
+            (1, (b'abcde', 0)),
+            (2, (b'abcde', 0)),
+            (3, (b'abcde', 0)),
+            (0, (b'abcde', 0)),
         ])
 
         self.assertEqual(
-            [(1, 0), (2, 0), (3, 0), (4, 0)],
+            [1, 2, 3, 0],
             [e.key for e in entries]
         )
 
@@ -179,69 +142,69 @@ class GenericLRUCacheTests(TestCase):
             for e in entries:
                 _ = cache[e.key]
 
-        freqs = [e.frequency for e in cache.entries()]
+        freqs = [e.frequency for e in cache.values()]
         self.assertEqual([5] * len(entries), freqs)
 
         # By half each time
         cache.age_frequencies()
-        freqs = [e.frequency for e in cache.entries()]
+        freqs = [e.frequency for e in cache.values()]
         self.assertEqual([2] * len(entries), freqs)
         return cache
 
 
     def test_delete(self):
         cache = self._makeOne(20)
-        cache[(1, 0)] = (b'abc', 0)
-        self.assertIn((1, 0), cache)
+        cache[1] = (b'abc', 0)
+        self.assertIn(1, cache)
         self.assertEqual(1, len(cache))
         self.assertEqual(3, cache.size)
-        self.assertEqual((b'abc', 0), cache[(1, 0)])
+        self.assertEqual((b'abc', 0), cache[1])
         self.assertEqual(list(cache), [(1, 0)])
-        del cache[(1, 0)]
-        self.assertNotIn((1, 0), cache)
+        del cache[1]
+        self.assertNotIn(1, cache)
         self.assertEqual(0, len(cache))
         self.assertEqual(0, cache.size)
-        self.assertIsNone(cache[(1, 0)])
+        self.assertIsNone(cache[1])
         self.assertEqual(list(cache), [])
 
     def test_entries(self):
         cache = self._makeOne(20)
-        cache[(1, 0)] = (b'abc', 0)
-        entries = list(cache.entries())
+        cache[1] = (b'abc', 0)
+        entries = list(cache.values())
         self.assertEqual(1, len(entries))
         entry = entries[0]
-        self.assertEqual((1, 0), entry.key)
-        self.assertEqual((b'abc', 0), entry.value)
+        assert_that(entry, validly_provides(interfaces.ILRUEntry))
+        self.assertEqual(1, entry.key)
+        self.assertEqual(b'abc', entry.value)
         self.assertEqual(1, entry.frequency)
 
         # Getting it again updates its frequency, not
         # necessarily on the same object though.
-        self.assertIsNotNone(cache[(1, 0)])
-        entries = list(cache.entries())
+        self.assertIsNotNone(cache[1])
+        entries = list(cache.values())
         self.assertEqual(1, len(entries))
         entry = entries[0]
-        self.assertEqual((1, 0), entry.key)
-        self.assertEqual((b'abc', 0), entry.value)
+        self.assertEqual(1, entry.key)
+        self.assertEqual(b'abc', entry.value)
         self.assertEqual(2, entry.frequency)
 
     def test_add_too_many_MRUs_works_aronud_big_entry(self):
-        self.skipTest("key/value weight not supported")
-        cache = self._getClass()(20,
-                                 key_weight=GenericLRUCacheTests.key_weight,
-                                 value_weight=GenericLRUCacheTests.value_weight)
-
+        cache = self._getClass()(20)
+        self.assertEqual([2, 16, 2],
+                         [cache.eden.limit, cache.protected.limit, cache.probation.limit])
         entries = cache.add_MRUs([
-            ((1, 0), (b'abc', 0)),
+            (1, (b'abc', 0)),
             # This entry itself will fit nowhere
-            ((2, 0), (b'12345678901234567890', 0)),
-            ((3, 0), (b'bcd', 0)),
-            ((4, 0), (b'cde', 0)),
-            ((5, 0), (b'dehi', 0)),
-            ((6, 0), (b'edghijkl', 0)),
+            (2, (b'12345678901234567890', 0)),
+            (3, (b'bcd', 0)),
+            (4, (b'cde', 0)),
+            (5, (b'dehi', 0)),
+            (6, (b'edghijkl', 0)),
         ])
+        self.assertEqual(3, len(cache))
 
         self.assertEqual(
-            [(1, 0), (3, 0), (4, 0), (5, 0)],
+            [1, 3, 4, ],
             [e.key for e in entries])
         return cache
 
@@ -273,28 +236,6 @@ class GenericGenerationalLRUCacheTests(GenericLRUCacheTests):
                                     "Generation 0 has no attribute 'on_hit'"):
             cache.generations[0].on_hit()
 
-
-    def test_add_too_many(self):
-        cache = super(GenericGenerationalLRUCacheTests, self).test_add_too_many()
-        self.assertEqual(2, len(cache.eden.node_free_list))
-        self.assertIsNone(cache.eden.node_free_list[0].key)
-        self.assertIsNone(cache.eden.node_free_list[0].value)
-
-    def test_add_too_many_MRUs_works_aronud_big_entry(self):
-        s = super(GenericGenerationalLRUCacheTests, self)
-        cache = s.test_add_too_many_MRUs_works_aronud_big_entry()
-
-        self.assertEqual(2, len(cache.eden.node_free_list))
-        for e in cache.eden.node_free_list:
-            self.assertIsNone(e.key)
-            self.assertIsNone(e.value)
-
-        entry = cache.eden.node_free_list[-1]
-        cache.add_MRU((1, 0), (b'1', 0))
-        self.assertEqual(1, len(cache.eden.node_free_list))
-
-        self.assertEqual(cache.eden.PARENT_CONST, entry.cffi_ring_node.u.entry.r_parent)
-
     def test_add_MRUs_reject_sets_sentinel_values(self):
         # When we find an item that completely fills the cache,
         # all the rest of the items are marked as rejected.
@@ -305,25 +246,25 @@ class GenericGenerationalLRUCacheTests(GenericLRUCacheTests):
 
         added_entries = cache.add_MRUs([
             # over fill eden with item of size 15
-            ((1, 0), (b'012345678901234', 0)),
+            (1, (b'012345678901234', 0)),
             # 1 goes to protected, filling it. eden is also over full with 2. probation is empty
-            ((2, 0), (b'012', 0)),
+            (2, (b'012', 0)),
             # 3 fills eden, bumping 2 to probation. But probation is actually overfull now
             # so we'd like to spill something if we could (but we can't.)
-            ((3, 0), (b'0', 0)),
+            (3, (b'0', 0)),
             # 4 should never be added because it won't fit anywhere.
-            ((4, 0), (b'ee', 0)),
+            (4, (b'ee', 0)),
         ])
 
         def keys(x):
             return [e.key for e in x]
 
-        self.assertEqual(keys(cache.protected), [(1, 0)])
-        self.assertEqual(keys(cache.probation), [(2, 0)])
+        self.assertEqual(keys(cache.protected), [1])
+        self.assertEqual(keys(cache.probation), [2])
 
-        self.assertEqual(keys(cache.eden), [(3, 0)])
+        self.assertEqual(keys(cache.eden), [3])
         self.assertEqual(
-            [(1, 0), (2, 0), (3, 0)],
+            [1, 2, 3],
             [e.key for e in added_entries])
 
         self.assertEqual(3, len(added_entries))

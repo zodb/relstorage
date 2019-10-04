@@ -294,22 +294,13 @@ class ILRUCache(Interface):
     # Cache-specific operations.
     ###
 
-    def replace_or_remove_smaller_value(key, value):
-        """
-        Given a key that's already present, either removes it
-        if *value* is none, or changes its stored value to be *value*.
-
-        Does this without counting as a hit or otherwise changing the MRU
-        status of key.
-        """
-
     def peek(key):
         """
         Similar to ``__getitem__``, but *does not* count
         as a hit on the key, merely returns a value if its present.
         """
 
-    def entries():
+    def values():
         """
         Iterate all the `ILRUEntry` values.
         """
@@ -317,14 +308,6 @@ class ILRUCache(Interface):
     def stats():
         """
         Return info about the cache.
-        """
-
-    def add_MRU(key, value):
-        """
-        Insert a new item in the cache, as the most recently used.
-
-        Returns the new entry, and any item pairs that had to be evicted
-        to make room.
         """
 
     def add_MRUs(ordered_keys_and_values, return_count_only=False):

@@ -46,7 +46,7 @@ class StorageCacheTests(TestCase):
             inst.close(close_async=False)
 
     def getClass(self):
-        from relstorage.cache import StorageCache
+        from relstorage.cache.storage_cache import StorageCache
         return StorageCache
 
     def _makeOne(self, current_oids=None, **kwargs):

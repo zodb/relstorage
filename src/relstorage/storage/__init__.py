@@ -42,7 +42,7 @@ from ..blobhelper import BlobHelper
 from ..blobhelper.interfaces import IBlobHelper
 from ..blobhelper.interfaces import INoBlobHelper
 
-from ..cache import StorageCache
+from ..cache.storage_cache import StorageCache
 from ..cache.interfaces import CacheConsistencyError
 from ..options import Options
 from ..interfaces import IRelStorage

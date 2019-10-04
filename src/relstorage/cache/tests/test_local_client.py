@@ -76,7 +76,7 @@ class LocalClientStrKeysValuesGenerationalTests(TestCase):
         # so our max size will be 60
         c.limit = 51
         setattr(c, '_cache', True) # Avoid type inference warnings
-        c.flush_all(preallocate_nodes=True)
+        c.flush_all()
 
         list_lrukeys = partial(list_lrukeys_, c._cache)
         list_lrufreq = partial(list_lrufreq_, c._cache)
@@ -96,7 +96,7 @@ class LocalClientStrKeysValuesGenerationalTests(TestCase):
         self.assertEqual(list_lrukeys('eden'), [4])
         self.assertEqual(list_lrukeys('probation'), [])
         self.assertEqual(list_lrukeys('protected'), [0, 1, 2, 3])
-        self.assertEqual(c._cache.size, 50)
+        self.assertEqual(c._cache.weight, 50)
 
         c['55'] = b'0123456789'
 
@@ -106,11 +106,11 @@ class LocalClientStrKeysValuesGenerationalTests(TestCase):
         self.assertEqual(list_lrukeys('eden'), [5])
         self.assertEqual(list_lrukeys('probation'), [4])
         self.assertEqual(list_lrukeys('protected'), [0, 1, 2, 3])
-        self.assertEqual(c._cache.size, 60)
+        self.assertEqual(c._cache.weight, 60)
 
         v = c['22']
         self.assertEqual(v, b'0123456789')
-        self.assertEqual(c._cache.size, 60)
+        self.assertEqual(c._cache.weight, 60)
 
         del c[(1, 1)]
         c['11'] = b'b'
@@ -118,7 +118,7 @@ class LocalClientStrKeysValuesGenerationalTests(TestCase):
         self.assertEqual(list_lrukeys('probation'), [5])
         self.assertEqual(list_lrukeys('protected'), [0, 3, 2])
 
-        self.assertEqual(c._cache.size, 41)
+        self.assertEqual(c._cache.weight, 41)
 
         for i in range(4):
             # add 10 bytes
@@ -136,7 +136,7 @@ class LocalClientStrKeysValuesGenerationalTests(TestCase):
         self.assertEqual(list_lrukeys('eden'), [-3])
         self.assertEqual(list_lrukeys('probation'), [-2])
         self.assertEqual(list_lrukeys('protected'), [3, 2, 0])
-        self.assertEqual(c._cache.size, 50)
+        self.assertEqual(c._cache.weight, 50)
 
         #pprint.pprint(c._cache.stats())
         self.assertEqual(c[(-1, 0)], None)
@@ -144,7 +144,7 @@ class LocalClientStrKeysValuesGenerationalTests(TestCase):
         self.assertEqual(c[(-2, 2)], b'0123456789')
         self.assertEqual(c[(-3, 3)], b'0123456789')
         self.assertEqual(c[(2, 2)], b'0123456789')
-        self.assertEqual(c._cache.size, 50)
+        self.assertEqual(c._cache.weight, 50)
 
         # Note that this last set of checks perturbed protected and probation;
         # We lost a key
@@ -152,7 +152,7 @@ class LocalClientStrKeysValuesGenerationalTests(TestCase):
         self.assertEqual(list_lrukeys('eden'), [-3])
         self.assertEqual(list_lrukeys('probation'), [])
         self.assertEqual(list_lrukeys('protected'), [3, 0, -2, 2])
-        self.assertEqual(c._cache.size, 50)
+        self.assertEqual(c._cache.weight, 50)
 
         self.assertEqual(c['00'], b'0123456789')
         self.assertEqual(c['00'], b'0123456789') # One more to increase its freq count
@@ -172,7 +172,7 @@ class LocalClientStrKeysValuesGenerationalTests(TestCase):
         self.assertEqual(list_lrukeys('eden'), [-3])
         self.assertEqual(list_lrukeys('probation'), [])
         self.assertEqual(list_lrukeys('protected'), [0, 2, 3, -2])
-        self.assertEqual(c._cache.size, 50)
+        self.assertEqual(c._cache.weight, 50)
 
         # Confirm frequency counts
         self.assertEqual(list_lrufreq('eden'), [2])
@@ -192,7 +192,7 @@ class LocalClientStrKeysValuesGenerationalTests(TestCase):
         self.assertEqual(list_lrufreq('probation'), [2])
         self.assertEqual(list_lrufreq('protected'), [4, 4, 2, 3])
 
-        self.assertEqual(c._cache.size, 60)
+        self.assertEqual(c._cache.weight, 60)
 
         self.assertEqual(c[(-3, 3)], b'0123456789')
         self.assertEqual(list_lrukeys('probation'), [0])
