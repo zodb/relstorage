@@ -101,7 +101,7 @@ class Options(object):
     #: The largest pickle to hold in the pickle cache
     cache_local_object_max = 16384
     #: How to compress local pickles
-    cache_local_compression = 'zlib'
+    cache_local_compression = 'none'
     #: Directory holding persistent cache files
     cache_local_dir = None
     #: Switch checkpoints after this many writes

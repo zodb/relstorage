@@ -151,7 +151,8 @@ cdef class PyCache:
             return None
         return value_from_entry(self.cache.get(key))
 
-    peek = get
+    cpdef object peek(self, OID_t key):
+        return self.get(key)
 
     def __getitem__(self, OID_t key):
         value = self.get(key)
@@ -324,7 +325,9 @@ cdef class PyCache:
             orig_value = value
             orig_weight = value.weight
             value <<= tid
-            assert value is not None
+            if value is None:
+                del self[oid]
+                continue
             if value is not orig_value or value.weight != orig_weight:
                 self.cache.replace_entry(
                     entry_from_python(value),

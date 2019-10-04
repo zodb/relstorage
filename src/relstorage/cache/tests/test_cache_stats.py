@@ -27,7 +27,7 @@ import zope.testing.setupstack
 
 import random2
 
-import relstorage.cache
+from relstorage.cache.storage_cache import StorageCache
 
 from relstorage.cache.tests import MockOptions, MockAdapter
 from relstorage.storage.tpc.temporary_storage import TemporaryStorage
@@ -66,7 +66,7 @@ def cache_run(name, size):
     # We can interleave between instances
     adapter = MockAdapter()
     poller = adapter.poller
-    cache = relstorage.cache.StorageCache(adapter, options, name)
+    cache = StorageCache(adapter, options, name)
     new_cache = cache.new_instance()
     assert hasattr(cache.cache, 'tracer'), cache.cache
     assert hasattr(new_cache.cache, 'tracer'), new_cache.cache
@@ -154,27 +154,26 @@ def tearDown(test):
 
 def test_suite():
     suite = unittest.TestSuite()
-    # Not yet re-implemented.
-    # try:
-    #     __import__('ZEO')
-    # except ImportError:
-    #     class NoTest(unittest.TestCase):
-    #         @unittest.skip("ZEO not installed")
-    #         def test_cache_trace_analysis(self):
-    #             "Does nothing"
-    #     suite.addTest(unittest.makeSuite(NoTest))
-    # else:
-    #     suite.addTest(
-    #         doctest.DocFileSuite(
-    #             'cache_trace_analysis.rst',
-    #             setUp=setUp,
-    #             tearDown=tearDown,
-    #             checker=ZODB.tests.util.checker + \
-    #                 zope.testing.renormalizing.RENormalizing([
-    #                     (re.compile(r'31\.3%'), '31.2%'),
-    #                 ]),
-    #             )
-    #         )
+    try:
+        __import__('ZEO')
+    except ImportError:
+        class NoTest(unittest.TestCase):
+            @unittest.skip("ZEO not installed")
+            def test_cache_trace_analysis(self):
+                "Does nothing"
+        suite.addTest(unittest.makeSuite(NoTest))
+    else:
+        suite.addTest(
+            doctest.DocFileSuite(
+                'cache_trace_analysis.rst',
+                setUp=setUp,
+                tearDown=tearDown,
+                checker=ZODB.tests.util.checker + \
+                    zope.testing.renormalizing.RENormalizing([
+                        (re.compile(r'31\.3%'), '31.2%'),
+                    ]),
+                )
+            )
 
     return suite
 

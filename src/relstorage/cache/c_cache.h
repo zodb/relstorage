@@ -109,10 +109,10 @@ namespace relstorage {
                 // C++ 11 and its delegating constructors, so we use a
                 // default argument to make it possible to create
                 // these.
-                SingleValueEntry(OID_t key, Pickle_t state, TID_t tid, bool frozen=false)
+                SingleValueEntry(OID_t key, const Pickle_t state, TID_t tid, bool frozen=false)
                  : AbstractEntry(key), state(state), tid(tid), frozen(frozen)
                 {}
-                SingleValueEntry(OID_t key, std::pair<Pickle_t, TID_t> state, bool frozen)
+                SingleValueEntry(OID_t key, const std::pair<const Pickle_t, TID_t>& state, bool frozen)
                     : AbstractEntry(key), state(state.first), tid(state.second), frozen(frozen)
                 {}
                 SingleValueEntry() : AbstractEntry(), state(), tid(-1), frozen(false) {}

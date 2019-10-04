@@ -158,7 +158,7 @@ class GenericLRUCacheTests(TestCase):
         self.assertIn(1, cache)
         self.assertEqual(1, len(cache))
         self.assertEqual(3, cache.size)
-        self.assertEqual((b'abc', 0), cache[1])
+        self.assertEqual(cache[1], (b'abc', 0))
         self.assertEqual(list(cache), [(1, 0)])
         del cache[1]
         self.assertNotIn(1, cache)

@@ -50,16 +50,16 @@ cdef extern from "c_cache.h" namespace "relstorage::cache":
         Pickle_t state
         TID_t tid
         bool frozen
-        SingleValueEntry(OID_t key, Pickle_t state, TID_t tid)
-        SingleValueEntry(OID_t key, pair[Pickle_t, TID_t], bool frozen)
-        SingleValueEntry(OID_t key, Pickle_t state, TID_t tid, bool frozen)
+        SingleValueEntry(OID_t key, const Pickle_t state, const TID_t tid)
+        SingleValueEntry(OID_t key, const pair[const Pickle_t, const TID_t]&, const bool frozen)
+        SingleValueEntry(OID_t key, const Pickle_t state, TID_t tid, bool frozen)
 
     ctypedef shared_ptr[SingleValueEntry] SingleValueEntry_p
 
     cdef cppclass MultipleValueEntry(AbstractEntry):
         MultipleValueEntry(OID_t key)
         list[SingleValueEntry_p] p_values;
-        void push_back(SingleValueEntry_p) except +
+        void push_back(const SingleValueEntry_p const) except +
         void remove_tids_lte(TID_t tid) except +
         void remove_tids_lt(TID_t tid) except +
 
@@ -79,11 +79,11 @@ cdef extern from "c_cache.h" namespace "relstorage::cache":
         Generation* ring_protected
         Generation* ring_probation
         Cache(uint64_t eden, uint64_t protected, uint64_t probation)
-        void add_to_eden(SingleValueEntry_p sve_p) except +
-        void update_MRU(AbstractEntry_p entry) except +
-        void replace_entry(AbstractEntry_p new_entry,
-                           AbstractEntry_p prev_entry,
-                           size_t prev_weight) except +
+        void add_to_eden(const SingleValueEntry_p sve_p) except +
+        void update_MRU(const AbstractEntry_p entry) except +
+        void replace_entry(const AbstractEntry_p new_entry,
+                           const AbstractEntry_p prev_entry,
+                           const size_t prev_weight) except +
         void delitem(OID_t key) except +
         bool contains(OID_t key)
         void age_frequencies()

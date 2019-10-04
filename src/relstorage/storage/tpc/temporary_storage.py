@@ -53,7 +53,6 @@ class TemporaryStorage(object):
         Typically, we can't actually cache the object yet, because its
         transaction ID is not yet chosen.
         """
-        assert isinstance(state, bytes)
         queue = self._queue
         queue.seek(0, 2)  # seek to end
         startpos = queue.tell()

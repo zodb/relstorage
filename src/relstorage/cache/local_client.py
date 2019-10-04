@@ -16,7 +16,6 @@ from __future__ import division
 from __future__ import print_function
 
 import bz2
-import collections
 import threading
 import time
 import zlib
@@ -144,7 +143,6 @@ class ICachedValue(interface.Interface):
         """
 
 interface.classImplements(cache_values.CachedValue, ICachedValue)
-
 
 @interface.implementer(IStateCache,
                        IPersistentCache)
@@ -316,9 +314,9 @@ class LocalClient(object):
         # zapping happens frequently during test runs,
         # and during zodbconvert when the process will exist
         # only for a short time.
-        self.flush_all(False)
+        self.flush_all()
 
-    def flush_all(self, preallocate_nodes=None):
+    def flush_all(self):
         with self._lock:
             if self._cache or self._cache is None:
                 # Only actually abandon the cache object
@@ -415,7 +413,7 @@ class LocalClient(object):
         now = time.time()
         logger.debug("Beginning frequency aging for %d cache entries",
                      len(self._cache))
-        self._cache.age_lists()
+        self._cache.age_frequencies()
         done = time.time()
         logger.debug("Aged %d cache entries in %s", len(self._cache), done - now)
 
@@ -717,7 +715,8 @@ class LocalClient(object):
                     matching_tid_count += 1
                     continue
 
-                yield (oid, actual_tid, newest_value.frozen, newest_value.state,
+                yield (oid, actual_tid, newest_value.frozen,
+                       bytes(newest_value.state),
                        lru_entry.frequency)
 
                 # We're able to satisfy this, so we don't need to consider

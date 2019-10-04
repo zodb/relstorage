@@ -35,11 +35,14 @@ matrix:
 env:
     global:
         - PYTHONHASHSEED=8675309
+        - PYTHONDEVMODE=1
+        - PYTHONFAULTHANDLER=1
         - CC="ccache gcc"
         - CCACHE_NOCPP2=true
         - CCACHE_SLOPPINESS=file_macro,time_macros,include_file_ctime,include_file_mtime
         - CCACHE_NOHASHDIR=true
         - CFLAGS="-g -pipe -std=gnu++11"
+        - CXXFLAGS="-g -pipe -std=gnu++11"
         - RS_TEST_CMD="-m zope.testrunner --test-path=src --auto-color --auto-progress"
 
 script:
@@ -66,8 +69,10 @@ install:
   - pip install -U pip
   - pip install -U setuptools wheel coveralls
   - pip install -U "pylint>=1.7.1"
-  - pip install -U 'cffi; platform_python_implementation=="CPython"'
-  - pip install -U -v -e ".[test,all_tested_drivers]"
+  - pip install -U cython
+  # Print debugging for the build
+  - python setup.py build_ext -i
+  - pip install -U -e ".[test,all_tested_drivers]"
   - .travis/postgres.sh
   - .travis/mysql.sh
 
