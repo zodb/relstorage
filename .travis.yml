@@ -35,7 +35,9 @@ matrix:
 env:
     global:
         - PYTHONHASHSEED=8675309
-        - PYTHONDEVMODE=1
+        # PYTHONDEVMODE leads to crashes in pylibmc.
+        # See https://github.com/lericson/pylibmc/issues/254
+        # - PYTHONDEVMODE=1
         - PYTHONFAULTHANDLER=1
         - CC="ccache gcc"
         - CCACHE_NOCPP2=true
