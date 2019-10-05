@@ -305,11 +305,6 @@ class ILRUCache(Interface):
         Iterate all the `ILRUEntry` values.
         """
 
-    def stats():
-        """
-        Return info about the cache.
-        """
-
     def add_MRUs(ordered_keys_and_values, return_count_only=False):
         """
         Add as many of the key/value pairs in *ordered_keys_and_values* as possible,

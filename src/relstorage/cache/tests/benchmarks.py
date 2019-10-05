@@ -315,7 +315,11 @@ def local_benchmark(runner):
         client = makeOne(populate=True)
         key_groups = _make_key_groups(KEY_GROUP_SIZE)
         begin = perf_counter()
+        duration = 0
+
         for _ in range(loops):
+            client = makeOne(populate=True)
+            begin = perf_counter()
             for keys in key_groups:
                 for oid in keys:
                     tid = oid
@@ -325,8 +329,9 @@ def local_benchmark(runner):
                     if not res:
                         continue
                     assert res[0] == random_data
-
+            duration += (perf_counter() - begin)
         print("Hit ratio: ", client.stats()['ratio'])
+
         duration = perf_counter() - begin
         key_groups = None
 
@@ -340,11 +345,10 @@ def local_benchmark(runner):
 
     def mixed(loops):
         key_groups = _make_key_groups(KEY_GROUP_SIZE)
+        duration = 0
         hot_keys = key_groups[0]
 
         client = makeOne(populate=True)
-
-        duration = 0
         i = 0
         miss_count = 0
 

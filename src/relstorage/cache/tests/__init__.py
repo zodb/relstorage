@@ -7,7 +7,9 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-from relstorage.cache.lru_cffiring import CFFICache as _BaseCache
+from zope import interface
+
+from relstorage.cache.cache import PyCache as _BaseCache
 from relstorage.cache.local_client import LocalClient as _BaseLocalClient
 
 from relstorage.tests import MockOptions
@@ -20,12 +22,46 @@ class MockOptionsWithFakeMemcache(MockOptions):
     cache_servers = 'host:9999'
 
 
-class Cache(_BaseCache):
+class Cache(object):
     # Tweak the generation sizes to match what we developed the tests with
     _gen_protected_pct = 0.8
     _gen_eden_pct = 0.1
+    _gen_probation_pct = 0.1
     _dict_type = dict
 
+
+    def __init__(self, byte_limit):
+        self.__cache = _BaseCache(
+            byte_limit * self._gen_eden_pct,
+            byte_limit * self._gen_protected_pct,
+            byte_limit * self._gen_probation_pct
+        )
+        interface.alsoProvides(self, interface.providedBy(self.__cache))
+
+    def __getitem__(self, key):
+        return self.__cache[key]
+
+    def __len__(self):
+        return len(self.__cache)
+
+    def __setitem__(self, k, v):
+        self.__cache[k] = v
+
+    def __delitem__(self, k):
+        del self.__cache[k]
+
+    def __iter__(self):
+        return iter(self.__cache)
+
+    def __contains__(self, k):
+        return k in self.__cache
+
+    def __getattr__(self, name):
+        return getattr(self.__cache, name)
+
+    @property
+    def size(self):
+        return self.weight
 
 class LocalClient(_BaseLocalClient):
     _cache_type = Cache

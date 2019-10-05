@@ -47,6 +47,7 @@ cdef extern from *:
     """
     void it_assign[T](T&, SingleValueEntry_p&)
 
+
 cdef object value_from_entry(const AbstractEntry_p& entry):
     cdef SingleValueEntry_p sve_p
     cdef MultipleValueEntry_p mve_p
@@ -180,26 +181,16 @@ cdef class SingleValue(CachedValue):
     cdef SingleValueEntry_p entry
     frozen = False
 
-    def __cinit__(self, OID_t oid, object state, TID_t tid, bint frozen=False):
-        if state is SingleValue:
-            # Marker passed in from value_from_entry
-            # not to do anything, we're shared.
-            return
-
-
-        # implicit cast and copy state from bytes to std::string.
-        self.entry = SingleValue.make_shared(oid, state, tid, frozen)
-
     @staticmethod
-    cdef SingleValueEntry_p make_shared(OID_t oid, object state, TID_t tid, bint frozen=False):
-        if state is None:
-            state = b''
+    cdef SingleValueEntry_p make_shared(OID_t oid,
+                                        const Pickle_t& state,
+                                        TID_t tid, bint frozen=False):
 
         return make_shared[SingleValueEntry](oid, pair[Pickle_t, TID_t](state, tid), frozen)
 
     @staticmethod
     cdef SingleValue from_entry(const SingleValueEntry_p& entry):
-        cdef SingleValue sv = SingleValue.__new__(SingleValue, 0, SingleValue, 0, 0)
+        cdef SingleValue sv = SingleValue.__new__(SingleValue)
         sv.entry = entry
         return sv
 
@@ -262,14 +253,8 @@ cdef class SingleValue(CachedValue):
         return NotImplemented
 
     cpdef get_if_tid_matches(self, object tid):
-        cdef SingleValue me
-        cdef TID_t native_tid
-        if tid is None:
-            return None
-        me = (<SingleValue>self)
-        native_tid = <TID_t>tid
-        if native_tid == me.entry.get().tid:
-            return me
+        if self.entry.get().tid_matches(-1 if tid is None else tid):
+            return self
 
     cpdef freeze_to_tid(self, TID_t tid):
         # We could be newer
@@ -287,11 +272,12 @@ cdef class SingleValue(CachedValue):
         # if we're older, fall off the end and discard.
 
     cpdef with_later(self, tuple value):
-        cdef object state = value[0] or b''
-        cdef TID_t tid = value[1]
         cdef const SingleValueEntry* sve = self.entry.get()
-        cdef bint state_equal = (<const Pickle_t>state == sve.state)
-        cdef bint tid_equal = (tid == sve.tid)
+        cdef object py_state = value[0]
+        cdef TID_t tid = value[1]
+        state = pickle_from_python(py_state)
+        state_equal = (state == sve.state)
+        tid_equal = (tid == sve.tid)
 
         if (state_equal and tid_equal):
             return self
@@ -303,7 +289,7 @@ cdef class SingleValue(CachedValue):
                 value
             )
 
-        return MultipleValues.__new__(MultipleValues, self, bytes(state), tid)
+        return MultipleValues.new_from_two_singles(self.entry, state, tid)
 
     cpdef discarding_tids_before(self, const TID_t tid):
         if tid <= self.entry.get().tid:
@@ -339,17 +325,6 @@ cdef class FrozenValue(SingleValue):
         sv.entry = entry
         return sv
 
-
-    cpdef get_if_tid_matches(self, tid):
-        cdef SingleValue me
-        cdef TID_t native_tid
-        if tid is None:
-            return self
-        me = (<SingleValue>self)
-        native_tid = <TID_t>tid
-        if native_tid == me.entry.get().tid:
-            return me
-
     cpdef freeze_to_tid(self, TID_t tid):
         # This method can get called if two different transaction views
         # tried to load an object at the same time and store it in the cache.
@@ -364,16 +339,21 @@ cdef class MultipleValues(CachedValue):
 # for accessing max_tid and newest_value, except for whatever space
 # overhead that adds.
 
-    def __cinit__(self, SingleValue mv1, bytes state2, TID_t tid2):
-        if mv1 is not None:
-            self.entry = make_shared[MultipleValueEntry](mv1.entry.get().key)
-            self.entry.get().push_back(mv1.entry)
-            self.entry.get().push_back(SingleValue.make_shared(mv1.entry.get().key,
-                                                               state2, tid2))
+    @staticmethod
+    cdef MultipleValues new_from_two_singles(const SingleValueEntry_p& first,
+                                             const Pickle_t& state2,
+                                             const TID_t tid2):
+        cdef MultipleValues mv = MultipleValues.__new__(MultipleValues)
+        mv.entry = make_shared[MultipleValueEntry](first.get().key)
+        mv.entry.get().push_back(first)
+        mv.entry.get().push_back(SingleValue.make_shared(first.get().key,
+                                                         state2, tid2))
+        return mv
+
 
     @staticmethod
     cdef MultipleValues from_entry(const MultipleValueEntry_p& entry):
-        cdef MultipleValues mv = MultipleValues.__new__(MultipleValues, None, None, 0)
+        cdef MultipleValues mv = MultipleValues.__new__(MultipleValues)
         mv.entry = entry
         return mv
 
@@ -408,7 +388,7 @@ cdef class MultipleValues(CachedValue):
 
     @property
     def newest_value(self):
-        cdef SingleValueEntry_p entry = self.entry.get().p_values.front()
+        cdef SingleValueEntry_p entry = self.entry.get().front()
         values = self.entry.get().p_values
         for p in values:
             if p.get().tid > entry.get().tid:
@@ -416,12 +396,11 @@ cdef class MultipleValues(CachedValue):
         return python_from_sve(entry)
 
     cpdef get_if_tid_matches(self, tid):
-        cdef SingleValue result
+        cdef TID_t native_tid = -1 if tid is None else tid
         values = self.entry.get().p_values
         for entry in values:
-            result = python_from_sve(entry).get_if_tid_matches(tid)
-            if result is not None:
-                return result
+            if entry.get().tid_matches(native_tid):
+                return python_from_sve(entry)
         return None
 
     cpdef freeze_to_tid(self, TID_t tid):
@@ -466,7 +445,9 @@ cdef class MultipleValues(CachedValue):
         return self
 
     cpdef with_later(self, tuple value):
-        self.entry.get().push_back(SingleValue.make_shared(self.entry.get().key, value[0], value[1]))
+        self.entry.get().push_back(SingleValue.make_shared(self.entry.get().key,
+                                                           pickle_from_python(value[0]),
+                                                           value[1]))
         return self
 
     cpdef discarding_tids_before(self, TID_t tid):

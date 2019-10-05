@@ -36,6 +36,9 @@ from relstorage.cache.c_cache cimport RSCache
 from relstorage.cache.cache_values cimport value_from_entry
 from relstorage.cache.cache_values cimport entry_from_python
 from relstorage.cache.cache_values cimport CachedValue
+from relstorage.cache.cache_values cimport pickle_from_python
+
+from relstorage.cache.interfaces import NoSuchGeneration
 
 from relstorage._compat import iteroiditems
 
@@ -100,15 +103,22 @@ cdef class PyGeneration:
             yield self._cache.get(here.key)
             here = <AbstractEntry*>here.r_next
 
-
+@cython.final
 cdef class PyCache:
     cdef Cache* cache
+    cdef readonly size_t sets
+    cdef readonly size_t hits
+    cdef readonly size_t misses
 
     def __cinit__(self, eden, protected, probation):
         self.cache = new Cache(eden, protected, probation)
+        self.sets = self.hits = self.misses = 0
 
     def __dealloc__(self):
         del self.cache
+
+    cpdef reset_stats(self):
+        self.hits = self.sets = self.misses = 0
 
     @property
     def limit(self):
@@ -134,6 +144,12 @@ cdef class PyCache:
         return PyGeneration.from_generation(<Generation*>self.cache.ring_probation,
                                             'probation',
                                             self)
+    @property
+    def generations(self):
+        return [NoSuchGeneration(0),
+                self.eden,
+                self.protected,
+                self.probation,]
 
     # Mapping operations
 
@@ -147,39 +163,63 @@ cdef class PyCache:
     def __len__(self):
         return self.cache.len()
 
-    cpdef object get(self, OID_t key):
+    cpdef CachedValue get(self, OID_t key):
         if not self.cache.contains(key):
             return None
         return value_from_entry(self.cache.get(key))
 
-    cpdef object peek(self, OID_t key):
+    cpdef CachedValue peek(self, OID_t key):
         return self.get(key)
 
+    cpdef object peek_item_with_tid(self, OID_t key, TID_t tid):
+        cdef CachedValue value = self.get(key)
+        if value is not None:
+            value = value.get_if_tid_matches(tid)
+        return value
+
     def __getitem__(self, OID_t key):
-        value = self.get(key)
+        return self.get(key)
+
+    cpdef get_item_with_tid(self, OID_t key, tid):
+        cdef CachedValue value = self.get(key)
+        if value is not None:
+            value = value.get_if_tid_matches(tid)
+
         if value is not None:
             self.cache.on_hit(key)
-            return value
+            self.hits += 1
+        else:
+            self.misses += 1
+        return value
 
-    def __setitem__(self, OID_t key, value):
+    def __setitem__(self, OID_t key, tuple value):
         # Do all this down here so we don't give up the GIL.
         cdef object state
         cdef TID_t tid
-        cdef AbstractEntry_p existing
-        cdef AbstractEntry_p from_python
-        cdef string state_str
-        if isinstance(value, tuple):
-            # It must not have already been in self
-            # to get a raw value passed down from Python.
-            assert key not in self
+        if not self.cache.contains(key): # the long way to avoid type conversion
             state, tid = value
-            state_str = (state or b'')
-            self.cache.add_to_eden(make_shared[SingleValueEntry](key, state_str, tid))
+            pickle = pickle_from_python(state)
+
+            self.cache.add_to_eden(
+                make_shared[SingleValueEntry](
+                    key,
+                    pickle,
+                    tid
+                )
+            )
         else:
-            # This could either be a merged value created
-            # in Python by += or a shrunk value from delitems()
-            from_python = entry_from_python(value)
-            self.cache.update_MRU(from_python)
+            # We need to merge values.
+            # TODO: Avoid the trip to Python. Implement with_later
+            # in C++?
+            # The pointer may or may not be stored in the dict,
+            # depending if we grew or not.
+            self.cache.update_MRU(
+                entry_from_python(
+                    self.get(key).with_later(value)
+                )
+            )
+
+        self.sets += 1
 
     def __delitem__(self, OID_t key):
         self.cache.delitem(key)
@@ -312,6 +352,13 @@ cdef class PyCache:
                     entry_from_python(orig_value),
                     orig_weight
                 )
+
+    def del_oids(self, oids):
+        """
+        For each oid in OIDs, remove it.
+        """
+        for oid in oids:
+            self.cache.delitem(oid)
 
     def freeze(self, oids_tids):
         # The idea is to *move* the data, or make it available,

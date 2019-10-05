@@ -109,7 +109,7 @@ namespace relstorage {
                 // C++ 11 and its delegating constructors, so we use a
                 // default argument to make it possible to create
                 // these.
-                SingleValueEntry(OID_t key, const Pickle_t state, TID_t tid, bool frozen=false)
+                SingleValueEntry(OID_t key, const Pickle_t& state, TID_t tid, bool frozen=false)
                  : AbstractEntry(key), state(state), tid(tid), frozen(frozen)
                 {}
                 SingleValueEntry(OID_t key, const std::pair<const Pickle_t, TID_t>& state, bool frozen)
@@ -119,6 +119,10 @@ namespace relstorage {
 
                 virtual size_t weight() { return this->state.size(); }
                 virtual size_t len() { return 1; }
+                // Use a value less than 0 for what would be None in Python.
+                virtual bool tid_matches(TID_t tid) const {
+                    return this->tid == tid || (tid < 0 && this->frozen);
+                }
         };
 
         typedef std::shared_ptr<SingleValueEntry> SingleValueEntry_p;

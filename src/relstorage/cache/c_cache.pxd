@@ -54,6 +54,9 @@ cdef extern from "c_cache.h" namespace "relstorage::cache":
         SingleValueEntry(OID_t key, const Pickle_t state, const TID_t tid)
         SingleValueEntry(OID_t key, const pair[const Pickle_t, const TID_t]&, const bool frozen)
         SingleValueEntry(OID_t key, const Pickle_t state, TID_t tid, bool frozen)
+        # Using -1 for None
+        bool tid_matches(TID_t tid)
+
 
     ctypedef shared_ptr[SingleValueEntry] SingleValueEntry_p
 

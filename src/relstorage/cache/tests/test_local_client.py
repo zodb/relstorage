@@ -215,26 +215,6 @@ class LocalClientOIDTests(AbstractStateCacheTests):
     def getClass(self):
         return LocalClient
 
-    def test_setitem_min_allowed_missing(self):
-        c = self._makeOne()
-
-        c[self.key] = self.value
-        self.assertIsEmpty(c._min_allowed_writeback)
-
-    def test_setitem_min_allowed_greater(self):
-        c = self._makeOne()
-        min_allowed = self.tid * 2
-        c._min_allowed_writeback[self.oid] = min_allowed
-        c[self.key] = self.value
-        self.assertEqual(c._min_allowed_writeback[self.oid], min_allowed)
-
-    def test_setitem_min_allowed_less(self):
-        c = self._makeOne()
-        min_allowed = 1
-        c._min_allowed_writeback[self.oid] = min_allowed
-        c[self.key] = self.value
-        self.assertEqual(c._min_allowed_writeback[self.oid], self.tid)
-
     def test_cache_corruption_on_store(self):
         from relstorage.cache.interfaces import CacheConsistencyError
         c = self._makeOne(cache_local_dir=':memory:')
@@ -242,38 +222,6 @@ class LocalClientOIDTests(AbstractStateCacheTests):
         # Different key, same real tid, different state. Uh-oh!
         with self.assertRaises(CacheConsistencyError):
             c[(self.oid, self.tid)] = (b'bad bytes', self.tid)
-
-    def test_delete_stale_objects_on_save(self):
-        from relstorage.cache.local_database import Database
-        from relstorage.cache.persistence import sqlite_connect
-        c = self._makeOne(cache_local_dir=":memory:")
-
-        conn = sqlite_connect(c.options, 'ignored-pfx', close_async=False)
-        self.addCleanup(conn.close)
-        db = Database.from_connection(conn)
-        db.store_temp([(0, 0, 0, b'state', 0)])
-        db.move_from_temp()
-        self.assertEqual(dict(db.oid_to_tid), {0: 0})
-        conn.commit()
-        # Pretend we loaded this from the db
-        c[(0, 0)] = (b'state', 0)
-        c._min_allowed_writeback[0] = 0
-
-        # Pass a newer version through
-        c[(0, 1)] = (b'state', 1)
-        self.assertEqual(c._min_allowed_writeback[0], 1)
-        # Evict it so we don't have it to write.
-        del c._cache[0]
-
-        # But it gets removed based on having seen it and knowing
-        # it's there.
-        conn._rs_has_closed = True # Prevent closing by the write method
-        try:
-            c.write_to_sqlite(conn, checkpoints=None)
-        finally:
-            conn._rs_has_closed = False
-
-        self.assertEmpty(db.oid_to_tid)
 
     def test_ctor(self):
         c = self._makeOne()

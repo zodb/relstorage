@@ -72,7 +72,12 @@ class GenericLRUCacheTests(TestCase):
 
     def _getClass(self):
         from . import Cache
-        return Cache
+        class C(Cache):
+            def __getitem__(self, oid):
+                entry = Cache.__getitem__(self, oid)
+                if entry is not None:
+                    return self.get_item_with_tid(oid, entry.tid)
+        return C
 
     def _makeOne(self, limit, kind=None):
         kind = kind or self._getClass()
@@ -85,7 +90,6 @@ class GenericLRUCacheTests(TestCase):
         cache = self._makeOne(100)
         assert_that(cache,
                     validly_provides(self._getIface()))
-        self.assertIsInstance(cache.stats(), dict)
         return cache
 
     def test_eden_implements(self):
