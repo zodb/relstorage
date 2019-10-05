@@ -124,6 +124,11 @@ def run_and_report_funcs(runner, named_funcs):
 def local_benchmark(runner):
     # pylint:disable=too-many-statements,too-many-locals
     from relstorage.cache.local_client import LocalClient
+    try:
+        from relstorage.cache.local_client import _SingleValue
+    except ImportError:
+        def _SingleValue(*args):
+            return args
     options = MockOptions()
     options.cache_local_mb = 100
     options.cache_local_compression = 'none'
@@ -151,9 +156,9 @@ def local_benchmark(runner):
         random_data = f.read(DATA_SIZE)
 
     key_groups = []
-    key_groups.append([(i, -1) for i in range(KEY_GROUP_SIZE)])
-    for i in range(1, KEY_GROUP_SIZE):
-        keys = [(i, j) for j in range(KEY_GROUP_SIZE)]
+    key_groups.append(list(range(KEY_GROUP_SIZE)))
+    for i in range(KEY_GROUP_SIZE):
+        keys = list(range(KEY_GROUP_SIZE * i, KEY_GROUP_SIZE * (i + 1)))
         assert len(set(keys)) == len(keys)
         key_groups.append(keys)
 
@@ -173,7 +178,8 @@ def local_benchmark(runner):
     ALL_DATA = {}
     for group in key_groups:
         for key in group:
-            ALL_DATA[key] = (random_data, key[1])
+            tid = key
+            ALL_DATA[key] = (random_data, tid)
     ALL_DATA = list(ALL_DATA.items())
     ALL_DATA.sort(key=lambda x: hash(x[0]))
     #print("Entries", len(ALL_DATA),
@@ -182,47 +188,46 @@ def local_benchmark(runner):
     def makeOne(populate=True):
         client = LocalClient(options, 'pfx')
         if populate:
-            client._bulk_update(ALL_DATA)
+            client._bulk_update([(t[0], _SingleValue(*t[1])) for t in ALL_DATA])
         return client
 
-    def populate_equal(loops, bucket_kind):
+    def populate_equal(loops):
         # Because we will populate when we make,
         # capture memory now to be able to include that.
         mem_before = get_memory_usage()
-        client = makeOne(bucket_kind)
+        client = makeOne()
 
         begin = perf_counter()
         for _ in range(loops):
-            for k, v in ALL_DATA:
+            for oid, (state, tid) in ALL_DATA:
                 # install a copy that's equal;
                 # this should mean no extra copies.
-                state = v[0]
                 state = state[:-1] + state[-1:]
-                new_v = (state, v[1])
-                assert new_v == v
-                assert new_v is not v
-                client[k] = new_v
+                client[(oid, tid)] = (state, tid)
         duration = perf_counter() - begin
         mem_used = get_memory_usage() - mem_before
         logger.info("Populated in %s; took %s mem; size: %d",
                     duration, byte_display(mem_used), len(client))
         return duration
 
-    def populate_not_equal(loops, bucket_kind):
+    def populate_not_equal(loops):
         # Because we will populate when we make,
         # capture memory now to be able to include that.
         mem_before = get_memory_usage()
-        client = makeOne(bucket_kind)
+        client = makeOne()
 
         begin = perf_counter()
-        for _ in range(loops):
-            for k, v in ALL_DATA:
+        for loop in range(loops):
+            for oid, (state, tid) in ALL_DATA:
                 # install a copy that's not quite equal.
                 # This should require saving it.
-                state = v[0]
+                # Note that we must use a different TID, or we
+                # get CacheConsistencyError.
                 state = state + b'1'
-                new_v = (state, v[1])
-                client[k] = new_v
+                tid = tid + loop + 1
+                key = (oid, tid)
+                new_v = (state, tid)
+                client[key] = new_v
         duration = perf_counter() - begin
         mem_used = get_memory_usage() - mem_before
         logger.info("Populated in %s; took %s mem; size: %d",
@@ -234,8 +239,8 @@ def local_benchmark(runner):
         mem_before = get_memory_usage()
         begin = perf_counter()
         for _ in range(loops):
-            for k, v in ALL_DATA:
-                client[k] = v
+            for oid, (state, tid) in ALL_DATA:
+                client[(oid, tid)] = (state, tid)
         duration = perf_counter() - begin
         mem_used = get_memory_usage() - mem_before
         logger.info("Populated in %s; took %s mem; size: %d",
@@ -253,8 +258,10 @@ def local_benchmark(runner):
         begin = perf_counter()
         for _ in range(loops):
             for keys in key_groups:
-                for k in keys:
-                    res = client[k]
+                for oid in keys:
+                    tid = oid
+                    key = (oid, tid)
+                    res = client[key]
                     #assert len(res) == len(keys)
                     if not res:
                         continue
@@ -275,11 +282,13 @@ def local_benchmark(runner):
         miss_count = 0
         begin = perf_counter()
         for _ in range(loops):
-            for k, v in ALL_DATA:
+            for oid, (state, tid) in ALL_DATA:
                 i += 1
-                client[k] = v
+                key = (oid, tid)
+                client[key] = (state, tid)
                 if i == len(hot_keys):
-                    for hot_key in hot_keys:
+                    for hot_oid in hot_keys:
+                        hot_key = (hot_oid, hot_oid)
                         res = client[hot_key]
                         if not res:
                             miss_count += 1
