@@ -29,6 +29,7 @@ cdef extern from "c_ring.h":
         RSRingNode* r_prev
         RSRingNode* r_next
         generation_num generation
+        size_t get_sizeof()
 
     cdef cppclass RSCache(RSRingNode):
         pass
@@ -57,12 +58,20 @@ cdef extern from "c_cache.h" namespace "relstorage::cache":
     ctypedef shared_ptr[SingleValueEntry] SingleValueEntry_p
 
     cdef cppclass MultipleValueEntry(AbstractEntry):
+        cppclass iterator:
+            iterator()
+            SingleValueEntry_p& operator*()
+            bool operator==()
+            bool operator!=()
+            iterator operator++()
         MultipleValueEntry(OID_t key)
         list[SingleValueEntry_p] p_values;
         void push_back(const SingleValueEntry_p const) except +
         void remove_tids_lte(TID_t tid) except +
         void remove_tids_lt(TID_t tid) except +
-
+        const SingleValueEntry_p front() except +
+        bool empty()
+        bool degenerate()
 
     ctypedef shared_ptr[MultipleValueEntry] MultipleValueEntry_p
 

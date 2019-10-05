@@ -116,7 +116,9 @@ namespace relstorage {
                     : AbstractEntry(key), state(state.first), tid(state.second), frozen(frozen)
                 {}
                 SingleValueEntry() : AbstractEntry(), state(), tid(-1), frozen(false) {}
+
                 virtual size_t weight() { return this->state.size(); }
+                virtual size_t len() { return 1; }
         };
 
         typedef std::shared_ptr<SingleValueEntry> SingleValueEntry_p;
@@ -133,6 +135,9 @@ namespace relstorage {
 
                 virtual size_t len() { return this->p_values.size(); }
                 virtual size_t weight();
+                virtual const SingleValueEntry_p front() const { return this->p_values.front(); }
+                virtual bool empty() const { return this->p_values.empty(); }
+                virtual bool degenerate() const { return this->p_values.size() == 1; }
         };
 
         typedef std::shared_ptr<MultipleValueEntry> MultipleValueEntry_p;

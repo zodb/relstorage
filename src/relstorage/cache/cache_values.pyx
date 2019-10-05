@@ -36,6 +36,17 @@ from relstorage.cache.c_cache cimport MultipleValueEntry
 import sys
 from relstorage.cache.interfaces import CacheConsistencyError
 
+cdef extern from *:
+    """
+    template <typename T>
+    static
+    void it_assign(T& it,
+                   relstorage::cache::SingleValueEntry_p& p) {
+        *it = p;
+    }
+    """
+    void it_assign[T](T&, SingleValueEntry_p&)
+
 cdef object value_from_entry(const AbstractEntry_p& entry):
     cdef SingleValueEntry_p sve_p
     cdef MultipleValueEntry_p mve_p
@@ -152,6 +163,18 @@ cdef class CachedValue:
     The base class for cached values.
     """
 
+    cpdef get_if_tid_matches(self, object tid):
+        raise NotImplementedError
+
+    cpdef freeze_to_tid(self, TID_t tid):
+        raise NotImplementedError
+
+    cpdef with_later(self, tuple value):
+        raise NotImplementedError
+
+    cpdef discarding_tids_before(self, TID_t tid):
+        raise NotImplementedError
+
 
 cdef class SingleValue(CachedValue):
     cdef SingleValueEntry_p entry
@@ -179,6 +202,10 @@ cdef class SingleValue(CachedValue):
         cdef SingleValue sv = SingleValue.__new__(SingleValue, 0, SingleValue, 0, 0)
         sv.entry = entry
         return sv
+
+    def sizeof(self):
+        # At this writing, reports 88
+        return sizeof(SingleValueEntry)
 
     def __iter__(self):
         value = self.entry.get()
@@ -234,7 +261,7 @@ cdef class SingleValue(CachedValue):
             return len(other) == 2 and self.tid == other[1] and self.value == other[0]
         return NotImplemented
 
-    def __mod__(self, tid):
+    cpdef get_if_tid_matches(self, object tid):
         cdef SingleValue me
         cdef TID_t native_tid
         if tid is None:
@@ -244,7 +271,7 @@ cdef class SingleValue(CachedValue):
         if native_tid == me.entry.get().tid:
             return me
 
-    def __ilshift__(self, const TID_t tid):
+    cpdef freeze_to_tid(self, TID_t tid):
         # We could be newer
         cdef FrozenValue fv
         cdef const SingleValueEntry* entry = self.entry.get()
@@ -259,7 +286,7 @@ cdef class SingleValue(CachedValue):
             return fv
         # if we're older, fall off the end and discard.
 
-    def __iadd__(self, tuple value):
+    cpdef with_later(self, tuple value):
         cdef object state = value[0] or b''
         cdef TID_t tid = value[1]
         cdef const SingleValueEntry* sve = self.entry.get()
@@ -278,7 +305,7 @@ cdef class SingleValue(CachedValue):
 
         return MultipleValues.__new__(MultipleValues, self, bytes(state), tid)
 
-    def __isub__(self, const TID_t tid):
+    cpdef discarding_tids_before(self, const TID_t tid):
         if tid <= self.entry.get().tid:
             return None
         return self
@@ -313,7 +340,7 @@ cdef class FrozenValue(SingleValue):
         return sv
 
 
-    def __mod__(self, tid):
+    cpdef get_if_tid_matches(self, tid):
         cdef SingleValue me
         cdef TID_t native_tid
         if tid is None:
@@ -323,7 +350,7 @@ cdef class FrozenValue(SingleValue):
         if native_tid == me.entry.get().tid:
             return me
 
-    def __ilshift__(self, TID_t tid):
+    cpdef freeze_to_tid(self, TID_t tid):
         # This method can get called if two different transaction views
         # tried to load an object at the same time and store it in the cache.
         if tid == self.entry.get().tid:
@@ -349,6 +376,10 @@ cdef class MultipleValues(CachedValue):
         cdef MultipleValues mv = MultipleValues.__new__(MultipleValues, None, None, 0)
         mv.entry = entry
         return mv
+
+    def sizeof(self):
+        # At this writing, reports 72.
+        return sizeof(MultipleValueEntry)
 
     @property
     def value(self):
@@ -384,17 +415,16 @@ cdef class MultipleValues(CachedValue):
                 entry = p
         return python_from_sve(entry)
 
-    def __mod__(self, tid):
-        cdef MultipleValues me = <MultipleValues>self
+    cpdef get_if_tid_matches(self, tid):
         cdef SingleValue result
-        values = me.entry.get().p_values
+        values = self.entry.get().p_values
         for entry in values:
-            result = python_from_sve(entry).__mod__(tid)
+            result = python_from_sve(entry).get_if_tid_matches(tid)
             if result is not None:
                 return result
         return None
 
-    def __ilshift__(self, TID_t tid):
+    cpdef freeze_to_tid(self, TID_t tid):
         # If we have the TID, everything else should be older,
         # unless we just overwrote and haven't made the transaction visible yet.
         # By (almost) definition, nothing newer, but if there is, we shouldn't
@@ -402,17 +432,19 @@ cdef class MultipleValues(CachedValue):
         # So this works like invalidation: drop everything older than the
         # tid; if we still have anything left, find and freeze the tid;
         # if that's the *only* thing left, return that, otherwise return ourself.
+        cdef SingleValueEntry_p sve_p
+        cdef CachedValue value
         entry = self.entry.get()
         entry.remove_tids_lt(tid)
 
-        if entry.p_values.empty():
+        if entry.empty():
             return None
 
-        if entry.p_values.size() == 1:
+        if entry.degenerate():
             # One item, either it or not
-            sve_p = entry.p_values.front()
+            sve_p = entry.front()
             result = python_from_sve(sve_p)
-            result <<= tid
+            result = (<CachedValue>result).freeze_to_tid(tid)
             return result
 
         # Multiple items, possibly in the future.
@@ -421,26 +453,31 @@ cdef class MultipleValues(CachedValue):
         while begin != end:
             sve_p = deref(begin)
             if sve_p.get().tid == tid:
-                entry.p_values.erase(begin)
                 value = python_from_sve(sve_p)
-                value <<= tid
-                entry.p_values.insert(begin, (<SingleValue>value).entry)
+                new_value = value.freeze_to_tid(tid)
+                assert new_value is not None # But it could be, couldn't it?
+                if new_value is not value:
+                    # Assign the entry via copy constructor;
+                    # using erase() invalidates the iterator
+                    sve_p = (<SingleValue>new_value).entry
+                    it_assign(begin, sve_p)
                 break
             postinc(begin)
         return self
 
-    def __iadd__(self, tuple value):
+    cpdef with_later(self, tuple value):
         self.entry.get().push_back(SingleValue.make_shared(self.entry.get().key, value[0], value[1]))
         return self
 
-    def __isub__(self, TID_t tid):
-        self.entry.get().remove_tids_lte(tid)
+    cpdef discarding_tids_before(self, TID_t tid):
+        entry = self.entry.get()
+        entry.remove_tids_lte(tid)
 
-        if self.entry.get().p_values.empty():
+        if entry.empty():
             return None
 
-        if self.entry.get().p_values.size() == 1:
-            return python_from_sve(self.entry.get().p_values.front())
+        if entry.degenerate():
+            return python_from_sve(entry.front())
 
         return self
 

@@ -108,7 +108,7 @@ class ICachedValue(interface.Interface):
 
     newest_value = interface.Attribute(u"The ``(state, tid)`` pair that is the newest.")
 
-    def __mod__(tid):
+    def get_if_tid_matches(tid):
         """
         Return the ``(state, tid)`` for the given TID.
 
@@ -116,10 +116,9 @@ class ICachedValue(interface.Interface):
 
         If no TID matches, returns None.
 
-        We use the % operator because ``__getitem__`` was taken.
         """
 
-    def __ilshift__(tid):
+    def freeze_to_tid(tid):
         """
         Mark the given TID, if it exists, as frozen.
 
@@ -128,13 +127,13 @@ class ICachedValue(interface.Interface):
         and must have been older.)
         """
 
-    def __iadd__(value):
+    def with_later(value):
         """
         Add the ``(state, tid)`` (another ICachedValue) to the list of
         cached entries. Return the new value to place in the cache.
         """
 
-    def __isub__(tid):
+    def discarding_tids_before(tid):
         """
         Remove the tid, and anything older, from the list of cached entries.
 
@@ -353,8 +352,9 @@ class LocalClient(object):
 
     def __contains__(self, oid_tid):
         oid, tid = oid_tid
-        entry = self._peek(oid)
-        return entry is not None and entry % tid is not None
+        if oid in self._cache:
+            entry = self._peek(oid)
+            return entry is not None and entry.get_if_tid_matches(tid) is not None
 
     def get(self, oid_tid, peek=False):
         oid, tid = oid_tid
@@ -364,17 +364,17 @@ class LocalClient(object):
 
         if peek:
             # Avoid the lock. We assume the underlying
-            # operations (dict.__getitem__, entry.__mod__)
+            # operations (dict.__getitem__, entry.get_if_tid_matches)
             # are thread-safe, when compared to other operations
             # that might mutate.
             entry = self._peek(oid)
             if entry is not None:
-                value = entry % tid
+                value = entry.get_if_tid_matches(tid)
         else:
             with self._lock:
                 entry = self._peek(oid)
                 if entry is not None:
-                    value = entry % tid
+                    value = entry.get_if_tid_matches(tid)
                 if value is not None:
                     self._hits += 1
                     self._cache_mru(oid) # Make an actual hit.
@@ -464,7 +464,7 @@ class LocalClient(object):
             with lock:
                 existing = peek(oid)
                 if existing:
-                    existing += value
+                    existing = existing.with_later(value)
                     value = existing
 
                 store(oid, value) # possibly evicts

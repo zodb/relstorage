@@ -35,6 +35,7 @@ from relstorage.cache.c_cache cimport RSCache
 
 from relstorage.cache.cache_values cimport value_from_entry
 from relstorage.cache.cache_values cimport entry_from_python
+from relstorage.cache.cache_values cimport CachedValue
 
 from relstorage._compat import iteroiditems
 
@@ -299,7 +300,7 @@ cdef class PyCache:
 
             orig_value = value
             orig_weight = value.weight
-            value -= expected_tid
+            value = value.discarding_tids_before(expected_tid)
             if value is None:
                 # Whole thing should be removed.
                 del self[oid]
@@ -317,6 +318,7 @@ cdef class PyCache:
         # *without* copying it.
         cdef OID_t oid
         cdef TID_t tid
+        cdef CachedValue value
 
         for oid, tid in iteroiditems(oids_tids):
             if not self.cache.contains(oid):
@@ -324,7 +326,7 @@ cdef class PyCache:
             value = self.get(oid)
             orig_value = value
             orig_weight = value.weight
-            value <<= tid
+            value = value.freeze_to_tid(tid)
             if value is None:
                 del self[oid]
                 continue

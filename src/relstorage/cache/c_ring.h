@@ -88,6 +88,7 @@ class RSRingNode : public RSRingEntry {
         throw std::runtime_error("Must provide weight");
     }
 
+
 };
 
 class RSRing : public RSRingEntry {
