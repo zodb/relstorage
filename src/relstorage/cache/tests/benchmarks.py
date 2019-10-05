@@ -123,6 +123,7 @@ def run_and_report_funcs(runner, named_funcs):
 
 def local_benchmark(runner):
     # pylint:disable=too-many-statements,too-many-locals
+    import gc
     from relstorage.cache.local_client import LocalClient
     try:
         from relstorage.cache.local_client import _SingleValue
@@ -186,15 +187,31 @@ def local_benchmark(runner):
     #      "Data size", byte_display(sum((len(v[1][0]) for v in ALL_DATA))))
 
     def makeOne(populate=True):
+        mem_before = get_memory_usage()
+        gc.collect()
+        gc.collect()
+        objects_before = len(gc.get_objects())
+
         client = LocalClient(options, 'pfx')
+        client.b_mem_before = mem_before
+        client.b_objects_before = objects_before
         if populate:
             client._bulk_update([(t[0], _SingleValue(*t[1])) for t in ALL_DATA])
         return client
 
+    def report(client, duration):
+        mem_before = client.b_mem_before
+        objects_before = client.b_objects_before
+        mem_used = get_memory_usage() - mem_before
+        objects_after = len(gc.get_objects())
+        logger.info("Populated in %s; took %s mem and %d objects; size: %d",
+                    duration, byte_display(mem_used),
+                    objects_after - objects_before,
+                    len(client))
+
     def populate_equal(loops):
         # Because we will populate when we make,
         # capture memory now to be able to include that.
-        mem_before = get_memory_usage()
         client = makeOne()
 
         begin = perf_counter()
@@ -205,15 +222,12 @@ def local_benchmark(runner):
                 state = state[:-1] + state[-1:]
                 client[(oid, tid)] = (state, tid)
         duration = perf_counter() - begin
-        mem_used = get_memory_usage() - mem_before
-        logger.info("Populated in %s; took %s mem; size: %d",
-                    duration, byte_display(mem_used), len(client))
+        report(client, duration)
         return duration
 
     def populate_not_equal(loops):
         # Because we will populate when we make,
         # capture memory now to be able to include that.
-        mem_before = get_memory_usage()
         client = makeOne()
 
         begin = perf_counter()
@@ -229,22 +243,18 @@ def local_benchmark(runner):
                 new_v = (state, tid)
                 client[key] = new_v
         duration = perf_counter() - begin
-        mem_used = get_memory_usage() - mem_before
-        logger.info("Populated in %s; took %s mem; size: %d",
-                    duration, byte_display(mem_used), len(client))
+        report(client, duration)
         return duration
 
     def populate_empty(loops):
         client = makeOne(populate=False)
-        mem_before = get_memory_usage()
+
         begin = perf_counter()
         for _ in range(loops):
             for oid, (state, tid) in ALL_DATA:
                 client[(oid, tid)] = (state, tid)
         duration = perf_counter() - begin
-        mem_used = get_memory_usage() - mem_before
-        logger.info("Populated in %s; took %s mem; size: %d",
-                    duration, byte_display(mem_used), len(client))
+        report(client, duration)
         return duration
 
     def read(loops):
@@ -268,7 +278,9 @@ def local_benchmark(runner):
                     assert res[0] == random_data
 
         print("Hit ratio: ", client.stats()['ratio'])
-        return perf_counter() - begin
+        duration = perf_counter() - begin
+        report(client, duration)
+        return duration
         # import pprint
         # pprint.pprint(client._bucket0.stats())
         # print("Probation promotes", client._bucket0._probation.promote_count)
@@ -293,7 +305,9 @@ def local_benchmark(runner):
                         if not res:
                             miss_count += 1
                     i = 0
-        return perf_counter() - begin
+        duration = perf_counter() - begin
+        report(client, duration)
+        return duration
     # def mixed_for_stats():
     #     # This is a trivial function that simulates the way
     #     # new keys can come in over time as we reset our checkpoints.
