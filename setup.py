@@ -117,17 +117,10 @@ setup(
     ],
     ext_modules=cythonize(
         [
-            Extension(name="relstorage.cache.cache_values",
-                      sources=[
-                          'src/relstorage/cache/cache_values.pyx',
-                          'src/relstorage/cache/c_ring.cpp',
-                          'src/relstorage/cache/c_cache.cpp',
-                      ]),
             Extension(name="relstorage.cache.cache",
                       language="c++",
                       sources=[
                           'src/relstorage/cache/cache.pyx',
-                          'src/relstorage/cache/c_ring.cpp',
                           'src/relstorage/cache/c_cache.cpp',
                       ]),
 

@@ -61,7 +61,7 @@ class Cache(object):
 
     @property
     def size(self):
-        return self.weight
+        return self.__cache.weight
 
 class LocalClient(_BaseLocalClient):
     _cache_type = Cache

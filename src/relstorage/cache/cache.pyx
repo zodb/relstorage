@@ -14,6 +14,9 @@ from __future__ import print_function
 cimport cython
 from cython.operator cimport typeid
 from cython.operator cimport dereference as deref
+from cpython.buffer cimport PyBuffer_FillInfo
+
+from libcpp.pair cimport pair
 from libcpp.memory cimport shared_ptr
 from libcpp.memory cimport make_shared
 from libcpp.memory cimport dynamic_pointer_cast
@@ -22,6 +25,7 @@ from libcpp.string cimport string
 
 from relstorage.cache.c_cache cimport TID_t
 from relstorage.cache.c_cache cimport OID_t
+from relstorage.cache.c_cache cimport Pickle_t
 from relstorage.cache.c_cache cimport AbstractEntry
 from relstorage.cache.c_cache cimport SingleValueEntry
 from relstorage.cache.c_cache cimport SingleValueEntry_p
@@ -30,15 +34,10 @@ from relstorage.cache.c_cache cimport MultipleValueEntry
 from relstorage.cache.c_cache cimport MultipleValueEntry_p
 from relstorage.cache.c_cache cimport Cache
 from relstorage.cache.c_cache cimport Generation
-from relstorage.cache.c_cache cimport rsc_eden_add_many
-from relstorage.cache.c_cache cimport RSCache
 
-from relstorage.cache.cache_values cimport value_from_entry
-from relstorage.cache.cache_values cimport entry_from_python
-from relstorage.cache.cache_values cimport CachedValue
-from relstorage.cache.cache_values cimport pickle_from_python
-
+import sys
 from relstorage.cache.interfaces import NoSuchGeneration
+from relstorage.cache.interfaces import CacheConsistencyError
 
 from relstorage._compat import iteroiditems
 
@@ -61,15 +60,308 @@ cdef extern from *:
     shared_ptr[T] shared_array_new[T](int)
     void array_delete[T](T* t)
 
+
+cdef object python_from_entry(const AbstractEntry_p& entry):
+    cdef SingleValueEntry_p sve_p
+    cdef MultipleValueEntry_p mve_p
+
+    cdef SingleValue sv
+    cdef MultipleValues mv
+
+    sve_p = dynamic_pointer_cast[SingleValueEntry, AbstractEntry](entry)
+    if sve_p:
+        if sve_p.get().frozen:
+            sv = FrozenValue.from_entry(sve_p)
+        else:
+            sv = SingleValue.from_entry(sve_p)
+        return sv
+
+    mve_p = dynamic_pointer_cast[MultipleValueEntry, AbstractEntry](entry)
+    if not mve_p:
+        raise AssertionError("Invalid pointer cast",
+                             entry.get().key)
+    return MultipleValues.from_entry(mve_p)
+
+cdef object python_from_sve(SingleValueEntry_p& entry):
+    cdef AbstractEntry_p ae = dynamic_pointer_cast[AbstractEntry, SingleValueEntry](entry)
+    return python_from_entry(ae)
+
+cdef inline Pickle_t pickle_from_python(state):
+    # Cython sadly won't let us use const return value :(
+    if state is None:
+        return b''
+    return state
+
+# Memory management notes:
+#
+# Converting from Pickle_t to Python bytes creates a copy of the
+# memory under Python control. We avoid that when we're read by
+# using a buffer object, which can be read by cStringIO and io.BytesIO.
+#
+# Freelists only work on classes that do not inherit from
+# anything except object. I think they also must be final.
+# So we could use them between SingleValue and FrozenValue if we
+# implemented the later with composition.
+
+cdef bint PY2 = sys.version_info[0] == 2
+
+@cython.final
+@cython.internal
+cdef class StringWrapper:
+    cdef SingleValueEntry_p entry
+
+    @staticmethod
+    cdef from_entry(const SingleValueEntry_p& entry):
+        if PY2:
+            # Too many things on Python 2 don't handle the
+            # new-style buffers that Cython creates. Notably, file.writelines()
+            # and zlib.decompress() require old-style buffers
+            return entry.get().state
+        cdef StringWrapper w = StringWrapper.__new__(StringWrapper)
+        w.entry = entry
+        return w
+
+    cdef from_substring(self, const Pickle_t& substr):
+        return StringWrapper.from_entry(
+            SingleValueEntry_p(self.entry, # share ownership with this existing pointer.
+                               new SingleValueEntry(self.entry.get().key,
+                                                    self.entry.get().tid,
+                                                    substr,
+                                                    ))
+        )
+
+    def __getbuffer__(self, Py_buffer* view, int flags):
+        PyBuffer_FillInfo(view, self,
+                          <void*>self.entry.get().state.data(),
+                          self.entry.get().state.size(),
+                          1,
+                          flags)
+
+    def __releasebuffer__(self, Py_buffer* view):
+        pass
+
+    def __len__(self):
+        return self.entry.get().state.size()
+
+    def __getitem__(self, ix):
+        cdef string* s = &self.entry.get().state
+        if ix == slice(None, 2, None):
+            # We need to be able to hash this, it's the compression prefix.
+            return <bytes>s.substr(0, 2)
+        if ix == slice(2, None, None):
+            return self.from_substring(s.substr(2))
+
+        return (<bytes>deref(s))[ix]
+
+    def __eq__(self, other):
+        if isinstance(other, StringWrapper):
+            return (<StringWrapper>other).entry == self.entry
+        return bytes(self) == other
+
+    def __str__(self):
+        return str(<bytes>self.entry.get().state)
+
+    def __bytes__(self):
+        return <bytes>self.entry.get().state
+
+    def __repr__(self):
+        return repr(<bytes>self.entry.get().state)
+
+cdef class CachedValue:
+    """
+    The base class for cached values.
+    """
+
+    cpdef get_if_tid_matches(self, object tid):
+        raise NotImplementedError
+
+
+cdef class SingleValue(CachedValue):
+    cdef SingleValueEntry_p entry
+    frozen = False
+
+    @staticmethod
+    cdef SingleValue from_entry(const SingleValueEntry_p& entry):
+        cdef SingleValue sv = SingleValue.__new__(SingleValue)
+        sv.entry = entry
+        return sv
+
+    def sizeof(self):
+        # At this writing, reports 88
+        return sizeof(SingleValueEntry)
+
+    def __iter__(self):
+        value = self.entry.get()
+        return iter((
+            StringWrapper.from_entry(self.entry),
+            value.tid
+        ))
+
+    @property
+    def value(self):
+        return self.state
+
+    @property
+    def key(self):
+        return self.entry.get().key
+
+    @property
+    def frequency(self):
+        return self.entry.get().frequency
+
+    @property
+    def state(self):
+        return StringWrapper.from_entry(self.entry)
+
+    @property
+    def tid(self):
+        return self.entry.get().tid
+
+    @property
+    def max_tid(self):
+        return self.entry.get().tid
+
+    @property
+    def newest_value(self):
+        return self
+
+    @property
+    def weight(self):
+        return self.entry.get().weight()
+
+    def __eq__(self, other):
+        cdef SingleValue p
+        if isinstance(other, SingleValue):
+            p = <SingleValue>other
+            my_entry = self.entry.get()
+            other_entry = p.entry.get()
+            return (
+                my_entry.state == other_entry.state
+                and my_entry.tid == other_entry.tid
+                and self.frozen == other.frozen
+            )
+        if isinstance(other, tuple):
+            return len(other) == 2 and self.tid == other[1] and self.value == other[0]
+        return NotImplemented
+
+    cpdef get_if_tid_matches(self, object tid):
+        if self.entry.get().tid_matches(-1 if tid is None else tid):
+            return self
+
+    def __getitem__(self, int i):
+        if i == 0:
+            return self.entry.get().state
+        if i == 1:
+            return self.entry.get().tid
+        raise IndexError
+
+    def __repr__(self):
+        return "%s(%r, %s, frozen=%s)" % (
+            self.__class__.__name__,
+            self.state,
+            self.tid,
+            self.frozen,
+        )
+
+
+
+@cython.final
+@cython.internal
+cdef class FrozenValue(SingleValue):
+
+    frozen = True
+
+    @staticmethod
+    cdef SingleValue from_entry(const SingleValueEntry_p& entry):
+        cdef FrozenValue sv = FrozenValue.__new__(FrozenValue, 0, SingleValue, 0, 0)
+        sv.entry = entry
+        return sv
+
+@cython.final
+cdef class MultipleValues(CachedValue):
+    cdef MultipleValueEntry_p entry
+# TODO: we should keep this sorted by tid, yes?
+# A std::map<tid, SingleValueEntry_p> sounds almost ideal
+# for accessing max_tid and newest_value, except for whatever space
+# overhead that adds.
+
+    @staticmethod
+    cdef MultipleValues from_entry(const MultipleValueEntry_p& entry):
+        cdef MultipleValues mv = MultipleValues.__new__(MultipleValues)
+        mv.entry = entry
+        return mv
+
+    def sizeof(self):
+        # At this writing, reports 72.
+        return sizeof(MultipleValueEntry)
+
+    @property
+    def value(self):
+        return list(self)
+
+    @property
+    def key(self):
+        return self.entry.get().key
+
+    @property
+    def frequency(self):
+        return self.entry.get().frequency
+
+    @property
+    def weight(self):
+        return self.entry.get().weight()
+
+    @property
+    def max_tid(self):
+        cdef TID_t result = 0
+        values = self.entry.get().p_values
+        for p in values:
+            if p.get().tid > result:
+                result = p.get().tid
+        return result
+
+    @property
+    def newest_value(self):
+        cdef SingleValueEntry_p entry = self.entry.get().front()
+        values = self.entry.get().p_values
+        for p in values:
+            if p.get().tid > entry.get().tid:
+                entry = p
+        return python_from_sve(entry)
+
+    cpdef get_if_tid_matches(self, tid):
+        cdef TID_t native_tid = -1 if tid is None else tid
+        values = self.entry.get().p_values
+        for entry in values:
+            if entry.get().tid_matches(native_tid):
+                return python_from_sve(entry)
+        return None
+
+    def __iter__(self):
+        return iter([
+            python_from_sve(v)
+            for v
+            in self.entry.get().p_values
+        ])
+
+    def __repr__(self):
+        return repr([
+            tuple(v)
+            for v in self
+        ])
+
+
 cdef class PyGeneration:
     cdef Generation* generation
     cdef readonly object __name__
+    # This reference is to keep the cache object alive while we're
+    # alive.
     cdef PyCache _cache
 
     @staticmethod
-    cdef from_generation(Generation* gen, name, cache):
+    cdef from_generation(Generation& gen, name, cache):
         cdef PyGeneration pygen = PyGeneration.__new__(PyGeneration)
-        pygen.generation = gen
+        pygen.generation = &gen
         pygen.__name__ = name
         pygen._cache = cache
         return pygen
@@ -84,24 +376,24 @@ cdef class PyGeneration:
 
     @property
     def weight(self):
-        return self.generation.sum_weights
+        return self.generation.sum_weights()
 
     def __len__(self):
-        return self.generation.len
+        return self.generation.len()
 
     # Cython still uses __nonzero__
     def __nonzero__(self):
-        return self.generation.len > 0
+        return not self.generation.empty()
 
     def __iter__(self):
         "Not thread safe."
-        cdef AbstractEntry* here
-        if self.generation.ring_is_empty():
+        if self.generation.empty():
             return ()
-        here = <AbstractEntry*>self.generation.r_next
-        while here != <void*>self.generation:
-            yield self._cache.get(here.key)
-            here = <AbstractEntry*>here.r_next
+        it = self.generation.iter()
+
+        for ptr in it:
+            yield self._cache.get(ptr.key)
+
 
 @cython.final
 cdef class PyCache:
@@ -129,19 +421,19 @@ cdef class PyCache:
     # Access to generations
     @property
     def eden(self):
-        return PyGeneration.from_generation(<Generation*>self.cache.ring_eden,
+        return PyGeneration.from_generation(self.cache.ring_eden,
                                             'eden',
                                             self)
 
     @property
     def protected(self):
-        return PyGeneration.from_generation(<Generation*>self.cache.ring_protected,
+        return PyGeneration.from_generation(self.cache.ring_protected,
                                             'protected',
                                             self)
 
     @property
     def probation(self):
-        return PyGeneration.from_generation(<Generation*>self.cache.ring_probation,
+        return PyGeneration.from_generation(self.cache.ring_probation,
                                             'probation',
                                             self)
     @property
@@ -166,7 +458,7 @@ cdef class PyCache:
     cpdef CachedValue get(self, OID_t key):
         if not self.cache.contains(key):
             return None
-        return value_from_entry(self.cache.get(key))
+        return python_from_entry(self.cache.get(key))
 
     cpdef CachedValue peek(self, OID_t key):
         return self.get(key)
@@ -194,30 +486,21 @@ cdef class PyCache:
 
     def __setitem__(self, OID_t key, tuple value):
         # Do all this down here so we don't give up the GIL.
-        cdef object state
-        cdef TID_t tid
-        if not self.cache.contains(key): # the long way to avoid type conversion
-            state, tid = value
-            pickle = pickle_from_python(state)
+        cdef TID_t tid = value[1]
 
+        if not self.cache.contains(key): # the long way to avoid type conversion
             self.cache.add_to_eden(
-                make_shared[SingleValueEntry](
-                    key,
-                    pickle,
-                    tid
-                )
+                key,
+                pickle_from_python(value[0]),
+                tid
             )
+
         else:
             # We need to merge values.
-            # TODO: Avoid the trip to Python. Implement with_later
-            # in C++?
-            # The pointer may or may not be stored in the dict,
-            # depending if we grew or not.
-            self.cache.update_MRU(
-                entry_from_python(
-                    self.get(key).with_later(value)
-                )
-            )
+            try:
+                self.cache.store_and_make_MRU(key, pickle_from_python(value[0]), tid)
+            except RuntimeError as e:
+                raise CacheConsistencyError(str(e))
 
         self.sets += 1
 
@@ -235,9 +518,9 @@ cdef class PyCache:
         """
         for pair in self.cache.getData():
             # XXX: we shouldn't have to go to python to get this.
-            python = value_from_entry(pair.second)
+            python = python_from_entry(pair.second)
             oid = pair.first
-            if pair.second.get().len() > 1:
+            if pair.second.get().value_count() > 1:
                 for entry in python:
                     yield (oid, entry.tid)
             else:
@@ -250,7 +533,7 @@ cdef class PyCache:
         Not thread safe.
         """
         for thing in self.cache.getData():
-            yield (thing.first, value_from_entry(thing.second))
+            yield (thing.first, python_from_entry(thing.second))
 
     def keys(self):
         """
@@ -268,7 +551,7 @@ cdef class PyCache:
         Not thread safe.
         """
         for thing in self.cache.getData():
-            yield value_from_entry(thing.second)
+            yield python_from_entry(thing.second)
 
     # Cache specific operations
 
@@ -298,24 +581,20 @@ cdef class PyCache:
         # We're done with ordered_keys, free its memory
         ordered_keys = None
 
-        added_count = rsc_eden_add_many[SingleValueEntry](
-            <RSCache&>deref(self.cache),
-            array,
+        added_count = self.cache.add_many(
+            shared_ptr_to_array,
             number_nodes)
 
         # Things that didn't get added have -1 for their generation.
+        if return_count_only:
+            return added_count
+
         i = 0
         result = []
-        while i < added_count:
-            if array[i].generation != -1:
-
+        while i < number_nodes:
+            if array[i].in_cache():
                 key = array[i].key
-                self.cache.getData()[key] = dynamic_pointer_cast[
-                    AbstractEntry, SingleValueEntry](
-                        SingleValueEntry_p(shared_ptr_to_array, array + i)
-                    )
-                if not return_count_only:
-                    result.append(self.get(key))
+                result.append(self.get(key))
             i += 1
 
         return result if not return_count_only else added_count
@@ -329,29 +608,10 @@ cdef class PyCache:
         for OID that are older than TID.
         """
         cdef OID_t oid
-        cdef TID_t expected_tid
-        cdef AbstractEntry_p from_python
+        cdef TID_t tid
 
-        for oid, expected_tid in iteroiditems(oids_tids):
-            if not self.cache.contains(oid):
-                continue
-
-            value = self.get(oid)
-
-            orig_value = value
-            orig_weight = value.weight
-            value = value.discarding_tids_before(expected_tid)
-            if value is None:
-                # Whole thing should be removed.
-                del self[oid]
-            elif value is not orig_value or value.weight != orig_weight:
-                # Even if it's the same object it may have
-                # mutated in place and must be replaced.
-                self.cache.replace_entry(
-                    entry_from_python(value),
-                    entry_from_python(orig_value),
-                    orig_weight
-                )
+        for oid, tid in iteroiditems(oids_tids):
+            self.cache.delitem(oid, tid)
 
     def del_oids(self, oids):
         """
@@ -368,21 +628,8 @@ cdef class PyCache:
         cdef CachedValue value
 
         for oid, tid in iteroiditems(oids_tids):
-            if not self.cache.contains(oid):
-                continue
-            value = self.get(oid)
-            orig_value = value
-            orig_weight = value.weight
-            value = value.freeze_to_tid(tid)
-            if value is None:
-                del self[oid]
-                continue
-            if value is not orig_value or value.weight != orig_weight:
-                self.cache.replace_entry(
-                    entry_from_python(value),
-                    entry_from_python(orig_value),
-                    orig_weight
-                )
+            self.cache.freeze(oid, tid)
+
     @property
     def weight(self):
         return self.cache.weight()

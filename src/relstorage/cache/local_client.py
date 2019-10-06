@@ -41,7 +41,7 @@ from relstorage.cache.persistence import sqlite_connect
 from relstorage.cache.persistence import sqlite_files
 from relstorage.cache.persistence import FAILURE_TO_OPEN_DB_EXCEPTIONS
 from relstorage.cache.local_database import Database
-from relstorage.cache import cache_values
+
 from relstorage.cache import cache
 
 logger = __import__('logging').getLogger(__name__)
@@ -141,7 +141,7 @@ class ICachedValue(ILRUEntry):
         were removed and the cached entry should be removed.
         """
 
-interface.classImplements(cache_values.CachedValue, ICachedValue)
+interface.classImplements(cache.CachedValue, ICachedValue)
 interface.classImplements(cache.PyCache, IGenerationalLRUCache)
 interface.classImplements(cache.PyGeneration, IGeneration)
 
@@ -207,6 +207,7 @@ class LocalClient(object):
         self._cache = None
 
         self.flush_all()
+        self.__initial_weight = self._cache.weight
 
         compression_module = options.cache_local_compression
         try:
@@ -256,7 +257,7 @@ class LocalClient(object):
     @_log_timed
     def save(self, object_index=None, checkpoints=None, **sqlite_args):
         options = self.options
-        if options.cache_local_dir and self.size:
+        if options.cache_local_dir and self.size > self.__initial_weight:
             try:
                 conn = sqlite_connect(options, self.prefix,
                                       **sqlite_args)
