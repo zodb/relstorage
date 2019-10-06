@@ -120,50 +120,30 @@ def run_and_report_funcs(runner, named_funcs):
         benchmarks[name] = benchmark
     return benchmarks
 
-
-def local_benchmark(runner):
-    # pylint:disable=too-many-statements,too-many-locals
-    import gc
-    from relstorage.cache.local_client import LocalClient
-    try:
-        from relstorage.cache.local_client import _SingleValue
-    except ImportError:
-        def _SingleValue(*args):
-            return args
-    options = MockOptions()
-    options.cache_local_mb = 100
-    options.cache_local_compression = 'none'
-
-
-    KEY_GROUP_SIZE = 400
-    DATA_SIZE = 1024
-
-    # With 1000 in a key group, and 1024 bytes of data, we produce
-    # 909100 keys, and 930918400 = 887MB of data, which will overflow
-    # a cache of 500 MB.
-
-    # A group size of 100 produces 9100 keys with 9318400 = 8.8MB of data.
-    # Likewise, group of 200 produces 36380 keys with 35.5MB of data.
-
-    # Group size of 400 produces 145480 keys with 142MB of data.
-
-    # Most of our time is spent in compression, it seems.
-    # In the 8.8mb case, populating all the data with default compression
-    # takes about 2.5-2.8s. Using no compression, it takes 0.38 to 0.42s.
-    # Reading is the same at about 0.2s.
-
-
+def _read_random(data_size):
     with open('/dev/urandom', 'rb') as f:
-        random_data = f.read(DATA_SIZE)
+        return f.read(data_size)
+
+
+def _make_key_groups(key_group_size):
 
     key_groups = []
-    key_groups.append(list(range(KEY_GROUP_SIZE)))
-    for i in range(KEY_GROUP_SIZE):
-        keys = list(range(KEY_GROUP_SIZE * i, KEY_GROUP_SIZE * (i + 1)))
+    key_groups.append(list(range(key_group_size)))
+    for i in range(key_group_size):
+        keys = list(range(key_group_size * i, key_group_size * (i + 1)))
         assert len(set(keys)) == len(keys)
         key_groups.append(keys)
 
+    return key_groups
 
+def _make_data(data_or_size, key_group_size):
+    random_data = None
+    if isinstance(data_or_size, bytes):
+        random_data = data_or_size
+    else:
+        random_data = _read_random(data_or_size)
+
+    key_groups = _make_key_groups(key_group_size)
     # Recent PyPy and Python 3.6 preserves iteration order of a dict
     # to match insertion order. If we use a dict for ALL_DATA, this
     # gives slightly different results due to the key lengths being
@@ -183,8 +163,42 @@ def local_benchmark(runner):
             ALL_DATA[key] = (random_data, tid)
     ALL_DATA = list(ALL_DATA.items())
     ALL_DATA.sort(key=lambda x: hash(x[0]))
-    #print("Entries", len(ALL_DATA),
-    #      "Data size", byte_display(sum((len(v[1][0]) for v in ALL_DATA))))
+    return ALL_DATA
+
+
+def local_benchmark(runner):
+    # pylint:disable=too-many-statements,too-many-locals
+    import gc
+    from relstorage.cache.local_client import LocalClient
+    try:
+        from relstorage.cache.local_client import _SingleValue
+    except ImportError:
+        def _SingleValue(*args):
+            return args
+    options = MockOptions()
+    options.cache_local_mb = 100
+    options.cache_local_compression = 'none'
+
+    KEY_GROUP_SIZE = 400
+    DATA_SIZE = 1024
+
+    # With 1000 in a key group, and 1024 bytes of data, we produce
+    # 909100 keys, and 930918400 = 887MB of data, which will overflow
+    # a cache of 500 MB.
+
+    # A group size of 100 produces 9100 keys with 9318400 = 8.8MB of data.
+    # Likewise, group of 200 produces 36380 keys with 35.5MB of data.
+
+    # Group size of 400 produces 145480 keys with 142MB of data.
+
+    # Most of our time is spent in compression, it seems.
+    # In the 8.8mb case, populating all the data with default compression
+    # takes about 2.5-2.8s. Using no compression, it takes 0.38 to 0.42s.
+    # Reading is the same at about 0.2s.
+    random_data = _read_random(DATA_SIZE)
+
+    # To best capture the actual memory usage, only create the data
+    # as needed, and destroy it before taking a memory reading.
 
     def makeOne(populate=True):
         mem_before = get_memory_usage()
@@ -196,32 +210,45 @@ def local_benchmark(runner):
         client.b_mem_before = mem_before
         client.b_objects_before = objects_before
         if populate:
-            client._bulk_update([(t[0], _SingleValue(*t[1])) for t in ALL_DATA])
+            client._bulk_update([
+                (t[0], _SingleValue(*t[1]))
+                for t
+                in _make_data(random_data, KEY_GROUP_SIZE)
+            ])
         return client
 
     def report(client, duration):
         mem_before = client.b_mem_before
         objects_before = client.b_objects_before
-        mem_used = get_memory_usage() - mem_before
+        mem_after = get_memory_usage()
+        mem_used = mem_after - mem_before
         objects_after = len(gc.get_objects())
-        logger.info("Populated in %s; took %s mem and %d objects; size: %d",
-                    duration, byte_display(mem_used),
-                    objects_after - objects_before,
-                    len(client))
+        logger.info(
+            "%s: Executed in %s; Mem delta: %s;  Object Delta: %s; "
+            "Num keys: %d; Weight: %s; "
+            "Mem before: %s; Mem after: %s",
+            os.getpid(),
+            duration, byte_display(mem_used), objects_after - objects_before,
+            len(client), byte_display(client.size),
+            byte_display(mem_before), byte_display(mem_after),
+        )
 
     def populate_equal(loops):
-        # Because we will populate when we make,
-        # capture memory now to be able to include that.
         client = makeOne()
+        duration = 0
 
-        begin = perf_counter()
         for _ in range(loops):
-            for oid, (state, tid) in ALL_DATA:
+            all_data = _make_data(random_data, KEY_GROUP_SIZE)
+
+            begin = perf_counter()
+            for oid, (state, tid) in all_data:
                 # install a copy that's equal;
                 # this should mean no extra copies.
                 state = state[:-1] + state[-1:]
                 client[(oid, tid)] = (state, tid)
-        duration = perf_counter() - begin
+            duration += perf_counter() - begin
+            all_data = None
+
         report(client, duration)
         return duration
 
@@ -229,32 +256,47 @@ def local_benchmark(runner):
         # Because we will populate when we make,
         # capture memory now to be able to include that.
         client = makeOne()
+        duration = 0
 
-        begin = perf_counter()
         for loop in range(loops):
-            for oid, (state, tid) in ALL_DATA:
+            all_data = _make_data(random_data, KEY_GROUP_SIZE)
+
+            begin = perf_counter()
+            for oid, (state, tid) in all_data:
                 # install a copy that's not quite equal.
                 # This should require saving it.
                 # Note that we must use a different TID, or we
                 # get CacheConsistencyError.
-                state = state + b'1'
+                state = state + str(loop).encode('ascii')
                 tid = tid + loop + 1
                 key = (oid, tid)
                 new_v = (state, tid)
                 client[key] = new_v
-        duration = perf_counter() - begin
+            duration += perf_counter() - begin
+
+        all_data = None
         report(client, duration)
         return duration
 
     def populate_empty(loops):
-        client = makeOne(populate=False)
+        # Capture memory usage
+        init_client = makeOne(populate=False)
+        # Here, we keep all clients alive so that we can
+        # measure the total memory usage.
+        all_clients = []
+        duration = 0
 
-        begin = perf_counter()
         for _ in range(loops):
-            for oid, (state, tid) in ALL_DATA:
+            client = makeOne(populate=False)
+            all_clients.append(client)
+            all_data = _make_data(random_data, KEY_GROUP_SIZE)
+
+            begin = perf_counter()
+            for oid, (state, tid) in all_data:
                 client[(oid, tid)] = (state, tid)
-        duration = perf_counter() - begin
-        report(client, duration)
+            duration += perf_counter() - begin
+
+        report(init_client, duration)
         return duration
 
     def read(loops):
@@ -265,6 +307,7 @@ def local_benchmark(runner):
         # probation and protected. It so happens that this is our slowest
         # case.
         client = makeOne(populate=True)
+        key_groups = _make_key_groups(KEY_GROUP_SIZE)
         begin = perf_counter()
         for _ in range(loops):
             for keys in key_groups:
@@ -279,6 +322,8 @@ def local_benchmark(runner):
 
         print("Hit ratio: ", client.stats()['ratio'])
         duration = perf_counter() - begin
+        key_groups = None
+
         report(client, duration)
         return duration
         # import pprint
@@ -288,13 +333,20 @@ def local_benchmark(runner):
         # print("Probation removes", client._bucket0._probation.remove_count)
 
     def mixed(loops):
-        client = makeOne(populate=True)
+        key_groups = _make_key_groups(KEY_GROUP_SIZE)
         hot_keys = key_groups[0]
+
+        client = makeOne(populate=True)
+
+        duration = 0
         i = 0
         miss_count = 0
-        begin = perf_counter()
+
         for _ in range(loops):
-            for oid, (state, tid) in ALL_DATA:
+            all_data = _make_data(random_data, KEY_GROUP_SIZE)
+
+            begin = perf_counter()
+            for oid, (state, tid) in all_data:
                 i += 1
                 key = (oid, tid)
                 client[key] = (state, tid)
@@ -305,7 +357,9 @@ def local_benchmark(runner):
                         if not res:
                             miss_count += 1
                     i = 0
-        duration = perf_counter() - begin
+            duration += perf_counter() - begin
+            all_data = None
+
         report(client, duration)
         return duration
     # def mixed_for_stats():
