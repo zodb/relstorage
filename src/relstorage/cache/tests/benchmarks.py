@@ -217,17 +217,19 @@ def local_benchmark(runner):
             ])
         return client
 
-    def report(client, duration):
+    def report(client, duration, extra=''):
+        gc.collect()
+        gc.collect()
         mem_before = client.b_mem_before
         objects_before = client.b_objects_before
         mem_after = get_memory_usage()
         mem_used = mem_after - mem_before
         objects_after = len(gc.get_objects())
         logger.info(
-            "%s: Executed in %s; Mem delta: %s;  Object Delta: %s; "
+            "%s:%sExecuted in %s; Mem delta: %s;  Object Delta: %s; "
             "Num keys: %d; Weight: %s; "
             "Mem before: %s; Mem after: %s",
-            os.getpid(),
+            os.getpid(), extra,
             duration, byte_display(mem_used), objects_after - objects_before,
             len(client), byte_display(client.size),
             byte_display(mem_before), byte_display(mem_after),
@@ -248,8 +250,9 @@ def local_benchmark(runner):
                 client[(oid, tid)] = (state, tid)
             duration += perf_counter() - begin
             all_data = None
+            report(client, duration, extra=" (Loop " + str(_) + ") ")
 
-        report(client, duration)
+        report(client, duration, extra=" (Final ) ")
         return duration
 
     def populate_not_equal(loops):
@@ -273,9 +276,10 @@ def local_benchmark(runner):
                 new_v = (state, tid)
                 client[key] = new_v
             duration += perf_counter() - begin
+            all_data = None
+            report(client, duration, extra=" (Loop " + str(loop) + ") ")
 
-        all_data = None
-        report(client, duration)
+        report(client, duration, extra=" (Final ) ")
         return duration
 
     def populate_empty(loops):
@@ -286,7 +290,7 @@ def local_benchmark(runner):
         all_clients = []
         duration = 0
 
-        for _ in range(loops):
+        for loop in range(loops):
             client = makeOne(populate=False)
             all_clients.append(client)
             all_data = _make_data(random_data, KEY_GROUP_SIZE)
@@ -295,8 +299,10 @@ def local_benchmark(runner):
             for oid, (state, tid) in all_data:
                 client[(oid, tid)] = (state, tid)
             duration += perf_counter() - begin
+            all_data = None
+            report(client, duration, extra=" (Loop " + str(loop) + ") ")
 
-        report(init_client, duration)
+        report(init_client, duration, extra=" (Final ) ")
         return duration
 
     def read(loops):
@@ -324,7 +330,7 @@ def local_benchmark(runner):
         duration = perf_counter() - begin
         key_groups = None
 
-        report(client, duration)
+        report(client, duration, extra=" (Final ) ")
         return duration
         # import pprint
         # pprint.pprint(client._bucket0.stats())
@@ -360,7 +366,7 @@ def local_benchmark(runner):
             duration += perf_counter() - begin
             all_data = None
 
-        report(client, duration)
+        report(client, duration, extra="(Final)")
         return duration
     # def mixed_for_stats():
     #     # This is a trivial function that simulates the way
