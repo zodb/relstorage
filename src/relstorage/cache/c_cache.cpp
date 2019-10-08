@@ -50,15 +50,16 @@ std::ostream& operator<<(std::ostream& s, const AbstractEntry& entry)
  */
 
 RSR_SINLINE
-OidList _spill_from_ring_to_ring(Generation& updated_ring,
-                                 Generation& destination_ring,
-                                 const AbstractEntry* updated_ignore_me,
-                                 const bool allow_victims,
-                                            const bool overfill_destination)
+void _spill_from_ring_to_ring(Generation& updated_ring,
+                              Generation& destination_ring,
+                              const AbstractEntry* updated_ignore_me,
+                              const bool allow_victims,
+                              const bool overfill_destination,
+                              OidList& rejects)
 {
     AbstractEntry* updated_oldest = NULL;
     AbstractEntry* destination_oldest = NULL;
-    OidList rejects;
+    rejects.clear();
 
 
     while(!updated_ring.empty() && updated_ring.oversize()) {
@@ -120,8 +121,6 @@ OidList _spill_from_ring_to_ring(Generation& updated_ring,
         }
     }
     */
-
-    return rejects;
 }
 
 //********************
@@ -253,23 +252,24 @@ void Probation::on_hit(Cache& cache, AbstractEntry& entry)
     // just added, or the ring only has one item left)
     _spill_from_ring_to_ring(protected_ring, probation_ring, &entry,
                              false, // No victims
-                             true); // let destination get too big
+                             true,
+                             this->no_rejects); // let destination get too big
 
 }
 
 //********************
 // Eden
-const OidList Eden::add_and_evict(AbstractEntry& entry)
+OidList& Eden::add_and_evict(AbstractEntry& entry)
 {
     Eden& eden_ring = *this;
     Cache& cache = *eden_ring.cache;
     Protected& protected_ring = cache.ring_protected;
     Probation& probation_ring = cache.ring_probation;
-
+    this->rejects.clear();
     Generation::add(entry);
 
     if(!eden_ring.oversize()) {
-        return OidList();
+        return this->rejects;
     }
 
     // Ok, we have to move things. Begin by filling up the
@@ -302,29 +302,30 @@ const OidList Eden::add_and_evict(AbstractEntry& entry)
                 protected_ring.adopt(eden_oldest);
             }
         }
-        return OidList();
+        return this->rejects;
     }
 
     // OK, we've already filled protected and have started putting
     // things in probation. So we may need to choose victims.
     // Begin by taking eden and moving to probation, evicting from probation
     // if needed.
-    OidList rejects = _spill_from_ring_to_ring(
-                 eden_ring, probation_ring, &entry,
-                 true, // allow_victims
-                 false); // don't overfill
+    _spill_from_ring_to_ring(
+                             eden_ring, probation_ring, &entry,
+                             true, // all   ow_victims
+                             false,  // don't overfill
+                             this->rejects);
 
     if (protected_ring.oversize()) {
         // If protected is oversize, also move from them to probation.
         // What about from eden to protected?
-        const OidList spill_rejects = _spill_from_ring_to_ring(
+        _spill_from_ring_to_ring(
                eden_ring, protected_ring, &entry,
                true,
-               false
+               false,
+               this->rejects
         );
-        rejects.insert(rejects.end(), spill_rejects.begin(), spill_rejects.end());
     }
-    return rejects;
+    return this->rejects;
 }
 
 
@@ -357,13 +358,16 @@ void MultipleValueEntry::remove_tids_lt(TID_t tid) {
 
 size_t MultipleValueEntry::weight() const
 {
+    size_t overhead = AbstractEntry::weight();
     size_t result = 0;
     for (std::list<SingleValueEntry_p>::const_iterator it = this->p_values.begin();
          it != this->p_values.end();
          it++ ) {
-        result += (*it)->weight();
+        // Include its weight but not the things that we pay for, and
+        // add its extra linked entry.
+        result += (*it)->weight() - overhead + (sizeof(void*) * 4);
     }
-    return result + sizeof(MultipleValueEntry);
+    return result + overhead;
 }
 
 AbstractEntry_p MultipleValueEntry::with_later(AbstractEntry_p& current_pointer,
@@ -421,7 +425,7 @@ AbstractEntry_p MultipleValueEntry::discarding_tids_before(AbstractEntry_p& curr
 //********************
 // Cache
 
-void Cache::_handle_evicted(const OidList& evicted) {
+void Cache::_handle_evicted(OidList& evicted) {
 
     OidList::const_iterator end = evicted.end();
     for(OidList::const_iterator it = evicted.begin(); it != end; it++) {
@@ -430,6 +434,7 @@ void Cache::_handle_evicted(const OidList& evicted) {
         // SingleValue Python nodes.
         this->data.erase(*it);
     }
+    evicted.clear();
 
 }
 
@@ -512,15 +517,16 @@ void Cache::replace_entry(AbstractEntry_p& new_entry, AbstractEntry_p& prev_entr
     }
 }
 
-OidList update_mru(Cache& cache, AbstractEntry& entry)
+void Cache::update_mru(AbstractEntry& entry)
 {
     // XXX: All this checking of ring equality isn't very elegant.
     // Should we have three functions? But then we'd have three places
     // to remember to resize the ring
-    Protected& protected_ring = cache.ring_protected;
-    Probation& probation_ring = cache.ring_probation;
-    Eden& eden_ring = cache.ring_eden;
+    Protected& protected_ring = this->ring_protected;
+    Probation& probation_ring = this->ring_probation;
+    Eden& eden_ring = this->ring_eden;
     Generation& home_ring = *entry.generation();
+    this->rejects.clear();
 
     // Always update the frequency
     entry.frequency++;
@@ -533,7 +539,8 @@ OidList update_mru(Cache& cache, AbstractEntry& entry)
         // This might be ever-so-slightly slower in the case where the size
         // went down or there was still room.
         home_ring.remove(entry);
-        return eden_ring.add_and_evict(entry);
+        eden_ring.add_and_evict(entry);
+        return;
     }
 
     if (home_ring == probation_ring) {
@@ -546,11 +553,10 @@ OidList update_mru(Cache& cache, AbstractEntry& entry)
 
     if (protected_ring.oversize()) {
         // bubble down, rejecting as needed
-        return _spill_from_ring_to_ring(protected_ring, probation_ring, &entry,
-                                        true, /*victims*/ false /*don't oversize*/);
+        _spill_from_ring_to_ring(protected_ring, probation_ring, &entry,
+                                 true, /*victims*/ false /*don't oversize*/,
+                                 this->rejects);
     }
-
-    return OidList();
 }
 
 
@@ -574,7 +580,8 @@ void Cache::store_and_make_MRU(OID_t oid,
         existing_entry->generation()->notice_weight_change(*existing_entry, old_weight);
     }
     if (new_entry->weight() > old_weight) {
-        this->_handle_evicted(update_mru(*this, *new_entry));
+        this->update_mru(*new_entry);
+        this->_handle_evicted(this->rejects);
     }
     else {
         assert(new_entry->weight() == old_weight);

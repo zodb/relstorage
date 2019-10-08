@@ -15,7 +15,6 @@ cimport cython
 from cython.operator cimport typeid
 from cython.operator cimport dereference as deref
 from cpython.buffer cimport PyBuffer_FillInfo
-from cpython.bytes cimport PyBytes_FromStringAndSize
 from cpython.bytes cimport PyBytes_AsString # Does NOT copy
 
 from libcpp.pair cimport pair

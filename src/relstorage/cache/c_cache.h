@@ -71,6 +71,7 @@ typedef signed long long int64_t;
 #include <unordered_map>
 #include <assert.h>
 #include <string.h>
+#include <iostream>
 
 /*
  * No version of MSVC properly supports inline. Sigh.
@@ -119,14 +120,13 @@ namespace cache
     class Generation;
     class AbstractEntry;
     typedef AbstractEntry* AbstractEntry_raw_p;
-
-
-
+    class SingleValueEntry;
 
     typedef std::vector<OID_t> OidList;
     typedef std::list<AbstractEntry* > EntryList;
     typedef EntryList::iterator EntryListIterator;
     typedef std::shared_ptr<AbstractEntry> AbstractEntry_p;
+    typedef std::shared_ptr<SingleValueEntry> SingleValueEntry_p;
 
     /**
      * All entries are of this type.
@@ -185,12 +185,28 @@ namespace cache
             return this->_position;
         }
 
+        virtual size_t overhead() const
+        {
+            return sizeof(AbstractEntry);
+        }
+
         /**
          * The total cost of this object.
          */
         virtual size_t weight() const
         {
-            return sizeof(AbstractEntry);
+            // include:
+            // the overhead of this object,
+            // the approximate size of the linked list entry
+            // in our generation (two pointers plus our object entry plus alignment == 32),
+            // the size of our map entry,
+            // and the size of the shared pointer.
+
+            return this->overhead()
+                + (sizeof(void*) * 4)
+                + sizeof(std::pair<OID_t, AbstractEntry_p>)
+                + sizeof(AbstractEntry_p);
+
         }
 
         /**
@@ -339,7 +355,13 @@ namespace cache
 
         virtual size_t weight() const
         {
-            return len + sizeof(SingleValueEntry);
+            // include: the bytes for the cached object,
+            return AbstractEntry::weight() + this->len;
+        }
+
+        virtual size_t overhead() const
+        {
+            return sizeof(SingleValueEntry);
         }
 
         virtual size_t value_count() const
@@ -370,7 +392,7 @@ namespace cache
 
     };
 
-    typedef std::shared_ptr<SingleValueEntry> SingleValueEntry_p;
+
 
     class MultipleValueEntry : public AbstractEntry {
     private:
@@ -388,6 +410,10 @@ namespace cache
             return this->p_values.size();
         }
         virtual size_t weight() const;
+        virtual size_t overhead() const
+        {
+            return sizeof(MultipleValueEntry);
+        }
 
         const SingleValueEntry_p front() const
         {
@@ -562,10 +588,12 @@ namespace cache
     };
 
     class Eden : public Generation {
+    private:
+        OidList rejects;
     public:
         Cache* cache;
         Eden(size_t limit)
-            : Generation(limit, GEN_EDEN)
+            : Generation(limit, GEN_EDEN), rejects(0)
         {
         }
         /**
@@ -575,7 +603,7 @@ namespace cache
          * Evict items from the cache, if needed, to get all the rings
          * down to size. Return a list of the keys evicted.
          */
-        const OidList add_and_evict(AbstractEntry& elt);
+        OidList& add_and_evict(AbstractEntry& elt);
 
     };
 
@@ -588,9 +616,11 @@ namespace cache
     };
 
     class Probation : public Generation {
+    private:
+        OidList no_rejects;
     public:
         Probation(size_t limit)
-            : Generation(limit, GEN_PROBATION)
+            : Generation(limit, GEN_PROBATION), no_rejects(0)
         {
         }
 
@@ -606,7 +636,9 @@ namespace cache
     class Cache {
     private:
         OidEntryMap data;
-        void _handle_evicted(const OidList& evicted);
+        OidList rejects;
+        void update_mru(AbstractEntry& entry);
+        void _handle_evicted(OidList& evicted);
 
     public:
         Eden ring_eden;
