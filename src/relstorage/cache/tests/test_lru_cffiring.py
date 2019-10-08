@@ -26,8 +26,8 @@ from . import Cache
 class GenerationTests(TestCase):
 
     def _makeCache(self, limit):
-        from . import Cache
-        return Cache(limit)
+        from . import Cache as BaseCache
+        return BaseCache(limit)
 
     def _makeOne(self, limit):
         return self._makeCache(limit).eden
@@ -47,9 +47,8 @@ class GenerationTests(TestCase):
 class EdenTests(TestCase):
 
     def _makeOne(self, limit):
-        from . import Cache
-
-        return Cache(limit)
+        from . import Cache as BaseCache
+        return BaseCache(limit)
 
     def test_add_MRUs_empty(self):
         lru = self._makeOne(100)

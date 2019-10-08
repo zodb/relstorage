@@ -3,11 +3,12 @@
 # cython: auto_pickle=False,embedsignature=True,always_allow_keywords=False,infer_types=True
 
 from libcpp.memory cimport shared_ptr
-from libcpp.string cimport string
 from libcpp.pair cimport pair
 from libcpp.list cimport list
 from libcpp cimport bool
+from libcpp.string cimport string
 from libcpp.unordered_map cimport unordered_map
+
 
 
 cdef extern from "c_cache.h":
@@ -15,8 +16,8 @@ cdef extern from "c_cache.h":
     ctypedef unsigned long uint64_t
     ctypedef int64_t TID_t
     ctypedef int64_t OID_t
-    ctypedef string Pickle_t
 
+    ctypedef string Pickle_t
 
 cdef extern from "c_cache.h" namespace "relstorage::cache":
     ctypedef size_t rs_counter_t
@@ -38,16 +39,18 @@ cdef extern from "c_cache.h" namespace "relstorage::cache":
     ctypedef shared_ptr[AbstractEntry] AbstractEntry_p
 
     cdef cppclass SingleValueEntry(AbstractEntry):
-        Pickle_t state
-        TID_t tid
-        bool frozen
-        # SingleValueEntry(OID_t key, const Pickle_t& state, const TID_t tid)
-        # SingleValueEntry(OID_t key, const pair[const Pickle_t, const TID_t]&, const bool frozen)
-        # SingleValueEntry(OID_t key, const Pickle_t state, TID_t tid, bool frozen)
-        SingleValueEntry(OID_t key, const Pickle_t& state, TID_t tid, bool frozen)
-        SingleValueEntry(OID_t key, TID_t tid, const Pickle_t& state)
+        # const Pickle_t& state() const
+        TID_t tid() const
+        bool frozen() const
         # Using -1 for None
         bool tid_matches(TID_t tid)
+        void force_update_during_bulk_load(OID_t key, char*, size_t len, TID_t tid)
+        bytes as_object()
+        bytes first_two_as_object()
+        SingleValueEntry* from_offset(size_t offset)
+        size_t size()
+        char* c_data()
+        bint eq_for_python(const SingleValueEntry* other) const
 
 
     ctypedef shared_ptr[SingleValueEntry] SingleValueEntry_p
@@ -63,6 +66,8 @@ cdef extern from "c_cache.h" namespace "relstorage::cache":
     ctypedef shared_ptr[MultipleValueEntry] MultipleValueEntry_p
 
     ctypedef unordered_map[OID_t, AbstractEntry_p] OidEntryMap
+    ctypedef AbstractEntry* AbstractEntry_raw_p
+    ctypedef list[AbstractEntry_raw_p] EntryList
 
     cdef cppclass Generation:
         size_t len() const
@@ -70,7 +75,7 @@ cdef extern from "c_cache.h" namespace "relstorage::cache":
         const size_t max_weight
         const generation_num generation
         bool empty()
-        list[AbstractEntry*] iter()
+        EntryList iter()
 
 
     cdef cppclass Cache:
@@ -78,8 +83,8 @@ cdef extern from "c_cache.h" namespace "relstorage::cache":
         Generation ring_protected
         Generation ring_probation
         Cache(uint64_t eden, uint64_t protected, uint64_t probation)
-        void add_to_eden(OID_t key, const Pickle_t& state, TID_t tid) except +
-        void store_and_make_MRU(OID_t, const Pickle_t&, const TID_t) except +
+        void add_to_eden(OID_t key, char* buf, size_t len, TID_t tid) except +
+        void store_and_make_MRU(OID_t, char* buf, size_t len, const TID_t) except +
         void delitem(OID_t key) except +
         void delitem(OID_t key, TID_t tid) except +
         void freeze(OID_t key, TID_t tid) except +

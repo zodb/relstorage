@@ -14,6 +14,7 @@
 
 #include <memory>
 #include <vector>
+#include <iostream>
 #include "c_cache.h"
 
 
@@ -21,6 +22,12 @@ using namespace relstorage::cache;
 
 //********************
 // Functions
+
+std::ostream& operator<<(std::ostream& s, const AbstractEntry& entry)
+{
+    s << "(Key: " << entry.key << " Generation: " << entry.generation() << ")";
+    return s;
+}
 
 /**
  * Call when `updated_ring` has gotten too big, and we should transfer
@@ -43,15 +50,15 @@ using namespace relstorage::cache;
  */
 
 RSR_SINLINE
-std::vector<OID_t> _spill_from_ring_to_ring(Generation& updated_ring,
-                                            Generation& destination_ring,
-                                            const AbstractEntry* updated_ignore_me,
-                                            const bool allow_victims,
+OidList _spill_from_ring_to_ring(Generation& updated_ring,
+                                 Generation& destination_ring,
+                                 const AbstractEntry* updated_ignore_me,
+                                 const bool allow_victims,
                                             const bool overfill_destination)
 {
     AbstractEntry* updated_oldest = NULL;
     AbstractEntry* destination_oldest = NULL;
-    std::vector<OID_t> rejects;
+    OidList rejects;
 
 
     while(!updated_ring.empty() && updated_ring.oversize()) {
@@ -129,11 +136,11 @@ std::vector<OID_t> _spill_from_ring_to_ring(Generation& updated_ring,
 //********************
 // SingleValueEntry
 AbstractEntry_p SingleValueEntry::with_later(AbstractEntry_p& current_pointer,
-                                             const Pickle_t& new_pickle,
+                                             char* buf, size_t len,
                                              const TID_t new_tid)
 {
-    const bool state_equal = new_pickle == this->state;
-    const bool tid_equal = new_tid == this->tid;
+    const bool state_equal = len == this->len && memcmp(buf, this->buf, len) == 0;
+    const bool tid_equal = new_tid == this->tid();
     if (state_equal && tid_equal) {
         return current_pointer;
     }
@@ -142,9 +149,10 @@ AbstractEntry_p SingleValueEntry::with_later(AbstractEntry_p& current_pointer,
         throw std::logic_error("Detected two different values for the same TID.");
     }
 
-    SingleValueEntry_p new_entry = std::make_shared<SingleValueEntry>(this->key,
-                                                                      std::move(new_pickle),
-                                                                      new_tid);
+    SingleValueEntry_p new_entry = SingleValueEntry_p(new SingleValueEntry(this->key,
+                                                                      buf,
+                                                                      len,
+                                                                      new_tid));
     MultipleValueEntry_p mve = std::make_shared<MultipleValueEntry>(this->key);
     mve->frequency = this->frequency;
     mve->push_back(std::static_pointer_cast<SingleValueEntry>(current_pointer));
@@ -155,13 +163,13 @@ AbstractEntry_p SingleValueEntry::with_later(AbstractEntry_p& current_pointer,
 AbstractEntry_p SingleValueEntry::freeze_to_tid(AbstractEntry_p& current_pointer,
                                                 const TID_t tid)
 {
-    if (this->tid > tid) {
+    if (this->_tid > tid) {
         return current_pointer;
     }
-    if (this->tid == tid) {
+    if (this->_tid == tid) {
         // We are discarding ourself now, but preserving this item's
         // location in the generations.
-        this->frozen = true;
+        this->_frozen = true;
         return current_pointer;
     }
     // We're older, we should be discarded.
@@ -171,7 +179,7 @@ AbstractEntry_p SingleValueEntry::freeze_to_tid(AbstractEntry_p& current_pointer
 AbstractEntry_p SingleValueEntry::discarding_tids_before(AbstractEntry_p& current_pointer,
                                                          const TID_t tid)
 {
-    if (tid <= this->tid) {
+    if (tid <= this->_tid) {
         return AbstractEntry_p();
     }
     return current_pointer;
@@ -212,6 +220,12 @@ void Generation::adopt(AbstractEntry& elt)
 void Generation::remove(AbstractEntry& elt)
 {
     assert(elt.generation() == this);
+    AbstractEntry* in_list = *elt.position();
+    if (in_list != &elt) {
+        std::cout << "Error, not matched " << in_list << " should be " << &elt << std::endl;
+        std::cout << "In list " << *in_list << std::endl;
+        std::cout << "Asked to remove " << elt << std::endl;
+    }
     assert(*elt.position() == &elt);
     this->_entries.erase(elt.position());
     elt.generation(nullptr);
@@ -245,7 +259,7 @@ void Probation::on_hit(Cache& cache, AbstractEntry& entry)
 
 //********************
 // Eden
-const std::vector<OID_t> Eden::add_and_evict(AbstractEntry& entry)
+const OidList Eden::add_and_evict(AbstractEntry& entry)
 {
     Eden& eden_ring = *this;
     Cache& cache = *eden_ring.cache;
@@ -255,7 +269,7 @@ const std::vector<OID_t> Eden::add_and_evict(AbstractEntry& entry)
     Generation::add(entry);
 
     if(!eden_ring.oversize()) {
-        return std::vector<OID_t>();
+        return OidList();
     }
 
     // Ok, we have to move things. Begin by filling up the
@@ -288,14 +302,14 @@ const std::vector<OID_t> Eden::add_and_evict(AbstractEntry& entry)
                 protected_ring.adopt(eden_oldest);
             }
         }
-        return std::vector<OID_t>();
+        return OidList();
     }
 
     // OK, we've already filled protected and have started putting
     // things in probation. So we may need to choose victims.
     // Begin by taking eden and moving to probation, evicting from probation
     // if needed.
-    std::vector<OID_t> rejects = _spill_from_ring_to_ring(
+    OidList rejects = _spill_from_ring_to_ring(
                  eden_ring, probation_ring, &entry,
                  true, // allow_victims
                  false); // don't overfill
@@ -303,7 +317,7 @@ const std::vector<OID_t> Eden::add_and_evict(AbstractEntry& entry)
     if (protected_ring.oversize()) {
         // If protected is oversize, also move from them to probation.
         // What about from eden to protected?
-        const std::vector<OID_t> spill_rejects = _spill_from_ring_to_ring(
+        const OidList spill_rejects = _spill_from_ring_to_ring(
                eden_ring, protected_ring, &entry,
                true,
                false
@@ -321,7 +335,7 @@ struct _LTE {
     TID_t tid;
     _LTE(TID_t t) : tid(t) {}
     bool operator()(SingleValueEntry_p p) {
-        return p.get()->tid <= this->tid;
+        return p.get()->tid() <= this->tid;
     }
 };
 
@@ -329,7 +343,7 @@ struct _LT {
     TID_t tid;
     _LT(TID_t t) : tid(t) {}
     bool operator()(SingleValueEntry_p p) {
-        return p.get()->tid < this->tid;
+        return p.get()->tid() < this->tid;
     }
 };
 
@@ -353,11 +367,11 @@ size_t MultipleValueEntry::weight() const
 }
 
 AbstractEntry_p MultipleValueEntry::with_later(AbstractEntry_p& current_pointer,
-                                               const Pickle_t& new_pickle,
+                                               char* buf, size_t len,
                                                const TID_t new_tid)
 {
     this->push_back(
-        std::make_shared<SingleValueEntry>(this->key, std::move(new_pickle), new_tid)
+        SingleValueEntry_p(new SingleValueEntry(this->key, buf, len, new_tid))
     );
     return current_pointer;
 }
@@ -382,8 +396,8 @@ AbstractEntry_p MultipleValueEntry::freeze_to_tid(AbstractEntry_p& current_point
     for(EntryList::iterator it = this->p_values.begin();
         it != this->p_values.end(); ++it) {
         SingleValueEntry* entry = (*it).get();
-        if (entry->tid == tid) {
-            entry->frozen = true;
+        if (entry->tid() == tid) {
+            entry->frozen() = true;
         }
     }
     return current_pointer;
@@ -407,10 +421,10 @@ AbstractEntry_p MultipleValueEntry::discarding_tids_before(AbstractEntry_p& curr
 //********************
 // Cache
 
-void Cache::_handle_evicted(const std::vector<OID_t>& evicted) {
+void Cache::_handle_evicted(const OidList& evicted) {
 
-    std::vector<OID_t>::const_iterator end = evicted.end();
-    for(std::vector<OID_t>::const_iterator it = evicted.begin(); it != end; it++) {
+    OidList::const_iterator end = evicted.end();
+    for(OidList::const_iterator it = evicted.begin(); it != end; it++) {
         // things were evicted, must be removed from our data, which
         // is the only place holding a reference to them, aside from transient
         // SingleValue Python nodes.
@@ -420,14 +434,14 @@ void Cache::_handle_evicted(const std::vector<OID_t>& evicted) {
 }
 
 
-void Cache::add_to_eden(OID_t key, const Pickle_t& pickle, TID_t tid)
+void Cache::add_to_eden(OID_t key, char* buf, size_t len, TID_t tid)
 {
     if (this->data.count(key)) {
         throw std::runtime_error("Key already present");
     }
 
     // keep with the shared ownership.
-    SingleValueEntry_p sve_p = std::make_shared<SingleValueEntry>(key, std::move(pickle), tid);
+    SingleValueEntry_p sve_p = SingleValueEntry_p(new SingleValueEntry(key, buf, len, tid));
     this->data[key] = sve_p;
     this->_handle_evicted(
        this->ring_eden.add_and_evict(*sve_p)
@@ -446,19 +460,19 @@ int Cache::add_many(SingleValueEntry_p& shared_ptr_to_array,
 
     for (int i = 0; i < entry_count; i++) {
         // Don't try if we know we won't find a place for it.
-        SingleValueEntry& incoming = *(entry_array + i);
-        if (!this->will_fit(incoming)) {
-            incoming.generation(nullptr);
+        SingleValueEntry* incoming = (entry_array + i);
+        if (!this->will_fit(*incoming)) {
+            incoming->generation(nullptr);
             continue;
         }
 
-        this->data[incoming.key] = SingleValueEntry_p(shared_ptr_to_array,
-                                                      entry_array + i);
+        this->data[incoming->key] = SingleValueEntry_p(shared_ptr_to_array,
+                                                       incoming);
 
         // _eden_add *always* adds, but it may or may not be able to
         // rebalance.
         added_count += 1;
-        const std::vector<OID_t> add_rejects = this->ring_eden.add_and_evict(incoming);
+        const OidList add_rejects = this->ring_eden.add_and_evict(*incoming);
         if (!add_rejects.empty()) {
             // We started rejecting stuff, so we must be full.
             // Well, this isn't strictly true. It could be one really
@@ -467,7 +481,7 @@ int Cache::add_many(SingleValueEntry_p& shared_ptr_to_array,
             // However, we *thought* we could fit this one in the
             // cache, but we couldn't. So we really are full.
             // Put everything that we rejected back in probation.
-            for(std::vector<OID_t>::const_iterator it = add_rejects.begin(); it != add_rejects.end(); it++) {
+            for(OidList::const_iterator it = add_rejects.begin(); it != add_rejects.end(); it++) {
                 const OID_t oid = *it;
                 this->ring_probation.add(*this->data.at(oid));
             }
@@ -498,7 +512,7 @@ void Cache::replace_entry(AbstractEntry_p& new_entry, AbstractEntry_p& prev_entr
     }
 }
 
-std::vector<OID_t> update_mru(Cache& cache, AbstractEntry& entry)
+OidList update_mru(Cache& cache, AbstractEntry& entry)
 {
     // XXX: All this checking of ring equality isn't very elegant.
     // Should we have three functions? But then we'd have three places
@@ -536,16 +550,18 @@ std::vector<OID_t> update_mru(Cache& cache, AbstractEntry& entry)
                                         true, /*victims*/ false /*don't oversize*/);
     }
 
-    return std::vector<OID_t>();
+    return OidList();
 }
 
+
 void Cache::store_and_make_MRU(OID_t oid,
-                               const Pickle_t& new_pickle,
+                               char* buf, size_t len,
                                const TID_t new_tid)
 {
     AbstractEntry_p existing_entry = this->data.at(oid);
     size_t old_weight = existing_entry->weight();
-    AbstractEntry_p new_entry = existing_entry->with_later(existing_entry, new_pickle, new_tid);
+
+    AbstractEntry_p new_entry = existing_entry->with_later(existing_entry, buf, len, new_tid);
 
     assert(new_entry);
     if (new_entry != existing_entry) {
@@ -575,7 +591,8 @@ void Cache::delitem(OID_t key)
         return;
     }
 
-    AbstractEntry& entry = *this->data[key];
+    AbstractEntry& entry = *this->data.at(key);
+    assert(entry.generation());
     entry.generation()->remove(entry);
     assert(entry.generation() == nullptr);
     this->data.erase(key);

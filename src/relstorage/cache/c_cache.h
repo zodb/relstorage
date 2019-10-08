@@ -67,7 +67,10 @@ typedef signed long long int64_t;
 
 #include <string>
 #include <list>
+#include <vector>
 #include <unordered_map>
+#include <assert.h>
+#include <string.h>
 
 /*
  * No version of MSVC properly supports inline. Sigh.
@@ -79,6 +82,19 @@ typedef signed long long int64_t;
 #define RSR_SINLINE static inline
 #define RSR_INLINE inline
 #endif
+
+extern "C" {
+    void* PyObject_Malloc(size_t);
+    void PyObject_Free(void* p);
+#ifndef Py_PYTHON_H
+    struct PyObject;
+    PyObject* PyBytes_FromStringAndSize(char* buf, size_t len);
+    void Py_INCREF(const PyObject* o);
+    void Py_XDECREF(const PyObject* o);
+    char* PyBytes_AsString(const PyObject* o);
+#endif
+}
+
 
 
 typedef int64_t TID_t;
@@ -102,7 +118,13 @@ namespace cache
         generation_num;
     class Generation;
     class AbstractEntry;
-    typedef std::list<AbstractEntry*> EntryList;
+    typedef AbstractEntry* AbstractEntry_raw_p;
+
+
+
+
+    typedef std::vector<OID_t> OidList;
+    typedef std::list<AbstractEntry* > EntryList;
     typedef EntryList::iterator EntryListIterator;
     typedef std::shared_ptr<AbstractEntry> AbstractEntry_p;
 
@@ -148,6 +170,11 @@ namespace cache
             return this->_generation;
         }
 
+        RSR_INLINE Generation* generation() const
+        {
+            return this->_generation;
+        }
+
         RSR_INLINE void generation(Generation* p)
         {
             this->_generation = p;
@@ -183,7 +210,7 @@ namespace cache
          * value and the new value, or raise an exception if that's inconsistent.
          */
         virtual AbstractEntry_p with_later(AbstractEntry_p& current_pointer,
-                                           const Pickle_t& new_pickle,
+                                           char* buf, size_t len,
                                            const TID_t new_tid) = 0;
 
         virtual AbstractEntry_p freeze_to_tid(AbstractEntry_p& current_pointer,
@@ -195,41 +222,124 @@ namespace cache
 
 
     class SingleValueEntry : public AbstractEntry {
+    private:
+        // If the offset is 0, we own the buffer, otherwise we're sharing.
+        char* buf;
+        size_t len, offset;
+        TID_t _tid;
+        bool _frozen;
     public:
-        // these are only modified when we construct an array.
-        // maybe an assignment operator?
-        Pickle_t state;
-        TID_t tid;
-        // This is only modified in one special circumstance,
-        // to avoid any copies. But maybe move semantics take care
-        // of that for us?
-        bool frozen;
-
         // Some C++ libraries don't support variardics to
         // make_shared(), topping out at 3 arguments. Those
         // are the ones that also tend not to fully support
         // C++ 11 and its delegating constructors, so we use a
         // default argument to make it possible to create
         // these.
-        // SingleValueEntry(OID_t key, const Pickle_t state, TID_t tid, bool frozen=false)
-        //     : AbstractEntry(key), state(std::move(state)), tid(tid), frozen(frozen)
-        // {}
-        SingleValueEntry(OID_t key, const Pickle_t& state, TID_t tid, bool frozen=false)
-            : AbstractEntry(key), state(state), tid(tid), frozen(frozen)
-        {}
-        SingleValueEntry(OID_t key, TID_t tid, const Pickle_t& state)
-            : AbstractEntry(key), state(state), tid(tid), frozen(false)
-        {}
 
-        // SingleValueEntry(OID_t key, const std::pair<const Pickle_t, TID_t>& state, bool frozen)
-        //     : AbstractEntry(key), state(std::move(state.first)), tid(state.second), frozen(frozen)
-        // {}
-        SingleValueEntry() : AbstractEntry(), state(), tid(-1), frozen(false)
-        {}
+        SingleValueEntry(OID_t key, char* buf, size_t len, TID_t tid)
+            : AbstractEntry(key),
+              buf(new char[len]),
+              len(len),
+              offset(0),
+              _tid(tid),
+              _frozen(false)
+        {
+            memcpy(this->buf, buf, len);
+        }
+
+        // Construct from an offset; does not own the pointer.
+        SingleValueEntry(OID_t key, char* buf, size_t len, TID_t tid, size_t offset)
+            : AbstractEntry(key),
+              buf(buf + offset),
+              len(len - offset),
+              offset(offset),
+              _tid(tid),
+              _frozen(false)
+        {
+            assert(offset > 0);
+        }
+
+
+        SingleValueEntry()
+            : AbstractEntry(),
+              buf(nullptr), len(0),
+              offset(0),
+              _tid(-1), _frozen(false)
+        {
+        }
+
+        virtual ~SingleValueEntry()
+        {
+            if (!this->offset) {
+                delete[] this->buf;
+            }
+        }
+
+        SingleValueEntry& operator=(const SingleValueEntry& other);
+
+        // Copies
+        void force_update_during_bulk_load(OID_t key, char* buf, size_t len, TID_t tid)
+        {
+           this->key = key;
+           this->_tid = tid;
+           this->len = len;
+           assert(this->buf == nullptr);
+           this->buf = new char[len];
+           memcpy(this->buf, buf, len);
+        }
+
+        PyObject* as_object()
+        {
+            return PyBytes_FromStringAndSize(this->buf, this->len);
+        }
+
+        PyObject* first_two_as_object()
+        {
+            if (this->len >= 2) {
+                return PyBytes_FromStringAndSize(this->buf, 2);
+            }
+            return this->as_object();
+        }
+
+        size_t size()
+        {
+            return this->len;
+        }
+
+        char* c_data()
+        {
+            return this->buf;
+        }
+
+        SingleValueEntry* from_offset(size_t offset)
+        {
+            return new SingleValueEntry(
+                this->key,
+                this->buf,
+                this->len,
+                this->_tid,
+                offset
+            );
+        }
+
+        const Pickle_t state() const
+        {
+            return Pickle_t(this->buf, this->len);
+        }
+
+        TID_t tid() const
+        {
+            return this->_tid;
+        }
+
+        bool& frozen()
+        {
+            return this->_frozen;
+        }
 
         virtual size_t weight() const
         {
-            return this->state.size() + sizeof(SingleValueEntry);
+            return len + sizeof(SingleValueEntry);
         }
 
         virtual size_t value_count() const
@@ -237,14 +347,23 @@ namespace cache
             return 1;
         }
 
+        bool eq_for_python(const SingleValueEntry* other) const
+        {
+            return this->_tid == other->_tid
+                && this->_frozen == other->_frozen
+                && this->len == other->len
+                && memcmp(this->buf, other->buf, this->len) == 0;
+        }
+
         // Use a value less than 0 for what would be None in Python.
         virtual bool tid_matches(TID_t tid) const
         {
-            return this->tid == tid || (tid < 0 && this->frozen);
+            return this->_tid == tid || (tid < 0 && this->_frozen);
         }
 
         virtual AbstractEntry_p with_later(AbstractEntry_p& current_pointer,
-                                           const Pickle_t& new_pickle,
+                                           char* buf,
+                                           size_t len,
                                            const TID_t new_tid);
         virtual AbstractEntry_p freeze_to_tid(AbstractEntry_p& current_pointer, const TID_t tid);
         virtual AbstractEntry_p discarding_tids_before(AbstractEntry_p& current_pointer, const TID_t tid);
@@ -284,7 +403,7 @@ namespace cache
         }
 
         virtual AbstractEntry_p with_later(AbstractEntry_p& current_pointer,
-                                           const Pickle_t& new_pickle,
+                                           char* buf, size_t len,
                                            const TID_t new_tid);
         virtual AbstractEntry_p freeze_to_tid(AbstractEntry_p& current_pointer, const TID_t tid);
         virtual AbstractEntry_p discarding_tids_before(AbstractEntry_p& current_pointer, const TID_t tid);
@@ -456,7 +575,7 @@ namespace cache
          * Evict items from the cache, if needed, to get all the rings
          * down to size. Return a list of the keys evicted.
          */
-        const std::vector<OID_t> add_and_evict(AbstractEntry& elt);
+        const OidList add_and_evict(AbstractEntry& elt);
 
     };
 
@@ -487,7 +606,7 @@ namespace cache
     class Cache {
     private:
         OidEntryMap data;
-        void _handle_evicted(const std::vector<OID_t>& evicted);
+        void _handle_evicted(const OidList& evicted);
 
     public:
         Eden ring_eden;
@@ -535,8 +654,7 @@ namespace cache
          * It becomes the first entry in eden. If this causes the cache to be oversized,
          * entries are freed.
          */
-        void add_to_eden(OID_t key, const Pickle_t& pickle, TID_t tid);
-
+        void add_to_eden(OID_t key, char* buf, size_t len, TID_t tid);
 
         /**
          * Does not rebalance rings. Use only when no evictions are necessary.
@@ -550,7 +668,7 @@ namespace cache
          * be present. Possibly evicts items if the entry grew.
          */
         void store_and_make_MRU(OID_t oid,
-                                const Pickle_t& new_pickle,
+                                char* buf, size_t len,
                                 const TID_t new_tid);
 
         /**

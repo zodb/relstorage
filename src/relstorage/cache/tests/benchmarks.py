@@ -393,11 +393,13 @@ def local_benchmark(runner):
     for name in ('CFFI',):
         benchmarks = run_and_report_funcs(
             runner,
-            ((name + ' pop_eq', populate_equal),
-             (name + ' pop_ne', populate_not_equal),
-             (name + ' epop', populate_empty),
-             (name + ' read', read),
-             (name + ' mix ', mixed),))
+            (
+                (name + ' pop_eq', populate_equal),
+                (name + ' pop_ne', populate_not_equal),
+                (name + ' epop', populate_empty),
+                (name + ' read', read),
+                (name + ' mix ', mixed),
+            ))
         group = {
             k[len(name) + 1:]: v for k, v in benchmarks.items()
         }

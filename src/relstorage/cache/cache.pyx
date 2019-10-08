@@ -15,6 +15,8 @@ cimport cython
 from cython.operator cimport typeid
 from cython.operator cimport dereference as deref
 from cpython.buffer cimport PyBuffer_FillInfo
+from cpython.bytes cimport PyBytes_FromStringAndSize
+from cpython.bytes cimport PyBytes_AsString # Does NOT copy
 
 from libcpp.pair cimport pair
 from libcpp.memory cimport shared_ptr
@@ -70,7 +72,7 @@ cdef object python_from_entry(const AbstractEntry_p& entry):
 
     sve_p = dynamic_pointer_cast[SingleValueEntry, AbstractEntry](entry)
     if sve_p:
-        if sve_p.get().frozen:
+        if sve_p.get().frozen():
             sv = FrozenValue.from_entry(sve_p)
         else:
             sv = SingleValue.from_entry(sve_p)
@@ -86,11 +88,8 @@ cdef object python_from_sve(SingleValueEntry_p& entry):
     cdef AbstractEntry_p ae = dynamic_pointer_cast[AbstractEntry, SingleValueEntry](entry)
     return python_from_entry(ae)
 
-cdef inline Pickle_t pickle_from_python(state):
-    # Cython sadly won't let us use const return value :(
-    if state is None:
-        return b''
-    return state
+cdef inline bytes bytes_from_pickle(const SingleValueEntry_p& entry):
+    return entry.get().as_object()
 
 # Memory management notes:
 #
@@ -116,24 +115,20 @@ cdef class StringWrapper:
             # Too many things on Python 2 don't handle the
             # new-style buffers that Cython creates. Notably, file.writelines()
             # and zlib.decompress() require old-style buffers
-            return entry.get().state
+            return bytes_from_pickle(entry)
         cdef StringWrapper w = StringWrapper.__new__(StringWrapper)
         w.entry = entry
         return w
 
-    cdef from_substring(self, const Pickle_t& substr):
+    cdef from_offset(self, offset):
         return StringWrapper.from_entry(
             SingleValueEntry_p(self.entry, # share ownership with this existing pointer.
-                               new SingleValueEntry(self.entry.get().key,
-                                                    self.entry.get().tid,
-                                                    substr,
-                                                    ))
-        )
+                               self.entry.get().from_offset(offset)))
 
     def __getbuffer__(self, Py_buffer* view, int flags):
         PyBuffer_FillInfo(view, self,
-                          <void*>self.entry.get().state.data(),
-                          self.entry.get().state.size(),
+                          <void*>self.entry.get().c_data(),
+                          self.entry.get().size(),
                           1,
                           flags)
 
@@ -141,17 +136,16 @@ cdef class StringWrapper:
         pass
 
     def __len__(self):
-        return self.entry.get().state.size()
+        return self.entry.get().size()
 
     def __getitem__(self, ix):
-        cdef string* s = &self.entry.get().state
         if ix == slice(None, 2, None):
             # We need to be able to hash this, it's the compression prefix.
-            return <bytes>s.substr(0, 2)
-        if ix == slice(2, None, None):
-            return self.from_substring(s.substr(2))
+            return self.entry.get().first_two_as_object()
+        if ix == slice(2, None, None) and self.entry.get().size() > 2:
+            return self.from_offset(2)
 
-        return (<bytes>deref(s))[ix]
+        return self.entry.get().as_object()[ix]
 
     def __eq__(self, other):
         if isinstance(other, StringWrapper):
@@ -159,13 +153,16 @@ cdef class StringWrapper:
         return bytes(self) == other
 
     def __str__(self):
-        return str(<bytes>self.entry.get().state)
+        cdef bytes b = bytes_from_pickle(self.entry)
+        return str(b)
 
     def __bytes__(self):
-        return <bytes>self.entry.get().state
+        cdef bytes b = bytes_from_pickle(self.entry)
+        return b
 
     def __repr__(self):
-        return repr(<bytes>self.entry.get().state)
+        cdef bytes b = bytes_from_pickle(self.entry)
+        return repr(b)
 
 cdef class CachedValue:
     """
@@ -194,7 +191,7 @@ cdef class SingleValue(CachedValue):
         value = self.entry.get()
         return iter((
             StringWrapper.from_entry(self.entry),
-            value.tid
+            value.tid()
         ))
 
     @property
@@ -215,11 +212,11 @@ cdef class SingleValue(CachedValue):
 
     @property
     def tid(self):
-        return self.entry.get().tid
+        return self.entry.get().tid()
 
     @property
     def max_tid(self):
-        return self.entry.get().tid
+        return self.entry.get().tid()
 
     @property
     def newest_value(self):
@@ -236,9 +233,7 @@ cdef class SingleValue(CachedValue):
             my_entry = self.entry.get()
             other_entry = p.entry.get()
             return (
-                my_entry.state == other_entry.state
-                and my_entry.tid == other_entry.tid
-                and self.frozen == other.frozen
+                self.entry.get().eq_for_python(other_entry)
             )
         if isinstance(other, tuple):
             return len(other) == 2 and self.tid == other[1] and self.value == other[0]
@@ -250,9 +245,9 @@ cdef class SingleValue(CachedValue):
 
     def __getitem__(self, int i):
         if i == 0:
-            return self.entry.get().state
+            return StringWrapper.from_entry(self.entry)
         if i == 1:
-            return self.entry.get().tid
+            return self.entry.get().tid()
         raise IndexError
 
     def __repr__(self):
@@ -316,8 +311,8 @@ cdef class MultipleValues(CachedValue):
         cdef TID_t result = 0
         values = self.entry.get().p_values
         for p in values:
-            if p.get().tid > result:
-                result = p.get().tid
+            if p.get().tid() > result:
+                result = p.get().tid()
         return result
 
     @property
@@ -325,7 +320,7 @@ cdef class MultipleValues(CachedValue):
         cdef SingleValueEntry_p entry = self.entry.get().front()
         values = self.entry.get().p_values
         for p in values:
-            if p.get().tid > entry.get().tid:
+            if p.get().tid() > entry.get().tid():
                 entry = p
         return python_from_sve(entry)
 
@@ -487,18 +482,18 @@ cdef class PyCache:
     def __setitem__(self, OID_t key, tuple value):
         # Do all this down here so we don't give up the GIL.
         cdef TID_t tid = value[1]
-
+        state = value[0] or b''
         if not self.cache.contains(key): # the long way to avoid type conversion
             self.cache.add_to_eden(
                 key,
-                pickle_from_python(value[0]),
+                PyBytes_AsString(state),
+                len(state),
                 tid
             )
-
         else:
             # We need to merge values.
             try:
-                self.cache.store_and_make_MRU(key, pickle_from_python(value[0]), tid)
+                self.cache.store_and_make_MRU(key, PyBytes_AsString(state), len(state), tid)
             except RuntimeError as e:
                 raise CacheConsistencyError(str(e))
 
@@ -561,7 +556,6 @@ cdef class PyCache:
         cdef SingleValueEntry_p shared_ptr_to_array
         cdef SingleValueEntry_p ptr_to_entry
         cdef OID_t key
-        cdef bytes state
         cdef TID_t tid
         cdef int i
         cdef int number_nodes = len(ordered_keys)
@@ -573,10 +567,10 @@ cdef class PyCache:
         array = shared_ptr_to_array.get()
 
         for i, (key, (state, tid)) in enumerate(ordered_keys):
-            single_entry = array + i
-            single_entry.key = key
-            single_entry.state = state
-            single_entry.tid = tid
+            state = state or b''
+            array[i].force_update_during_bulk_load(key,
+                                                   PyBytes_AsString(state), len(state),
+                                                   tid)
 
         # We're done with ordered_keys, free its memory
         ordered_keys = None
