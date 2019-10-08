@@ -479,9 +479,11 @@ cdef class PyCache:
         return value
 
     def __setitem__(self, OID_t key, tuple value):
+        self._do_set(key, value[0], value[1])
+
+    cdef _do_set(self, OID_t key, object state, TID_t tid):
         # Do all this down here so we don't give up the GIL.
-        cdef TID_t tid = value[1]
-        state = value[0] or b''
+        state = state if state is not None else b''
         if not self.cache.contains(key): # the long way to avoid type conversion
             self.cache.add_to_eden(
                 key,
@@ -548,6 +550,18 @@ cdef class PyCache:
             yield python_from_entry(thing.second)
 
     # Cache specific operations
+
+    cpdef set_all_for_tid(self, TID_t tid_int, state_oid_iter, compress, size_t value_limit):
+        # Do all this down here so we don't give up the GIL.
+        cdef OID_t oid_int
+        for state_bytes, oid_int, _ in state_oid_iter:
+            state_bytes = compress(state_bytes) if compress is not None else state_bytes
+            state_bytes = state_bytes if state_bytes is not None else b''
+            if len(state_bytes) >= value_limit:
+                # This value is too big, so don't cache it.
+                continue
+            self._do_set(oid_int, state_bytes, tid_int)
+
 
     def add_MRUs(self, ordered_keys, bint return_count_only=False):
         cdef SingleValueEntry* array

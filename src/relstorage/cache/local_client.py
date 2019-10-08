@@ -418,43 +418,15 @@ class LocalClient(object):
 
         # Really key_tid should be > 0; we allow >= for tests.
         assert key_tid == actual_tid and key_tid >= 0
-        self.__set_many([
-            (oid, key_tid, state_bytes)
-        ])
-
-    def __set_many(self, oid_tid_state_iter):
-        if not self.limit:
-            # don't bother
-            return
-
-        compress = self._compress
-        value_limit = self._value_limit
-        store = self._cache.__setitem__
-
-        for oid, tid, state_bytes in oid_tid_state_iter:
-            # A state of 'None' happens for undone transactions.
-            state_bytes = compress(state_bytes) if compress else state_bytes # pylint:disable=not-callable
-
-            if state_bytes and len(state_bytes) >= value_limit:
-                # This value is too big, so don't cache it.
-                continue
-
-            value = (state_bytes, tid)
-            store(oid, value) # possibly evicts
-
-
-        # Do we need to move this up above the eviction choices?
-        # Inline some of the logic about whether to age or not; avoiding the
-        # call helps speed
-        if self._cache.hits + self._cache.sets > self._next_age_at:
-            self._age()
+        self.set_all_for_tid(key_tid, [(state_bytes, oid, None)])
 
     def set_all_for_tid(self, tid_int, state_oid_iter):
-        self.__set_many((
-            (oid_int, tid_int, state)
-            for (state, oid_int, _)
-            in state_oid_iter
-        ))
+        if self.limit:
+            self._cache.set_all_for_tid(tid_int, state_oid_iter, self._compress, self._value_limit)
+            # Inline some of the logic about whether to age or not; avoiding the
+            # call helps speed
+            if self._cache.hits + self._cache.sets > self._next_age_at:
+                self._age()
 
     def __delitem__(self, oid_tid):
         self.delitems({oid_tid[0]: oid_tid[1]})

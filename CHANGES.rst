@@ -18,6 +18,13 @@
   chosen set of circumstances that attempt to balance overall
   throughput against latency. See :issue:`339`.
 
+- Drop support for Python 2.7 on Windows. The required compiler is
+  very old. See :issue:`358`.
+
+- Substantially reduce the overhead of the cache, making it mome
+  memory efficient. Also make it substantially faster. This was done
+  by rewriting it in C. See :issue:`358`.
+
 3.0a11 (2019-09-25)
 ===================
 
