@@ -27,7 +27,7 @@ import zope.testing.setupstack
 
 import random2
 
-import relstorage.cache
+from relstorage.cache.storage_cache import StorageCache
 
 from relstorage.cache.tests import MockOptions, MockAdapter
 from relstorage.storage.tpc.temporary_storage import TemporaryStorage
@@ -66,7 +66,7 @@ def cache_run(name, size):
     # We can interleave between instances
     adapter = MockAdapter()
     poller = adapter.poller
-    cache = relstorage.cache.StorageCache(adapter, options, name)
+    cache = StorageCache(adapter, options, name)
     new_cache = cache.new_instance()
     assert hasattr(cache.cache, 'tracer'), cache.cache
     assert hasattr(new_cache.cache, 'tracer'), new_cache.cache

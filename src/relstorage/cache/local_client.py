@@ -16,10 +16,9 @@ from __future__ import division
 from __future__ import print_function
 
 import bz2
-import collections
-import threading
 import time
 import zlib
+
 
 from contextlib import closing
 
@@ -29,28 +28,28 @@ from relstorage._util import get_memory_usage
 from relstorage._util import byte_display
 from relstorage._util import timer as _timer
 from relstorage._util import log_timed as _log_timed
-from relstorage._compat import OidTMap_intersection
 from relstorage._compat import OID_TID_MAP_TYPE as OidTMap
-from relstorage._compat import iteroiditems
 from relstorage.interfaces import Int
 
 from relstorage.cache.interfaces import IStateCache
 from relstorage.cache.interfaces import IPersistentCache
-from relstorage.cache.interfaces import MAX_TID
-from relstorage.cache.interfaces import CacheConsistencyError
+from relstorage.cache.interfaces import IGenerationalLRUCache
+from relstorage.cache.interfaces import IGeneration
+from relstorage.cache.interfaces import ILRUEntry
 
-from relstorage.cache.lru_cffiring import CFFICache
 
 from relstorage.cache.persistence import sqlite_connect
 from relstorage.cache.persistence import sqlite_files
 from relstorage.cache.persistence import FAILURE_TO_OPEN_DB_EXCEPTIONS
 from relstorage.cache.local_database import Database
 
+from relstorage.cache import cache
+
 logger = __import__('logging').getLogger(__name__)
 
 # pylint:disable=too-many-lines
 
-class ICachedValue(interface.Interface):
+class ICachedValue(ILRUEntry):
     """
     Data stored in the cache for a single OID.
 
@@ -110,7 +109,7 @@ class ICachedValue(interface.Interface):
 
     newest_value = interface.Attribute(u"The ``(state, tid)`` pair that is the newest.")
 
-    def __mod__(tid):
+    def get_if_tid_matches(tid):
         """
         Return the ``(state, tid)`` for the given TID.
 
@@ -118,10 +117,9 @@ class ICachedValue(interface.Interface):
 
         If no TID matches, returns None.
 
-        We use the % operator because ``__getitem__`` was taken.
         """
 
-    def __ilshift__(tid):
+    def freeze_to_tid(tid):
         """
         Mark the given TID, if it exists, as frozen.
 
@@ -130,13 +128,13 @@ class ICachedValue(interface.Interface):
         and must have been older.)
         """
 
-    def __iadd__(value):
+    def with_later(value):
         """
         Add the ``(state, tid)`` (another ICachedValue) to the list of
         cached entries. Return the new value to place in the cache.
         """
 
-    def __isub__(tid):
+    def discarding_tids_before(tid):
         """
         Remove the tid, and anything older, from the list of cached entries.
 
@@ -144,149 +142,28 @@ class ICachedValue(interface.Interface):
         were removed and the cached entry should be removed.
         """
 
-@interface.implementer(ICachedValue)
-class _MultipleValues(list):
-    __slots__ = ()
-
-    frozen = False
-
-    def __init__(self, *values):
-        list.__init__(self, values)
-
-    @property
-    def weight(self):
-        return sum(
-            len(value[0])
-            for value in self
-            if value[0]
-        )
-
-    @property
-    def max_tid(self):
-        return max(x[1] for x in self)
-
-    @property
-    def newest_value(self):
-        value = (None, -1)
-        for entry in self:
-            if entry[1] > value[1]:
-                value = entry
-        return value
-
-    def __mod__(self, tid):
-        for entry in self:
-            entry = entry % tid
-            if entry is not None:
-                return entry
-
-    def __ilshift__(self, tid):
-        # If we have the TID, everything else should be older,
-        # unless we just overwrote and haven't made the transaction visible yet.
-        # By (almost) definition, nothing newer, but if there is, we shouldn't
-        # drop it.
-        # So this works like invalidation: drop everything older than the
-        # tid; if we still have anything left, find and freeze the tid;
-        # if that's the *only* thing left, return that, otherwise return ourself.
-        to_save = [v for v in self if v[1] >= tid]
-        if not to_save:
-            return None
-
-        if len(to_save) == 1:
-            # One item, either it or not
-            result = to_save[0]
-            result <<= tid
-            return result
-
-        # Multiple items, possibly in the future.
-        self[:] = to_save
-        for i, entry in enumerate(self):
-            if entry[1] == tid:
-                self[i] <<= tid
-                break
-        return self
-
-    def __iadd__(self, value):
-        self.append(value)
-        return self
-
-    def __isub__(self, tid):
-        to_save = [v for v in self if v[1] > tid]
-        if not to_save:
-            del self[:]
-            return None
-
-        if len(to_save) == 1:
-            return to_save[0]
-        self[:] = to_save
-        return self
-
-
-@interface.implementer(ICachedValue)
-class _SingleValue(collections.namedtuple('_ValueBase', ('state_pickle', 'tid'))):
-    __slots__ = ()
-    # TODO: Maybe we should represent simple values as just byte strings;
-    # the key will match the TID in that case.
-    frozen = False
-
-    @property
-    def max_tid(self):
-        return self[1]
-
-    @property
-    def newest_value(self):
-        return self
-
-    @property
-    def weight(self):
-        return len(self[0]) if self[0] else 0
-
-    def __mod__(self, tid):
-        if tid == self[1]:
-            return self
-
-    def __ilshift__(self, tid):
-        # We could be newer
-        if self[1] > tid:
-            return self
-        if tid == self[1]:
-            return _FrozenValue(*self)
-        # if we're older, fall off the end and discard.
-
-    def __iadd__(self, value):
-        if value == self:
-            return value # Let us become frozen if desired.
-        if value[1] == self[1] and value[0] != self[0]:
-            raise CacheConsistencyError(
-                "Detected two different values for same TID",
-                self,
-                value
-            )
-        return _MultipleValues(self, value)
-
-    def __isub__(self, tid):
-        if tid <= self[1]:
-            return None
-        return self
-
-class _FrozenValue(_SingleValue):
-    __slots__ = ()
-    frozen = True
-
-    def __mod__(self, tid):
-        if tid in (None, self[1]):
-            return self
-
-    def __ilshift__(self, tid):
-        # This method can get called if two different transaction views
-        # tried to load an object at the same time and store it in the cache.
-        if tid == self[1]:
-            return self
+interface.classImplements(cache.CachedValue, ICachedValue)
+interface.classImplements(cache.PyCache, IGenerationalLRUCache)
+interface.classImplements(cache.PyGeneration, IGeneration)
 
 
 @interface.implementer(IStateCache,
                        IPersistentCache)
 class LocalClient(object):
     # pylint:disable=too-many-public-methods,too-many-instance-attributes
+
+    # Percentage of our byte limit that should be dedicated
+    # to the main "protected" generation
+    _gen_protected_pct = 0.8
+    # Percentage of our byte limit that should be dedicated
+    # to the initial "eden" generation
+    _gen_eden_pct = 0.1
+    # Percentage of our byte limit that should be dedicated
+    # to the "probationary"generation
+    _gen_probation_pct = 0.1
+    # By default these numbers add up to 1.0, but it would be possible to
+    # overcommit by making them sum to more than 1.0. (For very small
+    # limits, the rounding will also make them overcommit).
 
     # Use the same markers as zc.zlibstorage (well, one marker)
     # to automatically avoid double-compression
@@ -308,19 +185,13 @@ class LocalClient(object):
     _aged_at = 0
     _next_age_at = 1000
 
-    _hits = 0
-    _misses = 0
-    _sets = 0
     _cache = None
-    _cache_type = CFFICache
 
     # Things copied from self._cache
     _peek = None
-    _cache_mru = None
 
     def __init__(self, options,
                  prefix=None):
-        self._lock = threading.Lock()
         self.options = options
         self.prefix = prefix or ''
         # XXX: The calc for limit is substantially smaller
@@ -336,17 +207,8 @@ class LocalClient(object):
         # us use a LLBTree to store the data, which can be more memory efficient.
         self._cache = None
 
-        # The {oid: tid} that we read from the cache.
-        # These are entries that we know are there, and if we see them
-        # change, we need to be sure to update that in the database,
-        # *even if they are evicted* and we would otherwise lose
-        # knowledge of them before we save. We do this by watching incoming
-        # TIDs; only if they were already in here do we continue to keep track.
-        # At write time, if we can't meet the requirement ourself, we at least
-        # make sure there are no stale entries in the cache database.
-        self._min_allowed_writeback = OidTMap()
-
         self.flush_all()
+        self.__initial_weight = self._cache.weight
 
         compression_module = options.cache_local_compression
         try:
@@ -361,7 +223,7 @@ class LocalClient(object):
 
     @property
     def size(self):
-        return self._cache.size
+        return self._cache.weight
 
     def __len__(self):
         """
@@ -370,16 +232,10 @@ class LocalClient(object):
         return len(self._cache)
 
     def __iter__(self):
-        for oid, lru_entry in iteroiditems(self._cache.data):
-            value = lru_entry.value
-            if isinstance(value, _MultipleValues):
-                for entry in value:
-                    yield (oid, entry[1])
-            else:
-                yield (oid, value[1])
+        return iter(self._cache)
 
     def keys(self):
-        return self._cache.data.keys()
+        return self._cache.keys()
 
     def _decompress(self, data):
         pfx = data[:2]
@@ -402,7 +258,7 @@ class LocalClient(object):
     @_log_timed
     def save(self, object_index=None, checkpoints=None, **sqlite_args):
         options = self.options
-        if options.cache_local_dir and self.size:
+        if options.cache_local_dir and self.size > self.__initial_weight:
             try:
                 conn = sqlite_connect(options, self.prefix,
                                       **sqlite_args)
@@ -459,62 +315,43 @@ class LocalClient(object):
         # zapping happens frequently during test runs,
         # and during zodbconvert when the process will exist
         # only for a short time.
-        self.flush_all(False)
+        self.flush_all()
 
-    @staticmethod
-    def key_weight(_):
-        # All keys are equally weighted, and we don't count them.
-        return 0
-
-    @staticmethod
-    def value_weight(value):
-        # Values are the (state, actual_tid) pairs, or lists of the same, and their
-        # weight is the size of the state
-        return value.weight
-
-    def flush_all(self, preallocate_nodes=None):
-        with self._lock:
-            if self._cache or self._cache is None:
-                # Only actually abandon the cache object
-                # if it has data. Otherwise let it keep the
-                # preallocated CFFI objects it may have
-                # (those are expensive to create and tests call
-                # this a LOT)
-                self._cache = self._cache_type(
-                    self.limit,
-                    key_weight=self.key_weight,
-                    value_weight=self.value_weight,
-                    empty_value=_SingleValue(b'', 0),
-                    preallocate_nodes=preallocate_nodes,
-                )
-            self._peek = self._cache.peek
-            self._cache_mru = self._cache.__getitem__
-            self._min_allowed_writeback = OidTMap()
-            self.reset_stats()
+    def flush_all(self):
+        if self._cache or self._cache is None:
+            # Only actually abandon the cache object
+            # if it has data. Otherwise let it keep the
+            # preallocated CFFI objects it may have
+            # (those are expensive to create and tests call
+            # this a LOT)
+            byte_limit = self.limit
+            self._cache = cache.PyCache(
+                byte_limit * self._gen_eden_pct,
+                byte_limit * self._gen_protected_pct,
+                byte_limit * self._gen_probation_pct
+            )
+        self._peek = self._cache.peek
+        self.reset_stats()
 
     def reset_stats(self):
-        self._hits = 0
-        self._misses = 0
-        self._sets = 0
+        self._cache.reset_stats()
         self._aged_at = 0
         self._next_age_at = 1000
 
     def stats(self):
-        total = self._hits + self._misses
+        total = self._cache.hits + self._cache.misses
         return {
-            'hits': self._hits,
-            'misses': self._misses,
-            'sets': self._sets,
-            'ratio': self._hits / total if total else 0,
+            'hits': self._cache.hits,
+            'misses': self._cache.misses,
+            'sets': self._cache.sets,
+            'ratio': self._cache.hits / total if total else 0,
             'len': len(self),
             'bytes': self.size,
-            'lru_stats': self._cache.stats(),
         }
 
     def __contains__(self, oid_tid):
         oid, tid = oid_tid
-        entry = self._peek(oid)
-        return entry is not None and entry % tid is not None
+        return self._cache.get_item_with_tid(oid, tid) is not None
 
     def get(self, oid_tid, peek=False):
         oid, tid = oid_tid
@@ -523,25 +360,11 @@ class LocalClient(object):
         value = None
 
         if peek:
-            # Avoid the lock. We assume the underlying
-            # operations (dict.__getitem__, entry.__mod__)
-            # are thread-safe, when compared to other operations
-            # that might mutate.
-            entry = self._peek(oid)
-            if entry is not None:
-                value = entry % tid
+            value = self._cache.peek_item_with_tid(oid, tid)
         else:
-            with self._lock:
-                entry = self._peek(oid)
-                if entry is not None:
-                    value = entry % tid
-                if value is not None:
-                    self._hits += 1
-                    self._cache_mru(oid) # Make an actual hit.
-                else:
-                    self._misses += 1
+            value = self._cache.get_item_with_tid(oid, tid)
 
-        # Finally, while not holding the lock, decompress if needed.
+        # Finally, decompress if needed.
         # Recall that for deleted objects, `state` can be None.
         if value is not None:
             state, tid = value
@@ -560,9 +383,12 @@ class LocalClient(object):
         # operations we've done that would have altered popularity.
         # Dynamically calculate how often we need to age. By default, this is
         # based on what Caffeine's PerfectFrequency does: 10 * max
-        # cache entries
+        # cache entries.
+        #
+        # We don't take a lock to do this; it's fine if two threads
+        # attempt it at the same time.
         age_period = self._age_factor * len(self._cache)
-        operations = self._hits + self._sets
+        operations = self._cache.hits + self._cache.sets
         if operations - self._aged_at < age_period:
             self._next_age_at = age_period
             return
@@ -573,7 +399,7 @@ class LocalClient(object):
         now = time.time()
         logger.debug("Beginning frequency aging for %d cache entries",
                      len(self._cache))
-        self._cache.age_lists()
+        self._cache.age_frequencies()
         done = time.time()
         logger.debug("Aged %d cache entries in %s", len(self._cache), done - now)
 
@@ -586,69 +412,21 @@ class LocalClient(object):
             # don't bother
             return
 
-        # This used to allow non-byte values, but that's confusing
-        # on Py3 and wasn't used outside of tests, so we enforce it.
         # A state of 'None' happens for undone transactions.
         oid, key_tid = oid_tid
         state_bytes, actual_tid = state_bytes_tid
 
-        assert isinstance(state_bytes, bytes) or state_bytes is None, type(state_bytes)
         # Really key_tid should be > 0; we allow >= for tests.
         assert key_tid == actual_tid and key_tid >= 0
-        self.__set_many([
-            (oid, key_tid, state_bytes)
-        ])
-
-    def __set_many(self, oid_tid_state_iter):
-        if not self.limit:
-            # don't bother
-            return
-
-        compress = self._compress
-        peek = self._peek
-        value_limit = self._value_limit
-        min_allowed = self._min_allowed_writeback
-        lock = self._lock
-        store = self._cache.__setitem__
-        sets = 0
-
-        for oid, tid, state_bytes in oid_tid_state_iter:
-            # A state of 'None' happens for undone transactions.
-            state_bytes = compress(state_bytes) if compress else state_bytes # pylint:disable=not-callable
-
-            if state_bytes and len(state_bytes) >= value_limit:
-                # This value is too big, so don't cache it.
-                continue
-
-            value = _SingleValue(state_bytes, tid)
-
-            with lock:
-                existing = peek(oid)
-                if existing:
-                    existing += value
-                    value = existing
-
-                store(oid, value) # possibly evicts
-
-                if tid > min_allowed.get(oid, MAX_TID):
-                    min_allowed[oid] = tid
-
-                sets += 1
-
-        with lock:
-            self._sets += sets
-            # Do we need to move this up above the eviction choices?
-            # Inline some of the logic about whether to age or not; avoiding the
-            # call helps speed
-            if self._hits + self._sets > self._next_age_at:
-                self._age()
+        self.set_all_for_tid(key_tid, [(state_bytes, oid, None)])
 
     def set_all_for_tid(self, tid_int, state_oid_iter):
-        self.__set_many((
-            (oid_int, tid_int, state)
-            for (state, oid_int, _)
-            in state_oid_iter
-        ))
+        if self.limit:
+            self._cache.set_all_for_tid(tid_int, state_oid_iter, self._compress, self._value_limit)
+            # Inline some of the logic about whether to age or not; avoiding the
+            # call helps speed
+            if self._cache.hits + self._cache.sets > self._next_age_at:
+                self._age()
 
     def __delitem__(self, oid_tid):
         self.delitems({oid_tid[0]: oid_tid[1]})
@@ -658,44 +436,13 @@ class LocalClient(object):
         For each OID/TID pair in the items, remove all cached values
         for OID that are older than TID.
         """
-        peek = self._peek
-        replace = self._cache.replace_or_remove_smaller_value
-        min_allowed = self._min_allowed_writeback
-        with self._lock:
-            for oid, expected_tid in iteroiditems(oids_tids):
-                entry = peek(oid)
-                if entry is not None:
-                    entry -= expected_tid
-                    replace(oid, entry)
-                if expected_tid > min_allowed.get(oid, MAX_TID):
-                    min_allowed[oid] = expected_tid
+        self._cache.delitems(oids_tids)
 
     def invalidate_all(self, oids):
-        min_allowed = self._min_allowed_writeback
-        peek = self._peek
-        delitem = self._cache.__delitem__
-        with self._lock:
-            for oid in oids:
-                entry = peek(oid)
-                if entry is not None:
-                    delitem(oid)
-                    tid = entry.max_tid
-                    if tid > min_allowed.get(oid, MAX_TID):
-                        min_allowed[oid] = tid
+        self._cache.del_oids(oids)
 
     def freeze(self, oids_tids):
-        # The idea is to *move* the data, or make it available,
-        # *without* copying it.
-        replace = self._cache.replace_or_remove_smaller_value
-        peek = self._peek
-        with self._lock:
-            # This shuffles them around the LRU order. We probably don't actually
-            # want to do that.
-            for oid, tid in iteroiditems(oids_tids):
-                entry = peek(oid)
-                if entry is not None:
-                    entry <<= tid
-                    replace(oid, entry)
+        self._cache.freeze(oids_tids)
 
     def close(self):
         pass
@@ -771,8 +518,6 @@ class LocalClient(object):
         db = Database.from_connection(connection)
         checkpoints = db.checkpoints
 
-        self._min_allowed_writeback = db.oid_to_tid
-
         # XXX: The cache_ring is going to consume all the items we
         # give it, even if it doesn't actually add them to the cache.
         # It also creates a very large preallocated array for all to
@@ -814,8 +559,9 @@ class LocalClient(object):
                 size += len(state)
                 if size > limit:
                     break
-                items.append((oid, _FrozenValue(state, actual_tid)))
-
+                # XXX: Get these in as Frozen
+                # items.append((oid, FrozenValue(state, actual_tid)))
+                items.append((oid, (state, actual_tid)))
             items.reverse()
             return items
 
@@ -823,11 +569,10 @@ class LocalClient(object):
         # 18% of the total time is preallocating the entry nodes.
         self._bulk_update(fetch_and_filter_rows(),
                           source=connection,
-                          log_count=len(self._min_allowed_writeback),
                           mem_usage_before=mem_before)
         return checkpoints
 
-    def _items_to_write(self, object_index, stored_oid_tid):
+    def _items_to_write(self, stored_oid_tid):
         # pylint:disable=too-many-locals
         all_entries_len = len(self._cache)
 
@@ -868,25 +613,17 @@ class LocalClient(object):
 
         # The *object_index* is our best polling data; anything it has it gospel,
         # so if it has an entry for an object, it superceeds our own.
-        self._min_allowed_writeback.update(object_index)
-        pop_min_required_tid = self._min_allowed_writeback.pop
-        get_min_required_tid = self._min_allowed_writeback.get # pylint:disable=no-member
         get_current_oid_tid = stored_oid_tid.get
-        min_allowed_count = 0
         matching_tid_count = 0
         # When we accumulate all the rows here before returning them,
         # this function shows as about 3% of the total time to save
         # in a very large database.
         with _timer() as t:
-            for oid, lru_entry in iteroiditems(self._cache.data):
-                newest_value = lru_entry.value.newest_value
+            for oid, lru_entry in self._cache.iteritems():
+                newest_value = lru_entry.newest_value
                 # We must have something at least this fresh
                 # to consider writing it out
-                actual_tid = newest_value[1]
-                min_allowed = get_min_required_tid(oid, -1)
-                if min_allowed > actual_tid:
-                    min_allowed_count += 1
-                    continue
+                actual_tid = newest_value.tid
 
                 # If we have something >= min_allowed, matching
                 # what's in the database, or even older (somehow),
@@ -896,21 +633,22 @@ class LocalClient(object):
                     matching_tid_count += 1
                     continue
 
-                yield (oid, actual_tid, newest_value.frozen, newest_value[0], lru_entry.frequency)
+                yield (oid, actual_tid, newest_value.frozen,
+                       bytes(newest_value.state),
+                       lru_entry.frequency)
 
                 # We're able to satisfy this, so we don't need to consider
                 # it in our min_allowed set anymore.
                 # XXX: This isn't really the right place to do this.
                 # Move this and write a test.
-                pop_min_required_tid(oid, None)
 
-        removed_entry_count = matching_tid_count + min_allowed_count
+
+        removed_entry_count = matching_tid_count
         logger.info(
             "Examined %d entries and rejected %d "
-            "(rejected stale: %d; already in db: %d; might prune: %d) in %s",
+            "(already in db: %d) in %s",
             all_entries_len, removed_entry_count,
-            min_allowed_count, matching_tid_count,
-            len(self._min_allowed_writeback),
+            matching_tid_count,
             t.duration)
 
     @_log_timed
@@ -936,7 +674,7 @@ class LocalClient(object):
             cur.execute('BEGIN')
             stored_oid_tid = db.oid_to_tid
             fetch_current = time.time()
-            count_written, _ = db.store_temp(self._items_to_write(object_index, stored_oid_tid))
+            count_written, _ = db.store_temp(self._items_to_write(stored_oid_tid))
             cur.execute("COMMIT")
 
 
@@ -1006,27 +744,8 @@ class LocalClient(object):
             # Delete anything we still know is stale, because we
             # saw a new TID for it, but we had nothing to replace it with.
             min_allowed_writeback = OidTMap()
-            oids_in_both = OidTMap_intersection(self._min_allowed_writeback, stored_oid_tid)
-            get_min_required = self._min_allowed_writeback.__getitem__
-            get_stored = stored_oid_tid.__getitem__
-            for oid in oids_in_both:
-                min_required_tid = get_min_required(oid)
-                stored_tid = get_stored(oid)
-                if stored_tid < min_required_tid:
-                    min_allowed_writeback[oid] = min_required_tid
-            logger.debug(
-                "Comparing %d DB entries against %d known minimums; "
-                "(overlap: %d) "
-                "found %d to remove",
-                len(stored_oid_tid), len(self._min_allowed_writeback),
-                len(oids_in_both),
-                len(min_allowed_writeback)
-            )
             db.trim_to_size(self.limit, min_allowed_writeback)
             del min_allowed_writeback
-        # Typically we write when we're closing and don't expect to do
-        # anything else, so there's no need to keep tracking this info.
-        self._min_allowed_writeback = OidTMap()
 
         # Cleanups
         cur.close()

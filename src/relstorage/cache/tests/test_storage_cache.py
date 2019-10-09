@@ -46,7 +46,7 @@ class StorageCacheTests(TestCase):
             inst.close(close_async=False)
 
     def getClass(self):
-        from relstorage.cache import StorageCache
+        from relstorage.cache.storage_cache import StorageCache
         return StorageCache
 
     def _makeOne(self, current_oids=None, **kwargs):
@@ -72,7 +72,7 @@ class StorageCacheTests(TestCase):
         self.assertIsInstance(cache.g.client, Client)
         self.assertEqual(cache.g.client.servers, ['host:9999'])
         self.assertEqual(c.prefix, 'myprefix')
-        self.assertEqual(c.size, 0)
+        self.assertEqual(len(c), 0) # size may be greater than 0
         self.assertEqual(c.limit, MockOptionsWithFakeCache.cache_local_mb * 1000000)
 
         # can be closed multiple times

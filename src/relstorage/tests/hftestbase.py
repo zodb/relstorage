@@ -83,7 +83,7 @@ class HistoryFreeRelStorageTests(GenericRelStorageTests, ZODBTestCase):
                 storage.loadSerial(oid, tid)
 
         data = storage.loadSerial(oid, tid3)
-        pobj = loads(data)
+        pobj = loads(bytes(data))
         eq(pobj.getoid(), oid)
         eq(pobj.value, 3)
 

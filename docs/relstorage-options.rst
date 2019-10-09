@@ -417,7 +417,7 @@ cache-local-compression
         ``compress()`` and ``decompress()``.  Supported values include
         ``zlib``, ``bz2``, and ``none`` (no compression).
 
-        The default is ``zlib``.
+        The default is ``none`` to avoid copying data more than necessary.
 
         If you use the compressing storage wrapper `zc.zlibstorage
         <https://pypi.python.org/pypi/zc.zlibstorage>`_, this option

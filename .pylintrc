@@ -96,7 +96,7 @@ ignored-classes=SectionValue
 # (useful for modules/projects where namespaces are manipulated during runtime
 # and thus existing member attributes cannot be deduced by static analysis. It
 # supports qualified module names, as well as Unix pattern matching.
-ignored-modules=relstorage.cache._cache_ring
+ignored-modules=
 
 [DESIGN]
 max-attributes=15
@@ -107,7 +107,7 @@ max-locals=20
 # Prospector turns on unsafe-load-any-extension by default, but
 # pylint leaves it off. This is the proximal cause of the
 # undefined-all-variable crash.
-#unsafe-load-any-extension = no
+unsafe-load-any-extension = yes
 
 # Local Variables:
 # mode: conf-space

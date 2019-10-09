@@ -14,7 +14,3 @@
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
-
-from relstorage.cache.storage_cache import StorageCache
-
-StorageCache = StorageCache # export pylint:disable=self-assigning-variable

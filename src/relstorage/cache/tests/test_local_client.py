@@ -38,12 +38,6 @@ class LocalClientStrKeysValuesGenerationalTests(TestCase):
         # bust mostly for compatibility with old tests, before LocalClient
         # implemented IStateCache
 
-        def key_weight(self, _key):
-            return 0
-
-        def value_weight(self, value):
-            return len(value[0] if value[0] else b'')
-
         def __setitem__(self, key, val):
             oid = int(key[0])
             tid = int(key[1])
@@ -70,16 +64,29 @@ class LocalClientStrKeysValuesGenerationalTests(TestCase):
         # pylint:disable=too-many-statements
         # LocalClient is a simple w-TinyLRU cache.  Confirm it keeps the right keys.
         c = self._makeOne(cache_local_compression='none')
+
+        # The initial weight is the size of the cache object and the generations;
+        # on a 64-bit platform, I get 224
+        initial_weight = c._cache.weight
+        c['55'] = b''
+        # The weight of an empty entry is the overhead. On a64-bit platform
+        # I get 96
+        entry_weight = c._cache[5].weight
+
         # This limit will result in
         # eden and probation of 5, protected of 40. This means that eden
         # and probation each can hold one item, while protected can hold 4,
         # so our max size will be 60
-        c.limit = 51
+        c.limit = (entry_weight + 10) * 5 + 1
         setattr(c, '_cache', True) # Avoid type inference warnings
-        c.flush_all(preallocate_nodes=True)
+        c.flush_all()
 
         list_lrukeys = partial(list_lrukeys_, c._cache)
         list_lrufreq = partial(list_lrufreq_, c._cache)
+        def all_lrukeys():
+            return {k: list_lrukeys(k) for k in ('eden', 'probation', 'protected')}
+        def expected_weight(entry_count, python_weight):
+            return python_weight + (entry_count * entry_weight) + initial_weight
 
         k = None
 
@@ -93,10 +100,11 @@ class LocalClientStrKeysValuesGenerationalTests(TestCase):
 
         # While we have the room, we initially put items into the protected
         # space when they graduate from eden.
-        self.assertEqual(list_lrukeys('eden'), [4])
-        self.assertEqual(list_lrukeys('probation'), [])
-        self.assertEqual(list_lrukeys('protected'), [0, 1, 2, 3])
-        self.assertEqual(c._cache.size, 50)
+        self.assertEqual(
+            all_lrukeys(),
+            {'eden': [4], 'probation': [], 'protected': [3, 2, 1, 0]}
+        )
+        self.assertEqual(c._cache.weight, expected_weight(5, 50))
 
         c['55'] = b'0123456789'
 
@@ -105,20 +113,20 @@ class LocalClientStrKeysValuesGenerationalTests(TestCase):
         # allowed it to stay there
         self.assertEqual(list_lrukeys('eden'), [5])
         self.assertEqual(list_lrukeys('probation'), [4])
-        self.assertEqual(list_lrukeys('protected'), [0, 1, 2, 3])
-        self.assertEqual(c._cache.size, 60)
+        self.assertEqual(list_lrukeys('protected'), [3, 2, 1, 0])
+        self.assertEqual(c._cache.weight, expected_weight(6, 60))
 
         v = c['22']
         self.assertEqual(v, b'0123456789')
-        self.assertEqual(c._cache.size, 60)
+        self.assertEqual(c._cache.weight, expected_weight(6, 60))
 
         del c[(1, 1)]
         c['11'] = b'b'
         self.assertEqual(list_lrukeys('eden'), [1])
         self.assertEqual(list_lrukeys('probation'), [5])
-        self.assertEqual(list_lrukeys('protected'), [0, 3, 2])
+        self.assertEqual(list_lrukeys('protected'), [2, 3, 0])
 
-        self.assertEqual(c._cache.size, 41)
+        self.assertEqual(c._cache.weight, expected_weight(5, 41))
 
         for i in range(4):
             # add 10 bytes
@@ -135,8 +143,8 @@ class LocalClientStrKeysValuesGenerationalTests(TestCase):
         # more often
         self.assertEqual(list_lrukeys('eden'), [-3])
         self.assertEqual(list_lrukeys('probation'), [-2])
-        self.assertEqual(list_lrukeys('protected'), [3, 2, 0])
-        self.assertEqual(c._cache.size, 50)
+        self.assertEqual(list_lrukeys('protected'), [2, 3, 0])
+        self.assertEqual(c._cache.weight, expected_weight(5, 50))
 
         #pprint.pprint(c._cache.stats())
         self.assertEqual(c[(-1, 0)], None)
@@ -144,15 +152,14 @@ class LocalClientStrKeysValuesGenerationalTests(TestCase):
         self.assertEqual(c[(-2, 2)], b'0123456789')
         self.assertEqual(c[(-3, 3)], b'0123456789')
         self.assertEqual(c[(2, 2)], b'0123456789')
-        self.assertEqual(c._cache.size, 50)
 
         # Note that this last set of checks perturbed protected and probation;
         # We lost a key
         #pprint.pprint(c._cache.stats())
         self.assertEqual(list_lrukeys('eden'), [-3])
         self.assertEqual(list_lrukeys('probation'), [])
-        self.assertEqual(list_lrukeys('protected'), [3, 0, -2, 2])
-        self.assertEqual(c._cache.size, 50)
+        self.assertEqual(list_lrukeys('protected'), [2, -2, 3, 0])
+
 
         self.assertEqual(c['00'], b'0123456789')
         self.assertEqual(c['00'], b'0123456789') # One more to increase its freq count
@@ -166,18 +173,18 @@ class LocalClientStrKeysValuesGenerationalTests(TestCase):
         # First, verify our current state after those gets.
         self.assertEqual(list_lrukeys('eden'), [-3])
         self.assertEqual(list_lrukeys('probation'), [])
-        self.assertEqual(list_lrukeys('protected'), [-2, 0, 2, 3])
+        self.assertEqual(list_lrukeys('protected'), [3, 2, 0, -2])
         # Now get and switch
         c.__getitem__((-2, 2))
         self.assertEqual(list_lrukeys('eden'), [-3])
         self.assertEqual(list_lrukeys('probation'), [])
-        self.assertEqual(list_lrukeys('protected'), [0, 2, 3, -2])
-        self.assertEqual(c._cache.size, 50)
+        self.assertEqual(list_lrukeys('protected'), [-2, 3, 2, 0])
+
 
         # Confirm frequency counts
         self.assertEqual(list_lrufreq('eden'), [2])
         self.assertEqual(list_lrufreq('probation'), [])
-        self.assertEqual(list_lrufreq('protected'), [4, 4, 2, 3])
+        self.assertEqual(list_lrufreq('protected'), [3, 2, 4, 3])
         # A brand new key is in eden, shifting eden to probation
 
         c[(100, 0)] = b'0123456789'
@@ -186,13 +193,13 @@ class LocalClientStrKeysValuesGenerationalTests(TestCase):
         # accessed the last key from eden (x3), that's the one we keep
         self.assertEqual(list_lrukeys('eden'), [100])
         self.assertEqual(list_lrukeys('probation'), [-3])
-        self.assertEqual(list_lrukeys('protected'), [0, 2, 3, -2])
+        self.assertEqual(list_lrukeys('protected'), [-2, 3, 2, 0])
 
         self.assertEqual(list_lrufreq('eden'), [1])
         self.assertEqual(list_lrufreq('probation'), [2])
-        self.assertEqual(list_lrufreq('protected'), [4, 4, 2, 3])
+        self.assertEqual(list_lrufreq('protected'), [3, 2, 4, 3])
 
-        self.assertEqual(c._cache.size, 60)
+        self.assertEqual(c._cache.weight, expected_weight(6, 60))
 
         self.assertEqual(c[(-3, 3)], b'0123456789')
         self.assertEqual(list_lrukeys('probation'), [0])
@@ -215,26 +222,6 @@ class LocalClientOIDTests(AbstractStateCacheTests):
     def getClass(self):
         return LocalClient
 
-    def test_setitem_min_allowed_missing(self):
-        c = self._makeOne()
-
-        c[self.key] = self.value
-        self.assertIsEmpty(c._min_allowed_writeback)
-
-    def test_setitem_min_allowed_greater(self):
-        c = self._makeOne()
-        min_allowed = self.tid * 2
-        c._min_allowed_writeback[self.oid] = min_allowed
-        c[self.key] = self.value
-        self.assertEqual(c._min_allowed_writeback[self.oid], min_allowed)
-
-    def test_setitem_min_allowed_less(self):
-        c = self._makeOne()
-        min_allowed = 1
-        c._min_allowed_writeback[self.oid] = min_allowed
-        c[self.key] = self.value
-        self.assertEqual(c._min_allowed_writeback[self.oid], self.tid)
-
     def test_cache_corruption_on_store(self):
         from relstorage.cache.interfaces import CacheConsistencyError
         c = self._makeOne(cache_local_dir=':memory:')
@@ -242,38 +229,6 @@ class LocalClientOIDTests(AbstractStateCacheTests):
         # Different key, same real tid, different state. Uh-oh!
         with self.assertRaises(CacheConsistencyError):
             c[(self.oid, self.tid)] = (b'bad bytes', self.tid)
-
-    def test_delete_stale_objects_on_save(self):
-        from relstorage.cache.local_database import Database
-        from relstorage.cache.persistence import sqlite_connect
-        c = self._makeOne(cache_local_dir=":memory:")
-
-        conn = sqlite_connect(c.options, 'ignored-pfx', close_async=False)
-        self.addCleanup(conn.close)
-        db = Database.from_connection(conn)
-        db.store_temp([(0, 0, 0, b'state', 0)])
-        db.move_from_temp()
-        self.assertEqual(dict(db.oid_to_tid), {0: 0})
-        conn.commit()
-        # Pretend we loaded this from the db
-        c[(0, 0)] = (b'state', 0)
-        c._min_allowed_writeback[0] = 0
-
-        # Pass a newer version through
-        c[(0, 1)] = (b'state', 1)
-        self.assertEqual(c._min_allowed_writeback[0], 1)
-        # Evict it so we don't have it to write.
-        del c._cache[0]
-
-        # But it gets removed based on having seen it and knowing
-        # it's there.
-        conn._rs_has_closed = True # Prevent closing by the write method
-        try:
-            c.write_to_sqlite(conn, checkpoints=None)
-        finally:
-            conn._rs_has_closed = False
-
-        self.assertEmpty(db.oid_to_tid)
 
     def test_ctor(self):
         c = self._makeOne()

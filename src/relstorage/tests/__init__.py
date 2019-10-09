@@ -134,6 +134,7 @@ class TestCase(unittest.TestCase):
         self.assertEqual(len(container), length,
                          '%s -- %s' % (msg, container) if msg else container)
 
+
 class StorageCreatingMixin(ABC):
 
     keep_history = None # Override

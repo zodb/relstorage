@@ -8,7 +8,6 @@ export PYTHONDONTWRITEBYTECODE=1
 
 if [ -d /RelStorage -a -d /opt/python ]; then
     # Running inside docker
-    yum -y install libffi-devel
     cd /RelStorage
     rm -rf wheelhouse
     mkdir wheelhouse
@@ -19,8 +18,9 @@ if [ -d /RelStorage -a -d /opt/python ]; then
         git clone /RelStorage RelStorage
         cd RelStorage
         $variant/bin/pip install -U pip
-        $variant/bin/pip install -U cffi setuptools
-        PATH=$variant/bin:$PATH $variant/bin/pip wheel . -w dist
+        $variant/bin/pip install -U cython setuptools
+        PATH=$variant/bin:$PATH $variant/bin/python setup.py bdist_wheel
+        auditwheel show dist/RelStorage*.whl
         auditwheel repair dist/RelStorage*.whl
         cp wheelhouse/RelStorage*.whl /RelStorage/wheelhouse
         cd /RelStorage

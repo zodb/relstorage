@@ -200,7 +200,7 @@ def local_benchmark(runner):
     # To best capture the actual memory usage, only create the data
     # as needed, and destroy it before taking a memory reading.
 
-    def makeOne(populate=True):
+    def makeOne(populate=True, data=None):
         mem_before = get_memory_usage()
         gc.collect()
         gc.collect()
@@ -213,7 +213,7 @@ def local_benchmark(runner):
             client._bulk_update([
                 (t[0], _SingleValue(*t[1]))
                 for t
-                in _make_data(random_data, KEY_GROUP_SIZE)
+                in data or _make_data(random_data, KEY_GROUP_SIZE)
             ])
         return client
 
@@ -236,20 +236,20 @@ def local_benchmark(runner):
         )
 
     def populate_equal(loops):
-        client = makeOne()
+        all_data = _make_data(random_data, KEY_GROUP_SIZE)
+        client = makeOne(populate=False)
+
         duration = 0
 
         for _ in range(loops):
-            all_data = _make_data(random_data, KEY_GROUP_SIZE)
-
             begin = perf_counter()
             for oid, (state, tid) in all_data:
-                # install a copy that's equal;
-                # this should mean no extra copies.
-                state = state[:-1] + state[-1:]
+                # install the same version again.
+                # this should mean no extra copies,
+                # net even temporary
                 client[(oid, tid)] = (state, tid)
             duration += perf_counter() - begin
-            all_data = None
+
             report(client, duration, extra=" (Loop " + str(_) + ") ")
 
         report(client, duration, extra=" (Final ) ")
@@ -315,7 +315,11 @@ def local_benchmark(runner):
         client = makeOne(populate=True)
         key_groups = _make_key_groups(KEY_GROUP_SIZE)
         begin = perf_counter()
+        duration = 0
+
         for _ in range(loops):
+            client = makeOne(populate=True)
+            begin = perf_counter()
             for keys in key_groups:
                 for oid in keys:
                     tid = oid
@@ -325,8 +329,9 @@ def local_benchmark(runner):
                     if not res:
                         continue
                     assert res[0] == random_data
-
+            duration += (perf_counter() - begin)
         print("Hit ratio: ", client.stats()['ratio'])
+
         duration = perf_counter() - begin
         key_groups = None
 
@@ -340,11 +345,10 @@ def local_benchmark(runner):
 
     def mixed(loops):
         key_groups = _make_key_groups(KEY_GROUP_SIZE)
+        duration = 0
         hot_keys = key_groups[0]
 
         client = makeOne(populate=True)
-
-        duration = 0
         i = 0
         miss_count = 0
 
@@ -389,11 +393,13 @@ def local_benchmark(runner):
     for name in ('CFFI',):
         benchmarks = run_and_report_funcs(
             runner,
-            ((name + ' pop_eq', populate_equal),
-             (name + ' pop_ne', populate_not_equal),
-             (name + ' epop', populate_empty),
-             (name + ' read', read),
-             (name + ' mix ', mixed),))
+            (
+                (name + ' pop_eq', populate_equal),
+                (name + ' pop_ne', populate_not_equal),
+                (name + ' epop', populate_empty),
+                (name + ' read', read),
+                (name + ' mix ', mixed),
+            ))
         group = {
             k[len(name) + 1:]: v for k, v in benchmarks.items()
         }
