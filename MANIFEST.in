@@ -7,9 +7,11 @@ include .pylintrc
 include BUILDOUT.rst
 include CHANGES.rst
 include .landscape.yml
+include pyproject.toml
 recursive-include .travis *
 
 recursive-include src *.py *.xml *.txt *.test *.conf *.rst *.c *.h *.sql
+recursive-include src *.pxd *.pyx *.cpp
 
 recursive-include docs *.py *.rst *.png Makefile
 recursive-exclude docs relstorage.*.rst _build
