@@ -11,7 +11,9 @@ include pyproject.toml
 recursive-include .travis *
 
 recursive-include src *.py *.xml *.txt *.test *.conf *.rst *.c *.h *.sql
-recursive-include src *.pxd *.pyx *.cpp
+recursive-include src *.pxd *.pyx
+include src/relstorage/cache/c_cache.cpp
+exclude src/relstorage/cache/cache.cpp
 
 recursive-include docs *.py *.rst *.png Makefile
 recursive-exclude docs relstorage.*.rst _build

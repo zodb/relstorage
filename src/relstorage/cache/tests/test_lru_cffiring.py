@@ -60,7 +60,7 @@ class EdenTests(TestCase):
         # They just exceed the limit
         added = lru.add_MRUs(too_many)
         # Much less got added.
-        self.assertEqual(len(added), 6)
+        self.assertEqual(len(added), 8)
 
 
 class NoOverheadSizeCache(Cache):
@@ -162,7 +162,7 @@ class GenericLRUCacheTests(TestCase):
         ])
 
         self.assertEqual(
-            [1, 2, 3],
+            [1, 2, 3, 0],
             [e.key for e in entries]
         )
 

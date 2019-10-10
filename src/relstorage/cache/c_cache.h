@@ -73,6 +73,10 @@ typedef signed long long int64_t;
 #include <string.h>
 #include <iostream>
 
+#include <boost/intrusive/list.hpp>
+#include <boost/intrusive/set.hpp>
+using namespace boost::intrusive;
+
 /*
  * No version of MSVC properly supports inline. Sigh.
  */
@@ -85,80 +89,114 @@ typedef signed long long int64_t;
 #endif
 
 extern "C" {
-    void* PyObject_Malloc(size_t);
-    void PyObject_Free(void* p);
-#ifndef Py_PYTHON_H
-    struct PyObject;
-    PyObject* PyBytes_FromStringAndSize(char* buf, size_t len);
-    void Py_INCREF(const PyObject* o);
-    void Py_XDECREF(const PyObject* o);
-    char* PyBytes_AsString(const PyObject* o);
-#endif
+    #include "Python.h"
 }
 
+#if RS_COPY_STRING
+typedef std::string rs_string;
+#else
+typedef PyObject* rs_string;
+#endif
 
 
-typedef int64_t TID_t;
-// OIDs start at zero and go up from there. We use
-// a signed type though to distinguish uninitialized values:
-// they'll be less than 0.
-typedef int64_t OID_t;
-typedef std::string Pickle_t;
+namespace relstorage {
+namespace cache {
+    typedef int64_t TID_t;
+    // OIDs start at zero and go up from there. We use
+    // a signed type though to distinguish uninitialized values:
+    // they'll be less than 0.
+    typedef int64_t OID_t;
+    typedef rs_string Pickle_t;
 
-namespace relstorage
-{
-namespace cache
-{
-    typedef enum
-        {
-         GEN_UNKNOWN = -1,
-         GEN_EDEN = 1,
-         GEN_PROTECTED = 2,
-         GEN_PROBATION = 3
-        }
-        generation_num;
+    typedef
+    enum {
+      GEN_UNKNOWN = -1,
+      GEN_EDEN = 1,
+      GEN_PROTECTED = 2,
+      GEN_PROBATION = 3
+    } generation_num;
+
+    struct EntryListTag;
+    struct EntryMapTag;
+
+    class Cache;
     class Generation;
-    class AbstractEntry;
-    typedef AbstractEntry* AbstractEntry_raw_p;
-    class SingleValueEntry;
+    class ICacheEntry;
+    class SVCacheEntry;
 
+    // Compact storage of OIDs. Expected to remain small.
     typedef std::vector<OID_t> OidList;
-    typedef std::list<AbstractEntry* > EntryList;
-    typedef EntryList::iterator EntryListIterator;
-    typedef std::shared_ptr<AbstractEntry> AbstractEntry_p;
-    typedef std::shared_ptr<SingleValueEntry> SingleValueEntry_p;
+    // A general list of cache entries. Used for generations and
+    // multiple entries for the same key. A given ICacheEntry can be
+    // in exactly one such list at a time.
+    typedef list_base_hook<tag<EntryListTag>, link_mode<auto_unlink> > EntryListHook;
+    typedef boost::intrusive::list<
+        ICacheEntry,
+        // no constant time size saves space, and lets items auto-unlink
+        // if they get deleted.
+        constant_time_size<false>,
+        // any given entry can be in the main generation list,
+        // or in the list for a MultipleValue
+        base_hook<EntryListHook>
+        > EntryList;
+    typedef boost::intrusive::list<
+        SVCacheEntry,
+        constant_time_size<false>,
+        base_hook<EntryListHook>
+        > SVEntryList;
+
+    // A map[oid] = ICacheEntry, as maintained by the cache for lookup.
+    // Entries can be in exactly one such map at a time.
+    struct OID_is_key;
+    typedef set_base_hook<tag<EntryMapTag>, link_mode<auto_unlink> > EntryMapHook;
+    typedef set<ICacheEntry,
+                key_of_value<OID_is_key>,
+                base_hook<EntryMapHook>,
+                constant_time_size<false>
+                > OidEntryMap;
 
     /**
-     * All entries are of this type.
-     * On a 64-bit platform, this is XX bytes in size,
-     * pluss about two pointers (16 bytes) for the list node.
+     * Base interface for cache entries.
+     * A cache entry associates an OID/TID pair with a string value.
+     * There are different ways to do that, this just defines the OID.
+     *
+     * Cache values may not be copied. They are semi reference-counted
+     * from Python so when one is removed it can be destroyed.
      */
-    class AbstractEntry {
+    class ICacheEntry
+        : public EntryListHook,
+          public EntryMapHook {
     private:
+        BOOST_MOVABLE_BUT_NOT_COPYABLE(ICacheEntry)
         Generation* _generation;
-        EntryListIterator _position;
     public:
         // The key for this entry.
-        OID_t key;
+        OID_t key; //FIXME: Make const.
         // How popular this item is.
         int frequency;
 
 
-        AbstractEntry()
-            : _generation(nullptr),
+        ICacheEntry()
+            : EntryListHook(),
+              EntryMapHook(),
+              _generation(nullptr),
               key(-1),
               frequency(1)
         {
         }
 
-        AbstractEntry(OID_t key)
-            : _generation(nullptr),
+        ICacheEntry(OID_t key)
+            : EntryListHook(),
+              EntryMapHook(),
+              _generation(nullptr),
               key(key),
               frequency(1)
         {
         }
 
-        virtual ~AbstractEntry() {} // nothing to do .
+        // FIXME: Probably want to disable copy.
+
+        virtual ~ICacheEntry() {} // nothing to do .
 
         RSR_INLINE bool in_cache() const
         {
@@ -180,14 +218,9 @@ namespace cache
             this->_generation = p;
         }
 
-        RSR_INLINE EntryListIterator& position()
-        {
-            return this->_position;
-        }
-
         virtual size_t overhead() const
         {
-            return sizeof(AbstractEntry);
+            return sizeof(ICacheEntry);
         }
 
         /**
@@ -196,17 +229,9 @@ namespace cache
         virtual size_t weight() const
         {
             // include:
-            // the overhead of this object,
-            // the approximate size of the linked list entry
-            // in our generation (two pointers plus our object entry plus alignment == 32),
-            // the size of our map entry,
-            // and the size of the shared pointer.
-
-            return this->overhead()
-                + (sizeof(void*) * 4)
-                + sizeof(std::pair<OID_t, AbstractEntry_p>)
-                + sizeof(AbstractEntry_p);
-
+            // the size of this object, which should be the only overhead
+            // we actually have due to the use of intrusive containers.
+            return this->overhead();
         }
 
         /**
@@ -217,130 +242,148 @@ namespace cache
             return 0;
         }
 
-        // These functions all need to accept the current pointer.
-        // using enable_shared_from_this and shared_from_this() doesn't work
-        // when the pointer we're sharing was the bulk array we were bulk-loaded into.
+        void unlink_from_list()
+        {
+            EntryListHook::unlink();
+        }
 
         /**
-         * Return a shared pointer to an entry holding the current
-         * value and the new value, or raise an exception if that's inconsistent.
+         * Return either this or a new value.
          */
-        virtual AbstractEntry_p with_later(AbstractEntry_p& current_pointer,
-                                           char* buf, size_t len,
-                                           const TID_t new_tid) = 0;
+        virtual ICacheEntry* with_later(const Pickle_t&,
+                                        const TID_t new_tid) = 0;
 
-        virtual AbstractEntry_p freeze_to_tid(AbstractEntry_p& current_pointer,
-                                              const TID_t tid) = 0;
-        virtual AbstractEntry_p discarding_tids_before(AbstractEntry_p& current_pointer,
-                                                       const TID_t tid) = 0;
+        virtual ICacheEntry* freeze_to_tid(const TID_t tid) = 0;
+        virtual ICacheEntry* discarding_tids_before(const TID_t tid) = 0;
+        virtual std::vector<TID_t> all_tids() const = 0;
+    };
+
+    // key_of_value function object, must:
+    //- be default constructible if the container constructor requires it
+    //- define the key type using "type"
+    //- define an operator() taking "const value_type&" and
+    //    returning "type" or "const type &"
+    struct OID_is_key
+    {
+        typedef OID_t type;
+
+        const type& operator()(const ICacheEntry& v) const
+        {
+            return v.key;
+        }
     };
 
 
 
-    class SingleValueEntry : public AbstractEntry {
+    class SVCacheEntry : public ICacheEntry {
     private:
-        // If the offset is 0, we own the buffer, otherwise we're sharing.
-        char* buf;
-        size_t len, offset;
+        Pickle_t _pickle; // FIXME: Make const
         TID_t _tid;
         bool _frozen;
+        BOOST_MOVABLE_BUT_NOT_COPYABLE(SVCacheEntry)
+#if RS_COPY_STRING
+        inline Pickle_t& _incref() const { return this->_pickle; }
+        inline void _decref() {}
+#else
+        inline const Pickle_t& _incref() const
+        {
+            Py_INCREF(this->_pickle);
+            return this->_pickle;
+        }
+
+        inline void _decref()
+        {
+            Py_DECREF(this->_pickle);
+        }
+#endif
+
     public:
-        // Some C++ libraries don't support variardics to
-        // make_shared(), topping out at 3 arguments. Those
-        // are the ones that also tend not to fully support
-        // C++ 11 and its delegating constructors, so we use a
-        // default argument to make it possible to create
-        // these.
-
-        SingleValueEntry(OID_t key, char* buf, size_t len, TID_t tid)
-            : AbstractEntry(key),
-              buf(new char[len]),
-              len(len),
-              offset(0),
+        SVCacheEntry(OID_t key, const Pickle_t& pickle,TID_t tid)
+            : ICacheEntry(key),
+              _pickle(pickle),
               _tid(tid),
               _frozen(false)
         {
-            memcpy(this->buf, buf, len);
+            _incref();
         }
 
-        // Construct from an offset; does not own the pointer.
-        SingleValueEntry(OID_t key, char* buf, size_t len, TID_t tid, size_t offset)
-            : AbstractEntry(key),
-              buf(buf + offset),
-              len(len - offset),
-              offset(offset),
-              _tid(tid),
+
+        SVCacheEntry()
+            : ICacheEntry(),
+              _pickle(),
+              _tid(-1),
               _frozen(false)
         {
-            assert(offset > 0);
         }
 
-
-        SingleValueEntry()
-            : AbstractEntry(),
-              buf(nullptr), len(0),
-              offset(0),
-              _tid(-1), _frozen(false)
+        virtual ~SVCacheEntry()
         {
+            _decref();
         }
 
-        virtual ~SingleValueEntry()
+        SVCacheEntry& operator=(const SVCacheEntry& other);
+
+        virtual std::vector<TID_t> all_tids() const
         {
-            if (!this->offset) {
-                delete[] this->buf;
-            }
+            // initialize with 1 element, each having the value _tid
+            return std::vector<TID_t>(1, _tid);
         }
-
-        SingleValueEntry& operator=(const SingleValueEntry& other);
 
         // Copies
-        void force_update_during_bulk_load(OID_t key, char* buf, size_t len, TID_t tid)
+        void force_update_during_bulk_load(OID_t key, Pickle_t pickle,TID_t tid)
         {
-           this->key = key;
-           this->_tid = tid;
-           this->len = len;
-           assert(this->buf == nullptr);
-           this->buf = new char[len];
-           memcpy(this->buf, buf, len);
+            assert(!_pickle);
+            this->key = key;
+            this->_tid = tid;
+            this->_pickle = pickle;
+            _incref();
         }
 
+#if RS_COPY_STRING
         PyObject* as_object()
         {
-            return PyBytes_FromStringAndSize(this->buf, this->len);
+            return PyBytes_FromStringAndSize(this->_pickle.data(),
+                                             this->_pickle.size());
         }
 
-        PyObject* first_two_as_object()
+        size_t size() const
         {
-            if (this->len >= 2) {
-                return PyBytes_FromStringAndSize(this->buf, 2);
+            return this->_pickle.size();
+        }
+
+        bool state_eq(const Pickle_t& other) const
+        {
+            return _pickle == other;
+        }
+#else
+        // Cython leaves refcounting to us. It assumes we return
+        // an incremented reference and that we hold a reference when we're
+        // constructed until we're destructed.
+        PyObject* as_object() const
+        {
+            return _incref();
+        }
+
+        size_t size() const
+        {
+            ssize_t s = PyBytes_Size(this->_pickle);
+            if (s < 0) {
+                throw std::runtime_error("Size not valid");
             }
-            return this->as_object();
+            return static_cast<size_t>(s);
         }
 
-        size_t size()
+        bool state_eq(const Pickle_t& other) const
         {
-            return this->len;
+            // Note: Ignoring error return here.
+            // Temporarily borrowing the reference to other.
+            return PyObject_RichCompareBool(_pickle, other, Py_EQ);
         }
 
-        char* c_data()
+#endif
+        const Pickle_t& state() const
         {
-            return this->buf;
-        }
-
-        SingleValueEntry* from_offset(size_t offset)
-        {
-            return new SingleValueEntry(
-                this->key,
-                this->buf,
-                this->len,
-                this->_tid,
-                offset
-            );
-        }
-
-        const Pickle_t state() const
-        {
-            return Pickle_t(this->buf, this->len);
+            return _incref();
         }
 
         TID_t tid() const
@@ -353,28 +396,25 @@ namespace cache
             return this->_frozen;
         }
 
+        bool frozen() const
+        {
+            return this->_frozen;
+        }
+
         virtual size_t weight() const
         {
             // include: the bytes for the cached object,
-            return AbstractEntry::weight() + this->len;
+            return ICacheEntry::weight() + this->size();
         }
 
         virtual size_t overhead() const
         {
-            return sizeof(SingleValueEntry);
+            return sizeof(SVCacheEntry);
         }
 
         virtual size_t value_count() const
         {
             return 1;
-        }
-
-        bool eq_for_python(const SingleValueEntry* other) const
-        {
-            return this->_tid == other->_tid
-                && this->_frozen == other->_frozen
-                && this->len == other->len
-                && memcmp(this->buf, other->buf, this->len) == 0;
         }
 
         // Use a value less than 0 for what would be None in Python.
@@ -383,25 +423,24 @@ namespace cache
             return this->_tid == tid || (tid < 0 && this->_frozen);
         }
 
-        virtual AbstractEntry_p with_later(AbstractEntry_p& current_pointer,
-                                           char* buf,
-                                           size_t len,
-                                           const TID_t new_tid);
-        virtual AbstractEntry_p freeze_to_tid(AbstractEntry_p& current_pointer, const TID_t tid);
-        virtual AbstractEntry_p discarding_tids_before(AbstractEntry_p& current_pointer, const TID_t tid);
+        virtual ICacheEntry* with_later(const Pickle_t&,
+                                        const TID_t new_tid);
+        virtual ICacheEntry* freeze_to_tid(const TID_t tid);
+        virtual ICacheEntry* discarding_tids_before(const TID_t tid);
 
     };
 
 
 
-    class MultipleValueEntry : public AbstractEntry {
+    class MVCacheEntry : public ICacheEntry {
     private:
-
+        BOOST_MOVABLE_BUT_NOT_COPYABLE(MVCacheEntry)
+        SVEntryList p_values;
     public:
-        typedef std::list<SingleValueEntry_p> EntryList;
-        EntryList p_values;
-        MultipleValueEntry(const OID_t key) : AbstractEntry(key) {}
-        void push_back(SingleValueEntry_p entry) {this->p_values.push_back(entry);}
+        // Types
+        typedef SVEntryList::const_iterator iterator;
+        MVCacheEntry(const OID_t key) : ICacheEntry(key) {}
+        void push_back(SVCacheEntry& entry) {this->p_values.push_back(entry);}
         void remove_tids_lte(TID_t tid);
         void remove_tids_lt(TID_t tid);
 
@@ -412,30 +451,53 @@ namespace cache
         virtual size_t weight() const;
         virtual size_t overhead() const
         {
-            return sizeof(MultipleValueEntry);
+            return sizeof(MVCacheEntry);
         }
 
-        const SingleValueEntry_p front() const
+        const SVCacheEntry& front() const
         {
             return this->p_values.front();
         }
+
+        SVCacheEntry& front()
+        {
+            return this->p_values.front();
+        }
+
         bool empty() const
         {
             return this->p_values.empty();
         }
+
         bool degenerate() const
         {
             return this->p_values.size() == 1;
         }
 
-        virtual AbstractEntry_p with_later(AbstractEntry_p& current_pointer,
-                                           char* buf, size_t len,
-                                           const TID_t new_tid);
-        virtual AbstractEntry_p freeze_to_tid(AbstractEntry_p& current_pointer, const TID_t tid);
-        virtual AbstractEntry_p discarding_tids_before(AbstractEntry_p& current_pointer, const TID_t tid);
-    };
+        iterator begin() const
+        {
+            return this->p_values.cbegin();
+        }
 
-    typedef std::shared_ptr<MultipleValueEntry> MultipleValueEntry_p;
+        iterator end() const
+        {
+            return this->p_values.cend();
+        }
+
+        virtual std::vector<TID_t> all_tids() const
+        {
+            std::vector<TID_t> result;
+            for(iterator it = begin(), _end = end(); it != _end; ++it) {
+                result.push_back(it->tid());
+            }
+            return result;
+        }
+
+        virtual ICacheEntry* with_later(const Pickle_t&,
+                                        const TID_t new_tid);
+        virtual ICacheEntry* freeze_to_tid(const TID_t tid);
+        virtual ICacheEntry* discarding_tids_before(const TID_t tid);
+    };
 
     class Cache;
 
@@ -443,21 +505,39 @@ namespace cache
     private:
         // The sum of their weights.
         size_t _sum_weights;
+        size_t _max_weight;
+        friend class Cache;
+        BOOST_MOVABLE_BUT_NOT_COPYABLE(Generation)
     protected:
         EntryList _entries;
+        void change_max_weight(size_t new_limit)
+        {
+            _max_weight = new_limit;
+        }
     public:
-        // The maximum allowed weight
-        const size_t max_weight;
+        // types
+        typedef EntryList::const_iterator iterator;
         const generation_num generation;
 
-
         Generation(size_t limit, generation_num generation)
-            :
-              _sum_weights(0),
-              max_weight(limit),
+            : _sum_weights(0),
+              _max_weight(limit),
               generation(generation)
         {
 
+        }
+        size_t max_weight() const
+        {
+            return _max_weight;
+        }
+        iterator begin() const
+        {
+            return this->_entries.begin();
+        }
+
+        iterator end() const
+        {
+            return this->_entries.end();
         }
 
         RSR_INLINE size_t sum_weights() const
@@ -467,7 +547,7 @@ namespace cache
 
         RSR_INLINE bool oversize() const
         {
-            return this->_sum_weights > this->max_weight;
+            return this->_sum_weights > this->_max_weight;
         }
 
         RSR_INLINE bool empty() const
@@ -480,23 +560,23 @@ namespace cache
             return this->_entries.size();
         }
 
-        RSR_INLINE int will_fit(const AbstractEntry& entry)
+        RSR_INLINE int will_fit(const ICacheEntry& entry)
         {
-            return this->max_weight >= (entry.weight() + this->_sum_weights);
+            return this->_max_weight >= (entry.weight() + this->_sum_weights);
         }
 
-        RSR_INLINE const AbstractEntry* lru() const
+        RSR_INLINE const ICacheEntry* lru() const
         {
             if (this->empty())
                 return nullptr;
-            return this->_entries.back();
+            return &this->_entries.back();
         }
 
-        RSR_INLINE AbstractEntry* lru()
+        RSR_INLINE ICacheEntry* lru()
         {
             if (this->empty())
                 return nullptr;
-            return this->_entries.back();
+            return &this->_entries.back();
         }
 
         EntryList& iter()
@@ -504,7 +584,7 @@ namespace cache
             return this->_entries;
         }
 
-        RSR_INLINE void notice_weight_change(AbstractEntry& entry,
+        RSR_INLINE void notice_weight_change(ICacheEntry& entry,
                                              size_t old_weight)
         {
             assert(entry.generation() == this);
@@ -526,44 +606,43 @@ namespace cache
          *
          * Constant time.
          */
-        RSR_INLINE void move_to_head(AbstractEntry& elt)
+        RSR_INLINE void move_to_head(ICacheEntry& elt)
         {
-            this->_entries.erase(elt.position());
-            this->_entries.push_front(&elt);
-            elt.position() = this->_entries.begin();
+            elt.unlink_from_list();
+            this->_entries.push_front(elt);
         }
 
         /**
          * Accept elt, which must be in another node, to be the new
          * head of this ring. This may oversize this node.
          */
-        RSR_INLINE void adopt(AbstractEntry& elt);
+        RSR_INLINE void adopt(ICacheEntry& elt);
 
         /**
          * Remove elt from the list. elt must already be in the list.
          *
          * Constant time.
          */
-        RSR_INLINE void remove(AbstractEntry& elt);
+        RSR_INLINE void remove(ICacheEntry& elt);
 
 
-        RSR_INLINE void replace_entry(AbstractEntry& incoming,
+        RSR_INLINE void replace_entry(ICacheEntry& incoming,
                                       size_t old_weight,
-                                      AbstractEntry* old)
+                                      ICacheEntry& old)
         {
             assert(!incoming.in_cache());
-            assert(old->generation() == this);
+            assert(old.generation() == this);
 
             this->_sum_weights -= old_weight;
             this->_sum_weights += incoming.weight();
             // When we erase, the iterator goes invalid, so we must put it in
             // first
-            if (old != &incoming) {
+            if (&old != &incoming) {
                 incoming.generation() = this;
-                incoming.position() = this->_entries.insert(old->position(),
-                                                            &incoming);
-                this->_entries.erase(old->position());
-                old->generation() = nullptr;
+                dynamic_cast<EntryListHook&>(incoming).swap_nodes(dynamic_cast<EntryListHook&>(old));
+                old.unlink_from_list();
+                // FIXME: Possibly need to delete here.
+                old.generation() = nullptr;
             }
         }
 
@@ -573,14 +652,14 @@ namespace cache
          *
          * Constant time.
          */
-        virtual void add(AbstractEntry& elt);
+        virtual void add(ICacheEntry& elt);
 
         /**
          * Record that the entry has been used.
          * This updates its popularity counter  and makes it the
          * most recently used item in its ring. This is constant time.
          */
-        virtual void on_hit(Cache& cache, AbstractEntry& entry);
+        virtual void on_hit(Cache& cache, ICacheEntry& entry);
 
         // Two rings are equal iff they are the same object.
         virtual bool operator==(const Generation& other) const;
@@ -590,12 +669,11 @@ namespace cache
     class Eden : public Generation {
     private:
         OidList rejects;
+        Cache& cache;
+        Eden(size_t limit, Cache& cache) : Generation(limit, GEN_EDEN), cache(cache) {}
+        friend class Cache;
     public:
-        Cache* cache;
-        Eden(size_t limit)
-            : Generation(limit, GEN_EDEN), rejects(0)
-        {
-        }
+
         /**
          * Add elt as the most recently used object.  elt must not already be
          * in any list.
@@ -603,31 +681,28 @@ namespace cache
          * Evict items from the cache, if needed, to get all the rings
          * down to size. Return a list of the keys evicted.
          */
-        OidList& add_and_evict(AbstractEntry& elt);
+        OidList& add_and_evict(ICacheEntry& elt);
 
     };
 
     class Protected : public Generation {
+    private:
+        Protected(size_t limit) : Generation(limit, GEN_PROTECTED) {}
+        friend class Cache;
     public:
-        Protected(size_t limit)
-            : Generation(limit, GEN_PROTECTED)
-        {
-        }
+        const static generation_num generation = GEN_PROTECTED;
     };
 
     class Probation : public Generation {
     private:
         OidList no_rejects;
+        Probation(size_t limit) : Generation(limit, GEN_PROBATION) {}
+        friend class Cache;
     public:
-        Probation(size_t limit)
-            : Generation(limit, GEN_PROBATION), no_rejects(0)
-        {
-        }
 
-        virtual void on_hit(Cache& cache, AbstractEntry& entry);
+        virtual void on_hit(Cache& cache, ICacheEntry& entry);
     };
 
-    typedef std::unordered_map<OID_t, AbstractEntry_p> OidEntryMap;
 
     /**
      * The cache itself is three generations. See individual methods
@@ -637,31 +712,48 @@ namespace cache
     private:
         OidEntryMap data;
         OidList rejects;
-        void update_mru(AbstractEntry& entry);
+        void update_mru(ICacheEntry& entry);
         void _handle_evicted(OidList& evicted);
-
+        BOOST_MOVABLE_BUT_NOT_COPYABLE(Cache)
     public:
+        // types
+        typedef OidEntryMap::const_iterator iterator;
+
         Eden ring_eden;
         Protected ring_protected;
         Probation ring_probation;
 
-        Cache(size_t eden_limit, size_t protected_limit, size_t probation_limit)
-            : ring_eden(eden_limit),
+        Cache(size_t eden_limit=0, size_t protected_limit=0, size_t probation_limit=0)
+            : ring_eden(eden_limit, *this),
               ring_protected(protected_limit),
               ring_probation(probation_limit)
         {
-            this->ring_eden.cache = this;
+        }
+
+        void resize(size_t eden, size_t protected_limit, size_t probation_limit)
+        {
+            ring_eden.change_max_weight(eden);
+            ring_protected.change_max_weight(protected_limit);
+            ring_probation.change_max_weight(probation_limit);
         }
 
         virtual ~Cache()
         {
         }
 
-        // We'd much prefer to return const map&, but Cython fails to iterate
-        // that for some reason.
-        OidEntryMap& getData()
+        size_t max_weight() const
         {
-            return this->data;
+            return ring_eden.max_weight() + ring_probation.max_weight() + ring_protected.max_weight();
+        }
+
+        iterator begin() const
+        {
+            return this->data.begin();
+        }
+
+        iterator end() const
+        {
+            return this->data.end();
         }
 
         RSR_INLINE bool oversize()
@@ -672,26 +764,26 @@ namespace cache
         }
 
 
-        RSR_INLINE int will_fit(const AbstractEntry& entry)
+        RSR_INLINE int will_fit(const ICacheEntry& entry)
         {
             return this->ring_eden.will_fit(entry)
                 || this->ring_probation.will_fit(entry)
                 || this->ring_protected.will_fit(entry);
         }
 
-        virtual size_t weight() const;
+        size_t weight() const;
 
         /**
          * Add a new entry for the given state if one does not already exist.
          * It becomes the first entry in eden. If this causes the cache to be oversized,
          * entries are freed.
          */
-        void add_to_eden(OID_t key, char* buf, size_t len, TID_t tid);
+        void add_to_eden(OID_t key, const Pickle_t& state,TID_t tid);
 
         /**
          * Does not rebalance rings. Use only when no evictions are necessary.
          */
-        void replace_entry(AbstractEntry_p& new_entry, AbstractEntry_p& prev_entry,
+        void replace_entry(ICacheEntry& new_entry, ICacheEntry& prev_entry,
                            size_t prev_weight );
 
         /**
@@ -700,7 +792,7 @@ namespace cache
          * be present. Possibly evicts items if the entry grew.
          */
         void store_and_make_MRU(OID_t oid,
-                                char* buf, size_t len,
+                                const Pickle_t& state,
                                 const TID_t new_tid);
 
         /**
@@ -719,12 +811,12 @@ namespace cache
 
         bool contains(const OID_t key) const;
 
-        const AbstractEntry_p& get(const OID_t key) const;
+        ICacheEntry* get(const OID_t key);
 
         void age_frequencies();
         size_t len();
         void on_hit(OID_t key);
-        int add_many(SingleValueEntry_p& shared_ptr_to_array,
+        int add_many(SVCacheEntry* shared_ptr_to_array,
                      int entry_count);
 
     };
@@ -734,3 +826,7 @@ namespace cache
 } // namespace relstorage
 
 #endif
+
+// Local Variables:
+// flycheck-clang-include-path: ("/opt/local/include" "/opt/local/Library/Frameworks/Python.framework/Versions/2.7/include/python2.7")
+// End:

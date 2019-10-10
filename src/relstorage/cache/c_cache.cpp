@@ -23,7 +23,7 @@ using namespace relstorage::cache;
 //********************
 // Functions
 
-std::ostream& operator<<(std::ostream& s, const AbstractEntry& entry)
+std::ostream& operator<<(std::ostream& s, const ICacheEntry& entry)
 {
     s << "(Key: " << entry.key << " Generation: " << entry.generation() << ")";
     return s;
@@ -52,13 +52,13 @@ std::ostream& operator<<(std::ostream& s, const AbstractEntry& entry)
 RSR_SINLINE
 void _spill_from_ring_to_ring(Generation& updated_ring,
                               Generation& destination_ring,
-                              const AbstractEntry* updated_ignore_me,
+                              const ICacheEntry* updated_ignore_me,
                               const bool allow_victims,
                               const bool overfill_destination,
                               OidList& rejects)
 {
-    AbstractEntry* updated_oldest = NULL;
-    AbstractEntry* destination_oldest = NULL;
+    ICacheEntry* updated_oldest = NULL;
+    ICacheEntry* destination_oldest = NULL;
     rejects.clear();
 
 
@@ -124,9 +124,9 @@ void _spill_from_ring_to_ring(Generation& updated_ring,
 }
 
 //********************
-// AbstractEntry
+// ICacheEntry
 
-// bool AbstractEntry::operator==(const AbstractEntry& other) const
+// bool ICacheEntry::operator==(const ICacheEntry& other) const
 // {
 //     return this == &other;
 // }
@@ -134,54 +134,49 @@ void _spill_from_ring_to_ring(Generation& updated_ring,
 
 //********************
 // SingleValueEntry
-AbstractEntry_p SingleValueEntry::with_later(AbstractEntry_p& current_pointer,
-                                             char* buf, size_t len,
-                                             const TID_t new_tid)
+ICacheEntry* SVCacheEntry::with_later(const Pickle_t& state,
+                                      const TID_t new_tid)
 {
-    const bool state_equal = len == this->len && memcmp(buf, this->buf, len) == 0;
+    const bool state_equal = this->state_eq(state);
     const bool tid_equal = new_tid == this->tid();
     if (state_equal && tid_equal) {
-        return current_pointer;
+        return this;
     }
 
     if (!state_equal && tid_equal) {
         throw std::logic_error("Detected two different values for the same TID.");
     }
 
-    SingleValueEntry_p new_entry = SingleValueEntry_p(new SingleValueEntry(this->key,
-                                                                      buf,
-                                                                      len,
-                                                                      new_tid));
-    MultipleValueEntry_p mve = std::make_shared<MultipleValueEntry>(this->key);
+    SVCacheEntry* new_entry = new SVCacheEntry(this->key,
+                                               state,
+                                               new_tid);
+    MVCacheEntry* mve = new MVCacheEntry(this->key);
     mve->frequency = this->frequency;
-    mve->push_back(std::static_pointer_cast<SingleValueEntry>(current_pointer));
-    mve->push_back(new_entry);
+    mve->push_back(*new_entry);
     return mve;
 }
 
-AbstractEntry_p SingleValueEntry::freeze_to_tid(AbstractEntry_p& current_pointer,
-                                                const TID_t tid)
+ICacheEntry* SVCacheEntry::freeze_to_tid(const TID_t tid)
 {
     if (this->_tid > tid) {
-        return current_pointer;
+        return this;
     }
     if (this->_tid == tid) {
         // We are discarding ourself now, but preserving this item's
         // location in the generations.
         this->_frozen = true;
-        return current_pointer;
+        return this;
     }
     // We're older, we should be discarded.
-    return AbstractEntry_p();
+    return nullptr;
 }
 
-AbstractEntry_p SingleValueEntry::discarding_tids_before(AbstractEntry_p& current_pointer,
-                                                         const TID_t tid)
+ICacheEntry* SVCacheEntry::discarding_tids_before(const TID_t tid)
 {
     if (tid <= this->_tid) {
-        return AbstractEntry_p();
+        return nullptr;
     }
-    return current_pointer;
+    return this;
 }
 
 
@@ -193,41 +188,33 @@ bool Generation::operator==(const Generation& other) const
     return this == &other;
 }
 
-void Generation::on_hit(Cache& cache, AbstractEntry& entry)
+void Generation::on_hit(Cache& cache, ICacheEntry& entry)
 {
     UNUSED(cache);
     entry.frequency++;
     this->move_to_head(entry);
 }
 
-void Generation::add(AbstractEntry& elt)
+void Generation::add(ICacheEntry& elt)
 {
     assert(elt.generation() == nullptr);
-    this->_entries.push_front(&elt);
-    elt.position() = this->_entries.begin();
+    this->_entries.push_front(elt);
     elt.generation() = this;
     this->_sum_weights += elt.weight();
 }
 
-void Generation::adopt(AbstractEntry& elt)
+void Generation::adopt(ICacheEntry& elt)
 {
     elt.generation()->remove(elt);
     assert(elt.generation() == nullptr);
     this->add(elt);
 }
 
-void Generation::remove(AbstractEntry& elt)
+void Generation::remove(ICacheEntry& elt)
 {
     assert(elt.generation() == this);
-    AbstractEntry* in_list = *elt.position();
-    if (in_list != &elt) {
-        std::cout << "Error, not matched " << in_list << " should be " << &elt << std::endl;
-        std::cout << "In list " << *in_list << std::endl;
-        std::cout << "Asked to remove " << elt << std::endl;
-    }
-    assert(*elt.position() == &elt);
-    this->_entries.erase(elt.position());
-    elt.generation(nullptr);
+    elt.unlink_from_list();
+    elt.generation() = nullptr;
     this->_sum_weights -= elt.weight();
 }
 
@@ -236,7 +223,7 @@ void Generation::remove(AbstractEntry& elt)
 //********************
 // Probation
 
-void Probation::on_hit(Cache& cache, AbstractEntry& entry)
+void Probation::on_hit(Cache& cache, ICacheEntry& entry)
 {
     Protected& protected_ring = cache.ring_protected;
     Probation& probation_ring = cache.ring_probation;
@@ -259,10 +246,10 @@ void Probation::on_hit(Cache& cache, AbstractEntry& entry)
 
 //********************
 // Eden
-OidList& Eden::add_and_evict(AbstractEntry& entry)
+OidList& Eden::add_and_evict(ICacheEntry& entry)
 {
     Eden& eden_ring = *this;
-    Cache& cache = *eden_ring.cache;
+    Cache& cache = eden_ring.cache;
     Protected& protected_ring = cache.ring_protected;
     Probation& probation_ring = cache.ring_probation;
     this->rejects.clear();
@@ -285,7 +272,7 @@ OidList& Eden::add_and_evict(AbstractEntry& entry)
         */
         while(eden_ring.oversize()) {
             // This cannot be NULL if we're oversize.
-            AbstractEntry& eden_oldest = *eden_ring.lru();
+            ICacheEntry& eden_oldest = *eden_ring.lru();
             if(eden_oldest.key == entry.key) {
                 break;
             }
@@ -330,96 +317,92 @@ OidList& Eden::add_and_evict(AbstractEntry& entry)
 
 
 //********************
-// MultipleValueEntry
+// MVCacheEntry
 
 struct _LTE {
     TID_t tid;
     _LTE(TID_t t) : tid(t) {}
-    bool operator()(SingleValueEntry_p p) {
-        return p.get()->tid() <= this->tid;
+    bool operator()(const SVCacheEntry& p) {
+        return p.tid() <= this->tid;
     }
 };
 
 struct _LT {
     TID_t tid;
     _LT(TID_t t) : tid(t) {}
-    bool operator()(SingleValueEntry_p p) {
-        return p.get()->tid() < this->tid;
+    bool operator()(const SVCacheEntry& p) {
+        return p.tid() < this->tid;
     }
 };
 
-void MultipleValueEntry::remove_tids_lte(TID_t tid) {
+void MVCacheEntry::remove_tids_lte(TID_t tid) {
     this->p_values.remove_if(_LTE(tid));
 }
 
-void MultipleValueEntry::remove_tids_lt(TID_t tid) {
+void MVCacheEntry::remove_tids_lt(TID_t tid) {
     this->p_values.remove_if(_LT(tid));
 }
 
-size_t MultipleValueEntry::weight() const
+size_t MVCacheEntry::weight() const
 {
-    size_t overhead = AbstractEntry::weight();
+    size_t overhead = ICacheEntry::weight();
     size_t result = 0;
-    for (std::list<SingleValueEntry_p>::const_iterator it = this->p_values.begin();
+    for (SVEntryList::const_iterator it = this->p_values.begin();
          it != this->p_values.end();
          it++ ) {
-        // Include its weight but not the things that we pay for, and
-        // add its extra linked entry.
-        result += (*it)->weight() - overhead + (sizeof(void*) * 4);
+        result += it->weight();
     }
     return result + overhead;
 }
 
-AbstractEntry_p MultipleValueEntry::with_later(AbstractEntry_p& current_pointer,
-                                               char* buf, size_t len,
-                                               const TID_t new_tid)
+ICacheEntry* MVCacheEntry::with_later(const Pickle_t& state,
+                                      const TID_t new_tid)
 {
     this->push_back(
-        SingleValueEntry_p(new SingleValueEntry(this->key, buf, len, new_tid))
+        *new SVCacheEntry(this->key, state, new_tid)
     );
-    return current_pointer;
+    return this;
 }
 
-AbstractEntry_p MultipleValueEntry::freeze_to_tid(AbstractEntry_p& current_pointer,
-                                                  const TID_t tid)
+ICacheEntry* MVCacheEntry::freeze_to_tid(const TID_t tid)
 {
     this->remove_tids_lt(tid);
     if (this->empty()) {
         // We should be discarded.
-        return AbstractEntry_p();
+        return nullptr;
     }
     if (this->degenerate()) {
         // One item left, either it matches or it doesn't.
-        AbstractEntry_p my_pointer = std::static_pointer_cast<AbstractEntry>(this->p_values.front());
-        return this->front()->freeze_to_tid(my_pointer,
-                                            tid);
+        ICacheEntry& front = this->front();
+        // TODO: Lifetimes.
+        front.unlink_from_list();
+        return front.freeze_to_tid(tid);
     }
 
     // Multiple items left, all of which are at least == tid
     // but could be greater.
-    for(EntryList::iterator it = this->p_values.begin();
+    for(SVEntryList::iterator it = this->p_values.begin();
         it != this->p_values.end(); ++it) {
-        SingleValueEntry* entry = (*it).get();
-        if (entry->tid() == tid) {
-            entry->frozen() = true;
+        SVCacheEntry& entry = *it;
+        if (entry.tid() == tid) {
+            entry.frozen() = true;
         }
     }
-    return current_pointer;
+    return this;
 }
 
-AbstractEntry_p MultipleValueEntry::discarding_tids_before(AbstractEntry_p& current_pointer,
-                                                           const TID_t tid)
+ICacheEntry* MVCacheEntry::discarding_tids_before(const TID_t tid)
 {
     this->remove_tids_lte(tid);
     if (this->empty()) {
         // We should be discarded.
-        return AbstractEntry_p();
+        return nullptr;
     }
     if (this->degenerate()) {
         // One item left, must be greater.
-        return this->front();
+        return &this->front();
     }
-    return current_pointer;
+    return this;
 }
 
 //********************
@@ -439,40 +422,43 @@ void Cache::_handle_evicted(OidList& evicted) {
 }
 
 
-void Cache::add_to_eden(OID_t key, char* buf, size_t len, TID_t tid)
+void Cache::add_to_eden(OID_t key, const Pickle_t& state, TID_t tid)
 {
     if (this->data.count(key)) {
         throw std::runtime_error("Key already present");
     }
 
     // keep with the shared ownership.
-    SingleValueEntry_p sve_p = SingleValueEntry_p(new SingleValueEntry(key, buf, len, tid));
-    this->data[key] = sve_p;
+    // TODO: Avoid copy here. We want to move.
+    ICacheEntry* sve_p = new SVCacheEntry(key, state, tid);
+    this->data.insert(*sve_p);
     this->_handle_evicted(
        this->ring_eden.add_and_evict(*sve_p)
     );
 }
 
 
-int Cache::add_many(SingleValueEntry_p& shared_ptr_to_array,
+int Cache::add_many(SVCacheEntry* entry_array, // this type will change
                     int entry_count)
 {
     int added_count = 0;
     if (this->oversize() || !entry_count) {
         return 0;
     }
-    SingleValueEntry* entry_array = shared_ptr_to_array.get();
 
     for (int i = 0; i < entry_count; i++) {
         // Don't try if we know we won't find a place for it.
-        SingleValueEntry* incoming = (entry_array + i);
+        SVCacheEntry* incoming = (entry_array + i);
         if (!this->will_fit(*incoming)) {
             incoming->generation(nullptr);
             continue;
         }
 
-        this->data[incoming->key] = SingleValueEntry_p(shared_ptr_to_array,
-                                                       incoming);
+        // "Logarithmic in general, but it is amortized constant time
+        // (two comparisons in the worst case) if t is inserted
+        // immediately before hint."
+        // So we need the array sorted in *descending* order for boost::set
+        this->data.insert(*incoming); // This fails if it's already present.
 
         // _eden_add *always* adds, but it may or may not be able to
         // rebalance.
@@ -488,7 +474,8 @@ int Cache::add_many(SingleValueEntry_p& shared_ptr_to_array,
             // Put everything that we rejected back in probation.
             for(OidList::const_iterator it = add_rejects.begin(); it != add_rejects.end(); it++) {
                 const OID_t oid = *it;
-                this->ring_probation.add(*this->data.at(oid));
+                ICacheEntry& cached = *this->data.find(oid); // fails if oid not present
+                this->ring_probation.add(cached);
             }
             break;
         }
@@ -500,24 +487,22 @@ int Cache::add_many(SingleValueEntry_p& shared_ptr_to_array,
 /**
  * Does not rebalance rings. Use only when no evictions are necessary.
  */
-void Cache::replace_entry(AbstractEntry_p& new_entry, AbstractEntry_p& prev_entry,
+void Cache::replace_entry(ICacheEntry& new_entry, ICacheEntry& prev_entry,
                           size_t prev_weight )
 {
-    assert(!new_entry->in_cache());
-    assert(prev_entry->in_cache());
+    assert(!new_entry.in_cache());
+    assert(prev_entry.in_cache());
 
-    Generation& generation = *(*prev_entry).generation();
+    Generation& generation = *prev_entry.generation();
     // Must replace in our generation ring...
-    generation.replace_entry(*new_entry.get(), prev_weight, prev_entry.get());
+    generation.replace_entry(new_entry, prev_weight, prev_entry);
     // ... and our map
-    if (new_entry != prev_entry) {
-        // Replace the shared pointer, possibly causing
-        // prev_entry to go invalid.
-        this->data[new_entry->key] = new_entry;
+    if (&new_entry != &prev_entry) {
+        this->data.replace_node(this->data.iterator_to(prev_entry), new_entry);
     }
 }
 
-void Cache::update_mru(AbstractEntry& entry)
+void Cache::update_mru(ICacheEntry& entry)
 {
     // XXX: All this checking of ring equality isn't very elegant.
     // Should we have three functions? But then we'd have three places
@@ -561,23 +546,39 @@ void Cache::update_mru(AbstractEntry& entry)
 
 
 void Cache::store_and_make_MRU(OID_t oid,
-                               char* buf, size_t len,
+                               const Pickle_t& state,
                                const TID_t new_tid)
 {
-    AbstractEntry_p existing_entry = this->data.at(oid);
-    size_t old_weight = existing_entry->weight();
+    // better be there
+    OidEntryMap::iterator it(this->data.find(oid));
+    ICacheEntry& existing_entry = *it;
 
-    AbstractEntry_p new_entry = existing_entry->with_later(existing_entry, buf, len, new_tid);
+    size_t old_weight = existing_entry.weight();
+
+    // TODO: Memory management
+    // TODO: Wouldn't it be better to use a multimap and keep the equal keys?
+    // that way we don't have to mess with any of this.
+    // of course the downside is we're back to tracking LRU status by OID/TID pairs
+    // instead of just OID.
+    ICacheEntry* new_entry = existing_entry.with_later(state, new_tid);
 
     assert(new_entry);
-    if (new_entry != existing_entry) {
+    if (new_entry != &existing_entry) {
+        // We want to grow. To do that we need to move the existing entry
+        // to the new one and put the new one in our cache.
+        assert(existing_entry.in_cache());
         assert(!new_entry->in_cache());
-        this->delitem(oid);
+
+        MVCacheEntry* mve = dynamic_cast<MVCacheEntry*>(new_entry);
+        existing_entry.generation()->remove(existing_entry);
+        mve->push_back(dynamic_cast<SVCacheEntry&>(existing_entry));
+
         this->ring_protected.add(*new_entry);
-        this->data[oid] = new_entry;
+        this->data.replace_node(it, *new_entry);
+        // TODO: def ejecting here.
     }
     else {
-        existing_entry->generation()->notice_weight_change(*existing_entry, old_weight);
+        existing_entry.generation()->notice_weight_change(existing_entry, old_weight);
     }
     if (new_entry->weight() > old_weight) {
         this->update_mru(*new_entry);
@@ -589,60 +590,59 @@ void Cache::store_and_make_MRU(OID_t oid,
 
 }
 
+#define if_existing(K,V) OidEntryMap::iterator it(this->data.find(K)); do { \
+    if (it == this->data.end()) \
+        return V; \
+    } while (0); \
+    ICacheEntry& existing_entry = *it;
+
+
 /**
  * Remove an existing key.
  */
 void Cache::delitem(OID_t key)
 {
-    if (!this->data.count(key)) {
-        return;
-    }
+    if_existing(key,)
 
-    AbstractEntry& entry = *this->data.at(key);
-    assert(entry.generation());
-    entry.generation()->remove(entry);
-    assert(entry.generation() == nullptr);
-    this->data.erase(key);
+    assert(existing_entry.generation());
+    existing_entry.generation()->remove(existing_entry);
+    assert(existing_entry.generation() == nullptr);
+    this->data.erase(it);
+    // TODO: Memory management
 }
 
 RSR_SINLINE
 void _update(Cache* cache,
-             AbstractEntry_p& existing_entry,
+             ICacheEntry& existing_entry,
              size_t prev_weight,
-             AbstractEntry_p& new_entry)
+             ICacheEntry* new_entry)
 {
     if (!new_entry) {
-        cache->delitem(existing_entry->key);
+        cache->delitem(existing_entry.key);
     }
-    else if (new_entry == existing_entry) {
-        existing_entry->generation()->notice_weight_change(*existing_entry, prev_weight);
+    else if (new_entry == &existing_entry) {
+        existing_entry.generation()->notice_weight_change(existing_entry, prev_weight);
     }
     else {
-        cache->replace_entry(new_entry, existing_entry, prev_weight);
+        cache->replace_entry(*new_entry, existing_entry, prev_weight);
     }
 
 }
 
 void Cache::delitem(OID_t key, TID_t tid)
 {
-    if (!this->contains(key))
-        return;
+    if_existing(key,);
 
-    AbstractEntry_p& existing_entry = this->data.at(key);
-    const size_t old_weight = existing_entry->weight();
-    AbstractEntry_p new_entry = existing_entry->discarding_tids_before(existing_entry, tid);
+    const size_t old_weight = existing_entry.weight();
+    ICacheEntry* new_entry = existing_entry.discarding_tids_before(tid);
     _update(this, existing_entry, old_weight, new_entry);
 }
 
 void Cache::freeze(OID_t key, TID_t tid)
 {
-    if (!this->contains(key)) {
-        return;
-    }
-
-    AbstractEntry_p& existing_entry = this->data.at(key);
-    const size_t old_weight = existing_entry->weight();
-    AbstractEntry_p new_entry = existing_entry->freeze_to_tid(existing_entry, tid);
+    if_existing(key,);
+    const size_t old_weight = existing_entry.weight();
+    ICacheEntry* new_entry = existing_entry.freeze_to_tid(tid);
     _update(this, existing_entry, old_weight, new_entry);
 }
 
@@ -651,16 +651,18 @@ bool Cache::contains(const OID_t key) const
     return this->data.count(key) == 1;
 }
 
-const AbstractEntry_p& Cache::get(const OID_t key) const
+ICacheEntry* Cache::get(const OID_t key)
 {
-    return this->data.at(key);
+    if_existing(key, nullptr);
+    return &existing_entry;
 }
 
 void Cache::age_frequencies()
 {
     OidEntryMap::iterator end = this->data.end();
     for (OidEntryMap::iterator it = this->data.begin(); it != end; it++) {
-        it->second->frequency = it->second->frequency / 2;
+        it->frequency = it->frequency / 2;
+        // TODO: Shouldn't we remove them if they hit 0?
     }
 }
 
@@ -670,7 +672,7 @@ size_t Cache::len() {
 
 void Cache::on_hit(OID_t key)
 {
-    AbstractEntry& entry = *this->data[key];
+    ICacheEntry& entry = *this->data.find(key);
     entry.generation()->on_hit(*this, entry);
 }
 
@@ -681,3 +683,7 @@ size_t Cache::weight() const
         + this->ring_probation.sum_weights()
         + sizeof(Cache);
 }
+
+// Local Variables:
+// flycheck-clang-include-path: ("/opt/local/include" "/opt/local/Library/Frameworks/Python.framework/Versions/2.7/include/python2.7")
+// End:

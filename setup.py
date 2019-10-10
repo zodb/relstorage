@@ -11,7 +11,7 @@
 # FOR A PARTICULAR PURPOSE.
 #
 ##############################################################################
-
+import sys
 import os
 from setuptools import setup
 from setuptools import find_packages
@@ -26,6 +26,7 @@ def read_file(*path):
     return result
 
 VERSION = read_file('version.txt').strip()
+PYPY = hasattr(sys, 'pypy_version_info')
 
 memcache_require = [
     'pylibmc; platform_python_implementation=="CPython" and sys_platform != "win32"',
@@ -117,12 +118,17 @@ setup(
     ],
     ext_modules=cythonize(
         [
-            Extension(name="relstorage.cache.cache",
-                      language="c++",
-                      sources=[
-                          'src/relstorage/cache/cache.pyx',
-                          'src/relstorage/cache/c_cache.cpp',
-                      ]),
+            Extension(
+                name="relstorage.cache.cache",
+                language="c++",
+                sources=[
+                    'src/relstorage/cache/cache.pyx',
+                    'src/relstorage/cache/c_cache.cpp',
+                ],
+                define_macros=[
+                    ('RS_COPY_STRING', 0 if not PYPY else 1)
+                ],
+            ),
 
         ],
         annotate=True,
@@ -130,8 +136,13 @@ setup(
             'language_level': '3str',
             'always_allow_keywords': False,
             'infer_types': False,
-            'nonecheck': False
-        }
+            'nonecheck': False,
+        },
+        # XXX: NOTE: This affects the cython generated source code, which
+        # means we MUST NOT distribute the source
+        compile_time_env={
+            'RS_COPY_STRING': 0 if not PYPY else 1,
+        },
     ),
     tests_require=tests_require,
     extras_require={
