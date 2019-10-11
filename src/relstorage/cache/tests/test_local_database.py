@@ -91,7 +91,7 @@ class UpdateTests(TestCase):
             # to verify)
             (1, 1, 0, b'-1', 0),
             # 2 moves forward
-            (2, 2, 0, b'2b', 0)
+            (2, 2, 0, b'2b', 6)
         ]
 
         self.db.real_store_temp(new_rows)
@@ -105,9 +105,9 @@ class UpdateTests(TestCase):
 
         rows_in_db = list(self.db.fetch_rows_by_priority())
         rows_in_db.sort()
-        self.assertEqual(rows_in_db[0], (0, 1, b'0', 1))
-        self.assertEqual(rows_in_db[1], (1, 1, b'-1', 1))
-        self.assertEqual(rows_in_db[2], (2, 2, b'2b', 2))
+        self.assertEqual(rows_in_db[0], (0, 1, b'0', 1, 0))
+        self.assertEqual(rows_in_db[1], (1, 1, b'-1', 1, 0))
+        self.assertEqual(rows_in_db[2], (2, 2, b'2b', 2, 6))
 
     def test_remove_invalid_persistent_oids(self):
         rows = [

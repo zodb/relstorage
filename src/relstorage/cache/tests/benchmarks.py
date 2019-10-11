@@ -170,11 +170,7 @@ def local_benchmark(runner):
     # pylint:disable=too-many-statements,too-many-locals
     import gc
     from relstorage.cache.local_client import LocalClient
-    try:
-        from relstorage.cache.local_client import _SingleValue
-    except ImportError:
-        def _SingleValue(*args):
-            return args
+
     options = MockOptions()
     options.cache_local_mb = 100
     options.cache_local_compression = 'none'
@@ -211,7 +207,7 @@ def local_benchmark(runner):
         client.b_objects_before = objects_before
         if populate:
             client._bulk_update([
-                (t[0], _SingleValue(*t[1]))
+                (t[0], (t[1][0], t[1][1], False, 1))
                 for t
                 in data or _make_data(random_data, KEY_GROUP_SIZE)
             ])
@@ -289,18 +285,38 @@ def local_benchmark(runner):
         # measure the total memory usage.
         all_clients = []
         duration = 0
-
+        all_data = _make_data(random_data, KEY_GROUP_SIZE)
         for loop in range(loops):
             client = makeOne(populate=False)
             all_clients.append(client)
-            all_data = _make_data(random_data, KEY_GROUP_SIZE)
-
             begin = perf_counter()
             for oid, (state, tid) in all_data:
                 client[(oid, tid)] = (state, tid)
             duration += perf_counter() - begin
             all_data = None
             report(client, duration, extra=" (Loop " + str(loop) + ") ")
+
+        report(init_client, duration, extra=" (Final ) ")
+        return duration
+
+    def populate_bulk(loops):
+        # Capture memory usage
+        all_data = _make_data(random_data, KEY_GROUP_SIZE)
+        kvs = [
+            (t[0], (t[1][0], t[1][1], False, 1))
+            for t
+            in all_data
+        ]
+
+        init_client = makeOne(populate=False)
+        duration = 0
+        for loop in range(loops):
+            client = makeOne(populate=False)
+            begin = perf_counter()
+            client._bulk_update(kvs)
+            duration += perf_counter() - begin
+            report(client, duration, extra=" (Loop " + str(loop) + ") ")
+            client = None
 
         report(init_client, duration, extra=" (Final ) ")
         return duration
@@ -394,6 +410,7 @@ def local_benchmark(runner):
         benchmarks = run_and_report_funcs(
             runner,
             (
+                (name + ' pop_bulk', populate_bulk),
                 (name + ' pop_eq', populate_equal),
                 (name + ' pop_ne', populate_not_equal),
                 (name + ' epop', populate_empty),
@@ -788,7 +805,11 @@ def save_load_benchmark(runner):
 def main():
     import pyperf
     import tempfile
-
+    # NOTE: If you're trying to use clang's address sanitizer
+    # on these, at least on macOS, the necessary DLYD_ environment
+    # variable doesn't get passed to the subprocess; it's not anything that
+    # --inherit-environ can fix. You have to hard code it here *and* add it
+    # to --inherit-environ.
     temp = None
 
     def args_hook(cmd, args):

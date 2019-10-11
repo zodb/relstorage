@@ -366,9 +366,11 @@ class LocalClient(object):
 
         # Finally, decompress if needed.
         # Recall that for deleted objects, `state` can be None.
+        # TODO: This is making a copy of the string from C++ even if we
+        # don't need to decompress.
         if value is not None:
             state, tid = value
-            return decompress(state) if state else state, tid
+            return ((decompress(state) if state else state), tid)
 
     __getitem__ = get
 
@@ -460,15 +462,13 @@ class LocalClient(object):
                      log_count=None,
                      mem_usage_before=None):
         """
-        Insert all the ``(key, value)`` pairs found in *keys_and_values*.
+        Insert all the
+        ``(oid, (state, actual_tid, frozen, frequency)))`` pairs
+        found in *keys_and_values*, rejecting entries once we get too full.
 
-        This will permute the most-recently-used status of any existing entries.
-        Entries in the *keys_and_values* iterable should be returned from
-        least recent to most recent, as the items at the end will be considered to be
-        the most recent. (Alternately, you can think of them as needing to be in order
-        from lowest priority to highest priority.)
+        *keys_and_values* should be ordered from least to most recently used.
 
-        This will never evict existing entries from the cache.
+        This can only be done in an empty cache.
         """
         now = time.time()
         mem_usage_before = mem_usage_before if mem_usage_before is not None else get_memory_usage()
@@ -476,20 +476,8 @@ class LocalClient(object):
         log_count = log_count or len(keys_and_values)
 
         data = self._cache
-
         if data:
-            # Loading more data into an existing bucket.
-            # Load only the *new* keys, trying to get the newest ones
-            # because LRU is going to get messed up anyway.
-            #
-            # If we were empty, then take what they give us, LRU
-            # first, so that as we iterate the last item in the list
-            # becomes the MRU item.
-            new_entries_newest_first = [t for t in keys_and_values
-                                        if t[0] not in data]
-            new_entries_newest_first.reverse()
-            keys_and_values = new_entries_newest_first
-            del new_entries_newest_first
+            raise ValueError("Only bulk load into an empty cache.")
 
         stored = data.add_MRUs(
             keys_and_values,
@@ -518,24 +506,6 @@ class LocalClient(object):
         db = Database.from_connection(connection)
         checkpoints = db.checkpoints
 
-        # XXX: The cache_ring is going to consume all the items we
-        # give it, even if it doesn't actually add them to the cache.
-        # It also creates a very large preallocated array for all to
-        # hold the `total_count` of items. We don't want to read more
-        # rows than necessary, to keep the delta maps small and to
-        # avoid the overhead; we could pass the COUNT(zoid) to
-        # `bulk_update`, and have our row iterable be a generator that
-        # reads a row and breaks when it reaches the limit, but then
-        # we have that whole preallocated array hanging around, which
-        # is probably much bigger than we need. So we need to give an
-        # accurate count, and the easiest way to do that is to materialize
-        # the list of rows.
-        #
-        # In practice, we can assume that the limit hasn't changed between this
-        # run and the last run, so the database will already have been trimmed
-        # to fit the desired size, so essentially all the rows in the database
-        # should go in our cache. However, the order matters: The DB gives them to us in
-        # priority order, and those are the ones we want to add to the memory cache.
         @_log_timed
         def fetch_and_filter_rows():
             # Do this here so that we don't have the result
@@ -555,13 +525,12 @@ class LocalClient(object):
             size = 0
             limit = self.limit
             items = []
-            for oid, _, state, actual_tid in db.list_rows_by_priority():
+            for oid, frozen, state, actual_tid, frequency in db.list_rows_by_priority():
                 size += len(state)
                 if size > limit:
                     break
-                # XXX: Get these in as Frozen
-                # items.append((oid, FrozenValue(state, actual_tid)))
-                items.append((oid, (state, actual_tid)))
+                items.append((oid, (state, actual_tid, frozen, frequency)))
+            # Rows came to us MRU to LRU, but we need to feed them the other way.
             items.reverse()
             return items
 
@@ -623,6 +592,8 @@ class LocalClient(object):
                 newest_value = lru_entry.newest_value
                 # We must have something at least this fresh
                 # to consider writing it out
+                if newest_value is None:
+                    raise AssertionError("Value should not be none", oid, lru_entry)
                 actual_tid = newest_value.tid
 
                 # If we have something >= min_allowed, matching

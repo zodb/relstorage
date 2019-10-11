@@ -25,13 +25,14 @@ from libcpp.string cimport string
 
 from relstorage.cache.c_cache cimport TID_t
 from relstorage.cache.c_cache cimport OID_t
-from relstorage.cache.c_cache cimport Pickle_t
 from relstorage.cache.c_cache cimport ICacheEntry
 from relstorage.cache.c_cache cimport SVCacheEntry
 from relstorage.cache.c_cache cimport MVCacheEntry
 from relstorage.cache.c_cache cimport Cache
 from relstorage.cache.c_cache cimport Generation
 from relstorage.cache.c_cache cimport move
+from relstorage.cache.c_cache cimport TempCacheFiller
+from relstorage.cache.c_cache cimport ProposedCacheEntry
 
 import sys
 from relstorage.cache.interfaces import NoSuchGeneration
@@ -55,50 +56,64 @@ cdef extern from *:
 
 ctypedef const SVCacheEntry* SVCacheEntry_p
 ctypedef const MVCacheEntry* MVCacheEntry_p
-
-cdef inline object python_from_entry_p(const ICacheEntry* entry):
-    cdef const SVCacheEntry* sve_p = dynamic_cast[SVCacheEntry_p](entry)
-    cdef const MVCacheEntry* mve_p = dynamic_cast[MVCacheEntry_p](entry)
-
-    cdef SingleValue sv
-
-    if sve_p:
-        if sve_p.frozen():
-            sv = FrozenValue.from_entry(sve_p)
-        else:
-            sv = SingleValue.from_entry(sve_p)
-        return sv
-
-    if not mve_p:
-        raise AssertionError("Invalid pointer cast",
-                             entry.key)
-    return MultipleValues.from_entry(mve_p)
-
-cdef inline object python_from_entry(const ICacheEntry& entry):
-    return python_from_entry_p(&entry)
-
-cdef inline bytes bytes_from_pickle(const SVCacheEntry_p entry):
-    return entry.as_object()
-
+ctypedef const ICacheEntry*  ICacheEntry_p
+ctypedef ICacheEntry** ICacheEntry_pp
 
 cdef class CachedValue:
     """
     The base class for cached values.
     """
 
-    cpdef get_if_tid_matches(self, object tid):
-        raise NotImplementedError
+cdef inline CachedValue python_from_entry_p(ICacheEntry_p entry):
+    cdef const SVCacheEntry* sve_p = dynamic_cast[SVCacheEntry_p](entry)
+    cdef const MVCacheEntry* mve_p = dynamic_cast[MVCacheEntry_p](entry)
+    if not sve_p and not mve_p:
+        # Most likely, entry is null
+        raise AssertionError("Invalid pointer cast")
+
+    # Keeping in mind the semantics of our constructors
+    # and Cython destructors, we'll let the class constructors handle that.
+    cdef SingleValue sv
+    if sve_p:
+        sv = SingleValue.from_entry(sve_p)
+        return sv
+
+    return MultipleValues.from_entry(mve_p)
 
 
+cdef inline CachedValue python_from_entry(const ICacheEntry& entry):
+    return python_from_entry_p(&entry)
+
+cdef inline bytes bytes_from_pickle(const SVCacheEntry_p entry):
+    return entry.as_object()
+
+ctypedef fused ConcreteCacheEntry:
+    SVCacheEntry_p
+    MVCacheEntry_p
+
+cdef inline void release_entry(ConcreteCacheEntry* entry) except *:
+    # Docs say to be very careful during __dealloc__
+    if entry[0] and entry[0].Py_release():
+        del entry[0]
+    entry[0] = NULL
+
+
+@cython.final
+@cython.internal
 cdef class SingleValue(CachedValue):
     cdef SVCacheEntry_p entry
-    frozen = False
+
+    def __cinit__(self):
+        self.entry = <SVCacheEntry_p>0
 
     @staticmethod
     cdef SingleValue from_entry(SVCacheEntry_p entry):
         cdef SingleValue sv = SingleValue.__new__(SingleValue)
-        sv.entry = entry
+        sv.entry = entry.Py_use[SVCacheEntry]()
         return sv
+
+    def __dealloc__(self):
+        release_entry(&self.entry)
 
     def sizeof(self):
         # At this writing, reports 88
@@ -109,6 +124,10 @@ cdef class SingleValue(CachedValue):
             bytes_from_pickle(self.entry),
             self.entry.tid()
         ))
+
+    @property
+    def frozen(self):
+        return self.entry.frozen()
 
     @property
     def value(self):
@@ -151,15 +170,11 @@ cdef class SingleValue(CachedValue):
             p = <SingleValue>other
             my_entry = self.entry
             other_entry = p.entry
-            return my_entry.state_eq(other_entry.state())
+            return my_entry == other_entry
 
         if isinstance(other, tuple):
             return len(other) == 2 and self.tid == other[1] and self.value == other[0]
         return NotImplemented
-
-    cpdef get_if_tid_matches(self, object tid):
-        if self.entry.tid_matches(-1 if tid is None else tid):
-            return self
 
     def __getitem__(self, int i):
         if i == 0:
@@ -176,34 +191,18 @@ cdef class SingleValue(CachedValue):
             self.frozen,
         )
 
-
-
-@cython.final
-@cython.internal
-cdef class FrozenValue(SingleValue):
-
-    frozen = True
-
-    @staticmethod
-    cdef SingleValue from_entry(const SVCacheEntry*& entry):
-        cdef FrozenValue sv = FrozenValue.__new__(FrozenValue, 0, SingleValue, 0, 0)
-        sv.entry = entry
-        return sv
-
-
 @cython.final
 cdef class MultipleValues(CachedValue):
     cdef MVCacheEntry_p entry
-# TODO: we should keep this sorted by tid, yes?
-# A std::map<tid, SVCacheEntry_p> sounds almost ideal
-# for accessing max_tid and newest_value, except for whatever space
-# overhead that adds.
 
     @staticmethod
     cdef MultipleValues from_entry(MVCacheEntry_p entry):
         cdef MultipleValues mv = MultipleValues.__new__(MultipleValues)
-        mv.entry = entry
+        mv.entry = entry.Py_use[MVCacheEntry]()
         return mv
+
+    def __dealloc__(self):
+        release_entry(&self.entry)
 
     def sizeof(self):
         # At this writing, reports 72.
@@ -227,60 +226,18 @@ cdef class MultipleValues(CachedValue):
 
     @property
     def max_tid(self):
-        return self.newest_value.tid
+        return self.entry.newest_tid()
 
     @property
     def newest_value(self):
-        cdef TID_t tid = -1
-        cdef const SVCacheEntry* p = <SVCacheEntry_p>0
-        it = self.entry.begin()
-        end = self.entry.end()
-        result = []
-        while it != end:
-            if deref(it).tid() > tid:
-                tid = deref(it).tid()
-                p = &deref(it)
-            preincr(it)
-        return python_from_entry_p(p)
+        return python_from_entry_p(self.entry.copy_newest_entry());
 
-    cpdef get_if_tid_matches(self, tid):
-        cdef TID_t native_tid = -1 if tid is None else tid
-        it = self.entry.begin()
-        end = self.entry.end()
-        while it != end:
-            if deref(it).tid_matches(native_tid):
-                return python_from_entry(deref(it))
-            preincr(it)
-
-    def __iter__(self):
-        # Why the funny self.entry[0] even though we declare begin()
-        # and end() methods? Well, because self.entry is a pointer
-        # type (MVCacheEntry*), Cython gives an error that "arrays
-        # must have a known length" to be iterated (recall we can't have a
-        # reference because those can't be declared as a class attribute:
-        # there's no way to construct that).
-        # If we cast with cython.operator.dereference(),
-        # we sometimes get a different error that only the [0] deref
-        # syntax solves.
-        it = self.entry.begin()
-        end = self.entry.end()
-        result = []
-        while it != end:
-            result.append(python_from_entry(deref(it)))
-            preincr(it)
-        return result
-
-    def __repr__(self):
-        return repr([
-            tuple(v)
-            for v in self
-        ])
 
 cdef class PyGeneration:
     cdef Generation* generation
     cdef readonly object __name__
     # This reference is to keep the cache object alive while we're
-    # alive.
+    # alive since it owns the Generation*.
     cdef PyCache _cache
 
     @staticmethod
@@ -304,7 +261,7 @@ cdef class PyGeneration:
         return self.generation.sum_weights()
 
     def __len__(self):
-        return self.generation.len()
+        return self.generation.size()
 
     # Cython still uses __nonzero__
     def __nonzero__(self):
@@ -315,7 +272,6 @@ cdef class PyGeneration:
         if self.generation.empty():
             return ()
         it = self.generation.begin()
-        end = self.generation.end()
         while it != self.generation.end():
             yield python_from_entry(deref(it))
             preincr(it)
@@ -367,43 +323,41 @@ cdef class PyCache:
 
     def __nonzero__(self):
         # Cython still uses __nonzero__
-        return self.cache.len() > 0
+        return self.cache.size() > 0
 
     def __contains__(self, OID_t key):
         return self.cache.contains(key)
 
     def __len__(self):
-        return self.cache.len()
+        return self.cache.size()
 
     cpdef CachedValue get(self, OID_t key):
         entry = self.cache.get(key)
         if not entry:
             return None
-        return python_from_entry(deref(entry))
+        return python_from_entry_p(entry)
 
     cpdef CachedValue peek(self, OID_t key):
         return self.get(key)
 
     cpdef object peek_item_with_tid(self, OID_t key, TID_t tid):
-        cdef CachedValue value = self.get(key)
-        if value is not None:
-            value = value.get_if_tid_matches(tid)
-        return value
+        cdef TID_t native_tid = -1 if tid is None else tid
+        value = self.cache.peek(key, native_tid)
+        if value:
+            return python_from_entry_p(value)
 
     def __getitem__(self, OID_t key):
         return self.get(key)
 
     cpdef get_item_with_tid(self, OID_t key, tid):
-        cdef CachedValue value = self.get(key)
-        if value is not None:
-            value = value.get_if_tid_matches(tid)
+        cdef TID_t native_tid = -1 if tid is None else tid
+        cdef SVCacheEntry* cvalue = self.cache.get(key, native_tid)
 
-        if value is not None:
-            self.cache.on_hit(key)
+        if cvalue:
             self.hits += 1
-        else:
-            self.misses += 1
-        return value
+            return SingleValue.from_entry(cvalue)
+
+        self.misses += 1
 
     def __setitem__(self, OID_t key, tuple value):
         self._do_set(key, value[0], value[1])
@@ -411,16 +365,13 @@ cdef class PyCache:
     cdef _do_set(self, OID_t key, object state, TID_t tid):
         # Do all this down here so we don't give up the GIL.
         cdef bytes b_state = state if state is not None else b''
+        cdef ProposedCacheEntry proposed = ProposedCacheEntry(key, tid, b_state)
         if not self.cache.contains(key): # the long way to avoid type conversion
-            self.cache.add_to_eden(
-                key,
-                b_state,
-                tid
-            )
+            self.cache.add_to_eden(proposed)
         else:
             # We need to merge values.
             try:
-                self.cache.store_and_make_MRU(key, b_state, tid)
+                self.cache.store_and_make_MRU(proposed)
             except RuntimeError as e:
                 raise CacheConsistencyError(str(e))
 
@@ -506,41 +457,31 @@ cdef class PyCache:
 
 
     def add_MRUs(self, ordered_keys, return_count_only=False):
-        cdef SVCacheEntry* array
         cdef OID_t key
         cdef TID_t tid
         cdef int i
         cdef int number_nodes = len(ordered_keys)
-        cdef int added_count
+        cdef TempCacheFiller filler
         if not number_nodes:
             return 0 if return_count_only else ()
 
-        array = array_new[SVCacheEntry](number_nodes)
+        filler = TempCacheFiller(number_nodes)
 
-        for i, (key, (state, tid)) in enumerate(ordered_keys):
+        for i, (key, (state, tid, frozen, frequency)) in enumerate(ordered_keys):
             state = state or b''
-            array[i].force_update_during_bulk_load(key,
-                                                   state, # TODO: copying
-                                                   tid)
+            filler.set_once_at(i, key, tid, state, frozen, frequency)
+
 
         # We're done with ordered_keys, free its memory
         ordered_keys = None
 
-        added_count = self.cache.add_many(
-            array,
-            number_nodes)
+        added_oids = self.cache.add_many(filler)
 
         # Things that didn't get added have -1 for their generation.
         if return_count_only:
-            return added_count
+            return added_oids.size()
 
-        i = 0
-        result = []
-        while i < number_nodes:
-            if array[i].in_cache():
-                key = array[i].key
-                result.append(self.get(key))
-            i += 1
+        result = [self.get(key) for key in added_oids]
 
         return result
 
@@ -580,5 +521,4 @@ cdef class PyCache:
 
 # Local Variables:
 # flycheck-cython-cplus: t
-# flycheck-cython-executable: "cython -ERS_COPY_STRING=0"
 # End:

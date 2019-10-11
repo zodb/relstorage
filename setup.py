@@ -125,9 +125,6 @@ setup(
                     'src/relstorage/cache/cache.pyx',
                     'src/relstorage/cache/c_cache.cpp',
                 ],
-                define_macros=[
-                    ('RS_COPY_STRING', 0 if not PYPY else 1)
-                ],
             ),
 
         ],
@@ -137,11 +134,6 @@ setup(
             'always_allow_keywords': False,
             'infer_types': False,
             'nonecheck': False,
-        },
-        # XXX: NOTE: This affects the cython generated source code, which
-        # means we MUST NOT distribute the source
-        compile_time_env={
-            'RS_COPY_STRING': 0 if not PYPY else 1,
         },
     ),
     tests_require=tests_require,
