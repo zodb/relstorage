@@ -1263,8 +1263,8 @@ class GenericRelStorageTests(
         self.assertEqual(item_count, len(self._storage._cache))
         tid = bytes8_to_int64(mapping._p_serial)
         d = self._storage._cache.local_client._cache
-        self.assertEqual(d[0][1], tid)
-        self.assertEqual(d[1][1], tid)
+        self.assertEqual(d[0].max_tid, tid)
+        self.assertEqual(d[1].max_tid, tid)
         self._storage._cache.clear()
 
         self.assertEmpty(self._storage._cache)

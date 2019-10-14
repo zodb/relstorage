@@ -363,22 +363,25 @@ void MVCacheEntry::operator delete(void* ptr)
 
 void MVCacheEntry::remove_tids_lte(TID_t tid)
 {
-    // upper_bound(k) : first element greater than k
-    // lower_bound(k) : first element not less than k: which is first element >= k
-    // closed: lower_bound if true, upper_bound if false.
-    // thus, closed means >= k and not closed means greater than k.
+    // bounded_range(lower, upper, left_closed, right_closed)
+    // upper_bound(k) : first element greater than k.
+    // lower_bound(k) : first element not less than k: which is first element >= k.
+    // closed: Differs depending on whether its left or right. For right,
+    // if it's closed it's upper_bound, otherwise its lower_bound.
+    // thus, right_closed=True means the range includes (goes past) the upper bound;
+    // right_closed=False means the range stops at k.
     // erase(b, e) removes things from b, stopping at e (it never removes e).
     // Thus to remove everything less than tid, we need to return a second iterator
-    // greater than tid, so we need upper bound, meaning false.
+    // greater than tid,
     std::pair<iterator, iterator> range = this->p_values.bounded_range(0, tid,
-                                                                       false, false);
+                                                                       false, true);
     this->p_values.erase_and_dispose(range.first, range.second, Disposer());
 }
 
 void MVCacheEntry::remove_tids_lt(TID_t tid)
 {
     std::pair<iterator, iterator> range = this->p_values.bounded_range(0, tid,
-                                                                       false, true);
+                                                                       false, false);
     this->p_values.erase_and_dispose(range.first, range.second, Disposer());
 }
 
@@ -653,5 +656,5 @@ size_t Cache::weight() const
 
 
 // Local Variables:
-// flycheck-clang-include-path: ("/opt/local/include" "/opt/local/Library/Frameworks/Python.framework/Versions/2.7/include/python2.7")
+// flycheck-clang-include-path: ("../../../include" "/opt/local/Library/Frameworks/Python.framework/Versions/2.7/include/python2.7")
 // End:

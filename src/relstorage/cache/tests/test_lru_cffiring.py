@@ -20,9 +20,12 @@ from hamcrest import assert_that
 from nti.testing.matchers import validly_provides
 
 # The overhead of cache values, and thus how much fits in a ring or the
-# cache, depends on 32 or 64 bit, and on whether or not we copy
-# bytes into native code std::string. We only do the later on PyPy.
-from relstorage._compat import PYPY
+# cache, depends on 32 or 64 bit, whether or not we copy
+# bytes into native code std::string, and how the compiler lays out
+# the objects. We only copy strings on PyPy, but we have little control
+# over the object layout, especially with the various MSVC compilers
+# we have to deal with. So that explains the tests that have a range of sizes.
+
 from relstorage.tests import TestCase
 from relstorage.cache import interfaces
 from . import Cache
@@ -64,8 +67,8 @@ class EdenTests(TestCase):
         # They just exceed the limit
         added = lru.add_MRUs(too_many)
         # Much less got added
-        self.assertEqual(len(added), 9 if not PYPY else 7)
-
+        self.assertGreaterEqual(len(added), 7)
+        self.assertLessEqual(len(added), 9)
 
 class NoOverheadSizeCache(Cache):
     def __init__(self, byte_limit):
@@ -171,9 +174,9 @@ class GenericLRUCacheTests(TestCase):
             (0, (b'abcde', 0, False, 1)),
         ])
 
-        self.assertEqual(
-            [1, 2, 3, 0],
-            [e.key for e in entries]
+        self.assertIn(
+            [e.key for e in entries],
+            ([1, 2, 3, 0], [2, 3, 0])
         )
 
         for _ in range(4):
@@ -241,11 +244,12 @@ class GenericLRUCacheTests(TestCase):
             (5, (b'dehi', 0, False, 1)),
             (6, (b'edghijkl', 0, False, 1)),
         ])
-        self.assertEqual(len(cache), 4 if not PYPY else 3)
+        self.assertGreaterEqual(len(cache), 3)
+        self.assertLessEqual(len(cache), 4)
 
-        self.assertEqual(
-            [1, 3, 4, 5] if not PYPY else [3, 4, 5],
-            [e.key for e in entries])
+        self.assertIn(
+            [e.key for e in entries],
+            ([1, 3, 4, 5], [3, 4, 5]))
         return cache
 
 

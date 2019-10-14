@@ -59,6 +59,7 @@
 #if defined(_MSC_VER) &&  _MSC_VER <= 1500
 typedef unsigned long long uint64_t;
 typedef signed long long int64_t;
+typedef unsigned int uint32_t;
 #define nullptr NULL
 #else
 #include <cstdint>
@@ -88,7 +89,7 @@ extern "C" {
     #include "Python.h"
 }
 
-#ifdef PYPY_VERSION
+#if defined(PYPY_VERSION) && !defined(RS_REF_STRING)
   // Under PyPy, we don't want to keep PyObject* around.
   // They have overhead and prevent the GC from doing certain
   // things. Better to copy the object data to std::string.
@@ -137,6 +138,17 @@ namespace cache {
         // the descrutors, and then it calls the static ``operator delete``
         // on the type to release the storage. That's what our dispose()
         // mimics.
+        PythonAllocator(const PythonAllocator& other)
+            : std::allocator<T>()
+        {
+            UNUSED(other);
+        }
+
+        PythonAllocator(const std::allocator<T> other)
+            : std::allocator<T>(other)
+        {}
+
+        PythonAllocator() : std::allocator<T>() {}
 
         T* allocate(size_t number_objects, const void* hint=0)
         {
@@ -653,8 +665,6 @@ namespace cache {
             free_state();
         }
 
-        SVCacheEntry& operator=(const SVCacheEntry& other);
-
         bool operator==(const SVCacheEntry& other)
         {
             return key == other.key
@@ -758,7 +768,7 @@ namespace cache {
                   tid(incoming.tid()),
                   frozen(incoming.frozen())
             {}
-            Entry(BOOST_RV_REF(SVCacheEntry) incoming)
+            Entry(const SVCacheEntry& incoming)
                 : state(boost::move(incoming.state())),
                   tid(incoming.tid()),
                   frozen(incoming.frozen())
@@ -833,7 +843,7 @@ namespace cache {
         static void* operator new(size_t n);
         static void operator delete(void* ptr);
 
-        MVCacheEntry(BOOST_RV_REF(SVCacheEntry) prev,
+        MVCacheEntry(const SVCacheEntry& prev,
                      const ProposedCacheEntry& incoming)
             : ICacheEntry(prev.key)
         {
@@ -1312,5 +1322,5 @@ namespace cache {
 #endif
 
 // Local Variables:
-// flycheck-clang-include-path: ("/opt/local/include" "/opt/local/Library/Frameworks/Python.framework/Versions/2.7/include/python2.7")
+// flycheck-clang-include-path: ("../../../include" "/opt/local/Library/Frameworks/Python.framework/Versions/2.7/include/python2.7")
 // End:

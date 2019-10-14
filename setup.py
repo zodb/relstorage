@@ -47,6 +47,9 @@ def read_file(*path):
 
 VERSION = read_file('version.txt').strip()
 PYPY = hasattr(sys, 'pypy_version_info')
+WINDOWS = sys.platform.startswith("win")
+PY3 = sys.version_info[0] == 3
+PY2 = not PY3
 
 memcache_require = [
     'pylibmc; platform_python_implementation=="CPython" and sys_platform != "win32"',
@@ -146,6 +149,7 @@ setup(
                     'src/relstorage/cache/c_cache.cpp',
                 ],
                 include_dirs=['include'],
+                extra_compile_args=["/EHsc"] if WINDOWS and PY2 else [],
             ),
 
         ],

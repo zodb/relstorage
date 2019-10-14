@@ -84,7 +84,7 @@ cdef inline CachedValue python_from_entry_p(ICacheEntry_p entry):
 cdef inline CachedValue python_from_entry(const ICacheEntry& entry):
     return python_from_entry_p(&entry)
 
-cdef inline bytes bytes_from_pickle(const SVCacheEntry_p entry):
+cdef inline object bytes_from_pickle(const SVCacheEntry_p entry):
     return entry.as_object()
 
 ctypedef fused ConcreteCacheEntry:
@@ -364,7 +364,7 @@ cdef class PyCache:
 
     cdef _do_set(self, OID_t key, object state, TID_t tid):
         # Do all this down here so we don't give up the GIL.
-        cdef bytes b_state = state if state is not None else b''
+        cdef object b_state = state if state is not None else b''
         cdef ProposedCacheEntry proposed = ProposedCacheEntry(key, tid, b_state)
         if not self.cache.contains(key): # the long way to avoid type conversion
             self.cache.add_to_eden(proposed)
