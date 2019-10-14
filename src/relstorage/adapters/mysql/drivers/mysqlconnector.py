@@ -53,12 +53,14 @@ class PyMySQLConnectorDriver(AbstractMySQLDriver):
 
     def __init__(self):
         super(PyMySQLConnectorDriver, self).__init__()
+        # This driver doesn't support ``init_command``, we have to run
+        # it manually.
+        self.__init_command = self._init_command
+        del self._init_command
+
         # conn.close() -> InternalError: Unread result found
         # By the time we get to a close(), it's too late to do anything about it.
         self.close_exceptions += (self.driver_module.InternalError,)
-        # Ignore "no result set to fetch from" when we do our init
-        # statements.
-        self._ignored_fetchall_on_set_exception = (self.driver_module.InterfaceError,)
         if self.Binary is str:
             self.Binary = bytearray
 
@@ -158,30 +160,25 @@ class PyMySQLConnectorDriver(AbstractMySQLDriver):
         # operations.
         # NOTE: The C implementation returns bytes when the Py implementation
         # returns bytearray under Py2
-
         kwargs['use_pure'] = self.USE_PURE
-        converter_class = self._get_converter_class()
-        kwargs['converter_class'] = converter_class
+        kwargs['converter_class'] = self._get_converter_class()
         kwargs['get_warnings'] = True
-        # By default, make it fetch all rows for the cursor,
-        # like most drivers do.
+        # By default, make it fetch all rows for the cursor, like most
+        # drivers do. Unless we do this, cursors won't buffer, so we
+        # don't know how many rows there are. That's fine and within
+        # the DB-API spec. The Python implementation is much faster if
+        # we don't ask it to. The C connection doesn't accept the
+        # 'prepared' keyword. You can't have both a buffered and
+        # prepared cursor, but the prepared cursor doesn't gain us
+        # anything anyway.
         kwargs['buffered'] = True
-
-        con = self.driver_module.connect(*args, **kwargs)
-
-        # By default, cursors won't buffer, so we don't know
-        # how many rows there are. That's fine and within the DB-API spec.
-        # The Python implementation is much faster if we don't ask it to.
-        # The C connection doesn't accept the 'prepared' keyword.
-        # You can't have both a buffered and prepared cursor,
-        # but the prepared cursor doesn't gain us anything anyway.
-        return con
-
-    CURSOR_INIT_STMTS = (
-        # We're not setting the ``character_set_results`` to binary;
-        # is that fully intentional?
-        AbstractMySQLDriver.MY_TIMEZONE_STMT,
-    )
+        conn = super(PyMySQLConnectorDriver, self).connect(*args, **kwargs)
+        cur = conn.cursor()
+        try:
+            cur.execute(self.__init_command)
+        finally:
+            cur.close()
+        return conn
 
     def cursor(self, conn, server_side=False):
         if server_side:

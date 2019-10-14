@@ -38,6 +38,7 @@ from .sql import TID
 from .sql import State
 from .sql import Boolean
 from .sql import BinaryString
+from .sql import Char
 
 logger = __import__('logging').getLogger(__name__)
 
@@ -58,6 +59,18 @@ class Schema(object):
         Column('tid', TID),
         Column('state', State),
         Column('state_size'),
+        # These two only exist in history preserving.
+        # TODO: Wrap this in a HistoryVariantTable
+        Column('prev_tid', TID),
+        Column('md5'),
+    )
+
+    blob_chunk = Table(
+        'blob_chunk',
+        Column('zoid'),
+        Column('tid'),
+        Column('chunk_num'),
+        Column('chunk')
     )
 
     # Does the right thing whether history free or preserving
@@ -68,36 +81,62 @@ class Schema(object):
 
     # Does the right thing whether history free or preserving
     all_current_object_state = HistoryVariantTable(
-        current_object.natural_join(object_state),
+        current_object.inner_join(object_state).using(current_object.c.zoid, current_object.c.tid),
         object_state
     )
 
     temp_store = TemporaryTable(
         'temp_store',
-        Column('zoid', OID),
-        Column('prev_tid', TID),
-        Column('md5'),
+        Column('zoid', OID, primary_key=True),
+        Column('prev_tid', TID, nullable=False),
+        Column('md5', Char(32)), # Only used when keep_history=True
         Column('state', State)
+    )
+
+    temp_blob_chunk = TemporaryTable(
+        'temp_blob_chunk',
+        Column('zoid'),
+        Column('chunk_num'),
+        Column('chunk'),
     )
 
     transaction = Table(
         'transaction',
-        Column('tid', TID),
-        Column('packed', Boolean),
-        Column('username', BinaryString),
-        Column('description', BinaryString),
+        Column('tid', TID, primary_key=True),
+        Column('packed', Boolean, nullable=False, default=False),
+        Column('is_empty', Boolean, nullable=False, default=False),
+        Column('username', BinaryString, nullable=False),
+        Column('description', BinaryString, nullable=False),
         Column('extension', BinaryString),
     )
 
     commit_row_lock = Table(
         'commit_row_lock',
-        Column('tid'),
+        Column('tid', TID, primary_key=True),
     )
 
     all_transaction = HistoryVariantTable(
         transaction,
         object_state,
     )
+
+    # Not all databases will need this table
+    new_oid = Table(
+        'new_oid',
+        Column('zoid', OID, primary_key=True, auto_increment=True)
+    )
+
+    # Packing
+    object_ref = Table(
+        'object_ref',
+        Column('tid', TID),
+    )
+
+    object_refs_added = Table(
+        'object_refs_added',
+        Column('tid', TID)
+    )
+
 
 class AbstractSchemaInstaller(DatabaseHelpersMixin,
                               ABC):
@@ -242,11 +281,7 @@ class AbstractSchemaInstaller(DatabaseHelpersMixin,
     def get_database_name(self, cursor):
         raise NotImplementedError
 
-    CREATE_COMMIT_ROW_LOCK_TMPL = """
-    CREATE TABLE commit_row_lock (
-      tid {tid_type} NOT NULL PRIMARY KEY
-    ) {transactional_suffix};
-    """
+    _create_commit_row_lock_query = Schema.commit_row_lock.create()
 
     def _create_commit_row_lock(self, cursor):
         """
@@ -254,11 +289,7 @@ class AbstractSchemaInstaller(DatabaseHelpersMixin,
 
         (MySQL and PostgreSQL do this differently.)
         """
-        stmt = self.CREATE_COMMIT_ROW_LOCK_TMPL.format(
-            tid_type=self.COLTYPE_OID_TID,
-            transactional_suffix=self.TRANSACTIONAL_TABLE_SUFFIX,
-        )
-        self.runner.run_script(cursor, stmt)
+        self._create_commit_row_lock_query.execute(cursor)
 
     @abc.abstractmethod
     def _create_pack_lock(self, cursor):
@@ -268,6 +299,9 @@ class AbstractSchemaInstaller(DatabaseHelpersMixin,
         (MySQL and PostgreSQL do this differently.)
         """
         raise NotImplementedError()
+
+    # TODO: Finish porting the CREATE statements to use the table
+    # definitions in Schema and away from string templates.
 
     #: The type of the column used to hold transaction IDs
     #: and object IDs (64-bit integers).
@@ -287,16 +321,7 @@ class AbstractSchemaInstaller(DatabaseHelpersMixin,
     #: Our default is appropriate for PostgreSQL.
     TRANSACTIONAL_TABLE_SUFFIX = ''
 
-    CREATE_TRANSACTION_STMT_TMPL = """
-    CREATE TABLE transaction (
-        tid         {tid_type} NOT NULL PRIMARY KEY,
-        packed      BOOLEAN NOT NULL DEFAULT FALSE,
-        is_empty    BOOLEAN NOT NULL DEFAULT FALSE,
-        username    {binary_string_type} NOT NULL,
-        description {binary_string_type} NOT NULL,
-        extension   {binary_string_type}
-    ) {transactional_suffix};
-    """
+    _create_transaction_query = Schema.transaction.create()
 
     @noop_when_history_free
     def _create_transaction(self, cursor):
@@ -305,7 +330,7 @@ class AbstractSchemaInstaller(DatabaseHelpersMixin,
 
         This table is only used for history-preserving databases.
         """
-        self.runner.run_script(cursor, self.CREATE_TRANSACTION_STMT_TMPL)
+        self._create_transaction_query.execute(cursor)
 
     @abc.abstractmethod
     def _create_new_oid(self, cursor):
@@ -328,9 +353,9 @@ class AbstractSchemaInstaller(DatabaseHelpersMixin,
         CREATE TABLE object_state (
             zoid        {oid_type} NOT NULL,
             tid         {tid_type} NOT NULL
-                           REFERENCES transaction,
+                           REFERENCES "transaction",
             prev_tid    {tid_type} NOT NULL
-                           REFERENCES transaction,
+                           REFERENCES "transaction",
             md5         {md5_type},
             state_size  BIGINT NOT NULL,
             state       {state_type},
@@ -591,11 +616,15 @@ class AbstractSchemaInstaller(DatabaseHelpersMixin,
         with a single row to use as a global lock at commit time.
         """
         if self.keep_history:
-            stmt = """
-            INSERT INTO transaction (tid, username, description)
-            VALUES (0, 'system', 'special transaction for object creation');
-            """
-            self.runner.run_script(cursor, stmt)
+            stmt = Schema.transaction.insert(
+                Schema.transaction.c.tid,
+                Schema.transaction.c.username,
+                Schema.transaction.c.description
+            ).bind(self).compiled()
+            stmt.execute(
+                cursor,
+                (0, 'system', 'special transaction for object creation')
+            )
 
         stmt = """
         INSERT INTO commit_row_lock (tid)
@@ -695,7 +724,7 @@ class AbstractSchemaInstaller(DatabaseHelpersMixin,
         if not self.keep_history:
             return False
 
-        cursor.execute('SELECT * FROM transaction WHERE tid < 0')
+        cursor.execute('SELECT * FROM "transaction" WHERE tid < 0')
         columns = self._column_descriptions(cursor)
         # Make sure to read the (empty) result, some drivers (CMySQLConnector)
         # are picky about that and won't let you close a cursor without reading
@@ -713,7 +742,7 @@ class AbstractSchemaInstaller(DatabaseHelpersMixin,
     _rename_transaction_empty_stmt = 'ALTER TABLE transaction RENAME COLUMN empty TO is_empty'
 
     # Subclasses can redefine these.
-    _slow_zap_all_tbl_stmt = _zap_all_tbl_stmt = 'DELETE FROM %s'
+    _slow_zap_all_tbl_stmt = _zap_all_tbl_stmt = 'DELETE FROM "%s"'
 
 
     def zap_all(self, reset_oid=True, slow=False):
@@ -763,17 +792,18 @@ class AbstractSchemaInstaller(DatabaseHelpersMixin,
         self._init_after_create(cursor)
         logger.debug("Done running init script.")
 
-    DROP_TABLE_TMPL = 'DROP TABLE {table}'
+    DROP_TABLE_TMPL = 'DROP TABLE "{table}"'
+
+    def _drop_all(self, _conn, cursor):
+        existent = set(self.list_tables(cursor))
+        todo = list(self.all_tables)
+        todo.reverse()
+        for table in todo:
+            if table in existent:
+                cursor.execute(self.DROP_TABLE_TMPL.format(table=table))
+        for sequence in self.list_sequences(cursor):
+            cursor.execute("DROP SEQUENCE %s" % sequence)
 
     def drop_all(self):
         """Drop all tables and sequences."""
-        def drop_all(_conn, cursor):
-            existent = set(self.list_tables(cursor))
-            todo = list(self.all_tables)
-            todo.reverse()
-            for table in todo:
-                if table in existent:
-                    cursor.execute(self.DROP_TABLE_TMPL.format(table=table))
-            for sequence in self.list_sequences(cursor):
-                cursor.execute("DROP SEQUENCE %s" % sequence)
-        self.connmanager.open_and_call(drop_all)
+        self.connmanager.open_and_call(self._drop_all)

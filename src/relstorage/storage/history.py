@@ -36,6 +36,7 @@ from .util import phase_dependent
 from .util import storage_method
 from .util import stale_aware
 
+
 class History(object):
     """
     Provides the implementation of ``history``
@@ -115,15 +116,12 @@ class UndoableHistory(History):
     @stale_aware
     @storage_method
     def undoLog(self, first=0, last=-20, filter=None):
-        # pylint:disable=too-many-locals
         if last < 0:
             last = first - last
 
         # use a private connection to ensure the most current results
-        adapter = self.adapter
-        conn, cursor = adapter.connmanager.open()
-        try:
-            tx_iter = adapter.dbiter.iter_transactions(cursor)
+        with self.load_connection.isolated_connection() as cursor:
+            tx_iter = self.adapter.dbiter.iter_transactions(cursor)
             i = 0
             res = []
             for tx in tx_iter:
@@ -151,9 +149,6 @@ class UndoableHistory(History):
                     if i >= last:
                         break
             return res
-
-        finally:
-            adapter.connmanager.close(conn, cursor)
 
     @phase_dependent
     @storage_method

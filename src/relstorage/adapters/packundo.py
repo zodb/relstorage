@@ -30,10 +30,12 @@ from .._util import get_memory_usage
 
 from ..treemark import TreeMarker
 
+from .schema import Schema
 from .connections import LoadConnection
 from .connections import StoreConnection
 from .interfaces import IPackUndo
 from ._util import DatabaseHelpersMixin
+from .sql import it
 
 # pylint:disable=too-many-lines,unused-argument
 
@@ -43,7 +45,8 @@ logger = logging.getLogger(__name__)
 class PackUndo(DatabaseHelpersMixin):
     """Abstract base class for pack/undo"""
 
-    _script_choose_pack_transaction = None
+    _choose_pack_transaction_query = None
+
 
     _lock_for_share = 'FOR SHARE'
     _lock_for_update = 'FOR UPDATE'
@@ -83,8 +86,7 @@ class PackUndo(DatabaseHelpersMixin):
         """
         conn, cursor = self.connmanager.open()
         try:
-            stmt = self._script_choose_pack_transaction
-            self.runner.run_script(cursor, stmt, {'tid': pack_point})
+            self._choose_pack_transaction_query.execute(cursor, {'tid': pack_point})
             rows = cursor.fetchall()
             if not rows:
                 # Nothing needs to be packed.
@@ -264,15 +266,17 @@ class HistoryPreservingPackUndo(PackUndo):
 
     keep_history = True
 
-    _script_choose_pack_transaction = """
-    SELECT tid
-    FROM transaction
-    WHERE tid > 0
-      AND tid <= %(tid)s
-      AND packed = FALSE
-    ORDER BY tid DESC
-    LIMIT 1
-    """
+    _choose_pack_transaction_query = Schema.transaction.select(
+        it.c.tid
+    ).where(
+        it.c.tid > 0
+    ).and_(
+        it.c.tid <= it.bindparam('tid')
+    ).and_(
+        it.c.packed == False  # pylint:disable=singleton-comparison
+    ).order_by(
+        it.c.tid, 'DESC'
+    ).limit(1)
 
     _script_create_temp_pack_visit = """
     CREATE TEMPORARY TABLE temp_pack_visit (
@@ -332,14 +336,14 @@ class HistoryPreservingPackUndo(PackUndo):
     DELETE FROM object_refs_added
     WHERE tid IN (
         SELECT tid
-        FROM transaction
+        FROM "transaction"
         WHERE is_empty = %(TRUE)s
     );
 
     DELETE FROM object_ref
     WHERE tid IN (
         SELECT tid
-        FROM transaction
+        FROM "transaction"
         WHERE is_empty = %(TRUE)s
     );
         """
@@ -350,9 +354,9 @@ class HistoryPreservingPackUndo(PackUndo):
     # Also, it was postgres specific. Now we use a more standard syntax,
     # that lets us preserve order (in case that matters).
     _script_delete_empty_transactions_batch = """
-    DELETE FROM transaction
+    DELETE FROM "transaction"
     WHERE tid IN (
-        SELECT tid FROM transaction
+        SELECT tid FROM "transaction"
         WHERE packed = %(TRUE)s
         AND is_empty = %(TRUE)s
         ORDER BY tid
@@ -369,16 +373,28 @@ class HistoryPreservingPackUndo(PackUndo):
     AND    tid = %(tid)s
     """
 
+    _is_packed_tx_query = Schema.transaction.select(
+        1
+    ).where(
+        Schema.transaction.c.tid == Schema.transaction.bindparam('undo_tid')
+    ).and_(
+        Schema.transaction.c.packed == False # pylint:disable=singleton-comparison
+    )
+
+    _is_root_creation_tx_query = Schema.object_state.select(
+        1
+    ).where(
+        Schema.object_state.c.tid == Schema.object_state.bindparam('undo_tid')
+    ).and_(
+        Schema.object_state.c.zoid == 0
+    ).and_(
+        Schema.object_state.c.prev_tid == 0
+    )
+
     @metricmethod
     def verify_undoable(self, cursor, undo_tid):
         """Raise UndoError if it is not safe to undo the specified txn."""
-        stmt = """
-        SELECT 1
-        FROM transaction
-        WHERE tid = %(undo_tid)s
-            AND packed = %(FALSE)s
-        """
-        self.runner.run_script_stmt(cursor, stmt, {'undo_tid': undo_tid})
+        self._is_packed_tx_query.execute(cursor, {'undo_tid': undo_tid})
         if not cursor.fetchall():
             raise UndoError("Transaction not found or packed")
 
@@ -402,25 +418,18 @@ class HistoryPreservingPackUndo(PackUndo):
         INNER JOIN current_object
             ON (cur_os.zoid = current_object.zoid
                 AND cur_os.tid = current_object.tid)
-        WHERE prev_os.tid = %(undo_tid)s
+        WHERE prev_os.tid = %s
             AND cur_os.md5 != prev_os.md5
         ORDER BY prev_os.zoid
         """
-        self.runner.run_script_stmt(cursor, stmt, {'undo_tid': undo_tid})
+        cursor.execute(stmt, (undo_tid,))
         if cursor.fetchmany():
             raise UndoError(
                 "Some data were modified by a later transaction")
 
         # Rule: don't allow the creation of the root object to
         # be undone.  It's hard to get it back.
-        stmt = """
-        SELECT 1
-        FROM object_state
-        WHERE tid = %(undo_tid)s
-            AND zoid = 0
-            AND prev_tid = 0
-        """
-        self.runner.run_script_stmt(cursor, stmt, {'undo_tid': undo_tid})
+        self._is_root_creation_tx_query.execute(cursor, {'undo_tid': undo_tid})
         if cursor.fetchall():
             raise UndoError("Can't undo the creation of the root object")
 
@@ -505,12 +514,12 @@ class HistoryPreservingPackUndo(PackUndo):
         with load_connection.server_side_cursor() as ss_load_cursor:
             ss_load_cursor.itersize = ss_load_cursor.arraysize = self.cursor_arraysize
             stmt = """
-            SELECT transaction.tid
-            FROM transaction
+            SELECT tx.tid
+            FROM \"transaction\" tx
             LEFT OUTER JOIN object_refs_added
-                ON (transaction.tid = object_refs_added.tid)
+                ON (tx.tid = object_refs_added.tid)
             WHERE object_refs_added.tid IS NULL
-            ORDER BY transaction.tid
+            ORDER BY tx.tid
             """
             ss_load_cursor.execute(stmt)
             tids = OidList((tid for (tid,) in ss_load_cursor))
@@ -535,6 +544,22 @@ class HistoryPreservingPackUndo(PackUndo):
         store_connection.commit()
         logger.info("pre_pack: transactions analyzed: %d/%d", txns_done, tid_count)
 
+    _get_objects_in_transaction_query = Schema.object_state.select(
+        it.c.zoid,
+        it.c.state
+    ).where(
+        it.c.tid == it.bindparam('tid')
+    ).order_by(it.c.zoid).prepared()
+
+    _delete_refs_for_transaction_query = Schema.object_ref.delete(
+    ).where(
+        it.c.tid == it.bindparam('tid')
+    ).prepared()
+
+    _insert_object_refs_added_for_transaction_query = Schema.object_refs_added.insert(
+        it.c.tid
+    ).prepared()
+
     def _add_refs_for_tid(self, load_connection, store_connection, tid, get_references):
         """Fill object_refs with all states for a transaction.
 
@@ -542,13 +567,8 @@ class HistoryPreservingPackUndo(PackUndo):
         """
         logger.debug("pre_pack: transaction %d: computing references ", tid)
         from_count = 0
-        stmt = """
-        SELECT zoid, state
-        FROM object_state
-        WHERE tid = %(tid)s
-        ORDER BY zoid
-        """
-        self.runner.run_script_stmt(load_connection.cursor, stmt, {'tid': tid})
+        self._get_objects_in_transaction_query.execute(load_connection.cursor,
+                                                       {'tid': tid})
 
         add_rows = []  # [(from_oid, tid, to_oid)]
         for from_oid, state in load_connection.cursor:
@@ -569,23 +589,20 @@ class HistoryPreservingPackUndo(PackUndo):
 
         # A previous pre-pack may have been interrupted.  Delete rows
         # from the interrupted attempt.
-        stmt = "DELETE FROM object_ref WHERE tid = %(tid)s"
-        self.runner.run_script_stmt(store_connection.cursor, stmt, {'tid': tid})
+        self._delete_refs_for_transaction_query.execute(store_connection.cursor,
+                                                        {'tid': tid})
 
         # Add the new references.
-        # TODO: Use RowBatcher
+        # TODO: Use RowBatcher?
         stmt = """
         INSERT INTO object_ref (zoid, tid, to_zoid)
         VALUES (%s, %s, %s)
         """
         self.runner.run_many(store_connection.cursor, stmt, add_rows)
 
-        # The references have been computed for this transaction.
-        stmt = """
-        INSERT INTO object_refs_added (tid)
-        VALUES (%(tid)s)
-        """
-        self.runner.run_script_stmt(store_connection.cursor, stmt, {'tid': tid})
+        # The references have been computed for this transaction
+        self._insert_object_refs_added_for_transaction_query.execute(store_connection.cursor,
+                                                                     (tid,))
 
         to_count = len(add_rows)
         logger.debug("pre_pack: transaction %d: has %d reference(s) "
@@ -859,15 +876,15 @@ class HistoryPreservingPackUndo(PackUndo):
                 # transaction. The presence of an entry in ``pack_state_tid`` means that all
                 # object states from that transaction should be removed.
                 stmt = """
-                SELECT transaction.tid,
+                SELECT tx.tid,
                        CASE WHEN packed = %(TRUE)s THEN 1 ELSE 0 END,
                        CASE WHEN pack_state_tid.tid IS NOT NULL THEN 1 ELSE 0 END
-                FROM transaction
-                LEFT OUTER JOIN pack_state_tid ON (transaction.tid = pack_state_tid.tid)
-                WHERE transaction.tid > 0
-                    AND transaction.tid <= %(pack_tid)s
+                FROM "transaction" tx
+                LEFT OUTER JOIN pack_state_tid ON (tx.tid = pack_state_tid.tid)
+                WHERE tx.tid > 0
+                    AND tx.tid <= %(pack_tid)s
                     AND (packed = %(FALSE)s OR pack_state_tid.tid IS NOT NULL)
-                ORDER BY transaction.tid
+                ORDER BY tx.tid
                 """
                 self.runner.run_script_stmt(
                     cursor, stmt, {'pack_tid': pack_tid})
@@ -981,7 +998,7 @@ class HistoryPreservingPackUndo(PackUndo):
         else:
             clause = 'is_empty = %(FALSE)s'
             state = 'not empty'
-        stmt = "UPDATE transaction SET packed = %(TRUE)s, " + clause
+        stmt = 'UPDATE "transaction" SET packed = %(TRUE)s, ' + clause
         stmt += " WHERE tid = %(tid)s"
         self.runner.run_script_stmt(cursor, stmt, {'tid': tid})
 
@@ -1040,14 +1057,15 @@ class HistoryFreePackUndo(PackUndo):
     # doesn't use server-side cursors.
     fill_object_refs_batch_size = 100
 
-    _script_choose_pack_transaction = """
-        SELECT tid
-        FROM object_state
-        WHERE tid > 0
-            AND tid <= %(tid)s
-        ORDER BY tid DESC
-        LIMIT 1
-        """
+    _choose_pack_transaction_query = Schema.object_state.select(
+        it.c.tid
+    ).where(
+        it.c.tid > 0
+    ).and_(
+        it.c.tid <= it.bindparam('tid')
+    ).order_by(
+        it.c.tid, 'DESC'
+    ).limit(1)
 
     # history-free packing doesn't use temp_pack_visit, unlike
     # history-preserving.

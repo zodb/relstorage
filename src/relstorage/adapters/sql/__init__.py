@@ -54,6 +54,7 @@ from .types import TID
 from .types import State
 from .types import Boolean
 from .types import BinaryString
+from .types import Char
 
 from .functions import func
 
@@ -79,6 +80,7 @@ __all__ = [
     "State",
     "Boolean",
     "BinaryString",
+    "Char",
 
     # Functions
     "func",

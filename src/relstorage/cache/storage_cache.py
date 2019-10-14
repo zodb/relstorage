@@ -180,7 +180,7 @@ class StorageCache(DetachableMVCCDatabaseViewer):
     def reset_stats(self):
         self.local_client.reset_stats()
 
-    def new_instance(self, before=None): # pylint:disable=method-hidden,unused-argument
+    def new_instance(self, before=None, adapter=None):
         """
         Return a copy of this instance sharing the same local client
         and having the most current view of the database as collected
@@ -191,7 +191,8 @@ class StorageCache(DetachableMVCCDatabaseViewer):
         its usage pattern does not interfere.
         """
         klass = type(self) if before is None else _BeforeStorageCache
-        cache = klass(self.adapter, self.options, self.prefix,
+        cache = klass(adapter or self.adapter,
+                      self.options, self.prefix,
                       _parent=self)
         return cache
 

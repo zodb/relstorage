@@ -20,8 +20,10 @@ from zope.interface import implementer
 
 from .._compat import ABC
 from .interfaces import IDBStats
-from ._util import query_property
 from ._util import DatabaseHelpersMixin
+from .schema import Schema
+from .sql import func
+
 
 @implementer(IDBStats)
 class AbstractStats(DatabaseHelpersMixin, ABC):
@@ -30,18 +32,16 @@ class AbstractStats(DatabaseHelpersMixin, ABC):
         self.connmanager = connmanager
         self.keep_history = keep_history
 
-    _get_object_count_queries = (
-        "SELECT COUNT(*) FROM current_object",
-        "SELECT COUNT(*) FROM object_state"
+    _get_object_count_query = Schema.all_current_object.select(
+        func.count()
     )
 
-    _get_object_count_query = query_property('_get_object_count')
 
     def get_object_count(self):
         """Returns the approximate number of objects in the database"""
-        conn, cursor = self.connmanager.open()
+        conn, cursor = self.connmanager.open_for_load()
         try:
-            cursor.execute(self._get_object_count_query)
+            self._get_object_count_query.execute(cursor)
             return cursor.fetchone()[0]
         finally:
             self.connmanager.close(conn, cursor)

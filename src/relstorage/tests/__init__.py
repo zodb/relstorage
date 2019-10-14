@@ -4,6 +4,7 @@ import abc
 import contextlib
 import os
 import unittest
+import functools
 
 import transaction
 
@@ -133,6 +134,16 @@ class TestCase(unittest.TestCase):
     def assertLength(self, container, length, msg=None):
         self.assertEqual(len(container), length,
                          '%s -- %s' % (msg, container) if msg else container)
+
+def skipIfNoConcurrentWriters(func):
+    # Skip the test if only one writer is allowed at a time.
+    # e.g., sqlite
+    @functools.wraps(func)
+    def f(self):
+        if self._storage._adapter.WRITING_REQUIRES_EXCLUSIVE_LOCK:
+            self.skipTest("Storage doesn't support multiple writers")
+        func(self)
+    return f
 
 
 class StorageCreatingMixin(ABC):
@@ -339,19 +350,12 @@ class MockPoller(object):
         self.poll_tid = 1
         self.poll_changes = None
 
-    def poll_invalidations(self, _conn, _cursor, _since, _ignore):
+    def poll_invalidations(self, _conn, _cursor, _since):
         return self.poll_changes, self.poll_tid
 
-    def list_changes(self, _cursor, after_tid, last_tid):
-        # Return a list, because the caller is allowed
-        # to assume a length. Return exactly the item in the list because
-        # it may be a type other than a tuple
-        self.last_requested_range = (after_tid, last_tid)
-        return [
-            item
-            for item in self.changes
-            if item[1] > after_tid and item[1] <= last_tid
-        ]
+    def get_current_tid(self, _cursor):
+        return self.poll_tid
+
 
 class DisconnectedException(Exception):
     pass

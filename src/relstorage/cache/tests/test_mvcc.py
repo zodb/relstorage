@@ -69,9 +69,8 @@ class TestMVCCDatabaseCorrdinator(TestCase):
         self.polled_changes = None
         self.viewer.adapter.poller.poll_invalidations = self.poll_invalidations
 
-    def poll_invalidations(self, conn, cursor, last_tid, ignore_tid):
+    def poll_invalidations(self, conn, cursor, last_tid):
         self.assertEqual(last_tid, self.expected_poll_last_tid)
-        self.none(ignore_tid)
         self.assertEqual(conn, self.expected_poll_conn)
         self.assertEqual(cursor, self.expected_poll_cursor)
         return self.polled_changes, self.polled_tid

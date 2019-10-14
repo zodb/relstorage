@@ -194,6 +194,8 @@ class AbstractVote(AbstractTPCState):
         self._flush_temps_to_db(cursor)
 
         # Reserve all OIDs used by this transaction.
+        # In a typical transaction, this is our first write to the database
+        # that's not temporary.
 
         # In the common case where we allocated OIDs for new objects,
         # the most recent OID we allocated will match the
@@ -327,8 +329,10 @@ class AbstractVote(AbstractTPCState):
         required_tids = self.required_tids
         old_states_to_prefetch = []
         actual_conflicts = []
+        # First, go through and distinguish read-current conflicts from
+        # state conflicts (if the adapter didn't do that already).
         for conflict in conflicts:
-            oid_int, committed_tid_int, tid_this_txn_saw_int, committed_state = conflict
+            oid_int, committed_tid_int, tid_this_txn_saw_int, _ = conflict
             if tid_this_txn_saw_int is not None:
                 # An actual conflict. We need the state.
                 actual_conflicts.append(conflict)
@@ -353,6 +357,7 @@ class AbstractVote(AbstractTPCState):
         # We're probably going to need to make a database query. Elevate our
         # priority and regain control ASAP.
         self.__enter_critical_phase_until_transaction_end()
+
         old_states_and_tids = self.cache.prefetch_for_conflicts(
             self.load_connection.cursor,
             old_states_to_prefetch
@@ -369,14 +374,20 @@ class AbstractVote(AbstractTPCState):
         __traceback_info__ = conflicts, invalidated_oid_ints
 
         for conflict in actual_conflicts:
-            oid_int, committed_tid_int, tid_this_txn_saw_int, committed_state = conflict
             # Match the names of the arguments used
+            oid_int, committed_tid_int, tid_this_txn_saw_int, committedData = conflict
+
             oid = int64_to_8bytes(oid_int)
             committedSerial = int64_to_8bytes(committed_tid_int)
             oldSerial = int64_to_8bytes(tid_this_txn_saw_int)
             newpickle = read_temp(oid_int)
+
+            # Because we're using the _CachedConflictResolver, we can only loadSerial()
+            # one state: the ``oldSerial`` state. Therefore the committedData *must* be
+            # given.
+
             resolved_state = tryToResolveConflict(oid, committedSerial, oldSerial,
-                                                  newpickle, committed_state)
+                                                  newpickle, committedData)
 
             if resolved_state is None:
                 # unresolvable; kill the whole transaction
@@ -579,7 +590,10 @@ class _CachedConflictResolver(ConflictResolvingStorage):
 
     def loadSerial(self, oid, serial):
         state, tid = self._old_states_and_tids[bytes8_to_int64(oid)]
-        if not bytes8_to_int64(serial) == tid: # pragma: no cover
+        if bytes8_to_int64(serial) != tid: # pragma: no cover
             # This should not be possible
-            raise AssertionError("Load connection got invalid old state.")
+            raise AssertionError(
+                "Load connection got invalid old state. Expected: %s; but got %s." %(
+                    tid, bytes8_to_int64(serial)
+                ))
         return state

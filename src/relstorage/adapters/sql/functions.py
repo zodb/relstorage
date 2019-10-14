@@ -7,13 +7,16 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-
 from .expressions import Expression
+from .schema import Column
 
 class _Functions(object):
 
     def max(self, column):
         return _Function('max', column)
+
+    def count(self, column=Column('*')):
+        return _Function('COUNT', column)
 
 class _Function(Expression):
 

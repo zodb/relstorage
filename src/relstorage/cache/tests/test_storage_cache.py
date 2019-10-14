@@ -43,7 +43,7 @@ class StorageCacheTests(TestCase):
         data.clear()
         for inst in self._instances:
             inst.options.cache_local_dir = None
-            inst.close(close_async=False)
+            inst.close()
 
     def getClass(self):
         from relstorage.cache.storage_cache import StorageCache
@@ -83,7 +83,7 @@ class StorageCacheTests(TestCase):
     def test_closed_state(self, c=None):
         if c is None:
             c = self._makeOne()
-        c.close(close_async=False)
+        c.close()
 
         self.assertEqual(len(c), 0)
         self.assertTrue(c)
@@ -145,7 +145,7 @@ class StorageCacheTests(TestCase):
     def test_save_and_clear(self):
         c, oid, tid = self._setup_for_save()
         self.assertNoPersistentCache(c)
-        c.save(overwrite=True, close_async=False)
+        c.save(overwrite=True)
         self.assertPersistentCache(c)
 
         # Creating one in the same place automatically loads it.
@@ -153,7 +153,7 @@ class StorageCacheTests(TestCase):
                            cache_local_dir=c.options.cache_local_dir)
         self.assertEqual(1, len(c2))
 
-        c.save(close_async=False)
+        c.save()
 
         # Creating a new one loads the stored data.
         c2 = self._makeOne(current_oids={oid: tid},
@@ -189,14 +189,14 @@ class StorageCacheTests(TestCase):
     def test_save_no_hits_no_sets(self):
         c, _, _ = self._setup_for_save()
         c.local_client.reset_stats()
-        c.save(close_async=False)
+        c.save()
         self.assertNoPersistentCache(c)
 
     def test_zap_all(self):
         c, _, _ = self._setup_for_save()
         self.assertNoPersistentCache(c)
 
-        c.save(overwrite=True, close_async=False)
+        c.save(overwrite=True)
         self.assertPersistentCache(c)
 
         c.zap_all()
@@ -213,7 +213,7 @@ class StorageCacheTests(TestCase):
         self.assertNoPersistentCache(c)
         c.options.cache_local_dir = None
 
-        c.save(overwrite=True, close_async=False)
+        c.save(overwrite=True)
         self.assertNoPersistentCache(c)
 
         c.zap_all()

@@ -51,6 +51,7 @@ class AbstractConnectionManager(object):
     isolation_read_committed = None
 
     replica_selector = None
+    ro_replica_selector = None
 
     def __init__(self, options, driver):
         """
@@ -60,6 +61,7 @@ class AbstractConnectionManager(object):
         """
         self.keep_history = options.keep_history
         self.driver = driver
+        self.options = options
 
         self._ignored_exceptions = tuple(set(
             driver.close_exceptions
@@ -219,6 +221,9 @@ class AbstractConnectionManager(object):
         if self._may_need_commit(conn) or force:
             self._do_commit(conn, cursor)
 
+    def begin(self, conn, cursor):
+        pass
+
     def _do_open_for_call(self, callback): # pylint:disable=unused-argument
         return self.open()
 
@@ -226,7 +231,8 @@ class AbstractConnectionManager(object):
         return self.driver.cursor(conn)
 
     def open_and_call(self, callback):
-        """Call a function with an open connection and cursor.
+        """
+        Call ``callback(connection, cursor)`` with a newly open connection and cursor.
 
         If the function returns, commits the transaction and returns the
         result returned by the function.

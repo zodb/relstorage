@@ -62,3 +62,6 @@ class OracleOIDAllocator(AbstractOIDAllocator):
         cursor.execute(stmt)
         n = cursor.fetchone()[0]
         return self._oid_range_around(n)
+
+    def reset_oid(self, cursor):
+        raise NotImplementedError

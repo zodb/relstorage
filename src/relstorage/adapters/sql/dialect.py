@@ -7,6 +7,7 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+from contextlib import contextmanager
 from operator import attrgetter
 
 from zope.interface import implementer
@@ -40,6 +41,10 @@ class DefaultDialect(object):
         Boolean: 'BOOLEAN',
     }
 
+    STMT_TRUNCATE = 'TRUNCATE TABLE'
+    STMT_TABLE_TRAILER = ''
+    STMT_IF_NOT_EXISTS = ''
+
     def bind(self, context):
         # The context will reference us most likely
         # (compiled statement in instance dictionary)
@@ -54,15 +59,18 @@ class DefaultDialect(object):
         return Compiler
 
     def compiler(self, root):
-        return self.compiler_class()(root)
+        return self.compiler_class()(root, self)
 
     def datatypes_for_columns(self, column_list):
         columns = list(column_list)
         datatypes = []
         for column in columns:
-            datatype = self.datatype_map[type(column.type_)]
+            datatype = self.datatype_for_column(column)
             datatypes.append(datatype)
         return datatypes
+
+    def datatype_for_column(self, column):
+        return column.type_.to_sql_datatype(self.datatype_map)
 
     def __eq__(self, other):
         if isinstance(other, DefaultDialect):
@@ -86,11 +94,24 @@ class _MissingDialect(DefaultDialect):
 
 
 class Compiler(object):
+    # pylint:disable=too-many-public-methods
 
-    def __init__(self, root):
+    def __init__(self, root, dialect):
         self.buf = NStringIO()
         self.placeholders = {}
         self.root = root
+        self.dialect = dialect # type: DefaultDialect
+        self._visit_name_stack = ('__compile_visit__',)
+
+    @contextmanager
+    def using_visit_name(self, name):
+        name = '__compile_visit_for_' + name + '__'
+        cur_stack = self._visit_name_stack
+        self._visit_name_stack = (name,) + self._visit_name_stack
+        try:
+            yield self
+        finally:
+            self._visit_name_stack = cur_stack
 
     def __repr__(self):
         return "<%s %s %r>" % (
@@ -220,8 +241,17 @@ class Compiler(object):
     def finalize(self):
         return intern(self.buf.getvalue().strip()), {v: k for k, v in self.placeholders.items()}
 
-    def visit(self, node):
-        node.__compile_visit__(self)
+    def visit(self, node, **kwargs):
+        """
+        Returns whatever the ``__compile_visit__`` method of the *node*
+        returns.
+        """
+        for visit_name in self._visit_name_stack:
+            meth = getattr(node, visit_name, None)
+            if meth:
+                return meth(self, **kwargs)
+
+        raise AttributeError("No way to visit node", node)
 
     visit_clause = visit
 
@@ -240,13 +270,28 @@ class Compiler(object):
         self.emit(value, ' ')
 
     emit_keyword = emit_w_padding_space
+    emit_column_constraint = emit_w_padding_space
 
-    def emit_identifier(self, identifier):
+    def emit_column_autoincrement(self):
+        self.emit_keyword(self.dialect.CONSTRAINT_AUTO_INCREMENT)
+
+    def emit_keyword_truncate_table(self):
+        self.emit_keyword(self.dialect.STMT_TRUNCATE)
+
+    def emit_identifier(self, identifier, quoted=False):
         last_char = self.buf.getvalue()[-1]
-        if last_char not in ('(', ' '):
-            self.emit(' ', identifier)
+
+        if quoted:
+            emit = ('"', identifier, '"')
         else:
-            self.emit(identifier)
+            emit = (identifier,)
+        if last_char not in ('(', ' '):
+            emit = (' ',) + emit
+
+        self.emit(*emit)
+
+    def emit_quoted_identifier(self, identifier):
+        self.emit_identifier(identifier, quoted=True)
 
     def visit_select_list(self, column_list):
         clist = column_list.c if hasattr(column_list, 'c') else column_list
@@ -269,6 +314,9 @@ class Compiler(object):
     def visit_column(self, column_node):
         self.emit_identifier(column_node.name)
 
+    def visit_qualified_column(self, column):
+        self.emit_identifier(column.table + '.' + column.name)
+
     def visit_from(self, from_):
         self.emit_keyword('FROM')
         self.visit(from_)
@@ -277,6 +325,9 @@ class Compiler(object):
         self.emit('(')
         self.visit(clause)
         self.emit(')')
+
+    def visit_no_values(self):
+        self.emit('()')
 
     def visit_op(self, op):
         self.emit(' ' + op + ' ')
@@ -300,14 +351,25 @@ class Compiler(object):
         return placeholder
 
     def visit_literal_expression(self, value):
-        placeholder = self._placeholder_for_literal_param_value(value)
-        self.emit(placeholder)
+        if isinstance(value, int):
+            self.emit(str(value))
+        else:
+            placeholder = self._placeholder_for_literal_param_value(value)
+            self.emit(placeholder)
 
     def visit_boolean_literal_expression(self, value):
         # In the oracle dialect, this needs to be
-        # either "'Y'" or "'N'"
+        # either "'Y'" or "'N'". sqlite supports only 1 and 0,
+        # prior to certain versions.
         assert isinstance(value, bool)
         self.emit(str(value).upper())
+
+    def visit_immediate_expression(self, value):
+        # Like a literal, but never uses a placeholder.
+        if isinstance(value, bool):
+            self.visit_boolean_literal_expression(value)
+        else:
+            self.emit(str(value))
 
     def visit_bind_param(self, bind_param):
         self.placeholders[bind_param] = bind_param.key
@@ -317,6 +379,14 @@ class Compiler(object):
         self.placeholders[bind_param] = '%s'
         self.emit('%s')
 
+    def create_table(self, table, if_not_exists):
+        with self.using_visit_name('create'):
+            self.visit(table, if_not_exists=if_not_exists)
+            self.emit(' ', self.dialect.STMT_TABLE_TRAILER)
+
+    def emit_if_not_exists(self):
+        if self.dialect.STMT_IF_NOT_EXISTS:
+            self.emit(self.dialect.STMT_IF_NOT_EXISTS)
 
 class _DefaultContext(object):
 

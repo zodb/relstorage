@@ -371,6 +371,7 @@ class Lazy(object):
         inst.__dict__[name] = value
         return value
 
+
 class CachedIn(object):
     """Cached method with given cache attribute."""
 

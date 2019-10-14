@@ -295,7 +295,7 @@ class LocalClientOIDTests(AbstractStateCacheTests):
         len_initial_cache_files = len(cache_files)
         self.assertEqual(len_initial_cache_files, 1)
         # Saving an empty bucket does nothing
-        self.assertFalse(c.save(close_async=False))
+        self.assertFalse(c.save())
 
         key = (0, 1)
         val = (b'abc', 1)
@@ -303,7 +303,7 @@ class LocalClientOIDTests(AbstractStateCacheTests):
         c.__getitem__(key) # Increment the count so it gets saved
         self.assertEqual(c[key], val)
 
-        self.assertTrue(c.save(close_async=False))
+        self.assertTrue(c.save())
 
         cache_files = get_cache_files()
         self.assertEqual(len(cache_files), len_initial_cache_files)
@@ -325,14 +325,14 @@ class LocalClientOIDTests(AbstractStateCacheTests):
         c2[key2] = val2
         c2.__getitem__(key2) # increment
 
-        c2.save(close_async=False)
+        c2.save()
         new_cache_files = get_cache_files()
         # Same file still
         self.assertEqual(cache_files, new_cache_files)
 
         # And again
         cache_files = new_cache_files
-        c2.save(close_async=False)
+        c2.save()
         new_cache_files = get_cache_files()
         self.assertEqual(cache_files, new_cache_files)
 

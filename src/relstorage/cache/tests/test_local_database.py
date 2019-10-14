@@ -25,7 +25,7 @@ class UpdateTests(TestCase):
     def setUp(self):
         self.options = MockOptionsWithMemoryDB()
         self.connection = sqlite_connect(
-            self.options, "pfx-ignored", close_async=False)
+            self.options, "pfx-ignored")
         assert self.connection.rs_db_filename == ':memory:', self.connection
         self.db = self._makeOne()
 
@@ -244,7 +244,6 @@ class MultiConnectionTests(TestCase):
     def connect(self):
         return sqlite_connect(
             self.options, "pfx-ignored",
-            close_async=False,
             timeout=self.timeout
         )
 

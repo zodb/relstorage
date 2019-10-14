@@ -282,7 +282,7 @@ class LocalClient(object):
         options = self.options
         if options.cache_local_dir:
             try:
-                conn = sqlite_connect(options, self.prefix, close_async=False)
+                conn = sqlite_connect(options, self.prefix)
             except FAILURE_TO_OPEN_DB_EXCEPTIONS:
                 logger.exception("Failed to read data from sqlite")
                 return
@@ -302,7 +302,7 @@ class LocalClient(object):
         conn = '(no oids to remove)'
         if bad_oids:
             self.invalidate_all(bad_oids)
-            conn = sqlite_connect(options, self.prefix, close_async=False)
+            conn = sqlite_connect(options, self.prefix)
             with closing(conn):
                 db = Database.from_connection(conn)
                 count_removed = db.remove_invalid_persistent_oids(bad_oids)

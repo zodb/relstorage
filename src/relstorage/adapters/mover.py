@@ -14,7 +14,9 @@
 """IObjectMover implementation.
 """
 from __future__ import absolute_import
+from __future__ import print_function
 
+import os
 from hashlib import md5
 from abc import abstractmethod
 
@@ -207,7 +209,7 @@ class AbstractObjectMover(ABC):
         """Returns the current {oid: tid} for specified object ids."""
         res = self._current_object_tids_map_type()
         columns, table, filter_column = self._current_object_tids_query
-        batcher = self.make_batcher(cursor, row_limit=1000)
+        batcher = self.make_batcher(cursor)
         rows = batcher.select_from(columns, table, **{filter_column: oids})
         res = self._current_object_tids_map_type(list(rows))
 
@@ -238,7 +240,7 @@ class AbstractObjectMover(ABC):
             batcher.delete_from('temp_store', zoid=oid)
         batcher.insert_into(
             "temp_store (zoid, prev_tid, md5, state)",
-            "%s, %s, %s, %s",
+            batcher.row_schema_of_length(4),
             (oid, prev_tid, md5sum, self.driver.Binary(data)),
             rowkey=oid,
             size=len(data) + 32,
@@ -309,28 +311,28 @@ class AbstractObjectMover(ABC):
     def restore(self, cursor, batcher, oid, tid, data):
         raise NotImplementedError()
 
-    # careful with USING clause in a join: Oracle doesn't allow such
-    # columns to have a prefix.
-    _detect_conflict_query = Schema.temp_store.natural_join(
-        Schema.all_current_object
+    _detect_conflict_query = Schema.temp_store.inner_join(
+        Schema.all_current_object_state
+    ).using(
+        Schema.all_current_object_state.c.zoid
     ).select(
-        Schema.temp_store.c.zoid, Schema.all_current_object.c.tid, Schema.temp_store.c.prev_tid,
-        # We don't get the state here; no particularly good reason except that I need to write
-        # that into our query framework.
-        None
+        Schema.temp_store.c.zoid,
+        Schema.all_current_object_state.c.tid,
+        Schema.temp_store.c.prev_tid,
+        Schema.all_current_object_state.c.state,
     ).where(
-        Schema.temp_store.c.prev_tid != Schema.all_current_object.c.tid
+        Schema.temp_store.c.prev_tid != Schema.all_current_object_state.c.tid
     ).order_by(
         Schema.temp_store.c.zoid
     ).prepared()
 
     @metricmethod_sampled
     def detect_conflict(self, cursor):
-        # TODO: We should return the committed state so it can be
-        # passed to tryToResolveConflict, saving extra queries.
-        # OTOH, using extra memory.
         stmt = self._detect_conflict_query
         stmt.execute(cursor)
+        # Note that we're not transforming the state into
+        # bytes; it doesn't seem to be needed here, even with sqlite3
+        # on Python 2 (where it is a buffer).
         rows = cursor.fetchall()
         return rows
 
@@ -358,15 +360,33 @@ class AbstractObjectMover(ABC):
 
     # Subclasses may override any of these queries if there is a
     # more optimal form.
-
-    _move_from_temp_hp_insert_query = """
-    INSERT INTO object_state
-      (zoid, tid, prev_tid, md5, state_size, state)
-    SELECT zoid, %s, prev_tid, md5,
-      COALESCE(LENGTH(state), 0), state
-      FROM temp_store
-      ORDER BY zoid
-    """
+    _move_from_temp_hp_insert_query = Schema.object_state.insert(
+    ).from_select(
+        (Schema.object_state.c.zoid,
+         Schema.object_state.c.tid,
+         Schema.object_state.c.prev_tid,
+         Schema.object_state.c.md5,
+         Schema.object_state.c.state_size,
+         Schema.object_state.c.state),
+        Schema.temp_store.select(
+            Schema.temp_store.c.zoid,
+            Schema.temp_store.orderedbindparam(),
+            Schema.temp_store.c.prev_tid,
+            Schema.temp_store.c.md5,
+            'COALESCE(LENGTH(state), 0)',
+            Schema.temp_store.c.state
+        ).order_by(
+            Schema.temp_store.c.zoid
+        )
+    ).prepared()
+    # _move_from_temp_hp_insert_query = """
+    # INSERT INTO object_state
+    #   (zoid, tid, prev_tid, md5, state_size, state)
+    # SELECT zoid, %s, prev_tid, md5,
+    #   COALESCE(LENGTH(state), 0), state
+    #   FROM temp_store
+    #   ORDER BY zoid
+    # """
 
     _move_from_temp_hf_delete_query = """
     DELETE FROM object_state
@@ -389,11 +409,25 @@ class AbstractObjectMover(ABC):
         )
     ).prepared()
 
-    _move_from_temp_copy_blob_query = """
-    INSERT INTO blob_chunk (zoid, tid, chunk_num, chunk)
-    SELECT zoid, %s, chunk_num, chunk
-    FROM temp_blob_chunk
-    """
+    _move_from_temp_copy_blob_query = Schema.blob_chunk.insert(
+    ).from_select(
+        (Schema.blob_chunk.c.zoid,
+         Schema.blob_chunk.c.tid,
+         Schema.blob_chunk.c.chunk_num,
+         Schema.blob_chunk.c.chunk),
+        Schema.temp_blob_chunk.select(
+            Schema.temp_blob_chunk.c.zoid,
+            Schema.temp_blob_chunk.orderedbindparam(),
+            Schema.temp_blob_chunk.c.chunk_num,
+            Schema.temp_blob_chunk.c.chunk
+        )
+    ).prepared()
+
+    # _move_from_temp_copy_blob_query = """
+    # INSERT INTO blob_chunk (zoid, tid, chunk_num, chunk)
+    # SELECT zoid, %s, chunk_num, chunk
+    # FROM temp_blob_chunk
+    # """
 
     _move_from_temp_hf_delete_blob_chunk_query = """
     DELETE FROM blob_chunk
@@ -440,7 +474,7 @@ class AbstractObjectMover(ABC):
         if self.keep_history:
             stmt = self._move_from_temp_hp_insert_query
             __traceback_info__ = stmt
-            cursor.execute(stmt, (tid,))
+            stmt.execute(cursor, (tid,))
         else:
             self._move_from_temp_object_state(cursor, tid)
 
@@ -455,7 +489,7 @@ class AbstractObjectMover(ABC):
         if txn_has_blobs:
             stmt = self._move_from_temp_copy_blob_query
             __traceabck_info__ = stmt
-            cursor.execute(stmt, (tid,))
+            stmt.execute(cursor, (tid,))
 
 
     # Insert and update current objects. The trivial
@@ -501,11 +535,102 @@ class AbstractObjectMover(ABC):
     @metricmethod_sampled
     def download_blob(self, cursor, oid, tid, filename):
         """Download a blob into a file."""
-        raise NotImplementedError()
+        stmt = """
+        SELECT chunk
+        FROM blob_chunk
+        WHERE zoid = %s
+            AND tid = %s
+            AND chunk_num = %s
+        """
 
+        f = None
+        bytecount = 0
+        try:
+            chunk_num = 0
+            while True:
+                cursor.execute(stmt, (oid, tid, chunk_num))
+                rows = list(cursor)
+                if rows:
+                    assert len(rows) == 1
+                    chunk = rows[0][0]
+                else:
+                    # No more chunks.  Note: if there are no chunks at
+                    # all, then this method should not write a file.
+                    break
+
+                if f is None:
+                    f = open(filename, 'wb')
+
+                f.write(chunk)
+                bytecount += len(chunk)
+                chunk_num += 1
+        except:
+            if f is not None:
+                f.close()
+                os.remove(filename)
+            raise
+
+        if f is not None:
+            f.close()
+        return bytecount
+
+    _upload_blob_uses_chunks = True
+
+    def _upload_blob_clear_old_blob(self, cursor, oid, tid):
+        if tid is not None:
+            if self.keep_history:
+                delete_stmt = """
+                DELETE FROM blob_chunk
+                WHERE zoid = %s AND tid = %s
+                """
+                cursor.execute(delete_stmt, (oid, tid))
+            else:
+                delete_stmt = "DELETE FROM blob_chunk WHERE zoid = %s"
+                cursor.execute(delete_stmt, (oid,))
+
+            use_tid = True
+            insert_stmt = """
+            INSERT INTO blob_chunk (zoid, tid, chunk_num, chunk)
+            VALUES (%s, %s, %s, %s)
+            """
+        else:
+            use_tid = False
+            delete_stmt = "DELETE FROM temp_blob_chunk WHERE zoid = %s"
+            cursor.execute(delete_stmt, (oid,))
+
+            insert_stmt = """
+            INSERT INTO temp_blob_chunk (zoid, chunk_num, chunk)
+            VALUES (%s, %s, %s)
+            """
+
+        return insert_stmt, use_tid
+
+    def _upload_blob_read_chunks(self, cursor, oid, tid, filename,
+                                 use_chunks, insert_stmt, use_tid):
+        Binary = self.driver.Binary
+        with open(filename, 'rb') as f:
+            chunk_num = 0
+            while True:
+                chunk = f.read(self.blob_chunk_size) if use_chunks else f.read()
+                if not chunk and chunk_num > 0:
+                    # EOF.  Note that we always write at least one
+                    # chunk, even if the blob file is empty.
+                    break
+                if use_tid:
+                    params = (oid, tid, chunk_num, Binary(chunk))
+                else:
+                    params = (oid, chunk_num, Binary(chunk))
+                cursor.execute(insert_stmt, params)
+                chunk_num += 1
+
+    @metricmethod_sampled
     def upload_blob(self, cursor, oid, tid, filename):
         """Upload a blob from a file.
 
         If serial is None, upload to the temporary table.
         """
-        raise NotImplementedError()
+        insert_stmt, use_tid = self._upload_blob_clear_old_blob(cursor, oid, tid)
+        self._upload_blob_read_chunks(
+            cursor, oid, tid, filename,
+            self._upload_blob_uses_chunks, insert_stmt, use_tid
+        )

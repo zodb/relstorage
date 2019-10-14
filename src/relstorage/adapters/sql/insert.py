@@ -43,12 +43,16 @@ class Insert(Query):
     def __compile_visit__(self, compiler):
         compiler.emit_keyword('INSERT INTO')
         compiler.visit(self.table)
-        compiler.visit_grouped(self.column_list)
+        if self.column_list:
+            compiler.visit_grouped(self.column_list)
         if self.select:
             compiler.visit(self.select)
         else:
             compiler.emit_keyword('VALUES')
-            compiler.visit_grouped(self.values)
+            if self.values:
+                compiler.visit_grouped(self.values)
+            else:
+                compiler.visit_no_values()
         compiler.emit(self.epilogue)
 
     def __add__(self, extension):
@@ -89,7 +93,7 @@ class Insertable(object):
     def insert(self, *columns):
         return Insert(self, *columns)
 
-@implementer(ITypedParams)
+
 class Delete(Query):
 
     def __init__(self, table):
@@ -109,6 +113,21 @@ class Delete(Query):
         s._where = where(expression)
         return s
 
+
+class Truncate(Query):
+
+    def __init__(self, table):
+        super(Truncate, self).__init__()
+        self.table = table
+
+    def __compile_visit__(self, compiler):
+        compiler.emit_keyword_truncate_table()
+        compiler.visit(self.table)
+
+
 class Deletable(object):
     def delete(self):
         return Delete(self)
+
+    def truncate(self):
+        return Truncate(self)

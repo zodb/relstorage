@@ -125,6 +125,10 @@ class OracleAdapter(AbstractAdapter):
             keep_history=self.keep_history,
             runner=self.runner,
             revert_when_stale=options.revert_when_stale,
+            transactions_may_go_backwards=(
+                self.connmanager.replica_selector is not None
+                or self.connmanager.ro_replica_selector is not None
+            )
         )
 
         self.txncontrol = OracleTransactionControl(
