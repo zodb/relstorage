@@ -16,7 +16,27 @@ import os
 from setuptools import setup
 from setuptools import find_packages
 from setuptools import Extension
-from Cython.Build import cythonize
+
+# Based on code from
+# http://cython.readthedocs.io/en/latest/src/reference/compilation.html#distributing-cython-modules
+def _dummy_cythonize(extensions, **_kwargs):
+    for extension in extensions:
+        sources = []
+        for sfile in extension.sources:
+            path, ext = os.path.splitext(sfile)
+            if ext in ('.pyx', '.py'):
+                ext = '.c'
+                sfile = path + ext
+            sources.append(sfile)
+        extension.sources[:] = sources
+    return extensions
+
+try:
+    from Cython.Build import cythonize
+except ImportError:
+    # The .c files had better already exist.
+    cythonize = _dummy_cythonize
+
 
 def read_file(*path):
     base_dir = os.path.dirname(__file__)
@@ -125,6 +145,7 @@ setup(
                     'src/relstorage/cache/cache.pyx',
                     'src/relstorage/cache/c_cache.cpp',
                 ],
+                include_dirs=['include'],
             ),
 
         ],
