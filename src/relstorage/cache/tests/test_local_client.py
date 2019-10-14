@@ -143,7 +143,7 @@ class LocalClientStrKeysValuesGenerationalTests(TestCase):
         # more often
         self.assertEqual(list_lrukeys('eden'), [-3])
         self.assertEqual(list_lrukeys('probation'), [-2])
-        self.assertEqual(list_lrukeys('protected'), [2, 3, 0])
+        self.assertEqual(list_lrukeys('protected'), [0, 2, 3])
         self.assertEqual(c._cache.weight, expected_weight(5, 50))
 
         #pprint.pprint(c._cache.stats())
@@ -158,7 +158,7 @@ class LocalClientStrKeysValuesGenerationalTests(TestCase):
         #pprint.pprint(c._cache.stats())
         self.assertEqual(list_lrukeys('eden'), [-3])
         self.assertEqual(list_lrukeys('probation'), [])
-        self.assertEqual(list_lrukeys('protected'), [2, -2, 3, 0])
+        self.assertEqual(list_lrukeys('protected'), [2, -2, 0, 3])
 
 
         self.assertEqual(c['00'], b'0123456789')
@@ -184,7 +184,7 @@ class LocalClientStrKeysValuesGenerationalTests(TestCase):
         # Confirm frequency counts
         self.assertEqual(list_lrufreq('eden'), [2])
         self.assertEqual(list_lrufreq('probation'), [])
-        self.assertEqual(list_lrufreq('protected'), [3, 2, 4, 3])
+        self.assertEqual(list_lrufreq('protected'), [3, 2, 4, 4])
         # A brand new key is in eden, shifting eden to probation
 
         c[(100, 0)] = b'0123456789'
@@ -197,12 +197,12 @@ class LocalClientStrKeysValuesGenerationalTests(TestCase):
 
         self.assertEqual(list_lrufreq('eden'), [1])
         self.assertEqual(list_lrufreq('probation'), [2])
-        self.assertEqual(list_lrufreq('protected'), [3, 2, 4, 3])
+        self.assertEqual(list_lrufreq('protected'), [3, 2, 4, 4])
 
         self.assertEqual(c._cache.weight, expected_weight(6, 60))
 
         self.assertEqual(c[(-3, 3)], b'0123456789')
-        self.assertEqual(list_lrukeys('probation'), [0])
+        self.assertEqual(list_lrukeys('probation'), [])
 
 
 class LocalClientOIDTests(AbstractStateCacheTests):

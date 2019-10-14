@@ -19,6 +19,13 @@ from __future__ import print_function
 from hamcrest import assert_that
 from nti.testing.matchers import validly_provides
 
+# The overhead of cache values, and thus how much fits in a ring or the
+# cache, depends on 32 or 64 bit, whether or not we copy
+# bytes into native code std::string, and how the compiler lays out
+# the objects. We only copy strings on PyPy, but we have little control
+# over the object layout, especially with the various MSVC compilers
+# we have to deal with. So that explains the tests that have a range of sizes.
+
 from relstorage.tests import TestCase
 from relstorage.cache import interfaces
 from . import Cache
@@ -56,12 +63,12 @@ class EdenTests(TestCase):
 
     def test_add_MRUs_too_many(self):
         lru = self._makeOne(1000)
-        too_many = [(i, (b'a' * i, 0)) for i in range(50)]
+        too_many = [(i, (b'a' * i, 0, 0, 1)) for i in range(50)]
         # They just exceed the limit
         added = lru.add_MRUs(too_many)
-        # Much less got added.
-        self.assertEqual(len(added), 6)
-
+        # Much less got added
+        self.assertGreaterEqual(len(added), 7)
+        self.assertLessEqual(len(added), 9)
 
 class NoOverheadSizeCache(Cache):
     def __init__(self, byte_limit):
@@ -128,20 +135,26 @@ class GenericLRUCacheTests(TestCase):
             pass
         cache = _Cache(20 + _Cache(20).base_size + (_Cache(20).entry_size * 2))
 
-        entries = cache.add_MRUs([
-            (1, (b'abcde', 0)),
-            (2, (b'abcde', 0)),
-            (3, (b'abcde', 0)),
-            (4, (b'abcde', 0)),
-            (5, (b'abcde', 0)),
-            (6, (b'abcde', 0)),
-        ])
+        entry_count = 10
+        entries = cache.add_MRUs(list(reversed([
+            # oid, state, frozen, frequency
+            (x, (b'abcde', 0, False, x))
+            for x
+            in range(1, entry_count)
+        ])))
 
         self.assertEqual(
             [5 + cache.entry_size] * len(entries),
             [e.weight for e in entries])
+        self.assertLessEqual(
+            cache.weight,
+            cache.limit
+        )
         self.assertEqual(
-            [1, 2, 3, 4],
+            [e.key for e in entries],
+            [e.frequency for e in entries])
+        self.assertEqual(
+            [8, 7, 6, 5],
             [e.key for e in entries]
         )
         self.assertEqual(4, len(cache))
@@ -155,15 +168,15 @@ class GenericLRUCacheTests(TestCase):
 
 
         entries = cache.add_MRUs([
-            (1, (b'abcde', 0)),
-            (2, (b'abcde', 0)),
-            (3, (b'abcde', 0)),
-            (0, (b'abcde', 0)),
+            (1, (b'abcde', 0, False, 1)),
+            (2, (b'abcde', 0, False, 1)),
+            (3, (b'abcde', 0, False, 1)),
+            (0, (b'abcde', 0, False, 1)),
         ])
 
-        self.assertEqual(
-            [1, 2, 3],
-            [e.key for e in entries]
+        self.assertIn(
+            [e.key for e in entries],
+            ([1, 2, 3, 0], [2, 3, 0])
         )
 
         for _ in range(4):
@@ -220,22 +233,23 @@ class GenericLRUCacheTests(TestCase):
         cache = self._getClass()(20)
         base_size = cache.base_size
         entry_size = cache.entry_size
-        cache = self._getClass()(20 + base_size + entry_size)
+        cache = self._getClass()(40 + base_size + entry_size)
 
         entries = cache.add_MRUs([
-            (1, (b'abc', 0)),
+            (1, (b'abc', 0, False, 1)),
             # This entry itself will fit nowhere
-            (2, (b'12345678901234567890' * 20, 0)),
-            (3, (b'bcd', 0)),
-            (4, (b'cde', 0)),
-            (5, (b'dehi', 0)),
-            (6, (b'edghijkl', 0)),
+            (2, (b'12345678901234567890' * 20, 0, False, 1)),
+            (3, (b'bcd', 0, False, 1)),
+            (4, (b'cde', 0, False, 1)),
+            (5, (b'dehi', 0, False, 1)),
+            (6, (b'edghijkl', 0, False, 1)),
         ])
-        self.assertEqual(3, len(cache))
+        self.assertGreaterEqual(len(cache), 3)
+        self.assertLessEqual(len(cache), 4)
 
-        self.assertEqual(
-            [1, 3, 4,],
-            [e.key for e in entries])
+        self.assertIn(
+            [e.key for e in entries],
+            ([1, 3, 4, 5], [3, 4, 5]))
         return cache
 
 
@@ -276,14 +290,14 @@ class GenericGenerationalLRUCacheTests(GenericLRUCacheTests):
 
         added_entries = cache.add_MRUs([
             # over fill eden with item of size 15
-            (1, (b'012345678901234' * 20, 0)),
+            (1, (b'012345678901234' * 20, 0, False, 1)),
             # 1 goes to protected, filling it. eden is also over full with 2. probation is empty
-            (2, (b'012', 0)),
+            (2, (b'012', 0, False, 1)),
             # 3 fills eden, bumping 2 to probation. But probation is actually overfull now
             # so we'd like to spill something if we could (but we can't.)
-            (3, (b'0', 0)),
+            (3, (b'0', 0, False, 1)),
             # 4 should never be added because it won't fit anywhere.
-            (4, (b'ee', 0)),
+            (4, (b'ee', 0, False, 1)),
         ])
 
         def keys(x):

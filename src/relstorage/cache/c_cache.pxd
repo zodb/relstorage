@@ -2,25 +2,22 @@
 # distutils: language = c++
 # cython: auto_pickle=False,embedsignature=True,always_allow_keywords=False,infer_types=True
 
-from libcpp.memory cimport shared_ptr
-from libcpp.pair cimport pair
-from libcpp.list cimport list
+from libcpp.vector cimport vector
 from libcpp cimport bool
-from libcpp.string cimport string
-from libcpp.unordered_map cimport unordered_map
 
 
+cdef extern from *:
+    ctypedef signed long int64_t
+    ctypedef signed long uint64_t
 
-cdef extern from "c_cache.h":
-    ctypedef signed long int64_t # Size doesn't actually matter.
-    ctypedef unsigned long uint64_t
+cdef extern from * namespace "boost":
+    T& move[T](T&)
+
+
+cdef extern from "c_cache.h" namespace "relstorage::cache":
     ctypedef int64_t TID_t
     ctypedef int64_t OID_t
 
-    ctypedef string Pickle_t
-
-cdef extern from "c_cache.h" namespace "relstorage::cache":
-    ctypedef size_t rs_counter_t
     ctypedef enum generation_num:
         GEN_UNKNOWN,
         GEN_EDEN,
@@ -28,71 +25,92 @@ cdef extern from "c_cache.h" namespace "relstorage::cache":
         GEN_PROBATION
 
 
-    cdef cppclass AbstractEntry:
-        AbstractEntry()
-        AbstractEntry(OID_t key)
+    cdef cppclass ICacheEntry:
         OID_t key
         size_t weight() except +
-        size_t value_count()
         size_t frequency
-        bool in_cache()
-    ctypedef shared_ptr[AbstractEntry] AbstractEntry_p
+        bint in_cache() except +
+        vector[TID_t] all_tids() except +
+        # Memory management
+        bool can_delete() except +
+        const T* Py_use[T]()
+        bool Py_release() except + # Throwing during dev because of assertions
 
-    cdef cppclass SingleValueEntry(AbstractEntry):
-        # const Pickle_t& state() const
+
+    cdef cppclass SVCacheEntry(ICacheEntry):
         TID_t tid() const
-        bool frozen() const
+        bint frozen() const
         # Using -1 for None
-        bool tid_matches(TID_t tid)
-        void force_update_during_bulk_load(OID_t key, char*, size_t len, TID_t tid)
-        bytes as_object()
-        bytes first_two_as_object()
-        SingleValueEntry* from_offset(size_t offset)
+        object as_object()
         size_t size()
-        char* c_data()
-        bint eq_for_python(const SingleValueEntry* other) const
+        bint operator==(SVCacheEntry&)
 
 
-    ctypedef shared_ptr[SingleValueEntry] SingleValueEntry_p
+    cdef cppclass MVCacheEntry(ICacheEntry):
+        SVCacheEntry* copy_newest_entry() except +
+        TID_t newest_tid()
 
-    cdef cppclass MultipleValueEntry(AbstractEntry):
-        MultipleValueEntry(OID_t key)
-        list[SingleValueEntry_p] p_values
-        void push_back(const SingleValueEntry_p const) except +
-        const SingleValueEntry_p front() except +
-        bool empty()
-        bool degenerate()
 
-    ctypedef shared_ptr[MultipleValueEntry] MultipleValueEntry_p
+    cdef cppclass TempCacheFiller:
+        TempCacheFiller()
+        TempCacheFiller(size_t number_nodes) except +
+        void set_once_at(size_t, OID_t, TID_t, object, bool frozen, int frequency)
 
-    ctypedef unordered_map[OID_t, AbstractEntry_p] OidEntryMap
-    ctypedef AbstractEntry* AbstractEntry_raw_p
-    ctypedef list[AbstractEntry_raw_p] EntryList
 
     cdef cppclass Generation:
-        size_t len() const
+        cppclass iterator:
+            bool operator==(iterator)
+            bool operator!=(iterator)
+            const ICacheEntry& operator*()
+            iterator& operator++()
+        size_t size() const
         size_t sum_weights() const
-        const size_t max_weight
+        size_t max_weight()
         const generation_num generation
         bool empty()
-        EntryList iter()
+        iterator begin()
+        iterator end()
+
+    cdef cppclass ProposedCacheEntry:
+        ProposedCacheEntry()
+        ProposedCacheEntry(OID_t, TID_t, object)
 
 
     cdef cppclass Cache:
+        cppclass iterator:
+            bool operator==(iterator)
+            bool operator!=(iterator)
+            ICacheEntry& operator*()
+            iterator& operator++()
+            # Sadly this is not supported:
+            # ICacheEntry& operator->()
+
         Generation ring_eden
         Generation ring_protected
         Generation ring_probation
-        Cache(uint64_t eden, uint64_t protected, uint64_t probation)
-        void add_to_eden(OID_t key, char* buf, size_t len, TID_t tid) except +
-        void store_and_make_MRU(OID_t, char* buf, size_t len, const TID_t) except +
+        Cache()
+        Cache(size_t eden, size_t protected, size_t probation) except +
+        void __del__() except +
+        void resize(size_t, size_t, size_t)
+        size_t max_weight()
+        void add_to_eden(ProposedCacheEntry) except +
+        void store_and_make_MRU(ProposedCacheEntry) except +
         void delitem(OID_t key) except +
         void delitem(OID_t key, TID_t tid) except +
         void freeze(OID_t key, TID_t tid) except +
         bool contains(OID_t key)
         void age_frequencies()
-        AbstractEntry_p get(OID_t key)
-        size_t len()
+        ICacheEntry* get(OID_t key)
+        SVCacheEntry* get(OID_t, TID_t)
+        SVCacheEntry* peek(OID_t, TID_t)
+        size_t size()
         size_t weight()
-        void on_hit(OID_t key)
-        OidEntryMap& getData()
-        int add_many(SingleValueEntry_p&, int count) except +
+        vector[OID_t] add_many(TempCacheFiller&) except +
+
+        iterator begin()
+        iterator end()
+
+
+# Local Variables:
+# flycheck-cython-cplus: t
+# End:

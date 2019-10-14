@@ -5,7 +5,12 @@
 3.0a13 (unreleased)
 ===================
 
-- Nothing changed yet.
+- Further speed improvements and memory efficiency gains of around 30%
+  for the cache.
+
+- Restore support for Python 2.7 on Windows.
+
+- No longer require Cython to build from a sdist (.tar.gz).
 
 
 3.0a12 (2019-10-09)

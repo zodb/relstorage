@@ -14,10 +14,8 @@ bin/
 develop-eggs/
 wheelhouse/
 dist/
-eggs/
-include/
 lib/
-parts/
+
 
 docs/_build/
 docs/__pycache__

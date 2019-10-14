@@ -14,20 +14,28 @@
 
 #include <memory>
 #include <vector>
-#include <iostream>
 #include "c_cache.h"
 
-
 using namespace relstorage::cache;
+
 
 //********************
 // Functions
 
-std::ostream& operator<<(std::ostream& s, const AbstractEntry& entry)
-{
-    s << "(Key: " << entry.key << " Generation: " << entry.generation() << ")";
-    return s;
-}
+// std::ostream& operator<<(std::ostream& s, const ICacheEntry& entry)
+// {
+//     s << "(Key: " << entry.key << " Generation: " << entry.generation() << ")";
+//     return s;
+// }
+
+// std::ostream& operator<<(std::ostream& s, const Generation& gen)
+// {
+//     s << "(Generation: " << gen.generation << "; weight=" << gen.sum_weights() << "; len="
+//         << gen.size() << "; max_weight=" << gen.max_weight()
+//       << ")";
+//     return s;
+// }
+
 
 /**
  * Call when `updated_ring` has gotten too big, and we should transfer
@@ -35,63 +43,54 @@ std::ostream& operator<<(std::ostream& s, const AbstractEntry& entry)
  * caused the `updated_ring` to get too big, so if it's the only thing
  * in the ring, we don't move it.
  *
- * When `allow_victims` is False, then we stop once we fill up all
- * three rings and we avoid producing any victims. If we *would*
- * have produced victims, we return with rejects.frequency = 1 so the
- * caller can know to stop feeding us.
+ * We keep going until the *updated_ring* is the correct size.
  *
- * When `overfill_destination` is True, then we will move all the
- * items we have to in order to make updated_ring its correct size,
- * even though this could cause the destination to become too large.
- * There will never be victims in this case. `allow_victims` is
- * ignored in this case.
+ * Items may be removed from both *updated_ring* and *destination_ring*.
+ * If so, they are removed from the index and deleted if not in use
  *
- * You must only call this when the ring is already full.
+ *
+ * Returns true if items were (or would have been) deleted from the index.
  */
 
 RSR_SINLINE
-void _spill_from_ring_to_ring(Generation& updated_ring,
-                              Generation& destination_ring,
-                              const AbstractEntry* updated_ignore_me,
-                              const bool allow_victims,
-                              const bool overfill_destination,
-                              OidList& rejects)
+size_t _spill_from_ring_to_ring(Generation& updated_ring,
+                                Generation& destination_ring,
+                                const ICacheEntry* updated_ignore_me=nullptr,
+                                bool allow_rejects=true)
 {
-    AbstractEntry* updated_oldest = NULL;
-    AbstractEntry* destination_oldest = NULL;
-    rejects.clear();
+    ICacheEntry* updated_oldest = nullptr;
+    ICacheEntry* destination_oldest = nullptr;
+    size_t deleted_from_index = 0;
 
-
-    while(!updated_ring.empty() && updated_ring.oversize()) {
+    while (updated_ring.size() > 1 && updated_ring.oversize()) {
         updated_oldest = updated_ring.lru();
-        if(!updated_oldest || updated_oldest == updated_ignore_me) {
+        if (!updated_oldest || updated_oldest == updated_ignore_me) {
             break;
         }
 
-        if(overfill_destination || destination_ring.will_fit(*updated_oldest)){
+        if (destination_ring.will_fit(*updated_oldest)) {
             // Good, there's room. No victims to choose.
             destination_ring.adopt(*updated_oldest);
         }
+        // Darn, we're too big. We must choose a
+        // victim. If we can't destroy it, at least move it to the next ring.
+        else if (!allow_rejects) {
+            destination_ring.adopt(*updated_oldest);
+            deleted_from_index += 1;
+            break;
+        }
         else {
-            // Darn, we're too big. We must choose (and record) a
-            // victim.
-
-            if(!allow_victims) {
-                break;
-            }
-
             destination_oldest = destination_ring.lru();
-            if(!destination_oldest) {
-                //Hmm, the ring got emptied, but there's also no space
-                //in protected. This must be a very large object. Take
-                //ownership of it anyway, but quit trying.
-                destination_ring.adopt(*updated_oldest);
-               break;
+            ICacheEntry* removed;
+            if (!destination_oldest) {
+                // Hmm, the ring got emptied, but there's also no space
+                // in it for the new one. Discard it.
+                removed = updated_oldest;
+                updated_ring.remove(*updated_oldest);
             }
-
-            if (updated_oldest->frequency >= destination_oldest->frequency) {
+            else if (updated_oldest->frequency >= destination_oldest->frequency) {
                 // good bye to the item on probation.
-                rejects.push_back(destination_oldest->key);
+                removed = destination_oldest;
                 destination_ring.remove(*destination_oldest);
                 // hello to eden item, who is now on probation
                 destination_ring.adopt(*updated_oldest);
@@ -99,9 +98,16 @@ void _spill_from_ring_to_ring(Generation& updated_ring,
             else {
                 // Discard the eden entry, it's used less than the
                 // probation entry.
-                rejects.push_back(updated_oldest->key);
+                removed = updated_oldest;
                 updated_ring.remove(*updated_oldest);
             }
+
+            deleted_from_index += 1;
+            removed->remove_from_index();
+            if (removed->can_delete())
+                delete removed;
+            else
+                assert(removed->in_python());
         }
     }
 
@@ -121,67 +127,93 @@ void _spill_from_ring_to_ring(Generation& updated_ring,
         }
     }
     */
+    return deleted_from_index;
 }
 
 //********************
-// AbstractEntry
+// ICacheEntry
 
-// bool AbstractEntry::operator==(const AbstractEntry& other) const
-// {
-//     return this == &other;
-// }
+void ICacheEntry::_remove_from_generation()
+{
+    this->_generation->remove(*this);
+}
+
+void ICacheEntry::_remove_from_generation_and_index()
+{
+    this->_remove_from_generation();
+    EntryMapHook::unlink();
+}
+
+
+void ICacheEntry::_replace_with(ICacheEntry* new_entry)
+{
+    this->_generation->_sum_weights -= this->weight();
+    this->_generation->_sum_weights += new_entry->weight();
+    new_entry->_generation = this->_generation;
+    this->_generation = nullptr;
+    EntryListHook::swap_nodes(*new_entry);
+    EntryMapHook::swap_nodes(*new_entry);
+}
 
 
 //********************
 // SingleValueEntry
-AbstractEntry_p SingleValueEntry::with_later(AbstractEntry_p& current_pointer,
-                                             char* buf, size_t len,
-                                             const TID_t new_tid)
+void* SVCacheEntry::operator new(size_t count)
 {
-    const bool state_equal = len == this->len && memcmp(buf, this->buf, len) == 0;
-    const bool tid_equal = new_tid == this->tid();
-    if (state_equal && tid_equal) {
-        return current_pointer;
-    }
+    UNUSED(count);
+    assert(count == sizeof(SVCacheEntry));
+    return Cache::allocator.allocate(1);
+}
 
-    if (!state_equal && tid_equal) {
+void SVCacheEntry::operator delete(void* ptr)
+{
+    Cache::allocator.deallocate(static_cast<SVCacheEntry*>(ptr), 1);
+}
+
+ICacheEntry* SVCacheEntry::adding_value(const ProposedCacheEntry& proposed)
+{
+    const bool tid_equal = proposed.tid() == this->tid();
+    if (unlikely(tid_equal)) {
+        // If Pickle_t is PyObject*, this is pretty cheap. But if it's
+        // std::string, this is an extra copy. This situation should rarely arise.
+        Pickle_t other_pickle = this->owning_state(proposed.borrow_pickle());
+        const bool state_equal = this->state_eq(other_pickle);
+        this->decref(other_pickle);
+
+        if (state_equal && tid_equal) {
+            return this;
+        }
         throw std::logic_error("Detected two different values for the same TID.");
     }
 
-    SingleValueEntry_p new_entry = SingleValueEntry_p(new SingleValueEntry(this->key,
-                                                                      buf,
-                                                                      len,
-                                                                      new_tid));
-    MultipleValueEntry_p mve = std::make_shared<MultipleValueEntry>(this->key);
-    mve->frequency = this->frequency;
-    mve->push_back(std::static_pointer_cast<SingleValueEntry>(current_pointer));
-    mve->push_back(new_entry);
+    MVCacheEntry* mve = new MVCacheEntry(*this, proposed);
+    this->_replace_with(mve);
     return mve;
 }
 
-AbstractEntry_p SingleValueEntry::freeze_to_tid(AbstractEntry_p& current_pointer,
-                                                const TID_t tid)
+ICacheEntry* SVCacheEntry::freeze_to_tid(const TID_t tid)
 {
     if (this->_tid > tid) {
-        return current_pointer;
+        return this;
     }
     if (this->_tid == tid) {
         // We are discarding ourself now, but preserving this item's
         // location in the generations.
         this->_frozen = true;
-        return current_pointer;
+        return this;
     }
     // We're older, we should be discarded.
-    return AbstractEntry_p();
+    this->_remove_from_generation_and_index();
+    return nullptr;
 }
 
-AbstractEntry_p SingleValueEntry::discarding_tids_before(AbstractEntry_p& current_pointer,
-                                                         const TID_t tid)
+ICacheEntry* SVCacheEntry::discarding_tids_before(const TID_t tid)
 {
     if (tid <= this->_tid) {
-        return AbstractEntry_p();
+        this->_remove_from_generation_and_index();
+        return nullptr;
     }
-    return current_pointer;
+    return this;
 }
 
 
@@ -193,400 +225,344 @@ bool Generation::operator==(const Generation& other) const
     return this == &other;
 }
 
-void Generation::on_hit(Cache& cache, AbstractEntry& entry)
+void Generation::on_hit(ICacheEntry& entry)
 {
-    UNUSED(cache);
     entry.frequency++;
     this->move_to_head(entry);
 }
-
-void Generation::add(AbstractEntry& elt)
-{
-    assert(elt.generation() == nullptr);
-    this->_entries.push_front(&elt);
-    elt.position() = this->_entries.begin();
-    elt.generation() = this;
-    this->_sum_weights += elt.weight();
-}
-
-void Generation::adopt(AbstractEntry& elt)
-{
-    elt.generation()->remove(elt);
-    assert(elt.generation() == nullptr);
-    this->add(elt);
-}
-
-void Generation::remove(AbstractEntry& elt)
-{
-    assert(elt.generation() == this);
-    AbstractEntry* in_list = *elt.position();
-    if (in_list != &elt) {
-        std::cout << "Error, not matched " << in_list << " should be " << &elt << std::endl;
-        std::cout << "In list " << *in_list << std::endl;
-        std::cout << "Asked to remove " << elt << std::endl;
-    }
-    assert(*elt.position() == &elt);
-    this->_entries.erase(elt.position());
-    elt.generation(nullptr);
-    this->_sum_weights -= elt.weight();
-}
-
 
 
 //********************
 // Probation
 
-void Probation::on_hit(Cache& cache, AbstractEntry& entry)
+void Probation::on_hit(ICacheEntry& entry)
 {
-    Protected& protected_ring = cache.ring_protected;
-    Probation& probation_ring = cache.ring_probation;
     entry.frequency++;
-    protected_ring.adopt(entry); // guaranteed not to spill
+    this->_protected.adopt(entry); // guaranteed not to spill
 
-    if( !protected_ring.oversize() ) {
+    if( !this->_protected.oversize() ) {
         return;
     }
 
     // Protected got too big. Demote entries back to probation until
     // protected is the right size (or we happen to hit the entry we
     // just added, or the ring only has one item left)
-    _spill_from_ring_to_ring(protected_ring, probation_ring, &entry,
-                             false, // No victims
-                             true,
-                             this->no_rejects); // let destination get too big
+    _spill_from_ring_to_ring(this->_protected,
+                             *this, &entry);
 
+}
+
+//********************
+// Protected
+
+void Protected::on_hit(ICacheEntry& entry)
+{
+    Generation::on_hit(entry);
+    if (this->oversize()) {
+        // Demote to probation, rejecting as needed.
+        _spill_from_ring_to_ring(*this, this->_probation, &entry);
+    }
 }
 
 //********************
 // Eden
-OidList& Eden::add_and_evict(AbstractEntry& entry)
+bool Eden::_balance_rings(ICacheEntry* added_or_changed, bool allow_rejects)
 {
-    Eden& eden_ring = *this;
-    Cache& cache = *eden_ring.cache;
-    Protected& protected_ring = cache.ring_protected;
-    Probation& probation_ring = cache.ring_probation;
-    this->rejects.clear();
-    Generation::add(entry);
-
-    if(!eden_ring.oversize()) {
-        return this->rejects;
+    if(!this->oversize()) {
+        return false;
     }
 
     // Ok, we have to move things. Begin by filling up the
     // protected space
-    if(probation_ring.empty() && !protected_ring.oversize()) {
+    if (this->cache.ring_probation.empty()
+        && !this->cache.ring_protected.oversize()) {
         /*
-          # This is a modification of the algorithm. When we start out
-          # go ahead and populate the protected_lru directly
-          # from eden; only when its full do we start doing the probationary
-          # dance. This helps mitigate any issues with choosing segment sizes;
-          # we're going to occupy all the memory anyway, why not, it's reserved for us,
-          # so go ahead and fill it.
-        */
-        while(eden_ring.oversize()) {
+         * This is a modification of the algorithm. When we start out
+         * go ahead and populate the protected_lru directly
+         * from eden; only when its full do we start doing the probationary
+         * dance. This helps mitigate any issues with choosing segment sizes;
+         * we're going to occupy all the memory anyway, why not, it's reserved for us,
+         * so go ahead and fill it.
+         */
+        while (this->oversize()) {
             // This cannot be NULL if we're oversize.
-            AbstractEntry& eden_oldest = *eden_ring.lru();
-            if(eden_oldest.key == entry.key) {
+            ICacheEntry* eden_oldest = this->lru();
+            if(eden_oldest == added_or_changed)
                 break;
-            }
-            if( !protected_ring.will_fit(eden_oldest) ) {
+
+            if (!this->cache.ring_protected.will_fit(*eden_oldest)) {
                 /*
-                    # This would oversize protected. Move it to probation instead,
-                    # which is currently empty, so there's no need to choose a victim.
-                    # This may temporarily oversize us in the aggregate of the three.
-                */
-                probation_ring.adopt(eden_oldest);
-                break;
+                 * This would oversize protected. Move it to probation instead,
+                 * which is currently empty, so there's no need to choose a victim.
+                 * This may temporarily oversize us in the aggregate of the three.
+                 */
+                this->cache.ring_probation.adopt(*eden_oldest);
+                return true;
             }
-            else {
-                protected_ring.adopt(eden_oldest);
-            }
+            else
+                this->cache.ring_protected.adopt(*eden_oldest);
         }
-        return this->rejects;
+        return false;
     }
 
     // OK, we've already filled protected and have started putting
     // things in probation. So we may need to choose victims.
     // Begin by taking eden and moving to probation, evicting from probation
     // if needed.
-    _spill_from_ring_to_ring(
-                             eden_ring, probation_ring, &entry,
-                             true, // all   ow_victims
-                             false,  // don't overfill
-                             this->rejects);
+    return _spill_from_ring_to_ring(*this,
+                                    this->cache.ring_probation,
+                                    added_or_changed,
+                                    allow_rejects);
+}
 
-    if (protected_ring.oversize()) {
-        // If protected is oversize, also move from them to probation.
-        // What about from eden to protected?
-        _spill_from_ring_to_ring(
-               eden_ring, protected_ring, &entry,
-               true,
-               false,
-               this->rejects
-        );
-    }
-    return this->rejects;
+void Eden::on_hit(ICacheEntry& entry)
+{
+    Generation::on_hit(entry);
+    _balance_rings(&entry);
+}
+
+
+bool Eden::add(ICacheEntry& entry, bool allow_rejects)
+{
+    Generation::add(entry);
+    if (allow_rejects)
+        return _balance_rings(&entry, allow_rejects);
+    return false;
 }
 
 
 //********************
-// MultipleValueEntry
+// MVCacheEntry
+PythonAllocator<MVCacheEntry> MVCacheEntry::allocator;
+PythonAllocator<MVCacheEntry::Entry> MVCacheEntry::Entry::allocator;
 
-struct _LTE {
-    TID_t tid;
-    _LTE(TID_t t) : tid(t) {}
-    bool operator()(SingleValueEntry_p p) {
-        return p.get()->tid() <= this->tid;
-    }
-};
-
-struct _LT {
-    TID_t tid;
-    _LT(TID_t t) : tid(t) {}
-    bool operator()(SingleValueEntry_p p) {
-        return p.get()->tid() < this->tid;
-    }
-};
-
-void MultipleValueEntry::remove_tids_lte(TID_t tid) {
-    this->p_values.remove_if(_LTE(tid));
-}
-
-void MultipleValueEntry::remove_tids_lt(TID_t tid) {
-    this->p_values.remove_if(_LT(tid));
-}
-
-size_t MultipleValueEntry::weight() const
+void* MVCacheEntry::Entry::operator new(size_t count)
 {
-    size_t overhead = AbstractEntry::weight();
+    UNUSED(count);
+    assert(count == sizeof(MVCacheEntry::Entry));
+    return allocator.allocate(1);
+}
+
+void MVCacheEntry::Entry::operator delete(void* ptr)
+{
+    allocator.deallocate(static_cast<MVCacheEntry::Entry*>(ptr), 1);
+}
+
+
+void* MVCacheEntry::operator new(size_t count)
+{
+    UNUSED(count);
+    assert(count == sizeof(MVCacheEntry));
+    return allocator.allocate(1);
+}
+
+void MVCacheEntry::operator delete(void* ptr)
+{
+    allocator.deallocate(static_cast<MVCacheEntry*>(ptr), 1);
+}
+
+void MVCacheEntry::remove_tids_lte(TID_t tid)
+{
+    // bounded_range(lower, upper, left_closed, right_closed)
+    // upper_bound(k) : first element greater than k.
+    // lower_bound(k) : first element not less than k: which is first element >= k.
+    // closed: Differs depending on whether its left or right. For right,
+    // if it's closed it's upper_bound, otherwise its lower_bound.
+    // thus, right_closed=True means the range includes (goes past) the upper bound;
+    // right_closed=False means the range stops at k.
+    // erase(b, e) removes things from b, stopping at e (it never removes e).
+    // Thus to remove everything less than tid, we need to return a second iterator
+    // greater than tid,
+    std::pair<iterator, iterator> range = this->p_values.bounded_range(0, tid,
+                                                                       false, true);
+    this->p_values.erase_and_dispose(range.first, range.second, Disposer());
+}
+
+void MVCacheEntry::remove_tids_lt(TID_t tid)
+{
+    std::pair<iterator, iterator> range = this->p_values.bounded_range(0, tid,
+                                                                       false, false);
+    this->p_values.erase_and_dispose(range.first, range.second, Disposer());
+}
+
+size_t MVCacheEntry::weight() const
+{
+    size_t overhead = ICacheEntry::weight();
     size_t result = 0;
-    for (std::list<SingleValueEntry_p>::const_iterator it = this->p_values.begin();
+    for (const_iterator it = this->p_values.begin();
          it != this->p_values.end();
          it++ ) {
-        // Include its weight but not the things that we pay for, and
-        // add its extra linked entry.
-        result += (*it)->weight() - overhead + (sizeof(void*) * 4);
+        result += it->weight();
     }
     return result + overhead;
 }
 
-AbstractEntry_p MultipleValueEntry::with_later(AbstractEntry_p& current_pointer,
-                                               char* buf, size_t len,
-                                               const TID_t new_tid)
+ICacheEntry* MVCacheEntry::adding_value(const ProposedCacheEntry& proposed)
 {
-    this->push_back(
-        SingleValueEntry_p(new SingleValueEntry(this->key, buf, len, new_tid))
-    );
-    return current_pointer;
+    this->insert(proposed);
+    return this;
 }
 
-AbstractEntry_p MultipleValueEntry::freeze_to_tid(AbstractEntry_p& current_pointer,
-                                                  const TID_t tid)
+ICacheEntry* MVCacheEntry::freeze_to_tid(const TID_t tid)
 {
     this->remove_tids_lt(tid);
     if (this->empty()) {
         // We should be discarded.
-        return AbstractEntry_p();
+        this->_remove_from_generation_and_index();
+        return nullptr;
     }
     if (this->degenerate()) {
         // One item left, either it matches or it doesn't.
-        AbstractEntry_p my_pointer = std::static_pointer_cast<AbstractEntry>(this->p_values.front());
-        return this->front()->freeze_to_tid(my_pointer,
-                                            tid);
+        SVCacheEntry* new_entry = this->to_single();
+        if (!new_entry->freeze_to_tid(tid)) {
+            delete new_entry;
+            this->_remove_from_generation_and_index();
+            return nullptr;
+        }
+        this->_replace_with(new_entry);
+        return new_entry;
     }
 
     // Multiple items left, all of which are at least == tid
     // but could be greater.
-    for(EntryList::iterator it = this->p_values.begin();
+    for(iterator it = this->p_values.begin();
         it != this->p_values.end(); ++it) {
-        SingleValueEntry* entry = (*it).get();
-        if (entry->tid() == tid) {
-            entry->frozen() = true;
+        Entry& entry = *it;
+        if (entry.tid == tid) {
+            entry.frozen = true;
         }
     }
-    return current_pointer;
+    return this;
 }
 
-AbstractEntry_p MultipleValueEntry::discarding_tids_before(AbstractEntry_p& current_pointer,
-                                                           const TID_t tid)
+ICacheEntry* MVCacheEntry::discarding_tids_before(const TID_t tid)
 {
     this->remove_tids_lte(tid);
     if (this->empty()) {
         // We should be discarded.
-        return AbstractEntry_p();
+        this->_remove_from_generation_and_index();
+        return nullptr;
     }
     if (this->degenerate()) {
         // One item left, must be greater.
-        return this->front();
+        SVCacheEntry* only_entry = this->to_single();
+        this->_replace_with(only_entry);
+        return only_entry;
     }
-    return current_pointer;
+    return this;
 }
 
 //********************
 // Cache
-
-void Cache::_handle_evicted(OidList& evicted) {
-
-    OidList::const_iterator end = evicted.end();
-    for(OidList::const_iterator it = evicted.begin(); it != end; it++) {
-        // things were evicted, must be removed from our data, which
-        // is the only place holding a reference to them, aside from transient
-        // SingleValue Python nodes.
-        this->data.erase(*it);
-    }
-    evicted.clear();
-
-}
+PythonAllocator<SVCacheEntry> Cache::allocator;
+PythonAllocator<ICacheEntry> Cache::deallocator;
 
 
-void Cache::add_to_eden(OID_t key, char* buf, size_t len, TID_t tid)
+void Cache::add_to_eden(const ProposedCacheEntry& proposed)
 {
-    if (this->data.count(key)) {
+    if (unlikely(this->data.count(proposed.oid()))) {
         throw std::runtime_error("Key already present");
     }
 
-    // keep with the shared ownership.
-    SingleValueEntry_p sve_p = SingleValueEntry_p(new SingleValueEntry(key, buf, len, tid));
-    this->data[key] = sve_p;
-    this->_handle_evicted(
-       this->ring_eden.add_and_evict(*sve_p)
-    );
+    SVCacheEntry* entry = new SVCacheEntry(proposed);
+    this->data.insert(*entry);
+    this->ring_eden.add(*entry);
 }
 
-
-int Cache::add_many(SingleValueEntry_p& shared_ptr_to_array,
-                    int entry_count)
+OidList Cache::add_many(TempCacheFiller& temp_filler)
 {
-    int added_count = 0;
-    if (this->oversize() || !entry_count) {
-        return 0;
-    }
-    SingleValueEntry* entry_array = shared_ptr_to_array.get();
+    OidList added;
 
-    for (int i = 0; i < entry_count; i++) {
+    if (this->oversize() || temp_filler.entries.empty()) {
+        return added;
+    }
+
+    // We used to allocate a single large array for all the
+    // SVCacheEntry objects and insert individual offsets (array + i)
+    // to them. Back in the CFFI days, this was much faster than
+    // allocating individual CFFI-wrapped objects. But in C++, it
+    // turns out to be both faster (26ms vs 42ms for 90,000 entries)
+    // and more memory efficient (between 5 and 14MB vs 15-20MB) to
+    // allocate individually using new(). This saves the extra
+    // constructor time for the empty entries, and it saves the
+    // memory-management complexity of carving individual items out of
+    // a bulk array. This is especially true because we don't
+    // implement a node freelist to be able to re-use these individual
+    // items that get carved out of the array when they get evicted or
+    // replaced with a newer version.
+
+
+    // BIT::insert is "Logarithmic in general, but it is amortized constant time
+    // (two comparisons in the worst case) if t is inserted
+    // immediately before hint."
+    // So we need the array sorted in *descending* order for boost::set so that
+    // each successive element is less than the previous element. However, that messes
+    // with having the values come in in LRU - to - MRU order. The gains are modest:
+    // that 26ms becomes 35ms.
+    /*
+    std::sort(temp_filler.entries.begin(), temp_filler.entries.end(),
+              _ProposedCacheEntryCompare);
+    */
+
+    // The numbers above are for if we quit early, as soon as we're full.
+
+    // We put all the data into eden. We then manually rebalance the rings to get the
+    // best rejections when we have all the frequency information.
+    for (TempCacheFiller::iterator it = temp_filler.begin(), end = temp_filler.end();
+         it != end;
+         ++it ) {
         // Don't try if we know we won't find a place for it.
-        SingleValueEntry* incoming = (entry_array + i);
+        SVCacheEntry* incoming = new SVCacheEntry(*it);
         if (!this->will_fit(*incoming)) {
-            incoming->generation(nullptr);
+            delete incoming;
             continue;
         }
 
-        this->data[incoming->key] = SingleValueEntry_p(shared_ptr_to_array,
-                                                       incoming);
-
-        // _eden_add *always* adds, but it may or may not be able to
-        // rebalance.
-        added_count += 1;
-        const OidList add_rejects = this->ring_eden.add_and_evict(*incoming);
-        if (!add_rejects.empty()) {
-            // We started rejecting stuff, so we must be full.
-            // Well, this isn't strictly true. It could be one really
-            // large item in the middle that we can't fit, but we
-            // might be able to fit items after it.
-            // However, we *thought* we could fit this one in the
-            // cache, but we couldn't. So we really are full.
-            // Put everything that we rejected back in probation.
-            for(OidList::const_iterator it = add_rejects.begin(); it != add_rejects.end(); it++) {
-                const OID_t oid = *it;
-                this->ring_probation.add(*this->data.at(oid));
-            }
+        this->data.insert(*incoming); // This fails if it's already present.
+        this->ring_eden.add(*incoming, false);
+        if (this->ring_eden.sum_weights() > this->max_weight()) {
             break;
         }
     }
 
-    return added_count;
+    assert(this->ring_probation.empty());
+    assert(this->ring_protected.empty());
+    // First, spill everything from eden down to protected, without discarding anything.
+    // Then, if protected is too full, spill from it to probation, discarding those entries
+    // that won't fit.
+    // Because we don't allow evictions going from eden to protected, this may take a few rounds.
+    int would_evict = 1;
+
+    while(this->oversize() && would_evict) {
+        would_evict = _spill_from_ring_to_ring(this->ring_eden, this->ring_protected, nullptr, false);
+        would_evict += _spill_from_ring_to_ring(this->ring_protected, this->ring_probation);
+    }
+
+    // Now, only what's left is added.
+    for (TempCacheFiller::iterator it = temp_filler.begin(), end = temp_filler.end();
+         it != end;
+         ++it ) {
+        if (this->data.count(it->oid()) != 0)
+            added.push_back(it->oid());
+    }
+    return added;
 }
 
-/**
- * Does not rebalance rings. Use only when no evictions are necessary.
- */
-void Cache::replace_entry(AbstractEntry_p& new_entry, AbstractEntry_p& prev_entry,
-                          size_t prev_weight )
+#define if_existing(K,V) OidEntryMap::iterator it(this->data.find(K)); do { \
+    if (it == this->data.end()) \
+        return V; \
+    } while (0); \
+    ICacheEntry& existing_entry = *it;
+
+void Cache::store_and_make_MRU(const ProposedCacheEntry& proposed)
 {
-    assert(!new_entry->in_cache());
-    assert(prev_entry->in_cache());
+    if_existing(proposed.oid(), );
 
-    Generation& generation = *(*prev_entry).generation();
-    // Must replace in our generation ring...
-    generation.replace_entry(*new_entry.get(), prev_weight, prev_entry.get());
-    // ... and our map
-    if (new_entry != prev_entry) {
-        // Replace the shared pointer, possibly causing
-        // prev_entry to go invalid.
-        this->data[new_entry->key] = new_entry;
-    }
-}
-
-void Cache::update_mru(AbstractEntry& entry)
-{
-    // XXX: All this checking of ring equality isn't very elegant.
-    // Should we have three functions? But then we'd have three places
-    // to remember to resize the ring
-    Protected& protected_ring = this->ring_protected;
-    Probation& probation_ring = this->ring_probation;
-    Eden& eden_ring = this->ring_eden;
-    Generation& home_ring = *entry.generation();
-    this->rejects.clear();
-
-    // Always update the frequency
-    entry.frequency++;
-
-    if (home_ring == eden_ring) {
-        // The simplest thing to do is to act like a delete and an
-        // addition, since adding to eden always rebalances the rings
-        // in addition to moving it to head.
-
-        // This might be ever-so-slightly slower in the case where the size
-        // went down or there was still room.
-        home_ring.remove(entry);
-        eden_ring.add_and_evict(entry);
-        return;
-    }
-
-    if (home_ring == probation_ring) {
-        protected_ring.adopt(entry);
-    }
-    else {
-        assert(home_ring == protected_ring);
-        home_ring.move_to_head(entry);
-    }
-
-    if (protected_ring.oversize()) {
-        // bubble down, rejecting as needed
-        _spill_from_ring_to_ring(protected_ring, probation_ring, &entry,
-                                 true, /*victims*/ false /*don't oversize*/,
-                                 this->rejects);
-    }
-}
-
-
-void Cache::store_and_make_MRU(OID_t oid,
-                               char* buf, size_t len,
-                               const TID_t new_tid)
-{
-    AbstractEntry_p existing_entry = this->data.at(oid);
-    size_t old_weight = existing_entry->weight();
-
-    AbstractEntry_p new_entry = existing_entry->with_later(existing_entry, buf, len, new_tid);
+    ICacheEntry* new_entry = existing_entry.adding_value(proposed);
 
     assert(new_entry);
-    if (new_entry != existing_entry) {
-        assert(!new_entry->in_cache());
-        this->delitem(oid);
-        this->ring_protected.add(*new_entry);
-        this->data[oid] = new_entry;
-    }
-    else {
-        existing_entry->generation()->notice_weight_change(*existing_entry, old_weight);
-    }
-    if (new_entry->weight() > old_weight) {
-        this->update_mru(*new_entry);
-        this->_handle_evicted(this->rejects);
-    }
-    else {
-        assert(new_entry->weight() == old_weight);
-    }
-
+    assert(new_entry->generation());
+    new_entry->generation()->on_hit(*new_entry);
 }
 
 /**
@@ -594,56 +570,41 @@ void Cache::store_and_make_MRU(OID_t oid,
  */
 void Cache::delitem(OID_t key)
 {
-    if (!this->data.count(key)) {
-        return;
-    }
+    if_existing(key,)
 
-    AbstractEntry& entry = *this->data.at(key);
-    assert(entry.generation());
-    entry.generation()->remove(entry);
-    assert(entry.generation() == nullptr);
-    this->data.erase(key);
+    assert(existing_entry.generation());
+    existing_entry.generation()->remove(existing_entry);
+    assert(existing_entry.generation() == nullptr);
+    this->data.erase(it);
+
+    if (existing_entry.can_delete()) {
+        delete &existing_entry;
+    }
 }
 
-RSR_SINLINE
-void _update(Cache* cache,
-             AbstractEntry_p& existing_entry,
-             size_t prev_weight,
-             AbstractEntry_p& new_entry)
+static void maybe_delete_existing_entry(ICacheEntry* new_entry,
+                                        ICacheEntry& existing_entry)
 {
-    if (!new_entry) {
-        cache->delitem(existing_entry->key);
-    }
-    else if (new_entry == existing_entry) {
-        existing_entry->generation()->notice_weight_change(*existing_entry, prev_weight);
-    }
-    else {
-        cache->replace_entry(new_entry, existing_entry, prev_weight);
+    if (new_entry && new_entry != &existing_entry && existing_entry.can_delete()) {
+        delete &existing_entry;
     }
 
 }
 
 void Cache::delitem(OID_t key, TID_t tid)
 {
-    if (!this->contains(key))
-        return;
+    if_existing(key,);
 
-    AbstractEntry_p& existing_entry = this->data.at(key);
-    const size_t old_weight = existing_entry->weight();
-    AbstractEntry_p new_entry = existing_entry->discarding_tids_before(existing_entry, tid);
-    _update(this, existing_entry, old_weight, new_entry);
+    ICacheEntry* new_entry = existing_entry.discarding_tids_before(tid);
+    maybe_delete_existing_entry(new_entry, existing_entry);
 }
 
 void Cache::freeze(OID_t key, TID_t tid)
 {
-    if (!this->contains(key)) {
-        return;
-    }
+    if_existing(key,);
 
-    AbstractEntry_p& existing_entry = this->data.at(key);
-    const size_t old_weight = existing_entry->weight();
-    AbstractEntry_p new_entry = existing_entry->freeze_to_tid(existing_entry, tid);
-    _update(this, existing_entry, old_weight, new_entry);
+    ICacheEntry* new_entry = existing_entry.freeze_to_tid(tid);
+    maybe_delete_existing_entry(new_entry, existing_entry);
 }
 
 bool Cache::contains(const OID_t key) const
@@ -651,27 +612,38 @@ bool Cache::contains(const OID_t key) const
     return this->data.count(key) == 1;
 }
 
-const AbstractEntry_p& Cache::get(const OID_t key) const
+ICacheEntry* Cache::get(const OID_t key)
 {
-    return this->data.at(key);
+    if_existing(key, nullptr);
+    return &existing_entry;
+}
+
+SVCacheEntry* Cache::_get_or_peek(const OID_t key, const TID_t tid, const bool peek)
+{
+    if_existing(key, nullptr);
+    SVCacheEntry* matching = existing_entry.matching_tid(tid);
+    if (matching && !peek)
+        existing_entry.generation()->on_hit(existing_entry);
+    return matching;
+}
+
+SVCacheEntry* Cache::peek(const OID_t key, const TID_t tid)
+{
+    return _get_or_peek(key, tid, true);
+}
+
+SVCacheEntry* Cache::get(const OID_t key, const TID_t tid)
+{
+    return _get_or_peek(key, tid, false);
 }
 
 void Cache::age_frequencies()
 {
     OidEntryMap::iterator end = this->data.end();
     for (OidEntryMap::iterator it = this->data.begin(); it != end; it++) {
-        it->second->frequency = it->second->frequency / 2;
+        it->frequency = it->frequency / 2;
+        // TODO: Shouldn't we remove them if they hit 0?
     }
-}
-
-size_t Cache::len() {
-    return this->data.size();
-}
-
-void Cache::on_hit(OID_t key)
-{
-    AbstractEntry& entry = *this->data[key];
-    entry.generation()->on_hit(*this, entry);
 }
 
 size_t Cache::weight() const
@@ -681,3 +653,8 @@ size_t Cache::weight() const
         + this->ring_probation.sum_weights()
         + sizeof(Cache);
 }
+
+
+// Local Variables:
+// flycheck-clang-include-path: ("../../../include" "/opt/local/Library/Frameworks/Python.framework/Versions/2.7/include/python2.7")
+// End:

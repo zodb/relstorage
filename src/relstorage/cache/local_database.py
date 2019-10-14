@@ -196,15 +196,8 @@ class Database(ABC):
 
     def fetch_rows_by_priority(self):
         """
-        The returned cursor will iterate ``(zoid, key tid, state, tid)``
-        from most useful to least useful.
-
-        The extra tid is to allow for a uniform row syntax when we
-        don't want to do any key tid transforms. The row can neatly be
-        sliced as ``[r:2], r[2:]`` to get ``(key, value)`` pairs.
-
-        The *key tid* is -1 if the row was frozen, and equal to the actual tid
-        otherwise.
+        The returned cursor will iterate ``(zoid, was_frozen, state, tid, frequency)``
+        from most frequently used and newest, to least frequently used and oldest.
         """
         # Do this in a new cursor so it can interleave.
 
@@ -225,7 +218,7 @@ class Database(ABC):
         # at all the rows (it doesn't understand that cum_size can only increase.)
         # Plus, window functions were only added to sqlite 3.25
         cur = self.connection.execute("""
-        SELECT zoid, CASE was_frozen WHEN 1 THEN -1 ELSE tid END, state, tid
+        SELECT zoid, CASE was_frozen WHEN 1 THEN -1 ELSE tid END, state, tid, frequency
         FROM object_state
         ORDER BY frequency DESC, tid DESC
         """)

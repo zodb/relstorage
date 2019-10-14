@@ -11,12 +11,32 @@
 # FOR A PARTICULAR PURPOSE.
 #
 ##############################################################################
-
+import sys
 import os
 from setuptools import setup
 from setuptools import find_packages
 from setuptools import Extension
-from Cython.Build import cythonize
+
+# Based on code from
+# http://cython.readthedocs.io/en/latest/src/reference/compilation.html#distributing-cython-modules
+def _dummy_cythonize(extensions, **_kwargs):
+    for extension in extensions:
+        sources = []
+        for sfile in extension.sources:
+            path, ext = os.path.splitext(sfile)
+            if ext in ('.pyx', '.py'):
+                ext = '.c'
+                sfile = path + ext
+            sources.append(sfile)
+        extension.sources[:] = sources
+    return extensions
+
+try:
+    from Cython.Build import cythonize
+except ImportError:
+    # The .c files had better already exist.
+    cythonize = _dummy_cythonize
+
 
 def read_file(*path):
     base_dir = os.path.dirname(__file__)
@@ -26,6 +46,10 @@ def read_file(*path):
     return result
 
 VERSION = read_file('version.txt').strip()
+PYPY = hasattr(sys, 'pypy_version_info')
+WINDOWS = sys.platform.startswith("win")
+PY3 = sys.version_info[0] == 3
+PY2 = not PY3
 
 memcache_require = [
     'pylibmc; platform_python_implementation=="CPython" and sys_platform != "win32"',
@@ -117,12 +141,16 @@ setup(
     ],
     ext_modules=cythonize(
         [
-            Extension(name="relstorage.cache.cache",
-                      language="c++",
-                      sources=[
-                          'src/relstorage/cache/cache.pyx',
-                          'src/relstorage/cache/c_cache.cpp',
-                      ]),
+            Extension(
+                name="relstorage.cache.cache",
+                language="c++",
+                sources=[
+                    'src/relstorage/cache/cache.pyx',
+                    'src/relstorage/cache/c_cache.cpp',
+                ],
+                include_dirs=['include'],
+                extra_compile_args=["/EHsc"] if WINDOWS and PY2 else [],
+            ),
 
         ],
         annotate=True,
@@ -130,8 +158,8 @@ setup(
             'language_level': '3str',
             'always_allow_keywords': False,
             'infer_types': False,
-            'nonecheck': False
-        }
+            'nonecheck': False,
+        },
     ),
     tests_require=tests_require,
     extras_require={
