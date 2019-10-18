@@ -91,7 +91,7 @@ class TestOracleDialect(TestCase):
             str(stmt),
             'SELECT tid, username, description, extension, '
             "CASE WHEN packed = 'Y' THEN 1 ELSE 0 END "
-            'FROM transaction WHERE (tid >= :literal_0)'
+            'FROM transaction WHERE (tid >= 0)'
         )
 
 class TestMoverQueries(TestCase):
@@ -173,11 +173,11 @@ class TestDatabaseIteratorQueries(TestCase):
             stmt,
             'SELECT tid, username, description, extension, 0 '
             'FROM transaction '
-            "WHERE ((packed = 'N' AND tid <> :literal_0)) "
+            "WHERE ((packed = 'N' AND tid <> 0)) "
             'ORDER BY tid DESC'
         )
 
         self.assertEqual(
             params,
-            {'literal_0': 0}
+            None
         )

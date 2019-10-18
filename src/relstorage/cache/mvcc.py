@@ -99,7 +99,9 @@ class _TransactionRangeObjectIndex(OidTMap):
         else:
             # If we had no changes, then either we polled for the same tid
             # as we got, or we didn't try to poll for changes at all.
-            assert complete_since_tid is None or complete_since_tid == highest_visible_tid
+            assert complete_since_tid is None or complete_since_tid == highest_visible_tid, (
+                complete_since_tid, highest_visible_tid
+            )
 
     def verify(self, initial=True):
         # Check that our constraints are met
@@ -596,7 +598,7 @@ class MVCCDatabaseCoordinator(DetachableMVCCDatabaseCoordinator):
 
     def __initial_poll(self, cache, conn, cursor):
         # Initial poll for the world.
-        change_iter, tid = cache.adapter.poller.poll_invalidations(conn, cursor, None, None)
+        change_iter, tid = cache.adapter.poller.poll_invalidations(conn, cursor, None)
 
         assert change_iter is None
         new_index = None
@@ -637,7 +639,7 @@ class MVCCDatabaseCoordinator(DetachableMVCCDatabaseCoordinator):
         change_iter, polled_tid = cache.adapter.poller.poll_invalidations(
             conn, cursor,
             polling_since,
-            None)
+        )
 
         if polled_tid == 0 or polled_tid < polling_since:
             assert change_iter is None

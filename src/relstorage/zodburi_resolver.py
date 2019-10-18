@@ -120,6 +120,16 @@ class OracleAdapterHelper(Resolver):
             return OracleAdapter(options=options, **kw)
         return factory, unused
 
+class SqliteAdapterHelper(Resolver):
+    _string_args = ('path',)
+
+    def __call__(self, parsed_uri, kw):
+        kw, unused = self.interpret_kwargs(kw)
+
+        def factory(options):
+            from relstorage.adapters.sqlite.adapter import Sqlite3Adapter
+            return Sqlite3Adapter(options=options, **kw)
+        return factory, unused
 
 # The relstorage support is inspired by django-zodb.
 
@@ -159,6 +169,7 @@ class RelStorageURIResolver(Resolver):
         uri = uri.replace('postgres://', 'http://', 1)
         uri = uri.replace('mysql://', 'http://', 1)
         uri = uri.replace('oracle://', 'http://', 1)
+        uri = uri.replace('sqlite://', 'http://', 1)
         parsed_uri = urlparse.urlsplit(uri)
         kw = dict(parse_qsl(parsed_uri.query))
 
@@ -177,3 +188,4 @@ class RelStorageURIResolver(Resolver):
 postgresql_resolver = RelStorageURIResolver(PostgreSQLAdapterHelper())
 mysql_resolver = RelStorageURIResolver(MySQLAdapterHelper())
 oracle_resolver = RelStorageURIResolver(OracleAdapterHelper())
+sqlite_resolver = RelStorageURIResolver(SqliteAdapterHelper())

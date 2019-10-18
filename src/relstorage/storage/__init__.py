@@ -283,7 +283,7 @@ class RelStorage(LegacyMethodsMixin,
         if before and not self._options.read_only:
             options = self._options.new_instance(read_only=True)
         adapter = self._adapter.new_instance()
-        cache = self._cache.new_instance(before=before)
+        cache = self._cache.new_instance(before=before, adapter=adapter)
         blobhelper = self.blobhelper.new_instance(adapter=adapter)
         other = type(self)(adapter=adapter, name=self.__name__,
                            create=False, options=options, cache=cache,
@@ -367,6 +367,7 @@ class RelStorage(LegacyMethodsMixin,
         self._oids = None
         self._load_connection = ClosedConnection()
         self._store_connection = ClosedConnection()
+        self._adapter.release()
         if not self._instances:
             self._closed = True
 
@@ -393,6 +394,7 @@ class RelStorage(LegacyMethodsMixin,
 
         self._tpc_phase = None
         self._oids = None
+        self._adapter.close()
 
     def __len__(self):
         return self._adapter.stats.get_object_count()

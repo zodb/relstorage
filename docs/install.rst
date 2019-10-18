@@ -12,11 +12,11 @@ You can install RelStorage using pip::
 If you use a recent version of pip to install RelStorage on a
 supported platform (OS X, Windows or "manylinx"), you can get a
 pre-built binary wheel. If you install from source or on a different
-platform, you will need to have a functioning C compiler and the
-ability to compile `CFFI extensions
-<https://cffi.readthedocs.io/en/latest/installation.html>`_.
+platform, you will need to have a functioning C/C++ compiler and the
+ability to compile `Cython extensions
+<https://cython.readthedocs.io/>`_.
 
-RelStorage requires ZODB and ZEO 5. To use ZODB and ZEO 4 (which
+RelStorage requires ZODB 5. To use ZODB and ZEO 4 (which
 supports Python 2.7.8 and earlier), install RelStorage 2.1. If you
 need to use even older versions of ZODB/ZEO, install RelStorage 1.6.
 Likewise, if you need Python 2.6 support, install RelStorage 1.6 (note
@@ -27,6 +27,10 @@ Database Adapter
 
 You also need the Python database adapter that corresponds with your
 database.
+
+Support for SQLite is provided by the standard library :mod:`sqlite3`
+module; no extra library is required. The underlying SQLite database
+must be at least version 3.8.3.
 
 On CPython2, install psycopg2 2.8+, mysqlclient 1.4+, or cx_Oracle
 5.2+ (but use caution with 5.2.1+); PyMySQL 0.7, MySQL
@@ -98,11 +102,19 @@ automatically if the system is monkey-patched. PyMySQL, MySQL
 Connector/Python (without its C extension), and pg8000 are compatible
 (cooperative) with gevent when the system is monkey-patched.
 
+Because SQLite does not use the network, it does not provide any
+opportunities for gevent to switch. (Potentially a SQLite progress
+handler could be used to manually switch at regular intervals, but
+most queries are small, quick queries.)
+
 For additional details and warnings, see the "driver" section for each database in
 :doc:`db-specific-options`.
 
 Memcache Integration
 ====================
+
+.. note:: Memcache support is deprecated and will be removed in a
+          future release.
 
 If you want to use Memcache servers as an external shared cache for
 RelStorage clients, you'll need to install either `pylibmc

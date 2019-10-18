@@ -68,3 +68,10 @@ class MySQLAdapterFactory(BaseConfig):
             if value is not None:
                 params[key] = value
         return MySQLAdapter(options=options, **params)
+
+
+class Sqlite3AdapterFactory(BaseConfig):
+    def create(self, options):
+        from .adapters.sqlite.adapter import Sqlite3Adapter
+        return Sqlite3Adapter(path=self.config.path,
+                              options=options)

@@ -90,7 +90,7 @@ generated-members=exc_clear
 # (useful for classes with attributes dynamically set). This supports can work
 # with qualified names.
 
-ignored-classes=SectionValue
+ignored-classes=SectionValue,Lazy,_v_c
 
 # List of module names for which member attributes should not be checked
 # (useful for modules/projects where namespaces are manipulated during runtime

@@ -32,72 +32,73 @@ class Poller(object):
     # The zoid is the primary key on both ``current_object`` (history
     # preserving) and ``object_state`` (history free), so these
     # queries are guaranteed to only produce an OID once.
-    _list_changes_range_query = Schema.all_current_object.select(
-        Schema.all_current_object.c.zoid, Schema.all_current_object.c.tid
-    ).where(
-        Schema.all_current_object.c.tid > Schema.all_current_object.bindparam('min_tid')
-    ).and_(
-        Schema.all_current_object.c.tid <= Schema.all_current_object.bindparam('max_tid')
-    ).prepared()
 
     _poll_inv_query = Schema.all_current_object.select(
         Schema.all_current_object.c.zoid, Schema.all_current_object.c.tid
     ).where(
         Schema.all_current_object.c.tid > Schema.all_current_object.bindparam('tid')
+    ).order_by(
+        Schema.all_current_object.c.tid, 'DESC'
     ).prepared()
 
-    _poll_inv_exc_query = _poll_inv_query.and_(
-        Schema.all_current_object.c.tid != Schema.all_current_object.bindparam('self_tid')
-    ).prepared()
-
-    poll_query = Schema.all_transaction.select(
+    _poll_newest_tid_query = Schema.all_transaction.select(
         func.max(Schema.all_transaction.c.tid)
     ).prepared()
 
-    def __init__(self, driver, keep_history, runner, revert_when_stale):
+    def __init__(self, driver, keep_history, runner,
+                 revert_when_stale, transactions_may_go_backwards):
         self.driver = driver
         self.keep_history = keep_history
         self.runner = runner
         self.revert_when_stale = revert_when_stale
+        self.transactions_may_go_backwards = transactions_may_go_backwards
 
-    def poll_invalidations(self, conn, cursor, prev_polled_tid, ignore_tid):
+    def get_current_tid(self, cursor):
+        self._poll_newest_tid_query.execute(cursor)
+        rows = cursor.fetchall() or ((0,),)
+        current_tid, = rows[0]
+        return current_tid or 0
+
+    def poll_invalidations(self, conn, cursor, prev_polled_tid):
         """
-        Polls for new transactions.
-
-        *conn* and *cursor* must have been created previously by
-        ``open_for_load()`` (a snapshot connection). prev_polled_tid
-        is the tid returned at the last poll, or None if this is the
-        first poll. If ignore_tid is not None, changes committed in
-        that transaction will not be included in the list of changed
-        OIDs.
-
-        Returns ``(changes, new_polled_tid)``, where *changes* is
-        either an iterable of ``(oid_int, tid_int)`` that have changed, or
-        ``None`` to indicate that the changes are too complex to list
-        --- this must cause local storage caches to be invalidated..
-        *new_polled_tid* can be 0 if there is no data in the database.
+        See ``IPoller``
         """
         # pylint:disable=unused-argument
-        # find out the tid of the most recent transaction.
-        # TODO: We could do this all in a single query if we add an order-by
-        # tid. We'd want to take care to only read the first row here, and then
-        # return a generator or itertools.chain to yield the row we popped first,
-        # followed by the remaining rows.
-        self.poll_query.execute(cursor)
-        rows = cursor.fetchall()
-        if not rows or not rows[0][0]:
-            # No data, must be fresh database, without even
-            # the root object.
-            # Anything we had cached is now definitely invalid.
-            return None, 0
 
-        new_polled_tid = rows[0][0]
+        # Some databases, in some isolation modes, only establish a snapshot
+        # of a particular table when the table is first accessed in a given transaction.
+        # (Looking at you, MySQL on Windows). Thus if we're accessing two tables,
+        # as we would in history-preserving mode, we could get slightly different answers:
+        # The current_object table might move forward by a transaction while we're accessing the
+        # transaction table, leading to the results being inconsistent.
+        # For this reason, we only perform a single poll query against the actual object data.
+        # We order this to get the newest TID first, and we return a chain iterator
+        #
+        # Return the cursor: let it be its own iterable. This could be a
+        # very large result set. For things that matter, like gevent,
+        # consume in batches allowing periodic switches.
         if prev_polled_tid is None:
             # This is the first time the connection has polled.
             # We'd have to list the entire database for the changes,
-            # which is clearly no good. So we have no information
-            # about the state of anything we have cached.
-            return None, new_polled_tid
+            # which is clearly no good, so we want to fetch just the newest
+            # TID.
+            return None, self.get_current_tid(cursor)
+
+        params = {'tid': prev_polled_tid}
+        self._poll_inv_query.execute(cursor, params)
+        rows = cursor.fetchall()
+        if not rows:
+            if self.transactions_may_go_backwards:
+                # No detectable changes. Perhaps we went backwards? Check that,
+                # but only if it's a possibility
+                self._poll_newest_tid_query.execute(cursor)
+                new_polled_tid = self.get_current_tid(cursor)
+            else:
+                # Assume we're fully caught up and that transactions cannot
+                # go back
+                new_polled_tid = prev_polled_tid
+        else:
+            new_polled_tid = rows[0][1]
 
         if new_polled_tid == prev_polled_tid:
             # No transactions have been committed since prev_polled_tid.
@@ -141,30 +142,4 @@ class Poller(object):
         #
         # Thus we became convinced it was safe to remove the check in
         # history-preserving databases.
-
-        # Get the list of changed OIDs and return it.
-        stmt = self._poll_inv_query
-        params = {'tid': prev_polled_tid}
-        if ignore_tid is not None:
-            stmt = self._poll_inv_exc_query
-            params['self_tid'] = ignore_tid
-
-        stmt.execute(cursor, params)
-        # See list_changes: This could be a large result set.
-        changes = cursor
-        return changes, new_polled_tid
-
-    def list_changes(self, cursor, after_tid, last_tid):
-        """
-        See ``IPoller``.
-        """
-        if after_tid == last_tid:
-            # small optimization in case we're asked for the same.
-            # there can be no changes where change > X and change <= X
-            return ()
-        params = {'min_tid': after_tid, 'max_tid': last_tid}
-        self._list_changes_range_query.execute(cursor, params)
-        # Return the cursor: let it be its own iterable. This could be a
-        # very large result set. For things that matter, like gevent,
-        # consume in batches allowing periodic switches.
-        return cursor
+        return rows, new_polled_tid

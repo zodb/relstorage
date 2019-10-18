@@ -349,6 +349,14 @@ class IConnectionManager(Interface):
             are closed before this method returns).
         """
 
+    def begin(conn, cursor):
+        """
+        Call this on a store connection after restarting it.
+
+        This lets the store connection know that it may need to begin a
+        transaction, even if it was freshly opened.
+        """
+
     def open_and_call(callback):
         """Call a function with an open connection and cursor.
 
@@ -754,10 +762,13 @@ class IObjectMover(Interface):
 
     def detect_conflict(cursor):
         """
-        Find all conflicts in the data about to be committed.
+        Find all conflicts in the data about to be committed (as stored
+        by :meth:`store_temps`)
 
-        If there is a conflict, returns a sequence of
-        ``(oid, committed_tid, attempted_committed_tid, committed_state)``.
+        Returns a sequence of
+        ``(oid, committed_tid, attempted_committed_tid, committed_state)`` where
+        each entry refers to a conflicting object. The *committed_state* **must** be
+        returned.
 
         This method should be called during the ``tpc_vote`` phase of a transaction,
         with :meth:`ILocker.lock_current_objects` held.
@@ -857,6 +868,11 @@ class IOIDAllocator(Interface):
         :meth:`new_oids`) is greater than the given *oid_int*.
         """
 
+    def reset_oid(cursor):
+        """
+        Cause the sequence of OIDs to begin again from the beginning.
+        """
+
 
 class IPackUndo(Interface):
     """Perform pack and undo operations"""
@@ -934,23 +950,26 @@ class IPackUndo(Interface):
 class IPoller(Interface):
     """Poll for new data"""
 
-    def poll_invalidations(conn, cursor, prev_polled_tid, ignore_tid):
-        """Polls for new transactions.
+    def poll_invalidations(conn, cursor, prev_polled_tid):
+        """
+        Polls for new transactions.
 
-        conn and cursor must have been created previously by
-        open_for_load(). prev_polled_tid is the tid returned at the
-        last poll, or None if this is the first poll. If ignore_tid is
-        not None, changes committed in that transaction will not be
-        included in the list of changed OIDs.
+        *conn* and *cursor* must have been created previously by
+        ``open_for_load()`` (a snapshot connection). *prev_polled_tid*
+        is the tid returned at the last poll, or None if this is the
+        first poll.
 
         If the database has disconnected, this method should raise one
         of the exceptions listed in the disconnected_exceptions
         attribute of the associated IConnectionManager.
 
-        Returns (changes, new_polled_tid), where changes is either an
-        iterable of (oid, tid) that have changed, or None to indicate that
-        the changes are too complex to list. new_polled_tid is never
-        None. Important: You must consume the changes iterable, and you must
+        Returns ``(changes, new_polled_tid)``, where changes is either
+        an iterable of (oid, tid) that have changed, or None to
+        indicate that the changes are too complex to list; this must
+        cause local storage caches to be invalidated.
+        ``new_polled_tid`` is never None.
+
+        Important: You must consume the changes iterable, and you must
         not make any other queries until you do.
 
         This method may raise :class:`StaleConnectionError` (a
@@ -960,23 +979,6 @@ class IPoller(Interface):
         and most transaction middleware will catch it and retry the
         transaction.
         """
-
-    def list_changes(cursor, after_tid, last_tid):
-        """
-        Return the ``(oid, tid)`` values changed in a range of
-        transactions.
-
-        The returned iterable (which is not guaranteed to have a
-        defined ``len``) must include the latest changes in the range
-        *after_tid* < ``tid`` <= *last_tid*.
-
-        The ``oid`` values returned will be distinct: each ``oid``
-        will have been changed in exactly one ``tid``.
-
-        Important: You must consume the returned iterable in its entirety,
-        and you must not make any other queries until you do.
-        """
-
 
 class ISchemaInstaller(Interface):
     """Install the schema in the database, clear it, or uninstall it"""
@@ -1148,8 +1150,18 @@ class IRelStorageAdapter(Interface):
         """
         Return an instance for use by another RelStorage instance.
 
-        Adapters that are stateless can simply return self.  Adapters
+        Adapters that are stateless can simply return self. Adapters
         that have mutable state must make a clone and return it.
+        """
+
+    def release():
+        """
+        Release the resources held uniquely by this instance.
+        """
+
+    def close():
+        """
+        Release the resources held by this instance and all child instances.
         """
 
     def __str__():

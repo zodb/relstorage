@@ -1,0 +1,117 @@
+# -*- coding: utf-8 -*-
+##############################################################################
+#
+# Copyright (c) 2019 Zope Foundation and Contributors.
+# All Rights Reserved.
+#
+# This software is subject to the provisions of the Zope Public License,
+# Version 2.1 (ZPL).  A copy of the ZPL should accompany this distribution.
+# THIS SOFTWARE IS PROVIDED "AS IS" AND ANY AND ALL EXPRESS OR IMPLIED
+# WARRANTIES ARE DISCLAIMED, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+# WARRANTIES OF TITLE, MERCHANTABILITY, AGAINST INFRINGEMENT, AND FITNESS
+# FOR A PARTICULAR PURPOSE.
+#
+##############################################################################
+
+"""Integration tests for sqlite support."""
+
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+import tempfile
+import os.path
+
+
+from relstorage.adapters.sqlite.adapter import Sqlite3Adapter
+from relstorage.options import Options
+
+from relstorage.tests.util import AbstractTestSuiteBuilder
+from relstorage.tests.util import skipOnAppveyor
+
+class Sqlite3AdapterMixin(object):
+
+    def __get_db_name(self):
+        if self.keep_history:
+            db = self.base_dbname
+        else:
+            db = self.base_dbname + '_hf'
+        return db
+
+    def __get_adapter_options(self, dbname=None):
+        dbname = dbname or self.__get_db_name()
+        assert isinstance(dbname, str), (dbname, type(dbname))
+        # Our layers tend to change the temporary directory,
+        # and then destroy it when the layer is torn down.
+        # So our files don't persist. This can show a different set of
+        # bugs than re-using an existing schema that gets zapped.
+        path = os.path.join(
+            #"/tmp",
+            tempfile.gettempdir(),
+            dbname + '.sqlite3')
+
+        return {
+            'path': path,
+        }
+
+    def make_adapter(self, options, db=None):
+        return Sqlite3Adapter(
+            options=options,
+            **self.__get_adapter_options(db)
+        )
+
+    def get_adapter_class(self):
+        return Sqlite3Adapter
+
+    def get_adapter_zconfig(self):
+        options = self.__get_adapter_options()
+        options['driver'] = self.driver_name
+        formatted_options = '\n'.join(
+            '     %s %s' % (k, v)
+            for k, v in options.items()
+        )
+
+        return u"""
+        <sqlite3>
+            %s
+        </sqlite3>
+        """ % (formatted_options)
+
+    def verify_adapter_from_zconfig(self, adapter):
+        self.assertEqual(adapter.connmanager.path, self.__get_adapter_options()['path'])
+
+
+class Sqlite3TestSuiteBuilder(AbstractTestSuiteBuilder):
+
+    __name__ = 'Sqlite3'
+
+    def __init__(self):
+        from relstorage.adapters.sqlite import drivers
+        super(Sqlite3TestSuiteBuilder, self).__init__(
+            drivers,
+            Sqlite3AdapterMixin,
+            extra_test_classes=()
+        )
+
+    def _compute_large_blob_size(self, use_small_blobs):
+        return Options().blob_chunk_size
+
+    def _make_check_class_HistoryPreservingRelStorageTests(self, bases,
+                                                           name, klass_dict=None):
+        klass = self._default_make_check_class(bases, name, klass_dict=klass_dict)
+        for mname in (
+                # For some reason this fails to get the undo log. Something
+                # to do with the way we manage the connection? Seen on Python 3.7
+                # with sqlite 3.28
+                'checkPackUnlinkedFromRoot',
+                # Ditto, but on Python 2.7 with sqlite 3.14
+                'checkTransactionalUndoAfterPackWithObjectUnlinkFromRoot',
+        ):
+            meth = getattr(klass, mname)
+            meth = skipOnAppveyor("Fails to get the undo log")(meth)
+            setattr(klass, mname, meth)
+        return klass
+
+
+
+def test_suite():
+    return Sqlite3TestSuiteBuilder().test_suite()

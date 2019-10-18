@@ -342,9 +342,6 @@ class HistoryPreservingRelStorageTests(GenericRelStorageTests,
         # The transaction.empty column gets renamed in 'prepare'
         adapter = self._storage._adapter
         schema = adapter.schema
-        test_conn, test_cursor = adapter.connmanager.open()
-        self.addCleanup(adapter.connmanager.close, test_conn, test_cursor)
-
         # First, we have to flip it back to the old name, since we installed
         # with the name we want.
         stmt = schema._rename_transaction_empty_stmt
@@ -355,19 +352,23 @@ class HistoryPreservingRelStorageTests(GenericRelStorageTests,
         stmt = stmt.replace('empty', 'is_empty')
         stmt = stmt.replace("FOOBAR", 'empty')
 
-        __traceback_info__ = stmt
+        test_conn, test_cursor = adapter.connmanager.open()
         try:
-            test_cursor.execute(stmt)
-        except Exception as e:
-            # XXX: This should be more strict. We really just
-            # want to catch the db-api specific ProgrammingError,
-            # and only on MySQL 8.0+. But we don't have a good way to do that.
-            raise unittest.SkipTest(str(e))
 
-        self.assertTrue(schema._needs_transaction_empty_update(test_cursor))
+            try:
+                test_cursor.execute(stmt)
+            except Exception as e:
+                # XXX: This should be more strict. We really just
+                # want to catch the db-api specific ProgrammingError,
+                # and only on MySQL 8.0+. But we don't have a good way to do that.
+                raise unittest.SkipTest(str(e))
 
-        schema.update_schema(test_cursor, None)
-        self.assertFalse(schema._needs_transaction_empty_update(test_cursor))
+            self.assertTrue(schema._needs_transaction_empty_update(test_cursor))
+
+            schema.update_schema(test_cursor, None)
+            self.assertFalse(schema._needs_transaction_empty_update(test_cursor))
+        finally:
+            adapter.connmanager.close(test_conn, test_cursor)
 
     def __setup_checkImplementsIExternalGC(self):
         from zope.interface.verify import verifyObject

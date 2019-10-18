@@ -22,6 +22,10 @@ from ...drivers import AbstractModuleDriver
 from ...drivers import implement_db_driver_options
 from ...sql import Compiler
 from ...sql import DefaultDialect
+from ...sql import OID
+from ...sql import TID
+from ...sql import BinaryString
+from ...sql import State
 
 database_type = 'mysql'
 
@@ -39,10 +43,22 @@ class MySQLCompiler(Compiler):
         return '?'
 
     def _quote_query_for_prepare(self, query):
-        return '"{query}"'.format(query=query)
+        return "'{query}'".format(query=query)
 
 class MySQLDialect(DefaultDialect):
 
+    datatype_map = dict(DefaultDialect.datatype_map)
+    datatype_map.update({
+        OID: 'BIGINT UNSIGNED',
+        TID: 'BIGINT UNSIGNED',
+        BinaryString: 'BLOB',
+        #MD5: 'CHAR(32) CHARACTER SET ascii',
+        State: 'LONGBLOB',
+
+    })
+
+    CONSTRAINT_AUTO_INCREMENT = 'AUTO_INCREMENT'
+    STMT_TABLE_TRAILER = 'ENGINE = InnoDB'
     def compiler_class(self):
         return MySQLCompiler
 
@@ -66,39 +82,48 @@ class IterateFetchmanyMixin(object):
 
 class AbstractMySQLDriver(AbstractModuleDriver):
 
-    # Don't try to decode pickle states as UTF-8 (or whatever the
-    # environment is configured as); See
-    # https://github.com/zodb/relstorage/issues/57. This varies
-    # depending on Python 2/3 and which driver.
-    #
-    # In the past, we used 'SET names binary' for everything except
-    # mysqlclient on Python 3, which set the character_set_results
-    # only (because of an issue decoding column names (See
-    # https://github.com/zodb/relstorage/issues/213)). But having
-    # binary be the default encoding for string literals prevents
-    # using the JSON type. So we took another look at connection
-    # parameters and got things working with ``character_set_results``
-    # everywhere.
-    MY_CHARSET_STMT = 'SET character_set_results = binary'
+    MY_SESSION_VARS = {
+        # Don't try to decode pickle states as UTF-8 (or whatever the
+        # environment is configured as); See
+        # https://github.com/zodb/relstorage/issues/57. This varies
+        # depending on Python 2/3 and which driver.
+        #
+        # In the past, we used 'SET names binary' for everything except
+        # mysqlclient on Python 3, which set the character_set_results
+        # only (because of an issue decoding column names (See
+        # https://github.com/zodb/relstorage/issues/213)). But having
+        # binary be the default encoding for string literals prevents
+        # using the JSON type. So we took another look at connection
+        # parameters and got things working with ``character_set_results``
+        # everywhere.
+        'character_set_results': 'binary',
 
-    # Make the default timezone UTC. That way UTC_TIMESTAMP()
-    # and UNIX_TIMESTAMP() and FROM_UNIXTIME are all self-consistent.
-    # Subclasses can set to None if they don't need to do this.
-    # Starting in 8.0.17 this is hintable using SET_VAR.
-    MY_TIMEZONE_STMT = "SET time_zone = '+00:00'"
+        # Make the default timezone UTC. That way UTC_TIMESTAMP()
+        # and UNIX_TIMESTAMP() and FROM_UNIXTIME are all self-consistent.
+        # Subclasses can set to None if they don't need to do this.
+        # Starting in 8.0.17 this is hintable using SET_VAR.
+        "time_zone": "'+00:00'",
 
-    CURSOR_INIT_STMTS = (
-        MY_CHARSET_STMT,
-        MY_TIMEZONE_STMT,
-    )
+        # Certain identifiers are quoted in sql strings for compatibility
+        # with other databases. This should go away as all plain strings
+        # transition to modeled values. (Notable example: "transaction"
+        # is a reserved word in sqlite.)
+        'sql_mode': "CONCAT(@@sql_mode, ',ANSI_QUOTES')",
+    }
 
-    # TODO: MySQLdb (mysqlclient) and PyMySQL support an
-    # ``init_command`` argument to connect() that could be used to
-    # automatically handle both these statements (``SET names binary,
-    # time_zone = X``).
+    #: Holds the first statement that all connections need to run.
+    #: Used as the value of the ``init_command`` argument to ``connect()`` for
+    #: drivers that support it (mysqlclient, PyMySQL). This implementation fills
+    #: in the session variables needed.
+    _init_command = ''
+
+    def __init__(self):
+        super(AbstractMySQLDriver, self).__init__()
+
+        kv = ["%s=%s" % (k, v) for k, v in self.MY_SESSION_VARS.items()]
+        self._init_command = "SET " + ", ".join(kv)
 
     _server_side_cursor = None
-    _ignored_fetchall_on_set_exception = ()
 
     def _make_cursor(self, conn, server_side=False):
         if server_side:
@@ -108,15 +133,10 @@ class AbstractMySQLDriver(AbstractModuleDriver):
             cursor = super(AbstractMySQLDriver, self).cursor(conn, server_side=False)
         return cursor
 
-    def cursor(self, conn, server_side=False):
-        cursor = self._make_cursor(conn, server_side=server_side)
-        for stmt in self.CURSOR_INIT_STMTS:
-            cursor.execute(stmt)
-            try:
-                cursor.fetchall()
-            except self._ignored_fetchall_on_set_exception:
-                pass
-        return cursor
+    def connect(self, *args, **kwargs):
+        if self._init_command:
+            kwargs['init_command'] = self._init_command
+        return super(AbstractMySQLDriver, self).connect(*args, **kwargs)
 
     def synchronize_cursor_for_rollback(self, cursor):
         """Does nothing."""

@@ -252,7 +252,8 @@ setup(
         'zodburi.resolvers': [
             'postgres = relstorage.zodburi_resolver:postgresql_resolver',
             'mysql = relstorage.zodburi_resolver:mysql_resolver',
-            'oracle = relstorage.zodburi_resolver:oracle_resolver'
+            'oracle = relstorage.zodburi_resolver:oracle_resolver',
+            'sqlite = relstorage.zodburi_resolver:sqlite_resolver',
         ],
         'gevent.plugins.monkey.did_patch_builtins': [
             'psycopg2 = relstorage.adapters.postgresql.drivers.psycopg2:_gevent_did_patch',

@@ -12,7 +12,7 @@ section contains information specific to the these schemes.
 URI schemes
 ===========
 
-The ``postgres://`` , ``mysql://`` and ``oracle://`` URI schemes can
+The ``postgres://`` , ``mysql://``, ``oracle://`` and ``sqlite://`` URI schemes can
 be passed as ``zodbconn.uri`` to create a RelStorage PostgresSQL,
 MySQL or Oracle database factory.  The uri should contain the user,
 the password, the host, the port and the db name e.g.::
@@ -25,6 +25,10 @@ oracle uri should not contain the same information as the other, but
 only the dsn ::
 
   oracle://?dsn="HERE GOES THE DSN"
+
+Likewise, SQLite only needs the file path::
+
+  sqlite://?path=/the/path/to/database.sqlite3
 
 Query String Arguments
 ======================

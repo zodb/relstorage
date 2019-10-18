@@ -118,6 +118,9 @@ class Query(ParamMixin,
         s.prepare = True
         return s
 
+    def execute(self, cursor):
+        raise AttributeError("Do not execute a Query without compiling it.")
+
 
 class CompiledQuery(object):
     """
@@ -200,6 +203,7 @@ class CompiledQuery(object):
             params = self._prepare_converter(params)
 
         __traceback_info__ = stmt, params
+
         if params:
             cursor.execute(stmt, params)
         elif self.params:

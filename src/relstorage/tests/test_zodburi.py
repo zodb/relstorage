@@ -173,6 +173,19 @@ class TestOracleURIResolver(AbstractURIResolverTestBase):
                    host='somehost', port='5432', **kwargs):
         return {}
 
+class TestSQLiteURIResolver(AbstractURIResolverTestBase):
+    adapter_name = 'relstorage.adapters.sqlite.adapter.Sqlite3Adapter'
+    prefix = 'sqlite'
+
+    def _get_helper(self):
+        from relstorage.zodburi_resolver import SqliteAdapterHelper
+        return SqliteAdapterHelper
+
+    def _format_db(self, dbname='somedb', user='someuser', password='somepass',
+                   host='somehost', port='5432', **kwargs):
+        return {}
+
+
 del AbstractURIResolverTestBase # So it doesn't get discovered as a test
 
 class TestEntryPoints(unittest.TestCase):
@@ -195,3 +208,7 @@ class TestEntryPoints(unittest.TestCase):
     def test_oracle(self):
         from relstorage.zodburi_resolver import OracleAdapterHelper
         self._check_entry_point('oracle', RelStorageURIResolver, OracleAdapterHelper)
+
+    def test_sqlite(self):
+        from relstorage.zodburi_resolver import SqliteAdapterHelper
+        self._check_entry_point('sqlite', RelStorageURIResolver, SqliteAdapterHelper)

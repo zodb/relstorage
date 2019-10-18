@@ -3,9 +3,9 @@
 =====================
 
 RelStorage is a storage implementation for ZODB that stores pickles in
-a relational database. PostgreSQL 9.0 and above, MySQL 5.0.32+ /
-5.1.34+, and Oracle 10g and 11g are currently supported. RelStorage
-replaced the PGStorage project.
+a relational database. PostgreSQL 9.6 and above (but not 12), MySQL
+5.7.19 / 8.0, Oracle 10g and 11g, and SQLite 3.8.3 and above are
+currently supported. RelStorage replaced the PGStorage project.
 
 
 
@@ -72,22 +72,15 @@ monitor test coverage.
 .. image:: https://coveralls.io/repos/zodb/relstorage/badge.svg?branch=master&service=github
    :target: https://coveralls.io/github/zodb/relstorage?branch=master
 
-Likewise, builds on Travis CI will automatically submit updates to
-`landscape.io`_ to monitor code health (adherence to PEP8, absence of
-common code smells, etc).
-
-.. image:: https://landscape.io/github/zodb/relstorage/master/landscape.svg?style=flat
-   :target: https://landscape.io/github/zodb/relstorage/master
-   :alt: Code Health
 
 .. _coveralls.io: https://coveralls.io/github/zodb/relstorage
-.. _landscape.io: https://landscape.io/github/zodb/relstorage
+
 
 
 Project URLs
 ============
 
-* http://pypi.python.org/pypi/RelStorage       (PyPI entry and downloads)
+* http://pypi.org/project/RelStorage       (PyPI entry and downloads)
 * http://shane.willowrise.com/                 (blog)
 
 Indices and tables

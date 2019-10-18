@@ -58,6 +58,7 @@ class TestTransactionControl(TestCase):
 
     def test_get_tid_empty_db(self):
         inst = self._makeOne()
+        inst.poller.poll_tid = 0
         cur = MockCursor()
         cur.results = None
 

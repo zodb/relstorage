@@ -35,6 +35,7 @@ from ZODB.tests.MinPO import MinPO
 from relstorage.storage.interfaces import VoteReadConflictError
 
 from . import TestCase
+from . import skipIfNoConcurrentWriters
 
 def WithAndWithoutInterleaving(func):
     # Expands a test case into two tests, for those that can run
@@ -250,6 +251,7 @@ class TestLocking(TestCase):
 
         storageA.tpc_abort(txa)
 
+    @skipIfNoConcurrentWriters
     @WithAndWithoutInterleaving
     def checkTL_OverlappedReadCurrent_SharedLocksFirst(self):
         # Starting with two objects 1 and 2, if transaction A modifies 1 and
@@ -285,6 +287,7 @@ class TestLocking(TestCase):
         # ...the lock violation happened very quickly
         self.assertLessEqual(duration_blocking, 3)
 
+    @skipIfNoConcurrentWriters
     def checkTL_InterleavedConflictingReadCurrent(self):
         # Similar to
         # ``checkTL_ConflictingReadCurrent``
@@ -316,6 +319,7 @@ class TestLocking(TestCase):
 
         self.__assert_small_blocking_duration(storageA, duration_blocking)
 
+    @skipIfNoConcurrentWriters
     def checkTL_InterleavedConflictingReadCurrentDeadlock(self):
         # Like
         # ``checkTL_InterleavedConflictingReadCurrent``

@@ -49,7 +49,8 @@ def _format_to_named(stmt):
 
 class OracleScriptRunner(ScriptRunner):
 
-    script_vars = dict(ScriptRunner.script_vars).update({
+    script_vars = dict(ScriptRunner.script_vars)
+    script_vars.update({
         'TRUE':         "'Y'",
         'FALSE':        "'N'",
         'oid':          ':oid',

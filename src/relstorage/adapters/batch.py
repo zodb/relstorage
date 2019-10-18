@@ -19,6 +19,9 @@ import itertools
 from relstorage._compat import iteritems
 from relstorage._util import parse_byte_size
 
+# A cache
+# {(placeholder, count): "string"}
+_row_schemas = {}
 
 class RowBatcher(object):
     """
@@ -38,13 +41,19 @@ class RowBatcher(object):
     # what value we have)
     size_limit = parse_byte_size('2 MB')
     delete_placeholder = '%s'
+    insert_placeholder = '%s'
     # For testing, force the delete order to be deterministic
     # when multiple columns are involved
     sorted_deletes = False
 
-    def __init__(self, cursor, row_limit=None, delete_placeholder="%s"):
+    def __init__(self, cursor, row_limit=None,
+                 delete_placeholder=None,
+                 insert_placeholder=None):
         self.cursor = cursor
-        self.delete_placeholder = delete_placeholder
+        if delete_placeholder is not None:
+            self.delete_placeholder = delete_placeholder
+        if insert_placeholder is not None:
+            self.insert_placeholder = insert_placeholder
         if row_limit is not None:
             self.row_limit = row_limit
 
@@ -92,6 +101,17 @@ class RowBatcher(object):
         if (self.rows_added >= self.row_limit
                 or self.size_added >= self.size_limit):
             self.flush()
+
+    def row_schema_of_length(self, param_count):
+        # Use as the *row_schema* parameter to insert_into
+        key = (self.insert_placeholder, param_count)
+        try:
+            return _row_schemas[key]
+        except KeyError:
+            p = [self.insert_placeholder] * param_count
+            p = ', '.join(p)
+            _row_schemas[key] = p
+            return p
 
     def select_from(self, columns, table, suffix='', **kw):
         """
@@ -198,5 +218,6 @@ class RowBatcher(object):
             # INSERT INTO table(c1, c2)
             # VALUES (%s, %s), (%s, %s), (%s, %s)
             # <suffix>
+            __traceback_info__ = stmt
             self.cursor.execute(stmt, params)
         return count

@@ -12,6 +12,9 @@ from copy import copy as stdlib_copy
 from .interfaces import IBindParam
 
 def copy(obj):
+    """
+    Make a shallow copy of the object, ignoring any volatile attributes.
+    """
     new = stdlib_copy(obj)
     volatile = [k for k in vars(new) if k.startswith('_v')]
     for k in volatile:
@@ -56,6 +59,9 @@ class Columns(object):
     def __getitem__(self, ix):
         return self._columns[ix]
 
+    def __iter__(self):
+        return iter(self._columns)
+
     def _col_list(self):
         return ','.join(str(c) for c in self._columns)
 
@@ -68,6 +74,68 @@ class Columns(object):
             for c in self._columns
         )
 
+    def is_ambiguous(self, column):
+        """
+        Does the *column* name appear more than once?
+
+        If so it needs to be qualified.
+        """
+        count = 0
+        for c in self._columns:
+            if c.name == column.name:
+                count += 1
+        return count > 1
+
     def as_select_list(self):
         from .select import _SelectColumns
         return _SelectColumns(self._columns)
+
+    def as_names(self):
+        return {c.name for c in self}
+
+    def as_dict(self):
+        # This fails if there are duplicates.
+        return {col.name: col for col in self._columns}
+
+    def union(self, other):
+        """
+        Discards duplicates.
+        """
+        od = other.as_dict()
+        od.update(self.as_dict())
+        return type(self)(
+            sorted(od.values(), key=lambda c: c.name))
+
+    def dup_union(self, other, combining=()):
+        """
+        Preserves duplicates, with the exception of columns in *combining*.
+        """
+        seen_combining = set()
+        columns = []
+        for c in self._columns + other._columns:
+            if c.name in combining and c.name not in seen_combining:
+                columns.append(c)
+                seen_combining.add(c.name)
+            else:
+                columns.append(c)
+        return type(self)(columns)
+
+    def intersection(self, other):
+        col_names = set(other.as_dict()).intersection(set(self.as_dict()))
+        col_names = sorted(col_names)
+        return type(self)(
+            getattr(self, c)
+            for c in col_names
+        )
+
+    def __repr__(self):
+        return '<%s %s>' % (
+            type(self).__name__,
+            ', '.join(repr(c) for c in self)
+        )
+
+    def __eq__(self, other):
+        try:
+            return self.as_dict() == other.as_dict()
+        except AttributeError:
+            return NotImplemented

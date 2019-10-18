@@ -72,8 +72,7 @@ class AbstractManagedConnection(object):
 
     __nonzero__ = __bool__
 
-    @Lazy
-    def cursor(self):
+    def get_cursor(self):
         if not self.active or self._cursor is None:
             # XXX: If we've been explicitly dropped, do we always want to
             # automatically re-open? Probably not; bad things could happen:
@@ -83,6 +82,8 @@ class AbstractManagedConnection(object):
             self.on_first_use(conn, cursor)
             self.active = True
         return self._cursor
+
+    cursor = Lazy(get_cursor, 'cursor')
 
     def enter_critical_phase_until_transaction_end(self):
         """
@@ -153,7 +154,7 @@ class AbstractManagedConnection(object):
         Restart the connection if there is any chance that it has any associated state.
         """
         if not self:
-            assert not self.active
+            assert not self.active, self.__dict__
             return
 
         # If we've never accessed the cursor, we shouldn't have any
@@ -273,7 +274,6 @@ class LoadConnection(AbstractManagedConnection):
     _RESTART_NAME = 'restart_load'
 
 
-
 @implementer(interfaces.IManagedStoreConnection)
 class StoreConnection(AbstractManagedConnection):
 
@@ -283,6 +283,8 @@ class StoreConnection(AbstractManagedConnection):
     _RESTART_NAME = 'restart_store'
     _ROLLBACK_NAME = 'rollback_store_quietly'
 
+    def begin(self):
+        self.connmanager.begin(*self.open_if_needed())
 
 @implementer(interfaces.IManagedDBConnection)
 class ClosedConnection(object):

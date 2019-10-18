@@ -30,9 +30,9 @@ import sqlite3
 from relstorage._compat import ABC
 from relstorage._compat import OID_TID_MAP_TYPE
 from relstorage._util import log_timed
-from relstorage.adapters.batch import RowBatcher
 
-from .persistence import SQ3_SUPPORTS_UPSERT as SUPPORTS_UPSERT
+from relstorage.adapters.sqlite.batch import Sqlite3RowBatcher
+from relstorage.adapters.sqlite.dialect import SQ3_SUPPORTS_UPSERT as SUPPORTS_UPSERT
 
 
 logger = __import__('logging').getLogger(__name__)
@@ -161,9 +161,7 @@ class Database(ABC):
 
     def _remove_invalid_persistent_oids(self, bad_oids, cur):
         cur.execute("BEGIN")
-        batch = RowBatcher(cur,
-                           row_limit=999 // 1,
-                           delete_placeholder='?')
+        batch = Sqlite3RowBatcher(cur)
         for oid in bad_oids:
             batch.delete_from('object_state', zoid=oid)
         batch.flush()
@@ -345,6 +343,8 @@ class Database(ABC):
         # We'll be interleaving statements so we must use a
         # separate cursor
         batch_cur = self.connection.cursor()
+        batch = Sqlite3RowBatcher(batch_cur)
+
         # In fact, because of the way PyPy wants you to fetch all rows
         # or it considers some statements to still be open and thus
         # refuses to allow things like VACUUM, we need to use two
@@ -355,9 +355,8 @@ class Database(ABC):
         FROM object_state
         ORDER BY frequency ASC, tid ASC, LENGTH(CAST(state AS BLOB)) DESC, zoid ASC
         """)
-        batch = RowBatcher(batch_cur,
-                           row_limit=999 // 1,
-                           delete_placeholder='?')
+
+
         for row in fetch_cur:
             zoid, size = row
             how_much_to_trim -= size

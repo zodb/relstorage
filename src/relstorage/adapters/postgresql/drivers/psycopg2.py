@@ -21,9 +21,8 @@ from __future__ import print_function
 
 from zope.interface import implementer
 
-from relstorage._compat import PY3
-
 from ...interfaces import IDBDriver
+from ...drivers import MemoryViewBlobDriverMixin
 
 from . import AbstractPostgreSQLDriver
 from ._lobject import LobConnectionMixin
@@ -35,7 +34,8 @@ __all__ = [
 
 
 @implementer(IDBDriver)
-class Psycopg2Driver(AbstractPostgreSQLDriver):
+class Psycopg2Driver(MemoryViewBlobDriverMixin,
+                     AbstractPostgreSQLDriver):
     __name__ = 'psycopg2'
     MODULE_NAME = __name__
 
@@ -112,29 +112,6 @@ class Psycopg2Driver(AbstractPostgreSQLDriver):
               "needs commit", self.connection_may_need_commit(conn),
               "needs rollback", self.connection_may_need_rollback(conn),
               *extra)
-
-    # psycopg2 is smart enough to return memoryview or buffer on
-    # Py3/Py2, respectively, for bytea columns. memoryview can't be
-    # passed to bytes() on Py2 or Py3, but it can be passed to
-    # cStringIO.StringIO() or io.BytesIO() --- unfortunately,
-    # memoryviews, at least, don't like going to io.BytesIO() on
-    # Python 3, and that's how we unpickle states. So while ideally
-    # we'd like to keep it that way, to save a copy, we are forced to
-    # make the copy. Plus there are tests that like to directly
-    # compare bytes.
-
-    if PY3:
-        def binary_column_as_state_type(self, data):
-            if data:
-                # Calling 'bytes()' on a memoryview in Python 3 does
-                # nothing useful.
-                data = data.tobytes()
-            return data
-    else:
-        def binary_column_as_state_type(self, data):
-            if data:
-                data = bytes(data)
-            return data
 
     def connection_may_need_rollback(self, conn):
         # If we've immediately executed a 'BEGIN' command,

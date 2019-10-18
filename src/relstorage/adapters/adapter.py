@@ -49,6 +49,7 @@ class AbstractAdapter(object):
     txncontrol = None # type: ITransactionControl
     mover = None # type: IObjectMover
     connmanager = None # type: IConnectionManager
+    oidallocator = None # type: IOIDAllocator
 
     def __init__(self, options=None):
         if options is None:
@@ -67,6 +68,16 @@ class AbstractAdapter(object):
 
     def _create(self):
         raise NotImplementedError
+
+    def release(self):
+        if self.oidallocator is not None:
+            self.oidallocator.release()
+            self.oidallocator = None
+
+    def close(self):
+        if self.oidallocator is not None:
+            self.oidallocator.close()
+            self.oidallocator = None
 
     def _select_driver(self, options=None):
         return _select_driver(
@@ -152,10 +163,12 @@ class AbstractAdapter(object):
         return committing_tid_int, prepared_txn_id
 
     DEFAULT_LOCK_OBJECTS_AND_DETECT_CONFLICTS_INTERLEAVABLE = True
+    WRITING_REQUIRES_EXCLUSIVE_LOCK = False
 
     # Hooks for unit tests.
     force_lock_objects_and_detect_conflicts_interleavable = False
     force_lock_readCurrent_for_share_blocking = False
+
 
     @metricmethod_sampled
     def lock_objects_and_detect_conflicts(self, cursor, read_current_oids):

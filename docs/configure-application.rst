@@ -25,7 +25,7 @@ configuration document (a file or string) using the `ZConfig
 <https://zconfig.readthedocs.io/en/latest/>`_ syntax. You will write a
 ``<relstorage>`` element containing the general RelStorage options,
 and containing one database-specific element (``<postgresql>``,
-``<mysql>`` or ``<oracle>``). (Where in the document the ``<relstorage>``
+``<mysql>``, ``<oracle>`` or ``<sqlite3>``). (Where in the document the ``<relstorage>``
 element goes is specific to the framework or application you're using
 and will be covered next.)
 
@@ -62,6 +62,18 @@ And Oracle (10g XE in this example)::
           dsn XE
         </oracle>
      </relstorage>
+
+SQLite::
+
+
+    <relstorage>
+        keep-history false
+        cache-local-mb 0
+        <sqlite3>
+           path /path/to/database/file.sqlite3
+        </sqlite3>
+    </relstorage>
+
 
 To add ZODB blob support, provide a ``blob-dir`` option that specifies
 where to store the blobs.  For example::

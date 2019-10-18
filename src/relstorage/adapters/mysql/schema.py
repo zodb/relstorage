@@ -23,6 +23,7 @@ from zope.interface import implementer
 
 from ..interfaces import ISchemaInstaller
 from ..schema import AbstractSchemaInstaller
+from ..schema import Schema
 from .._util import DatabaseHelpersMixin
 
 logger = __import__('logging').getLogger(__name__)
@@ -150,13 +151,10 @@ class MySQLSchemaInstaller(AbstractSchemaInstaller):
         "BOOLEAN NOT NULL DEFAULT FALSE"
     )
 
+    _new_oid_query = Schema.new_oid.create()
+
     def _create_new_oid(self, cursor):
-        stmt = """
-        CREATE TABLE new_oid (
-            zoid        {oid_type} NOT NULL PRIMARY KEY AUTO_INCREMENT
-        ) {transactional_suffix};
-        """
-        self.runner.run_script(cursor, stmt)
+        self._new_oid_query.execute(cursor)
 
     # Temp tables are created in a session-by-session basis
     def _create_temp_store(self, _cursor):

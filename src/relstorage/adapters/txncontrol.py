@@ -76,14 +76,7 @@ class GenericTransactionControl(AbstractTransactionControl):
         self.Binary = Binary
 
     def get_tid(self, cursor):
-        self.poller.poll_query.execute(cursor)
-        row = cursor.fetchall()
-        if not row:
-            # nothing has been stored yet
-            return 0
-
-        tid = row[0][0]
-        return tid if tid is not None else 0
+        return self.poller.get_current_tid(cursor)
 
     _add_transaction_query = Schema.transaction.insert(
         Schema.transaction.c.tid,

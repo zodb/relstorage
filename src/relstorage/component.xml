@@ -231,4 +231,16 @@
 
   </sectiontype>
 
+  <sectiontype name="sqlite3" implements="relstorage.adapter"
+    datatype=".Sqlite3AdapterFactory">
+	<key name="driver" datatype="string" required="no" default="auto">
+      <description>See the RelStorage documentation.</description>
+	</key>
+    <key name="path" datatype="string" required="yes">
+      <description>
+        The path to the sqlite3 file.
+      </description>
+    </key>
+  </sectiontype>
+
 </component>

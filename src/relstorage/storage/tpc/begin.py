@@ -97,6 +97,8 @@ class AbstractBegin(AbstractTPCState):
         # if we do deleteObject() or store a blob (which we're not fully in
         # control of)
         self.store_connection.restart()
+
+        self.store_connection.begin()
         self.blobhelper.begin()
 
     def _clear_temp(self):

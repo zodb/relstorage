@@ -43,7 +43,7 @@ class TestCompiler(TestCase):
             def _find_datatypes_for_prepared_query(self):
                 return ()
 
-        compiler = C(None)
+        compiler = C(None, dialect.DefaultDialect())
 
         stmt, execute, convert = compiler.prepare()
 
@@ -67,7 +67,7 @@ class TestCompiler(TestCase):
 
     def test_prepare_named_datatypes(self):
 
-        compiler = dialect.Compiler(None)
+        compiler = dialect.Compiler(None, dialect.DefaultDialect())
         compiler.placeholders[object()] = 'name'
 
         _s, _x, convert = compiler.prepare()

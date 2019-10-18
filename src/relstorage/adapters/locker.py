@@ -198,7 +198,7 @@ class AbstractLocker(DatabaseHelpersMixin,
     def _lock_readCurrent_oids_for_share(self, cursor, current_oids, shared_locks_block):
         _, table = self._get_current_objects_query
         oids_to_lock = sorted(set(current_oids))
-        batcher = self.make_batcher(cursor, row_limit=1000)
+        batcher = self.make_batcher(cursor)
 
         locking_suffix = ' %s ' % (
             self._lock_share_clause

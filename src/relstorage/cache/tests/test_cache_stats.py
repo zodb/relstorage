@@ -114,7 +114,7 @@ def cache_run(name, size):
                     _send_queue(new_cache, 1, new_cache_ts)
                     cache.adapter.mover.data[oid] = (data, 1)
     finally:
-        cache.close(close_async=False)
+        cache.close()
 
 def setUp(test):
     import time

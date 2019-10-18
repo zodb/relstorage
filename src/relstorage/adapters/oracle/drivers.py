@@ -58,6 +58,11 @@ class cx_OracleDriver(AbstractModuleDriver):
         self.STRING = cx_Oracle.STRING
         self.version = cx_Oracle.version
 
+    def binary_column_as_state_type(self, data):
+        # cx_Oracle likes to give us an object
+        # with .read(), look for that.
+        return self.binary_column_as_state_type(data.read())
+
 
 implement_db_driver_options(
     __name__,

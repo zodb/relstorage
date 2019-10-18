@@ -144,7 +144,7 @@ class TestTableSelect(TestCase):
         self.assertEqual(
             str(stmt),
             'SELECT zoid, tid, state, state_size '
-            'FROM object_state WHERE ((zoid = tid AND zoid > %(literal_0)s))'
+            'FROM object_state WHERE ((zoid = tid AND zoid > 5))'
         )
 
     def test_simple_eq_select_literal(self):
@@ -155,12 +155,12 @@ class TestTableSelect(TestCase):
 
         self.assertEqual(
             str(stmt),
-            'SELECT zoid, tid, state, state_size FROM object_state WHERE (zoid = %(literal_0)s)'
+            'SELECT zoid, tid, state, state_size FROM object_state WHERE (zoid = 7)'
         )
 
         self.assertEqual(
             stmt.compiled().params,
-            {'literal_0': 7})
+            {})
 
     def test_column_query_variant_table(self):
         stmt = objects.select(objects.c.tid, objects.c.zoid).where(
@@ -184,7 +184,7 @@ class TestTableSelect(TestCase):
             'SELECT zoid, state '
             'FROM current_object '
             'JOIN object_state '
-            'USING (zoid, tid) WHERE (zoid = %(oid)s)'
+            'USING (tid, zoid) WHERE (zoid = %(oid)s)'
         )
 
         class H(object):

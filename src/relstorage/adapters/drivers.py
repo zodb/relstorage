@@ -26,6 +26,7 @@ from zope.interface import implementer
 
 from .._compat import ABC
 from .._compat import PYPY
+from .._compat import PY3
 from .._compat import casefold
 from .._util import positive_integer
 
@@ -215,6 +216,7 @@ class AbstractModuleDriver(ABC):
 
     # Py MySQL Connector/Python returns a bytearray, whereas
     # C MySQL Connector/Python returns bytes.
+    # sqlite uses buffer on Py2 and memoryview on Py3.
 
     # Keep these ordered with the most common at the front;
     # Python does a linear traversal of type checks.
@@ -223,10 +225,9 @@ class AbstractModuleDriver(ABC):
     def binary_column_as_state_type(self, data):
         if isinstance(data, self.state_types) or data is None:
             return data
-        # Nothing we know about. cx_Oracle likes to give us an object
-        # with .read(), look for that.
-        # XXX: TODO: Move this to the oracle driver.
-        return self.binary_column_as_state_type(data.read())
+        __traceback_info__ = type(data), data
+        raise TypeError("Unknown binary state column")
+
 
     def binary_column_as_bytes(self, data):
         # Take the same inputs as `as_state_type`, but turn them into
@@ -247,6 +248,36 @@ class AbstractModuleDriver(ABC):
 
     def enter_critical_phase_until_transaction_end(self, connection, cursor):
         """Default implementation; does nothing."""
+
+
+class MemoryViewBlobDriverMixin(object):
+    # psycopg2 is smart enough to return memoryview or buffer on
+    # Py3/Py2, respectively, for BYTEa columns. sqlite3 does exactly
+    # the same for BLOB columns (on Python 2; on Python 3 it returns
+    # bytes instead of buffer), and defines ``Binary`` that way as
+    # well.
+
+    # memoryview can't be passed to bytes() on Py2 or Py3, but it can
+    # be passed to cStringIO.StringIO() or io.BytesIO() ---
+    # unfortunately, memoryviews, at least, don't like going to
+    # io.BytesIO() on Python 3, and that's how we unpickle states. So
+    # while ideally we'd like to keep it that way, to save a copy, we
+    # are forced to make the copy. Plus there are tests that like to
+    # directly compare bytes.
+
+    if PY3:
+        def binary_column_as_state_type(self, data):
+            if data:
+                # Calling 'bytes()' on a memoryview in Python 3 does
+                # nothing useful.
+                data = data.tobytes()
+            return data
+    else:
+        def binary_column_as_state_type(self, data):
+            if data:
+                data = bytes(data)
+            return data
+
 
 @implementer(IDBDriverFactory)
 class _ClassDriverFactory(object):

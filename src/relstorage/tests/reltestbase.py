@@ -61,6 +61,7 @@ from . import util
 from . import mock
 from . import TestCase
 from . import StorageCreatingMixin
+from . import skipIfNoConcurrentWriters
 from .persistentcache import PersistentCacheStorageTests
 from .locking import TestLocking
 from .test_zodbconvert import FSZODBConvertTests
@@ -980,10 +981,10 @@ class GenericRelStorageTests(
         # should notice that backward time travel has occurred and
         # raise a ReadConflictError.
         self._storage = self.make_storage(revert_when_stale=False)
-
         db = DB(self._storage)
         try:
             c = db.open()
+            c._storage._adapter.poller.transactions_may_go_backwards = True
             r = c.root()
             r['alpha'] = PersistentMapping()
             transaction.commit()
@@ -1012,8 +1013,9 @@ class GenericRelStorageTests(
                 storage_2.zap_all(reset_oid=False, slow=True)
                 storage_2.copyTransactionsFrom(fs)
                 storage_2.close()
-
+                del storage_2
                 fs.close()
+                del fs
             finally:
                 shutil.rmtree(d)
 
@@ -1281,6 +1283,7 @@ class GenericRelStorageTests(
     # Parallel Commit Tests
     ######
 
+    @skipIfNoConcurrentWriters
     def checkCanVoteAndCommitWhileOtherStorageVotes(self):
         storage1 = self._closing(self._storage.new_instance())
         storage2 = self._closing(self._storage.new_instance())
@@ -1293,9 +1296,9 @@ class GenericRelStorageTests(
             data = zodb_pickle(MinPO(str(storage)))
             t = TransactionMetaData()
             txs[storage] = t
+
             storage.tpc_begin(t)
             oid = storage.new_oid()
-
             storage.store(oid, None, data, '', t)
             storage.tpc_vote(t)
 

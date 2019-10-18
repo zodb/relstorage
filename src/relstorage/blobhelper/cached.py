@@ -25,13 +25,13 @@ import BTrees
 import zc.lockfile
 
 import ZODB.blob
-from ZODB.utils import u64
 from zope.interface import implementer
 
 from relstorage._util import byte_display
 from relstorage._util import spawn
 from relstorage._util import thread_spawn
 from relstorage._util import timer
+from relstorage._util import bytes8_to_int64
 from relstorage.interfaces import POSKeyError
 
 from .interfaces import ICachedBlobHelper
@@ -334,7 +334,7 @@ class CacheBlobHelper(AbstractBlobHelper):
 
         if os.path.exists(blob_filename):
             return self._accessed(blob_filename)
-
+        __traceback_info__ = cursor
         raise POSKeyError(oid, serial=serial, fn=blob_filename)
 
     def upload_blob(self, cursor, oid, serial, filename):
@@ -344,16 +344,16 @@ class CacheBlobHelper(AbstractBlobHelper):
         If serial is None, upload to the temporary table.
         """
         if serial is not None:
-            tid_int = u64(serial)
+            tid_int = bytes8_to_int64(serial)
         else:
             tid_int = None
-        self.adapter.mover.upload_blob(cursor, u64(oid), tid_int, filename)
+        self.adapter.mover.upload_blob(cursor, bytes8_to_int64(oid), tid_int, filename)
 
     def download_blob(self, cursor, oid, serial, filename):
         """Download a blob into a file"""
         tmp_fn = filename + ".tmp"
         bytecount = self.adapter.mover.download_blob(
-            cursor, u64(oid), u64(serial), tmp_fn)
+            cursor, bytes8_to_int64(oid), bytes8_to_int64(serial), tmp_fn)
         if os.path.exists(tmp_fn):
             os.rename(tmp_fn, filename)
         self.cache_checker.loaded(bytecount)
@@ -501,11 +501,11 @@ class _BlobCacheLayout(object):
     size = 997
 
     def oid_to_path(self, oid):
-        rem = u64(oid) % self.size
+        rem = bytes8_to_int64(oid) % self.size
         return str(rem)
 
     def getBlobFilePath(self, oid, tid):
-        base, rem = divmod(u64(oid), self.size)
+        base, rem = divmod(bytes8_to_int64(oid), self.size)
         return os.path.join(
             str(rem),
             "%s.%s%s" % (
