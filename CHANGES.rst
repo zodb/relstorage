@@ -12,6 +12,12 @@
 
 - No longer require Cython to build from a sdist (.tar.gz).
 
+- Add support for using a SQLite file as a RelStorage backend, if all
+  processes accessing it will be on a single machine. The advantage
+  over FileStorage is that multiple processes can use the database
+  concurrently. To allow multiple processes to use a FileStorage one
+  must deploy ZEO, even if all processes are on a single machine. See
+  :pr:`362`.
 
 3.0a12 (2019-10-09)
 ===================
@@ -1692,5 +1698,3 @@ Project Details
 
 - Fixed minor test failures under Windows. Windows is now a supportable
   platform.
-
-Information about older releases can be found :doc:`here <HISTORY>`.

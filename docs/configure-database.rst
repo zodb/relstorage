@@ -104,3 +104,10 @@ and granting the required permissions::
     CREATE USER zodb IDENTIFIED BY mypassword;
     GRANT CONNECT, RESOURCE, CREATE TABLE, CREATE SEQUENCE TO zodb;
     GRANT EXECUTE ON DBMS_LOCK TO zodb;
+
+
+SQLite
+======
+
+No configuration is necessary for SQLite. The necessary files will be
+created automatically.

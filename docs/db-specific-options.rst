@@ -261,3 +261,29 @@ password
 dsn
     The Oracle data source name.  The Oracle client library will
     normally expect to find the DSN in ``/etc/oratab``.
+
+SQLite Adapter Options
+======================
+
+A SQLite database can be used by multiple processes concurrently, but
+because it uses shared memory, those processes *must* all be on the
+same machine.
+
+Using a persistent cache file is not recommended with this adapter.
+Indeed, consider disabling RelStorage's in-memory pickle cache
+altogether (``cache-local-mb 0``) and allow the operating system's
+filesystem cache to serve that purpose.
+
+For more, see :doc:`faq`.
+
+There is only one option:
+
+path
+    The path to the main database file.
+
+    Choosing a dedicated directory is recommended. A network
+    filesystem is generally not recommended.
+
+    Several other files will be created in the same directory as this
+    file while the database is in use. Do not remove them or data
+    corruption may result.
