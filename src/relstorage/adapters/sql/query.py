@@ -45,8 +45,8 @@ class WhereClause(Clause):
 
     def __compile_visit__(self, compiler):
         compiler.emit_keyword('WHERE')
-        #compiler.visit_grouped(self.expression)
-        compiler.visit(self.expression)
+        compiler.visit_grouped(self.expression)
+
 
 class OrderBy(Clause):
 

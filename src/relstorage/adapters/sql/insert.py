@@ -97,16 +97,24 @@ class Insertable(object):
 
 class Delete(Query, WhereMixin):
 
+    _limit = None
+
     def __init__(self, table):
         super(Delete, self).__init__()
         self.table = table
         self._where = None
+
+    def limit(self, literal):
+        s = copy(self)
+        s._limit = literal
+        return s
 
     def __compile_visit__(self, compiler):
         compiler.emit_keyword('DELETE FROM')
         compiler.visit(self.table)
         if self._where:
             compiler.visit(self._where)
+        compiler.visit_limit(self._limit)
 
 class Truncate(Query):
 

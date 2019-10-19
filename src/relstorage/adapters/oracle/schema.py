@@ -246,39 +246,6 @@ class OracleSchemaInstaller(AbstractSchemaInstaller):
         """
         self.runner.run_script(cursor, stmt)
 
-    # def _create_object_state(self, cursor):
-    #     if self.keep_history:
-    #         stmt = """
-    #         CREATE TABLE object_state (
-    #             zoid        NUMBER(20) NOT NULL,
-    #             tid         NUMBER(20) NOT NULL REFERENCES transaction,
-    #                         PRIMARY KEY (zoid, tid),
-    #                         CONSTRAINT tid_min CHECK (tid > 0),
-    #             prev_tid    NUMBER(20) NOT NULL REFERENCES transaction,
-    #             md5         CHAR(32),
-    #             state_size  NUMBER(20) NOT NULL,
-    #                         CONSTRAINT state_size_min CHECK (state_size >= 0),
-    #             state       BLOB
-    #         );
-    #         CREATE INDEX object_state_tid ON object_state (tid);
-    #         CREATE INDEX object_state_prev_tid ON object_state (prev_tid);
-
-    #         """
-    #     else:
-    #         stmt = """
-    #         CREATE TABLE object_state (
-    #             zoid        NUMBER(20) NOT NULL PRIMARY KEY,
-    #             tid         NUMBER(20) NOT NULL,
-    #                         CONSTRAINT tid_min CHECK (tid > 0),
-    #             state_size  NUMBER(20) NOT NULL,
-    #                         CONSTRAINT state_size_min CHECK (state_size >= 0),
-    #             state       BLOB
-    #         );
-    #         CREATE INDEX object_state_tid ON object_state (tid);
-    #         """
-
-    #     self.runner.run_script(cursor, stmt)
-
     def _create_blob_chunk(self, cursor):
         if self.keep_history:
             stmt = """
@@ -312,19 +279,6 @@ class OracleSchemaInstaller(AbstractSchemaInstaller):
             """
 
         self.runner.run_script(cursor, stmt)
-
-
-    # def _create_pack_object(self, cursor):
-    #     stmt = """
-    #     CREATE TABLE pack_object (
-    #         zoid        NUMBER(20) NOT NULL PRIMARY KEY,
-    #         keep        CHAR NOT NULL CHECK (keep IN ('N', 'Y')),
-    #         keep_tid    NUMBER(20) NOT NULL,
-    #         visited     CHAR DEFAULT 'N' NOT NULL CHECK (visited IN ('N', 'Y'))
-    #     );
-    #     CREATE INDEX pack_object_keep_zoid ON pack_object (keep, zoid);
-    #     """
-    #     self.runner.run_script(cursor, stmt)
 
     def _create_pack_state(self, cursor):
         if self.keep_history:

@@ -536,7 +536,8 @@ class AbstractSchemaInstaller(DatabaseHelpersMixin,
         object.
         """
         self._create_pack_object_query.execute(cursor)
-        self.runner.run_script_stmt(cursor, self.CREATE_PACK_OBJECT_IX_TMPL)
+        # Some databases (pg) have multiple statements
+        self.runner.run_script(cursor, self.CREATE_PACK_OBJECT_IX_TMPL)
 
     CREATE_PACK_STATE_TMPL = """
     CREATE TABLE pack_state (

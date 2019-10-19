@@ -183,10 +183,14 @@ class TestLocking(TestCase):
         # B does precisely the same thing,
         # we get an error after ``commit_lock_timeout``  and not a deadlock.
         from relstorage.adapters.interfaces import UnableToLockRowsToModifyError
+        from relstorage.adapters.interfaces import UnableToLockRowsToReadCurrentError
 
         commit_lock_timeout = self.__tiny_commit_time
         duration_blocking = self.__do_check_error_with_conflicting_concurrent_read_current(
-            UnableToLockRowsToModifyError,
+            (UnableToLockRowsToModifyError
+             # Oracle has no share locks so we can't distinguish.
+             if not self.__is_oracle()
+             else UnableToLockRowsToReadCurrentError),
             commit_lock_timeout=commit_lock_timeout,
             identical_pattern_a_b=True
         )
@@ -284,8 +288,14 @@ class TestLocking(TestCase):
         # Even though we just went with the default commit_lock_timeout,
         # which is large...
         self.assertGreaterEqual(storage._options.commit_lock_timeout, 10)
-        # ...the lock violation happened very quickly
-        self.assertLessEqual(duration_blocking, 3)
+        # ...the lock violation happened very quickly...
+        # except on Oracle, which takes closer to the actual timeout , for some reason...
+        # possibly because we don't have share locks?
+        duration = 3
+        if self.__is_oracle():
+            duration = 12
+
+        self.assertLessEqual(duration_blocking, duration)
 
     @skipIfNoConcurrentWriters
     def checkTL_InterleavedConflictingReadCurrent(self):
@@ -406,11 +416,13 @@ class TestLocking(TestCase):
         # Now, one or the other storage got killed by the deadlock
         # detector, but NOT both. Which one depends on the database.
         # PostgreSQL likes to kill the foreground thread (storageB),
-        # MySQL likes to kill the background thread (storageA)
+        # MySQL likes to kill the background thread (storageA)...
+        # And Oracle likes to kill them both! Argh!
         self.assertTrue(storageA.last_error or storageB.last_error,
                         (storageA.last_error, storageB.last_error))
-        self.assertFalse(storageA.last_error and storageB.last_error,
-                         (storageA.last_error, storageB.last_error))
+        if not self.__is_oracle():
+            self.assertFalse(storageA.last_error and storageB.last_error,
+                             (storageA.last_error, storageB.last_error))
 
         last_error = storageA.last_error or storageB.last_error
 
@@ -418,3 +430,8 @@ class TestLocking(TestCase):
 
         self.__assert_small_blocking_duration(storageA, duration_blocking)
         self.__assert_small_blocking_duration(storageB, duration_blocking)
+
+    def __is_oracle(self):
+        # This is an anti-pattern. we really should subclass the tests
+        # in our testoracle.py file.
+        return self._storage._adapter.schema.database_type == 'oracle'

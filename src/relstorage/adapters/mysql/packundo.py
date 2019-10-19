@@ -18,6 +18,7 @@ from __future__ import absolute_import
 
 from ..packundo import HistoryFreePackUndo
 from ..packundo import HistoryPreservingPackUndo
+from ..schema import Schema
 
 class _LockStmt(object):
     # 8.0 supports 'FOR SHARE' but before that we have
@@ -102,12 +103,14 @@ class MySQLHistoryPreservingPackUndo(_LockStmt, HistoryPreservingPackUndo):
         );
     """
 
-    _script_delete_empty_transactions_batch = """
-        DELETE FROM transaction
-        WHERE packed = %(TRUE)s
-          AND is_empty = %(TRUE)s
-        LIMIT 1000
-        """
+    # pylint:disable=singleton-comparison
+    _delete_empty_transactions_batch_query = Schema.transaction.delete(
+    ).where(
+        Schema.transaction.c.packed == True
+    ).and_(
+        Schema.transaction.c.is_empty == True
+    ).limit(1000)
+
 
 class MySQLHistoryFreePackUndo(_LockStmt, HistoryFreePackUndo):
     pass
