@@ -379,7 +379,7 @@ class AbstractSchemaInstaller(DatabaseHelpersMixin,
             zoid        {oid_type} NOT NULL PRIMARY KEY,
             tid         {tid_type} NOT NULL,
             state_size  {state_size_type} NOT NULL,
-            state       {state_type} NOT NULL,
+            state       {state_type},
             CHECK (tid > 0),
             CHECK (state_size >= 0)
         ) {transactional_suffix};
@@ -521,9 +521,8 @@ class AbstractSchemaInstaller(DatabaseHelpersMixin,
         self.runner.run_script(cursor, self.CREATE_OBJECT_REFS_ADDED_TMPL)
 
 
-    # Oracle doesn't accept a line break before ON
     CREATE_PACK_OBJECT_IX_TMPL = """
-    CREATE INDEX pack_object_keep_zoid ON pack_object (keep, zoid);
+    CREATE INDEX pack_object_keep_zoid ON pack_object (keep, zoid)
     """
 
     _create_pack_object_query = Schema.pack_object.create()

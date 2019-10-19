@@ -103,6 +103,8 @@ class OracleObjectMover(AbstractObjectMover):
         if size <= 2000:
             # Send data inline for speed.  Oracle docs say maximum size
             # of a RAW is 2000 bytes.
+            # XXX: Revisit this. cx_Oracle docs suggest that blobs up to 1GB can
+            # be sent inline very fast.
             if self.keep_history:
                 stmt = "BEGIN relstorage_op.restore(:1, :2, :3, :4); END;"
                 batcher.add_array_op(
