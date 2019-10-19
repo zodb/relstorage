@@ -78,6 +78,9 @@ class OracleAdapter(AbstractAdapter):
         options = self.options
         dsn = self._dsn
 
+        batcher_factory = lambda cursor, row_limit=None: OracleRowBatcher(
+            cursor, inputsizes, row_limit
+        )
         self.connmanager = CXOracleConnectionManager(
             driver,
             user=user,
@@ -91,6 +94,7 @@ class OracleAdapter(AbstractAdapter):
             options=self.options,
             driver=driver,
             inputsize_NUMBER=driver.NUMBER,
+            batcher_factory=batcher_factory,
         )
         self.schema = OracleSchemaInstaller(
             connmanager=self.connmanager,
@@ -110,15 +114,13 @@ class OracleAdapter(AbstractAdapter):
             driver,
             options=options,
             runner=self.runner,
-            batcher_factory=lambda cursor, row_limit: OracleRowBatcher(
-                cursor, inputsizes, row_limit),
+            batcher_factory=batcher_factory,
         )
         self.mover.inputsizes = inputsizes
         self.connmanager.add_on_store_opened(self.mover.on_store_opened)
         self.oidallocator = OracleOIDAllocator(
             connmanager=self.connmanager,
         )
-
 
         self.poller = Poller(
             self.driver,

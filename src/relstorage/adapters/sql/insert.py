@@ -10,13 +10,14 @@ from __future__ import print_function
 from zope.interface import implementer
 
 from .query import Query
-from .query import where
 from ._util import copy
 from .query import ColumnList
 from .ast import resolved_against
 
 from .interfaces import ITypedParams
 from .interfaces import IOrderedBindParam
+from .query import WhereMixin
+from .expressions import AssignmentExpression
 
 @implementer(ITypedParams)
 class Insert(Query):
@@ -94,7 +95,7 @@ class Insertable(object):
         return Insert(self, *columns)
 
 
-class Delete(Query):
+class Delete(Query, WhereMixin):
 
     def __init__(self, table):
         super(Delete, self).__init__()
@@ -106,13 +107,6 @@ class Delete(Query):
         compiler.visit(self.table)
         if self._where:
             compiler.visit(self._where)
-
-    def where(self, expression):
-        expression = expression.resolve_against(self.table)
-        s = copy(self)
-        s._where = where(expression)
-        return s
-
 
 class Truncate(Query):
 
@@ -131,3 +125,32 @@ class Deletable(object):
 
     def truncate(self):
         return Truncate(self)
+
+class Updatable(object):
+    c = None
+
+    def update(self, **kwargs):
+        """
+        Update the table. The kwargs must name columns that are members of this table.
+        """
+        col_expressions = []
+        for k, v in kwargs.items():
+            col_expressions.append(AssignmentExpression(
+                getattr(self.c, k),
+                v
+            ))
+
+        return Update(self, col_expressions)
+
+class Update(Query, WhereMixin):
+
+    def __init__(self, table, col_expressions):
+        self.table = table
+        self.col_expressions = col_expressions
+
+    def __compile_visit__(self, compiler):
+        compiler.emit_keyword('UPDATE')
+        compiler.visit(self.table)
+        compiler.emit_keyword('SET')
+        compiler.visit_csv(self.col_expressions)
+        compiler.visit(self._where)

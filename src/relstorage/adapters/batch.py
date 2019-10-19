@@ -118,7 +118,8 @@ class RowBatcher(object):
         Handles a query of the ``WHERE col IN (?, ?,)`` type.
 
         The keyword arguments should be of length 1, containing
-        an iterable of the values to check.
+        an iterable of the values to check: ``col=(1, 2)`` or
+        in the dynamic case ``**{indirect_var: [1, 2]}``.
 
         Returns a iterator of matching rows.
         """
@@ -185,10 +186,13 @@ class RowBatcher(object):
         params = list(itertools.chain.from_iterable(params))
         return params
 
+    def _make_placeholder_list_of_length(self, count):
+        return ','.join([self.delete_placeholder] * count)
+
     def _make_single_column_query(self, command, table,
                                   filter_column, filter_value,
                                   rows_need_flattened):
-        placeholder_str = ','.join([self.delete_placeholder] * len(filter_value))
+        placeholder_str = self._make_placeholder_list_of_length(len(filter_value))
         stmt = "%s FROM %s WHERE %s IN (%s)" % (
             command, table, filter_column, placeholder_str
         )

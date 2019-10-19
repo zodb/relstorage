@@ -87,10 +87,28 @@ class CXOracleConnectionManager(AbstractConnectionManager):
 
         while True:
             try:
-                kw = {'twophase': twophase, 'threaded': True}
+                # cx_Oracle deprecated `twophase` in 5.3 and removed
+                # it in 6.0 in favor of the `internal_name` and
+                # `external_name` parameters. In 5.3, these were both
+                # implicitly set by `twophase` to "cx_Oracle".
+                # According to the docs
+                # (https://docs.oracle.com/cd/E18283_01/appdev.112/e10646/ociaahan.htm),
+                # OCI_ATTR_EXTERNAL_NAME is "the user-friendly global
+                # name stored in sys.props$.value$, where name =
+                # 'GLOBAL_DB_NAME'. It is not guaranteed to be unique
+                # " and OCI_ATTR_INTERNAL_NAME is "the client database
+                # name that is recorded when performing global
+                # transactions. The DBA can use the name to track
+                # transactions"
+                kw = {'threaded': True}
                 conn = self._db_connect(self._user, self._password, dsn, **kw)
+                conn.outputtypehandler = self._outputtypehandler
+                if twophase:
+                    conn.internal_name = 'cx_Oracle'
+                    conn.external_name = 'cx_Oracle'
                 cursor = conn.cursor()
                 cursor.arraysize = 64
+
                 if isolation:
                     cursor.execute("SET TRANSACTION %s" % isolation)
                 return conn, cursor
@@ -149,3 +167,22 @@ class CXOracleConnectionManager(AbstractConnectionManager):
     def _after_opened_for_store(self, conn, cursor, restart=False):
         if self._twophase:
             self._set_xid(conn, cursor)
+
+    def _outputtypehandler(self, cursor, name, defaultType,
+                           size, precision, scale): # pylint:disable=unused-argument
+        """
+        cx_Oracle outputtypehandler that causes Oracle to send BLOBs
+        inline. This works for sizes up to 1GB, which should be fine for object state,
+        but not actual blobs.
+
+        Note that if a BLOB in the result is too large, Oracle generates an
+        error indicating truncation.  The run_lob_stmt() method works
+        around this.
+        """
+        # pylint:disable=unused-argument
+        if defaultType == self.driver.BLOB:
+            # Default size for BLOB is 4000, we want the whole blob inline.
+            return cursor.var(self.driver.LONG_BINARY, arraysize=cursor.arraysize)
+        if defaultType == self.driver.CLOB:
+            # Default size for CLOB is 4000, we want the whole blob inline.
+            return cursor.var(self.driver.LONG_STRING, arraysize=cursor.arraysize)

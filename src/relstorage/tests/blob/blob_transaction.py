@@ -63,11 +63,17 @@ class TestBlobTransactionMixin(TestBlobMixin):
         blob1 = self._make_blob()
         conn = self.database.open()
         root1 = conn.root()
+        self.assertNotIn('blob1', root1)
         root1['blob1'] = blob1
         self.assertIn('blob1', root1)
-
+        self.assertEqual(root1._p_status, 'changed')
         # Aborting a blob add leaves the blob unchanged:
+
         transaction.abort()
+        # Note that debugging with something like pudb that automatically
+        # displays local variables will invalidate this: it will already
+        # have been loaded again.
+        self.assertEqual(root1._p_status, 'ghost')
         self.assertNotIn('blob1', root1)
 
         self.assertIsNone(blob1._p_oid)

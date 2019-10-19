@@ -368,7 +368,7 @@ class TestLocking(TestCase):
                 storage._adapter.locker._lock_readCurrent_oids_for_share(
                     cursor,
                     read_current_oids,
-                    True
+                    shared_locks_block=True
                 )
             except UnableToLockRowsToReadCurrentError as ex:
                 storage.last_error = ex
@@ -381,7 +381,8 @@ class TestLocking(TestCase):
 
         thread_locking_a = threading.Thread(
             target=lock_shared,
-            args=(storageA,)
+            args=(storageA,),
+            name="thread_locking_a",
         )
         thread_locking_a.start()
 
@@ -403,11 +404,13 @@ class TestLocking(TestCase):
         duration_blocking = end - begin
 
         # Now, one or the other storage got killed by the deadlock
-        # detector, but not both. Which one depends on the database.
+        # detector, but NOT both. Which one depends on the database.
         # PostgreSQL likes to kill the foreground thread (storageB),
         # MySQL likes to kill the background thread (storageA)
-        self.assertTrue(storageA.last_error or storageB.last_error)
-        self.assertFalse(storageA.last_error and storageB.last_error)
+        self.assertTrue(storageA.last_error or storageB.last_error,
+                        (storageA.last_error, storageB.last_error))
+        self.assertFalse(storageA.last_error and storageB.last_error,
+                         (storageA.last_error, storageB.last_error))
 
         last_error = storageA.last_error or storageB.last_error
 

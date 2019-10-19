@@ -52,16 +52,13 @@ class cx_OracleDriver(AbstractModuleDriver):
         self.DatabaseError = cx_Oracle.DatabaseError
         self.NUMBER = cx_Oracle.NUMBER
         self.BLOB = cx_Oracle.BLOB
+        self.CLOB = cx_Oracle.CLOB
         self.LOB = cx_Oracle.LOB
         self.LONG_BINARY = cx_Oracle.LONG_BINARY
+        self.LONG_STRING = cx_Oracle.LONG_STRING
         self.BINARY = cx_Oracle.BINARY
         self.STRING = cx_Oracle.STRING
         self.version = cx_Oracle.version
-
-    def binary_column_as_state_type(self, data):
-        # cx_Oracle likes to give us an object
-        # with .read(), look for that.
-        return self.binary_column_as_state_type(data.read())
 
 
 implement_db_driver_options(

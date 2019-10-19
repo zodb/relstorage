@@ -20,10 +20,10 @@ import sys
 
 from zope.interface import implementer
 
-from ..._compat import xrange
 from ..interfaces import IObjectMover
 from ..mover import AbstractObjectMover
 from ..mover import metricmethod_sampled
+from ..sql._util import copy
 
 
 @implementer(IObjectMover)
@@ -32,48 +32,6 @@ class OracleObjectMover(AbstractObjectMover):
     # This is assigned to by the adapter.
     inputsizes = None
 
-    @metricmethod_sampled
-    def load_current(self, cursor, oid):
-        stmt = self._load_current_query
-        return self.runner.run_lob_stmt(
-            cursor, stmt, (oid,), default=(None, None))
-
-
-    @metricmethod_sampled
-    def load_revision(self, cursor, oid, tid):
-        stmt = self._load_revision_query
-        (state,) = self.runner.run_lob_stmt(
-            cursor, stmt, (oid, tid), default=(None,))
-        return state
-
-
-    @metricmethod_sampled
-    def exists(self, cursor, oid):
-        stmt = self._exists_query
-        cursor.execute(stmt, (oid,))
-        for _row in cursor:
-            return True
-        return False
-
-    @metricmethod_sampled
-    def load_before(self, cursor, oid, tid):
-        """Returns the pickle and tid of an object before transaction tid.
-
-        Returns (None, None) if no earlier state exists.
-        """
-        stmt = """
-        SELECT state, tid
-        FROM object_state
-        WHERE zoid = :oid
-            AND tid = (
-                SELECT MAX(tid)
-                FROM object_state
-                WHERE zoid = :oid
-                    AND tid < :tid
-            )
-        """
-        return self.runner.run_lob_stmt(
-            cursor, stmt, {'oid': oid, 'tid': tid}, default=(None, None))
 
     @metricmethod_sampled
     def get_object_tid_after(self, cursor, oid, tid):
@@ -226,7 +184,12 @@ class OracleObjectMover(AbstractObjectMover):
 
 
 
-    # XXX: For _update_current_update_query we used to remove 'ORDER BY zoid'. Still needed?
+    # Oracle doesn't like 'ORDER BY' in a sub-select used in the IN clause.
+    # It gives a confusing syntax error about missing a right paren.
+    _update_current_update_query = copy(AbstractObjectMover._update_current_update_query)
+    sub_select = _update_current_update_query._where.expression.rhs
+    _update_current_update_query._where.expression.rhs = sub_select.unordered()
+    del sub_select
 
     @metricmethod_sampled
     def download_blob(self, cursor, oid, tid, filename):
@@ -244,6 +207,8 @@ class OracleObjectMover(AbstractObjectMover):
         # Current versions of cx_Oracle only support offsets up
         # to sys.maxint or 4GB, whichever comes first.
         maxsize = min(sys.maxsize, 1 << 32)
+        oth = cursor.connection.outputtypehandler
+        del cursor.connection.outputtypehandler
         try:
             cursor.execute(stmt, (oid, tid))
             while True:
@@ -280,15 +245,13 @@ class OracleObjectMover(AbstractObjectMover):
                 f.close()
                 os.remove(filename)
             raise
+        finally:
+            cursor.connection.outputtypehandler = oth
 
         if f is not None:
             f.close()
         return bytecount
 
-    # Current versions of cx_Oracle only support offsets up
-    # to sys.maxint or 4GB, whichever comes first. We divide up our
-    # upload into chunks within this limit.
-    oracle_blob_chunk_maxsize = min(sys.maxsize, 1 << 32)
 
     @metricmethod_sampled
     def upload_blob(self, cursor, oid, tid, filename):
@@ -312,12 +275,8 @@ class OracleObjectMover(AbstractObjectMover):
             insert_stmt = """
             INSERT INTO blob_chunk (zoid, tid, chunk_num, chunk)
             VALUES (:oid, :tid, :chunk_num, empty_blob())
+            RETURNING chunk INTO :newblob
             """
-            select_stmt = """
-            SELECT chunk FROM blob_chunk
-            WHERE zoid=:oid AND tid=:tid AND chunk_num=:chunk_num
-            """
-
         else:
             use_tid = False
             delete_stmt = "DELETE FROM temp_blob_chunk WHERE zoid = :1"
@@ -326,41 +285,27 @@ class OracleObjectMover(AbstractObjectMover):
             insert_stmt = """
             INSERT INTO temp_blob_chunk (zoid, chunk_num, chunk)
             VALUES (:oid, :chunk_num, empty_blob())
-            """
-            select_stmt = """
-            SELECT chunk FROM temp_blob_chunk
-            WHERE zoid=:oid AND chunk_num=:chunk_num
+            RETURNING chunk INTO :newblob
             """
 
         f = open(filename, 'rb')
-        maxsize = self.oracle_blob_chunk_maxsize
+        blob_var = cursor.var(self.driver.BLOB)
+        params = dict(oid=oid, chunk_num=0, newblob=blob_var)
+        if use_tid:
+            params['tid'] = tid
+        cursor.execute(insert_stmt, params)
+        blob, = blob_var.getvalue()
+        offset = 1 # Oracle uses 1-based indexing
         try:
-            chunk_num = 0
-            while True:
-                blob = None
-                params = dict(oid=oid, chunk_num=chunk_num)
-                if use_tid:
-                    params['tid'] = tid
-                cursor.execute(insert_stmt, params)
-                cursor.execute(select_stmt, params)
-                blob, = cursor.fetchone()
-                blob.open()
-                write_chunk_size = int(
-                    max(
-                        round(1.0 * self.blob_chunk_size / blob.getchunksize()),
-                        1)
-                    * blob.getchunksize())
-                offset = 1 # Oracle still uses 1-based indexing.
-                for _i in xrange(maxsize // write_chunk_size):
-                    write_chunk = f.read(write_chunk_size)
-                    if not blob.write(write_chunk, offset):
-                        # EOF.
-                        return
-                    offset += len(write_chunk)
-                if blob is not None and blob.isopen():
-                    blob.close()
-                chunk_num += 1
+            with f:
+                while 1:
+                    data = f.read(blob.getchunksize())
+                    if data:
+                        blob.write(data, offset)
+                    else:
+                        break
+                    offset += len(data)
+
         finally:
-            f.close()
             if blob is not None and blob.isopen():
                 blob.close()

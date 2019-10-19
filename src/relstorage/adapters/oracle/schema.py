@@ -138,34 +138,38 @@ END relstorage_op;
 @implementer(ISchemaInstaller)
 class OracleSchemaInstaller(AbstractSchemaInstaller):
 
+    all_tables = list(AbstractSchemaInstaller.all_tables)
+    all_tables.remove('new_oid')
+    all_tables = tuple(all_tables)
+
+    all_sequences = (
+        'zoid_seq',
+    )
+
     database_type = 'oracle'
 
     COLTYPE_OID_TID = 'NUMBER(20)'
+    COLTYPE_BINARY_STRING = 'RAW(2000)'
+    COLTYPE_BLOB_CHUNK = 'BLOB'
+    COLTYPE_BLOB_CHUNK_NUM = COLTYPE_OID_TID
+    COLTYPE_STATE_SIZE = COLTYPE_OID_TID
+    COLTYPE_STATE = 'BLOB'
 
     def get_database_name(self, cursor):
         cursor.execute("SELECT ora_database_name FROM DUAL")
         for (name,) in cursor:
             return name
 
-    def prepare(self):
-        """Create the database schema if it does not already exist."""
-        def callback(_conn, cursor):
-            tables = self.list_tables(cursor)
-            if 'object_state' not in tables:
-                self.create_tables(cursor)
-            else:
-                self.check_compatibility(cursor, tables)
-                self.update_schema(cursor, tables)
+    def create_procedures(self, cursor):
+        packages = self.list_packages(cursor)
+        package_name = 'relstorage_op'
+        if packages.get(package_name) != oracle_package_version:
+            self.install_package(cursor)
             packages = self.list_packages(cursor)
-            package_name = 'relstorage_op'
             if packages.get(package_name) != oracle_package_version:
-                self.install_package(cursor)
-                packages = self.list_packages(cursor)
-                if packages.get(package_name) != oracle_package_version:
-                    raise AssertionError(
-                        "Could not get version information after "
-                        "installing the %s package." % package_name)
-        self.connmanager.open_and_call(callback)
+                raise AssertionError(
+                    "Could not get version information after "
+                    "installing the %s package." % package_name)
 
     def install_package(self, cursor):
         """Install the package containing stored procedures"""
@@ -180,11 +184,11 @@ class OracleSchemaInstaller(AbstractSchemaInstaller):
 
     def list_tables(self, cursor):
         cursor.execute("SELECT table_name FROM user_tables")
-        return [name.lower() for (name,) in cursor.fetchall()]
+        return [name for (name,) in cursor.fetchall()]
 
     def list_sequences(self, cursor):
         cursor.execute("SELECT sequence_name FROM user_sequences")
-        return [name.lower() for (name,) in cursor.fetchall()]
+        return {name for (name,) in cursor.fetchall()}
 
     def list_packages(self, cursor):
         """List installed stored procedure packages.
@@ -236,45 +240,44 @@ class OracleSchemaInstaller(AbstractSchemaInstaller):
             """
             self.runner.run_script(cursor, stmt)
 
-    def _create_new_oid(self, cursor):
+    def _create_zoid_seq(self, cursor):
         stmt = """
         CREATE SEQUENCE zoid_seq;
         """
         self.runner.run_script(cursor, stmt)
 
+    # def _create_object_state(self, cursor):
+    #     if self.keep_history:
+    #         stmt = """
+    #         CREATE TABLE object_state (
+    #             zoid        NUMBER(20) NOT NULL,
+    #             tid         NUMBER(20) NOT NULL REFERENCES transaction,
+    #                         PRIMARY KEY (zoid, tid),
+    #                         CONSTRAINT tid_min CHECK (tid > 0),
+    #             prev_tid    NUMBER(20) NOT NULL REFERENCES transaction,
+    #             md5         CHAR(32),
+    #             state_size  NUMBER(20) NOT NULL,
+    #                         CONSTRAINT state_size_min CHECK (state_size >= 0),
+    #             state       BLOB
+    #         );
+    #         CREATE INDEX object_state_tid ON object_state (tid);
+    #         CREATE INDEX object_state_prev_tid ON object_state (prev_tid);
 
-    def _create_object_state(self, cursor):
-        if self.keep_history:
-            stmt = """
-            CREATE TABLE object_state (
-                zoid        NUMBER(20) NOT NULL,
-                tid         NUMBER(20) NOT NULL REFERENCES transaction,
-                            PRIMARY KEY (zoid, tid),
-                            CONSTRAINT tid_min CHECK (tid > 0),
-                prev_tid    NUMBER(20) NOT NULL REFERENCES transaction,
-                md5         CHAR(32),
-                state_size  NUMBER(20) NOT NULL,
-                            CONSTRAINT state_size_min CHECK (state_size >= 0),
-                state       BLOB
-            );
-            CREATE INDEX object_state_tid ON object_state (tid);
-            CREATE INDEX object_state_prev_tid ON object_state (prev_tid);
+    #         """
+    #     else:
+    #         stmt = """
+    #         CREATE TABLE object_state (
+    #             zoid        NUMBER(20) NOT NULL PRIMARY KEY,
+    #             tid         NUMBER(20) NOT NULL,
+    #                         CONSTRAINT tid_min CHECK (tid > 0),
+    #             state_size  NUMBER(20) NOT NULL,
+    #                         CONSTRAINT state_size_min CHECK (state_size >= 0),
+    #             state       BLOB
+    #         );
+    #         CREATE INDEX object_state_tid ON object_state (tid);
+    #         """
 
-            """
-        else:
-            stmt = """
-            CREATE TABLE object_state (
-                zoid        NUMBER(20) NOT NULL PRIMARY KEY,
-                tid         NUMBER(20) NOT NULL,
-                            CONSTRAINT tid_min CHECK (tid > 0),
-                state_size  NUMBER(20) NOT NULL,
-                            CONSTRAINT state_size_min CHECK (state_size >= 0),
-                state       BLOB
-            );
-            CREATE INDEX object_state_tid ON object_state (tid);
-            """
-
-        self.runner.run_script(cursor, stmt)
+    #     self.runner.run_script(cursor, stmt)
 
     def _create_blob_chunk(self, cursor):
         if self.keep_history:
@@ -310,68 +313,18 @@ class OracleSchemaInstaller(AbstractSchemaInstaller):
 
         self.runner.run_script(cursor, stmt)
 
-    def _create_current_object(self, cursor):
-        if self.keep_history:
-            stmt = """
-            CREATE TABLE current_object (
-                zoid        NUMBER(20) NOT NULL PRIMARY KEY,
-                tid         NUMBER(20) NOT NULL,
-                            FOREIGN KEY (zoid, tid)
-                                REFERENCES object_state (zoid, tid)
-            );
-            CREATE INDEX current_object_tid ON current_object (tid);
-            """
-            self.runner.run_script(cursor, stmt)
 
-    def _create_object_ref(self, cursor):
-        if self.keep_history:
-            stmt = """
-            CREATE TABLE object_ref (
-                zoid        NUMBER(20) NOT NULL,
-                tid         NUMBER(20) NOT NULL,
-                to_zoid     NUMBER(20) NOT NULL,
-                PRIMARY KEY (tid, zoid, to_zoid)
-            );
-            """
-        else:
-            stmt = """
-            CREATE TABLE object_ref (
-                zoid        NUMBER(20) NOT NULL,
-                to_zoid     NUMBER(20) NOT NULL,
-                tid         NUMBER(20) NOT NULL,
-                PRIMARY KEY (zoid, to_zoid)
-            );
-            """
-
-        self.runner.run_script(cursor, stmt)
-
-    def _create_object_refs_added(self, cursor):
-        if self.keep_history:
-            stmt = """
-            CREATE TABLE object_refs_added (
-                tid         NUMBER(20) NOT NULL PRIMARY KEY
-            );
-            """
-        else:
-            stmt = """
-            CREATE TABLE object_refs_added (
-                zoid        NUMBER(20) NOT NULL PRIMARY KEY,
-                tid         NUMBER(20) NOT NULL
-            );
-            """
-        self.runner.run_script(cursor, stmt)
-
-    def _create_pack_object(self, cursor):
-        stmt = """
-        CREATE TABLE pack_object (
-            zoid        NUMBER(20) NOT NULL PRIMARY KEY,
-            keep        CHAR NOT NULL CHECK (keep IN ('N', 'Y')),
-            keep_tid    NUMBER(20) NOT NULL,
-            visited     CHAR DEFAULT 'N' NOT NULL CHECK (visited IN ('N', 'Y'))
-        );
-        CREATE INDEX pack_object_keep_zoid ON pack_object (keep, zoid);
-        """
-        self.runner.run_script(cursor, stmt)
+    # def _create_pack_object(self, cursor):
+    #     stmt = """
+    #     CREATE TABLE pack_object (
+    #         zoid        NUMBER(20) NOT NULL PRIMARY KEY,
+    #         keep        CHAR NOT NULL CHECK (keep IN ('N', 'Y')),
+    #         keep_tid    NUMBER(20) NOT NULL,
+    #         visited     CHAR DEFAULT 'N' NOT NULL CHECK (visited IN ('N', 'Y'))
+    #     );
+    #     CREATE INDEX pack_object_keep_zoid ON pack_object (keep, zoid);
+    #     """
+    #     self.runner.run_script(cursor, stmt)
 
     def _create_pack_state(self, cursor):
         if self.keep_history:
@@ -441,16 +394,5 @@ class OracleSchemaInstaller(AbstractSchemaInstaller):
                 prev_tid    NUMBER(20) NOT NULL
             );
 
-            """
-            self.runner.run_script(cursor, stmt)
-
-    def _init_after_create(self, cursor):
-        if self.keep_history:
-            stmt = """
-            INSERT INTO transaction (tid, username, description)
-                VALUES (0,
-                UTL_I18N.STRING_TO_RAW('system', 'US7ASCII'),
-                UTL_I18N.STRING_TO_RAW(
-                    'special transaction for object creation', 'US7ASCII'));
             """
             self.runner.run_script(cursor, stmt)

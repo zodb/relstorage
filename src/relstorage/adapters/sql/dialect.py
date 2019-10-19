@@ -70,7 +70,12 @@ class DefaultDialect(object):
         return datatypes
 
     def datatype_for_column(self, column):
-        return column.type_.to_sql_datatype(self.datatype_map)
+        return column.type_.to_sql_datatype(self.datatype_map).format(
+            col_name=column.name
+        )
+
+    def extra_constraints_for_column(self, column): # pylint:disable=unused-argument
+        return ''
 
     def __eq__(self, other):
         if isinstance(other, DefaultDialect):
@@ -330,7 +335,10 @@ class Compiler(object):
         self.emit('()')
 
     def visit_op(self, op):
-        self.emit(' ' + op + ' ')
+        last_char = self.buf.getvalue()[-1]
+        if last_char != ' ':
+            self.emit(' ')
+        self.emit(op, ' ')
 
     def _next_placeholder_name(self, prefix='param'):
         return '%s_%d' % (prefix, len(self.placeholders),)
@@ -387,6 +395,15 @@ class Compiler(object):
     def emit_if_not_exists(self):
         if self.dialect.STMT_IF_NOT_EXISTS:
             self.emit(self.dialect.STMT_IF_NOT_EXISTS)
+
+    @contextmanager
+    def visit_limited_select(self, select, limit): # pylint:disable=unused-argument
+        yield self
+
+    def visit_limit(self, limit_literal):
+        if limit_literal:
+            self.emit_keyword('LIMIT')
+            self.visit_immediate_expression(limit_literal)
 
 class _DefaultContext(object):
 

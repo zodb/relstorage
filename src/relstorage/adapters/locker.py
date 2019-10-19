@@ -236,6 +236,7 @@ class AbstractLocker(DatabaseHelpersMixin,
             # Bug in our code
             raise
         except self.lock_exceptions:
+            import traceback; traceback.print_exc()
             self.reraise_commit_lock_error(
                 cursor,
                 stmt,

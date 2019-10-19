@@ -22,6 +22,7 @@ from .dialect import DialectAware
 from .select import Selectable
 from .insert import Insertable
 from .insert import Deletable
+from .insert import Updatable
 from .query import Query
 
 _marker = object()
@@ -77,13 +78,19 @@ class Column(ExpressionOperatorMixin):
         if self.primary_key:
             compiler.emit_column_constraint('PRIMARY KEY')
         # Order matters for some databases.
+        # - In Oracle, the DEFAULT has to come before NOT NULL
+        # - In sqlite, the auto_increment has to be before NOT NULL (?)
+        if self.default is not _marker:
+            compiler.emit_keyword('DEFAULT')
+            compiler.visit_immediate_expression(self.default)
+
         if self.auto_increment:
             compiler.emit_column_autoincrement()
         if not self.nullable:
             compiler.emit_column_constraint('NOT NULL')
-        if self.default is not _marker:
-            compiler.emit_keyword('DEFAULT')
-            compiler.visit_immediate_expression(self.default)
+        compiler.emit(
+            compiler.dialect.extra_constraints_for_column(self)
+        )
 
 class _QualifiedColumn(Column):
 
@@ -128,9 +135,11 @@ class _CreateTable(Query):
     def __compile_visit__(self, compiler):
         compiler.create_table(self.table, self.if_not_exists)
 
+
 class Table(Selectable,
             Insertable,
             Deletable,
+            Updatable,
             ParamMixin,
             SchemaItem):
     """

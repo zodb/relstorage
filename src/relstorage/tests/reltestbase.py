@@ -1168,7 +1168,8 @@ class GenericRelStorageTests(
         replica_conf = ''
         if util.DEFAULT_DATABASE_SERVER_HOST == util.STANDARD_DATABASE_SERVER_HOST:
             replica_fn = self.get_adapter_zconfig_replica_conf()
-            replica_conf = 'replica-conf ' + self.get_adapter_zconfig_replica_conf()
+            if replica_fn:
+                replica_conf = 'replica-conf ' + self.get_adapter_zconfig_replica_conf()
 
         conf = u"""
         %import relstorage

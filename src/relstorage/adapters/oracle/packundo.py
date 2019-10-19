@@ -17,6 +17,7 @@ from __future__ import absolute_import
 
 from ..packundo import HistoryFreePackUndo
 from ..packundo import HistoryPreservingPackUndo
+from .dialect import OracleDialect
 
 
 def _oracle_fetchmany(self, cursor): # pylint:disable=unused-argument
@@ -34,6 +35,8 @@ _oracle_traverse_graph_optimizer_hint = "/*+ FULL(object_ref) FULL(pack_object) 
 
 
 class OracleHistoryPreservingPackUndo(HistoryPreservingPackUndo):
+
+    dialect = OracleDialect()
 
     _script_choose_pack_transaction = """
         SELECT MAX(tid)
@@ -75,6 +78,8 @@ class OracleHistoryPreservingPackUndo(HistoryPreservingPackUndo):
 
 class OracleHistoryFreePackUndo(HistoryFreePackUndo):
 
+    dialect = OracleDialect()
+
     _script_choose_pack_transaction = """
         SELECT MAX(tid)
         FROM object_state
@@ -86,3 +91,15 @@ class OracleHistoryFreePackUndo(HistoryFreePackUndo):
 
     _fetchmany = _oracle_fetchmany
     _traverse_graph_optimizer_hint = _oracle_traverse_graph_optimizer_hint
+
+
+def _check_limit(c):
+    for b in c.mro():
+        for k, v in vars(b).items():
+            if hasattr(v, 'bind'):
+                v = v.bind(c.dialect)
+            if 'LIMIT ' in str(v):
+                raise TypeError("Forgot to override %s in %s" % (k, c))
+
+_check_limit(OracleHistoryPreservingPackUndo)
+_check_limit(OracleHistoryFreePackUndo)

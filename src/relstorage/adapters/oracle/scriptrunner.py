@@ -60,6 +60,9 @@ class OracleScriptRunner(ScriptRunner):
         'self_tid':     ':self_tid',
         'min_tid':      ':min_tid',
         'max_tid':      ':max_tid',
+        # Oracle won't accept ORDER BY clauses inside
+        # the subquery of an IN
+        'INNER_ORDER_BY': ''
     })
 
     def run_script_stmt(self, cursor, generic_stmt, generic_params=()):
@@ -68,7 +71,13 @@ class OracleScriptRunner(ScriptRunner):
         params should be either an empty tuple (no parameters) or
         a map.
         """
-        if generic_params:
+        generic_stmt = generic_stmt.format(**self.format_vars)
+        # We can't quote "transaction", but we have to for sqlite.
+        generic_stmt = generic_stmt.replace(' "transaction"', ' transaction')
+
+        if generic_params and isinstance(generic_params, tuple):
+            generic_stmt = _format_to_named(generic_stmt) # Unnamed params become numbered.
+        if generic_params and isinstance(generic_params, dict):
             # Oracle raises ORA-01036 if the parameter map contains extra keys,
             # so filter out any unused parameters.
             tracker = TrackingMap(self.script_vars)
@@ -78,9 +87,14 @@ class OracleScriptRunner(ScriptRunner):
             for k, v in iteritems(generic_params):
                 if k in used:
                     params[k] = v
+
         else:
             stmt = generic_stmt % self.script_vars
             params = ()
+
+        if generic_params and isinstance(generic_params, tuple):
+            params = generic_params
+        __traceback_info__ = stmt
 
         try:
             cursor.execute(stmt, params)
@@ -117,19 +131,6 @@ class CXOracleScriptRunner(OracleScriptRunner):
     def new_instance(self):
         return type(self)(self.driver)
 
-    def _outputtypehandler(self, cursor, name, defaultType,
-                           size, precision, scale): # pylint:disable=unused-argument
-        """cx_Oracle outputtypehandler that causes Oracle to send BLOBs inline.
-
-        Note that if a BLOB in the result is too large, Oracle generates an
-        error indicating truncation.  The run_lob_stmt() method works
-        around this.
-        """
-        # pylint:disable=unused-argument
-        if defaultType == self.driver.BLOB:
-            # Default size for BLOB is 4, we want the whole blob inline.
-            # Typical chunk size is 8132, we choose a multiple - 32528
-            return cursor.var(self.driver.LONG_BINARY, 32528, cursor.arraysize)
 
     def _read_lob(self, value):
         """Handle an Oracle LOB by returning its byte stream.
@@ -141,18 +142,23 @@ class CXOracleScriptRunner(OracleScriptRunner):
         return value
 
     def run_lob_stmt(self, cursor, stmt, args=(), default=None):
-        """Execute a statement and return one row with all LOBs inline.
-
-        Returns the value of the default parameter if the result was empty.
         """
+        Execute a statement and return one row with all LOBs
+        inline.
+
+        Returns the value of the default parameter if the result was
+        empty.
+
+        The statement can either be a string, or a CompiledQuery
+        object.
+        """
+
         try:
-            cursor.outputtypehandler = self._outputtypehandler
-            try:
+            if hasattr(stmt, 'execute'):
+                stmt.execute(cursor, args)
+            else:
                 cursor.execute(stmt, args)
-                for row in cursor:
-                    return row
-            finally:
-                del cursor.outputtypehandler
+            rows = cursor.fetchall()
         except self.driver.DatabaseError as e:
             # ORA-01406: fetched column value was truncated
             error = e.args[0]
@@ -164,8 +170,16 @@ class CXOracleScriptRunner(OracleScriptRunner):
             # changing its meaning, so that the query cache
             # will see it as a statement that has to be compiled
             # with different output type parameters.
-            cursor.execute(stmt + ' ', args)
-            for row in cursor:
-                return tuple(map(self._read_lob, row))
+            oth = cursor.connection.outputtypehandler
+            cursor.connection.outputtypehandler = None
+            try:
+                cursor.execute(stmt + ' ', args)
+                rows = [
+                    tuple([self._read_lob(x) for x in row])
+                    for row in cursor
+                ]
+            finally:
+                cursor.connection.outputtypehandler = oth
 
-        return default
+        assert len(rows) in (0, 1)
+        return rows[0] if rows else default

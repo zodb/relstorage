@@ -19,6 +19,8 @@
   must deploy ZEO, even if all processes are on a single machine. See
   :pr:`362`.
 
+- Fix and test Oracle. The minimum required cx_oracle is now 6.0.
+
 3.0a12 (2019-10-09)
 ===================
 

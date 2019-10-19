@@ -47,6 +47,7 @@ class ScriptRunner(object):
         'self_tid':     '%(self_tid)s',
         'min_tid':      '%(min_tid)s',
         'max_tid':      '%(max_tid)s',
+        'INNER_ORDER_BY': 'ORDER BY zoid',
     }
 
     format_vars = {
@@ -72,8 +73,9 @@ class ScriptRunner(object):
         """
         __traceback_info__ = generic_stmt, self.format_vars
         stmt = generic_stmt.format(**self.format_vars)
-        __traceback_info__ = stmt, self.script_vars
-        stmt = stmt % self.script_vars
+        if '%(' in stmt and ')s' in stmt:
+            __traceback_info__ = stmt, self.script_vars
+            stmt = stmt % self.script_vars
         __traceback_info__ = stmt
         try:
             cursor.execute(stmt, generic_params)

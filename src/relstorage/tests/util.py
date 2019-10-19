@@ -153,6 +153,7 @@ class _Availability(object):
         try:
             adapter.connmanager.open_and_call(self.__check_db_access_cb)
         except (TypeError, AttributeError):
+            import traceback; traceback.print_exc()
             raise
         except Exception as e:  # pylint:disable=broad-except
             self._available = False

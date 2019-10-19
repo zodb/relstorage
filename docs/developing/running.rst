@@ -9,9 +9,13 @@ local checkout using tox::
 
 There are environments for each database and each Python version.
 
+.. note:: This may not always be in a working state; the core
+          developers tend to work in multiple independent virtual
+          environments rather than using tox.
+
 You can also run tests manually (be sure to have installed
 relstorage's test dependencies; for example, ``pip install -e
-.[test]``). Most test files contain a ``__main__`` block that can be
+.[test]``). Many test files contain a ``__main__`` block that can be
 used with Python's ``-m``::
 
   python -m relstorage.tests.test_zodbconvert
@@ -20,12 +24,38 @@ Running all tests can be done with zope.testrunner::
 
   zope-testrunner --test-path=src
 
-
 For each database driver installed, tests will be run. Use the
 ``--unit`` argument to only run the (small) subset of tests that do
 not require access to an operational database. Use ``--layer
 <driver>`` to run tests for a particular database driver; for example,
-``--layer PG8000``.
+``--layer PG8000``. The ``-t`` and ``-m`` arguments are also useful
+for filtering tests; the ``--repeat`` argument can help find
+intermittent issues.
+
+Shell aliases make this more convenient::
+
+    alias ztest='zope-testrunner --test-path=src --auto-color --auto-progress'
+    alias ztestv='zope-testrunner --test-path=src --auto-color -vvv --slow-test=3'
+
+.. note:: zope-testrunner is how the core developers test. It's
+          advanced features (layers) are required to run the complete
+          test suite.
+
+The ``--list`` argument can be used to discover tests. To find the
+available layers, look for ``Listing``:
+
+.. code:: console
+
+   $ ztest --list | grep Listing | sort
+   Listing .MySQLCMySQLConnector_Python_SharedHistoryFreeBlobTests tests:
+   ...
+   Listing .Oraclecx_Oracle_SharedHistoryFreeBlobTests tests:
+   Listing .Oraclecx_Oracle_SharedHistoryPreservingBlobTests tests:
+   ...
+   Listing .PostgreSQLgeventPsycopg2Driver_SharedHistoryFreeBlobTests tests:
+   ...
+   Listing .Sqlite3sqlite3_SharedHistoryFreeBlobTests tests:
+   ...
 
 .. _test-databases:
 
@@ -45,16 +75,20 @@ virtual environment you could write::
 from the root of the checkout. This sets up an editable installation
 of relstorage complete with the correct MySQL driver.
 
-
-Before actually running the tests, you need to create a test user
-account and several databases. Use or adapt the SQL statements below
-to create the databases. (You can also see example scripts that are
-used to set up the continuous integration test environment in the
-`.travis <https://github.com/zodb/relstorage/tree/master/.travis>`_ directory.)
+For all databases except SQLite, before actually running the tests,
+you need to create a test user account and several databases. Use or
+adapt the SQL statements below to create the databases. (You can also
+see example scripts that are used to set up the continuous integration
+test environment in the `.travis
+<https://github.com/zodb/relstorage/tree/master/.travis>`_ directory.)
 
 If the environment variable ``RS_SMALL_BLOB`` is set when running
 the tests, certain blob tests will use a much smaller size, making the
 test run much faster.
+
+.. tip:: See ``relstorage.tests.util`` for other environment variables
+         RelStorage's tests look at. ``RS_DB_HOST`` is useful if you
+         want to have the database servers running on a different machine.
 
 .. highlight:: sql
 
@@ -77,9 +111,9 @@ them at the bottom, they may be overridden by other parameters)::
     host    relstoragetest_hf  relstoragetest   127.0.0.1/32 md5
 
 
-PostgreSQL specific tests can be run by the testposgresql module::
+PostgreSQL specific tests can be run with the PostgreSQL layer::
 
-  python -m relstorage.tests.testpostgresql
+  ztest --layer PostgreSQL
 
 MySQL
 -----
@@ -89,9 +123,9 @@ Execute the following using the ``mysql`` command:
 .. literalinclude:: ../../.travis/mysql.sh
    :language: shell
 
-MySQL specific tests can be run by the testmysql module::
+MySQL specific tests can be run with the MySQL layer::
 
-  python -m relstorage.tests.testmysql
+  ztest --layer MySQL
 
 .. note:: For some MySQL tests to pass (check16MObject), it may be
           necessary to increase the server's ``max_allowed_packet``
@@ -136,9 +170,9 @@ on tablespace" errors::
     grant unlimited tablespace to relstoragetest_hf;
     grant unlimited tablespace to relstoragetest2_hf;
 
-Oracle specific tests can be run by the testoracle module::
+Oracle specific tests can be run with the Oracle layer::
 
-  python -m relstorage.tests.testoracle
+  ztest --layer Oracle
 
 When running the tests, you can use the environment variable
 ORACLE_TEST_DSN to override the data source name, which defaults to

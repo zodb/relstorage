@@ -19,63 +19,27 @@ from __future__ import absolute_import
 
 from zope.interface import implementer
 
-from ..._compat import metricmethod
+
 from ..interfaces import ILocker
-from ..interfaces import UnableToAcquireCommitLockError
 from ..interfaces import UnableToAcquirePackUndoLockError
 from ..locker import AbstractLocker
 
-from .batch import OracleRowBatcher
 
 @implementer(ILocker)
 class OracleLocker(AbstractLocker):
 
-    def __init__(self, options, driver, inputsize_NUMBER):
+    def __init__(self, options, driver, inputsize_NUMBER, batcher_factory):
         super(OracleLocker, self).__init__(
             options=options,
             driver=driver,
-            batcher_factory=OracleRowBatcher
+            batcher_factory=batcher_factory
         )
         self.inputsize_NUMBER = inputsize_NUMBER
-
-    @metricmethod
-    def hold_commit_lock(self, cursor, ensure_current=False, nowait=False):
-        # Hold commit_lock to prevent concurrent commits
-        # (for as short a time as possible).
-        timeout = self.commit_lock_timeout if not nowait else 0
-        status = cursor.callfunc(
-            "DBMS_LOCK.REQUEST",
-            self.inputsize_NUMBER, (
-                self.commit_lock_id,
-                6,  # exclusive (X_MODE)
-                timeout,
-                True, # release on commit, yes please
-            ))
-        if status != 0:
-            if nowait and status == 1:
-                return False # Lock failed due to a timeout
-            if status >= 1 and status <= 5:
-                msg = ('', 'timeout', 'deadlock', 'parameter error',
-                       'lock already owned', 'illegal handle')[int(status)]
-            else:
-                msg = str(status)
-            raise UnableToAcquireCommitLockError(
-                "Unable to acquire commit lock (%s)" % msg)
-
-        # Alternative:
-        #cursor.execute("LOCK TABLE commit_lock IN EXCLUSIVE MODE")
-        # However, this is known to produce slower results. See
-        # https://groups.google.com/d/msg/zodb/IzQoClP5Hgc/8o28J4PkDQAJ
-
-        if ensure_current:
-            if self.keep_history:
-                # Lock transaction and current_object in share mode to ensure
-                # conflict detection has the most current data.
-                cursor.execute("LOCK TABLE transaction IN SHARE MODE")
-                cursor.execute("LOCK TABLE current_object IN SHARE MODE")
-            else:
-                cursor.execute("LOCK TABLE object_state IN SHARE MODE")
-        return True
+        timeout = ' WAIT ' + str(self.commit_lock_timeout)
+        self._lock_current_clause = self._lock_current_clause + timeout
+        # 'FOR SHARE' isn't supported so all locks are exclusive.
+        self._lock_share_clause = self._lock_current_clause
+        self._lock_share_clause_nowait = 'FOR UPDATE NOWAIT'
 
     def release_commit_lock(self, cursor):
         # no action needed
