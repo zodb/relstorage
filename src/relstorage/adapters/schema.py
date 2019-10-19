@@ -203,6 +203,7 @@ class AbstractSchemaInstaller(DatabaseHelpersMixin,
 
     def __init__(self, connmanager, runner, keep_history):
         self.connmanager = connmanager
+        self.driver = connmanager.driver
         self.keep_history = keep_history
         self.runner = runner.with_format_vars(
             tid_type=self.COLTYPE_OID_TID,
@@ -622,7 +623,9 @@ class AbstractSchemaInstaller(DatabaseHelpersMixin,
             ).bind(self).compiled()
             stmt.execute(
                 cursor,
-                (0, b'system', b'special transaction for object creation')
+                (0,
+                 self.driver.Binary(b'system'),
+                 self.driver.Binary(b'special transaction for object creation'))
             )
 
         stmt = """

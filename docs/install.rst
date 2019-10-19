@@ -33,7 +33,7 @@ module; no extra library is required. The underlying SQLite database
 must be at least version 3.8.3.
 
 On CPython2, install psycopg2 2.8+, mysqlclient 1.4+, or cx_Oracle
-5.2+ (but use caution with 5.2.1+); PyMySQL 0.7, MySQL
+6.0+; PyMySQL 0.7, MySQL
 Connector/Python 8.0.16 is also tested to work as is pg8000.
 
 .. note:: umysql support was removed in RelStorage 3.0. Use 'gevent
