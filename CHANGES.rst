@@ -21,6 +21,8 @@
 
 - Fix and test Oracle. The minimum required cx_oracle is now 6.0.
 
+- Add support for Python 3.8.
+
 3.0a12 (2019-10-09)
 ===================
 

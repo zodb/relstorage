@@ -2,8 +2,8 @@
  Installation
 ==============
 
-RelStorage 3.0 is supported on Python 2.7.9+, Python 3.5, 3.6 and 3.7,
-and PyPy2 and PyPy 3 7.1 or later.
+RelStorage 3.0 is supported on Python 2.7.9+, Python 3.5, 3.6, 3.7,
+and 3.8, as well as PyPy2 and PyPy 3 7.1 or later.
 
 You can install RelStorage using pip::
 

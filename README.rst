@@ -1,30 +1,71 @@
 
+..
+  This file is the long-description for PyPI so it can only use plain
+  ReST, no sphinx extensions.
+
 RelStorage is a storage implementation for ZODB that stores pickles in
-a relational database. PostgreSQL 9.6 and above (but not 12), MySQL
-5.7.19 / 8.0, Oracle 10g and 11g, and SQLite 3.8.3 and above are
+a relational database (`RDBMS`_). PostgreSQL 9.6 and above (but not 12), MySQL
+5.7.19 / 8.0, Oracle 10g and above, and SQLite 3.8.3 and above are
 currently supported. RelStorage replaced the PGStorage project.
 
+.. _RDBMS: https://en.wikipedia.org/wiki/Relational_database_
 
 ==========
  Features
 ==========
 
-* It is a drop-in replacement for FileStorage and ZEO.
-* There is a simple way to convert FileStorage to RelStorage and back again.
-  You can also convert a RelStorage instance to a different relational database.
-* Designed for high volume sites: multiple ZODB instances can share the same
-  database. This is similar to ZEO, but RelStorage does not require ZEO.
-* According to some tests, RelStorage handles high concurrency better than
-  the standard combination of ZEO and FileStorage.
-* Whereas FileStorage takes longer to start as the database grows due to an
-  in-memory index of all objects, RelStorage starts quickly regardless of
-  database size.
-* Supports undo, packing, and filesystem-based ZODB blobs.
-* Both history-preserving and history-free storage are available.
-* Capable of failover to replicated SQL databases.
-* ``zodbconvert`` utility to copy databases.
+* It is a drop-in replacement for FileStorage and ZEO, with several
+  enhancements:
+
+  * Supports undo, packing, and object history preservation just like
+    FileStorage.
+  * RelStorage can be configured *not* to keep object histories for
+    reduced disk space usage and improved performance.
+  * Multiple processes on a single machine can read and write a local
+    ZODB database using SQLite without needing to start and manage
+    another process (i.e., ZEO).
+  * Blobs can be stored on a shared filesystem, or (recommended) in
+    the relational database and only cached locally.
+  * Multiple threads in the same process share a high-performance
+    in-memory pickle cache to reduce the number of queries to the
+    RDBMS. This is similar to ZEO, and the ZEO cache trace tools are
+    supported.
+  * The in-memory pickle cache can be saved to disk and read when a
+    process starts up. This can dramatically speed up site warmup time
+    by eliminating a flood of RDBMS queries. Unlike ZEO, this cache
+    is automatically shared by all processes on the machine (no need
+    to configure separate client identifiers.)
+
+* Ideal for large, high volume sites.
+
+  * Multiple Python processes on multiple machines can read and write
+    the same ZODB database concurrently. This is similar to ZEO, but
+    RelStorage does not require ZEO.
+  * Supports ZODB 5's parallel commit feature: Database writers only
+    block each other when they would conflict (except for a small
+    window at the end of the twophase commit protocol when the
+    transaction ID is allocated; that still requires a global database
+    lock).
+  * According to some tests, RelStorage handles concurrency better than
+    the standard combination of ZEO and FileStorage.
+  * Whereas FileStorage takes longer to start as the database grows
+    due to an in-memory index of all objects, RelStorage starts
+    quickly regardless of database size.
+  * Capable of failover to replicated SQL databases.
+* Tested integration with `gevent`_ for PostgreSQL and MySQL.
+* There is a simple way (`zodbconvert`_) to (incrementally) convert
+  FileStorage to RelStorage and back again. You can also convert a
+  RelStorage instance to a different relational database. This is a
+  general tool that can be used to convert between any two ZODB
+  storage implementations.
+* There is a simple way (`zodbpack`_) to pack databases.
+* Supports `zodburi`_ .
 * Free, open source (ZPL 2.1)
 
+.. _gevent: http://gevent.org_
+.. _zodbconvert: https://relstorage.readthedocs.io/en/latest/zodbconvert.html_
+.. _zodbpack: https://relstorage.readthedocs.io/en/latest/zodbpack.html_
+.. _zodburi: https://relstorage.readthedocs.io/en/latest/zodburi.html
 
 ===============
  Documentation

@@ -17,8 +17,8 @@ addons:
 
 matrix:
   include:
+    - python: 3.8
     - python: 2.7
-    - python: pypy
     - python: pypy3
     - python: 3.7
       services:
@@ -31,6 +31,8 @@ matrix:
         - cp .travis/docker.cnf ~/.my.cnf
     - python: 3.5
     - python: 3.6
+    - python: pypy
+
 
 env:
     global:

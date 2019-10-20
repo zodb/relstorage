@@ -82,15 +82,15 @@ tests_require = [
 setup(
     name="RelStorage",
     version=VERSION,
-    author="Zope Foundation and Contributors",
+    author="Shane Hathaway with Zope Foundation and Contributors",
     author_email="shane@willowrise.com",
-    maintainer="Shane Hathaway",
-    maintainer_email="shane@willowrise.com",
-    url="http://relstorage.readthedocs.io/",
+    maintainer="Jason Madden",
+    maintainer_email="jason@nextthought.com",
+    url="https://relstorage.readthedocs.io/",
     project_urls={
         'Bug Tracker': 'https://github.com/zodb/relstorage/issues',
         'Source Code': 'https://github.com/zodb/relstorage/',
-        'Documentation': 'http://relstorage.readthedocs.io',
+        'Documentation': 'https://relstorage.readthedocs.io',
     },
     keywords="ZODB SQL RDBMS MySQL PostgreSQL Oracle",
     packages=find_packages('src'),
@@ -107,13 +107,14 @@ setup(
         "Programming Language :: Python :: 3.5",
         "Programming Language :: Python :: 3.6",
         "Programming Language :: Python :: 3.7",
+        "Programming Language :: Python :: 3.8",
         "Programming Language :: Python :: Implementation :: CPython",
         "Programming Language :: Python :: Implementation :: PyPy",
         "Topic :: Database",
         "Topic :: Software Development :: Libraries :: Python Modules",
         "Operating System :: Microsoft :: Windows",
         "Operating System :: Unix",
-        "Development Status :: 3 - Alpha",
+        "Development Status :: 4 - Beta",
     ],
     long_description=read_file("README.rst"),
     # We cannot be used from an archive. ZConfig can't see
@@ -247,7 +248,7 @@ setup(
             # We get 2.7 testing from PyPy on Travis.
             'psycopg2cffi >= 2.7.4; python_version == "3.5" or platform_python_implementation == "PyPy"',
             # Psycopg2 on all CPython, it's the default
-            'psycopg2 >= 2.6.1; platform_python_implementation == "CPython"',
+            'psycopg2 >= 2.8.3; platform_python_implementation == "CPython"',
         ],
     },
     entry_points={

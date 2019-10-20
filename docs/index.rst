@@ -2,86 +2,12 @@
  What is RelStorage?
 =====================
 
-RelStorage is a storage implementation for ZODB that stores pickles in
-a relational database. PostgreSQL 9.6 and above (but not 12), MySQL
-5.7.19 / 8.0, Oracle 10g and 11g, and SQLite 3.8.3 and above are
-currently supported. RelStorage replaced the PGStorage project.
-
-
-
-Features
-========
-
-* It is a drop-in replacement for FileStorage and ZEO.
-* There is a simple way to convert FileStorage to RelStorage and back again.
-  You can also convert a RelStorage instance to a different relational database.
-* Designed for high volume sites: multiple ZODB instances can share the same
-  database. This is similar to ZEO, but RelStorage does not require ZEO.
-* According to some tests, RelStorage handles high concurrency better than
-  the standard combination of ZEO and FileStorage.
-* Whereas FileStorage takes longer to start as the database grows due to an
-  in-memory index of all objects, RelStorage starts quickly regardless of
-  database size.
-* Supports undo, packing, and filesystem-based ZODB blobs.
-* Both history-preserving and history-free storage are available.
-* Capable of failover to replicated SQL databases.
-* :doc:`zodbconvert <zodbconvert>` utility to copy/transform
-  databases.
-* :doc:`zodbpack <zodbpack>` utility to pack databases.
-* :doc:`zodburi <zodburi>` support.
-* Free, open source (ZPL 2.1)
-
-
-See :doc:`the rest of the documentation <contents>` for more information.
-
-
 .. toctree::
    :maxdepth: 2
 
    contents
 
-
-Development
-===========
-
-RelStorage is hosted at GitHub:
-
-    https://github.com/zodb/relstorage
-
-
-Continuous integration
-----------------------
-
-A test suite is run for every push and pull request submitted. Travis
-CI is used to test on Linux, and AppVeyor runs the builds on
-Windows.
-
-.. image:: https://travis-ci.org/zodb/relstorage.svg?branch=master
-    :target: https://travis-ci.org/zodb/relstorage
-
-.. image:: https://ci.appveyor.com/api/projects/status/pccddlgujdoqvl83?svg=true
-   :target: https://ci.appveyor.com/project/jamadden/relstorage/branch/master
-
-.. image:: https://readthedocs.org/projects/relstorage/badge/?version=latest
-   :target: http://relstorage.readthedocs.io/en/latest/?badge=latest
-   :alt: Documentation Status
-
-Builds on Travis CI automatically submit updates to `coveralls.io`_ to
-monitor test coverage.
-
-.. image:: https://coveralls.io/repos/zodb/relstorage/badge.svg?branch=master&service=github
-   :target: https://coveralls.io/github/zodb/relstorage?branch=master
-
-
-.. _coveralls.io: https://coveralls.io/github/zodb/relstorage
-
-
-
-Project URLs
-============
-
-* http://pypi.org/project/RelStorage       (PyPI entry and downloads)
-* http://shane.willowrise.com/                 (blog)
+.. include:: ../README.rst
 
 Indices and tables
 ==================

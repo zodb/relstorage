@@ -4,8 +4,25 @@
 
 Q: How can I help improve RelStorage?
 
-    A: The best way to help is to test and to provide database-specific
-    expertise.  Ask questions about RelStorage on the zodb-dev mailing list.
+    A: The best way to help is to test and to provide
+    database-specific expertise. Ask questions about RelStorage on the
+    zodb-dev mailing list.
+
+Q: Which relational database should I use?
+
+   A: If your organization already has a standard database server, use
+   that one. It'll work fine, and the advantages of a known quantity
+   and in-house expertise can't be overstated.
+
+   Otherwise, if you're making a choice, the RelStorage
+   maintainers would suggest PostgreSQL 11+, PostgreSQL 9.6+, MySQL
+   8.0+, MySQL 5.7.19+ or Oracle, in that order. (Consider SQLite for
+   smaller deployments or testing.)
+
+   Oracle is not used in production by the RelStorage maintainers and
+   tends to lag behind in feature development; it also does not fully
+   support parallel commit. If possible, choose PostgreSQL. Oracle
+   support may be deprecated and eventually removed.
 
 Q: Can I perform SQL queries on the data in the database?
 
@@ -26,9 +43,9 @@ Q: How does RelStorage performance compare with FileStorage?
 
 Q: Why should I choose RelStorage?
 
-    A: Because RelStorage is a fairly small layer that builds on world-class
-    databases.  These databases have proven reliability and scalability, along
-    with numerous support options.
+    A: Because RelStorage is a fairly small layer that builds on
+    world-class databases. These databases have proven reliability and
+    scalability, along with numerous support options.
 
 Q: Can RelStorage replace ZRS (Zope Replication Services)?
 

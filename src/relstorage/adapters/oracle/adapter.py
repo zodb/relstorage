@@ -55,12 +55,14 @@ class OracleAdapter(AbstractAdapter):
                  twophase=False, options=None):
         """Create an Oracle adapter.
 
-        The user, password, and dsn parameters are provided to cx_Oracle
-        at connection time.
+        The user, password, and dsn parameters are provided to
+        cx_Oracle at connection time.
 
-        If twophase is true, all commits go through an Oracle-level two-phase
-        commit process.  This is disabled by default.  Even when this option
-        is disabled, the ZODB two-phase commit is still in effect.
+        If twophase is true, all commits go through an Oracle-level
+        two-phase commit process. This is disabled by default; it causes
+        deadlock detection to become slow and based on a timeout. Even
+        when this option is disabled, the ZODB two-phase commit is
+        still in effect.
         """
         # pylint:disable=unused-argument
         self._user = user
