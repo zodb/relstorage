@@ -20,15 +20,21 @@ BEGIN
     -- that the required rows all get locked. The optimizer is smart
     -- enough to push a <> condition from an outer query into a
     -- subquery. It is *not* smart enough to do the same with a CTE...
-    -- ...prior to PG12. In PG12, CTEs can be inlined and presumably
-    -- the same optimizer issue would arise. This can be fixed by
-    -- saying 'WITH AS NOT MATERIALIZED', but that's not valid syntax
-    -- before 12. It also says recursive CTEs are not inlined, and
-    -- that is valid on older versions, but this isn't actually a
-    -- recursive query, even if we use that keyword, and I don't know
-    -- if the keyword alone would be enough to fool it (the plan
-    -- doesn't change on 11 when we use the keyword). 12 isn't
-    -- released yet; we'll cross that bridge when we get there.
+    -- ...prior to PG12. In PG12, CTEs can be inlined, and if it was,
+    -- the same optimizer error would arise.
+    --
+    -- Fortunately, in PG12, "CTEs are automatically inlined if they
+    -- have no side-effects, are not recursive, and are referenced
+    -- only once in the query." The ``FOR SHARE`` clause counts as a
+    -- side-effect, and so the CTE Is not inlined.
+
+    -- Should this ever change, we could force the issue by using
+    -- 'WITH ... AS MATERIALIZED' but that's not valid syntax before
+    -- 12. (It also says recursive CTEs are not inlined, and that *is*
+    -- valid on older versions, but this isn't actually a recursive
+    -- query, even if we use that keyword, and I don't know if the
+    -- keyword alone would be enough to fool it (the plan doesn't
+    -- change on 11 when we use the keyword)).
     RETURN QUERY
       WITH locked AS (
         SELECT {CURRENT_OBJECT}.zoid, {CURRENT_OBJECT}.tid, t.tid AS desired
@@ -70,8 +76,10 @@ BEGIN
   -- transactions contain relatively few objects, and that it would do a
   -- sequential scan /anyway/, this is fine, and worth it to avoid probing
   -- the main index for new objects.
+
   -- TODO: Is it worth doing partitioning and putting prev_tid = 0 in their own
-  -- partition?
+  -- partition? prev_tid isn't the primary key, zoid is, though, and range
+  -- partitioning has to include the primary key when there is one.
 
   PERFORM {CURRENT_OBJECT}.zoid
   FROM {CURRENT_OBJECT}
