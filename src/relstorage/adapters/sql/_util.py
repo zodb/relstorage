@@ -56,6 +56,9 @@ class Columns(object):
             name
         ))
 
+    def has_column(self, name):
+        return hasattr(self, name)
+
     def __getitem__(self, ix):
         return self._columns[ix]
 
@@ -112,10 +115,12 @@ class Columns(object):
         """
         seen_combining = set()
         columns = []
+
         for c in self._columns + other._columns:
-            if c.name in combining and c.name not in seen_combining:
-                columns.append(c)
-                seen_combining.add(c.name)
+            if c.name in combining:
+                if c.name not in seen_combining:
+                    columns.append(c)
+                    seen_combining.add(c.name)
             else:
                 columns.append(c)
         return type(self)(columns)

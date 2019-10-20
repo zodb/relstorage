@@ -9,13 +9,13 @@ from __future__ import print_function
 
 from .query import Query
 from .query import ColumnList
-from .query import where as _where
 from .query import OrderBy
+from .query import WhereMixin
 from ._util import copy
+from ._util import Resolvable
 
 from .ast import TextNode
 from .ast import resolved_against
-
 from .expressions import EmptyExpression
 
 class _SelectColumns(ColumnList):
@@ -27,7 +27,9 @@ class _SelectColumns(ColumnList):
         return self
 
 
-class Select(Query):
+class Select(Query,
+             Resolvable,
+             WhereMixin):
     """
     A Select query.
 
@@ -38,7 +40,7 @@ class Select(Query):
     """
 
     _distinct = EmptyExpression()
-    _where = EmptyExpression()
+
     _order_by = EmptyExpression()
     _limit = None
     _for_update = None
@@ -51,22 +53,17 @@ class Select(Query):
         else:
             self.column_list = table
 
-    def where(self, expression):
-        expression = expression.resolve_against(self.table)
-        s = copy(self)
-        s._where = _where(expression)
-        return s
-
-    def and_(self, expression):
-        expression = expression.resolve_against(self.table)
-        s = copy(self)
-        s._where = self._where.and_(expression)
-        return s
-
     def order_by(self, expression, dir=None):
         expression = expression.resolve_against(self.table)
         s = copy(self)
         s._order_by = OrderBy(expression, dir)
+        return s
+
+    def unordered(self):
+        if not self._order_by:
+            return self
+        s = copy(self)
+        del s._order_by
         return s
 
     def limit(self, literal):
@@ -90,19 +87,18 @@ class Select(Query):
         return s
 
     def __compile_visit__(self, compiler):
-        compiler.emit_keyword('SELECT')
-        compiler.visit(self._distinct)
-        compiler.visit_select_list(self.column_list)
-        compiler.visit_from(self.table)
-        compiler.visit_clause(self._where)
-        compiler.visit_clause(self._order_by)
-        if self._limit:
-            compiler.emit_keyword('LIMIT')
-            compiler.emit(str(self._limit))
-        if self._for_update:
-            compiler.emit_keyword(self._for_update)
-        if self._nowait:
-            compiler.emit_keyword(self._nowait)
+        with compiler.visit_limited_select(self, self._limit):
+            compiler.emit_keyword('SELECT')
+            compiler.visit(self._distinct)
+            compiler.visit_select_list(self.column_list)
+            compiler.visit_from(self.table)
+            compiler.visit_clause(self._where)
+            compiler.visit_clause(self._order_by)
+            compiler.visit_limit(self._limit)
+            if self._for_update:
+                compiler.emit_keyword(self._for_update)
+            if self._nowait:
+                compiler.emit_keyword(self._nowait)
 
 
 class Selectable(object):

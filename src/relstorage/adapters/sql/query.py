@@ -17,13 +17,12 @@ from .dialect import DialectAware
 
 from .expressions import ParamMixin
 from .expressions import And
+from .expressions import EmptyExpression
 
 class Clause(DialectAware):
     """
     A portion of a SQL statement.
     """
-
-
 
 class ColumnList(Columns):
     """
@@ -45,8 +44,9 @@ class WhereClause(Clause):
         return new
 
     def __compile_visit__(self, compiler):
-        compiler.emit_keyword(' WHERE')
+        compiler.emit_keyword('WHERE')
         compiler.visit_grouped(self.expression)
+
 
 class OrderBy(Clause):
 
@@ -55,7 +55,7 @@ class OrderBy(Clause):
         self.dir = dir
 
     def __compile_visit__(self, compiler):
-        compiler.emit(' ORDER BY ')
+        compiler.emit_keyword('ORDER BY')
         compiler.visit(self.expression)
         if self.dir:
             compiler.emit(' ' + self.dir)
@@ -65,6 +65,20 @@ def where(expression):
     if expression:
         return WhereClause(expression)
 
+class WhereMixin(object):
+    _where = EmptyExpression()
+
+    def where(self, expression):
+        expression = expression.resolve_against(self.table)
+        s = copy(self)
+        s._where = where(expression)
+        return s
+
+    def and_(self, expression):
+        expression = expression.resolve_against(self.table)
+        s = copy(self)
+        s._where = self._where.and_(expression)
+        return s
 
 class Query(ParamMixin,
             Clause):

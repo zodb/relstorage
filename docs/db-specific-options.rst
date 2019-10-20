@@ -238,6 +238,9 @@ driver
     Other than "auto" the only supported value is "cx_Oracle".
 
     .. caution::
+        (This is a historical note. Only version 6.0 and above of
+        cx_Oracle is supported in RelStorage 3.)
+
         If you use cx_Oracle 5.2.1 or 5.3 (in general, any version >=
         5.2 but < 6.0) you must be sure that it is compiled against a
         version of the Oracle client that is compatible with the

@@ -7,10 +7,15 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+from contextlib import contextmanager
+
 from ..sql import DefaultDialect
 from ..sql import Compiler
 from ..sql import Boolean
 from ..sql import Column
+
+from ..sql import OID
+from ..sql import TID
 
 class OracleCompiler(Compiler):
 
@@ -42,8 +47,43 @@ class OracleCompiler(Compiler):
         else:
             super(OracleCompiler, self).visit_select_expression(column_node)
 
+    @contextmanager
+    def visit_limited_select(self, select, limit):
+        if limit:
+            self.visit_limit = self._visit_limit_while_limited
+            self.emit('SELECT * FROM (')
+            try:
+                yield self
+            finally:
+                del self.visit_limit
+            self.emit(') WHERE ROWNUM <=')
+            self.visit_immediate_expression(limit)
+        else:
+            yield self
+
+    def visit_limit(self, limit_literal): # pylint:disable=method-hidden
+        if limit_literal is not None:
+            raise Exception("Forgot to visit in a visit_limited_select")
+
+    def _visit_limit_while_limited(self, limit):
+        assert limit is not None
+
 
 class OracleDialect(DefaultDialect):
+
+    datatype_map = DefaultDialect.datatype_map.copy()
+    datatype_map.update({
+        OID: 'NUMBER(20)',
+        TID: 'NUMBER(20)',
+        Boolean: "CHAR",
+    })
+
+    def extra_constraints_for_column(self, column):
+        if column.is_type(Boolean):
+            return "CHECK ({col_name} IN ('N', 'Y'))".format(
+                col_name=column.name
+            )
+        return ''
 
     def compiler_class(self):
         return OracleCompiler

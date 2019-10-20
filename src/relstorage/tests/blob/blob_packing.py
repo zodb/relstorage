@@ -121,7 +121,6 @@ class TestBlobPackHistoryPreservingMixin(TestBlobMixin):
         del root['blob']
         transaction.commit()
         conn.close()
-
         self._pack_at_time_index(None, count_not_exist=5)
         self.assertFalse(os.path.exists(dir_name))
 

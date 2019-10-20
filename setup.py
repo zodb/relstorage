@@ -206,7 +206,13 @@ setup(
             'psycopg2cffi >= 2.8.1',
         ],
         'oracle': [
-            'cx_Oracle>=5.0.0'
+            # 5.2 added support for LOBs larger than 4GB.
+            # 6.0 lets lobs be used across DB fetches, uses
+            # temp lob caching.
+            # 6.2 lets lobs be bound directly to a cursor, and
+            # 7.0 lets lobs be set directly from bytes, without an intermediate
+            # temporary lob.
+            'cx_Oracle>=6.0'
         ],
         'memcache': memcache_require,
         'test': tests_require,

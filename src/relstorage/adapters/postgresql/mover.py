@@ -38,14 +38,13 @@ class PostgreSQLObjectMover(AbstractObjectMover):
             state = excluded.state
     """
 
-    _update_current_insert_query = """
-        INSERT INTO current_object (zoid, tid)
-            SELECT zoid, tid FROM object_state
-            WHERE tid = %s
-            ORDER BY zoid
+    _update_current_insert_query = (
+        AbstractObjectMover._upsert_current_insert_base
+        + """
         ON CONFLICT (zoid) DO UPDATE SET
             tid = excluded.tid
-    """
+        """
+    )
     _update_current_update_query = None
 
 

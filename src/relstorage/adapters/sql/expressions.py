@@ -118,10 +118,16 @@ class BinaryExpression(Expression):
             self.rhs
         )
 
-    def __compile_visit__(self, compiler):
+    def _visit_lhs(self, compiler):
         compiler.visit(self.lhs)
-        compiler.visit_op(self.op)
+
+    def _visit_rhs(self, compiler):
         compiler.visit(self.rhs)
+
+    def __compile_visit__(self, compiler):
+        self._visit_lhs(compiler)
+        compiler.visit_op(self.op)
+        self._visit_rhs(compiler)
 
     def resolve_against(self, table):
         lhs = self.lhs.resolve_against(table)
@@ -133,7 +139,7 @@ class BinaryExpression(Expression):
 
 class EmptyExpression(Expression):
     """
-    No comparison at all.
+    No expression at all.
     """
 
     __slots__ = ()
@@ -158,6 +164,8 @@ class EqualExpression(BinaryExpression):
 
     def __init__(self, lhs, rhs):
         BinaryExpression.__init__(self, '=', lhs, rhs)
+
+AssignmentExpression = EqualExpression
 
 class NotEqualExpression(BinaryExpression):
 
@@ -194,6 +202,15 @@ class LessExpression(BinaryExpression):
 
     def __init__(self, lhs, rhs):
         BinaryExpression.__init__(self, '<', lhs, rhs)
+
+class InExpression(BinaryExpression):
+    __slots__ = ()
+
+    def __init__(self, lhs, rhs):
+        BinaryExpression.__init__(self, 'IN', lhs, rhs)
+
+    def _visit_rhs(self, compiler):
+        compiler.visit_grouped(self.rhs)
 
 
 class And(Expression):
@@ -244,3 +261,6 @@ class ExpressionOperatorMixin(object):
 
     def __lt__(self, other):
         return LessExpression(self, other)
+
+    def in_(self, other):
+        return InExpression(self, other)

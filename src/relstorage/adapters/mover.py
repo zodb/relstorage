@@ -499,23 +499,44 @@ class AbstractObjectMover(ABC):
     # and set `_update_current_update_query` to None.
     # Note that to avoid deadlocks, it is incredibly important
     # to order the updates in OID order.
-    _update_current_insert_query = """
-        INSERT INTO current_object (zoid, tid)
-        SELECT zoid, tid FROM object_state
-        WHERE tid = %s
-            AND prev_tid = 0
-    """
-
-    _update_current_update_query = """
-        UPDATE current_object
-        SET tid = %s
-        WHERE zoid IN (
-            SELECT zoid FROM object_state
-            WHERE tid = %s
-                AND prev_tid != 0
-            ORDER BY zoid
+    _update_current_insert_query = Schema.current_object.insert(
+    ).from_select(
+        (Schema.current_object.c.zoid, Schema.current_object.c.tid),
+        Schema.object_state.select(
+            Schema.object_state.c.zoid, Schema.object_state.c.tid
+        ).where(
+            Schema.object_state.c.tid == Schema.object_state.orderedbindparam()
+        ).and_(
+            Schema.object_state.c.prev_tid == 0
         )
-    """
+    )
+
+    # Use this as the base for your upsert, if the upsert part foes in an epilogue
+    # at the end.
+    _upsert_current_insert_base = Schema.current_object.insert(
+    ).from_select(
+        (Schema.current_object.c.zoid, Schema.current_object.c.tid),
+        Schema.object_state.select(
+            Schema.object_state.c.zoid, Schema.object_state.c.tid
+        ).where(
+            Schema.object_state.c.tid == Schema.object_state.orderedbindparam()
+        ).order_by(Schema.object_state.c.zoid)
+    )
+
+    _update_current_update_query = Schema.current_object.update(
+        tid=Schema.current_object.orderedbindparam()
+    ).where(
+        Schema.current_object.c.zoid.in_(
+            Schema.object_state.select(
+                Schema.object_state.c.zoid
+            ).where(
+                Schema.object_state.c.tid == Schema.object_state.orderedbindparam()
+            ).and_(
+                Schema.object_state.c.prev_tid != 0
+            ).order_by(Schema.object_state.c.zoid)
+        )
+    )
+
 
     @noop_when_history_free
     @metricmethod_sampled
@@ -526,11 +547,12 @@ class AbstractObjectMover(ABC):
         tid is the integer tid of the transaction being committed.
         """
         stmt = self._update_current_insert_query
-        cursor.execute(stmt, (tid,))
+        stmt.execute(cursor, (tid,))
 
         if self._update_current_update_query:
             stmt = self._update_current_update_query
-            cursor.execute(stmt, (tid, tid))
+            stmt.execute(cursor, (tid, tid))
+
 
     @metricmethod_sampled
     def download_blob(self, cursor, oid, tid, filename):

@@ -137,9 +137,22 @@ class Schema(object):
         Column('tid', TID)
     )
 
+    pack_object = Table(
+        'pack_object',
+        Column('zoid', OID, primary_key=True),
+        Column('keep', Boolean, nullable=False),
+        Column('keep_tid', TID, nullable=False),
+        Column('visited', Boolean, nullable=False, default=False)
+    )
+
 
 class AbstractSchemaInstaller(DatabaseHelpersMixin,
                               ABC):
+
+    # Names of schema objects: Wherever we write them, they should be
+    # in lower case, even if the database internally changes the case.
+    # (In general, they should be written to match the output of
+    # :meth:`_normalize_schema_object_names`.)
 
     # Keep this list in the same order as the schema scripts,
     # for dependency (Foreign Key) purposes.
@@ -153,7 +166,7 @@ class AbstractSchemaInstaller(DatabaseHelpersMixin,
         'commit_row_lock',
         'pack_lock',
         'transaction',
-        'new_oid',
+        'new_oid', # If you use a sequence, remove this
         'object_state',
         'blob_chunk',
         'current_object',
@@ -167,6 +180,8 @@ class AbstractSchemaInstaller(DatabaseHelpersMixin,
         'temp_pack_visit',
         'temp_undo',
     )
+
+    all_sequences = ()
 
     # Tables that might exist, but which are unused and obsolete.
     # These can/should be dropped, and names shouldn't be reused.
@@ -188,6 +203,7 @@ class AbstractSchemaInstaller(DatabaseHelpersMixin,
 
     def __init__(self, connmanager, runner, keep_history):
         self.connmanager = connmanager
+        self.driver = connmanager.driver
         self.keep_history = keep_history
         self.runner = runner.with_format_vars(
             tid_type=self.COLTYPE_OID_TID,
@@ -197,6 +213,7 @@ class AbstractSchemaInstaller(DatabaseHelpersMixin,
             blob_chunk_num_type=self.COLTYPE_BLOB_CHUNK_NUM,
             md5_type=self.COLTYPE_MD5,
             state_type=self.COLTYPE_STATE,
+            state_size_type=self.COLTYPE_STATE_SIZE,
             transactional_suffix=self.TRANSACTIONAL_TABLE_SUFFIX,
         )
 
@@ -310,6 +327,7 @@ class AbstractSchemaInstaller(DatabaseHelpersMixin,
     #: Our default is appropriate for PostgreSQL.
     COLTYPE_BINARY_STRING = 'BYTEA'
     COLTYPE_STATE = COLTYPE_BINARY_STRING
+    COLTYPE_STATE_SIZE = 'BIGINT'
     #: The type of the column used to number blob chunks.
     COLTYPE_BLOB_CHUNK_NUM = 'BIGINT'
     #: The type of the column used to store blob chunks.
@@ -332,16 +350,6 @@ class AbstractSchemaInstaller(DatabaseHelpersMixin,
         """
         self._create_transaction_query.execute(cursor)
 
-    @abc.abstractmethod
-    def _create_new_oid(self, cursor):
-        """
-        Create the incrementing sequence for new OIDs.
-
-        This should be the same for history free and preserving
-        schemas.
-        """
-        raise NotImplementedError()
-
     # NOTE: Prior to MySQL 8.0.16, CHECK constraints
     # are ignored at creation time and dropped. Thus if you upgrade
     # an existing 5.7 schema to 8, constraints will not be enforced,
@@ -357,7 +365,7 @@ class AbstractSchemaInstaller(DatabaseHelpersMixin,
             prev_tid    {tid_type} NOT NULL
                            REFERENCES "transaction",
             md5         {md5_type},
-            state_size  BIGINT NOT NULL,
+            state_size  {state_size_type} NOT NULL,
             state       {state_type},
             CONSTRAINT object_state_pk
                 PRIMARY KEY (zoid, tid),
@@ -371,8 +379,8 @@ class AbstractSchemaInstaller(DatabaseHelpersMixin,
         CREATE TABLE object_state (
             zoid        {oid_type} NOT NULL PRIMARY KEY,
             tid         {tid_type} NOT NULL,
-            state_size  BIGINT NOT NULL,
-            state       {state_type} NOT NULL,
+            state_size  {state_size_type} NOT NULL,
+            state       {state_type},
             CHECK (tid > 0),
             CHECK (state_size >= 0)
         ) {transactional_suffix};
@@ -513,19 +521,12 @@ class AbstractSchemaInstaller(DatabaseHelpersMixin,
         """
         self.runner.run_script(cursor, self.CREATE_OBJECT_REFS_ADDED_TMPL)
 
-    CREATE_PACK_OBJECT_TMPL = """
-    CREATE TABLE pack_object (
-        zoid        {oid_type} NOT NULL PRIMARY KEY,
-        keep        BOOLEAN NOT NULL,
-        keep_tid    {oid_type} NOT NULL,
-        visited     BOOLEAN NOT NULL DEFAULT FALSE
-    ) {transactional_suffix};
-    """
 
     CREATE_PACK_OBJECT_IX_TMPL = """
-    CREATE INDEX pack_object_keep_zoid
-    ON pack_object (keep, zoid);
+    CREATE INDEX pack_object_keep_zoid ON pack_object (keep, zoid)
     """
+
+    _create_pack_object_query = Schema.pack_object.create()
 
     def _create_pack_object(self, cursor):
         """
@@ -535,10 +536,9 @@ class AbstractSchemaInstaller(DatabaseHelpersMixin,
         visited. The keep_tid field specifies the current revision of the
         object.
         """
-        self.runner.run_script(
-            cursor,
-            self.CREATE_PACK_OBJECT_TMPL + self.CREATE_PACK_OBJECT_IX_TMPL,
-        )
+        self._create_pack_object_query.execute(cursor)
+        # Some databases (pg) have multiple statements
+        self.runner.run_script(cursor, self.CREATE_PACK_OBJECT_IX_TMPL)
 
     CREATE_PACK_STATE_TMPL = """
     CREATE TABLE pack_state (
@@ -623,7 +623,9 @@ class AbstractSchemaInstaller(DatabaseHelpersMixin,
             ).bind(self).compiled()
             stmt.execute(
                 cursor,
-                (0, 'system', 'special transaction for object creation')
+                (0,
+                 self.driver.Binary(b'system'),
+                 self.driver.Binary(b'special transaction for object creation'))
             )
 
         stmt = """
@@ -636,12 +638,24 @@ class AbstractSchemaInstaller(DatabaseHelpersMixin,
     def _reset_oid(self, cursor):
         raise NotImplementedError()
 
+    def _normalize_schema_object_names(self, names):
+        return [n.lower() for n in names]
+
+    def _create_schema_objects(self, cursor, all_object_names, existing_object_names):
+        # Normalize names
+        existing_object_names = set(self._normalize_schema_object_names(existing_object_names))
+        todo = set(all_object_names) - existing_object_names
+        # Preserve order
+        todo = [t for t in all_object_names if t in todo]
+        __traceback_info__ = todo, existing_object_names, all_object_names
+        for table in todo:
+            meth = getattr(self, '_create_' + table)
+            meth(cursor)
+        return todo, existing_object_names
+
     def create_tables(self, cursor, existing_tables=()):
         """Create the database tables."""
-        for table in self.all_tables:
-            if table not in existing_tables:
-                meth = getattr(self, '_create_' + table)
-                meth(cursor)
+        _, existing_tables = self._create_schema_objects(cursor, self.all_tables, existing_tables)
 
         if self.keep_history and 'transaction' not in existing_tables:
             self._init_after_create(cursor)
@@ -658,6 +672,12 @@ class AbstractSchemaInstaller(DatabaseHelpersMixin,
     def create_triggers(self, cursor):
         "Subclasses should override"
 
+    def create_sequences(self, cursor):
+        "Subclasses should override."
+        self._create_schema_objects(cursor,
+                                    self.all_sequences,
+                                    self.list_sequences(cursor))
+
     def _prepare_with_connection(self, conn, cursor): # pylint:disable=unused-argument
         # XXX: We can generalize this to handle triggers, procs, etc,
         # to make subclasses have easier time.
@@ -665,9 +685,10 @@ class AbstractSchemaInstaller(DatabaseHelpersMixin,
         __traceback_info__ = existing_tables
         all_tables = self.create_tables(cursor, existing_tables)
         __traceback_info__ = existing_tables, all_tables
-        if 'transaction' in existing_tables:
+        if 'transaction' in self._normalize_schema_object_names(existing_tables):
             self.update_schema(cursor, existing_tables)
 
+        self.create_sequences(cursor)
         self.create_procedures(cursor)
         self.create_triggers(cursor)
 
@@ -682,6 +703,7 @@ class AbstractSchemaInstaller(DatabaseHelpersMixin,
         self.check_compatibility(cursor, tables)
 
     def check_compatibility(self, cursor, tables): # pylint:disable=unused-argument
+        tables = self._normalize_schema_object_names(tables)
         if self.keep_history:
             if 'transaction' not in tables and 'current_object' not in tables:
                 raise StorageError(
@@ -718,18 +740,23 @@ class AbstractSchemaInstaller(DatabaseHelpersMixin,
         if self._needs_transaction_empty_update(cursor):
             cursor.execute(self._rename_transaction_empty_stmt)
 
+    _blank_transaction_query = Schema.transaction.select(
+        '*'
+    ).where(Schema.transaction.c.tid < 0)
+
     def _needs_transaction_empty_update(self, cursor):
         # Get a description of the table, but don't actually return
         # any rows.
         if not self.keep_history:
             return False
 
-        cursor.execute('SELECT * FROM "transaction" WHERE tid < 0')
+        self._blank_transaction_query.execute(cursor)
         columns = self._column_descriptions(cursor)
         # Make sure to read the (empty) result, some drivers (CMySQLConnector)
         # are picky about that and won't let you close a cursor without reading
         # everything.
         cursor.fetchall()
+
         for column_descr in columns:
             if column_descr.name.lower() == 'is_empty':
                 # Yay, nothing to do.
@@ -758,17 +785,22 @@ class AbstractSchemaInstaller(DatabaseHelpersMixin,
 
         def zap_all(_conn, cursor):
             existent = set(self.list_tables(cursor))
-            todo = list(self.all_tables)
-            todo.reverse() # using reversed()  doesn't print nicely
-            logger.debug("Checking tables: %r", todo)
+            to_zap = {} # {normalized_name: recorded_name}
             self._before_zap_all_tables(cursor, existent, slow)
-            for table in todo:
-                logger.debug("Considering table %s", table)
-                if table.startswith('temp_'):
+            for possible_table in existent:
+                norm_table = self._normalize_schema_object_names([possible_table])[0]
+                if norm_table.startswith('temp_'):
                     continue
-                if table in existent:
-                    table_stmt = stmt % table
+                if norm_table in self.all_tables:
+                    to_zap[norm_table] = possible_table
+
+            # Do in reverse order because that's how Foreign Key
+            # constraints are set up.
+            for possible_table in reversed(self.all_tables):
+                if possible_table in to_zap:
+                    table_stmt = stmt % to_zap[possible_table]
                     logger.debug(table_stmt)
+                    __traceback_info__ = table_stmt
                     cursor.execute(table_stmt)
             logger.debug("Done deleting from tables.")
 

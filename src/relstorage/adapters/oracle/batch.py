@@ -32,6 +32,11 @@ class OracleRowBatcher(RowBatcher):
     Expects :name parameters and a dictionary for each row.
     """
 
+    insert_placeholder = delete_placeholder = ':1'
+
+    # ORA-01795: maximum number of expressions in a list is 1000
+    row_limit = 999
+
     def __init__(self, cursor, inputsizes, row_limit=None):
         super(OracleRowBatcher, self).__init__(cursor, row_limit)
         self.inputsizes = inputsizes
@@ -110,3 +115,10 @@ class OracleRowBatcher(RowBatcher):
             for i, column in enumerate(zip(*r)):
                 params.append(self.cursor.arrayvar(datatypes[i], list(column)))
             self.cursor.execute(operation, tuple(params))
+
+    # TODO: Can we override _make_single_column_query() to pass
+    # an array to the database for use in a sql statement?
+    # We'd need the TABLE operator, probably. How far back is that supported?
+
+    def _make_placeholder_list_of_length(self, count):
+        return ','.join((':%d' % i for i in range(count)))
