@@ -2,7 +2,7 @@
  Changes
 =========
 
-3.0a13 (unreleased)
+3.0a13 (2019-10-21)
 ===================
 
 - Further speed improvements and memory efficiency gains of around 30%
