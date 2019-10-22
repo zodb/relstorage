@@ -45,6 +45,7 @@ from .schema import TemporaryTable
 from .schema import HistoryVariantTable
 from .schema import Column
 from .schema import ColumnResolvingProxy
+from .schema import ColumnExpression
 
 from .dialect import DefaultDialect
 from .dialect import Compiler

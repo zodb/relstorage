@@ -106,20 +106,24 @@ class TestMoverQueries(TestCase):
 
         inst = self._makeOne()
 
-        unbound = type(inst)._move_from_temp_hf_insert_query
+        unbound = type(inst)._move_from_temp_hf_upsert_query
 
         self.assertRegex(
             str(unbound),
             r'EXECUTE rs_prep_stmt_.*'
         )
-
+        self.maxDiff = None
         # Bound, the py-format style escapes are replaced with
         # :name params; these are simple numbers.
         self.assertEqual(
-            str(inst._move_from_temp_hf_insert_query),
-            'INSERT INTO object_state(zoid, tid, state_size, state) '
-            'SELECT zoid, :1, COALESCE(LENGTH(state), 0), state '
-            'FROM temp_store ORDER BY zoid'
+            str(inst._move_from_temp_hf_upsert_query),
+            'MERGE INTO object_state USING ( '
+            'SELECT zoid, :1 tid, COALESCE(LENGTH(state), 0) state_size, state '
+            'FROM temp_store ORDER BY zoid) D '
+            'ON (object_state.zoid = D.zoid) '
+            'WHEN MATCHED THEN UPDATE SET state = D.state, tid = D.tid, state_size = D.state_size '
+            'WHEN NOT MATCHED THEN INSERT (zoid, tid, state_size, state) '
+            'VALUES (D.zoid, D.tid, D.state_size, D.state)'
         )
 
 class TestDatabaseIteratorQueries(TestCase):

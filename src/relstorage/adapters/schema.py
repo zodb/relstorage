@@ -39,6 +39,9 @@ from .sql import State
 from .sql import Boolean
 from .sql import BinaryString
 from .sql import Char
+from .sql import ColumnExpression
+
+StateSize = OID
 
 logger = __import__('logging').getLogger(__name__)
 
@@ -58,7 +61,7 @@ class Schema(object):
         Column('zoid', OID),
         Column('tid', TID),
         Column('state', State),
-        Column('state_size'),
+        Column('state_size', StateSize),
         # These two only exist in history preserving.
         # TODO: Wrap this in a HistoryVariantTable
         Column('prev_tid', TID),
@@ -741,7 +744,7 @@ class AbstractSchemaInstaller(DatabaseHelpersMixin,
             cursor.execute(self._rename_transaction_empty_stmt)
 
     _blank_transaction_query = Schema.transaction.select(
-        '*'
+        ColumnExpression('*')
     ).where(Schema.transaction.c.tid < 0)
 
     def _needs_transaction_empty_update(self, cursor):

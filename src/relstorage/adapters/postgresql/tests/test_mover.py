@@ -94,7 +94,7 @@ class TestPostgreSQLObjectMover(TestCase):
     def test_prep_statements_hf(self):
         inst = self._makeOne(keep_history=False)
         self.assertTrue(
-            str(inst._move_from_temp_hf_insert_query).startswith(
+            str(inst._move_from_temp_hf_upsert_query).startswith(
                 'EXECUTE rs_prep_stmt'
             )
         )

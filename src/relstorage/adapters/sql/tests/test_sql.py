@@ -24,6 +24,8 @@ from __future__ import print_function
 from relstorage.tests import TestCase
 
 from .. import Table
+from .. import TemporaryTable
+from .. import Char
 from .. import HistoryVariantTable
 from .. import Column
 from .. import it
@@ -71,6 +73,15 @@ transaction = Table(
     Column('description', BinaryString),
     Column('extension', BinaryString),
 )
+
+temp_store = TemporaryTable(
+    'temp_store',
+    Column('zoid', OID, primary_key=True),
+    Column('prev_tid', TID, nullable=False),
+    Column('md5', Char(32)), # Only used when keep_history=True
+    Column('state', State)
+)
+
 
 class TestTableSelect(TestCase):
 
@@ -402,4 +413,121 @@ class TestTableSelect(TestCase):
             'USING (tid) '
             'WHERE ((zoid = %(oid)s AND packed = FALSE)) '
             'ORDER BY tid DESC'
+        )
+
+class TestUpsert(TestCase):
+    # This is here rather than test_dialect.py because it uses the higher level
+    # schema objects.
+    keep_history = False
+    dialect = DefaultDialect()
+    maxDiff = None
+
+    insert_or_replace = (
+        'INSERT INTO object_state(zoid, state, tid, state_size) '
+        'VALUES (%s, %s, %s, %s) '
+        'ON CONFLICT (zoid) '
+        'DO UPDATE SET state = excluded.state, tid = excluded.tid, '
+        'state_size = excluded.state_size'
+    )
+
+    def test_insert_or_replace(self):
+        stmt = object_state.upsert(
+            it.c.zoid,
+            it.c.state,
+            it.c.tid,
+            it.c.state_size
+        ).on_conflict(
+            it.c.zoid
+        ).do_update(
+            it.c.state,
+            it.c.tid,
+            it.c.state_size
+        ).bind(self)
+
+        self.assertEqual(
+            str(stmt),
+            self.insert_or_replace
+        )
+
+    insert_or_replace_subquery = (
+        'INSERT INTO object_state(zoid, tid, state, state_size) '
+        'SELECT zoid, %s, state, COALESCE(LENGTH(state), 0) FROM temp_store '
+        'ORDER BY zoid '
+        'ON CONFLICT (zoid) '
+        'DO UPDATE SET state = excluded.state, tid = excluded.tid, '
+        'state_size = excluded.state_size'
+    )
+
+    def test_insert_or_replace_subquery(self):
+        stmt = object_state.upsert(
+            it.c.zoid,
+            it.c.tid,
+            it.c.state,
+            it.c.state_size
+        ).from_select(
+            (object_state.c.zoid,
+             object_state.c.tid,
+             object_state.c.state,
+             object_state.c.state_size,
+            ),
+            temp_store.select(
+                temp_store.c.zoid,
+                temp_store.orderedbindparam(),
+                temp_store.c.state,
+                'COALESCE(LENGTH(state), 0)',
+            ).order_by(
+                temp_store.c.zoid
+            )
+        ).on_conflict(
+            it.c.zoid
+        ).do_update(
+            it.c.state,
+            it.c.tid,
+            it.c.state_size
+        ).bind(self)
+
+        self.maxDiff = None
+        self.assertEqual(
+            str(stmt),
+            self.insert_or_replace_subquery
+        )
+
+    upsert_unconstrained_subquery = (
+        'INSERT INTO object_state(zoid, tid, state, state_size) '
+        'SELECT zoid, %s, state, COALESCE(LENGTH(state), 0) FROM temp_store '
+        'ON CONFLICT (zoid) '
+        'DO UPDATE SET state = excluded.state, tid = excluded.tid, '
+        'state_size = excluded.state_size'
+    )
+
+    def test_upsert_unconstrained_subquery(self):
+        stmt = object_state.upsert(
+            it.c.zoid,
+            it.c.tid,
+            it.c.state,
+            it.c.state_size
+        ).from_select(
+            (object_state.c.zoid,
+             object_state.c.tid,
+             object_state.c.state,
+             object_state.c.state_size,
+            ),
+            temp_store.select(
+                temp_store.c.zoid,
+                temp_store.orderedbindparam(),
+                temp_store.c.state,
+                'COALESCE(LENGTH(state), 0)',
+            )
+        ).on_conflict(
+            it.c.zoid
+        ).do_update(
+            it.c.state,
+            it.c.tid,
+            it.c.state_size
+        ).bind(self)
+
+        self.maxDiff = None
+        self.assertEqual(
+            str(stmt),
+            self.upsert_unconstrained_subquery
         )

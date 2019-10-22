@@ -89,34 +89,6 @@ class MySQLObjectMover(AbstractObjectMover):
 
         AbstractObjectMover.on_store_opened(self, cursor, restart=restart)
 
-    # Upserts: It's a good idea to use `ON DUPLICATE KEY UPDATE`
-    # instead of REPLACE because `ON DUPLICATE` updates rows in place
-    # instead of performing a DELETE followed by an INSERT; that might
-    # matter for row locking or MVCC, depending on isolation level and
-    # locking strategies, and it's been said that it matters for
-    # backend IO, especially on things like a large distributed SAN
-    # (https://github.com/zodb/relstorage/issues/189). This is also
-    # more similar to what PostgreSQL uses, possibly allowing more
-    # query sharing (with a smarter query runner/interpreter).
-
-    # TODO: Some drivers (mysqlclient) have a pretty good executemany()
-    # implementation that works with iterators. We could use that
-    # instead of our generic RowBatcher here.
-    def store_temp(self, cursor, batcher, oid, prev_tid, data):
-        suffix = """
-        ON DUPLICATE KEY UPDATE
-            state = VALUES(state),
-            prev_tid = VALUES(prev_tid),
-            md5 = VALUES(md5)
-        """
-        self._generic_store_temp(batcher, oid, prev_tid, data, suffix=suffix)
-
-    @metricmethod_sampled
-    def replace_temps(self, cursor, state_oid_tid_iter):
-        # We can use the regular batcher and store_temps -> store_temp
-        # method because of our upsert query.
-        self.store_temps(cursor, state_oid_tid_iter)
-
     @metricmethod_sampled
     def restore(self, cursor, batcher, oid, tid, data):
         """Store an object directly, without conflict detection.
@@ -153,20 +125,3 @@ class MySQLObjectMover(AbstractObjectMover):
 
     # We UPSERT for hf movement; no need to do a delete.
     _move_from_temp_hf_delete_query = ''
-
-    _move_from_temp_hf_insert_query = AbstractObjectMover._move_from_temp_hf_insert_query + """
-    ON DUPLICATE KEY UPDATE
-        tid = VALUES(tid),
-        state_size = VALUES(state_size),
-        state = VALUES(state)
-    """
-
-    # UPSERT for current_object: no need for separate update.
-    _update_current_insert_query = (
-        AbstractObjectMover._upsert_current_insert_base
-        + """
-        ON DUPLICATE KEY UPDATE
-            tid = VALUES(tid)
-        """
-    )
-    _update_current_update_query = None

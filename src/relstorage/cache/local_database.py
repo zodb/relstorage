@@ -371,6 +371,11 @@ class Database(ABC):
 class _UpsertUpdateDatabase(Database):
 
     def move_from_temp(self):
+        # "The parser might not be able to tell if the "ON" keyword is
+        # introducing the UPSERT or if it is the ON clause of a join.
+        # To work around this, the SELECT statement should always
+        # include a WHERE clause, even if that WHERE clause is just
+        # ``WHERE true``."
         self.cursor.execute("""
         INSERT INTO object_state (zoid, tid, was_frozen, frequency, state)
         SELECT zoid, tid, was_frozen, frequency, state

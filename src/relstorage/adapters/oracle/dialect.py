@@ -13,9 +13,11 @@ from ..sql import DefaultDialect
 from ..sql import Compiler
 from ..sql import Boolean
 from ..sql import Column
-
 from ..sql import OID
 from ..sql import TID
+
+from ..sql._util import Columns
+from ..sql.insert import _ExcludedColumn
 
 class OracleCompiler(Compiler):
 
@@ -68,6 +70,35 @@ class OracleCompiler(Compiler):
     def _visit_limit_while_limited(self, limit):
         assert limit is not None
 
+    def visit_upsert(self, upsert):
+        self.emit_keyword('MERGE INTO')
+        self.visit(upsert.table)
+        self.emit_keyword('USING')
+        if upsert.select:
+            self.visit_grouped(upsert.select)
+            self.emit_keyword('D')
+        else:
+            raise TypeError
+        self.emit_keyword('ON')
+        self.emit(
+            '(',
+            upsert.table.name + '.' + upsert.conflict_column.name,
+            ' = '
+            'D.' + upsert.conflict_column.name,
+            ')'
+        )
+        self.emit_keyword('WHEN MATCHED THEN')
+        self.visit(upsert.update_clause)
+
+        self.emit_keyword('WHEN NOT MATCHED THEN INSERT')
+        self.visit_grouped(upsert.column_list)
+        self.emit_keyword('VALUES')
+        # XXX: If the subquery has expression, they need to be given aliases.
+        excluded_columns = Columns(_ExcludedColumn(c.name) for c in upsert.column_list)
+        self.visit_grouped(excluded_columns)
+
+    def visit_upsert_excluded_column(self, column):
+        self.emit('D.' + column.name)
 
 class OracleDialect(DefaultDialect):
 

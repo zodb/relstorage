@@ -5,7 +5,10 @@
 3.0b1 (unreleased)
 ==================
 
-- Nothing changed yet.
+- Make SQLite and Oracle both use UPSERT queries instead of multiple
+  database round trips.
+
+- Fix an exception with large transactions on SQLite.
 
 
 3.0a13 (2019-10-21)

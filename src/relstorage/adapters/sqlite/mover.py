@@ -27,6 +27,7 @@ from ..mover import metricmethod_sampled
 
 from .batch import Sqlite3RowBatcher
 
+
 @implementer(IObjectMover)
 class Sqlite3ObjectMover(AbstractObjectMover):
 
@@ -61,16 +62,6 @@ class Sqlite3ObjectMover(AbstractObjectMover):
             cursor.execute(stmt)
 
         super(Sqlite3ObjectMover, self).on_store_opened(cursor, restart)
-
-    @metricmethod_sampled
-    def store_temp(self, _cursor, batcher, oid, prev_tid, data):
-        # suffix = """
-        # ON CONFLICT (zoid) DO UPDATE SET state = excluded.state,
-        #                       prev_tid = excluded.prev_tid,
-        #                       md5 = excluded.md5
-        # """
-        # TODO: Use the update syntax when available.
-        self._generic_store_temp(batcher, oid, prev_tid, data)
 
     _upload_blob_uses_chunks = False
 

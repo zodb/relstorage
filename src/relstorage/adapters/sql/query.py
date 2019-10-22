@@ -99,8 +99,9 @@ class Query(ParamMixin,
         # does the job perfectly. In earlier versions, we're on our
         # own.
         #
-        # TODO: In test cases, we spend a lot of time binding and compiling.
-        # Can we find another layer of caching somewhere?
+        # TODO: In test cases, we spend a lot of time binding and
+        # compiling. Can we find another layer of caching somewhere?
+        # The dialect object would probably work.
 
         if not self.__name__:
             # Go through the class hierarchy, find out what we're called.
@@ -227,3 +228,6 @@ class CompiledQuery(object):
             cursor.execute(stmt, self.params)
         else:
             cursor.execute(stmt)
+
+    def executemany(self, cursor, paramlist):
+        return cursor.executemany(self.stmt, paramlist)

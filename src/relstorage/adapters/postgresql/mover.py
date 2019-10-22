@@ -30,28 +30,6 @@ from ..mover import metricmethod_sampled
 @implementer(IObjectMover)
 class PostgreSQLObjectMover(AbstractObjectMover):
 
-    _move_from_temp_hf_insert_query = AbstractObjectMover._move_from_temp_hf_insert_query + """
-        ON CONFLICT (zoid)
-        DO UPDATE
-        SET state_size = COALESCE(LENGTH(excluded.state), 0),
-            tid = excluded.tid,
-            state = excluded.state
-    """
-
-    _update_current_insert_query = (
-        AbstractObjectMover._upsert_current_insert_base
-        + """
-        ON CONFLICT (zoid) DO UPDATE SET
-            tid = excluded.tid
-        """
-    )
-    _update_current_update_query = None
-
-
-    # We upsert, no need
-    _move_from_temp_hf_delete_query = ''
-
-
     @metricmethod_sampled
     def on_store_opened(self, cursor, restart=False):
         """Create the temporary tables for storing objects"""
@@ -105,16 +83,6 @@ class PostgreSQLObjectMover(AbstractObjectMover):
                 self.store_temps = super(PostgreSQLObjectMover, self).store_temps
 
         AbstractObjectMover.on_store_opened(self, cursor, restart)
-
-
-    @metricmethod_sampled
-    def store_temp(self, _cursor, batcher, oid, prev_tid, data):
-        suffix = """
-        ON CONFLICT (zoid) DO UPDATE SET state = excluded.state,
-                              prev_tid = excluded.prev_tid,
-                              md5 = excluded.md5
-        """
-        self._generic_store_temp(batcher, oid, prev_tid, data, suffix=suffix)
 
     @metricmethod_sampled
     def restore(self, cursor, batcher, oid, tid, data):

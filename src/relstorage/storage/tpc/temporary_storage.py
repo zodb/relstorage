@@ -62,12 +62,9 @@ class TemporaryStorage(object):
 
     def __len__(self):
         # How many distinct OIDs have been stored?
+        # This also lets us be used in a boolean context to see
+        # if we've actually stored anything.
         return len(self._queue_contents)
-
-    def __bool__(self):
-        return True
-
-    __nonzero__ = __bool__
 
     @property
     def stored_oids(self):

@@ -18,8 +18,6 @@ from __future__ import print_function
 
 import os
 from hashlib import md5
-from abc import abstractmethod
-
 
 from zope.interface import implementer
 
@@ -31,6 +29,8 @@ from .._compat import ABC
 from .batch import RowBatcher
 from .interfaces import IObjectMover
 from .schema import Schema
+from .sql import it
+from .sql.schema import ColumnExpression
 
 objects = Schema.all_current_object_state
 object_state = Schema.object_state
@@ -226,39 +226,47 @@ class AbstractObjectMover(ABC):
         Hook for subclasses.
         """
 
-    # The _generic methods allow for UPSERTs, at least on MySQL
-    # and PostgreSQL. Previously, MySQL used `command='REPLACE'`
-    # for an UPSERT; now it uses a suffix 'ON DUPLICATE KEY UPDATE ...'.
-    # PostgreSQL uses a suffix 'ON CONFLICT (...) UPDATE ...'.
-
-    def _generic_store_temp(self, batcher, oid, prev_tid, data,
-                            command='INSERT', suffix=''):
-        md5sum = self._compute_md5sum(data)
-        # TODO: Now that we guarantee not to feed duplicates here, drop
-        # the conflict handling.
-        if command == 'INSERT' and not suffix:
-            batcher.delete_from('temp_store', zoid=oid)
-        batcher.insert_into(
-            "temp_store (zoid, prev_tid, md5, state)",
-            batcher.row_schema_of_length(4),
-            (oid, prev_tid, md5sum, self.driver.Binary(data)),
-            rowkey=oid,
-            size=len(data) + 32,
-            command=command,
-            suffix=suffix
-        )
-
-    @abstractmethod
-    def store_temp(self, cursor, batcher, oid, prev_tid, data):
-        raise NotImplementedError()
+    _store_temp_query = Schema.temp_store.upsert(
+        it.c.zoid,
+        it.c.prev_tid,
+        it.c.md5,
+        it.c.state
+    ).on_conflict(
+        it.c.zoid
+    ).do_update(
+        it.c.prev_tid,
+        it.c.md5,
+        it.c.state
+    )
 
     @metricmethod_sampled
     def store_temps(self, cursor, state_oid_tid_iter):
-        batcher = self.make_batcher(cursor) # Default row limit
-        store_temp = self.store_temp
-        for data, oid_int, tid_int in state_oid_tid_iter:
-            store_temp(cursor, batcher, oid_int, tid_int, data)
-        batcher.flush()
+        query = self._store_temp_query
+        do_md5 = self._compute_md5sum
+        Binary = self.driver.Binary
+        # On Postgresql, we use COPY for this.
+        # On Oracle, we use the RowBatcher.
+        # On SQLite, executemany is implemented in C looping around our
+        # iterator; that still saves substantial setup overhead in the statement
+        # cache.
+        # On MySQL, the preferred driver (mysqlclient) has a decent implementation
+        # of executemany for INSERT; that's shared with PyMySQL as well, but it must be
+        # a simple INSERT statement matching a regular expression. Note that it has a bug though:
+        # it can't handle an iterator that's empty.
+        query.executemany(
+            cursor,
+            (
+                (oid_int, tid_int, do_md5(data), Binary(data))
+                for (data, oid_int, tid_int)
+                in state_oid_tid_iter
+            )
+        )
+
+    @metricmethod_sampled
+    def replace_temps(self, cursor, state_oid_tid_iter):
+        # Reuse the upsert query. The same comments apply. In particular,
+        # MySQLclient won't optimize an UPDATE in the same way it does an INSERT.
+        self.store_temps(cursor, state_oid_tid_iter)
 
     @metricmethod_sampled
     def _generic_restore(self, batcher, oid, tid, data,
@@ -336,28 +344,6 @@ class AbstractObjectMover(ABC):
         rows = cursor.fetchall()
         return rows
 
-    def replace_temp(self, cursor, oid, prev_tid, data):
-        """Replace an object in the temporary table.
-
-        This happens after conflict resolution.
-        """
-        md5sum = self._compute_md5sum(data)
-
-        stmt = """
-        UPDATE temp_store SET
-            prev_tid = %s,
-            md5 = %s,
-            state = %s
-        WHERE zoid = %s
-        """
-        cursor.execute(stmt, (prev_tid, md5sum, self.driver.Binary(data), oid))
-
-    @metricmethod_sampled
-    def replace_temps(self, cursor, state_oid_tid_iter):
-        for data, oid_int, tid_int in state_oid_tid_iter:
-            self.replace_temp(cursor, oid_int, tid_int, data)
-
-
     # Subclasses may override any of these queries if there is a
     # more optimal form.
     _move_from_temp_hp_insert_query = Schema.object_state.insert(
@@ -379,34 +365,31 @@ class AbstractObjectMover(ABC):
             Schema.temp_store.c.zoid
         )
     ).prepared()
-    # _move_from_temp_hp_insert_query = """
-    # INSERT INTO object_state
-    #   (zoid, tid, prev_tid, md5, state_size, state)
-    # SELECT zoid, %s, prev_tid, md5,
-    #   COALESCE(LENGTH(state), 0), state
-    #   FROM temp_store
-    #   ORDER BY zoid
-    # """
 
-    _move_from_temp_hf_delete_query = """
-    DELETE FROM object_state
-    WHERE zoid IN (SELECT zoid FROM temp_store)
-    """
-
-    _move_from_temp_hf_insert_query = Schema.object_state.insert(
+    _move_from_temp_hf_upsert_query = Schema.object_state.upsert(
+        it.c.zoid,
+        it.c.tid,
+        it.c.state_size,
+        it.c.state
     ).from_select(
-        (Schema.object_state.c.zoid,
-         Schema.object_state.c.tid,
+        (Schema.temp_store.c.zoid,
+         Schema.object_state.c.tid, # correct column for typing
          Schema.object_state.c.state_size,
-         Schema.object_state.c.state),
+         Schema.temp_store.c.state),
         Schema.temp_store.select(
-            Schema.temp_store.c.zoid,
-            Schema.temp_store.orderedbindparam(),
-            'COALESCE(LENGTH(state), 0)',
-            Schema.temp_store.c.state
+            it.c.zoid,
+            ColumnExpression(it.orderedbindparam()).aliased('tid'),
+            ColumnExpression('COALESCE(LENGTH(state), 0)').aliased('state_size'),
+            it.c.state
         ).order_by(
-            Schema.temp_store.c.zoid
+            it.c.zoid
         )
+    ).on_conflict(
+        it.c.zoid
+    ).do_update(
+        it.c.state,
+        it.c.tid,
+        it.c.state_size
     ).prepared()
 
     _move_from_temp_copy_blob_query = Schema.blob_chunk.insert(
@@ -423,11 +406,6 @@ class AbstractObjectMover(ABC):
         )
     ).prepared()
 
-    # _move_from_temp_copy_blob_query = """
-    # INSERT INTO blob_chunk (zoid, tid, chunk_num, chunk)
-    # SELECT zoid, %s, chunk_num, chunk
-    # FROM temp_blob_chunk
-    # """
 
     _move_from_temp_hf_delete_blob_chunk_query = """
     DELETE FROM blob_chunk
@@ -457,11 +435,7 @@ class AbstractObjectMover(ABC):
 
         Blobs are handled separately.
         """
-        stmt = self._move_from_temp_hf_delete_query
-        if stmt:
-            cursor.execute(stmt)
-
-        stmt = self._move_from_temp_hf_insert_query
+        stmt = self._move_from_temp_hf_upsert_query
         __traceback_info__ = stmt
         stmt.execute(cursor, (tid,))
 
@@ -492,51 +466,23 @@ class AbstractObjectMover(ABC):
             stmt.execute(cursor, (tid,))
 
 
-    # Insert and update current objects. The trivial
-    # implementation does a two-part query; if you
-    # have an UPSERT statement that can do it in one query,
-    # then put that in `_update_current_insert_query`
-    # and set `_update_current_update_query` to None.
+    # Insert and update current objects.
     # Note that to avoid deadlocks, it is incredibly important
     # to order the updates in OID order.
-    _update_current_insert_query = Schema.current_object.insert(
+    _update_current_upsert_query = Schema.current_object.upsert(
+        it.c.zoid, it.c.tid
     ).from_select(
-        (Schema.current_object.c.zoid, Schema.current_object.c.tid),
+        (it.c.zoid, it.c.tid),
         Schema.object_state.select(
-            Schema.object_state.c.zoid, Schema.object_state.c.tid
+            it.c.zoid, Schema.object_state.c.tid # correct column for typing
         ).where(
-            Schema.object_state.c.tid == Schema.object_state.orderedbindparam()
-        ).and_(
-            Schema.object_state.c.prev_tid == 0
-        )
-    )
-
-    # Use this as the base for your upsert, if the upsert part foes in an epilogue
-    # at the end.
-    _upsert_current_insert_base = Schema.current_object.insert(
-    ).from_select(
-        (Schema.current_object.c.zoid, Schema.current_object.c.tid),
-        Schema.object_state.select(
-            Schema.object_state.c.zoid, Schema.object_state.c.tid
-        ).where(
-            Schema.object_state.c.tid == Schema.object_state.orderedbindparam()
-        ).order_by(Schema.object_state.c.zoid)
-    )
-
-    _update_current_update_query = Schema.current_object.update(
-        tid=Schema.current_object.orderedbindparam()
-    ).where(
-        Schema.current_object.c.zoid.in_(
-            Schema.object_state.select(
-                Schema.object_state.c.zoid
-            ).where(
-                Schema.object_state.c.tid == Schema.object_state.orderedbindparam()
-            ).and_(
-                Schema.object_state.c.prev_tid != 0
-            ).order_by(Schema.object_state.c.zoid)
-        )
-    )
-
+            it.c.tid == it.orderedbindparam()
+        ).order_by(it.c.zoid)
+    ).on_conflict(
+        it.c.zoid
+    ).do_update(
+        it.c.tid
+    ).prepared()
 
     @noop_when_history_free
     @metricmethod_sampled
@@ -546,13 +492,8 @@ class AbstractObjectMover(ABC):
 
         tid is the integer tid of the transaction being committed.
         """
-        stmt = self._update_current_insert_query
+        stmt = self._update_current_upsert_query
         stmt.execute(cursor, (tid,))
-
-        if self._update_current_update_query:
-            stmt = self._update_current_update_query
-            stmt.execute(cursor, (tid, tid))
-
 
     @metricmethod_sampled
     def download_blob(self, cursor, oid, tid, filename):

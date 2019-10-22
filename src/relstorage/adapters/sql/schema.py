@@ -23,6 +23,7 @@ from .select import Selectable
 from .insert import Insertable
 from .insert import Deletable
 from .insert import Updatable
+from .insert import Upsertable
 from .query import Query
 
 _marker = object()
@@ -45,6 +46,7 @@ class Column(ExpressionOperatorMixin):
         self.nullable = False if primary_key else nullable
         self.auto_increment = auto_increment
         self.default = default
+        self.alias = name
 
     def is_type(self, type_):
         return isinstance(self.type_, type_)
@@ -53,6 +55,9 @@ class Column(ExpressionOperatorMixin):
         if table.c.is_ambiguous(self):
             return _QualifiedColumn(self)
         return self
+
+    def aliased(self, alias):
+        return _AliasedColumn(self, alias)
 
     def __str__(self):
         return self.name
@@ -91,6 +96,31 @@ class Column(ExpressionOperatorMixin):
         compiler.emit(
             compiler.dialect.extra_constraints_for_column(self)
         )
+
+class ColumnExpression(Column):
+
+    def resolve_against(self, table):
+        return self
+
+    def __str__(self):
+        return str(self.name)
+
+    def aliased(self, alias):
+        return _AliasedColumnExpression(self, alias)
+
+class _AliasedColumn(Column):
+    def __init__(self, other, alias):
+        Column.__init__(self, other.name)
+        vars(self).update(vars(other))
+        self.alias = alias
+
+    def __compile_visit__(self, compiler):
+        compiler.visit_aliased_column(self)
+
+class _AliasedColumnExpression(_AliasedColumn):
+
+    def __str__(self):
+        return str(self.name)
 
 class _QualifiedColumn(Column):
 
@@ -140,6 +170,7 @@ class Table(Selectable,
             Insertable,
             Deletable,
             Updatable,
+            Upsertable,
             ParamMixin,
             SchemaItem):
     """

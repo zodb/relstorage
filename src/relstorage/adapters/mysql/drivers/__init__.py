@@ -45,6 +45,28 @@ class MySQLCompiler(Compiler):
     def _quote_query_for_prepare(self, query):
         return "'{query}'".format(query=query)
 
+    # Upserts: It's a good idea to use `ON DUPLICATE KEY UPDATE`
+    # instead of REPLACE because `ON DUPLICATE` updates rows in place
+    # instead of performing a DELETE followed by an INSERT; that might
+    # matter for row locking or MVCC, depending on isolation level and
+    # locking strategies, and it's been said that it matters for
+    # backend IO, especially on things like a large distributed SAN
+    # (https://github.com/zodb/relstorage/issues/189). This is also
+    # more similar to what PostgreSQL uses, possibly allowing more
+    # query sharing (with a smarter query runner/interpreter).
+
+
+    def visit_upsert_conflict_column(self, _column):
+        self.emit_keyword('ON DUPLICATE KEY')
+
+    def visit_upsert_conflict_update(self, update):
+        self.emit_keyword('UPDATE')
+        self.visit_csv(update.col_expressions)
+
+    def visit_upsert_excluded_column(self, column):
+        self.emit('VALUES(%s)' % (column.name,))
+
+
 class MySQLDialect(DefaultDialect):
 
     datatype_map = dict(DefaultDialect.datatype_map)

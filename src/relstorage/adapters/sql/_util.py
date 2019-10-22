@@ -39,7 +39,12 @@ class Columns(object):
     def __init__(self, columns):
         cs = []
         for c in columns:
-            setattr(self, c.name, c)
+            try:
+                col_name = c.alias or c.name
+            except AttributeError:
+                pass
+            else:
+                setattr(self, col_name, c)
             cs.append(c)
         self._columns = tuple(cs)
 
@@ -58,6 +63,12 @@ class Columns(object):
 
     def has_column(self, name):
         return hasattr(self, name)
+
+    def __contains__(self, column):
+        return column in self._columns
+
+    def is_subset(self, other):
+        return all(c in other for c in self)
 
     def __getitem__(self, ix):
         return self._columns[ix]
