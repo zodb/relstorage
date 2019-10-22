@@ -69,6 +69,7 @@ typedef unsigned int uint32_t;
 
 #include <string>
 #include <vector>
+#include <stdexcept>
 #include <cassert>
 
 #include <boost/intrusive/list.hpp>
