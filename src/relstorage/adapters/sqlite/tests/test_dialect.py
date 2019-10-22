@@ -24,6 +24,7 @@ from .. import dialect
 class TestSQLiteUpsertDialect(test_sql.TestUpsert):
     keep_history = False
     dialect = dialect.Sqlite3Dialect()
+    dialect.compiler_class = lambda: dialect._Sqlite3UpsertCompiler
 
     def test_default(self):
         self.assertEqual(
@@ -42,4 +43,24 @@ class TestSQLiteUpsertDialect(test_sql.TestUpsert):
         '%s', '?'
     ).replace(
         ' ON ', ' WHERE true ON '
+    )
+
+
+class TestSQLiteOldDialect(test_sql.TestUpsert):
+    keep_history = False
+    dialect = dialect.Sqlite3Dialect()
+    dialect.compiler_class = lambda: dialect._Sqlite3NoUpsertCompiler
+
+    insert_or_replace = (
+        'INSERT OR REPLACE INTO object_state(zoid, state, tid, state_size) VALUES (?, ?, ?, ?)'
+    )
+
+    insert_or_replace_subquery = (
+        'INSERT OR REPLACE INTO object_state(zoid, tid, state, state_size) '
+        'SELECT zoid, ?, state, COALESCE(LENGTH(state), 0) FROM temp_store ORDER BY zoid'
+    )
+
+    upsert_unconstrained_subquery = (
+        'INSERT OR REPLACE INTO object_state(zoid, tid, state, state_size) '
+        'SELECT zoid, ?, state, COALESCE(LENGTH(state), 0) FROM temp_store'
     )

@@ -93,7 +93,6 @@ class OracleCompiler(Compiler):
         self.emit_keyword('WHEN NOT MATCHED THEN INSERT')
         self.visit_grouped(upsert.column_list)
         self.emit_keyword('VALUES')
-        # XXX: If the subquery has expression, they need to be given aliases.
         excluded_columns = Columns(_ExcludedColumn(c.name) for c in upsert.column_list)
         self.visit_grouped(excluded_columns)
 

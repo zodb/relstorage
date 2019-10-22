@@ -109,7 +109,7 @@ class _Sqlite3NoUpsertCompiler(_Sqlite3UpsertCompiler):
     # rows.
 
     def emit_keyword_upsert(self):
-        self.emit_keyword("INSERT OR REPLACE")
+        self.emit_keyword("INSERT OR REPLACE INTO")
 
     def visit_upsert_conflict_column(self, column):
         pass
@@ -119,6 +119,9 @@ class _Sqlite3NoUpsertCompiler(_Sqlite3UpsertCompiler):
 
     def visit_upsert_excluded_column(self, column):
         pass
+
+    def visit_upsert_after_select(self, select):
+        "No need to do anything"
 
 SqliteCompiler = _Sqlite3UpsertCompiler if SQ3_SUPPORTS_UPSERT else _Sqlite3NoUpsertCompiler
 

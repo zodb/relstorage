@@ -38,9 +38,6 @@ class Insert(Query):
 
         if columns:
             self.column_list = ColumnList(resolved_against(columns, table))
-            # TODO: Probably want a different type, like a ValuesList
-            #self.values = ColumnList([self.orderedbindparam() for _ in columns])
-#            self.values = [self.orderedbindparam() for _ in columns]
 
     def from_select(self, names, select):
         i = copy(self)
@@ -92,7 +89,6 @@ class Insert(Query):
                 if IOrderedBindParam.providedBy(source)
             ]
             return dialect.datatypes_for_columns(columns_with_params)
-
 
 
 class _ExcludedColumn(Expression):
