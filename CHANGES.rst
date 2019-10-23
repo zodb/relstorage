@@ -2,7 +2,7 @@
  Changes
 =========
 
-3.0b1 (unreleased)
+3.0b1 (2019-10-22)
 ==================
 
 - Make SQLite and Oracle both use UPSERT queries instead of multiple
