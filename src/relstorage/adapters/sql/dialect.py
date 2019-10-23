@@ -70,6 +70,7 @@ class DefaultDialect(object):
         return datatypes
 
     def datatype_for_column(self, column):
+        __traceback_info__ = column
         return column.type_.to_sql_datatype(self.datatype_map).format(
             col_name=column.name
         )
@@ -259,6 +260,7 @@ class Compiler(object):
         raise AttributeError("No way to visit node", node)
 
     visit_clause = visit
+    visit_upsert = visit
 
     def emit(self, *contents):
         for content in contents:
@@ -282,6 +284,12 @@ class Compiler(object):
 
     def emit_keyword_truncate_table(self):
         self.emit_keyword(self.dialect.STMT_TRUNCATE)
+
+    def emit_keyword_upsert(self):
+        self.emit_keyword_insert_into()
+
+    def emit_keyword_insert_into(self):
+        self.emit_keyword("INSERT INTO")
 
     def emit_identifier(self, identifier, quoted=False):
         last_char = self.buf.getvalue()[-1]
@@ -318,6 +326,16 @@ class Compiler(object):
 
     def visit_column(self, column_node):
         self.emit_identifier(column_node.name)
+
+    def _visit_or_str(self, node_or_name):
+        if hasattr(node_or_name, '__compile_visit__'):
+            self.visit(node_or_name)
+        else:
+            self.emit_identifier(node_or_name)
+
+    def visit_aliased_column(self, column_node):
+        self._visit_or_str(column_node.name)
+        self.emit_identifier(column_node.alias)
 
     def visit_qualified_column(self, column):
         self.emit_identifier(column.table + '.' + column.name)
@@ -404,6 +422,26 @@ class Compiler(object):
         if limit_literal:
             self.emit_keyword('LIMIT')
             self.visit_immediate_expression(limit_literal)
+
+    @contextmanager
+    def visiting_upsert(self, upsert): # pylint:disable=unused-argument
+        with self.using_visit_name('upsert'):
+            yield self
+
+    def visit_upsert_conflict_column(self, column):
+        self.emit_keyword('ON CONFLICT')
+        self.visit_grouped(column)
+
+    def visit_upsert_conflict_update(self, update):
+        self.emit_keyword('DO')
+        self.visit(update)
+
+    def visit_upsert_excluded_column(self, column):
+        self.emit('excluded.')
+        self.emit(column.name)
+
+    def visit_upsert_after_select(self, select): # pylint:disable=unused-argument
+        pass
 
 class _DefaultContext(object):
 

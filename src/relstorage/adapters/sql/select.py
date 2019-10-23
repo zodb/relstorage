@@ -18,6 +18,7 @@ from .ast import TextNode
 from .ast import resolved_against
 from .expressions import EmptyExpression
 
+
 class _SelectColumns(ColumnList):
 
     def __compile_visit__(self, compiler):
@@ -52,6 +53,7 @@ class Select(Query,
             self.column_list = _SelectColumns(resolved_against(columns, table))
         else:
             self.column_list = table
+        self.c = self.column_list
 
     def order_by(self, expression, dir=None):
         expression = expression.resolve_against(self.table)
@@ -85,6 +87,10 @@ class Select(Query,
         s = copy(self)
         s._distinct = TextNode('DISTINCT')
         return s
+
+    def is_unconstrained(self):
+        "Does this query have nothing after the basic table?"
+        return not self._order_by and not self._where
 
     def __compile_visit__(self, compiler):
         with compiler.visit_limited_select(self, self._limit):

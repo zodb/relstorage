@@ -160,8 +160,9 @@ class AbstractVote(AbstractTPCState):
 
     @log_timed
     def _flush_temps_to_db(self, cursor):
-        mover = self.adapter.mover
-        mover.store_temps(cursor, self.temp_storage)
+        if self.temp_storage:
+            # Don't bother if we're empty.
+            self.adapter.mover.store_temps(cursor, self.temp_storage)
 
     def __enter_critical_phase_until_transaction_end(self):
         self.load_connection.enter_critical_phase_until_transaction_end()

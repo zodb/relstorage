@@ -18,6 +18,11 @@ from .interfaces import ITypedParams
 from .interfaces import IOrderedBindParam
 from .query import WhereMixin
 from .expressions import AssignmentExpression
+from .expressions import EmptyExpression
+from .expressions import Expression
+
+class _ValuesPlaceholderList(ColumnList):
+    pass
 
 @implementer(ITypedParams)
 class Insert(Query):
@@ -25,55 +30,54 @@ class Insert(Query):
     column_list = None
     select = None
     epilogue = ''
-    values = None
+#    values = None
 
     def __init__(self, table, *columns):
         super(Insert, self).__init__()
         self.table = table
+
         if columns:
             self.column_list = ColumnList(resolved_against(columns, table))
-            # TODO: Probably want a different type, like a ValuesList
-            self.values = ColumnList([self.orderedbindparam() for _ in columns])
 
     def from_select(self, names, select):
         i = copy(self)
-        i.column_list = ColumnList(names)
+        i.column_list = ColumnList(resolved_against(names, select))
         i.select = select
         return i
 
+    def _visit_command(self, compiler):
+        compiler.emit_keyword_insert_into()
+
+    def _visit_select(self, compiler):
+        compiler.visit(self.select)
+
     def __compile_visit__(self, compiler):
-        compiler.emit_keyword('INSERT INTO')
+        self._visit_command(compiler)
         compiler.visit(self.table)
         if self.column_list:
             compiler.visit_grouped(self.column_list)
         if self.select:
-            compiler.visit(self.select)
+            self._visit_select(compiler)
         else:
             compiler.emit_keyword('VALUES')
-            if self.values:
-                compiler.visit_grouped(self.values)
+            if self.column_list:
+                values = _ValuesPlaceholderList([self.orderedbindparam()
+                                                 for _ in self.column_list])
+                compiler.visit_grouped(values)
             else:
                 compiler.visit_no_values()
         compiler.emit(self.epilogue)
 
-    def __add__(self, extension):
-        # This appends a textual epilogue. It's a temporary
-        # measure until we have more nodes and can model what
-        # we're trying to accomplish.
-        assert isinstance(extension, str)
-        i = copy(self)
-        i.epilogue += extension
-        return i
-
     def datatypes_for_parameters(self):
         dialect = self.dialect
-        if self.values and self.column_list:
+        if self.column_list and not self.select:
             # If we're sending in a list of values, those have to
             # exactly match the columns, so we can easily get a list
             # of datatypes.
             column_list = self.column_list
-            datatypes = dialect.datatypes_for_columns(column_list)
-        elif self.select and self.select.column_list.has_bind_param():
+            return dialect.datatypes_for_columns(column_list)
+
+        if self.select and self.select.column_list.has_bind_param():
             targets = self.column_list
             sources = self.select.column_list
             # TODO: This doesn't support bind params anywhere except the
@@ -84,10 +88,75 @@ class Insert(Query):
                 for target, source in zip(targets, sources)
                 if IOrderedBindParam.providedBy(source)
             ]
-            datatypes = dialect.datatypes_for_columns(columns_with_params)
-        return datatypes
+            return dialect.datatypes_for_columns(columns_with_params)
 
 
+class _ExcludedColumn(Expression):
+
+    def __init__(self, name):
+        self.name = name
+
+    def __compile_visit__(self, compiler): # pragma: no cover
+        raise AssertionError("Should only be used in upsert")
+
+    def __compile_visit_for_upsert__(self, compiler):
+        compiler.visit_upsert_excluded_column(self)
+
+class Upsert(Insert):
+    """
+    Perform an insert-or-update operation.
+
+    All supported databases have some version of this,
+    but not all of them have the same expressive power. This
+    interface is limited to the lowest common denominator.
+
+    You must call ``on_conflict()`` and ``do_update()``.
+    The on_conflict parameter must be a single column of the
+    primary key, though this isn't verified. ``do_update``
+    should be called to specify a subset of the columns in the
+    insert list to be updated; they will have the same values as the insert
+    list. Note that some databases may update all columns.
+    """
+
+    conflict_column = None
+    update_columns = None
+
+    def on_conflict(self, exp):
+        i = copy(self)
+        i.conflict_column = exp
+        return i
+
+    def do_update(self, *columns):
+        update_columns = ColumnList(resolved_against(columns, self.table))
+        assert update_columns.is_subset(self.column_list)
+        i = copy(self)
+        i.update_columns = update_columns
+        return i
+
+    @property
+    def update_clause(self):
+        return Update(EmptyExpression(), [
+            AssignmentExpression(col, _ExcludedColumn(col.name))
+            for col in self.update_columns
+        ])
+
+    def _visit_command(self, compiler):
+        compiler.emit_keyword_upsert()
+
+    def _visit_select(self, compiler):
+        super(Upsert, self)._visit_select(compiler)
+        compiler.visit_upsert_after_select(self.select)
+
+    def __compile_visit__(self, compiler):
+        assert self.conflict_column, "Didn't call on_conflict"
+        assert self.update_columns, "Didn't call do_update"
+        with compiler.visiting_upsert(self) as upsert_compiler:
+            upsert_compiler.visit_upsert(self)
+
+    def __compile_visit_for_upsert__(self, compiler):
+        super(Upsert, self).__compile_visit__(compiler)
+        compiler.visit_upsert_conflict_column(self.conflict_column)
+        compiler.visit_upsert_conflict_update(self.update_clause)
 
 class Insertable(object):
 
@@ -162,3 +231,9 @@ class Update(Query, WhereMixin):
         compiler.emit_keyword('SET')
         compiler.visit_csv(self.col_expressions)
         compiler.visit(self._where)
+
+
+class Upsertable(object):
+
+    def upsert(self, *columns):
+        return Upsert(self, *columns)

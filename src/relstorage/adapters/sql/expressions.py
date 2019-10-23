@@ -74,6 +74,7 @@ class OrderedBindParam(Expression):
     def __compile_visit__(self, compiler):
         compiler.visit_ordered_bind_param(self)
 
+
 @implementer(IOrderedBindParam)
 def orderedbindparam():
     return OrderedBindParam()

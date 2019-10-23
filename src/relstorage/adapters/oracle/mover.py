@@ -23,7 +23,6 @@ from zope.interface import implementer
 from ..interfaces import IObjectMover
 from ..mover import AbstractObjectMover
 from ..mover import metricmethod_sampled
-from ..sql._util import copy
 
 
 @implementer(IObjectMover)
@@ -58,8 +57,16 @@ class OracleObjectMover(AbstractObjectMover):
         pass
 
     @metricmethod_sampled
-    def store_temp(self, cursor, batcher, oid, prev_tid, data):
-        """Store an object in the temporary table."""
+    def store_temps(self, cursor, state_oid_tid_iter):
+        store_temp = self._store_temp
+        batcher = self.make_batcher(cursor) # Default row limit
+        for data, oid_int, tid_int in state_oid_tid_iter:
+            store_temp(batcher, oid_int, tid_int, data)
+        batcher.flush()
+
+
+    @metricmethod_sampled
+    def _store_temp(self, batcher, oid, prev_tid, data):
         md5sum = self._compute_md5sum(data)
 
         size = len(data)
@@ -164,34 +171,6 @@ class OracleObjectMover(AbstractObjectMover):
                         rowkey=oid,
                         size=size,
                     )
-
-    @metricmethod_sampled
-    def replace_temp(self, cursor, oid, prev_tid, data):
-        """Replace an object in the temporary table.
-
-        This happens after conflict resolution.
-        """
-        md5sum = self._compute_md5sum(data)
-
-        stmt = """
-        UPDATE temp_store SET
-            prev_tid = :prev_tid,
-            md5 = :md5sum,
-            state = :blobdata
-        WHERE zoid = :oid
-        """
-        cursor.setinputsizes(blobdata=self.inputsizes['blobdata']) # pylint:disable=unsubscriptable-object
-        cursor.execute(stmt, oid=oid, prev_tid=prev_tid,
-                       md5sum=md5sum, blobdata=self.driver.Binary(data))
-
-
-
-    # Oracle doesn't like 'ORDER BY' in a sub-select used in the IN clause.
-    # It gives a confusing syntax error about missing a right paren.
-    _update_current_update_query = copy(AbstractObjectMover._update_current_update_query)
-    sub_select = _update_current_update_query._where.expression.rhs
-    _update_current_update_query._where.expression.rhs = sub_select.unordered()
-    del sub_select
 
     @metricmethod_sampled
     def download_blob(self, cursor, oid, tid, filename):

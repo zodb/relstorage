@@ -21,6 +21,10 @@ class LiteralNode(Resolvable):
         self.raw = raw
         self.name = 'anon_%x' % (id(self),)
 
+    @property
+    def alias(self):
+        return self.name
+
     def __compile_visit__(self, compiler):
         compiler.emit(str(self.raw))
 

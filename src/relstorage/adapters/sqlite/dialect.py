@@ -55,25 +55,11 @@ SQ3_SUPPORTS_UPSERT = sq3_version >= (3, 24) # 2018-06-04
 SQ3_SUPPORTS_WINDOW = sq3_version >= (3, 25) # 2018-09-15
 
 
-class Sqlite3Dialect(DefaultDialect):
-    datatype_map = {
-        OID: 'INTEGER',
-        TID: 'INTEGER',
-        BinaryString: 'BLOB',
-        State: 'BLOB',
-        Boolean: 'INTEGER',
-    }
 
-    STMT_TRUNCATE = 'DELETE FROM'
-    STMT_IF_NOT_EXISTS = 'IF NOT EXISTS'
+class _Sqlite3UpsertCompiler(DefaultCompiler):
+    # We inherit (most of) the default upsert syntax (sqlite matches postgres
+    # in that area).
 
-    CONSTRAINT_AUTO_INCREMENT = 'AUTOINCREMENT'
-
-    def compiler_class(self):
-        return Sqlite3Compiler
-
-
-class Sqlite3Compiler(DefaultCompiler):
     def can_prepare(self):
         # sqlite3 has no notion of prepared statements.
         return False
@@ -82,7 +68,7 @@ class Sqlite3Compiler(DefaultCompiler):
         if identifier == "transaction":
             # Sigh. This has to be quoted for some reason.
             quoted = True
-        super(Sqlite3Compiler, self).emit_identifier(identifier, quoted)
+        super(_Sqlite3UpsertCompiler, self).emit_identifier(identifier, quoted)
 
     if not SQ3_SUPPORTS_BOOL_KW:
         def visit_boolean_literal_expression(self, value):
@@ -103,3 +89,55 @@ class Sqlite3Compiler(DefaultCompiler):
         # But sqlite doesn't like (), there must be at least one
         # column
         self.emit("(NULL)")
+
+    def visit_upsert_after_select(self, select):
+        if select.is_unconstrained():
+            # "The parser might not be able to tell if the "ON" keyword is
+            # introducing the UPSERT or if it is the ON clause of a join.
+            # To work around this, the SELECT statement should always
+            # include a WHERE clause, even if that WHERE clause is just
+            # ``WHERE true``."
+            self.emit(' WHERE true ')
+
+class _Sqlite3NoUpsertCompiler(_Sqlite3UpsertCompiler):
+    # we have to disable the upsert syntax, we're limited to the old
+    # syntax. The old 'INSERT OR REPLACE' syntax is supported from
+    # 3.0.0 forward. It's not as flexible as the true upsert: for
+    # example, you can't specify the type of conflict, nor can you use
+    # a WHERE clause or specify the values to use in the update. It
+    # also doesn't increment the cursor's change counter for replaced
+    # rows.
+
+    def emit_keyword_upsert(self):
+        self.emit_keyword("INSERT OR REPLACE INTO")
+
+    def visit_upsert_conflict_column(self, column):
+        pass
+
+    def visit_upsert_conflict_update(self, update):
+        pass
+
+    def visit_upsert_excluded_column(self, column):
+        pass
+
+    def visit_upsert_after_select(self, select):
+        "No need to do anything"
+
+SqliteCompiler = _Sqlite3UpsertCompiler if SQ3_SUPPORTS_UPSERT else _Sqlite3NoUpsertCompiler
+
+class Sqlite3Dialect(DefaultDialect):
+    datatype_map = {
+        OID: 'INTEGER',
+        TID: 'INTEGER',
+        BinaryString: 'BLOB',
+        State: 'BLOB',
+        Boolean: 'INTEGER',
+    }
+
+    STMT_TRUNCATE = 'DELETE FROM'
+    STMT_IF_NOT_EXISTS = 'IF NOT EXISTS'
+
+    CONSTRAINT_AUTO_INCREMENT = 'AUTOINCREMENT'
+
+    def compiler_class(self):
+        return SqliteCompiler
