@@ -33,13 +33,21 @@ _MB = 1024 * 1024
 DEFAULT_MAX_WAL = 10 * _MB
 
 # Benchmarking on at least one system doesn't show an improvement to
-# either reading or writing by forcing a large mmap_size. By default,
-# just report. A setting of 0 means do not use.
+# either reading or writing by forcing a large mmap_size (maybe that's
+# not enabled on macOS?). By default, just report. A setting of 0
+# means do not use.
 DEFAULT_MMAP_SIZE = None
 # 4096 is the page size in current releases of sqlite; older versions
 # used 1024. A larger page makes sense as we have biggish values.
 # Going larger doesn't make much difference in benchmarks.
 DEFAULT_PAGE_SIZE = 4096
+# The default of -2000 is abs(N*1024) = ~2MB. At 4K page size,
+# that's about 500 pages. A negative number specifies bytes, a
+# positive number specifies pages. In general, since we have two
+# connections for each ZODB connection, we're probably best letting
+# the cache stay relatively small and letting the operating system
+# page cache decide between threads and process.s
+DEFAULT_CACHE_SIZE = None
 # Control where temporary data is:
 #
 # FILE = a deleted disk file (that sqlite never flushes so
@@ -49,7 +57,9 @@ DEFAULT_PAGE_SIZE = 4096
 # MEMORY = explicitly in memory only
 #
 # DEFAULT = compile time default. Benchmarking for large writes
-# doesn't show much difference between FILE and MEMORY, so don't
+# doesn't show much difference between FILE and MEMORY *usually*:
+# Sometimes changing the setting back and forth causes massive
+# changes in performance, at least on a macOS desktop system.
 # bother to change from the default.
 DEFAULT_TEMP_STORE = None
 
@@ -303,6 +313,7 @@ def connect_to_file(fname,
                     max_wal_size=DEFAULT_MAX_WAL,
                     mmap_size=DEFAULT_MMAP_SIZE,
                     page_size=DEFAULT_PAGE_SIZE,
+                    cache_size=DEFAULT_CACHE_SIZE,
                     temp_store=DEFAULT_TEMP_STORE,
                     timeout=DEFAULT_TIMEOUT,
                     quick_check=True,
@@ -352,6 +363,10 @@ def connect_to_file(fname,
         'mmap_size': mmap_size,
         'page_size': page_size,
         'temp_store': temp_store,
+        # If cache_spill is allowed, at some point a transaction
+        # can begin writing dirty pages to the database file, taking
+        # an exclusive lock. That could be at arbitrary times, so we don't want that.
+        'cache_spill': 'off',
         # WAL mode is always consistent even after a operating system
         # crash in NORMAL mode. It might lose a transaction, though.
         # The default is often FULL, which is higher than NORMAL.
@@ -362,14 +377,12 @@ def connect_to_file(fname,
         # database connection that's open will essentially do that
         # automatically.)
         # XXX: Is that really worth it? We have seen some apparent corruptions,
+        # maybe due to that? It's also a balance between readers and writers.
         # so we'le leave it at the default and just report it.
-        # 'wal_autocheckpoint': 0,
         'wal_autocheckpoint': None,
         # Things to query and report.
         'soft_heap_limit': None, # 0 means no limit
-        # The default of -2000 is 2000 pages. At 4K page size,
-        # that's 8MB.
-        'cache_size': None,
+        'cache_size': cache_size,
         # How big is the database?
         'page_count': None,
     }

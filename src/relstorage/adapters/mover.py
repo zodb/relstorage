@@ -329,6 +329,8 @@ class AbstractObjectMover(ABC):
         Schema.temp_store.c.prev_tid,
         Schema.all_current_object_state.c.state,
     ).where(
+        # Some databases may be able to benefit from prev_tid <> 0, but it depends
+        # on their ability to make use of indexes
         Schema.temp_store.c.prev_tid != Schema.all_current_object_state.c.tid
     ).order_by(
         Schema.temp_store.c.zoid
