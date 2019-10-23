@@ -120,8 +120,9 @@ class UpdateTests(TestCase):
 
         invalid_oids = range(1, 5000)
         count = self.db.remove_invalid_persistent_oids(invalid_oids)
-        self.assertEqual(count, len(invalid_oids))
         self.assertEqual(dict(self.db.oid_to_tid), {0: 1})
+        self.assertEqual(count, len(invalid_oids))
+
 
     def test_trim_to_size_deletes_stale(self):
         rows = [

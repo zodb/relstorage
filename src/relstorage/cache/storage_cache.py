@@ -470,22 +470,19 @@ class StorageCache(DetachableMVCCDatabaseViewer):
             # No point even trying, we would just throw the results away
             return
 
-        to_fetch = OIDSet()
+
         cache = self.cache
         index = self.object_index
-        for oid_int in oid_ints:
-            tid_int = index[oid_int]
-            key = (oid_int, tid_int)
-            # We don't actually need the cache data, so avoid asking
-            # for it. That would trigger stats updates (hits/misses)
-            # and move it to the front of the LRU list. But this is just
-            # in advance, we don't know if it will actually be used.
-            # `in` has a race condition (it could be evicted soon), but
-            # if it is, there was probably something else more important
-            # going on.
-            if key not in cache:
-                # That was our one place, so we must fetch
-                to_fetch.add(oid_int)
+        # We don't actually need the cache data, so avoid asking
+        # for it. That would trigger stats updates (hits/misses)
+        # and move it to the front of the LRU list. But this is just
+        # in advance, we don't know if it will actually be used.
+        # `in` has a race condition (it could be evicted soon), but
+        # if it is, there was probably something else more important
+        # going on.
+        to_fetch = {oid_int
+                    for oid_int in oid_ints
+                    if (oid_int, index[oid_int]) not in cache}
 
         if not to_fetch:
             return

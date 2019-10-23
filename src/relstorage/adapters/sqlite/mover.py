@@ -67,21 +67,5 @@ class Sqlite3ObjectMover(AbstractObjectMover):
 
     @metricmethod_sampled
     def restore(self, cursor, batcher, oid, tid, data):
-        # TODO: Use the update syntax when available.
-        # if self.keep_history:
-        #     suffix = """
-        #     ON DUPLICATE KEY UPDATE
-        #         tid = VALUES(tid),
-        #         prev_tid = VALUES(prev_tid),
-        #         md5 = VALUES(md5),
-        #         state_size = VALUES(state_size),
-        #         state = VALUES(state)
-        #     """
-        # else:
-        #     suffix = """
-        #     ON DUPLICATE KEY UPDATE
-        #         tid = VALUES(tid),
-        #         state_size = VALUES(state_size),
-        #         state = VALUES(state)
-        #     """
-        self._generic_restore(batcher, oid, tid, data, suffix='')
+        self._generic_restore(batcher, oid, tid, data,
+                              command='INSERT OR REPLACE', suffix='')

@@ -238,6 +238,7 @@ class MockConnection(object):
 
 class MockCursor(object):
     closed = False
+    sort_sequence_params = False
 
     def __init__(self, conn=None):
         self.executed = []
@@ -250,6 +251,10 @@ class MockCursor(object):
         self.inputsizes.update(kw)
 
     def execute(self, stmt, params=None):
+        if self.sort_sequence_params and isinstance(params, (tuple, list)):
+            params = sorted(sorted(p) if isinstance(p, (tuple, list)) else p
+                            for p in params)
+
         params = tuple(params) if isinstance(params, list) else params
         self.executed.append((stmt, params))
 

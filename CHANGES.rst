@@ -5,8 +5,13 @@
 3.0b2 (unreleased)
 ==================
 
-- Nothing changed yet.
+- SQLite: Fix resetting OIDs when zapping a storage. This could be a
+  problem for benchmarks.
 
+- SQLite: Fix large prefetches resulting in ``OperationalError``
+
+- SQLite: Improve the speed of copying transactions into a SQLite
+  storage (e.g., with zodbconvert).
 
 3.0b1 (2019-10-22)
 ==================

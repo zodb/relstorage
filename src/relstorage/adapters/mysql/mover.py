@@ -111,7 +111,8 @@ class MySQLObjectMover(AbstractObjectMover):
                 state_size = VALUES(state_size),
                 state = VALUES(state)
             """
-        self._generic_restore(batcher, oid, tid, data, suffix=suffix)
+        self._generic_restore(batcher, oid, tid, data,
+                              command='INSERT', suffix=suffix)
 
     # Override this query from the superclass. The MySQL optimizer, up
     # through at least 5.7.17 doesn't like actual subqueries in a DELETE

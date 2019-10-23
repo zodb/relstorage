@@ -20,13 +20,13 @@ from __future__ import print_function
 from ..batch import RowBatcher
 
 class Sqlite3RowBatcher(RowBatcher):
-    # The batch size depends on how many params a stored proc can
+    # The batch size depends on how many params a statement can
     # have; if we go too big we get OperationalError: too many SQL
     # variables. The default allowed is 999.
     # Note that the multiple-value syntax was added in
     # 3.7.11, 2012-03-20.
 
-    row_limit = 998
+    bind_limit = 998
 
     # sqlite only supports ? as a param.
     delete_placeholder = '?'

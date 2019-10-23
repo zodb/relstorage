@@ -14,6 +14,7 @@
 
 from relstorage.tests import TestCase
 from relstorage.tests import MockCursor
+from relstorage._util import consume
 
 
 class RowBatcherTests(TestCase):
@@ -45,14 +46,30 @@ class RowBatcherTests(TestCase):
         self.assertEqual(dict(batcher.deletes),
                          {('mytable', ('id', 'tid')): set([(2, 10)])})
 
+    IN_ROWS_FLATTENED = False
+    delete_auto_flush = 'DELETE FROM mytable WHERE id IN (%s,%s)'
+
+    def _in(self, *params):
+        params = sorted(params)
+        if self.IN_ROWS_FLATTENED:
+            l = list(params)
+            return (l,)
+        return tuple(params)
+
     def test_delete_auto_flush(self):
         cursor = MockCursor()
+        cursor.sort_sequence_params = True
         batcher = self.getClass()(cursor, 2)
         batcher.sorted_deletes = True
         batcher.delete_from("mytable", id=2)
         batcher.delete_from("mytable", id=1)
-        self.assertEqual(cursor.executed,
-                         [('DELETE FROM mytable WHERE id IN (%s,%s)', ((1, 2)))])
+        self.assertEqual(
+            cursor.executed,
+            [
+                (self.delete_auto_flush,
+                 self._in(1, 2)
+                )
+            ])
         self.assertEqual(batcher.rows_added, 0)
         self.assertEqual(batcher.size_added, 0)
         self.assertEqual(batcher.deletes, {})
@@ -219,6 +236,8 @@ class RowBatcherTests(TestCase):
         self.assertEqual(batcher.total_rows_deleted, 0)
         self.assertEqual(batcher.total_size_inserted, 10)
 
+    flush_delete_one = 'DELETE FROM mytable WHERE id IN (?)'
+
     def test_flush(self):
         cursor = MockCursor()
         batcher = self.getClass()(cursor, delete_placeholder="?")
@@ -236,58 +255,70 @@ class RowBatcherTests(TestCase):
         batcher.delete_from("mytable", id=2, key='def')
         batcher.flush()
         self.assertEqual(cursor.executed, [
-            ('DELETE FROM mytable WHERE id IN (?)',
-             ((1,))),
+            (self.flush_delete_one,
+             self._in(1)),
             ('DELETE FROM mytable WHERE (id=? AND key=?) OR (id=? AND key=?)',
              (1, 'abc', 2, 'def')),
             ('INSERT INTO mytable (id, name) VALUES\n(%s, id || %s)\n',
              (1, 'a')),
         ])
 
+    select_one = 'SELECT zoid,tid FROM object_state WHERE oids IN (%s)'
+
     def test_select_one(self):
         cursor = MockCursor()
         batcher = self.getClass()(cursor)
-        list(batcher.select_from(('zoid', 'tid'), 'object_state', oids=(1,)))
+        consume(batcher.select_from(('zoid', 'tid'), 'object_state', oids=(1,)))
         self.assertEqual(cursor.executed, [
-            ('SELECT zoid,tid FROM object_state WHERE oids IN (%s)',
-             (1,))
+            (self.select_one,
+             self._in(1,))
         ])
+
+    select_multiple_one_batch = 'SELECT zoid,tid FROM object_state WHERE oids IN (%s,%s,%s,%s)'
 
     def test_select_multiple_one_batch(self):
         cursor = MockCursor()
+        cursor.sort_sequence_params = True
         batcher = self.getClass()(cursor)
         list(batcher.select_from(('zoid', 'tid'), 'object_state',
                                  oids=(1, 2, 3, 4)))
         self.assertEqual(cursor.executed, [
-            ('SELECT zoid,tid FROM object_state WHERE oids IN (%s,%s,%s,%s)',
-             (1, 2, 3, 4))
+            (self.select_multiple_one_batch,
+             self._in(1, 2, 3, 4))
         ])
 
-    def test_select_multiple_many_batch(self):
+    select_multiple_many_batch = 'SELECT zoid,tid FROM object_state WHERE oids IN (%s,%s)'
+
+    def test_select_multiple_many_batch(self, batch_limit_attr='row_limit'):
         cursor = MockCursor()
+        cursor.sort_sequence_params = True
         cursor.many_results = [
             [(1, 1)],
             [(3, 1)],
             []
         ]
         batcher = self.getClass()(cursor)
-        batcher.row_limit = 2
+        setattr(batcher, batch_limit_attr, 2)
         rows = batcher.select_from(('zoid', 'tid'), 'object_state',
-                                   oids=(1, 2, 3, 4, 5))
+                                   oids=iter((1, 2, 3, 4, 5)))
         rows = list(rows)
+
         self.assertEqual(cursor.executed, [
-            ('SELECT zoid,tid FROM object_state WHERE oids IN (%s,%s)',
-             (1, 2,)),
-            ('SELECT zoid,tid FROM object_state WHERE oids IN (%s,%s)',
-             (3, 4,)),
-            ('SELECT zoid,tid FROM object_state WHERE oids IN (%s)',
-             (5,)),
+            (self.select_multiple_many_batch,
+             self._in(1, 2)),
+            (self.select_multiple_many_batch,
+             self._in(3, 4)),
+            (self.select_one,
+             self._in(5)),
         ])
 
         self.assertEqual(rows, [
             (1, 1),
             (3, 1)
         ])
+
+    def test_select_multiple_many_batch_bind_limit(self):
+        self.test_select_multiple_many_batch(batch_limit_attr='bind_limit')
 
 
 class OracleRowBatcherTests(TestCase):
@@ -394,53 +425,16 @@ class OracleRowBatcherTests(TestCase):
             'rawdata_1': MockRawType,
         })
 
-class PostgreSQLRowBatcherTests(TestCase):
+class PostgreSQLRowBatcherTests(RowBatcherTests):
 
     def getClass(self):
         from relstorage.adapters.postgresql.batch import PostgreSQLRowBatcher
         return PostgreSQLRowBatcher
 
-    def test_select_one(self):
-        cursor = MockCursor()
-        batcher = self.getClass()(cursor)
-        list(batcher.select_from(('zoid', 'tid'), 'object_state', oids=(1,)))
-        self.assertEqual(cursor.executed, [
-            ('SELECT zoid,tid FROM object_state WHERE oids = ANY (%s)',
-             ([1,],))
-        ])
+    IN_ROWS_FLATTENED = True
 
-    def test_select_multiple_one_batch(self):
-        cursor = MockCursor()
-        batcher = self.getClass()(cursor)
-        list(batcher.select_from(('zoid', 'tid'), 'object_state',
-                                 oids=(1, 2, 3, 4)))
-        self.assertEqual(cursor.executed, [
-            ('SELECT zoid,tid FROM object_state WHERE oids = ANY (%s)',
-             ([1, 2, 3, 4],))
-        ])
-
-    def test_select_multiple_many_batch(self):
-        cursor = MockCursor()
-        cursor.many_results = [
-            [(1, 1)],
-            [(3, 1)],
-            []
-        ]
-        batcher = self.getClass()(cursor)
-        batcher.row_limit = 2
-        rows = batcher.select_from(('zoid', 'tid'), 'object_state',
-                                   oids=(1, 2, 3, 4, 5))
-        rows = list(rows)
-        self.assertEqual(cursor.executed, [
-            ('SELECT zoid,tid FROM object_state WHERE oids = ANY (%s)',
-             ([1, 2,],)),
-            ('SELECT zoid,tid FROM object_state WHERE oids = ANY (%s)',
-             ([3, 4,],)),
-            ('SELECT zoid,tid FROM object_state WHERE oids = ANY (%s)',
-             ([5,],)),
-        ])
-
-        self.assertEqual(rows, [
-            (1, 1),
-            (3, 1)
-        ])
+    delete_auto_flush = 'DELETE FROM mytable WHERE id = ANY (%s)'
+    flush_delete_one = 'DELETE FROM mytable WHERE id = ANY (?)'
+    select_one = 'SELECT zoid,tid FROM object_state WHERE oids = ANY (%s)'
+    select_multiple_one_batch = 'SELECT zoid,tid FROM object_state WHERE oids = ANY (%s)'
+    select_multiple_many_batch = 'SELECT zoid,tid FROM object_state WHERE oids = ANY (%s)'

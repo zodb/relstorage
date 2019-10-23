@@ -270,13 +270,17 @@ class AbstractObjectMover(ABC):
 
     @metricmethod_sampled
     def _generic_restore(self, batcher, oid, tid, data,
-                         command='INSERT', suffix=''):
-        """Store an object directly, without conflict detection.
+                         command, suffix):
+        """
+        Store an object directly, without conflict detection.
 
         Used for copying transactions into this database.
-        """
-        md5sum = self._compute_md5sum(data)
 
+        Either the *command* or the *suffix* must be capable of
+        handling conflicts in a single query. For example,
+        ``command='INSERT OR REPLACE'``
+        or ``command='INSERT', suffix='ON CONFLICT (zoid) DO...``
+        """
         if data is not None:
             encoded = self.driver.Binary(data)
             size = len(data)
@@ -285,8 +289,8 @@ class AbstractObjectMover(ABC):
             size = 0
 
         if self.keep_history:
-            if command == 'INSERT' and not suffix:
-                batcher.delete_from("object_state", zoid=oid, tid=tid)
+            # We can record deletion/un-creation via a null state.
+            md5sum = self._compute_md5sum(data)
             row_schema = """
                 %s, %s,
                 COALESCE((SELECT tid FROM current_object WHERE zoid = %s), 0),
@@ -301,20 +305,20 @@ class AbstractObjectMover(ABC):
                 command=command,
                 suffix=suffix
             )
-        elif data:
-            if command == 'INSERT' and not suffix:
-                batcher.delete_from('object_state', zoid=oid)
-            batcher.insert_into(
-                "object_state (zoid, tid, state_size, state)",
-                "%s, %s, %s, %s",
-                (oid, tid, size, encoded),
-                rowkey=oid,
-                size=size,
-                command=command,
-                suffix=suffix
-            )
         else:
-            batcher.delete_from('object_state', zoid=oid)
+            # history free can only delete the entire record.
+            if data:
+                batcher.insert_into(
+                    "object_state (zoid, tid, state_size, state)",
+                    "%s, %s, %s, %s",
+                    (oid, tid, size, encoded),
+                    rowkey=oid,
+                    size=size,
+                    command=command,
+                    suffix=suffix
+                )
+            else:
+                batcher.delete_from('object_state', zoid=oid)
 
     def restore(self, cursor, batcher, oid, tid, data):
         raise NotImplementedError()

@@ -71,7 +71,7 @@ class Sqlite3SchemaInstaller(AbstractSchemaInstaller):
 
     def _reset_oid(self, cursor):
         from .oidallocator import Sqlite3OIDAllocator
-        with contextlib.closing(Sqlite3OIDAllocator(self.driver, self.connmanager)) as oids:
+        with contextlib.closing(Sqlite3OIDAllocator(self.driver, self.oid_connmanager)) as oids:
             oids.reset_oid(cursor)
 
     def drop_all(self):

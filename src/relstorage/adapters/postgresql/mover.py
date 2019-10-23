@@ -106,7 +106,8 @@ class PostgreSQLObjectMover(AbstractObjectMover):
                 state_size = excluded.state_size,
                 state = excluded.state
             """
-        self._generic_restore(batcher, oid, tid, data, suffix=suffix)
+        self._generic_restore(batcher, oid, tid, data,
+                              command='INSERT', suffix=suffix)
 
     @metricmethod_sampled
     def download_blob(self, cursor, oid, tid, filename):
