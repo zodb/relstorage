@@ -286,6 +286,10 @@ class StoreConnection(AbstractManagedConnection):
     def begin(self):
         self.connmanager.begin(*self.open_if_needed())
 
+class PrePackConnection(StoreConnection):
+    __slots__ = ()
+    _NEW_CONNECTION_NAME = 'open_for_pre_pack'
+
 @implementer(interfaces.IManagedDBConnection)
 class ClosedConnection(object):
     """

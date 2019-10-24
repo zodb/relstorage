@@ -37,6 +37,7 @@ __all__ = [
     # Constants
     'PY3',
     'PY2',
+    'PY36',
     'PYPY',
     'WIN',
     'MAC',
@@ -72,6 +73,7 @@ __all__ = [
 ]
 
 PY3 = sys.version_info[0] == 3
+PY36 = sys.version_info[:2] >= (3, 6)
 PY2 = not PY3
 PYPY = platform.python_implementation() == 'PyPy'
 WIN = sys.platform.startswith('win')

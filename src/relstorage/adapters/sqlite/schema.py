@@ -18,13 +18,12 @@ from __future__ import division
 from __future__ import print_function
 
 import os.path
-import contextlib
 
 from zope.interface import implementer
 
 from ..interfaces import ISchemaInstaller
 from ..schema import AbstractSchemaInstaller
-from ..schema import Schema
+
 
 @implementer(ISchemaInstaller)
 class Sqlite3SchemaInstaller(AbstractSchemaInstaller):
@@ -36,9 +35,14 @@ class Sqlite3SchemaInstaller(AbstractSchemaInstaller):
     COLTYPE_BLOB_CHUNK = 'BLOB'
     COLTYPE_MD5 = 'BLOB'
 
-    def __init__(self, driver, oid_connmanager=None, **kwargs):
+    all_tables = tuple(
+        t for t in AbstractSchemaInstaller.all_tables
+        if t != 'new_oid'
+    )
+
+    def __init__(self, driver, oid_allocator, **kwargs):
         self.driver = driver
-        self.oid_connmanager = oid_connmanager
+        self.oid_allocator = oid_allocator
         super(Sqlite3SchemaInstaller, self).__init__(**kwargs)
 
     def get_database_name(self, cursor):
@@ -57,23 +61,18 @@ class Sqlite3SchemaInstaller(AbstractSchemaInstaller):
 
     list_sequences = list_procedures
 
-    _new_oid_query = Schema.new_oid.create(if_not_exists=True)
-
-    def _create_new_oid(self, cursor):
-        self._new_oid_query.execute(cursor)
-        self.oid_connmanager.open_and_call(
-            lambda conn, cursor: self._new_oid_query.execute(cursor)
-        )
+    def _prepare_with_connection(self, conn, cursor):
+        AbstractSchemaInstaller._prepare_with_connection(self, conn, cursor)
+        if not self.connmanager.are_stats_ok(cursor):
+            self.connmanager.correct_stats(cursor)
+            conn.commit()
 
     def _create_pack_lock(self, cursor):
         """Does nothing."""
-    _reset_oid = _create_new_oid
 
     def _reset_oid(self, cursor):
-        from .oidallocator import Sqlite3OIDAllocator
-        with contextlib.closing(Sqlite3OIDAllocator(self.driver, self.oid_connmanager)) as oids:
-            oids.reset_oid(cursor)
+        self.oid_allocator.reset_oid()
 
     def drop_all(self):
         super(Sqlite3SchemaInstaller, self).drop_all()
-        self.oid_connmanager.open_and_call(self._drop_all)
+        self.oid_allocator.reset_oid()

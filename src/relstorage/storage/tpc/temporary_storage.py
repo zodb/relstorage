@@ -86,7 +86,6 @@ class TemporaryStorage(object):
         """
         Return the bytes for a previously stored temporary item.
         """
-        __traceback_info__ = dict(self._queue_contents.items())
         startpos, endpos, _ = self._queue_contents[oid_int]
         return self._read_temp_state(startpos, endpos)
 

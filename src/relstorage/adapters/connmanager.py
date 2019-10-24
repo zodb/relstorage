@@ -45,10 +45,14 @@ class AbstractConnectionManager(object):
     # in practice they should.)
     _ignored_exceptions = ()
 
-    isolation_load = None
-    isolation_store = None
+    # Subclasses should set these to get semantics as close
+    # as possible to these standard levels.
     isolation_serializable = None
     isolation_read_committed = None
+    # If these are not set by a subclass, they will be copied
+    # from isolation_serializable and read_committed, respectively.
+    isolation_load = None
+    isolation_store = None
 
     replica_selector = None
     ro_replica_selector = None
@@ -79,8 +83,10 @@ class AbstractConnectionManager(object):
         else:
             self.ro_replica_selector = self.replica_selector
 
-        self.isolation_load = self.isolation_serializable
-        self.isolation_store = self.isolation_read_committed
+        if not self.isolation_load:
+            self.isolation_load = self.isolation_serializable
+        if not self.isolation_store:
+            self.isolation_store = self.isolation_read_committed
 
         self._may_need_rollback = driver.connection_may_need_rollback
         self._may_need_commit = driver.connection_may_need_commit
@@ -300,6 +306,9 @@ class AbstractConnectionManager(object):
         Returns (conn, cursor).
         """
         return self.open_for_store(application_name='RS prepack')
+
+    def open_for_pack_lock(self):
+        return self.open()
 
     def _do_open_for_store(self, **open_args):
         open_args['isolation'] = self.isolation_store

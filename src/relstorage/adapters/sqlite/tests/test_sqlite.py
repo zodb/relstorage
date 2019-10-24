@@ -44,13 +44,14 @@ class Sqlite3AdapterMixin(object):
         # and then destroy it when the layer is torn down.
         # So our files don't persist. This can show a different set of
         # bugs than re-using an existing schema that gets zapped.
-        path = os.path.join(
+        data_dir = os.path.join(
             #"/tmp",
             tempfile.gettempdir(),
-            dbname + '.sqlite3')
+            dbname)
 
         return {
-            'path': path,
+            'data_dir': data_dir,
+            'pragmas': {}
         }
 
     def make_adapter(self, options, db=None):
@@ -64,6 +65,9 @@ class Sqlite3AdapterMixin(object):
 
     def get_adapter_zconfig(self):
         options = self.__get_adapter_options()
+        options['data-dir'] = options['data_dir']
+        del options['data_dir']
+        del options['pragmas']
         options['driver'] = self.driver_name
         formatted_options = '\n'.join(
             '     %s %s' % (k, v)
@@ -73,16 +77,34 @@ class Sqlite3AdapterMixin(object):
         return u"""
         <sqlite3>
             %s
+            <pragmas>
+               journal_mode memory
+               cache_size 8mb
+            </pragmas>
         </sqlite3>
         """ % (formatted_options)
 
     def verify_adapter_from_zconfig(self, adapter):
-        self.assertEqual(adapter.connmanager.path, self.__get_adapter_options()['path'])
+        self.assertEqual(adapter.connmanager.path,
+                         os.path.join(
+                             self.__get_adapter_options()['data_dir'], 'main.sqlite3'))
+        conn, _ = adapter.connmanager.open()
+        try:
+            cur = conn.execute('pragma cache_size')
+            size, = cur.fetchall()[0]
+            self.assertEqual(size, 8388608)
+            # But we weren't allowed to change journal_mode
+            cur = conn.execute('pragma journal_mode')
+            journal, = cur.fetchall()[0]
+            self.assertEqual(journal, 'wal')
+        finally:
+            conn.close()
 
 
 class Sqlite3TestSuiteBuilder(AbstractTestSuiteBuilder):
 
     __name__ = 'Sqlite3'
+    RAISED_EXCEPTIONS = Exception
 
     def __init__(self):
         from relstorage.adapters.sqlite import drivers

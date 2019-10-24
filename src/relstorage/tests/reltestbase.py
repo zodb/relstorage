@@ -771,7 +771,7 @@ class GenericRelStorageTests(
         r = c1.root()
 
         c1._storage._load_connection.connection.close()
-        c1._storage.sync()
+        c1._storage.sync(True)
         # ZODB5 calls sync when a connection is opened. Our monkey
         # patch on a Connection makes sure that works in earlier
         # versions, but we don't have that patch on ZODB5. So test

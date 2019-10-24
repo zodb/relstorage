@@ -22,4 +22,5 @@ from ...tests import test_adapter
 class TestAdapter(test_adapter.AdapterTestBase):
 
     def _makeOne(self, options):
-        return Adapter(":memory:", options=options)
+        return Adapter(":memory:",
+                       options=options, pragmas={})

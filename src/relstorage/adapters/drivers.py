@@ -29,6 +29,7 @@ from .._compat import PYPY
 from .._compat import PY3
 from .._compat import casefold
 from .._util import positive_integer
+from .._util import consume
 
 from .interfaces import IDBDriver
 from .interfaces import IDBDriverFactory
@@ -116,6 +117,8 @@ class AbstractModuleDriver(ABC):
 
     def __init__(self):
         if PYPY and not self.AVAILABLE_ON_PYPY:
+            raise DriverNotAvailableError(self.__name__)
+        if not self.STATIC_AVAILABLE:
             raise DriverNotAvailableError(self.__name__)
         try:
             self.driver_module = mod = self.get_driver_module()
@@ -205,9 +208,8 @@ class AbstractModuleDriver(ABC):
         # it in certain circumstances.
 
         if cursor is not None:
-            fetchall = cursor.fetchall
             try:
-                fetchall()
+                consume(cursor)
             except Exception: # pylint:disable=broad-except
                 pass
 

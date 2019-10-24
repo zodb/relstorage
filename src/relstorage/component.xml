@@ -231,16 +231,38 @@
 
   </sectiontype>
 
+  <sectiontype name="pragmas" datatype=".SQLitePragmas">
+      <!-- A few of the important pragmas we know about and can
+           provide optimized handling of. -->
+      <key name="page_size" datatype="byte-size" />
+      <key name="mmap_size" datatype="byte-size" />
+      <key name="max_page_count" datatype="integer" />
+      <key name="threads" datatype="integer" />
+      <key name="cache_size" datatype="byte-size" />
+      <key name="wal_autocheckpoint" datatype="integer" />
+      <key name="soft_heap_limit" datatype="byte-size" />
+      <multikey name="+" attribute="pragmas" datatype="string">
+          <description>
+              A SQLite pragma that will be executed when the
+              connection is opened.
+          </description>
+      </multikey>
+  </sectiontype>
+
   <sectiontype name="sqlite3" implements="relstorage.adapter"
-    datatype=".Sqlite3AdapterFactory">
+               datatype=".Sqlite3AdapterFactory">
 	<key name="driver" datatype="string" required="no" default="auto">
       <description>See the RelStorage documentation.</description>
 	</key>
-    <key name="path" datatype="string" required="yes">
+    <key name="data-dir" datatype="existing-dirpath" required="yes">
       <description>
-        The path to the sqlite3 file.
+        The path to the directory used to store the sqlite database
+        and associated files. The directory must be on a local filesystem.
       </description>
     </key>
+
+    <section name="*" attribute="pragmas" required="no" type="pragmas">
+    </section>
   </sectiontype>
 
 </component>

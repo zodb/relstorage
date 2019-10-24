@@ -19,8 +19,6 @@ from __future__ import print_function
 
 from zope.interface import implementer
 
-from relstorage._util import Lazy
-
 from ..interfaces import ILocker
 from ..locker import AbstractLocker
 
@@ -28,17 +26,10 @@ from ..locker import AbstractLocker
 @implementer(ILocker)
 class Sqlite3Locker(AbstractLocker):
 
+    supports_row_lock_nowait = False
     _lock_share_clause = ''
     _lock_share_clause_nowait = ''
-    _lock_current_caules = ''
-
-    @Lazy
-    def _lock_current_objects_query(self):
-        # We exclusively lock the whole database at this point. There's no way to
-        # avoid it. We also switch out of autocommit mode and start a transaction,
-        # meaning our store cursor is no longer updating...but since we have an exclusive
-        # lock, that's fine.
-        return 'BEGIN IMMEDIATE TRANSACTION'
+    _lock_current_clause = ''
 
     def _lock_readCurrent_oids_for_share(self, cursor, current_oids, shared_locks_block):
         """
@@ -50,8 +41,29 @@ class Sqlite3Locker(AbstractLocker):
         so it will read the current data.
         """
 
+    _lock_current_objects_query = 'UPDATE commit_row_lock SET tid = tid WHERE tid < 0'
+
+    def _lock_rows_being_modified(self, cursor):
+        # We exclusively lock the whole database at this point. There's no way to
+        # avoid it. We also switch out of autocommit mode and start a transaction,
+        # meaning our store cursor is no longer updating...but since we have an exclusive
+        # lock, that's fine. We use a statement that matches no rows, but still takes
+        # locks.
+        conn = cursor.connection
+        # If we pre-allocated the TID due to a restore, we could already be
+        # in a tranasction. In which case there's nothing to do (but for safety
+        # we still execute the query)
+        AbstractLocker._lock_rows_being_modified(self, cursor)
+        assert conn.in_transaction or conn.in_transaction is None # Py2
+
     def hold_commit_lock(self, cursor, ensure_current=False, nowait=False):
-        return True
+        # We may or may not actually have locked rows; if we're doing a restore
+        # we allocate the tid first. Likewise, an undo also
+        # locks upfront.
+        if ensure_current:
+            cursor.execute(self._lock_current_objects_query)
+            in_transaction = cursor.connection.in_transaction
+            assert in_transaction or in_transaction is None # Py2
 
     def release_commit_lock(self, cursor):
         # no action needed, locks released with transaction.

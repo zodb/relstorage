@@ -445,23 +445,3 @@ class _InsertReplaceDatabase(Database):
             cp0,
             cp0, cp1
         ))
-
-
-class _ExplainCursor(object): # pragma: no cover (A debugging aid)
-    def __init__(self, cur):
-        self.cur = cur
-
-    def __getattr__(self, name):
-        return getattr(self.cur, name)
-
-    def __iter__(self):
-        return iter(self.cur)
-
-    def execute(self, sql, *args):
-        if sql.strip().startswith(('INSERT', 'SELECT', 'DELETE', 'WITH')):
-            exp = 'EXPLAIN QUERY PLAN ' + sql.lstrip()
-            print(sql)
-            self.cur.execute(exp, *args)
-            for row in self.cur:
-                print(*row)
-        return self.cur.execute(sql, *args)

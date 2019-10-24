@@ -98,8 +98,12 @@ class _Availability(object):
     Note that this includes checking whether we can connect to the database.
     """
 
-    def __init__(self, factory, drivers, max_priority, use_adapter, db_name):
+
+
+    def __init__(self, factory, drivers, max_priority, use_adapter, db_name,
+                 raised_exceptions=(TypeError, AttributeError)):
         from relstorage.adapters.interfaces import DriverNotAvailableError
+        self.raised_exceptions = raised_exceptions
         self.driver_name = factory.driver_name
         self.escaped_driver_name = self.driver_name.replace(' ', '').replace('/', '_')
 
@@ -152,7 +156,9 @@ class _Availability(object):
         adapter = adapter_maker.make_adapter(options, db_name)
         try:
             adapter.connmanager.open_and_call(self.__check_db_access_cb)
-        except (TypeError, AttributeError):
+        except self.raised_exceptions:
+            # We're called from test_suite(), and zope.testrunner
+            # ignores errors at that time, so we need to print it ourself.
             import traceback; traceback.print_exc()
             raise
         except Exception as e:  # pylint:disable=broad-except
@@ -169,6 +175,11 @@ class AbstractTestSuiteBuilder(object):
 
     # Ask the drivers to be in their strictest possible mode.
     STRICT_DRIVER = True
+
+    # The kind of exceptions that are raised, not ignored,
+    # when trying to check access to the database. They indicate
+    # programming problems.
+    RAISED_EXCEPTIONS = (TypeError, AttributeError)
 
     def __init__(self, driver_options, use_adapter, extra_test_classes=()):
         """
@@ -208,7 +219,8 @@ class AbstractTestSuiteBuilder(object):
             available = _Availability(
                 factory, self.drivers, self.MAX_PRIORITY,
                 self.use_adapter,
-                self.db_names['data']
+                self.db_names['data'],
+                self.RAISED_EXCEPTIONS
             )
 
             # On CI, we don't even add tests for unavailable drivers to the
