@@ -5,6 +5,18 @@
 3.0b2 (unreleased)
 ==================
 
+- SQLite: Require the database to be in dedicated directory.
+
+  .. caution::
+
+     This introduces a change to the <sqlite3> configuration.
+     Please review the documentation. It is possible to migrate a
+     database created earlier to the new structure, but no automated
+     tooling or documentation is provided for that.
+
+- SQLite: Allow configuration of many of SQLite's PRAGMAs for advanced
+  tuning.
+
 - SQLite: Fix resetting OIDs when zapping a storage. This could be a
   problem for benchmarks.
 
@@ -12,6 +24,8 @@
 
 - SQLite: Improve the speed of copying transactions into a SQLite
   storage (e.g., with zodbconvert).
+
+- SQLite: Substantially improve general performance. See :pr:`368`.
 
 - PostgreSQL: Improve the speed of  writes when using the 'gevent
   psycopg2' driver.

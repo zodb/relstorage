@@ -48,34 +48,51 @@ The PostgreSQL adapter accepts:
 driver
     All of these drivers use the name of the corresponding PyPI
     package. All drivers support uploading objects using PostgreSQL's
-    fast binary COPY protocol (except where noted). The possible options are:
+    fast binary COPY protocol (except where noted). None of the gevent
+    drivers support RelStorage's critical commit section. The possible options are:
 
     psycopg2
-      A C-based driver that requires the PostgreSQL development
+      A C-based driver that uses the C PostgreSQL client
       libraries. Optimal on CPython, but not compatible with gevent.
-      Non-production, experimental usage, can install the
+      For non-production, experimental usage, one can install the
       ``psycopg2-binary`` package to be able to use this driver
       without `needing a C compiler
       <http://initd.org/psycopg/docs/install.html#binary-packages>`_.
+
+      This is the default and preferred driver everywhere except PyPy.
 
     gevent psycopg2
       The same as ``psycopg2``, but made to be gevent compatible
       through the use of a wait callback. If the system is
       monkey-patched by gevent, RelStorage will automatically install
-      a wait callback (which is global to all connections created by
-      psycopg2). Otherwise, you must install a compatible wait
-      callback (perhaps using `psycogreen
-      <https://pypi.org/project/psycogreen/>`__). This driver forfeits
-      use of the COPY protocol and use of the C-accelerated BLOBs.
+      a wait callback optimized for RelStorage. If you won't be
+      monkey-patching, you must install a compatible wait
+      callback yourself (perhaps using `psycogreen
+      <https://pypi.org/project/psycogreen/>`__).
+
+      A wait callback is shared between all connections created by the
+      psycopg2 library. There is no way to have some connections be
+      blocking and some non-blocking. If you'll be using psycopg2
+      connections in the same process outside of RelStorage, the wait
+      callback RelStorage installs won't work for those other
+      connections. You can install a more general callback at a slight
+      expense to the RelStorage connections, or you could use the
+      RelStorage driver module to create the other connections.
+
+      This driver forfeits use of the COPY protocol and use of the
+      C-accelerated BLOBs.
 
     psycopg2cffi
-      A C-based driver that requires the PostgreSQL development
+      A C-based driver that requires the PostgreSQL client
       libraries. Optimal on PyPy and almost indistinguishable from
       psycopg2 on CPython. Not compatible with gevent.
 
+      This is the default and preferred driver for PyPy.
+
     pg8000
-     A pure-Python driver suitable for use with gevent. Works on all
-     supported platforms.
+     A pure-Python driver suitable for use with gevent (if the system
+     is monkey-patched). Works on all supported platforms, and can use
+     the COPY protocol even when the system is monkey-patched.
 
      This driver makes use of ``SET SESSION CHARACTERISTICS`` and thus
      `may not work well
@@ -96,13 +113,13 @@ dsn
 MySQL Adapter Options
 =====================
 
-RelStorage 3.0 requires MySQL 5.7.19 or above; 5.7.21 or higher, or
-MySQL 8.0.16 or higher, is recommended.
+RelStorage 3.0 requires MySQL 5.7.19 or above. MySQL 5.7.21 or higher, or
+MySQL 8.0.16 or higher, is strongly recommended.
 
 .. note::
 
    MySQL versions earlier than 8.0.16 do not support or preserve table
-   ``CHECK`` constraints. Upgrading a RelStorage schema from 5.7.x to
+   ``CHECK`` constraints. Upgrading a RelStorage schema from MySQL 5.7.x to
    8.0.x will thus not have any defined or enforced table ``CHECK``
    constraints, but creating a new RelStorage schema under MySQL 8.0
    will include enforced ``CHECK`` constraints.
@@ -112,17 +129,18 @@ MySQL 8.0.16 or higher, is recommended.
    MySQL 5.0.18 and earlier contain crashing bugs. See :pr:`287` for
    details.
 
-The MySQL adapter accepts most parameters supported by the mysqlclient
-library (the maintained version of MySQL-python), including:
-
 driver
     The possible options are:
 
     MySQLdb
-      A C-based driver that requires the MySQL client development
+      A C-based driver that requires the MySQL client
       libraries.. This is best provided by the PyPI distribution
       `mysqlclient <https://pypi.python.org/pypi/mysqlclient>`_.
-      This driver is *not* compatible with gevent.
+      This driver is *not* compatible with gevent, though alternate
+      distributions exist and were used in the past.
+
+      This is the default and preferred driver on CPython on all
+      platforms except Windows.
 
     gevent MySQLdb
       Like ``MySQLdb``, but explicitly uses's gevent's event loop to
@@ -133,7 +151,12 @@ driver
       we can only yield until the socket is ready to write, and then
       we must write the entire query (because that portion is
       implemented in C). Likewise, we can only yield until results are
-      ready to be read, and then we must read the entire query.
+      ready to be read, and then we must read the entire results,
+      unless a server-side cursor is used.
+
+      Supports RelStorage's critical commit section. Supports server-side
+      cursors for large result sets, and if they are large, will
+      periodically yield to gevent while iterating them.
 
     PyMySQL
       A pure-Python driver provided by the distribution of the same
@@ -141,22 +164,27 @@ driver
       preferred). It is compatible with gevent if gevent's
       monkey-patching is used.
 
+      This is the default and preferred driver on Windows and on PyPy.
+
     Py MySQL Connector/Python
+
       This is the `official client
-      <https://dev.mysql.com/doc/connector-python/en/>`_ provided by
-      Oracle. It generally cannot be installed from PyPI or by pip if
-      you want the optional C extension. It has an optional C
-      extension that must be built manually. The C extension (which
-      requires the MySQL client development libraries) performs
-      about as well as mysqlclient, but the pure-python version
-      somewhat slower than PyMySQL. However, it supports more advanced
-      options for failover and high availability.
+      <https://dev.mysql.com/doc/connector-python/en/>`_ built by
+      Oracle and distributed as `mysql-connector-python on PyPI
+      <https://pypi.org/project/mysql-connector-python/8.0.17/#files>`_.
+
+      It has an optional C extension. The C extension (which uses the
+      MySQL client libraries) performs about as well as mysqlclient,
+      but the pure-python version is somewhat slower than PyMySQL.
+      However, it supports more advanced options for failover and high
+      availability.
 
       RelStorage will only use the pure-Python implementation when
-      using this name; this is compatible with gevent.
+      using this name; this is compatible with gevent monkey-patching.
 
       Binary packages are distributed by Oracle for many platforms
       and include the necessary native libraries and C extension.
+      These can be installed from PyPI or downloaded from Oracle.
 
       .. versionadded:: 2.1a1
 
@@ -177,6 +205,10 @@ driver
          called without holding the GIL." This signals potentially
          serious internal problems.
 
+The MySQL adapter accepts most parameters supported by the mysqlclient
+library (the maintained version of MySQL-python). If a particular
+driver doesn't support a parameter, it will be ignored. The parameters
+include:
 
 host
     string, host to connect
@@ -204,7 +236,7 @@ connect_timeout
     number of seconds to wait before the connection attempt fails.
 
 compress
-    if set, gzip compression is enabled
+    if set, gzip network compression is enabled
 
 named_pipe
     if set, connect to server via named pipe (Windows only)
@@ -228,6 +260,10 @@ load_infile
 
 Oracle Adapter Options
 ======================
+
+The Oracle adapter has been tested against Oracle 12, but likely works
+with Oracle 10 as well. The only supported driver is `cx_Oracle
+<https://cx-oracle.readthedocs.io/en/latest/user_guide/installation.html>`_.
 
 The Oracle adapter accepts:
 
@@ -265,25 +301,66 @@ dsn
 SQLite Adapter Options
 ======================
 
+This adapter uses the built-in sqlite3 module provided by the Python
+standard library. It is available on Python 2.7 (including PyPy) and
+Python 3.6 and above (including PyPy3), as long as the underlying
+version of SQLite is at least 3.11. The best performance can be
+obtained by ensuring the underlying SQLite is at least 3.24.
+
 A SQLite database can be used by multiple processes concurrently, but
 because it uses shared memory, those processes *must* all be on the
-same machine.
+same machine. The database files also should reside locally.
 
-Using a persistent cache file is not recommended with this adapter.
-Indeed, consider disabling RelStorage's in-memory pickle cache
+Using a persistent cache file is not supported with this driver and
+will be automatically disabled. In some cases, it may be advantageous
+to also disable RelStorage's in-memory pickle cache
 altogether (``cache-local-mb 0``) and allow the operating system's
 filesystem cache to serve that purpose.
 
+This adapter supports blobs, but you still must configure a
+``blob-cache-dir``, or use a ``shared-blob-dir``.
+
 For more, see :doc:`faq`.
 
-There is only one option:
+There is one required setting:
 
-path
-    The path to the main database file.
+data-dir
+    The path to a directory to hold the data.
 
-    Choosing a dedicated directory is recommended. A network
+    Choosing a dedicated directory is strongly recommended. A network
     filesystem is generally not recommended.
 
-    Several other files will be created in the same directory as this
-    file while the database is in use. Do not remove them or data
-    corruption may result.
+    Several files will be created in this directory automatically by
+    RelStorage. Some are persistent while others are transient. Do not
+    remove them or data corruption may result.
+
+RelStorage configures SQLite to work well and be safe. For advanced
+tuning, nearly the entire set of `SQLite PRAGMAs
+<https://www.sqlite.org/pragma.html>`_ are available. Put them in the
+``pragmas`` section of the configuration. For example, this
+configuration is meant to make SQLite run as fast as possible while
+ignoring safety considerations::
+
+        <sqlite3>
+            data-dir /dev/shm
+            <pragmas>
+                synchronous off
+                checkpoint_fullfsync off
+                defer_foreign_keys on
+                fullfsync off
+                ignore_check_constraints on
+                foreign_keys off
+            </pragmas>
+        </sqlite3>
+
+Particularly useful pragmas to consider adjusting include
+``cache_size`` and ``mmap_size``.
+
+Setting ``wal_autocheckpoint`` to a larger value than the default may
+improve write speed at the expense of read speed and substantially
+increased disk usage. (A setting of 0 is not recommended.)
+
+Setting ``max_page_count`` can be used to enforce a crude quota
+system.
+
+The ``journal_mode`` cannot be changed.
