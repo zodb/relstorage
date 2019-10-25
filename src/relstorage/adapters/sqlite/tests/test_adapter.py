@@ -16,9 +16,13 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+from unittest import skipUnless
+
 from ..adapter import Sqlite3Adapter as Adapter
+from ..drivers import Sqlite3Driver
 from ...tests import test_adapter
 
+@skipUnless(Sqlite3Driver.STATIC_AVAILABLE, "Driver not available")
 class TestAdapter(test_adapter.AdapterTestBase):
 
     def _makeOne(self, options):
