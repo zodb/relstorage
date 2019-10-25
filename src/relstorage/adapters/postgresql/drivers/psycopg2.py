@@ -67,20 +67,31 @@ class Psycopg2Driver(MemoryViewBlobDriverMixin,
 
     def _create_connection(self, mod, *extra_slots):
         if getattr(mod, 'RSPsycopg2Connection', self) is self:
-            class Psycopg2Connection(mod.extensions.connection):
+            class RSPsycopg2Connection(mod.extensions.connection):
                 # The replica attribute holds the name of the replica this
                 # connection is bound to.
                 __slots__ = ('replica',) + extra_slots
 
-            mod.RSPsycopg2Connection = Psycopg2Connection
+            mod.RSPsycopg2Connection = RSPsycopg2Connection
 
         return mod.RSPsycopg2Connection
+
+    def _check_wait_callback(self):
+        from psycopg2 import extensions # pylint:disable=no-name-in-module
+
+        if extensions.get_wait_callback() is not None: # pragma: no cover
+            raise ImportError("Wait callback installed")
+
+    def get_driver_module(self):
+        self._check_wait_callback()
+        return super(Psycopg2Driver, self).get_driver_module()
 
     def connect_with_isolation(self, dsn,
                                isolation=None,
                                read_only=False,
                                deferrable=False,
                                application_name=None):
+
         conn = self.connect(dsn)
         assert not conn.autocommit
         if isolation or deferrable or read_only:
@@ -143,9 +154,13 @@ class GeventPsycopg2Driver(Psycopg2Driver):
     def _create_connection(self, mod, *extra_slots):
         if getattr(mod, 'RSGeventPsycopg2Connection', self) is self:
             Base = super(GeventPsycopg2Driver, self)._create_connection(mod, *extra_slots)
+            from relstorage.adapters.drivers import GeventConnectionMixin
 
-            class RSGeventPsycopg2Connection(LobConnectionMixin, Base):
+            class RSGeventPsycopg2Connection(GeventConnectionMixin,
+                                             LobConnectionMixin,
+                                             Base):
                 RSDriverBinary = self.Binary
+
 
             mod.RSGeventPsycopg2Connection = RSGeventPsycopg2Connection
 
@@ -156,15 +171,15 @@ class GeventPsycopg2Driver(Psycopg2Driver):
         # Make sure we can use gevent; if we can't the ImportError
         # will prevent this driver from being used.
         __import__('gevent')
+        return super(GeventPsycopg2Driver, self).get_driver_module()
 
-        mod = super(GeventPsycopg2Driver, self).get_driver_module()
+    def _check_wait_callback(self):
         from psycopg2 import extensions # pylint:disable=no-name-in-module
-
         if extensions.get_wait_callback() is None: # pragma: no cover
             raise ImportError("No wait callback installed")
-        return mod
 
     # TODO: Implement enter_critical_phase_until_transaction_end
+
 
 class _GeventPsycopg2WaitCallback(object):
 
@@ -186,10 +201,12 @@ class _GeventPsycopg2WaitCallback(object):
             state = conn.poll()
             if state == self.poll_ok:
                 return
+
             if state == self.poll_read:
-                self.wait_read(conn.fileno())
+                conn.gevent_wait_read()
             else:
-                self.wait_write(conn.fileno())
+                conn.gevent_wait_write()
+
 
 def _gevent_did_patch(_event):
     try:

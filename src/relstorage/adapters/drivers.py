@@ -348,3 +348,52 @@ def implement_db_driver_options(name, *driver_modules):
 
     module.select_driver = lambda driver_name=None: _select_driver_by_name(driver_name,
                                                                            sys.modules[name])
+
+
+try:
+    import gevent
+except ImportError:
+    pass
+else:
+    from gevent.socket import wait
+    get_hub = gevent.get_hub
+
+    class GeventConnectionMixin(object):
+
+        def __init__(self, *args, **kwargs):
+            self.gevent_hub = None
+            self.gevent_read_watcher = None
+            self.gevent_write_watcher = None
+            super(GeventConnectionMixin, self).__init__(*args, **kwargs)
+
+        def close(self):
+            self.__close_watchers()
+            super(GeventConnectionMixin, self).close()
+
+        def __check_watchers(self):
+            # We can be used from more than one thread in a sequential
+            # fashion.
+            hub = get_hub()
+            if hub is not self.gevent_hub:
+                self.__close_watchers()
+
+                fileno = self.fileno()
+                hub = self.gevent_hub = get_hub()
+                self.gevent_read_watcher = hub.loop.io(fileno, 1)
+                self.gevent_write_watcher = hub.loop.io(fileno, 2)
+
+        def __close_watchers(self):
+            if self.gevent_read_watcher is not None:
+                self.gevent_read_watcher.close()
+                self.gevent_write_watcher.close()
+                self.gevent_hub = None
+
+        def gevent_wait_read(self):
+            self.__check_watchers()
+            wait(self.gevent_read_watcher,
+                 hub=self.gevent_hub)
+
+        def gevent_wait_write(self):
+            self.__check_watchers()
+            wait(self.gevent_write_watcher,
+                 hub=self.gevent_hub)

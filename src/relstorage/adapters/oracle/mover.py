@@ -22,51 +22,12 @@ from zope.interface import implementer
 
 from ..interfaces import IObjectMover
 from ..mover import AbstractObjectMover
+from ..mover import RowBatcherStoreTemps
 from ..mover import metricmethod_sampled
 
+class OracleRowBatcherStoreTemps(RowBatcherStoreTemps):
 
-@implementer(IObjectMover)
-class OracleObjectMover(AbstractObjectMover):
-
-    # This is assigned to by the adapter.
-    inputsizes = None
-
-
-    @metricmethod_sampled
-    def get_object_tid_after(self, cursor, oid, tid):
-        """Returns the tid of the next change after an object revision.
-
-        Returns None if no later state exists.
-        """
-        stmt = """
-        SELECT MIN(tid)
-        FROM object_state
-        WHERE zoid = :1
-            AND tid > :2
-        """
-        cursor.execute(stmt, (oid, tid))
-        rows = cursor.fetchall()
-        if rows:
-            # XXX: If we can use rowcount here, we can combine
-            # with superclass.
-            assert len(rows) == 1
-            return rows[0][0]
-
-    # no store connection initialization needed for Oracle
-    def on_store_opened(self, cursor, restart=False):
-        pass
-
-    @metricmethod_sampled
-    def store_temps(self, cursor, state_oid_tid_iter):
-        store_temp = self._store_temp
-        batcher = self.make_batcher(cursor) # Default row limit
-        for data, oid_int, tid_int in state_oid_tid_iter:
-            store_temp(batcher, oid_int, tid_int, data)
-        batcher.flush()
-
-
-    @metricmethod_sampled
-    def _store_temp(self, batcher, oid, prev_tid, data):
+    def store_temp_into_batcher(self, batcher, oid, prev_tid, data):
         md5sum = self._compute_md5sum(data)
 
         size = len(data)
@@ -96,6 +57,42 @@ class OracleObjectMover(AbstractObjectMover):
                 rowkey=oid,
                 size=size,
             )
+
+
+@implementer(IObjectMover)
+class OracleObjectMover(OracleRowBatcherStoreTemps,
+                        AbstractObjectMover):
+
+    # This is assigned to by the adapter.
+    inputsizes = None
+
+    def __init__(self, *args, **kwargs):
+        AbstractObjectMover.__init__(self, *args, **kwargs)
+        OracleRowBatcherStoreTemps.__init__(self, self.keep_history, self.driver.Binary)
+
+    @metricmethod_sampled
+    def get_object_tid_after(self, cursor, oid, tid):
+        """Returns the tid of the next change after an object revision.
+
+        Returns None if no later state exists.
+        """
+        stmt = """
+        SELECT MIN(tid)
+        FROM object_state
+        WHERE zoid = :1
+            AND tid > :2
+        """
+        cursor.execute(stmt, (oid, tid))
+        rows = cursor.fetchall()
+        if rows:
+            # XXX: If we can use rowcount here, we can combine
+            # with superclass.
+            assert len(rows) == 1
+            return rows[0][0]
+
+    # no store connection initialization needed for Oracle
+    def on_store_opened(self, cursor, restart=False):
+        pass
 
     @metricmethod_sampled
     def restore(self, cursor, batcher, oid, tid, data):
