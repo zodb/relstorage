@@ -16,16 +16,13 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-from gevent import socket
-from gevent import get_hub
 from gevent import sleep as gevent_sleep
-wait = socket.wait # pylint:disable=no-member
-
 
 # pylint:disable=wrong-import-position,no-name-in-module,import-error
 from MySQLdb.connections import Connection as BaseConnection
 from MySQLdb.cursors import SSCursor
 
+from relstorage.adapters.drivers import GeventConnectionMixin
 from . import IterateFetchmanyMixin
 
 class Cursor(IterateFetchmanyMixin, SSCursor):
@@ -92,7 +89,8 @@ class Cursor(IterateFetchmanyMixin, SSCursor):
 def _noop():
     "Does nothing"
 
-class Connection(BaseConnection):
+class Connection(GeventConnectionMixin,
+                 BaseConnection):
     default_cursor = Cursor
     gevent_read_watcher = None
     gevent_write_watcher = None
@@ -114,24 +112,6 @@ class Connection(BaseConnection):
         del self.query
         del self.sleep
 
-    def check_watchers(self):
-        # We can be used from more than one thread in a sequential
-        # fashion.
-        hub = get_hub()
-        if hub is not self.gevent_hub:
-            self.__close_watchers()
-
-            fileno = self.fileno()
-            hub = self.gevent_hub = get_hub()
-            self.gevent_read_watcher = hub.loop.io(fileno, 1)
-            self.gevent_write_watcher = hub.loop.io(fileno, 2)
-
-    def __close_watchers(self):
-        if self.gevent_read_watcher is not None:
-            self.gevent_read_watcher.close()
-            self.gevent_write_watcher.close()
-            self.gevent_hub = None
-
     def _critical_query(self, query):
         return BaseConnection.query(self, query)
 
@@ -141,12 +121,10 @@ class Connection(BaseConnection):
         if isinstance(query, bytearray):
             query = bytes(query)
 
-        self.check_watchers()
-
-        wait(self.gevent_write_watcher, hub=self.gevent_hub)
+        self.gevent_wait_write()
         self.send_query(query)
 
-        wait(self.gevent_read_watcher, hub=self.gevent_hub)
+        self.gevent_wait_read()
         self.read_query_result()
 
     # The default implementations of 'rollback' and
@@ -176,10 +154,6 @@ class Connection(BaseConnection):
 
     def commit(self):
         self.query('commit')
-
-    def close(self):
-        self.__close_watchers()
-        BaseConnection.close(self)
 
     def __delattr__(self, name):
         # BaseConnection has a delattr that forbids

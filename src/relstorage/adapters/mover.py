@@ -37,6 +37,12 @@ objects = Schema.all_current_object_state
 object_state = Schema.object_state
 
 
+def _compute_md5sum(_self, data):
+    if data is None:
+        return None
+    return md5(data).hexdigest()
+
+
 
 @implementer(IObjectMover)
 class AbstractObjectMover(DatabaseHelpersMixin, ABC):
@@ -55,11 +61,7 @@ class AbstractObjectMover(DatabaseHelpersMixin, ABC):
         self.version_detector = version_detector
         self.make_batcher = batcher_factory
 
-    @noop_when_history_free
-    def _compute_md5sum(self, data):
-        if data is None:
-            return None
-        return md5(data).hexdigest()
+    _compute_md5sum = noop_when_history_free(_compute_md5sum)
 
     _load_current_query = objects.select(
         objects.c.state, objects.c.tid
@@ -242,18 +244,42 @@ class AbstractObjectMover(DatabaseHelpersMixin, ABC):
 
     @metricmethod_sampled
     def store_temps(self, cursor, state_oid_tid_iter):
+        """
+        Uses the cursor's ``executemany`` method to store temporary
+        objects.
+
+        If there is a more optimal way to implement putting objects in
+        the database, please do so.
+
+            - On SQLite, ``executemany`` is implemnted in a C looping
+              over the provided iterator. Which it turns out is
+              exactly what the normal ``execute`` method also does (it
+              just uses a one-row iterator). So ``executemany`` that
+              saves substantial setup overhead dealing with sqlite's
+              prepared statements.
+
+            - On Postgresql, we use COPY for this (unless we're using
+              the 'gevent psycopg2' driver; it's the only thing that
+              doesn't support COPY). None of the supported PostgreSQL
+              drivers have a good ``executemany`` method, so they
+              should fall back to using our own RowBatcher.
+
+            - On Oracle, we use the RowBatcher with a combination of
+              bulk array operations and direct inserts.
+
+            - On MySQL, the preferred driver (mysqlclient) has a
+              decent implementation of executemany for INSERT or
+              REPLACE (basically an optimized form of what our
+              RowBatcher does). That implementation is shared with
+              PyMySQL as well, but it must be a simple INSERT
+              statement matching a regular expression. Note that it
+              has a bug though: it can't handle an iterator that's
+              empty.
+        """
         query = self._store_temp_query
         do_md5 = self._compute_md5sum
         Binary = self.driver.Binary
-        # On Postgresql, we use COPY for this.
-        # On Oracle, we use the RowBatcher.
-        # On SQLite, executemany is implemented in C looping around our
-        # iterator; that still saves substantial setup overhead in the statement
-        # cache.
-        # On MySQL, the preferred driver (mysqlclient) has a decent implementation
-        # of executemany for INSERT; that's shared with PyMySQL as well, but it must be
-        # a simple INSERT statement matching a regular expression. Note that it has a bug though:
-        # it can't handle an iterator that's empty.
+
         query.executemany(
             cursor,
             (
@@ -265,8 +291,13 @@ class AbstractObjectMover(DatabaseHelpersMixin, ABC):
 
     @metricmethod_sampled
     def replace_temps(self, cursor, state_oid_tid_iter):
-        # Reuse the upsert query. The same comments apply. In particular,
-        # MySQLclient won't optimize an UPDATE in the same way it does an INSERT.
+        """
+        Assumes that ``store_temps`` is using an upsert query and simply calls
+        that method.
+
+        The same comments apply. In particular,
+        MySQLclient won't optimize an UPDATE in the same way it does an INSERT.
+        """
         self.store_temps(cursor, state_oid_tid_iter)
 
     @metricmethod_sampled
@@ -601,3 +632,58 @@ class AbstractObjectMover(DatabaseHelpersMixin, ABC):
             cursor, oid, tid, filename,
             self._upload_blob_uses_chunks, insert_stmt, use_tid
         )
+
+
+class RowBatcherStoreTemps(object):
+    """
+    A helper class to implement ``store_temps`` using a RowBatcher.
+    You must provide an implementation of
+    :meth:`store_temp_into_batcher` and it must be an upsert. The
+    :meth:`generic_store_temp_into_batcher` method can be used to help
+    with this.
+    """
+
+    def __init__(self, keep_history, binary, batcher_factory=RowBatcher):
+        self.make_batcher = batcher_factory
+        self.keep_history = keep_history
+        self.binary = binary
+
+    _compute_md5sum = noop_when_history_free(_compute_md5sum)
+
+    @metricmethod_sampled
+    def store_temps(self, cursor, state_oid_tid_iter):
+        store_temp = self.store_temp_into_batcher
+        batcher = self.make_batcher(cursor) # Default row limit
+        for data, oid_int, tid_int in state_oid_tid_iter:
+            store_temp(batcher, oid_int, tid_int, data)
+        batcher.flush()
+
+    replace_temps = store_temps
+
+    # The _generic methods allow for UPSERTs, at least on MySQL
+    # and PostgreSQL. Previously, MySQL used `command='REPLACE'`
+    # for an UPSERT; now it uses a suffix 'ON DUPLICATE KEY UPDATE ...'.
+    # PostgreSQL uses a suffix 'ON CONFLICT (...) UPDATE ...'.
+
+    generic_command = 'INSERT'
+    generic_suffix = ''
+
+    def generic_store_temp_into_batcher(self, batcher, oid, prev_tid, data):
+        md5sum = self._compute_md5sum(data)
+        command = self.generic_command
+        suffix = self.generic_suffix
+        # TODO: Now that we guarantee not to feed duplicates here, drop
+        # the conflict handling.
+        if command == 'INSERT' and not suffix:
+            batcher.delete_from('temp_store', zoid=oid)
+        batcher.insert_into(
+            "temp_store (zoid, prev_tid, md5, state)",
+            batcher.row_schema_of_length(4),
+            (oid, prev_tid, md5sum, self.binary(data)),
+            rowkey=oid,
+            size=len(data) + 32,
+            command=command,
+            suffix=suffix
+        )
+
+    store_temp_into_batcher = generic_store_temp_into_batcher

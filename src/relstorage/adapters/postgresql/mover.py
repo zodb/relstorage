@@ -24,7 +24,16 @@ from zope.interface import implementer
 
 from ..interfaces import IObjectMover
 from ..mover import AbstractObjectMover
+from ..mover import RowBatcherStoreTemps
 from ..mover import metricmethod_sampled
+
+class PostgreSQLRowBatcherStoreTemps(RowBatcherStoreTemps):
+    generic_suffix = """
+    ON CONFLICT (zoid) DO UPDATE
+    SET state = excluded.state,
+        prev_tid = excluded.prev_tid,
+        md5 = excluded.md5
+    """
 
 
 @implementer(IObjectMover)
@@ -79,8 +88,11 @@ class PostgreSQLObjectMover(AbstractObjectMover):
             cursor.connection.commit()
 
             if not self.driver.supports_copy:
-                self.replace_temps = super(PostgreSQLObjectMover, self).replace_temps
-                self.store_temps = super(PostgreSQLObjectMover, self).store_temps
+                batcher = PostgreSQLRowBatcherStoreTemps(self.keep_history,
+                                                         self.driver.Binary,
+                                                         self.make_batcher)
+                self.replace_temps = batcher.replace_temps
+                self.store_temps = batcher.store_temps
 
         AbstractObjectMover.on_store_opened(self, cursor, restart)
 

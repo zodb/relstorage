@@ -23,6 +23,7 @@ class Context(object):
 class Driver(object):
     dialect = OracleDialect()
     binary_column_as_state_type = binary_column_as_bytes = lambda b: b
+    Binary = bytes
 
 class TestOracleDialect(TestCase):
 

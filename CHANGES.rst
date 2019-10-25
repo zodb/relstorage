@@ -13,6 +13,9 @@
 - SQLite: Improve the speed of copying transactions into a SQLite
   storage (e.g., with zodbconvert).
 
+- PostgreSQL: Improve the speed of  writes when using the 'gevent
+  psycopg2' driver.
+
 3.0b1 (2019-10-22)
 ==================
 
