@@ -84,6 +84,11 @@ class AbstractModuleDriver(ABC):
     #: Can this module be used on PyPy?
     AVAILABLE_ON_PYPY = True
 
+    #: Set this to false if your subclass can do static checks
+    #: at import time to determine it should not be used.
+    #: Helpful for things like Python version detection.
+    STATIC_AVAILABLE = True
+
     #: Priority of this driver, when available. Lower is better.
     #: (That is, first choice should have value 1, and second choice value
     #: 2, and so on.)
@@ -123,6 +128,7 @@ class AbstractModuleDriver(ABC):
         try:
             self.driver_module = mod = self.get_driver_module()
         except ImportError:
+            logger.exception("Unable to import driver")
             raise DriverNotAvailableError(self.__name__)
 
 

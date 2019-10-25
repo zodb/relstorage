@@ -133,7 +133,7 @@ class Psycopg2Driver(MemoryViewBlobDriverMixin,
 
 
 class GeventPsycopg2Driver(Psycopg2Driver):
-    __name__ = 'gevent ' + Psycopg2Driver.__name__
+    __name__ = 'gevent ' + Psycopg2Driver.MODULE_NAME
 
     _GEVENT_CAPABLE = True
     _GEVENT_NEEDS_SOCKET_PATCH = False
