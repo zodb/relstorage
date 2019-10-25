@@ -37,7 +37,8 @@ main database to be locked like that.
 Locks
 =====
 
-Sqlite3 only supports database-wide locks.
+Sqlite3 only supports database-wide write locks. For details on when and how
+they are taken and managed, see connmanager.py and locker.py
 """
 
 from __future__ import absolute_import

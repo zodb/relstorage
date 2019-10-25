@@ -49,13 +49,6 @@ class AbstractOIDs(object):
 
 class OIDs(AbstractOIDs):
 
-    __slots__ = (
-        'preallocated_oids',
-        'max_allocated_oid',
-        'oidallocator',
-        'store_connection',
-    )
-
     def __init__(self, oidallocator, store_connection):
         # From largest to smallest: [16, 15, 14, ..., 1]
         self.preallocated_oids = [] # type: list
@@ -64,6 +57,8 @@ class OIDs(AbstractOIDs):
         self.max_allocated_oid = 0 # type: int
         self.oidallocator = oidallocator
         self.store_connection = store_connection # type: StoreConnection
+        if hasattr(oidallocator, 'new_oids_no_cursor'):
+            self.__preallocate_oids = self.__preallocate_oids_no_cursor
 
     def set_min_oid(self, max_observed_oid):
         """
@@ -116,16 +111,22 @@ class OIDs(AbstractOIDs):
         # Thus we may or may not have a store connection already open;
         # if we do, we can't restart it or drop it.
         if not self.preallocated_oids:
-            self.preallocated_oids = self.store_connection.call(
-                self.__new_oid_callback,
-                can_reconnect=not commit_in_progress
-            )
+            self.__preallocate_oids(commit_in_progress)
             # OIDs are monotonic, always increasing. It should never
             # go down or return equal to what we've already seen.
             self.max_allocated_oid = max(self.preallocated_oids[0], self.max_allocated_oid)
 
         oid_int = self.preallocated_oids.pop()
         return int64_to_8bytes(oid_int)
+
+    def __preallocate_oids(self, commit_in_progress): # pylint:disable=method-hidden
+        self.preallocated_oids = self.store_connection.call(
+            self.__new_oid_callback,
+            can_reconnect=not commit_in_progress
+        )
+
+    def __preallocate_oids_no_cursor(self, commit_in_progress):# pylint:disable=unused-argument
+        self.preallocated_oids = self.oidallocator.new_oids_no_cursor()
 
     def __new_oid_callback(self, _store_conn, store_cursor, _fresh_connection):
         return self.oidallocator.new_oids(store_cursor)

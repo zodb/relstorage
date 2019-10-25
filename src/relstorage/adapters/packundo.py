@@ -32,7 +32,7 @@ from ..treemark import TreeMarker
 
 from .schema import Schema
 from .connections import LoadConnection
-from .connections import StoreConnection
+from .connections import PrePackConnection
 from .interfaces import IPackUndo
 from ._util import DatabaseHelpersMixin
 from .sql import it
@@ -634,7 +634,7 @@ class HistoryPreservingPackUndo(PackUndo):
         much faster.
         """
         load_connection = LoadConnection(self.connmanager)
-        store_connection = StoreConnection(self.connmanager)
+        store_connection = PrePackConnection(self.connmanager)
         try:
             # The pre-pack functions are responsible for managing
             # their own commits; when they return, the transaction
@@ -1297,7 +1297,7 @@ class HistoryFreePackUndo(PackUndo):
             return
 
         load_connection = LoadConnection(self.connmanager)
-        store_connection = StoreConnection(self.connmanager)
+        store_connection = PrePackConnection(self.connmanager)
         try:
             try:
                 self._pre_pack_main(load_connection, store_connection,

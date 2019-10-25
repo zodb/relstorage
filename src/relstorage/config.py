@@ -17,6 +17,7 @@ from __future__ import absolute_import
 from relstorage.options import Options
 from relstorage.storage import RelStorage
 
+logger = __import__('logging').getLogger(__name__)
 
 class BaseConfig(object):
 
@@ -34,6 +35,9 @@ class RelStorageFactory(BaseConfig):
         # that would prevent us from being correctly opened again.
         #config.adapter.config.driver = None
         options = Options.copy_valid_options(config)
+        # The adapter factories may modify the global options (or raise an exception)
+        # if something at the top-level is specifically not allowed based on
+        # their configuration.
         adapter = config.adapter.create(options)
         return RelStorage(adapter, name=config.name, options=options)
 
@@ -70,8 +74,36 @@ class MySQLAdapterFactory(BaseConfig):
         return MySQLAdapter(options=options, **params)
 
 
+class SQLitePragmas(BaseConfig):
+
+    @property
+    def pragmas(self):
+        pragmas = self.config.pragmas
+        # The keys could be repeated so the values are lists
+        pragmas = {k: v for k, (v,) in pragmas.items()}
+        # Ignore busy_timeout: That's the same thing as commit-lock-timeout
+        pragmas.pop('busy_timeout', None)
+        for attr in self.config.getSectionAttributes():
+            if attr == 'pragmas':
+                continue
+            val = getattr(self.config, attr)
+            if val is not None:
+                pragmas[attr] = val
+        return pragmas
+
 class Sqlite3AdapterFactory(BaseConfig):
     def create(self, options):
         from .adapters.sqlite.adapter import Sqlite3Adapter
-        return Sqlite3Adapter(path=self.config.path,
-                              options=options)
+        if options.cache_local_dir:
+            # A persistent cache makes absolutely no sense.
+            # Disable.
+            logger.info("Ignoring cache-local-dir setting.")
+            del options.cache_local_dir
+        if self.config.pragmas:
+            pragmas = self.config.pragmas.pragmas
+        else:
+            pragmas = {}
+        return Sqlite3Adapter(
+            self.config.data_dir,
+            pragmas=pragmas,
+            options=options)

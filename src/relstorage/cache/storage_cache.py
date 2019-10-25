@@ -28,6 +28,7 @@ from zope import interface
 
 from relstorage._compat import IN_TESTRUNNER
 from relstorage._compat import OID_SET_TYPE as OIDSet
+from relstorage._compat import OID_TID_MAP_TYPE as OidTMap
 from relstorage._util import bytes8_to_int64
 from relstorage._mvcc import DetachableMVCCDatabaseViewer
 
@@ -303,9 +304,10 @@ class StorageCache(DetachableMVCCDatabaseViewer):
         self.clear(load_persistent=False)
 
     def _check_tid_after_load(self, oid_int, actual_tid_int,
-                              expect_tid_int=None):
+                              expect_tid_int=None,
+                              cursor=None):
         """Verify the tid of an object loaded from the database is sane."""
-        if actual_tid_int > self.highest_visible_tid:
+        if actual_tid_int is not None and actual_tid_int > self.highest_visible_tid:
             # Strangely, the database just gave us data from a future
             # transaction. We can't give the data to ZODB because that
             # would be a consistency violation. However, the cause is
@@ -354,24 +356,27 @@ class StorageCache(DetachableMVCCDatabaseViewer):
             # - Restarting a load connection at a future point we hadn't
             #   actually polled to, such that our current_tid is out of sync
             #   with the connection's *actual* viewable tid?
+            from pprint import pformat
+            from relstorage._util import int64_to_8bytes
             msg = ("Detected an inconsistency "
                    "between the RelStorage cache and the database "
-                   "while loading an object using the delta_after0 dict.  "
+                   "while loading an object using the MVCC index.  "
                    "Please verify the database is configured for "
                    "ACID compliance and that all clients are using "
-                   "the same commit lock.  "
-                   "(oid_int=%(oid_int)r, expect_tid_int=%(expect_tid_int)r, "
-                   "actual_tid_int=%(actual_tid_int)r, "
-                   "current_tid=%(current_tid)r, "
-                   "pid=%(pid)r, thread_ident=%(thread_ident)r)"
-                   % {
+                   "the same commit lock. Info:\n%s"
+                   % pformat({
                        'oid_int': oid_int,
                        'expect_tid_int': expect_tid_int,
                        'actual_tid_int': actual_tid_int,
+                       # Typically if this happens we get something newer than we expect.
+                       'actual_expect_delta': actual_tid_int - expect_tid_int,
+                       'expect_tid': str(TimeStamp(int64_to_8bytes(expect_tid_int))),
+                       'actual_tid': str(TimeStamp(int64_to_8bytes(actual_tid_int))),
                        'current_tid': self.highest_visible_tid,
                        'pid': os.getpid(),
                        'thread_ident': threading.current_thread(),
-                   })
+                       'cursor': cursor,
+                   }))
             # We reset ourself as if we hadn't polled, and hope the transient
             # error gets retried in a working, consistent view.
             self._reset(msg)
@@ -452,7 +457,7 @@ class StorageCache(DetachableMVCCDatabaseViewer):
             cursor, oid_int)
         if actual_tid_int:
             # If either is None, the object was deleted.
-            self._check_tid_after_load(oid_int, actual_tid_int, indexed_tid_int)
+            self._check_tid_after_load(oid_int, actual_tid_int, indexed_tid_int, cursor)
 
             # We may or may not have had an index entry, but make sure we do now.
             # Eventually this will age to be frozen again if needed.
@@ -470,8 +475,11 @@ class StorageCache(DetachableMVCCDatabaseViewer):
             # No point even trying, we would just throw the results away
             return
 
-
         cache = self.cache
+        if cache is self.local_client and not cache.limit:
+            # No point.
+            return
+
         index = self.object_index
         # We don't actually need the cache data, so avoid asking
         # for it. That would trigger stats updates (hits/misses)
@@ -489,30 +497,38 @@ class StorageCache(DetachableMVCCDatabaseViewer):
 
         for oid, state, tid_int in self.adapter.mover.load_currents(cursor, to_fetch):
             key = (oid, tid_int)
-            self._check_tid_after_load(oid, tid_int)
+            self._check_tid_after_load(oid, tid_int, cursor=cursor)
             cache[key] = (state, tid_int)
             index[oid] = tid_int
 
     def prefetch_for_conflicts(self, cursor, oid_tid_pairs):
         results = {}
-        to_fetch = OIDSet()
+        to_fetch = OidTMap()
         cache_get = self.cache.get
 
-        for key in oid_tid_pairs:
-            # Don't update stats/MRU, just as with normal prefetch().
-            # It's also important here to avoid taking the lock.
-            # We don't store this prefetched data back into the cache because
-            # we're just about to overwrite it; we'd have to have multiple writers
-            # all with the same initial starting TID lined up to write to the object
-            # for that to have any benefit.
-            cache_data = cache_get(key, peek=True)
-            if not cache_data:
-                to_fetch.add(key[0])
-            else:
-                results[key[0]] = cache_data
+        # if we've never polled, we can't actually use our cache, will
+        # just have to make a bulk query.
+        if not self.object_index:
+            to_fetch = OidTMap(oid_tid_pairs)
+        else:
+            for key in oid_tid_pairs:
+                # Don't update stats/MRU, just as with normal prefetch().
+                # It's also important here to avoid taking the lock.
+                # We don't store this prefetched data back into the cache because
+                # we're just about to overwrite it; we'd have to have multiple writers
+                # all with the same initial starting TID lined up to write to the object
+                # for that to have any benefit.
+                cache_data = cache_get(key, peek=True)
+                if not cache_data:
+                    to_fetch[key[0]] = key[1]
+                else:
+                    results[key[0]] = cache_data
+                    assert cache_data[1] == key[1]
 
         if to_fetch:
+            check = self._check_tid_after_load if self.object_index else lambda *_, **kw__: None
             for oid, state, tid_int in self.adapter.mover.load_currents(cursor, to_fetch):
+                check(oid, tid_int, to_fetch[oid], cursor=cursor)
                 results[oid] = (state, tid_int)
 
         return results

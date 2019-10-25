@@ -449,6 +449,21 @@ class IConnectionManager(Interface):
         :return: ``(conn, cursor)``
         """
 
+    def open_for_pack_lock():
+        """
+        Open a connection to be used for the sole purpose of holding
+        the pack lock.
+
+        Use a private connection (lock_conn and lock_cursor) to hold
+        the pack lock. Have the adapter open temporary connections
+        to do the actual work, allowing the adapter to use special
+        transaction modes for packing, and to commit at will without
+        losing the lock.
+
+        If the database doesn't actually use a pack lock,
+        this may return ``(None, None)``.
+        """
+
     def cursor_for_connection(conn):
         """
         If the cursor returned by an open method was discarded

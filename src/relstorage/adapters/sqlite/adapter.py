@@ -47,30 +47,22 @@ class Sqlite3Adapter(AbstractAdapter):
     driver_options = drivers
     WRITING_REQUIRES_EXCLUSIVE_LOCK = True
 
-    def __init__(self, path, options=None, oidallocator=None):
-        self.path = os.path.abspath(path)
+    def __init__(self, data_dir, pragmas, options=None, oidallocator=None):
+        self.data_dir = os.path.abspath(data_dir)
+        self.pragmas = pragmas
         self.oidallocator = oidallocator
         super(Sqlite3Adapter, self).__init__(options)
-
-    def _path_for_oids(self):
-        dirname = os.path.dirname(self.path)
-        root, _ = os.path.splitext(os.path.basename(self.path))
-        oid_name = root + '.oids'
-        return os.path.join(dirname, oid_name)
 
     def _create(self):
         driver = self.driver
         options = self.options
         self.connmanager = Sqlite3ConnectionManager(
             driver,
-            path=self.path,
+            path=os.path.join(self.data_dir, 'main.sqlite3'),
+            pragmas=self.pragmas,
             options=options
         )
-        oid_connman = Sqlite3ConnectionManager(
-            driver,
-            path=self._path_for_oids(),
-            options=options,
-        )
+
         self.mover = Sqlite3ObjectMover(
             driver,
             options=options,
@@ -82,8 +74,7 @@ class Sqlite3Adapter(AbstractAdapter):
 
         if not self.oidallocator:
             self.oidallocator = Sqlite3OIDAllocator(
-                driver,
-                oid_connman
+                os.path.join(self.data_dir, 'oids.sqlite3')
             )
 
         self.runner = Sqlite3ScriptRunner()
@@ -95,7 +86,6 @@ class Sqlite3Adapter(AbstractAdapter):
             transactions_may_go_backwards=False
         )
 
-
         self.txncontrol = Sqlite3TransactionControl(
             connmanager=self.connmanager,
             poller=self.poller,
@@ -106,8 +96,8 @@ class Sqlite3Adapter(AbstractAdapter):
 
         self.schema = Sqlite3SchemaInstaller(
             driver=driver,
+            oid_allocator=self.oidallocator,
             connmanager=self.connmanager,
-            oid_connmanager=oid_connman,
             runner=self.runner,
             keep_history=self.keep_history
         )
@@ -144,7 +134,8 @@ class Sqlite3Adapter(AbstractAdapter):
 
     def new_instance(self):
         inst = type(self)(
-            self.path,
+            self.data_dir,
+            self.pragmas,
             options=self.options,
             oidallocator=self.oidallocator.new_instance())
         return inst

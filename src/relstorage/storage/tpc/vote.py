@@ -67,7 +67,7 @@ class DatabaseLockedForTid(object):
     @classmethod
     def lock_database_for_given_tid(cls, tid, tid_is_packed,
                                     cursor, adapter, ude):
-        adapter.locker.hold_commit_lock(cursor, ensure_current=True)
+        adapter.locker.hold_commit_lock(cursor, ensure_current=(tid,))
         tid_int = bytes8_to_int64(tid)
         user, desc, ext = ude
         adapter.txncontrol.add_transaction(
@@ -381,7 +381,11 @@ class AbstractVote(AbstractTPCState):
             oid = int64_to_8bytes(oid_int)
             committedSerial = int64_to_8bytes(committed_tid_int)
             oldSerial = int64_to_8bytes(tid_this_txn_saw_int)
-            newpickle = read_temp(oid_int)
+            try:
+                newpickle = read_temp(oid_int)
+            except KeyError:
+                print(self.store_connection.cursor.execute("select * from temp_store").fetchall())
+                raise
 
             # Because we're using the _CachedConflictResolver, we can only loadSerial()
             # one state: the ``oldSerial`` state. Therefore the committedData *must* be
@@ -591,10 +595,5 @@ class _CachedConflictResolver(ConflictResolvingStorage):
 
     def loadSerial(self, oid, serial):
         state, tid = self._old_states_and_tids[bytes8_to_int64(oid)]
-        if bytes8_to_int64(serial) != tid: # pragma: no cover
-            # This should not be possible
-            raise AssertionError(
-                "Load connection got invalid old state. Expected: %s; but got %s." %(
-                    tid, bytes8_to_int64(serial)
-                ))
+        assert bytes8_to_int64(serial) == tid
         return state

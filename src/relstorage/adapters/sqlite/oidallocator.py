@@ -18,41 +18,70 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import sqlite3
 import threading
 
 from zope.interface import implementer
 
+from relstorage._util import consume
 from ..interfaces import IOIDAllocator
-from ..oidallocator import AbstractTableOIDAllocator
-from ..connections import StoreConnection
-from ..connections import ClosedConnection
+from ..oidallocator import AbstractOIDAllocator
+
+from .connmanager import connect_to_file
 
 @implementer(IOIDAllocator)
-class Sqlite3OIDAllocator(AbstractTableOIDAllocator):
+class Sqlite3OIDAllocator(AbstractOIDAllocator):
+    # Even though we use the new_oid table like AbstractTableOIDAllocator
+    # does, because we have to take exclusive locks *anyway*, we can
+    # ensure that it only ever has a single increasing row.
 
-    def __init__(self, driver, connmanager):
-        super(Sqlite3OIDAllocator, self).__init__(driver)
-        self.store_connection = StoreConnection(connmanager)
+    def __init__(self, db_path):
+        super(Sqlite3OIDAllocator, self).__init__()
+        self.db_path = db_path
         self.lock = threading.Lock()
-        self._use_count = 1
+        self._connection = None
 
     def new_instance(self):
-        with self.lock:
-            self._use_count += 1
         return self
 
     def release(self):
-        with self.lock:
-            self._use_count -= 1
-            if self._use_count <= 0:
-                self.store_connection.drop()
-                self.store_connection = ClosedConnection()
+        self.close()
 
     def close(self):
         with self.lock:
-            self._use_count = 0
-            self.store_connection.drop()
-            self.store_connection = ClosedConnection()
+            if self._connection:
+                self._connection.close()
+                self._connection = None
+
+    _new_oid_query = 'CREATE TABLE new_oid (zoid INTEGER PRIMARY KEY NOT NULL);'
+
+    def _connect(self):
+        if self._connection is None:
+            conn = connect_to_file(
+                self.db_path,
+                mmap_size=1024 * 1024 * 10, # try to keep the whole thing in memory.
+                override_pragmas={
+                    # We can always reconstruct the contents of this file from the database
+                    # itself, and speed is utterly critical.
+                    'journal_mode': 'off',
+                    'synchronous': 'off',
+                }
+            )
+            try:
+                consume(conn.execute('SELECT count(*) from new_oid'))
+            except sqlite3.OperationalError:
+                conn.executescript(
+                    self._new_oid_query + """
+                INSERT OR REPLACE INTO new_oid
+                SELECT MAX(x) FROM (
+                    SELECT 1 x
+                    UNION ALL
+                    SELECT MAX(zoid)
+                    FROM new_oid
+                )
+                """)
+            self._connection = conn
+        return self._connection
 
     def set_min_oid(self, cursor, oid_int):
         # Recall that the very first write to the database will cause
@@ -62,37 +91,28 @@ class Sqlite3OIDAllocator(AbstractTableOIDAllocator):
         # in autocommit mode.
         with self.lock:
             # We've left the underlying connection in autocommit mode.
-            cursor = self.store_connection.get_cursor()
-            cursor.execute(
-                'SELECT seq FROM sqlite_sequence WHERE name = ?',
-                ('new_oid',))
-            rows = cursor.fetchall()
-            if rows and rows[0][0] >= oid_int:
-                return
+            conn = self._connect()
+            rows = conn.execute(
+                'SELECT zoid FROM new_oid WHERE zoid < ?',
+                (oid_int,)).fetchall()
+            if rows:
+                # Narf, we need to open a transaction.
+                consume(conn.execute(
+                    'UPDATE new_oid SET zoid = :new WHERE zoid < :new',
+                    {'new': oid_int}))
 
-            cursor.execute('UPDATE sqlite_sequence SET seq = MAX(?, seq) WHERE name = ?',
-                           (oid_int, 'new_oid'))
-            cursor.fetchall()
-            if not cursor.rowcount:
-                # If we've never actually put any values into new_oid,
-                # then even though the ``sqlite_sequence`` table exists,
-                # it won't have an entry for ``new_oid`` and the UPDATE
-                # will do nothing.
-                #
-                # This is mostly an issue in tests, or if we've only copied
-                # transactions.
-                cursor.execute(
-                    'INSERT INTO sqlite_sequence(name, seq) '
-                    'VALUES (?, ?)',
-                    ('new_oid', oid_int))
-                cursor.fetchall()
+    def new_oids(self, cursor=None):
+        return self.new_oids_no_cursor()
 
-    def new_oids(self, cursor):
+    def new_oids_no_cursor(self):
         with self.lock:
-            return AbstractTableOIDAllocator.new_oids(self, self.store_connection.get_cursor())
+            conn = self._connect()
+            consume(conn.execute('BEGIN IMMEDIATE TRANSACTION'))
+            row, = conn.execute('SELECT zoid FROM new_oid')
+            conn.execute('UPDATE new_oid SET zoid = zoid + 1')
+            conn.commit()
+        return self._oid_range_around(row[0])
 
-    def reset_oid(self, cursor):
+    def reset_oid(self, cursor=None):
         with self.lock:
-            cursor = self.store_connection.get_cursor()
-            AbstractTableOIDAllocator.reset_oid(self, cursor)
-            cursor.execute('DELETE FROM sqlite_sequence WHERE name = ?', ('new_oid',))
+            self._connect().execute('UPDATE new_oid SET zoid = 1')

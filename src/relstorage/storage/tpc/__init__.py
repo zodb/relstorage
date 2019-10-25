@@ -170,7 +170,6 @@ class AbstractTPCState(object):
 
         try:
             self.load_connection.rollback_quietly()
-
             self.adapter.txncontrol.abort(
                 self.store_connection,
                 self.prepared_txn)

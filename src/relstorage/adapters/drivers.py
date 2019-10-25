@@ -29,6 +29,7 @@ from .._compat import PYPY
 from .._compat import PY3
 from .._compat import casefold
 from .._util import positive_integer
+from .._util import consume
 
 from .interfaces import IDBDriver
 from .interfaces import IDBDriverFactory
@@ -83,6 +84,11 @@ class AbstractModuleDriver(ABC):
     #: Can this module be used on PyPy?
     AVAILABLE_ON_PYPY = True
 
+    #: Set this to false if your subclass can do static checks
+    #: at import time to determine it should not be used.
+    #: Helpful for things like Python version detection.
+    STATIC_AVAILABLE = True
+
     #: Priority of this driver, when available. Lower is better.
     #: (That is, first choice should have value 1, and second choice value
     #: 2, and so on.)
@@ -117,9 +123,12 @@ class AbstractModuleDriver(ABC):
     def __init__(self):
         if PYPY and not self.AVAILABLE_ON_PYPY:
             raise DriverNotAvailableError(self.__name__)
+        if not self.STATIC_AVAILABLE:
+            raise DriverNotAvailableError(self.__name__)
         try:
             self.driver_module = mod = self.get_driver_module()
         except ImportError:
+            logger.exception("Unable to import driver")
             raise DriverNotAvailableError(self.__name__)
 
 
@@ -205,9 +214,8 @@ class AbstractModuleDriver(ABC):
         # it in certain circumstances.
 
         if cursor is not None:
-            fetchall = cursor.fetchall
             try:
-                fetchall()
+                consume(cursor)
             except Exception: # pylint:disable=broad-except
                 pass
 

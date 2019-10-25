@@ -25,6 +25,7 @@ from .._compat import OID_TID_MAP_TYPE
 from .._compat import metricmethod_sampled
 from ._util import noop_when_history_free
 from ._util import query_property as _query_property
+from ._util import DatabaseHelpersMixin
 from .._compat import ABC
 from .batch import RowBatcher
 from .interfaces import IObjectMover
@@ -38,7 +39,7 @@ object_state = Schema.object_state
 
 
 @implementer(IObjectMover)
-class AbstractObjectMover(ABC):
+class AbstractObjectMover(DatabaseHelpersMixin, ABC):
 
     def __init__(self, database_driver, options, runner=None,
                  version_detector=None,
@@ -335,15 +336,12 @@ class AbstractObjectMover(ABC):
     ).where(
         # Some databases may be able to benefit from prev_tid <> 0, but it depends
         # on their ability to make use of indexes
-        Schema.temp_store.c.prev_tid != Schema.all_current_object_state.c.tid
-    ).order_by(
-        Schema.temp_store.c.zoid
+        Schema.all_current_object_state.c.tid != Schema.temp_store.c.prev_tid
     ).prepared()
 
     @metricmethod_sampled
     def detect_conflict(self, cursor):
-        stmt = self._detect_conflict_query
-        stmt.execute(cursor)
+        self._detect_conflict_query.execute(cursor)
         # Note that we're not transforming the state into
         # bytes; it doesn't seem to be needed here, even with sqlite3
         # on Python 2 (where it is a buffer).

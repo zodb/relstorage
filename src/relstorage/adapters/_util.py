@@ -12,6 +12,8 @@
 #
 ##############################################################################
 "Internal helper utilities."
+from __future__ import print_function
+from __future__ import absolute_import
 
 from collections import namedtuple
 from functools import partial
@@ -186,7 +188,11 @@ class DatabaseHelpersMixin(object):
         """
         Return the rows formatted in a way for easy human consumption.
         """
-        # This could be tabular, but its easiest just to use pprint
-        import pprint
-        rows = list(self._rows_as_dicts(cursor))
-        return pprint.pformat(rows)
+        from .._compat import NStringIO
+        out = NStringIO()
+        names = [d.name for d in self._column_descriptions(cursor)]
+        kwargs = {'sep': '\t', 'file': out}
+        print(*names, **kwargs)
+        for row in cursor:
+            print(*row, **kwargs)
+        return out.getvalue()
