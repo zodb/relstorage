@@ -57,7 +57,7 @@ class Columns(object):
         # Here only so that pylint knows this class has a set of
         # dynamic attributes.
         raise AttributeError("Column list %s does not include %s" % (
-            self._col_list(),
+            self._col_list() or "()",
             name
         ))
 

@@ -113,11 +113,15 @@ class MySQLSchemaInstaller(AbstractSchemaInstaller):
 
     def __list_tables_and_engines(self, cursor):
         # {table_name: engine}, all in lower case.
-        cursor.execute('SHOW TABLE STATUS')
+        cursor.execute("SHOW  TABLE STATUS")
         native = self._metadata_to_native_str
+
         result = {
             native(row['name']): native(row['engine']).lower()
             for row in self._rows_as_dicts(cursor)
+            # This also returns views for some reason, but they don't have
+            # an engine.
+            if row['engine']
         }
         return result
 
@@ -130,6 +134,10 @@ class MySQLSchemaInstaller(AbstractSchemaInstaller):
 
     def list_sequences(self, cursor):
         return []
+
+    def list_views(self, cursor):
+        cursor.execute("SHOW FULL TABLES WHERE TABLE_TYPE LIKE 'VIEW'")
+        return [self._metadata_to_native_str(r[0]) for r in cursor]
 
     def check_compatibility(self, cursor, tables):
         super(MySQLSchemaInstaller, self).check_compatibility(cursor, tables)

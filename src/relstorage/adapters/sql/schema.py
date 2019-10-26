@@ -10,6 +10,7 @@ from __future__ import print_function
 from relstorage._util import Lazy
 
 from ._util import Columns
+from ._util import copy
 
 from .types import Type
 from .types import Unknown
@@ -122,12 +123,16 @@ class _AliasedColumnExpression(_AliasedColumn):
     def __str__(self):
         return str(self.name)
 
-class _QualifiedColumn(Column):
+class _QualifiedColumn(DialectAware,
+                       Column):
 
     def __init__(self, other):
         Column.__init__(self, other.name)
         vars(self).update(vars(other))
         assert self.table
+
+    def __str__(self):
+        return "%s.%s" % (self.table, self.name)
 
     def __compile_visit__(self, compiler):
         compiler.visit_qualified_column(self)
@@ -135,12 +140,18 @@ class _QualifiedColumn(Column):
 class _DeferredColumn(Column):
 
     def resolve_against(self, table):
-        return getattr(table.c, self.name)
+        col = getattr(table.c, self.name)
+        if col is not self:
+            # We may not be able to resolve fully until the table
+            # is bound.
+            col = col.resolve_against(table)
+        return col
 
 class _DeferredColumns(object):
 
     def __getattr__(self, name):
         return _DeferredColumn(name)
+
 
 class ColumnResolvingProxy(ParamMixin):
     """
@@ -158,12 +169,12 @@ class SchemaItem(object):
 
 class _CreateTable(Query):
 
-    def __init__(self, table, if_not_exists=False):
+    def __init__(self, table, **kw):
         self.table = table
-        self.if_not_exists = if_not_exists
+        self.kw = kw
 
     def __compile_visit__(self, compiler):
-        compiler.create_table(self.table, self.if_not_exists)
+        compiler.create_table(self.table, **self.kw)
 
 
 class Table(Selectable,
@@ -202,15 +213,22 @@ class Table(Selectable,
         compiler.emit_keyword('CREATE')
         compiler.emit_keyword('TABLE')
 
+    def _emit_identifier_suffix(self, compiler):
+        pass
+
     def __compile_visit_for_create__(self, compiler, if_not_exists=False):
         self._emit_create_prefix(compiler)
         if if_not_exists:
             compiler.emit_if_not_exists()
         compiler.emit_identifier(self.name)
+        self._emit_identifier_suffix(compiler)
+        self._visit_definition(compiler)
+        return self
+
+    def _visit_definition(self, compiler):
         compiler.visit_grouped(
             self.c
         )
-        return self
 
     def natural_join(self, other_table):
         return NaturalJoinedTable(self, other_table)
@@ -218,7 +236,7 @@ class Table(Selectable,
     def inner_join(self, other_table):
         return _InnerJoinBuilder(self, other_table)
 
-    def resolve_against(self, _):
+    def resolve_against(self, _table):
         return self
 
     def create(self, if_not_exists=False):
@@ -226,7 +244,7 @@ class Table(Selectable,
         WARNING: This currently doesn't support table constraints
         or foreign keys.
         """
-        return _CreateTable(self, if_not_exists)
+        return _CreateTable(self, if_not_exists=if_not_exists)
 
 
 class TemporaryTable(Table):
@@ -238,8 +256,40 @@ class TemporaryTable(Table):
         compiler.emit_keyword('TEMPORARY')
         compiler.emit_keyword('TABLE')
 
+class View(DialectAware,
+           Table):
+    """
+    A table defined by a query.
+    """
 
-class _CompositeTableMixin(Selectable,
+    def __init__(self, name, select):
+        # The column names can't be qualified against the original table,
+        # they disappear, so we need to rebind them against a new table.
+        columns = [copy(c) for c in select.column_list]
+        super(View, self).__init__(name, *columns)
+        self.select = select
+
+    def _emit_create_prefix(self, compiler):
+        compiler.emit_keyword('CREATE')
+        compiler.emit_keyword('VIEW')
+
+    def _emit_identifier_suffix(self, compiler):
+        compiler.emit_keyword('AS')
+
+    def _visit_definition(self, compiler):
+        with compiler.using_visit_name(''):
+            compiler.visit(self.select)
+
+    def __str__(self):
+        # This is almost how you would inline it in a FROM clause
+        return '(%s)' % (self.select,)
+
+    def create(self): # pylint:disable=arguments-differ
+        return _CreateTable(self, if_not_exists=False, use_trailer=False)
+
+
+class _CompositeTableMixin(DialectAware,
+                           Selectable,
                            ParamMixin):
     """
     A virtual table whose columns are the common set of columns
@@ -248,33 +298,37 @@ class _CompositeTableMixin(Selectable,
     def __init__(self, lhs, rhs):
         self.lhs = lhs
         self.rhs = rhs
-    # Use volatile properties so these get reset when an
-    # instance is bound.
+
+    _bind_vars_ignored = ('c', 'columns')
+
+    def _bound_to(self, context, dialect):
+        for v in self._bind_vars_ignored:
+            self.__dict__.pop(v, None)
+        return super(_CompositeTableMixin, self)._bound_to(context, dialect)
 
     @Lazy
-    def _v_c(self):
+    def c(self):
         return self.lhs.c.intersection(self.rhs.c)
 
     @Lazy
-    def _v_columns(self):
-        return tuple(self._v_c)
-
-    @property
-    def c(self):
-        return self._v_c
-
-    @property
     def columns(self):
-        return self._v_columns
+        return tuple(self.c)
 
     def resolve_against(self, _):
         return self
 
-class _JoinedTable(DialectAware,
-                   _CompositeTableMixin):
+    def __repr__(self):
+        return '<%s at 0x%x lhs=%r rhs=%r>' % (
+            type(self).__name__,
+            id(self),
+            self.lhs,
+            self.rhs,
+        )
+
+class _JoinedTable(_CompositeTableMixin):
 
     @Lazy
-    def _v_c(self):
+    def c(self):
         # Make the union of columns available,
         # being sure that if we're doing a USING join
         # we don't double the list of columns we're USING,
@@ -284,6 +338,7 @@ class _JoinedTable(DialectAware,
             self.lhs.resolve_against(self),
             self.rhs.resolve_against(self))
         union = self.lhs.c.dup_union(self.rhs.c, combining=join_columns.as_names())
+
         return union
 
     _JOIN_KW = 'JOIN'
@@ -312,6 +367,21 @@ class _JoinedTable(DialectAware,
             compiler.visit_grouped(self._get_join_columns(lhs, rhs))
         return self
 
+    def join_kind(self, kind):
+        s = copy(self)
+        s._JOIN_KW = kind
+        return s
+
+    def __repr__(self):
+        return '<%s at 0x%x %r %s %r (%r)>' % (
+            type(self).__name__,
+            id(self),
+            self.lhs,
+            self._JOIN_KW,
+            self.rhs,
+            self.c
+        )
+
 class NaturalJoinedTable(_JoinedTable):
     pass
 
@@ -337,12 +407,24 @@ class UsingJoinedTable(_JoinedTable):
         return c
 
 
-class HistoryVariantTable(DialectAware,
-                          _CompositeTableMixin):
+class HistoryVariantTable(_CompositeTableMixin):
     """
     A table that can be one of two tables, depending on whether
     the instance is keeping history or not.
     """
+
+    @Lazy
+    def c(self):
+        # Lose the owning table of the columns so we can write the correct
+        # one when bound
+        union = _CompositeTableMixin.c.data[0](self) # pylint:disable=no-member
+        return Columns([
+            _DeferredColumn(c.name) for c in union])
+
+
+    def _bound_to(self, context, dialect):
+        t = self.history_preserving if context.keep_history else self.history_free
+        return t.bind(context, dialect) if hasattr(t, 'bind') else t
 
     @property
     def history_preserving(self):

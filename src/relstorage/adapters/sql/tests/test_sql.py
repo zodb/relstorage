@@ -213,12 +213,13 @@ class TestTableSelect(TestCase):
 
     def test_bind(self):
         from operator import attrgetter
-        query = objects.select(objects.c.tid, objects.c.zoid).where(
+        # pylint:disable=no-member
+        select = objects.select(objects.c.tid, objects.c.zoid).where(
             objects.c.tid > bindparam('tid')
         )
         # Unbound we assume history
         self.assertEqual(
-            str(query),
+            str(select),
             'SELECT tid, zoid FROM current_object WHERE (tid > %(tid)s)'
         )
 
@@ -228,14 +229,17 @@ class TestTableSelect(TestCase):
 
         context = Context()
         dialect = context.dialect
-        query = query.bind(context)
+        query = select.bind(context)
 
         class Root(object):
             select = query
 
+        # The table replaced itself with the correct variant.
+        self.assertIsNot(query.table, objects)
+        self.assertIs(query.table, objects.history_preserving)
+
         for item_name in (
                 'select',
-                'select.table',
                 'select._where',
                 'select._where.expression',
         ):
@@ -257,7 +261,7 @@ class TestTableSelect(TestCase):
 
         # Bound to history-free we use history free
         context.keep_history = False
-        query = query.bind(context)
+        query = select.bind(context)
 
         self.assertEqual(
             str(query),
@@ -268,6 +272,7 @@ class TestTableSelect(TestCase):
         class Context(object):
             keep_history = True
             dialect = DefaultDialect()
+            # pylint:disable=no-member
             select = objects.select(objects.c.tid, objects.c.zoid).where(
                 objects.c.tid > bindparam('tid')
             )

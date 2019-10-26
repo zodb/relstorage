@@ -163,6 +163,10 @@ class PostgreSQLSchemaInstaller(AbstractSchemaInstaller):
         cursor.execute("SELECT relname FROM pg_class WHERE relkind = 'S'")
         return self.__native_names_only(cursor)
 
+    def list_views(self, cursor):
+        cursor.execute("SELECT relname FROM pg_class WHERE relkind = 'v'")
+        return self.__native_names_only(cursor)
+
     def list_languages(self, cursor):
         cursor.execute("SELECT lanname FROM pg_catalog.pg_language")
         return self.__native_names_only(cursor)

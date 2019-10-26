@@ -111,7 +111,10 @@ class Compiler(object):
 
     @contextmanager
     def using_visit_name(self, name):
-        name = '__compile_visit_for_' + name + '__'
+        if name:
+            name = '__compile_visit_for_' + name + '__'
+        else:
+            name = '__compile_visit__'
         cur_stack = self._visit_name_stack
         self._visit_name_stack = (name,) + self._visit_name_stack
         try:
@@ -405,10 +408,11 @@ class Compiler(object):
         self.placeholders[bind_param] = '%s'
         self.emit('%s')
 
-    def create_table(self, table, if_not_exists):
+    def create_table(self, table, if_not_exists, use_trailer=True):
         with self.using_visit_name('create'):
             self.visit(table, if_not_exists=if_not_exists)
-            self.emit(' ', self.dialect.STMT_TABLE_TRAILER)
+            if use_trailer:
+                self.emit(' ', self.dialect.STMT_TABLE_TRAILER)
 
     def emit_if_not_exists(self):
         if self.dialect.STMT_IF_NOT_EXISTS:
@@ -481,21 +485,30 @@ class DialectAware(object):
         raise TypeError("Unable to bind to %s; no dialect found" % (context,))
 
     def bind(self, context, dialect=None):
+        assert self.context is DialectAware.context, "already bound"
         if dialect is None:
             dialect = self._find_dialect(context)
 
         assert dialect is not None
 
         new = copy(self)
+        return new._bound_to(context, dialect)
+
+    _bind_vars_ignored = ()
+
+    def _bound_to(self, context, dialect):
+        # Called on the copy of self.
         if context is not None:
-            new.context = context
-        new.dialect = dialect
+            self.context = context
+        self.dialect = dialect
+
         bound_replacements = {
             k: v.bind(context, dialect)
             for k, v
-            in vars(new).items()
-            if isinstance(v, DialectAware)
+            in vars(self).items()
+            if k not in self._bind_vars_ignored and isinstance(v, DialectAware)
         }
         for k, v in bound_replacements.items():
-            setattr(new, k, v)
-        return new
+            setattr(self, k, v)
+
+        return self

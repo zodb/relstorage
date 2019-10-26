@@ -186,6 +186,10 @@ class OracleSchemaInstaller(AbstractSchemaInstaller):
         cursor.execute("SELECT table_name FROM user_tables")
         return [name for (name,) in cursor.fetchall()]
 
+    def list_views(self, cursor):
+        cursor.execute("SELECT view_name FROM user_views")
+        return [name for (name,) in cursor.fetchall()]
+
     def list_sequences(self, cursor):
         cursor.execute("SELECT sequence_name FROM user_sequences")
         return {name for (name,) in cursor.fetchall()}

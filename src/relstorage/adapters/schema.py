@@ -29,6 +29,7 @@ from ._util import DatabaseHelpersMixin
 from ._util import query_property
 from ._util import noop_when_history_free
 
+from .sql import View
 from .sql import Table
 from .sql import TemporaryTable
 from .sql import Column
@@ -40,6 +41,7 @@ from .sql import Boolean
 from .sql import BinaryString
 from .sql import Char
 from .sql import ColumnExpression
+from .sql import it
 
 StateSize = OID
 
@@ -82,9 +84,23 @@ class Schema(object):
         object_state,
     )
 
+    current_object_state = View(
+        'current_object_state',
+        object_state.inner_join(
+            current_object
+        ).using(
+            current_object.c.zoid,
+            current_object.c.tid
+        ).select(
+            object_state.c.zoid,
+            object_state.c.tid,
+            it.c.state
+        )
+    )
+
     # Does the right thing whether history free or preserving
     all_current_object_state = HistoryVariantTable(
-        current_object.inner_join(object_state).using(current_object.c.zoid, current_object.c.tid),
+        current_object_state,
         object_state
     )
 
@@ -185,6 +201,10 @@ class AbstractSchemaInstaller(DatabaseHelpersMixin,
     )
 
     all_sequences = ()
+
+    all_views = (
+        'current_object_state',
+    )
 
     # Tables that might exist, but which are unused and obsolete.
     # These can/should be dropped, and names shouldn't be reused.
@@ -296,6 +316,10 @@ class AbstractSchemaInstaller(DatabaseHelpersMixin,
     @abc.abstractmethod
     def list_procedures(self, cursor):
         raise NotImplementedError
+
+    @abc.abstractmethod
+    def list_views(self, cursor):
+        return ()
 
     @abc.abstractmethod
     def get_database_name(self, cursor):
@@ -609,6 +633,12 @@ class AbstractSchemaInstaller(DatabaseHelpersMixin,
         """
         return
 
+    _create_current_object_state_query = Schema.current_object_state.create()
+
+    @noop_when_history_free
+    def _create_current_object_state(self, cursor):
+        self._create_current_object_state_query.execute(cursor)
+
     def _init_after_create(self, cursor):
         """
         Create a special '0' transaction to represent object creation. The
@@ -681,6 +711,11 @@ class AbstractSchemaInstaller(DatabaseHelpersMixin,
                                     self.all_sequences,
                                     self.list_sequences(cursor))
 
+    def create_views(self, cursor):
+        self._create_schema_objects(cursor,
+                                    self.all_views,
+                                    self.list_views(cursor))
+
     def _prepare_with_connection(self, conn, cursor): # pylint:disable=unused-argument
         # XXX: We can generalize this to handle triggers, procs, etc,
         # to make subclasses have easier time.
@@ -694,6 +729,7 @@ class AbstractSchemaInstaller(DatabaseHelpersMixin,
         self.create_sequences(cursor)
         self.create_procedures(cursor)
         self.create_triggers(cursor)
+        self.create_views(cursor)
 
     def prepare(self):
         self.connmanager.open_and_call(self._prepare_with_connection)
@@ -830,6 +866,10 @@ class AbstractSchemaInstaller(DatabaseHelpersMixin,
     DROP_TABLE_TMPL = 'DROP TABLE "{table}"'
 
     def _drop_all(self, _conn, cursor):
+        for view in self.list_views(cursor):
+            if view in self.all_views:
+                cursor.execute('DROP VIEW %s' % view)
+
         existent = set(self.list_tables(cursor))
         todo = list(self.all_tables)
         todo.reverse()

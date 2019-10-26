@@ -46,6 +46,7 @@ from .schema import HistoryVariantTable
 from .schema import Column
 from .schema import ColumnResolvingProxy
 from .schema import ColumnExpression
+from .schema import View
 
 from .dialect import DefaultDialect
 from .dialect import Compiler
@@ -67,9 +68,11 @@ __all__ = [
     'Column',
     "TemporaryTable",
     "HistoryVariantTable",
+    "View",
 
     # Query helpers
     'it',
+    "ColumnExpression",
 
     # Dialect
     "DefaultDialect",

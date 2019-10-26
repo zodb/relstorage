@@ -36,4 +36,6 @@ class MySQLStats(AbstractStats):
             self.connmanager.close(conn, cursor)
         data_column = description.index('Data_length')
         index_column = description.index('Index_length')
-        return sum([row[data_column] + row[index_column] for row in rows], 0)
+        # We also got back views, which have no size.
+        return sum([row[data_column] + row[index_column] for row in rows
+                    if row[data_column] and row[index_column]], 0)

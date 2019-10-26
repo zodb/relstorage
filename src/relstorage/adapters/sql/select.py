@@ -49,11 +49,23 @@ class Select(Query,
 
     def __init__(self, table, *columns):
         self.table = table
+        self.columns = columns
         if columns:
             self.column_list = _SelectColumns(resolved_against(columns, table))
         else:
             self.column_list = table
         self.c = self.column_list
+
+    _bind_vars_ignored = ('column_list',)
+
+    def _bound_to(self, context, dialect):
+        super(Select, self)._bound_to(context, dialect)
+        if self.columns:
+            # Need to re-resolve, it's possible our table changed.
+            self.column_list = _SelectColumns(
+                resolved_against(self.columns, self.table)
+            )
+        return self
 
     def order_by(self, expression, dir=None):
         expression = expression.resolve_against(self.table)
@@ -86,6 +98,11 @@ class Select(Query,
     def distinct(self):
         s = copy(self)
         s._distinct = TextNode('DISTINCT')
+        return s
+
+    def join_kind(self, kind):
+        s = copy(self)
+        s.table = s.table.join_kind(kind)
         return s
 
     def is_unconstrained(self):

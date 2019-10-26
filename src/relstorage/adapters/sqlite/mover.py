@@ -32,7 +32,26 @@ from .batch import Sqlite3RowBatcher
 
 @implementer(IObjectMover)
 class Sqlite3ObjectMover(AbstractObjectMover):
+
     _create_temp_store = Schema.temp_store.create()
+    # SQLite doesn't do well at joining temporary tables to normal tables.
+    # Even after running ANALYZE. (ANALYZE doesn't get temp tables). It assumes
+    # that a table with no stats has a million rows (1,048,576), so until
+    # the normal table is actually recorded as having a million rows, the join
+    # order of these two tables is always going to put OBJECT_STATE as the outer loop
+    # and scan that table. In practice, that's a poor choice: object_state will have
+    # many more rows than the temp table. We can workaround that by explicitly
+    # adding a stat for object_state to sqlite_stat1, but that will vanish
+    # the next time an ANALYZE is run. Instead, if we use a CROSS JOIN,
+    # we force the optimizer to follow our query ordering and make the smaller
+    # number of loops.
+    #
+    # References:
+    # - https://www.sqlite.org/lang_select.html#fromclause
+    # - https://www.sqlite.org/optoverview.html#manual_control_of_query_plans_using_cross_join
+    _detect_conflict_query = AbstractObjectMover._detect_conflict_query.join_kind(
+        'CROSS JOIN'
+    )
 
     def __init__(self, database_driver, options, runner=None,
                  version_detector=None,
@@ -70,6 +89,9 @@ class Sqlite3ObjectMover(AbstractObjectMover):
         super(Sqlite3ObjectMover, self).on_store_opened(cursor, restart)
 
     def _before_commit(self, connection, _rolling_back=None):
+        # Regardless of whether we're rolling back or not we need to delete
+        # everything to freshen the connection. DELETE with no WHERE clause
+        # in SQLite is optimized like a TRUNCATE.
         consume(connection.execute('DELETE FROM temp_store'))
         consume(connection.execute('DELETE FROM temp_blob_chunk'))
 

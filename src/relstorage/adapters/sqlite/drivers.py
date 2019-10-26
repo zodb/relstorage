@@ -65,7 +65,8 @@ class Sqlite3Driver(MemoryViewBlobDriverMixin,
         self.disconnected_exceptions += (self.driver_module.ProgrammingError,)
 
     if PY3:
-        # in_transaction doesn't work there, so assume the worst.
+        # in_transaction doesn't work on Py2, so assume the worst
+        # by inheriting the functions.
         def connection_may_need_rollback(self, conn):
             try:
                 return conn.in_transaction

@@ -56,16 +56,17 @@ class Sqlite3SchemaInstaller(AbstractSchemaInstaller):
         )
         return [x[0] for x in cursor.fetchall()]
 
+    def list_views(self, cursor):
+        cursor.execute(
+            'SELECT name FROM sqlite_master '
+            'WHERE type = "view"'
+        )
+        return [x[0] for x in cursor.fetchall()]
+
     def list_procedures(self, cursor):
         return ()
 
     list_sequences = list_procedures
-
-    def _prepare_with_connection(self, conn, cursor):
-        AbstractSchemaInstaller._prepare_with_connection(self, conn, cursor)
-        if not self.connmanager.are_stats_ok(cursor):
-            self.connmanager.correct_stats(cursor)
-            conn.commit()
 
     def _create_pack_lock(self, cursor):
         """Does nothing."""
