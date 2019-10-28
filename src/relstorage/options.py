@@ -44,6 +44,9 @@ class Options(object):
        Change the default for ``shared_blob_dir`` to False.
     """
 
+    #: The adapter factory configuration.
+    adapter = None
+
     #: The name
     name = None
     #: Read only?

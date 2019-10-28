@@ -27,18 +27,17 @@ from relstorage._util import consume
 from ..interfaces import IOIDAllocator
 from ..oidallocator import AbstractOIDAllocator
 
-from .connmanager import connect_to_file
-
 @implementer(IOIDAllocator)
 class Sqlite3OIDAllocator(AbstractOIDAllocator):
     # Even though we use the new_oid table like AbstractTableOIDAllocator
     # does, because we have to take exclusive locks *anyway*, we can
     # ensure that it only ever has a single increasing row.
 
-    def __init__(self, db_path):
+    def __init__(self, db_path, driver):
         super(Sqlite3OIDAllocator, self).__init__()
         self.db_path = db_path
         self.lock = threading.Lock()
+        self.driver = driver
         self._connection = None
 
     def new_instance(self):
@@ -57,7 +56,7 @@ class Sqlite3OIDAllocator(AbstractOIDAllocator):
 
     def _connect(self):
         if self._connection is None:
-            conn = connect_to_file(
+            conn = self.driver.connect_to_file(
                 self.db_path,
                 mmap_size=1024 * 1024 * 10, # try to keep the whole thing in memory.
                 override_pragmas={

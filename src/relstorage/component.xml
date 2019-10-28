@@ -260,6 +260,13 @@
         and associated files. The directory must be on a local filesystem.
       </description>
     </key>
+    <key name="gevent_yield_interval" datatype="integer"
+         required="no">
+        <description>
+            How many SQLite virtual instructions to execute between
+            calls to gevent.sleep()
+        </description>
+    </key>
 
     <section name="*" attribute="pragmas" required="no" type="pragmas">
     </section>

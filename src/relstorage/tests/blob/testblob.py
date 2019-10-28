@@ -37,6 +37,7 @@ from ZODB.serialize import referencesf
 
 from relstorage.tests import TestCase
 from relstorage.tests.util import USE_SMALL_BLOBS
+from relstorage.tests.util import MinimalTestLayer as BaseTestLayer
 from relstorage.tests.RecoveryStorage import IteratorDeepCompare
 from relstorage.tests.blob.blob_packing import TestBlobPackHistoryPreservingMixin
 from relstorage.tests.blob.blob_packing import TestBlobPackHistoryFreeMixin
@@ -478,13 +479,13 @@ class TestThingsPreviouslyDocTests(TestBlobMixin,
         db.close()
 
 
-class MinimalTestLayer(object):
+class BlobTestLayer(BaseTestLayer):
 
     __bases__ = ()
     __module__ = ''
 
     def __init__(self, name):
-        self.__name__ = name
+        BaseTestLayer.__init__(self, name)
 
     def setUp(self):
         self.here = os.getcwd()
@@ -605,6 +606,6 @@ def storage_reusable_suite(prefix, factory,
     if large_blob_size:
         add_test_based_on_test_class(LargeBlobTest, testsize=large_blob_size)
 
-    suite.layer = MinimalTestLayer(prefix + 'BlobTests')
+    suite.layer = BlobTestLayer('BlobTests')
 
     return suite

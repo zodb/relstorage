@@ -35,6 +35,7 @@ class RelStorageFactory(BaseConfig):
         # that would prevent us from being correctly opened again.
         #config.adapter.config.driver = None
         options = Options.copy_valid_options(config)
+        options.adapter = config.adapter
         # The adapter factories may modify the global options (or raise an exception)
         # if something at the top-level is specifically not allowed based on
         # their configuration.
@@ -105,5 +106,6 @@ class Sqlite3AdapterFactory(BaseConfig):
             pragmas = {}
         return Sqlite3Adapter(
             self.config.data_dir,
+            gevent_yield_interval=self.config.gevent_yield_interval,
             pragmas=pragmas,
             options=options)

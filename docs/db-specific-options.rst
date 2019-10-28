@@ -334,6 +334,30 @@ data-dir
     RelStorage. Some are persistent while others are transient. Do not
     remove them or data corruption may result.
 
+Optional settings include:
+
+driver
+    This can be set to "gevent sqlite3" to activate a mode that yields
+    to the gevent loop periodically. Normally, sqlite3 gives up the
+    GIL and allows other threads to run while executing SQLite
+    queries, but for a gevent-based system, that's not particularly
+    helpful. This driver will call ``gevent.sleep()`` approximately every
+    ``gevent_yield_interval`` virtual machine instractions executed by
+    any given connection. (It's approximate because the instruction
+    count is tracked per-prepared statement. RelStorage uses a few
+    different prepared statements during normal operations.)
+
+    The gevent sqlite driver supports RelStorage's critical commit section.
+
+gevent_yield_interval
+    Only used if the driver is ``gevent sqlite``. The default is
+    currently 100, but that's arbitrary and subject to change. Choosing a specific value that
+    works well for your application is recommended. Note that this
+    will interact with the ``cache-local-mb`` value as that's shared
+    among Connections and could reduce the number of SQLite queries
+    executed.
+
+
 RelStorage configures SQLite to work well and be safe. For advanced
 tuning, nearly the entire set of `SQLite PRAGMAs
 <https://www.sqlite.org/pragma.html>`_ are available. Put them in the

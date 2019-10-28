@@ -52,13 +52,19 @@ class MockAdapter(object):
     def create(self, opts):
         self.options = opts
 
+    def __eq__(self, other):
+        return isinstance(other, MockAdapter)
+
 class TestConfig(unittest.TestCase):
 
     DRIVER_NAME = 'a_driver'
 
-    def _make_expected_options(self):
-        return options.Options(name='name',
-                               driver=self.DRIVER_NAME)
+    def _make_expected_options(self, **kwargs):
+        o = options.Options(name='name',
+                            driver=self.DRIVER_NAME)
+        for k, v in kwargs.items():
+            setattr(o, k, v)
+        return o
 
     @mock.patch('relstorage.config.RelStorage', autospec=True)
     def test_driver_stays_set(self, mock_storage):
@@ -72,9 +78,10 @@ class TestConfig(unittest.TestCase):
 
         factory.open()
 
-        mock_storage.assert_called_once_with(None,
-                                             name='name',
-                                             options=self._make_expected_options())
+        mock_storage.assert_called_once_with(
+            None,
+            name='name',
+            options=self._make_expected_options(adapter=MockAdapter()))
 
         # The driver was copied to the right place to make an Options instance
         self.assertEqual(root_zconfig.driver, self.DRIVER_NAME)
@@ -99,7 +106,9 @@ class TestConfig(unittest.TestCase):
 
         factory.open()
 
-        mock_mysql.assert_called_once_with(a_conn_setting=42, options=self._make_expected_options())
+        mock_mysql.assert_called_once_with(
+            a_conn_setting=42,
+            options=self._make_expected_options(adapter=root_zconfig.adapter))
 
 
 class TestOptions(unittest.TestCase):

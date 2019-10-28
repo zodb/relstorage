@@ -47,10 +47,13 @@ class Sqlite3Adapter(AbstractAdapter):
     driver_options = drivers
     WRITING_REQUIRES_EXCLUSIVE_LOCK = True
 
-    def __init__(self, data_dir, pragmas, options=None, oidallocator=None):
+    def __init__(self, data_dir, pragmas,
+                 options=None, oidallocator=None,
+                 gevent_yield_interval=None):
         self.data_dir = os.path.abspath(data_dir)
         self.pragmas = pragmas
         self.oidallocator = oidallocator
+        self.gevent_yield_interval = gevent_yield_interval
         super(Sqlite3Adapter, self).__init__(options)
 
     def _create(self):
@@ -74,7 +77,8 @@ class Sqlite3Adapter(AbstractAdapter):
 
         if not self.oidallocator:
             self.oidallocator = Sqlite3OIDAllocator(
-                os.path.join(self.data_dir, 'oids.sqlite3')
+                os.path.join(self.data_dir, 'oids.sqlite3'),
+                driver=driver
             )
 
         self.runner = Sqlite3ScriptRunner()

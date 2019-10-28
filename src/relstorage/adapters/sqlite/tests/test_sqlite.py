@@ -80,6 +80,7 @@ class Sqlite3AdapterMixin(object):
         return u"""
         <sqlite3>
             %s
+            gevent_yield_interval 42
             <pragmas>
                journal_mode memory
                cache_size 8mb
@@ -91,6 +92,9 @@ class Sqlite3AdapterMixin(object):
         self.assertEqual(adapter.connmanager.path,
                          os.path.join(
                              self.__get_adapter_options()['data_dir'], 'main.sqlite3'))
+        if 'gevent' in adapter.connmanager.driver.__name__:
+            self.assertEqual(adapter.connmanager.driver.yield_to_gevent_instruction_interval,
+                             42)
         conn, _ = adapter.connmanager.open()
         try:
             cur = conn.execute('pragma cache_size')
