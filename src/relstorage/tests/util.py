@@ -424,7 +424,7 @@ class AbstractTestSuiteBuilder(object):
                         'Shared' if shared_blob_dir else 'Unshared',
                         'HistoryPreserving' if keep_history else 'HistoryFree',
                     ),
-                    suite.layer.__module__ + '.blobs',
+                    suite.layer.__module__ + '.' + suite.layer.__name__ + '.blobs',
                     suite.layer
                 )
                 layer_name = history_layer.__name__
