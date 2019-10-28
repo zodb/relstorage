@@ -124,16 +124,18 @@ class AbstractModuleDriver(object):
         os.environ.get('RS_CURSOR_ARRAYSIZE', '1024')
     )
 
+    DriverNotAvailableError = DriverNotAvailableError
+
     def __init__(self):
         if PYPY and not self.AVAILABLE_ON_PYPY:
-            raise DriverNotAvailableError(self.__name__)
+            raise self.DriverNotAvailableError(self.__name__)
         if not self.STATIC_AVAILABLE:
-            raise DriverNotAvailableError(self.__name__)
+            raise self.DriverNotAvailableError(self.__name__)
         try:
             self.driver_module = mod = self.get_driver_module()
         except ImportError:
             logger.exception("Unable to import driver")
-            raise DriverNotAvailableError(self.__name__)
+            raise self.DriverNotAvailableError(self.__name__)
 
 
         self.disconnected_exceptions = (mod.OperationalError,

@@ -116,11 +116,16 @@ def sqlite_files(options, prefix):
 class Sqlite3TooOldError(ValueError):
     """Raised if the sqlite3 module is too old."""
 
-    def __init__(self):
+    def __init__(self, *_args):
         super(Sqlite3TooOldError, self).__init__(
             "Unable to use sqlite; minimum version is %s but this version is %s" % (
                 "3.8.3", sqlite3.sqlite_version_info
             ))
+
+
+class _Driver(Sqlite3Driver):
+    STATIC_AVAILABLE = SQ3_SUPPORTS_CTE
+    DriverNotAvailableError = Sqlite3TooOldError
 
 CORRUPT_DB_EXCEPTIONS = (sqlite3.DatabaseError,)
 FAILURE_TO_OPEN_DB_EXCEPTIONS = (sqlite3.OperationalError, Sqlite3TooOldError)
@@ -151,7 +156,7 @@ def sqlite_connect(options, prefix,
     connect_args = (fname,)
 
     try:
-        connection = Sqlite3Driver().connect_to_file(
+        connection = _Driver().connect_to_file(
             *connect_args,
             **connect_kwargs
         )
@@ -159,7 +164,7 @@ def sqlite_connect(options, prefix,
         __traceback_info__ = e, fname, destroy
         logger.exception("Corrupt cache database at %s; replacing", fname)
         destroy()
-        connection = Sqlite3Driver().connect_to_file(
+        connection = _Driver().connect_to_file(
             *connect_args,
             **connect_kwargs
         )
