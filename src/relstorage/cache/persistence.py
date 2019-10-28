@@ -27,7 +27,7 @@ import os.path
 import sqlite3
 
 
-from relstorage.adapters.sqlite.connmanager import connect_to_file
+from relstorage.adapters.sqlite.drivers import Sqlite3Driver
 from relstorage.adapters.sqlite.dialect import SQ3_SUPPORTS_CTE
 
 # Because we use a CTE in our default queries. In principle,
@@ -151,7 +151,7 @@ def sqlite_connect(options, prefix,
     connect_args = (fname,)
 
     try:
-        connection = connect_to_file(
+        connection = Sqlite3Driver().connect_to_file(
             *connect_args,
             **connect_kwargs
         )
@@ -159,7 +159,7 @@ def sqlite_connect(options, prefix,
         __traceback_info__ = e, fname, destroy
         logger.exception("Corrupt cache database at %s; replacing", fname)
         destroy()
-        connection = connect_to_file(
+        connection = Sqlite3Driver().connect_to_file(
             *connect_args,
             **connect_kwargs
         )

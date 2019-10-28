@@ -27,6 +27,9 @@
 
 - SQLite: Substantially improve general performance. See :pr:`368`.
 
+- SQLite: Add the ``gevent sqlite3`` driver that periodically yields
+  to the gevent loop at configurable intervals.
+
 - PostgreSQL: Improve the speed of  writes when using the 'gevent
   psycopg2' driver.
 

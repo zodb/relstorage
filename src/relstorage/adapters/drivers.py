@@ -24,7 +24,6 @@ import os
 from zope.interface import directlyProvides
 from zope.interface import implementer
 
-from .._compat import ABC
 from .._compat import PYPY
 from .._compat import PY3
 from .._compat import casefold
@@ -42,7 +41,9 @@ from .interfaces import UnknownDriverError
 logger = __import__('logging').getLogger(__name__)
 
 def _select_driver(options, driver_options):
-    return _select_driver_by_name(options.driver, driver_options)
+    driver = _select_driver_by_name(options.driver, driver_options)
+    driver.configure_from_options(options)
+    return driver
 
 def _select_driver_by_name(driver_name, driver_options):
     driver_name = driver_name or 'auto'
@@ -66,7 +67,7 @@ def _select_driver_by_name(driver_name, driver_options):
     raise error(driver_name, driver_options)
 
 
-class AbstractModuleDriver(ABC):
+class AbstractModuleDriver(object):
     """
     Base implementation of a driver, based on a module, as used in DBAPI.
 
@@ -80,6 +81,9 @@ class AbstractModuleDriver(ABC):
 
     #: The name of the DB-API module to import.
     MODULE_NAME = None
+
+    #: The name written in config files
+    __name__ = None
 
     #: Can this module be used on PyPy?
     AVAILABLE_ON_PYPY = True
@@ -163,6 +167,9 @@ class AbstractModuleDriver(ABC):
             return self._sockets_gevent_monkey_patched()
         return True
 
+    def configure_from_options(self, options): # pylint:disable=unused-argument
+        """Default implementation; does nothing."""
+
     def _sockets_gevent_monkey_patched(self):
         # Return whether the socket module has been monkey-patched
         # by gevent
@@ -171,7 +178,11 @@ class AbstractModuleDriver(ABC):
         except ImportError: # pragma: no cover
             return False
         else:
-            return monkey.is_module_patched('socket')
+            # some versions of gevent have a bug where if we're monkey-patched
+            # on the command line using python -m gevent.monkey /path/to/testrunner ...
+            # it doesn't report being monkey-patched.
+            import socket
+            return monkey.is_module_patched('socket') or 'gevent' in repr(socket.socket)
 
     # Common compatibility shims, overriden as needed.
 
@@ -353,10 +364,15 @@ def implement_db_driver_options(name, *driver_modules):
 try:
     import gevent
 except ImportError:
-    pass
+    class GeventDriverMixin(object):
+        def get_driver_module(self):
+            raise ImportError("Could not import gevent")
 else:
     from gevent.socket import wait
     get_hub = gevent.get_hub
+
+    class GeventDriverMixin(object):
+        gevent = gevent
 
     class GeventConnectionMixin(object):
 

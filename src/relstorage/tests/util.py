@@ -74,8 +74,12 @@ class MinimalTestLayer(object):
     __bases__ = ()
     __module__ = ''
 
-    def __init__(self, name):
+    def __init__(self, name, module='', base=None):
         self.__name__ = name
+        if module:
+            self.__module__ = module
+        if base:
+            self.__bases__ = (base,)
 
     def setUp(self):
         pass
@@ -89,6 +93,8 @@ class MinimalTestLayer(object):
     def testTearDown(self):
         pass
 
+
+GeventLayer = MinimalTestLayer('gevent', __name__)
 
 class _Availability(object):
     """
@@ -111,6 +117,12 @@ class _Availability(object):
             self.driver = drivers.select_driver(self.driver_name)
         except DriverNotAvailableError:
             self.driver = None
+        else:
+            if self.driver.gevent_cooperative() and 'gevent' not in self.driver_name:
+                # Pure-python implementations that can do gevent but
+                # don't have to still need to have it in their name so we can get them
+                # by layer.
+                self.escaped_driver_name = 'gevent_' + self.escaped_driver_name
 
         self._available = self.driver is not None and self.driver.priority <= max_priority
 
@@ -187,7 +199,11 @@ class AbstractTestSuiteBuilder(object):
         :param use_adapter: A mixin class implementing the abstract methods
             defined by ``StorageCreatingMixin``.
         """
-
+        self.database_layer = MinimalTestLayer(self.__name__)
+        self.gevent_layer = MinimalTestLayer('gevent_' + self.__name__,
+                                             '',
+                                             GeventLayer)
+        self.gevent_layer.__bases__ += (self.database_layer,)
         self.drivers = driver_options
         self.extra_test_classes = extra_test_classes
         self.base_dbname = os.environ.get('RELSTORAGETEST_DBNAME', 'relstoragetest')
@@ -222,34 +238,38 @@ class AbstractTestSuiteBuilder(object):
                 self.db_names['data'],
                 self.RAISED_EXCEPTIONS
             )
+            # Checking the driver is just a unit test, it doesn't connect or
+            # need a layer
+            suite.addTest(unittest.makeSuite(
+                self.__skipping_if_not_available(
+                    type(
+                        self.__name__ + 'DBDriverTest_' + available.escaped_driver_name,
+                        (AbstractIDBDriverTest,),
+                        {'driver': available.driver}
+                    ),
+                    available.driver is not None)))
 
             # On CI, we don't even add tests for unavailable drivers to the
             # list of tests; this makes the output much shorter and easier to read,
             # but it does make zope-testrunner's discovery options less useful.
-            if available or TEST_UNAVAILABLE_DRIVERS:
-                # Checking the driver is just a unit test, it doesn't connect or
-                # need a layer
-                suite.addTest(unittest.makeSuite(
-                    self.__skipping_if_not_available(
-                        type(
-                            self.__name__ + 'DBDriverTest_' + available.escaped_driver_name,
-                            (AbstractIDBDriverTest,),
-                            {'driver': available.driver}
-                        ),
-                        available.driver is not None)))
+            if not available and not TEST_UNAVAILABLE_DRIVERS:
+                continue
 
-                # We put the various drivers into a zope.testrunner layer
-                # for ease of selection by name, e.g.,
-                # zope-testrunner --layer PG8000Driver
-                driver_suite = unittest.TestSuite()
-                layer_name = '%s%s' % (
-                    self.__name__,
-                    available.escaped_driver_name,
-                )
-                driver_suite.layer = MinimalTestLayer(layer_name)
-                driver_suite.layer.__module__ = self.__module__
-                self._add_driver_to_suite(driver_suite, layer_name, available)
-                suite.addTest(driver_suite)
+            # We put the various drivers into a zope.testrunner layer
+            # for ease of selection by name, e.g.,
+            # zope-testrunner --layer PG8000Driver
+            driver_suite = unittest.TestSuite()
+            layer_name = available.escaped_driver_name
+
+            base = self.database_layer
+            if available.driver and available.driver.gevent_cooperative():
+                base = self.gevent_layer
+
+            driver_suite.layer = MinimalTestLayer(layer_name,
+                                                  base.__name__ + '.drivers',
+                                                  base)
+            self._add_driver_to_suite(driver_suite, layer_name, available)
+            suite.addTest(driver_suite)
         return suite
 
     def _default_make_check_class(self, bases, name, klass_dict=None):
@@ -399,6 +419,15 @@ class AbstractTestSuiteBuilder(object):
                 # TODO: Make any of the tests that are needing this
                 # subclass StorageCreatingMixin so we unify where
                 # that's handled.
+                history_layer = MinimalTestLayer(
+                    '%s%s' % (
+                        'Shared' if shared_blob_dir else 'Unshared',
+                        'HistoryPreserving' if keep_history else 'HistoryFree',
+                    ),
+                    suite.layer.__module__ + '.blobs',
+                    suite.layer
+                )
+                layer_name = history_layer.__name__
                 def create_storage(name, blob_dir,
                                    shared_blob_dir=shared_blob_dir,
                                    keep_history=keep_history, **kw):
@@ -424,17 +453,16 @@ class AbstractTestSuiteBuilder(object):
                     storage.zap_all()
                     return storage
 
-                prefix = '%s_%s%s' % (
+                prefix = '%s_%s' % (
                     layer_prefix,
-                    'Shared' if shared_blob_dir else 'Unshared',
-                    'HistoryPreserving' if keep_history else 'HistoryFree',
+                    layer_name
                 )
 
                 # If the blob directory is a cache, don't test packing,
                 # since packing can not remove blobs from all caches.
                 test_packing = shared_blob_dir
 
-                suite.addTest(storage_reusable_suite(
+                blob_suite = storage_reusable_suite(
                     prefix, create_storage,
                     keep_history=keep_history,
                     test_blob_storage_recovery=True,
@@ -444,6 +472,10 @@ class AbstractTestSuiteBuilder(object):
                     # PostgreSQL blob chunks are max 2GB in size
                     large_blob_size=(not shared_blob_dir) and (self.large_blob_size) + 100,
                     storage_is_available=driver_available
-                ))
+                )
+
+                blob_suite.layer.__bases__ = blob_suite.layer.__bases__ + (history_layer,)
+                blob_suite.layer.__module__ = history_layer.__module__
+                suite.addTest(blob_suite)
 
         return suite
