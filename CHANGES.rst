@@ -2,7 +2,7 @@
  Changes
 =========
 
-3.0b2 (unreleased)
+3.0b2 (2019-10-28)
 ==================
 
 - SQLite: Require the database to be in dedicated directory.
