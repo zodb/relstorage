@@ -475,7 +475,9 @@ class AbstractTestSuiteBuilder(object):
                 )
 
                 blob_suite.layer.__bases__ = blob_suite.layer.__bases__ + (history_layer,)
-                blob_suite.layer.__module__ = history_layer.__module__
+                blob_suite.layer.__module__ = "%s.%s" % (
+                    history_layer.__module__,
+                    history_layer.__name__)
                 suite.addTest(blob_suite)
 
         return suite
