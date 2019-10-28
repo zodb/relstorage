@@ -7,7 +7,7 @@
 mkdir /tmp/RelStorage/
 
 
-# 2.7 is a python.org build, builds a 10_6_intel wheel
+# 2.7 is a python.org build, builds a 10_9_intel wheel
 ./relstoragerel.sh /usr/local/bin/python2.7
 
 # 3.5 is a python.org build, builds a 10_6_intel wheel
@@ -16,9 +16,11 @@ mkdir /tmp/RelStorage/
 # 3.6 is a python.org build, builds a 10_6_intel wheel
 ./relstoragerel.sh /usr/local/bin/python3.6
 
-# 3.7 is a python.org build, builds a 10_6_intel wheel
+# 3.7 is a python.org build, builds a 10_9_intel wheel
 ./relstoragerel.sh /usr/local/bin/python3.7
 
+# Likewise for 3.8
+./relstoragerel.sh /usr/local/bin/python3.8
 
 # PyPy 4.0
 ./relstoragerel.sh `which pypy`

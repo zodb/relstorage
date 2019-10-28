@@ -9,17 +9,19 @@ export WORKON_HOME=$HOME/Projects/VirtualEnvs
 export VIRTUALENVWRAPPER_LOG_DIR=~/.virtualenvs
 source `which virtualenvwrapper.sh`
 
-# Make sure there are no -march flags set
-# https://github.com/gevent/gevent/issues/791
-unset CFLAGS
-unset CXXFLAGS
+# Make sure we use a particular known set of flags (in particular
+# avoiding -march=native, https://github.com/gevent/gevent/issues/791)
+# and avoiding ccache or gcc that might have come from MacPorts (in
+# case of bad slopiness settings in the first and in case of ABI
+# issues in the second).
+export CFLAGS="-Ofast -pipe -flto -ffunction-sections -std=gnu++11"
+export CXXFLAGS="$CFLAGS"
+export LDFLAGS="-Wl,-dead_strip -Wl,-merge_zero_fill_sections -flto -Wl,-headerpad_max_install_names"
 unset CPPFLAGS
+export CC=/usr/bin/clang
+export CXX=/usr/bin/clang++
+unset LDCXXSHARED
 
-# If we're building on 10.12, we have to exclude clock_gettime
-# because it's not available on earlier releases and leads to
-# segfaults because the symbol clock_gettime is NULL.
-# See https://github.com/gevent/gevent/issues/916
-export CPPFLAGS="-D_DARWIN_FEATURE_CLOCK_GETTIME=0"
 
 BASE=`pwd`/../../
 BASE=`greadlink -f $BASE`
@@ -35,7 +37,7 @@ echo cloning $BASE
 git clone $BASE RelStorage
 cd ./RelStorage
 pip install -U pip
-pip install -U setuptools cython greenlet cffi
+pip install -U setuptools cython
 pip install -U wheel
 # We may need different versions of deps depending on the
 # version of python; that's captured in this file.

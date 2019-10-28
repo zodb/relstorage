@@ -122,10 +122,8 @@ setup(
     # list and locate auxiliary files (e.g., schema.py finds SQL files)
     zip_safe=False,
     setup_requires=[
-        'cffi',
     ],
     install_requires=[
-        'cffi',
         'perfmetrics >= 3.0.0',
         'zope.interface',
         'zope.dottedname',
