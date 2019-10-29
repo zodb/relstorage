@@ -25,10 +25,10 @@ from zope.interface import implementer
 
 from relstorage._util import consume
 from ..interfaces import IOIDAllocator
-from ..oidallocator import AbstractOIDAllocator
+from ..oidallocator import AbstractRangedOIDAllocator
 
 @implementer(IOIDAllocator)
-class Sqlite3OIDAllocator(AbstractOIDAllocator):
+class Sqlite3OIDAllocator(AbstractRangedOIDAllocator):
     # Even though we use the new_oid table like AbstractTableOIDAllocator
     # does, because we have to take exclusive locks *anyway*, we can
     # ensure that it only ever has a single increasing row.
@@ -52,6 +52,8 @@ class Sqlite3OIDAllocator(AbstractOIDAllocator):
                 self._connection.close()
                 self._connection = None
 
+    # This is actually the last OID we returned. We begin allocating beginning with
+    # the *next* integer.
     _new_oid_query = 'CREATE TABLE new_oid (zoid INTEGER PRIMARY KEY NOT NULL);'
 
     def _connect(self):
@@ -73,7 +75,7 @@ class Sqlite3OIDAllocator(AbstractOIDAllocator):
                     self._new_oid_query + """
                 INSERT OR REPLACE INTO new_oid
                 SELECT MAX(x) FROM (
-                    SELECT 1 x
+                    SELECT 0 x
                     UNION ALL
                     SELECT MAX(zoid)
                     FROM new_oid
@@ -82,7 +84,7 @@ class Sqlite3OIDAllocator(AbstractOIDAllocator):
             self._connection = conn
         return self._connection
 
-    def set_min_oid(self, cursor, oid_int):
+    def _set_min_oid_from_range(self, cursor, n):
         # Recall that the very first write to the database will cause
         # the file to be locked against further writes. So there's some
         # benefit in avoiding writes if they're not needed. Because we
@@ -93,12 +95,12 @@ class Sqlite3OIDAllocator(AbstractOIDAllocator):
             conn = self._connect()
             rows = conn.execute(
                 'SELECT zoid FROM new_oid WHERE zoid < ?',
-                (oid_int,)).fetchall()
+                (n,)).fetchall()
             if rows:
-                # Narf, we need to open a transaction.
+                # Narf, we need to execute a write transaction.
                 consume(conn.execute(
                     'UPDATE new_oid SET zoid = :new WHERE zoid < :new',
-                    {'new': oid_int}))
+                    {'new': n}))
 
     def new_oids(self, cursor=None):
         return self.new_oids_no_cursor()
@@ -110,8 +112,8 @@ class Sqlite3OIDAllocator(AbstractOIDAllocator):
             row, = conn.execute('SELECT zoid FROM new_oid')
             conn.execute('UPDATE new_oid SET zoid = zoid + 1')
             conn.commit()
-        return self._oid_range_around(row[0])
+        return self._oid_range_around(row[0] + 1)
 
     def reset_oid(self, cursor=None):
         with self.lock:
-            self._connect().execute('UPDATE new_oid SET zoid = 1')
+            self._connect().execute('UPDATE new_oid SET zoid = 0')

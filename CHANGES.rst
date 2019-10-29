@@ -5,7 +5,8 @@
 3.0b3 (unreleased)
 ==================
 
-- Nothing changed yet.
+- SQLite: Fix a bug that could lead to invalid OIDs being allocated if
+  transactions were imported from another storage.
 
 
 3.0b2 (2019-10-28)

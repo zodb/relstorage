@@ -347,6 +347,33 @@ class HistoryFreeRelStorageTests(GenericRelStorageTests, ZODBTestCase):
 
         storage2.close()
 
+    def checkSetMinOid(self):
+        # Verify that OID allocation goes as expected when we use
+        # set_min_oid. There have been problems in the past translating
+        # between user-space OIDs and the 16-range gapped OIDs that are actually
+        # stored.
+
+        # TODO: This test is independent of history keeping status.
+        # We should have file for all those type tests and only mix it in
+        # to one of the test classes.
+
+        storage = self._storage
+        I = bytes8_to_int64
+        for offset in range(1, 50):
+            # Ensure no gaps.
+            oid = storage.new_oid()
+            self.assertEqual(offset, I(oid))
+
+        storage._oids.set_min_oid(32768)
+        oid = storage.new_oid()
+        self.assertEqual(32769, I(oid))
+
+        # Close to the 64-bit boundary.
+        storage._oids.set_min_oid(2 ** 62)
+        # Iterate through several ranges. This has been a problem in the past.
+        for offset in range(1, 50):
+            self.assertEqual(2 ** 62 + offset, I(storage.new_oid()))
+
 
 
 class HistoryFreeToFileStorage(AbstractToFileStorage,

@@ -27,6 +27,33 @@ from .schema import Schema
 
 logger = __import__('logging').getLogger(__name__)
 
+class AbstractOIDAllocator(ABC):
+    """
+    These objects are intended to be stateless.
+
+    They consult an underlying database sequence than increases, and
+    then derive additional OIDs from that sequence. ``new_oids``
+    returns a list of those OIDs, with the largest such OID in
+    position 0.
+    """
+    __slots__ = ()
+
+    def new_instance(self):
+        return self
+
+    close = release = lambda self: None
+
+    def reset_oid(self, cursor):
+        raise NotImplementedError
+
+    @abc.abstractmethod
+    def set_min_oid(self, cursor, oid_int):
+        raise NotImplementedError
+
+    @abc.abstractmethod
+    def new_oids(self, cursor):
+        raise NotImplementedError
+
 # All of these allocators allocate 16 OIDs at a time. In the sequence
 # or table, value (n) represents (n * 16 - 15) through (n * 16). So,
 # value 1 represents OID block 1-16, 2 represents OID block 17-32, and
@@ -55,31 +82,18 @@ def _oid_range_around_assume_list(n, _s=_OID_RANGE_SIZE):
 def _oid_range_around_iterable(n, _s=_OID_RANGE_SIZE, _range=_oid_range_around_assume_list):
     return list(_range(n))
 
-class AbstractOIDAllocator(ABC):
-    """
-    These objects are intended to be stateless.
 
-    They consult an underlying database sequence than increases, and
-    then derive additional OIDs from that sequence. ``new_oids``
-    returns a list of those OIDs, with the largest such OID in
-    position 0.
-    """
+class AbstractRangedOIDAllocator(AbstractOIDAllocator):
     __slots__ = ()
 
-    def new_instance(self):
-        return self
-
-    close = release = lambda self: None
-
-    def reset_oid(self, cursor):
-        raise NotImplementedError
-
-    @abc.abstractmethod
     def set_min_oid(self, cursor, oid_int):
-        raise NotImplementedError
+        # This takes a user-space OID and turns it into the internal
+        # range number.
+        n = (oid_int + 15) // 16
+        self._set_min_oid_from_range(cursor, n)
 
     @abc.abstractmethod
-    def new_oids(self, cursor):
+    def _set_min_oid_from_range(self, cursor, n):
         raise NotImplementedError
 
     if isinstance(range(1), list):
@@ -89,7 +103,7 @@ class AbstractOIDAllocator(ABC):
         _oid_range_around = staticmethod(_oid_range_around_iterable)
 
 
-class AbstractTableOIDAllocator(AbstractOIDAllocator):
+class AbstractTableOIDAllocator(AbstractRangedOIDAllocator):
     """
     Implements OID allocation using a table, new_oid, with an incrementing
     column.

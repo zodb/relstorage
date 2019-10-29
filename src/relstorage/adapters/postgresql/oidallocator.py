@@ -21,17 +21,15 @@ from zope.interface import implementer
 
 from ..._compat import metricmethod
 from ..interfaces import IOIDAllocator
-from ..oidallocator import AbstractOIDAllocator
+from ..oidallocator import AbstractRangedOIDAllocator
 
 
 @implementer(IOIDAllocator)
-class PostgreSQLOIDAllocator(AbstractOIDAllocator):
+class PostgreSQLOIDAllocator(AbstractRangedOIDAllocator):
 
     __slots__ = ()
 
-    def set_min_oid(self, cursor, oid_int):
-        """Ensure the next OID is at least the given OID."""
-        n = (oid_int + 15) // 16
+    def _set_min_oid_from_range(self, cursor, n):
         # This potentially wastes a value from the sequence to find
         # out that we're already past the max. But that's the only option:
         # curval() is local to this connection, and 'ALTER SEQUENCE ... MINVALUE n STARTS WITH n'
