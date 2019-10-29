@@ -2,7 +2,7 @@
  Changes
 =========
 
-3.0b3 (unreleased)
+3.0b3 (2019-10-29)
 ==================
 
 - SQLite: Fix a bug that could lead to invalid OIDs being allocated if
