@@ -282,7 +282,7 @@ try:
     from abc import ABC
 except ImportError:
     import abc
-    ABC = abc.ABCMeta('ABC', (object,), {})
+    ABC = abc.ABCMeta('ABC', (object,), {'__slots__': ()})
     del abc
 
 # Functions

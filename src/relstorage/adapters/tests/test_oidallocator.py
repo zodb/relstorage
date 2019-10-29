@@ -8,12 +8,12 @@ from __future__ import print_function
 
 from relstorage.tests import TestCase
 
-from ..oidallocator import AbstractOIDAllocator
+from ..oidallocator import AbstractRangedOIDAllocator
 
 
-class MockOIDAllocator(AbstractOIDAllocator):
+class MockOIDAllocator(AbstractRangedOIDAllocator):
 
-    def set_min_oid(self, cursor, oid_int):
+    def _set_min_oid_from_range(self, cursor, n):
         raise NotImplementedError
 
     def new_oids(self, cursor):

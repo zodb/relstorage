@@ -311,7 +311,7 @@ class Sqlite3GeventDriver(GeventDriverMixin,
     yield_to_gevent_instruction_interval = 100
 
     def configure_from_options(self, options):
-        if options.adapter:
+        if options.adapter and options.adapter.config.gevent_yield_interval:
             conf = options.adapter.config
             self.yield_to_gevent_instruction_interval = conf.gevent_yield_interval
 

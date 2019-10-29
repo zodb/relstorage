@@ -61,7 +61,7 @@ class MySQLOIDAllocator(AbstractTableOIDAllocator):
     # "Any AUTO_INCREMENT value is reset to its start value. This is
     # true even for MyISAM and InnoDB, which normally do not reuse
     # sequence values."
-    def set_min_oid(self, cursor, oid_int):
+    def _set_min_oid_from_range(self, cursor, n):
         # A simple statement like the following can easily deadlock:
         #
         # INSERT INTO new_oid (zoid)
@@ -78,8 +78,6 @@ class MySQLOIDAllocator(AbstractTableOIDAllocator):
         # Partly this is because MAX() is local to the current session.
         # We deal with this by using a stored procedure to efficiently make
         # multiple queries.
-
-        n = (oid_int + 15) // 16
         self.driver.callproc_multi_result(cursor, 'set_min_oid(%s)', (n,))
 
    # Notes on new_oids:
