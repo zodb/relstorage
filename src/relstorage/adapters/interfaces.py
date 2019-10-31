@@ -965,6 +965,13 @@ class IPackUndo(Interface):
 class IPoller(Interface):
     """Poll for new data"""
 
+    def get_current_tid(cursor):
+        """
+        Returns the highest transaction ID visible to the cursor.
+
+        If there are no transactions, returns 0.
+        """
+
     def poll_invalidations(conn, cursor, prev_polled_tid):
         """
         Polls for new transactions.

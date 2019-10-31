@@ -596,11 +596,10 @@ class MVCCDatabaseCoordinator(DetachableMVCCDatabaseCoordinator):
                     if index is not None
                     else None)
 
-    def __initial_poll(self, cache, conn, cursor):
+    def __initial_poll(self, cache, cursor):
         # Initial poll for the world.
-        change_iter, tid = cache.adapter.poller.poll_invalidations(conn, cursor, None)
+        tid = cache.adapter.poller.get_current_tid(cursor)
 
-        assert change_iter is None
         new_index = None
         if tid > 0:
             # tid 0 is empty database, no data.
@@ -614,8 +613,7 @@ class MVCCDatabaseCoordinator(DetachableMVCCDatabaseCoordinator):
             self.__set_viewer_state_locked(cache, self.object_index)
         # Regardless whether we or someone else did or did not
         # get an index, the viewer gets our current state, and also
-        # gets told to invalidate everything.
-        return change_iter
+        # gets told to invalidate everything (implicit return None)
 
     def _poll(self, cache, conn, cursor,
               current_index,
@@ -624,7 +622,7 @@ class MVCCDatabaseCoordinator(DetachableMVCCDatabaseCoordinator):
         # or it can return (None, old_tid) where old_tid is less than
         # its third parameter (``prev_polled_tid``)
         if current_index is None:
-            return self.__initial_poll(cache, conn, cursor)
+            return self.__initial_poll(cache, cursor)
 
         # We have begun keeping an object index. But the cache
         # may not yet. (See comments in _ObjectIndex docstring about

@@ -217,8 +217,6 @@ class CompiledQuery(object):
                 cursor.execute(self._prepare_stmt)
             params = self._prepare_converter(params)
 
-        __traceback_info__ = stmt, params
-
         if params:
             cursor.execute(stmt, params)
         elif self.params:

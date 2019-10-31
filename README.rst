@@ -67,6 +67,56 @@ currently supported. RelStorage replaced the PGStorage project.
 .. _zodbpack: https://relstorage.readthedocs.io/en/latest/zodbpack.html_
 .. _zodburi: https://relstorage.readthedocs.io/en/latest/zodburi.html
 
+Features Supported by Databases
+===============================
+
+Some of RelStorage's features are only supported on certain versions
+of certain databases. If the database doesn't support the feature,
+RelStorage will still work, but possibly with a performance penalty.
+
+
+.. list-table:: Supported Features
+   :widths: auto
+   :header-rows: 1
+   :stub-columns: 1
+
+   * -
+     - Parallel Commit
+     - Shared readCurrent locks
+     - Non-blocking readCurrent locks
+     - Streaming blobs
+     - Central transaction ID allocation
+     - Atomic lock and commit without Python involvement
+   * - PostgreSQL
+     - Yes
+     - Yes
+     - Yes
+     - With psycopg2 driver
+     - Yes
+     - Yes, except with PG8000 driver
+   * - MySQL
+     - Yes
+     - Yes
+     - Native on MySQL 8.0, emulated on MySQL 5.7
+     - No, emulated via chunking
+     - Yes
+     - Yes
+   * - Oracle
+     - Yes
+     - No
+     - Yes
+     - Yes
+     - No (could probably be implemented)
+     - No (could probably be implemented)
+   * - SQLite
+     - No
+     - No
+     - N/A (there is no distinction in lock types)
+     - No, consider using a shared-blob-dir
+     - N/A (essentially yes because it happens on one machine)
+     - No
+
+
 ===============
  Documentation
 ===============
@@ -93,7 +143,7 @@ RelStorage is hosted at GitHub:
     https://github.com/zodb/relstorage
 
 Continuous integration
-----------------------
+======================
 
 A test suite is run for every push and pull request submitted. Travis
 CI is used to test on Linux, and AppVeyor runs the builds on
