@@ -70,7 +70,7 @@ SQLite::
         keep-history false
         cache-local-mb 0
         <sqlite3>
-           path /path/to/database/file.sqlite3
+           data-dir /path/to/database/
         </sqlite3>
     </relstorage>
 
