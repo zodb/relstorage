@@ -5,8 +5,9 @@
 3.0b4 (unreleased)
 ==================
 
-- SQLite: Avoid exception when executing ``PRAGMA OPTIMIZE`` when
-  closing a read-only (load) connection.
+- SQLite: Avoid logging (at DEBUG level) an error executing ``PRAGMA
+  OPTIMIZE`` when closing a read-only (load) connection. Now, the
+  error is avoided by making the connection writable.
 
 - Packaging: Prune unused headers from the include/ directory.
 
