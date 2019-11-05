@@ -5,7 +5,7 @@
 3.0b4 (unreleased)
 ==================
 
-- Nothing changed yet.
+- Packaging: Prune unused headers from the include/ directory.
 
 
 3.0b3 (2019-10-29)
