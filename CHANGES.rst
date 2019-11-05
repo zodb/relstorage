@@ -5,6 +5,9 @@
 3.0b4 (unreleased)
 ==================
 
+- SQLite: Avoid exception when executing ``PRAGMA OPTIMIZE`` when
+  closing a read-only (load) connection.
+
 - Packaging: Prune unused headers from the include/ directory.
 
 

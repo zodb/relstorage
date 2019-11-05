@@ -538,9 +538,16 @@ class Connection(sqlite3.Connection):
         # Recommended best practice is to OPTIMIZE the database for
         # each closed connection. OPTIMIZE needs to run in each connection
         # so it can see what tables and indexes were used. It's usually fast,
-        # but has the potential to be slow.
+        # but has the potential to be slow and lock the database. It cannot be executed
+        # on a read-only connection. We don't want to block too long just closing
+        # a connection, so reset the time we wait to get a lock
+        # (if needed) to a lower value (ms).
         try:
-            self.execute("PRAGMA optimize")
+            self.executescript("""
+            PRAGMA busy_timeout = 3000;
+            PRAGMA query_only = 0;
+            PRAGMA optimize;
+            """)
         except sqlite3.OperationalError:
             logger.debug("Failed to optimize databas, probably in use", exc_info=True)
         except sqlite3.DatabaseError:
