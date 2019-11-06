@@ -93,28 +93,42 @@ class Psycopg2ConnectionManager(AbstractConnectionManager):
                 raise
 
     def _do_open_for_load(self):
-        # XXX: SERIALIZABLE isn't allowed on streaming replicas
-        # (https://www.enterprisedb.com/blog/serializable-postgresql-11-and-beyond)
-        # Do we really need SERIALIZABLE? Wouldn't REPEATABLE READ be
-        # sufficient? That's what we use on MySQL. OTOH, SERIALIZABLE
-        # is much more efficient on PostgreSQL than other systems
-        # and has some nice features.
+        # In RelStorage 1, 2 and <= 3.0b2, we used SERIALIZABLE isolation,
+        # while MySQL used REPEATABLE READ and Oracle used SERIALIZABLE (but
+        # only because of an apparent issue with RAC).
+        #
+        # Although SERIALIZABLE is much cheaper on PostgreSQL than
+        # most other databases, it has its issues. Most notably,
+        # SERIALIZABLE isn't allowed on streaming replicas
+        # (https://www.enterprisedb.com/blog/serializable-postgresql-11-and-beyond),
+        # and prior to PostgreSQL 12 it disables parallel queries (not
+        # that we expect many queries to be something that can benefit
+        # from parallel workers.)
+        #
+        # The differences that SERIALIZABLE brings shouldn't be
+        # relevant as we don't run the write transactions at that
+        # level, and we never try to commit this transaction. So it's
+        # mostly just overhead for tracking read anomalies that can
+        # never happen. And the standby issue became a problem
+        # (https://github.com/zodb/relstorage/issues/376) and we
+        # dropped down to REPEATABLE READ.
 
-        # If we could get the store connections to work in
-        # SERIALIZABLE mode, we'd probably be able to stop the
-        # explicit locking altogether. With judicious use of
+        # Of course, there's a chance that if we could get the store
+        # connections to work in SERIALIZABLE mode, we'd be able to
+        # stop the explicit locking altogether. With judicious use of
         # savepoints, and proper re-raising of ConflictError, that
         # might be possible.
 
-        # Set the transaction to READ ONLY mode. This lets
-        # transactions (especially SERIALIZABLE) elide some locks.
+        # Using READ ONLY mode lets transactions (especially
+        # SERIALIZABLE) elide some locks. If we were SERIALIZABLE,
+        # we'd probably also want to enable deferrable transactions as
+        # there's special support to make them cheaper (but they might
+        # have to wait on other serializable transactions, but since
+        # our only other serializable transactions would be READ ONLY
+        # that shouldn't matter.)
 
-        # TODO: Enable deferrable transactions if we stay in
-        # serializable, read only mode. This should generally be
-        # faster, as the *only* serializable transactions we have
-        # should be READ ONLY.
         return self.open(
-            self.isolation_load,
+            self.isolation_repeatable_read,
             read_only=True,
             deferrable=False,
             replica_selector=self.ro_replica_selector,

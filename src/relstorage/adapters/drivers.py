@@ -134,7 +134,7 @@ class AbstractModuleDriver(object):
         try:
             self.driver_module = mod = self.get_driver_module()
         except ImportError:
-            logger.exception("Unable to import driver")
+            logger.debug("Unable to import driver", exc_info=True)
             raise self.DriverNotAvailableError(self.__name__)
 
 

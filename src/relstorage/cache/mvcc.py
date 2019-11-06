@@ -30,6 +30,7 @@ from relstorage._compat import OidTMap_multiunion
 from relstorage._compat import OidTMap_intersection
 from relstorage._compat import OID_SET_TYPE as OidSet
 from relstorage._compat import iteroiditems
+from relstorage._compat import IN_TESTRUNNER
 from relstorage._util import log_timed
 from relstorage._util import positive_integer
 from relstorage._util import TRACE
@@ -41,6 +42,7 @@ from .interfaces import IStorageCacheMVCCDatabaseCoordinator
 
 logger = __import__('logging').getLogger(__name__)
 
+DEBUG = __debug__ and IN_TESTRUNNER
 
 ###
 # Notes on in-process concurrency:
@@ -94,8 +96,9 @@ class _TransactionRangeObjectIndex(OidTMap):
             # Verify the data matches what they told us.
             # If we were constructed with data, we must be complete.
             # Otherwise we get built up bit by bit.
-            assert self.complete_since_tid
-            self.verify()
+            if DEBUG:
+                assert self.complete_since_tid
+                self.verify()
         else:
             # If we had no changes, then either we polled for the same tid
             # as we got, or we didn't try to poll for changes at all.
@@ -505,7 +508,8 @@ class _ObjectIndex(object):
         other = _ObjectIndex.__new__(_ObjectIndex)
         other.maps = [incoming_bucket]
         other.maps.extend(self.maps)
-        other.verify() # XXX: Remove before release.
+        if DEBUG:
+            other.verify()
         return other
 
 
