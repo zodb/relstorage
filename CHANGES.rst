@@ -9,6 +9,14 @@
   OPTIMIZE`` when closing a read-only (load) connection. Now, the
   error is avoided by making the connection writable.
 
+- PostgreSQL: Reduce the load connection's isolation level from
+  ``SERIALIZABLE`` to ``REPEATABLE READ`` (two of the three other
+  supported databases also operate at this level). This allows
+  connecting to streaming replicas. Since the connection is read-only,
+  and there were no other ``SERIALIZABLE`` transactions (the store
+  connection operates in ``READ COMMITTED`` mode), there should be no
+  other visible effects. See :issue:`376`.
+
 - Packaging: Prune unused headers from the include/ directory.
 
 
