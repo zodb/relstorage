@@ -91,19 +91,19 @@ class Psycopg2Driver(MemoryViewBlobDriverMixin,
                                read_only=False,
                                deferrable=False,
                                application_name=None):
-
+        # Even though the documentation claims that "Any other
+        # connection parameter supported by the client library/server
+        # can be passed either in the connection string or as a
+        # keyword," it doesn't allow application_name as a kwarg. So we have to
+        # resort to changing the dsn.
+        if application_name and 'application_name' not in dsn:
+            dsn = "%s application_name='%s'" % (dsn, application_name)
         conn = self.connect(dsn)
         assert not conn.autocommit
         if isolation or deferrable or read_only:
             conn.set_session(isolation_level=isolation, readonly=read_only,
                              deferrable=deferrable)
 
-        if application_name:
-            cursor = self.cursor(conn)
-            cursor.execute('SET SESSION application_name = %s', (application_name,))
-            cursor.close()
-            # Make it permanent, in case the connection rolls back.
-            conn.commit()
         return conn
 
     def cursor(self, conn, server_side=False):

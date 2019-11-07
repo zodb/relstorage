@@ -21,6 +21,7 @@ from collections import namedtuple
 from ZODB.POSException import StorageError
 from zope.interface import implementer
 
+from ..connmanager import connection_callback
 from ..interfaces import ISchemaInstaller
 from ..schema import AbstractSchemaInstaller
 from ..schema import Schema
@@ -193,7 +194,7 @@ class MySQLSchemaInstaller(AbstractSchemaInstaller):
             cursor.execute("ALTER TABLE %s ENGINE=Innodb" % (table,))
         logger.info("Done converting tables to InnoDB: %s", tables)
 
-
+    @connection_callback(inherit=AbstractSchemaInstaller._prepare_with_connection)
     def _prepare_with_connection(self, conn, cursor):
         from .oidallocator import MySQLOIDAllocator
         self.__convert_all_tables_to_innodb(cursor)

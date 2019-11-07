@@ -29,6 +29,8 @@ from ._util import DatabaseHelpersMixin
 from ._util import query_property
 from ._util import noop_when_history_free
 
+from .connmanager import connection_callback
+
 from .sql import View
 from .sql import Table
 from .sql import TemporaryTable
@@ -716,6 +718,7 @@ class AbstractSchemaInstaller(DatabaseHelpersMixin,
                                     self.all_views,
                                     self.list_views(cursor))
 
+    @connection_callback(read_only=False, application_name="RS: PrepareSchema")
     def _prepare_with_connection(self, conn, cursor): # pylint:disable=unused-argument
         # XXX: We can generalize this to handle triggers, procs, etc,
         # to make subclasses have easier time.
@@ -737,6 +740,7 @@ class AbstractSchemaInstaller(DatabaseHelpersMixin,
     def verify(self):
         self.connmanager.open_and_call(self._verify)
 
+    @connection_callback(read_only=True, application_name='RS: VerifySchema')
     def _verify(self, conn, cursor): # pylint:disable=unused-argument
         tables = self.list_tables(cursor)
         self.check_compatibility(cursor, tables)

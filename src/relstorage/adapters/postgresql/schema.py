@@ -19,6 +19,7 @@ from __future__ import print_function
 
 from zope.interface import implementer
 
+from ..connmanager import connection_callback
 from ..interfaces import ISchemaInstaller
 from ..schema import AbstractSchemaInstaller
 
@@ -122,6 +123,7 @@ class PostgreSQLSchemaInstaller(AbstractSchemaInstaller):
         name, = row
         return self._metadata_to_native_str(name)
 
+    @connection_callback(inherit=AbstractSchemaInstaller._prepare_with_connection)
     def _prepare_with_connection(self, conn, cursor):
         super(PostgreSQLSchemaInstaller, self)._prepare_with_connection(conn, cursor)
 

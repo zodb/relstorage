@@ -46,6 +46,20 @@ class AbstractPostgreSQLDriver(AbstractModuleDriver):
                                read_only=False,
                                deferrable=False,
                                application_name=None):
+        """
+        Return a connection whose transactions will have the defined
+        characteristics and which will use the given
+        ``application_name``.
+
+        The driver should pass the ``application_name`` as part of the
+        connect packet, and *not* via ``SET SESSION application_name``.
+        This is because the former is both faster and
+        because the latter does not work when connecting to a hot
+        standby (it triggers "cannot set transaction read-write mode
+        during recovery"). If it cannot be passed at connect time,
+        an alternative is ``SELECT set_config('application_name', %s, FALSE)``
+        which does not seem to have this problem.
+        """
         raise NotImplementedError
 
     def set_lock_timeout(self, cursor, timeout):

@@ -50,6 +50,7 @@ class PostgreSQLStats(AbstractStats):
         return self.connmanager.open_and_call(get_size)
 
     def large_database_change(self):
+
         def analyze(_conn, cursor):
             # VACUUM cannot be run inside a transaction block;
             # ANALYZE can be. Both update pg_class.reltuples.

@@ -82,13 +82,17 @@ class IDBDriver(Interface):
     cursor_arraysize = Attribute(
         "The value to assign to each new cursor's ``arraysize`` attribute.")
 
-    def connect(*args, **kwargs):
-        """
-        Create and return a new connection object.
+    connect = Attribute("""
+    A callable to create and return a new connection object.
 
-        This connection, and all objects created from it such as cursors,
-        should be used within a single thread only.
-        """
+    The signature is not specified here because the
+    required parameters differ between databases and drivers. The interface
+    should be agreed upon between the :class:`IConnectionManager` and
+    the drivers for its database.
+
+    This connection, and all objects created from it such as cursors,
+    should be used within a single thread only.
+    """)
 
     def cursor(connection, server_side=False):
         """
