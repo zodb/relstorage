@@ -964,14 +964,17 @@ class MVCCDatabaseCoordinator(DetachableMVCCDatabaseCoordinator):
 
     @log_timed
     def __poll_old_oids_and_remove(self, adapter, local_client):
+        from relstorage.adapters.connmanager import connection_callback
+
         oids = OidSet(local_client.keys())
         # In local tests, this function executes against PostgreSQL 11 in .78s
         # for 133,002 older OIDs; or, .35s for 57,002 OIDs against MySQL 5.7.
         logger.debug("Polling %d oids stored in cache", len(oids))
+
+        @connection_callback(isolation_level=adapter.connmanager.isolation_load, read_only=True)
         def poll_old_oids(_conn, cursor):
             return adapter.mover.current_object_tids(cursor, oids)
-        poll_old_oids.transaction_isolation_level = adapter.connmanager.isolation_load
-        poll_old_oids.transaction_read_only = True
+
         current_tids_for_oids = adapter.connmanager.open_and_call(poll_old_oids).get
         polled_invalid_oids = OidSet()
         peek = local_client._peek

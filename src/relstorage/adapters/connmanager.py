@@ -23,6 +23,49 @@ from .replica import ReplicaSelector
 
 logger = __import__('logging').getLogger(__name__)
 
+
+def connection_callback(isolation_level=None,
+                        read_only=None,
+                        deferrable=None,
+                        application_name=None,
+                        inherit=None):
+    """
+    Decorator for functions used in :meth:`IConnectionManager.open_and_call`.
+
+    When the function is called, it will be given a connection that has
+    the given traits.
+
+    Use ``inherit=BaseClass.func`` when you're overriding a callback
+    function ``func``.
+    """
+    if inherit is not None:
+        isolation_level = isolation_level or inherit.transaction_isolation_level
+        application_name = application_name or inherit.transaction_application_name
+        read_only = read_only or inherit.transaction_read_only
+        deferrable = deferrable or inherit.transaction_deferrable
+    def f(func):
+        func.transaction_isolation_level = isolation_level
+        func.transaction_read_only = read_only
+        func.transaction_deferrable = deferrable
+        func.transaction_application_name = application_name
+        return func
+    return f
+
+
+def _connection_callback_open_args(connmanager, callback):
+    # Read the settings from `connection_callback` or defaults.
+    isolation = getattr(callback, 'transaction_isolation_level', None)
+    read_only = getattr(callback, 'transaction_read_only', None)
+    deferrable = getattr(callback, 'transaction_deferrable', None)
+    application_name = getattr(callback, 'transaction_application_name', None)
+    return dict(
+        isolation=isolation or connmanager.isolation_store,
+        read_only=read_only or False,
+        deferrable=deferrable or False,
+        application_name=application_name or ('RS: ' + callback.__name__)
+    )
+
+
 @implementer(IConnectionManager)
 class AbstractConnectionManager(object):
     """
@@ -230,9 +273,6 @@ class AbstractConnectionManager(object):
     def begin(self, conn, cursor):
         pass
 
-    def _do_open_for_call(self, callback): # pylint:disable=unused-argument
-        return self.open()
-
     def cursor_for_connection(self, conn):
         return self.driver.cursor(conn)
 
@@ -319,15 +359,7 @@ class AbstractConnectionManager(object):
         return self.open(**open_args)
 
     def _do_open_for_call(self, callback):
-        isolation = getattr(callback, 'transaction_isolation_level', self.isolation_store)
-        read_only = getattr(callback, 'transaction_read_only', False)
-        deferrable = getattr(callback, 'transaction_deferrable', False)
-        return self.open(
-            isolation=isolation,
-            read_only=read_only,
-            deferrable=deferrable,
-            application_name='RS: ' + callback.__name__)
-
+        return self.open(**_connection_callback_open_args(self, callback))
 
     def _after_opened_for_store(self, conn, cursor, restart=False):
         """

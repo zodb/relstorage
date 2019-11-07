@@ -133,25 +133,21 @@ class PG8000Driver(AbstractPostgreSQLDriver):
 
         self._connect = self.driver_module.RSConnection
 
-    def connect(self, *args, **kwargs): # pylint:disable=arguments-differ
+    def connect(self, dsn, application_name=None): # pylint:disable=arguments-differ
         # Parse the DSN into parts to pass as keywords.
         # We don't do this psycopg2 because a real DSN supports more options than
         # we do and we don't want to limit it.
-        assert len(args) == 1
-        assert not kwargs
-        dsn = args[0]
         kwds = {}
         parts = dsn.split(' ')
         for part in parts:
             key, value = part.split('=')
             value = value.strip("'\"")
-            if key == 'dbname':
-                key = 'database'
+            key = 'database' if key == 'dbname' else key
+            value = int(value) if key == 'port' else value
             kwds[key] = value
+        kwds['application_name'] = application_name
         conn = self._connect(**kwds)
         return conn
-
-    # Extensions
 
     ISOLATION_LEVEL_READ_COMMITTED = 'ISOLATION LEVEL READ COMMITTED'
     ISOLATION_LEVEL_SERIALIZABLE = 'ISOLATION LEVEL SERIALIZABLE'
@@ -162,7 +158,7 @@ class PG8000Driver(AbstractPostgreSQLDriver):
                                read_only=False,
                                deferrable=False,
                                application_name=None):
-        conn = self.connect(dsn)
+        conn = self.connect(dsn, application_name=application_name)
         cursor = self.cursor(conn)
         # For the current transaction
         transaction_stmt = 'TRANSACTION %s %s %s' % (
@@ -175,8 +171,6 @@ class PG8000Driver(AbstractPostgreSQLDriver):
         # NOTE: This will probably not play will with things like pgbouncer.
         # See http://initd.org/psycopg/docs/connection.html#connection.set_session
         cursor.execute('SET SESSION CHARACTERISTICS AS ' + transaction_stmt)
-        if application_name:
-            cursor.execute("SELECT set_config('application_name', %s, False)", (application_name,))
         conn.commit()
         conn.readonly = read_only
         return conn

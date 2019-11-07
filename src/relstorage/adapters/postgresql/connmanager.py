@@ -132,5 +132,5 @@ class Psycopg2ConnectionManager(AbstractConnectionManager):
             read_only=True,
             deferrable=False,
             replica_selector=self.ro_replica_selector,
-            application_name='RS load'
+            application_name='RS: Load'
         )
