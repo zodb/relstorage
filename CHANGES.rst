@@ -2,8 +2,8 @@
  Changes
 =========
 
-3.0b4 (unreleased)
-==================
+3.0rc1 (2019-11-08)
+===================
 
 - SQLite: Avoid logging (at DEBUG level) an error executing ``PRAGMA
   OPTIMIZE`` when closing a read-only (load) connection. Now, the
