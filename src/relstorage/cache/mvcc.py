@@ -969,6 +969,8 @@ class MVCCDatabaseCoordinator(DetachableMVCCDatabaseCoordinator):
         oids = OidSet(local_client.keys())
         # In local tests, this function executes against PostgreSQL 11 in .78s
         # for 133,002 older OIDs; or, .35s for 57,002 OIDs against MySQL 5.7.
+        # In one production environment of 800,000 OIDs with a 98% survival rate,
+        # using MySQL 5.7 takes an average of about 11s.
         logger.debug("Polling %d oids stored in cache", len(oids))
 
         @connection_callback(isolation_level=adapter.connmanager.isolation_load, read_only=True)
