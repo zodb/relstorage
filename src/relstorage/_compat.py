@@ -99,10 +99,49 @@ else:
 # for primitive operations, so don't accept Python BTree
 # implementations. (Also, on PyPy, the Python BTree implementation
 # uses more memory than a dict.)
+#
+# The map types are rarely large, but they could sometimes be.
+# The set types are more likely to be large (e.g., a set is used to hold
+# all the OIDs we need to poll after reading from a persistent cache).
+
 if BTrees.LLBTree.LLBTree is not BTrees.LLBTree.LLBTreePy: # pylint:disable=no-member
-    OID_TID_MAP_TYPE = BTrees.family64.II.BTree
-    OID_OBJECT_MAP_TYPE = BTrees.family64.IO.BTree
-    OID_SET_TYPE = BTrees.family64.II.TreeSet
+    # For BTree and Tree set objects, if you subclass you can define two attributes
+    # to customize their allocation:
+    # - ``max_internal_size`` is the number of buckets the root BTree is allowed to hold before
+    # it splits. (Actually, it goes to twice that size before it splits.) Each time it needs to
+    # resize its internal array, it doubles.
+    # - ``max_leaf_size`` is how big (strictly) a bucket is allowed to be before *it* splits.
+    # Buckets start out by allocating an array of size 16 and they double their allocation
+    # each time they have to grow. Unfortunately there's no way to give them a suggested size
+    # and have them allocate that.
+    #
+    # Since these are only in-memory, there's no real downside to
+    # increasing them all substantially; it will result in larger
+    # memory allocations and better memory locality. The algorithms
+    # are still logarithmic (and actually creation and lookups
+    # benchmark slightly faster for larger values). The only time that
+    # could be a problem is if they're *very* large, then the amount
+    # of waste could be substantial. Choose values one less than a
+    # power of two to avoid that last huge allocation.
+    #
+    # Using these values and an OidSet of about 800,000 objects (from
+    # a real cache file) results in 12,000 fewer LLSet objects being
+    # created, and 2MB less memory being used.
+    class OID_TID_MAP_TYPE(BTrees.family64.II.BTree):
+        __slots__ = ()
+        max_internal_size = 1023
+        # keep under 4K, a common virtual memory page size.
+        max_leaf_size = 4095
+
+    class OID_OBJECT_MAP_TYPE(BTrees.family64.IO.BTree):
+        __slots__ = ()
+        max_internal_size = OID_TID_MAP_TYPE.max_internal_size
+        max_leaf_size = OID_TID_MAP_TYPE.max_leaf_size
+
+    class OID_SET_TYPE(BTrees.family64.II.TreeSet):
+        max_internal_size = OID_TID_MAP_TYPE.max_internal_size
+        max_leaf_size = OID_TID_MAP_TYPE.max_leaf_size
+
     OidTMap_difference = BTrees.family64.II.difference  # pylint:disable=no-member
     OidTMap_multiunion = BTrees.family64.II.multiunion  # pylint:disable=no-member
     OidTMap_intersection = BTrees.family64.II.intersection  # pylint:disable=no-member
@@ -145,7 +184,7 @@ else:
 # Lists of OIDs or TIDs. These could be simple list() objects, or we
 # can treat them as numbers and store them in array.array objects, if
 # we have an unsigned 64-bit element type. array.array, just like the
-# C version of BTrees, uses less memory or CPython, but has a cost
+# C version of BTrees, uses less memory on CPython, but has a cost
 # converting back and forth between objects and native values. What's
 # the cost? Let's measure.
 #
