@@ -16,6 +16,10 @@ environment:
     # a later point release.
 
     # 64-bit
+    - PYTHON: "C:\\Python38-x64"
+      PYTHON_VERSION: "3.8.x"
+      PYTHON_ARCH: "64"
+      PYTHON_EXE: python
 
     - PYTHON: "C:\\Python37-x64"
       PYTHON_VERSION: "3.7.x"
@@ -38,6 +42,11 @@ environment:
       PYTHON_EXE: python
 
     # 32-bit, wheel only (no testing)
+    - PYTHON: "C:\\Python38"
+      PYTHON_VERSION: "3.8.x"
+      PYTHON_ARCH: "32"
+      PYTHON_EXE: python
+      GWHEEL_ONLY: true
 
     - PYTHON: "C:\\Python37"
       PYTHON_VERSION: "3.7.x"
