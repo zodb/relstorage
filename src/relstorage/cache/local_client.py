@@ -28,6 +28,7 @@ from relstorage._util import get_memory_usage
 from relstorage._util import byte_display
 from relstorage._util import timer as _timer
 from relstorage._util import log_timed as _log_timed
+from relstorage._util import consume
 from relstorage._compat import OID_TID_MAP_TYPE as OidTMap
 from relstorage.interfaces import Int
 
@@ -525,11 +526,13 @@ class LocalClient(object):
             size = 0
             limit = self.limit
             items = []
-            for oid, frozen, state, actual_tid, frequency in db.list_rows_by_priority():
+            rows = db.fetch_rows_by_priority()
+            for oid, frozen, state, actual_tid, frequency in rows:
                 size += len(state)
                 if size > limit:
                     break
                 items.append((oid, (state, actual_tid, frozen, frequency)))
+            consume(rows)
             # Rows came to us MRU to LRU, but we need to feed them the other way.
             items.reverse()
             return items

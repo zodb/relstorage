@@ -194,8 +194,10 @@ class Database(ABC):
 
     def fetch_rows_by_priority(self):
         """
-        The returned cursor will iterate ``(zoid, was_frozen, state, tid, frequency)``
+        The returned object will iterate ``(zoid, was_frozen, state, tid, frequency)``
         from most frequently used and newest, to least frequently used and oldest.
+
+        You *must* completely consume the returned object.
         """
         # Do this in a new cursor so it can interleave.
 
@@ -215,25 +217,24 @@ class Database(ABC):
         # However, that seems to generate a poor query plan that actually looks
         # at all the rows (it doesn't understand that cum_size can only increase.)
         # Plus, window functions were only added to sqlite 3.25
-        cur = self.connection.execute("""
-        SELECT zoid, CASE was_frozen WHEN 1 THEN -1 ELSE tid END, state, tid, frequency
-        FROM object_state
-        ORDER BY frequency DESC, tid DESC
-        """)
+        as_state = bytes # Py2 returns buffers, Py3 returns bytes. bytes(bytes) is a no-op.
+        cur = self.connection.cursor()
         cur.arraysize = 100
-        return cur
+        cur.execute("""
+            SELECT zoid, CASE was_frozen WHEN 1 THEN -1 ELSE tid END,
+                   CAST(state AS BLOB), tid, frequency
+            FROM object_state
+            ORDER BY frequency DESC, tid DESC
+        """)
+        for zoid, frozen, state, tid, frequency in cur:
+            yield zoid, frozen, as_state(state), tid, frequency
 
     @log_timed
     def list_rows_by_priority(self):
         """
         Like ``fetch_rows_by_priority``, but returns a list instead of cursor.
         """
-        cur = self.fetch_rows_by_priority()
-        try:
-            items = cur.fetchall()
-        finally:
-            cur.close()
-        return items
+        return list(self.fetch_rows_by_priority())
 
     def store_temp(self, rows):
         """
@@ -249,9 +250,23 @@ class Database(ABC):
         # Benchmarking shows essentially no difference between this
         # simple method and using our RowBatcher to produce
         # multi-value statements. vmprof shows all of the time spent
-        # in *this* function right here, nothing any lower (the next lower function it shows is
-        # _pysqlite_fetch_one_row, taking  1.1% of the execution of *this* function).
-        # I'm Not entirely sure what that means.
+        # in *this* function right here, nothing any lower (the next
+        # lower function it shows is _pysqlite_fetch_one_row, taking
+        # 1.1% of the execution of *this* function). I'm Not entirely
+        # sure what that means.
+
+        # Because of sqlite's loose typing. on Python 2 we may get
+        # state column values stored with TEXT affinity, even though
+        # the storage class of the state column is BLOB. On Python 3
+        # reading that back will try to decode as UTF-8 and result in
+        # decode errors:
+        #
+        # sqlite3.OperationalError: Could not decode to UTF-8 column
+        # 'state' with text '.zx....'
+        #
+        # We can add a CAST(state as BLOB), or we could set the
+        # connection's text_factory to bytes (which makes the metadata
+        # bytes too).
         rows = list(rows) # materialize
         self.cursor.executemany(
             'INSERT INTO temp_state(zoid, tid, was_frozen, state, frequency) '

@@ -106,14 +106,20 @@ else:
 
 if BTrees.LLBTree.LLBTree is not BTrees.LLBTree.LLBTreePy: # pylint:disable=no-member
     # For BTree and Tree set objects, if you subclass you can define two attributes
-    # to customize their allocation:
-    # - ``max_internal_size`` is the number of buckets the root BTree is allowed to hold before
-    # it splits. (Actually, it goes to twice that size before it splits.) Each time it needs to
-    # resize its internal array, it doubles.
-    # - ``max_leaf_size`` is how big (strictly) a bucket is allowed to be before *it* splits.
-    # Buckets start out by allocating an array of size 16 and they double their allocation
-    # each time they have to grow. Unfortunately there's no way to give them a suggested size
-    # and have them allocate that.
+    # to customize their allocation (simplified):
+    #
+    # - ``max_internal_size`` is the number of buckets the root BTree
+    # is allowed to hold before it splits. (Actually, it goes to twice
+    # that size before it splits.) Each time it needs to resize its
+    # internal array, it doubles. In the C code, the default for this
+    # is DEFAULT_MAX_BTREE_SIZE == 500.
+    #
+    # - ``max_leaf_size`` is how big (strictly) a bucket is allowed to
+    # be before *it* splits. Buckets start out by allocating an array
+    # of size 16 and they double their allocation each time they have
+    # to grow. Unfortunately there's no way to give them a suggested
+    # size and have them allocate that. In the C code, the default for
+    # this is DEFAULT_MAX_BUCKET_SIZE == 120
     #
     # Since these are only in-memory, there's no real downside to
     # increasing them all substantially; it will result in larger
@@ -129,9 +135,19 @@ if BTrees.LLBTree.LLBTree is not BTrees.LLBTree.LLBTreePy: # pylint:disable=no-m
     # created, and 2MB less memory being used.
     class OID_TID_MAP_TYPE(BTrees.family64.II.BTree):
         __slots__ = ()
-        max_internal_size = 1023
-        # keep under 4K, a common virtual memory page size.
-        max_leaf_size = 4095
+        # Since these are contiguous arrays, there *might* be some
+        # benefit in keeping them within a virtual memory page
+        # (commonly 4K). The BTree doesn't actually hold an array of
+        # Bucket, it holds an array of BTreeItem, which is a key and a
+        # pointer (to bucket or tree). Assuming 64-bit pointers, the size of an array is
+        # (8 * 2 * len) and we'd have to go down to 255, which is actually a
+        # reduction from the default of 500 (8000 bytes, less than two pages).
+        # Until we have evidence that keeping in a page matters, we'll just choose
+        # some walues that we observed to result in an overall memory use reduction.
+        max_internal_size = 1023 # just under 16K, four pages.
+        # buckets have an array of keys and (for trees but not sets) an array of values.
+        # This is definitely 64 bits
+        max_leaf_size = 4095 # under 32K, or 8 pages.
 
     class OID_OBJECT_MAP_TYPE(BTrees.family64.IO.BTree):
         __slots__ = ()
