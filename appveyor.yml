@@ -16,6 +16,11 @@ environment:
     # a later point release.
 
     ## 64-bit
+    - PYTHON: "C:\\Python38-x64"
+      PYTHON_VERSION: "3.8.x"
+      PYTHON_ARCH: "64"
+      PYTHON_EXE: python
+
     - PYTHON: "C:\\Python37-x64"
       PYTHON_VERSION: "3.7.x"
       PYTHON_ARCH: "64"
@@ -37,14 +42,6 @@ environment:
       PYTHON_EXE: python
 
     ## 32-bit, wheel only (no testing)
-    # psycopg2 builds but doesn't load; we need to wait for the
-    # binary wheels to be available.
-    # See https://github.com/psycopg/psycopg2/issues/990
-    - PYTHON: "C:\\Python38-x64"
-      PYTHON_VERSION: "3.8.x"
-      PYTHON_ARCH: "64"
-      PYTHON_EXE: python
-      GWHEEL_ONLY: true
 
     - PYTHON: "C:\\Python38"
       PYTHON_VERSION: "3.8.x"
