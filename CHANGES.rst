@@ -5,7 +5,7 @@
 3.0rc2 (unreleased)
 ===================
 
-- Nothing changed yet.
+- Build binary wheels for Python 3.8 on Windows.
 
 
 3.0rc1 (2019-11-08)
