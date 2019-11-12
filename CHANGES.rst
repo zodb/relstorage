@@ -5,7 +5,8 @@
 3.0.1 (unreleased)
 ==================
 
-- Nothing changed yet.
+- Fix an AttributeError in Oracle support. See :pr:`380` by Mauro
+  Amico.
 
 
 3.0.0 (2019-11-12)
