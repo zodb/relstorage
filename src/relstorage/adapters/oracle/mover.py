@@ -68,7 +68,11 @@ class OracleObjectMover(OracleRowBatcherStoreTemps,
 
     def __init__(self, *args, **kwargs):
         AbstractObjectMover.__init__(self, *args, **kwargs)
-        OracleRowBatcherStoreTemps.__init__(self, self.keep_history, self.driver.Binary)
+        OracleRowBatcherStoreTemps.__init__(
+            self,
+            self.keep_history,
+            self.driver.Binary,
+            batcher_factory=self.make_batcher)
 
     @metricmethod_sampled
     def get_object_tid_after(self, cursor, oid, tid):
