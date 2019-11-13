@@ -109,7 +109,7 @@ Here are some sample SQL statements for creating the database user
 and granting the required permissions::
 
     CREATE USER zodb IDENTIFIED BY mypassword;
-    GRANT CONNECT, RESOURCE, CREATE TABLE, CREATE SEQUENCE TO zodb;
+    GRANT CONNECT, RESOURCE, CREATE TABLE, CREATE SEQUENCE, CREATE VIEW TO zodb;
     GRANT EXECUTE ON DBMS_LOCK TO zodb;
 
 

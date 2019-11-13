@@ -150,16 +150,16 @@ Using ``sqlplus`` with ``SYS`` privileges, execute the
 following::
 
     CREATE USER relstoragetest IDENTIFIED BY relstoragetest;
-    GRANT CONNECT, RESOURCE, CREATE TABLE, CREATE SEQUENCE TO relstoragetest;
+    GRANT CONNECT, RESOURCE, CREATE TABLE, CREATE SEQUENCE, CREATE VIEW TO relstoragetest;
     GRANT EXECUTE ON DBMS_LOCK TO relstoragetest;
     CREATE USER relstoragetest2 IDENTIFIED BY relstoragetest;
-    GRANT CONNECT, RESOURCE, CREATE TABLE, CREATE SEQUENCE TO relstoragetest2;
+    GRANT CONNECT, RESOURCE, CREATE TABLE, CREATE SEQUENCE, CREATE VIEW TO relstoragetest2;
     GRANT EXECUTE ON DBMS_LOCK TO relstoragetest2;
     CREATE USER relstoragetest_hf IDENTIFIED BY relstoragetest;
-    GRANT CONNECT, RESOURCE, CREATE TABLE, CREATE SEQUENCE TO relstoragetest_hf;
+    GRANT CONNECT, RESOURCE, CREATE TABLE, CREATE SEQUENCE, CREATE VIEW TO relstoragetest_hf;
     GRANT EXECUTE ON DBMS_LOCK TO relstoragetest_hf;
     CREATE USER relstoragetest2_hf IDENTIFIED BY relstoragetest;
-    GRANT CONNECT, RESOURCE, CREATE TABLE, CREATE SEQUENCE TO relstoragetest2_hf;
+    GRANT CONNECT, RESOURCE, CREATE TABLE, CREATE SEQUENCE, CREATE VIEW TO relstoragetest2_hf;
     GRANT EXECUTE ON DBMS_LOCK TO relstoragetest2_hf;
 
 You may need to grant tablespace privileges if you get "no privileges

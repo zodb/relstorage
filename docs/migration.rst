@@ -8,6 +8,7 @@ upgrade.  Hopefully, this will not often be necessary.
 .. toctree::
    :maxdepth: 1
 
+   migration/migrate-to-3.0
    migration/migrate-to-1.5
    migration/migrate-to-1.4
    migration/migrate-to-1.1.2
