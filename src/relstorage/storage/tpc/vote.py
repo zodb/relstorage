@@ -372,7 +372,9 @@ class AbstractVote(AbstractTPCState):
         read_temp = self.temp_storage.read_temp
         store_temp = self.temp_storage.store_temp
 
-        __traceback_info__ = conflicts, invalidated_oid_ints
+        # The conflicts can be very large binary strings, no need to include
+        # them in traceback info. (Plus they could be sensitive.)
+        __traceback_info__ = count_conflicts, invalidated_oid_ints
 
         for conflict in actual_conflicts:
             # Match the names of the arguments used
@@ -381,11 +383,7 @@ class AbstractVote(AbstractTPCState):
             oid = int64_to_8bytes(oid_int)
             committedSerial = int64_to_8bytes(committed_tid_int)
             oldSerial = int64_to_8bytes(tid_this_txn_saw_int)
-            try:
-                newpickle = read_temp(oid_int)
-            except KeyError:
-                print(self.store_connection.cursor.execute("select * from temp_store").fetchall())
-                raise
+            newpickle = read_temp(oid_int)
 
             # Because we're using the _CachedConflictResolver, we can only loadSerial()
             # one state: the ``oldSerial`` state. Therefore the committedData *must* be
