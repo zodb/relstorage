@@ -169,15 +169,21 @@ class AbstractTPCState(object):
                 return self
 
         try:
-            self.load_connection.rollback_quietly()
+            # Drop locks first.
+            if self.store_connection:
+                # It's possible that this connection/cursor was
+                # already closed if an error happened (which would
+                # release the locks). Don't try to re-open it.
+                self.adapter.locker.release_commit_lock(self.store_connection.cursor)
             self.adapter.txncontrol.abort(
                 self.store_connection,
                 self.prepared_txn)
-            if self.store_connection:
-                # It's possible that abort() could have closed this connection/cursor
-                # if an error happened (which would release the locks). Don't try to
-                # re-open it.
-                self.adapter.locker.release_commit_lock(self.store_connection.cursor)
+
+            if force:
+                self.load_connection.drop()
+                self.store_connection.drop()
+            else:
+                self.load_connection.rollback_quietly()
             self.blobhelper.abort()
         finally:
             self._clear_temp()

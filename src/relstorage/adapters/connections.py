@@ -96,6 +96,10 @@ class AbstractManagedConnection(object):
             *self.open_if_needed()
         )
 
+    def exit_critical_phase(self):
+        if self.connection is not None:
+            self.connmanager.driver.exit_critical_phase(self.connection, self._cursor)
+
     def drop(self):
         self.active = False
         conn, cursor = self.connection, self._cursor

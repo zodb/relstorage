@@ -388,6 +388,9 @@ class MockDriver(object):
     def enter_critical_phase_until_transaction_end(self, connection, cursor):
         "Does nothing"
 
+    is_in_critical_phase = enter_critical_phase_until_transaction_end
+    exit_critical_phase = enter_critical_phase_until_transaction_end
+
     def commit(self, conn):
         conn.commit()
 

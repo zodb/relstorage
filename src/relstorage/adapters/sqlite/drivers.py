@@ -32,6 +32,7 @@ from ..drivers import AbstractModuleDriver
 from ..drivers import GeventDriverMixin
 from ..drivers import MemoryViewBlobDriverMixin
 from ..interfaces import IDBDriver
+from ..interfaces import IDBDriverSupportsCritical
 from .._util import DatabaseHelpersMixin
 
 from .dialect import Sqlite3Dialect
@@ -106,6 +107,7 @@ class Sqlite3Driver(MemoryViewBlobDriverMixin,
         # That should really only happen in tests, though, since
         # we're directly connected to the file on disk.
         self.disconnected_exceptions += (self.driver_module.ProgrammingError,)
+        self._connect = self.connect_to_file
 
     if PY3:
         # in_transaction doesn't work on Py2, so assume the worst
@@ -119,7 +121,6 @@ class Sqlite3Driver(MemoryViewBlobDriverMixin,
                 return True
 
         connection_may_need_commit = connection_may_need_rollback
-
 
         # Py2 returns buffer for blobs, hence the Mixin.
         # But Py3 returns plain bytes.
@@ -278,7 +279,7 @@ class Sqlite3Driver(MemoryViewBlobDriverMixin,
 
         pragmas.update(override_pragmas or {})
 
-        connection = self._connect_to_file_or_uri(
+        return self._connect_to_file_or_uri(
             fname,
             pragmas=pragmas,
             timeout=timeout,
@@ -286,9 +287,8 @@ class Sqlite3Driver(MemoryViewBlobDriverMixin,
             isolation_level=isolation_level
         )
 
-        return connection
 
-
+@implementer(IDBDriverSupportsCritical)
 class Sqlite3GeventDriver(GeventDriverMixin,
                           Sqlite3Driver):
 
@@ -317,23 +317,19 @@ class Sqlite3GeventDriver(GeventDriverMixin,
 
     def _connect_to_file_or_uri(self, *args, **kwargs): # pylint:disable=arguments-differ
         conn = super(Sqlite3GeventDriver, self)._connect_to_file_or_uri(*args, **kwargs)
-        conn.set_progress_handler(self.gevent.sleep,
-                                  self.yield_to_gevent_instruction_interval)
+        conn.set_standard_progress_handler(self.gevent.sleep,
+                                           self.yield_to_gevent_instruction_interval)
+        conn.is_in_critical_phase = lambda: conn.get_progress_handler() is None
         return conn
 
     def enter_critical_phase_until_transaction_end(self, connection, cursor):
-        connection.set_progress_handler(None, 0)
+        connection.enter_critical_phase_until_transaction_end()
 
-    def commit(self, conn, cursor=None):
-        super(Sqlite3GeventDriver, self).commit(conn, cursor)
-        conn.set_progress_handler(self.gevent.sleep,
-                                  self.yield_to_gevent_instruction_interval)
+    def is_in_critical_phase(self, connection, cursor):
+        return connection.is_in_critical_phase()
 
-    def rollback(self, conn):
-        super(Sqlite3GeventDriver, self).rollback(conn)
-        conn.set_progress_handler(self.gevent.sleep,
-                                  self.yield_to_gevent_instruction_interval)
-
+    def exit_critical_phase(self, connection, cursor):
+        connection.ensure_standard_progress_handler()
 
 class UnableToConnect(sqlite3.OperationalError):
     filename = None
@@ -403,7 +399,9 @@ class Connection(sqlite3.Connection):
     has_analyzed_temp = False
     before_commit_functions = ()
     _rs_has_closed = False
+    _rs_progress_handler = None
     replica = None
+    standard_progress_handler = (None, 0)
 
     def __init__(self, rs_db_filename, *args, **kwargs):
         __traceback_info__ = args, kwargs
@@ -437,6 +435,23 @@ class Connection(sqlite3.Connection):
         def in_transaction(self):
             return None
 
+    def set_progress_handler(self, func, interval):
+        super(Connection, self).set_progress_handler(func, interval)
+        self._rs_progress_handler = func
+
+    def set_standard_progress_handler(self, func, interval):
+        self.set_progress_handler(func, interval)
+        self.standard_progress_handler = (func, interval)
+
+    def ensure_standard_progress_handler(self):
+        self.set_progress_handler(*self.standard_progress_handler)
+
+    def get_progress_handler(self):
+        return self._rs_progress_handler
+
+    def enter_critical_phase_until_transaction_end(self):
+        self.set_progress_handler(None, 0)
+
     def register_before_commit_cleanup(self, func):
         self.before_commit_functions.append(func)
 
@@ -447,16 +462,26 @@ class Connection(sqlite3.Connection):
         def cursor(self):
             return sqlite3.Connection.cursor(self, Cursor)
 
-    def commit(self, run_cleanups=True):
-        if run_cleanups:
-            for func in self.before_commit_functions:
-                func(self)
+    def return_to_repeatable_read(self):
+        # See mover.py
+        # deliberately doesn't use self.commit()
         sqlite3.Connection.commit(self)
 
+    def commit(self):
+        try:
+            for func in self.before_commit_functions:
+                func(self)
+            sqlite3.Connection.commit(self)
+        finally:
+            self.ensure_standard_progress_handler()
+
     def rollback(self):
-        sqlite3.Connection.rollback(self)
-        for func in self.before_commit_functions:
-            func(self, True)
+        try:
+            sqlite3.Connection.rollback(self)
+            for func in self.before_commit_functions:
+                func(self, True)
+        finally:
+            self.ensure_standard_progress_handler()
 
     _last_changed_settings = ()
     _last_reported_settings = ()

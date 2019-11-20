@@ -66,6 +66,9 @@ def _select_driver_by_name(driver_name, driver_options):
     error = NoDriversAvailableError if accept_any_driver else UnknownDriverError
     raise error(driver_name, driver_options)
 
+class DriverNotImportableError(DriverNotAvailableError,
+                               ImportError):
+    "When the module can't be imported."
 
 class AbstractModuleDriver(object):
     """
@@ -135,7 +138,7 @@ class AbstractModuleDriver(object):
             self.driver_module = mod = self.get_driver_module()
         except ImportError:
             logger.debug("Unable to import driver", exc_info=True)
-            raise self.DriverNotAvailableError(self.__name__)
+            raise DriverNotImportableError(self.__name__)
 
 
         self.disconnected_exceptions = (mod.OperationalError,
@@ -270,6 +273,11 @@ class AbstractModuleDriver(object):
     def enter_critical_phase_until_transaction_end(self, connection, cursor):
         """Default implementation; does nothing."""
 
+    def is_in_critical_phase(self, connection, cursor):
+        """Default implementation; returns a false value."""
+
+    def exit_critical_phase(self, connection, cursor):
+        "Default implementation; does nothing."
 
 class MemoryViewBlobDriverMixin(object):
     # psycopg2 is smart enough to return memoryview or buffer on
@@ -363,12 +371,23 @@ def implement_db_driver_options(name, *driver_modules):
                                                                            sys.modules[name])
 
 
+class _NoGeventDriverMixin(object):
+    import time as gevent
+
+    def get_driver_module(self):
+        raise ImportError("Could not import gevent")
+
+class _NoGeventConnectionMixin(object):
+    gevent_hub = None
+    gevent_read_watcher = None
+    gevent_write_watcher = None
+    gevent_sleep = None
+
 try:
     import gevent
 except ImportError:
-    class GeventDriverMixin(object):
-        def get_driver_module(self):
-            raise ImportError("Could not import gevent")
+    GeventDriverMixin = _NoGeventDriverMixin
+    GeventConnectionMixin = _NoGeventConnectionMixin
 else:
     from gevent.socket import wait
     get_hub = gevent.get_hub
@@ -376,13 +395,8 @@ else:
     class GeventDriverMixin(object):
         gevent = gevent
 
-    class GeventConnectionMixin(object):
-
-        def __init__(self, *args, **kwargs):
-            self.gevent_hub = None
-            self.gevent_read_watcher = None
-            self.gevent_write_watcher = None
-            super(GeventConnectionMixin, self).__init__(*args, **kwargs)
+    class GeventConnectionMixin(_NoGeventConnectionMixin):
+        gevent_sleep = staticmethod(gevent.sleep)
 
         def close(self):
             self.__close_watchers()

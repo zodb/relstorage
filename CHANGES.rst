@@ -5,9 +5,10 @@
 3.0.1 (unreleased)
 ==================
 
-- Fix an AttributeError in Oracle support. See :pr:`380` by Mauro
+- Oracle: Fix an AttributeError saving to Oracle. See :pr:`380` by Mauro
   Amico.
 
+- MySQL+gevent: Release the critical section a bit sooner. See :issue:`381`.
 
 3.0.0 (2019-11-12)
 ==================

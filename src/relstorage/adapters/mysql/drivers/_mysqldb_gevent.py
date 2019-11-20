@@ -16,16 +16,16 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-from gevent import sleep as gevent_sleep
-
-# pylint:disable=wrong-import-position,no-name-in-module,import-error
+# Perhaps pylint gets confused because of the mysqldb module in this package?
+# pylint:disable=no-name-in-module,import-error
 from MySQLdb.connections import Connection as BaseConnection
 from MySQLdb.cursors import SSCursor
 
-from relstorage.adapters.drivers import GeventConnectionMixin
+from ...drivers import GeventConnectionMixin
 from . import IterateFetchmanyMixin
 
-class Cursor(IterateFetchmanyMixin, SSCursor):
+class Cursor(IterateFetchmanyMixin,
+             SSCursor):
     # Internally this calls mysql_use_result(). The source
     # code for that function has this comment: "There
     # shouldn't be much processing per row because mysql
@@ -63,10 +63,9 @@ class Cursor(IterateFetchmanyMixin, SSCursor):
     # we only needed to make one fetch.
 
     def fetchall(self):
-        sleep = self.connection.sleep
-        if sleep is _noop:
+        if self.connection.is_in_critical_phase():
             return SSCursor.fetchall(self)
-
+        sleep = self.connection.gevent_sleep
         result = []
         fetch = self.fetchmany # calls _fetch_row with the arraysize
         while 1:
@@ -82,78 +81,91 @@ class Cursor(IterateFetchmanyMixin, SSCursor):
             sleep()
         return result
 
-
-# Prior to mysqlclient 1.4, there was a 'waiter' Connection
-# argument that could be used to do this, but it was removed.
-# So we implement it ourself.
 def _noop():
     "Does nothing"
 
-class Connection(GeventConnectionMixin,
-                 BaseConnection):
+class AbstractConnection(GeventConnectionMixin):
     default_cursor = Cursor
-    gevent_read_watcher = None
-    gevent_write_watcher = None
-    gevent_hub = None
-    sleep = staticmethod(gevent_sleep)
 
     # pylint:disable=method-hidden
-
-    def enter_critical_phase_until_transaction_end(self):
-        # Must be idempotent
-        self.commit = self._critical_commit
-        self.rollback = self._critical_rollback
-        self.query = self._critical_query
-        self.sleep = _noop
-
-    def exit_critical_phase_at_transaction_end(self):
-        del self.rollback
-        del self.commit
-        del self.query
-        del self.sleep
-
-    def _critical_query(self, query):
-        return BaseConnection.query(self, query)
 
     def query(self, query):
         # From the mysqlclient implementation:
         # "Since _mysql releases the GIL while querying, we need immutable buffer"
+        # RelStorage never passes a bytearray, but third-parties have
+        # been known to use this connection implementation.
         if isinstance(query, bytearray):
             query = bytes(query)
 
+        # Prior to mysqlclient 1.4, there was a 'waiter' Connection
+        # argument that could be used to do this, but it was removed.
+        # So we implement it ourself.
         self.gevent_wait_write()
         self.send_query(query)
 
         self.gevent_wait_read()
         self.read_query_result()
 
-    # The default implementations of 'rollback' and
-    # 'commit' use only C API functions `mysql_rollback`
-    # and `mysql_commit`; it doesn't touch any internal
-    # state. Those in turn simply call
-    # `mysql_real_query("rollback")` and
-    # `mysql_real_query("commit")`. That's a synchronous
-    # function that waits for the result to be ready. We
-    # don't want to block like that (commit could
+    # The default implementations of 'rollback' and 'commit' use only
+    # C API functions `mysql_rollback` and `mysql_commit`; it doesn't
+    # touch any internal state. Those in turn simply call
+    # `mysql_real_query("rollback")` and `mysql_real_query("commit")`.
+    # That's a synchronous function that waits for the result to be
+    # ready. We don't want to block like that (commit could
     # potentially take some time.)
-
-    def _critical_rollback(self):
-        try:
-            BaseConnection.rollback(self)
-        finally:
-            self.exit_critical_phase_at_transaction_end()
 
     def rollback(self):
         self.query('rollback')
 
-    def _critical_commit(self):
-        try:
-            BaseConnection.commit(self)
-        finally:
-            self.exit_critical_phase_at_transaction_end()
-
     def commit(self):
         self.query('commit')
+
+    ###
+    # Critical sections
+    ###
+    def enter_critical_phase_until_transaction_end(self):
+        # Must be idempotent
+        self.commit = self._critical_commit
+        self.rollback = self._critical_rollback
+        self.query = self._critical_query
+        self.gevent_sleep = _noop
+
+    def is_in_critical_phase(self):
+        return 'gevent_sleep' in self.__dict__
+
+    def __exit_critical_phase(self):
+        # Unconditional, assumes we're in one.
+        del self.rollback
+        del self.commit
+        del self.query
+        del self.gevent_sleep
+
+    def exit_critical_phase(self):
+        # Public, may or may not be in one.
+        if self.is_in_critical_phase():
+            self.__exit_critical_phase()
+
+    def _critical_query(self, query):
+        return BaseConnection.query(self, query)
+
+    def _critical_rollback(self):
+        try:
+            self._direct_rollback()
+        finally:
+            self.__exit_critical_phase()
+
+    def _critical_commit(self):
+        try:
+            self._direct_commit()
+        finally:
+            self.__exit_critical_phase()
+
+
+class Connection(AbstractConnection,
+                 BaseConnection):
+
+    _direct_rollback = BaseConnection.rollback
+    _direct_commit = BaseConnection.commit
 
     def __delattr__(self, name):
         # BaseConnection has a delattr that forbids
