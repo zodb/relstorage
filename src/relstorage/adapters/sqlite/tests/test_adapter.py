@@ -22,9 +22,61 @@ from ..adapter import Sqlite3Adapter as Adapter
 from ..drivers import Sqlite3Driver
 from ...tests import test_adapter
 
+class MockConnection(object):
+
+    @property
+    def cursor(self):
+        return self
+
+    @property
+    def connection(self):
+        return self
+
+    in_transaction = False
+    in_critical_phase = True
+
+    def execute(self, query, _args=()):
+        if query.startswith('UPDATE'):
+            self.in_transaction = True
+
+    def fetchall(self):
+        return ()
+
+    def commit(self):
+        self.in_transaction = False
+        self.in_critical_phase = False
+
+class MockBlobHelper(object):
+
+    txn_has_blobs = False
+
 @skipUnless(Sqlite3Driver.STATIC_AVAILABLE, "Driver not available")
 class TestAdapter(test_adapter.AdapterTestBase):
 
     def _makeOne(self, options):
         return Adapter(":memory:",
                        options=options, pragmas={})
+
+    def _test_lock_database_and_move_ends_critical_section_on_commit(self, commit):
+        from relstorage.options import Options
+        options = Options()
+        options.driver = 'gevent sqlite3'
+        adapter = self._makeOne(None)
+        conn = MockConnection()
+        assert conn.in_critical_phase
+
+        result = adapter.lock_database_and_move(
+            conn,
+            MockBlobHelper(),
+            (b'username', b'desc', b'ext'),
+            commit=commit
+        )
+
+        self.assertIsNotNone(result)
+        self.assertEqual(conn.in_critical_phase, not commit)
+
+    def test_lock_database_and_move_ends_critical_section_on_commit(self):
+        self._test_lock_database_and_move_ends_critical_section_on_commit(True)
+
+    def test_lock_database_and_move_keeps_critical_section_wo_commit(self):
+        self._test_lock_database_and_move_ends_critical_section_on_commit(False)

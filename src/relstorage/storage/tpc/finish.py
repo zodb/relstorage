@@ -41,4 +41,8 @@ def Finish(vote_state, needs_store_commit=True):
     vote_state.cache.after_tpc_finish(vote_state.committing_tid_lock.tid,
                                       vote_state.temp_storage)
 
+    # Make sure we're not holding any elevated privileges still;
+    # that would be a bug in the driver.
+    vote_state.load_connection.exit_critical_phase()
+    vote_state.store_connection.exit_critical_phase()
     return NotInTransaction(vote_state)

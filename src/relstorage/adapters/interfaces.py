@@ -165,14 +165,26 @@ class IDBDriver(Interface):
         to attempt to raise its priority and return results faster.
 
         This mostly has meaning for gevent drivers, which may limit
-        the amount of time they spend in the hub.
+        the amount of time they spend in the hub and the number of context
+        switches to other greenlets.
 
         This phase continues until *after* the ultimate call that
-        commits or aborts is sent.
+        commits or aborts is sent, but should revert to normal as quickly as
+        possible after that. :class:`IRelStorageAdapter` may cooperate with
+        the driver using implementation-specific methods to end the phase
+        at an appropriate time if there is a hidden commit.
 
         This method must be idempotent (have the same effect if called more than
         once) within a given transaction.
         """
+
+    def is_in_critical_phase(connection, cursor):
+        """
+        Answer whether :meth:`enter_critical_phase_until_transaction_end` is in effect.
+        """
+
+    def exit_critical_phase(connection, cursor):
+        "If currently in a critical phase, de-escalate."
 
 class IDBDriverSupportsCritical(IDBDriver):
     """
@@ -1263,6 +1275,13 @@ class IRelStorageAdapter(Interface):
         :meth:`IObjectMover.update_current` and
         :meth:`ITransactionControl.commit_phase1` and
         :meth:`ITransactionControl.commit_phase2`.
+
+        When committing, implementations are encouraged to exit any
+        :meth:`critical phase <IDBDriver.enter_critical_phase_until_transaction_end>`
+        in the most timely manner possible after ensuring that the commit
+        request has been sent, especially if only one
+        communication with the database is required that may block for an arbitrary
+        time to get the lock.
 
         :return: A tuple ``(committing_tid_int, prepared_txn_id)``;
                  the *prepared_txn_id* is irrelevant if *commit* was

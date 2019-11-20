@@ -193,7 +193,7 @@ class PyMySQLConnectorDriver(AbstractMySQLDriver):
         # This implementation uses a property instead of a method.
         conn.autocommit = value
 
-    def callproc_multi_result(self, cursor, proc, args=()):
+    def callproc_multi_result(self, cursor, proc, args=(), exit_critical_phase=False):
         # This driver is weird, wants multi=True, returns an iterator of cursors
         # instead of using nextset()
         resultsets = cursor.execute("CALL " + proc, args, multi=True)

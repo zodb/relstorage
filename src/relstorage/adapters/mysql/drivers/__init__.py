@@ -133,6 +133,8 @@ class AbstractMySQLDriver(AbstractModuleDriver):
         'sql_mode': "CONCAT(@@sql_mode, ',ANSI_QUOTES')",
     }
 
+    dialect = MySQLDialect()
+
     #: Holds the first statement that all connections need to run.
     #: Used as the value of the ``init_command`` argument to ``connect()`` for
     #: drivers that support it (mysqlclient, PyMySQL). This implementation fills
@@ -163,7 +165,9 @@ class AbstractMySQLDriver(AbstractModuleDriver):
     def synchronize_cursor_for_rollback(self, cursor):
         """Does nothing."""
 
-    def callproc_multi_result(self, cursor, proc, args=()):
+    def callproc_multi_result(self, cursor, proc,
+                              args=(),
+                              exit_critical_phase=False):
         """
         Some drivers need extra arguments to execute a statement that
         returns multiple results, and they don't all use the standard
@@ -191,7 +195,21 @@ class AbstractMySQLDriver(AbstractModuleDriver):
         only returns one result set (because the CALLed object doesn't
         return any of its own, i.e., it only has side-effects) there
         shouldn't be any penalty.
+
+        :keyword bool exit_critical_phase: If true (*not* the default),
+            then if the cursor's connection is in a critical phase,
+            it will be exited *before* sending the ``CALL`` query.
+            Do this when the called procedure will commit the transaction
+            itself. There's no need to maintain elevated priority and block
+            other greenlets while the query completes, we have nothing else
+            that must be done to release locks and unblock other threads.
+
+            Exiting before is fine; it's almost a certainty that we
+            won't need to block to write to the socket.
         """
+        if exit_critical_phase:
+            self.exit_critical_phase(cursor.connection, cursor)
+
         cursor.execute('CALL ' + proc, args)
 
         multi_results = [cursor.fetchall()]
@@ -199,8 +217,8 @@ class AbstractMySQLDriver(AbstractModuleDriver):
             multi_results.append(cursor.fetchall())
         return multi_results
 
-
-    dialect = MySQLDialect()
+    def exit_critical_phase(self, connection, cursor):
+        "Override if you implement critical phases."
 
 
 implement_db_driver_options(

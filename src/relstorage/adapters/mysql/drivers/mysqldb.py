@@ -28,6 +28,7 @@ from relstorage._util import Lazy
 
 from . import AbstractMySQLDriver
 from . import IterateFetchmanyMixin
+from ...drivers import GeventDriverMixin
 
 __all__ = [
     'MySQLdbDriver',
@@ -95,7 +96,8 @@ class MySQLdbDriver(AbstractMySQLDriver):
         return True
 
 @implementer(IDBDriverSupportsCritical)
-class GeventMySQLdbDriver(MySQLdbDriver):
+class GeventMySQLdbDriver(GeventDriverMixin,
+                          MySQLdbDriver):
     __name__ = 'gevent MySQLdb'
 
     _GEVENT_CAPABLE = True
@@ -117,17 +119,17 @@ class GeventMySQLdbDriver(MySQLdbDriver):
         self._connect = self._get_connection_class()
         self._strict_cursor = self._connect.default_cursor
 
-    def get_driver_module(self):
-        # Make sure we can use gevent; if we can't the ImportError
-        # will prevent this driver from being used.
-        __import__('gevent')
-        return super(GeventMySQLdbDriver, self).get_driver_module()
-
     _Connection = None
 
     def enter_critical_phase_until_transaction_end(self, connection, cursor):
         # pylint:disable=unused-argument
         connection.enter_critical_phase_until_transaction_end()
+
+    def is_in_critical_phase(self, connection, cursor):
+        return connection.is_in_critical_phase()
+
+    def exit_critical_phase(self, connection, cursor):
+        connection.exit_critical_phase()
 
     @classmethod
     def _get_connection_class(cls):

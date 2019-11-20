@@ -105,10 +105,11 @@ class Sqlite3ObjectMover(AbstractObjectMover):
     def store_temps(self, cursor, state_oid_tid_iter):
         AbstractObjectMover.store_temps(self, cursor, state_oid_tid_iter)
         # That should have started a transaction, effectively moving us
-        # from READ COMMITTED mode into REPEATABLE READ. We don't want that (but we do
+        # from READ COMMITTED mode into REPEATABLE READ. We don't want that because we haven't
+        # taken out an exclusive lock on the main database yet (but we do
         # want the write to be transactional and fast) so we now COMMIT and go back to
         # floating.
-        cursor.connection.commit(run_cleanups=False)
+        cursor.connection.return_to_repeatable_read()
 
     def replace_temps(self, cursor, state_oid_tid_iter):
         # This is called when we're already holding exclusive locks

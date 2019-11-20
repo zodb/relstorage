@@ -256,7 +256,8 @@ class MySQLAdapter(AbstractAdapter):
         multi_results = self.driver.callproc_multi_result(
             store_connection.cursor,
             proc,
-            params
+            params,
+            exit_critical_phase=commit
         )
 
         tid_int, = multi_results[0][0]

@@ -95,3 +95,38 @@ class TestAbstractDrivers(unittest.TestCase):
         self.assertIsInstance(drivers.select_driver('mixedcase'), Driver)
         self.assertIsInstance(drivers.select_driver('MIXEDCASE'), Driver)
         self.assertIsInstance(drivers.select_driver('MixedCase'), Driver)
+
+
+class IDBDriverSupportsCriticalTestMixin(object):
+
+    def _makeOne(self):
+        raise NotImplementedError
+
+    def test_enter_critical_phase(self):
+        driver = self._makeOne()
+        conn = driver.connect()
+
+        self.assertFalse(conn.is_in_critical_phase())
+        driver.enter_critical_phase_until_transaction_end(conn, None)
+        self.assertTrue(driver.is_in_critical_phase(conn, None))
+        # idempotent
+        conn.enter_critical_phase_until_transaction_end()
+        self.assertTrue(conn.is_in_critical_phase())
+
+    def test_enter_critical_phase_exit_on_commit(self):
+        driver = self._makeOne()
+        conn = driver.connect()
+
+        # exits on commit
+        driver.enter_critical_phase_until_transaction_end(conn, None)
+        conn.commit()
+        self.assertFalse(driver.is_in_critical_phase(conn, None))
+
+    def test_enter_critical_phase_exit_on_rollback(self):
+        driver = self._makeOne()
+        conn = driver.connect()
+
+        # exits on commit
+        driver.enter_critical_phase_until_transaction_end(conn, None)
+        conn.rollback()
+        self.assertFalse(driver.is_in_critical_phase(conn, None))
