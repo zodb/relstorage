@@ -48,6 +48,10 @@ class Sqlite3ConnectionManager(AbstractConnectionManager):
           Connection COMMITs when commit() is called or when a DDL
           statement is executed (prior to Python 3.6).
 
+          For SELECT statements, the connection remains in its current state,
+          which would be autocommit (read  committed) unless a transaction
+          has been opened.
+
     Now, those are all write statements that theoretically would begin
     a write transaction and take a database lock, so it would seem
     like there's no difference between IMMEDIATE and DEFERRED. But
@@ -60,7 +64,7 @@ class Sqlite3ConnectionManager(AbstractConnectionManager):
 
     We thus tell Python SQLite to operate in DEFERRED mode; for load
     connections, we must explicitly execute the BEGIN to get a
-    consistent snapshot of the database, but for load, we can let the
+    consistent snapshot of the database, but for store, we can let the
     Python Connection detect when we execute a write operation and
     begin the transaction then, letting SQLite upgrade the locks to
     explicit mode when we attempt a write to the main database.
@@ -73,7 +77,10 @@ class Sqlite3ConnectionManager(AbstractConnectionManager):
     # super copies these into isolation_load/store
     # We use 'EXCLUSIVE' for the load connection isolation but we don't
     # ever actually expect to get to that. It just makes problems
-    # more apparent should that happen.
+    # more apparent should that happen. EXCLUSIVE and IMMEDIATE do the same
+    # thing in WAL mode, but in other modes, EXCLUSIVE also prevents
+    # read access to the database. DEFERRED is the default if you just use
+    # BEGIN TRANSACTION.
     isolation_serializable = 'EXCLUSIVE'
     isolation_read_committed = 'DEFERRED'
 

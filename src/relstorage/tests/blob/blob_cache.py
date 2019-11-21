@@ -110,10 +110,9 @@ class TestBlobCacheMixin(TestBlobMixin):
             self._verify_blob_number(blob_number, conn, mode)
         conn.close()
 
-
     def _wait_for_shrinks_to_finish(self):
         cache_checker = self.blob_storage.blobhelper.cache_checker
-        cache_checker.reduced_event.wait()
+        cache_checker.wait_for_checker()
         size = self._size_blobs_in_directory()
         self.assertLess(size, 5000)
 
