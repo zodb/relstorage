@@ -141,19 +141,12 @@ class _LimitedCacheSizeMonitor(_AbstractCacheSizeMonitor):
         """For tests only."""
         # Efficiently wait only if a checker thread is running.
         # It's native, a threading.Event() might not be and we'd need an
-        # asyncwatcher to communicate among threads.
-        if self._reduced_event.is_set():
-            return
-        try:
-            self._reduced_event.wait()
-        except Exception as e: # pylint:disable=broad-except
-            if type(e).__name__ != 'LoopExit':
-                raise
-            # Sigh. gevent. Trying to wait on a threadpool thread
-            # from a greenlet in the main thread, with nothing else
-            # happening.
-            import gevent
-            gevent.get_hub().threadpool.join()
+        # asyncwatcher to communicate among threads. The tests that use us patch
+        # to be sure we use matching events.
+        with self._lock:
+            if self._checker_thread is None:
+                return
+        self._reduced_event.wait()
 
     def _check(self):
         """
@@ -188,7 +181,6 @@ class _LimitedCacheSizeMonitor(_AbstractCacheSizeMonitor):
         checker = _BlobCacheSizeChecker(
             self.blob_dir, self.blob_cache_target_cleanup_size, self._when_done
         )
-
         return native_thread_spawn(checker)
 
     def _when_done(self, checker, holding_clean_lock):

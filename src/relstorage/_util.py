@@ -250,7 +250,7 @@ def log_timed_only_self(func):
 
 _ThreadWithReady = None
 
-def thread_spawn(func, args, daemon=False):
+def thread_spawn(func, args=(), daemon=False):
     global _ThreadWithReady
     if _ThreadWithReady is None:
         import threading
@@ -282,7 +282,7 @@ def thread_spawn(func, args, daemon=False):
     t.start()
     return t
 
-def _gevent_pool_spawn(func, args):
+def _gevent_pool_spawn(func, args=()):
     import gevent
     return gevent.get_hub().threadpool.spawn(func, *args)
 

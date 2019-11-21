@@ -52,7 +52,7 @@ env:
 script:
 # coverage slows PyPy down from 2minutes to 12+.
   - if [[ $TRAVIS_PYTHON_VERSION == 3.7 ]]; then pylint --rcfile=.pylintrc relstorage -f parseable -r n; fi
-  - coverage run -p --concurrency=greenlet .travis/zope_testrunner_gevent.py -t check7 -t check2 -t BlobCache -t Switches --layer gevent
+  - if [[ $TRAVIS_PYTHON_VERSION != pypy* ]]; then coverage run -p --concurrency=greenlet .travis/zope_testrunner_gevent.py -t check7 -t check2 -t BlobCache -t Switches --layer gevent; fi
   - if [[ $TRAVIS_PYTHON_VERSION == pypy* ]]; then python $RS_TEST_CMD --layer "!gevent"; fi
   - if [[ $TRAVIS_PYTHON_VERSION != pypy* ]]; then coverage run -p --concurrency=thread  $RS_TEST_CMD --layer "!gevent"; fi
   # Make sure we can import without zope.schema, which is intended to
