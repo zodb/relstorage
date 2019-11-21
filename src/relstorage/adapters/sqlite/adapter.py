@@ -47,6 +47,7 @@ class Sqlite3Adapter(AbstractAdapter):
     driver_options = drivers
     WRITING_REQUIRES_EXCLUSIVE_LOCK = True
 
+
     def __init__(self, data_dir, pragmas,
                  options=None, oidallocator=None,
                  gevent_yield_interval=None):
@@ -78,7 +79,9 @@ class Sqlite3Adapter(AbstractAdapter):
         if not self.oidallocator:
             self.oidallocator = Sqlite3OIDAllocator(
                 os.path.join(self.data_dir, 'oids.sqlite3'),
-                driver=driver
+                # No switching during OID allocation. It holds an exclusive
+                # lock anyway.
+                driver=drivers.Sqlite3Driver()
             )
 
         self.runner = Sqlite3ScriptRunner()

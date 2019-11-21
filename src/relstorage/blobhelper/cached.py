@@ -28,7 +28,7 @@ import ZODB.blob
 from zope.interface import implementer
 
 from relstorage._util import byte_display
-from relstorage._util import spawn
+from relstorage._util import spawn as native_thread_spawn
 from relstorage._util import thread_spawn
 from relstorage._util import timer
 from relstorage._util import bytes8_to_int64
@@ -88,8 +88,8 @@ class _LimitedCacheSizeMonitor(_AbstractCacheSizeMonitor):
         'bytes_loaded_check_threshold',
         '_lock',
         '_checker_thread',
+        '_reduced_event',
         '_exceeded_counter',
-        'reduced_event'
     )
 
     def __init__(self, options):
@@ -110,16 +110,18 @@ class _LimitedCacheSizeMonitor(_AbstractCacheSizeMonitor):
             0
         )
         self.bytes_loaded_since_last_check = 0
+        # thread-safe according to whatever threading system is in use.
+        # We *want* mankey patches here.
         self._lock = threading.Lock()
+        self._reduced_event = threading.Event()
         self._checker_thread = None
         self._exceeded_counter = 0
-        self.reduced_event = threading.Event()
         self._check()
 
     def close(self):
         try:
             if self._checker_thread is not None:
-                self._checker_thread.wait()
+                self.wait_for_checker()
         finally:
             self._checker_thread = None
 
@@ -135,6 +137,17 @@ class _LimitedCacheSizeMonitor(_AbstractCacheSizeMonitor):
                 )
                 self._check()
 
+    def wait_for_checker(self):
+        """For tests only."""
+        # Efficiently wait only if a checker thread is running.
+        # It's native, a threading.Event() might not be and we'd need an
+        # asyncwatcher to communicate among threads. The tests that use us patch
+        # to be sure we use matching events.
+        with self._lock:
+            if self._checker_thread is None:
+                return
+        self._reduced_event.wait()
+
     def _check(self):
         """
         Run blob cache cleanup in another thread if needed.
@@ -144,7 +157,7 @@ class _LimitedCacheSizeMonitor(_AbstractCacheSizeMonitor):
         """
         on_init = self.bytes_loaded_since_last_check == 0
         self.bytes_loaded_since_last_check = 0
-        self.reduced_event.clear()
+        self._reduced_event.clear()
         self._exceeded_counter += 1
         checker_thread = self._checker_thread
         if checker_thread is not None and not checker_thread.ready():
@@ -168,8 +181,7 @@ class _LimitedCacheSizeMonitor(_AbstractCacheSizeMonitor):
         checker = _BlobCacheSizeChecker(
             self.blob_dir, self.blob_cache_target_cleanup_size, self._when_done
         )
-
-        return spawn(checker)
+        return native_thread_spawn(checker)
 
     def _when_done(self, checker, holding_clean_lock):
         """
@@ -184,7 +196,7 @@ class _LimitedCacheSizeMonitor(_AbstractCacheSizeMonitor):
             # definition it cannot be ready yet.
             self._checker_thread = None
             if not holding_clean_lock:
-                self.reduced_event.set()
+                self._reduced_event.set()
                 return
 
             # In principle, if the checker finished sizing the directory and got
@@ -217,7 +229,7 @@ class _LimitedCacheSizeMonitor(_AbstractCacheSizeMonitor):
                 )
                 self._check()
             else:
-                self.reduced_event.set()
+                self._reduced_event.set()
 
 
 class _ExternalLimitedCacheSizeMonitor(_LimitedCacheSizeMonitor):

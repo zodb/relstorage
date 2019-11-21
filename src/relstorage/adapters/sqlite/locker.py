@@ -27,9 +27,9 @@ from ..locker import AbstractLocker
 class Sqlite3Locker(AbstractLocker):
 
     supports_row_lock_nowait = False
-    _lock_share_clause = ''
-    _lock_share_clause_nowait = ''
-    _lock_current_clause = ''
+    _lock_share_clause = '<This should not be used>'
+    _lock_share_clause_nowait = '<This should not be used>'
+    _lock_current_clause = '<This Should not be used>'
 
     def _lock_readCurrent_oids_for_share(self, cursor, current_oids, shared_locks_block):
         """
@@ -54,7 +54,7 @@ class Sqlite3Locker(AbstractLocker):
         # in a tranasction. In which case there's nothing to do (but for safety
         # we still execute the query)
         AbstractLocker._lock_rows_being_modified(self, cursor)
-        assert conn.in_transaction or conn.in_transaction is None # Py2
+        assert conn.in_transaction or conn.in_transaction is None, repr(conn) # Py2
 
     def hold_commit_lock(self, cursor, ensure_current=False, nowait=False):
         # We may or may not actually have locked rows; if we're doing a restore

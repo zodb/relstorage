@@ -53,6 +53,14 @@ class TestBlobCacheMixin(TestBlobMixin):
     CLIENT_COUNT = 4 if not RUNNING_ON_CI else 2
 
     def setUp(self):
+        # and don't actually use native threads in gevent mode. They can't be
+        # waited on which makes this test racy.
+
+        from relstorage.blobhelper import cached
+        from relstorage._util import thread_spawn
+        assert cached.native_thread_spawn is not thread_spawn
+        cached.native_thread_spawn = thread_spawn
+
         super(TestBlobCacheMixin, self).setUp()
         # We're going to wait for any threads we started to finish, so...
         self._old_threads = list(threading.enumerate())
@@ -68,7 +76,10 @@ class TestBlobCacheMixin(TestBlobMixin):
 
     def tearDown(self):
         # # Let the shrink run as many more times as it needs to, if it's waiting.
-        # self.cleanup_finished.release()
+        from relstorage.blobhelper import cached
+        from relstorage._util import spawn as native_thread_spawn
+        cached.native_thread_spawn = native_thread_spawn
+
         self._wait_for_all_spawned_threads_to_finish()
         self._old_threads = []
         super(TestBlobCacheMixin, self).tearDown()
@@ -110,10 +121,9 @@ class TestBlobCacheMixin(TestBlobMixin):
             self._verify_blob_number(blob_number, conn, mode)
         conn.close()
 
-
     def _wait_for_shrinks_to_finish(self):
         cache_checker = self.blob_storage.blobhelper.cache_checker
-        cache_checker.reduced_event.wait()
+        cache_checker.wait_for_checker()
         size = self._size_blobs_in_directory()
         self.assertLess(size, 5000)
 

@@ -10,6 +10,9 @@
 
 - MySQL+gevent: Release the critical section a bit sooner. See :issue:`381`.
 
+- SQLite+gevent: Fix possible deadlocks with gevent if switchers
+  occurred at unexpected times. See :issue:`382`.
+
 3.0.0 (2019-11-12)
 ==================
 

@@ -17,8 +17,10 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import contextlib
 import os.path
 import sqlite3
+import functools
 
 from zope.interface import implementer
 
@@ -78,11 +80,262 @@ DEFAULT_CACHE_SIZE = None
 # doesn't show much difference between FILE and MEMORY *usually*:
 # Sometimes changing the setting back and forth causes massive
 # changes in performance, at least on a macOS desktop system.
-# bother to change from the default.
 DEFAULT_TEMP_STORE = None
 
 # How long before we get 'OperationalError: database is locked'
 DEFAULT_TIMEOUT = 15
+
+
+class UnableToConnect(sqlite3.OperationalError):
+    filename = None
+    def with_filename(self, f):
+        self.filename = f
+        return self
+
+    def __str__(self):
+        s = super(UnableToConnect, self).__str__()
+        if self.filename:
+            s += " (At: %r)" % self.filename
+        return s
+
+
+class Cursor(sqlite3.Cursor):
+    has_analyzed_temp = False
+
+    def execute(self, stmt, params=None):
+        # While we transition away from hardcoded SQL to the query
+        # objects, we still have some %s params out there. This papers
+        # over that.
+        if params is not None:
+            stmt = stmt.replace('%s', '?')
+            return sqlite3.Cursor.execute(self, stmt, params)
+
+        return sqlite3.Cursor.execute(self, stmt)
+
+    def executemany(self, stmt, params):
+        stmt = stmt.replace('%s', '?')
+        return sqlite3.Cursor.executemany(self, stmt, params)
+
+    def __repr__(self):
+        return '<%s at 0x%x from %r>' % (
+            type(self).__name__,
+            id(self), self.connection
+        )
+
+    def close(self):
+        try:
+            sqlite3.Cursor.close(self)
+        except sqlite3.ProgrammingError:
+            # XXX: Where was this happening? Why are we doing this?
+            # (I haven't seen it locally)
+            pass
+
+
+class _ExplainCursor(DatabaseHelpersMixin): # pragma: no cover (A debugging aid)
+    def __init__(self, cur):
+        self.cur = cur
+
+    def __getattr__(self, name):
+        return getattr(self.cur, name)
+
+    def __iter__(self):
+        return iter(self.cur)
+
+    def execute(self, sql, *args):
+        if sql.strip().startswith(('INSERT', 'SELECT', 'DELETE', 'WITH')):
+            exp = 'EXPLAIN QUERY PLAN ' + sql.lstrip()
+            print(sql)
+            self.cur.execute(exp, *args)
+            print(self._rows_as_pretty_string(self.cur))
+        return self.cur.execute(sql, *args)
+
+
+class Connection(sqlite3.Connection):
+    CURSOR_FACTORY = Cursor
+    has_analyzed_temp = False
+    before_commit_functions = ()
+    _rs_has_closed = False
+    _rs_progress_handler = None
+    replica = None
+    standard_progress_handler = (None, 0)
+
+    def __init__(self, rs_db_filename, *args, **kwargs):
+        __traceback_info__ = args, kwargs
+        # PyPy3 calls self.commit() during __init__.
+        self.rs_db_filename = rs_db_filename
+        self.before_commit_functions = []
+
+        try:
+            super(Connection, self).__init__(*args, **kwargs)
+        except sqlite3.OperationalError as e:
+            raise UnableToConnect(e).with_filename(rs_db_filename)
+
+    def __repr__(self):
+        if not self.rs_db_filename:
+            return super(Connection, self).__repr__()
+        try:
+            in_tx = self.in_transaction
+        except sqlite3.ProgrammingError:
+            in_tx = 'closed'
+
+        return '<%s at 0x%x to %r in_transaction=%s>' % (
+            type(self).__name__,
+            id(self), self.rs_db_filename,
+            in_tx
+        )
+
+    def _at_transaction_end(self):
+        pass
+
+    if not PY3:
+        # This helpful attribute is Python 3 only.
+        assert not hasattr(sqlite3.Connection, 'in_transaction')
+        __in_transaction = None
+        @property
+        def in_transaction(self):
+            return self.__in_transaction
+
+        def _at_transaction_end(self):
+            self.__in_transaction = None
+
+    def register_before_commit_cleanup(self, func):
+        self.before_commit_functions.append(func)
+
+    if 0: # pylint:disable=using-constant-test
+        def cursor(self):
+            return _ExplainCursor(sqlite3.Connection.cursor(self, self.CURSOR_FACTORY))
+    else:
+        def cursor(self):
+            return sqlite3.Connection.cursor(self, self.CURSOR_FACTORY)
+
+    def return_to_repeatable_read(self):
+        # See mover.py
+        # deliberately doesn't use self.commit(), we don't want to run cleanup
+        # hooks, this is a mid-logical-ZODB-transaction operation
+        sqlite3.Connection.commit(self)
+
+    def commit(self):
+        try:
+            for func in self.before_commit_functions:
+                func(self)
+            sqlite3.Connection.commit(self)
+        finally:
+            self._at_transaction_end()
+
+    def rollback(self):
+        try:
+            sqlite3.Connection.rollback(self)
+            for func in self.before_commit_functions:
+                func(self, True)
+        finally:
+            self._at_transaction_end()
+
+    def __check_and_log(self, reported_values, changed_values):
+        logger.debug(
+            "Connection: %(conn)s.\n\t"
+            "Using sqlite3 version: %(ver)s.\n\t"
+            "Default    connection settings: %(defs)s.\n\t"
+            "Changing   connection settings: %(changing)s.\n\t"
+            "Desired    connection settings: %(desired)s.\n\t"
+            "Unapplied  connection settings: %(applied)s.\n\t",
+            dict(
+                conn=self,
+                ver=sqlite3.sqlite_version,
+                defs={
+                    k: v for k, v in reported_values.items()
+                    if k not in changed_values
+                },
+                changing={
+                    k: v for k, v in reported_values.items()
+                    if k in changed_values
+                },
+                desired={
+                    k: v[0] for k, v in changed_values.items()
+                },
+                applied={
+                    k: v[1] for k, v in changed_values.items()
+                    if v[0] != v[1]
+                },
+            )
+        )
+
+    # PRAGMA statements don't allow ? placeholders
+    # when executed. This is probably a bug in the sqlite3
+    # module.
+    def __execute_pragma(self, name, value):
+        stmt = 'PRAGMA %s = %s' % (name, value)
+        cur = self.execute(stmt)
+        # On PyPy, it's important to traverse the cursor, even if
+        # you don't expect any results, because it still counts as
+        # a statement that's open and can cause 'OperationalError:
+        # can't commit with SQL operations active'.
+        return cur.fetchall()
+
+    def execute_pragmas(self, **kwargs):
+        report = {}
+        changed = {} # {setting: (desired, updated)}
+        if 'page_size' in kwargs:
+            # This has to happen before changing into WAL.
+            ps = kwargs.pop('page_size')
+            items = [('page_size', ps)]
+            items.extend(kwargs.items())
+        else:
+            items = sorted(kwargs.items())
+
+        for pragma, desired in items:
+            # Query, report, then change
+            stmt = 'PRAGMA %s' % (pragma,)
+            row, = self.execute(stmt).fetchall() or ((),)
+            orig_value = row[0] if row else None
+            assert pragma not in report # Only one
+            report[pragma] = orig_value
+            if desired is not None and desired != orig_value:
+                self.__execute_pragma(pragma, desired)
+                row = self.execute(stmt).fetchone()
+                new_value = row[0] if row else None
+                changed[pragma] = (desired, new_value)
+
+        self.__check_and_log(report, changed)
+
+    @log_timed
+    def close(self):
+        # If we're the only connection open to this database,
+        # and SQLITE_FCNTL_PERSIST_WAL is true (by default
+        # *most* places, but apparently not in the sqlite3
+        # 3.24 shipped with Apple in macOS 10.14.5), then when
+        # we close the database the wal file that was built up
+        # by any of the writes that have been done will be automatically
+        # combined with the database file, as if with
+        # "PRAGMA wal_checkpoint(RESTART)".
+        #
+        # This can be slow. It releases the GIL, so it could be done in another thread;
+        # but most often (aside from tests) we're closing connections because we're
+        # shutting down the process so spawning threads isn't really a good thing.
+        if self._rs_has_closed: # pragma: no cover
+            return
+
+        self._rs_has_closed = True
+        self.before_commit_functions = ()
+        # Recommended best practice is to OPTIMIZE the database for
+        # each closed connection. OPTIMIZE needs to run in each connection
+        # so it can see what tables and indexes were used. It's usually fast,
+        # but has the potential to be slow and lock the database. It cannot be executed
+        # on a read-only connection. We don't want to block too long just closing
+        # a connection, so reset the time we wait to get a lock
+        # (if needed) to a lower value (ms).
+        try:
+            self.executescript("""
+            PRAGMA busy_timeout = 3000;
+            PRAGMA query_only = 0;
+            PRAGMA optimize;
+            """)
+        except sqlite3.OperationalError:
+            logger.debug("Failed to optimize databas, probably in use", exc_info=True)
+        except sqlite3.DatabaseError:
+            # It's possible the file was removed.
+            logger.exception("Failed to optimize database; was it removed?")
+
+        super(Connection, self).close()
 
 
 @implementer(IDBDriver)
@@ -100,6 +353,10 @@ class Sqlite3Driver(MemoryViewBlobDriverMixin,
         and sqlite3.sqlite_version_info[:2] >= (3, 11)
     )
 
+    CONNECTION_FACTORY = Connection
+    DEFAULT_CONNECT_ARGS = {
+    }
+
     def __init__(self):
         super(Sqlite3Driver, self).__init__()
         # Sadly, if a connection is closed out from under it,
@@ -107,6 +364,8 @@ class Sqlite3Driver(MemoryViewBlobDriverMixin,
         # That should really only happen in tests, though, since
         # we're directly connected to the file on disk.
         self.disconnected_exceptions += (self.driver_module.ProgrammingError,)
+        # Make our usual connect() method call our connect_to_file method instead of the
+        # module's connect() method so we get our preferred goodies.
         self._connect = self.connect_to_file
 
     if PY3:
@@ -127,23 +386,20 @@ class Sqlite3Driver(MemoryViewBlobDriverMixin,
         def binary_column_as_state_type(self, data):
             return data
 
-    default_connect_args = {
-    }
+
 
     def _connect_to_file_or_uri(self, fname,
-                                factory=None,
                                 timeout=DEFAULT_TIMEOUT,
                                 pragmas=None,
                                 quick_check=True,
                                 isolation_level=None,
+                                factory_args=(),
                                 **connect_args):
-        if factory is None:
-            factory = Connection
 
-        _factory = factory
-        factory = lambda *args, **kwargs: _factory(fname, *args, **kwargs)
+        factory_args = (fname,) + factory_args
+        factory = lambda *args, **kwargs: self.CONNECTION_FACTORY(*(factory_args + args), **kwargs)
 
-        default_connect_args = self.default_connect_args.copy()
+        default_connect_args = self.DEFAULT_CONNECT_ARGS.copy()
         default_connect_args.update(connect_args)
         connect_args = default_connect_args
 
@@ -258,6 +514,8 @@ class Sqlite3Driver(MemoryViewBlobDriverMixin,
             'cache_size': cache_size,
             # How big is the database?
             'page_count': None,
+            'busy_timeout': None,
+            'query_only': None,
         }
 
         # User-specified extra pragmas go here.
@@ -288,6 +546,109 @@ class Sqlite3Driver(MemoryViewBlobDriverMixin,
         )
 
 
+
+
+###
+# Gevent.
+#
+# Database drivers that use networking and a gevent cooperative driver
+# will essentially always switch while any given query is running.
+# This means that acquiring database locks doesn't block the Python
+# process and other greenlets can run. We need to achieve the same
+# thing here, otherwise we can deadlock the process --- despite the
+# 'critical_phase', it's still possible that, while already holding
+# sqlite's exclusive locks, we could switch to another greenlet that
+# wants to take those same locks. If we block, we deadlock until a
+# timeout occurs. The ZODB tests check7*Threads do this explicitly by
+# invoking tpc_vote() and then time.sleep().
+#
+# So, since there are limited statements that we execute to lock,
+# we push those onto gevent's threadpool (unless we're in critical phase).
+#
+# The rest of the time, we use a progress handler for non-blocking functions
+# to periodically automatically switch. This is a bit non-deterministic,
+# but low overhead.
+###
+
+def run_blocking_in_threadpool(func):
+    @functools.wraps(func)
+    def in_threadpool(self, stmt, params=None):
+        if self.could_block(stmt) and not self.connection.is_in_critical_phase():
+            # Be sure not to yield in the threadpool thread, there's nothing to yield to.
+            with self.connection.temp_critical_phase():
+                return self.connection.gevent.get_hub().threadpool.apply(
+                    func, (self, stmt, params)
+                )
+        return func(self, stmt, params)
+    return in_threadpool
+
+class GeventCursor(Cursor):
+
+    BLOCKING_PREFIXES = (
+        'BEGIN EXCLUSIVE',
+        'BEGIN IMMEDIATE',
+        'UPDATE',
+        'INSERT',
+    )
+
+    def could_block(self, stmt):
+        stmt = stmt.upper().rstrip()
+        if stmt.upper().rstrip().startswith(self.BLOCKING_PREFIXES):
+            return True
+        return False
+
+    execute = run_blocking_in_threadpool(Cursor.execute)
+    executemany = run_blocking_in_threadpool(Cursor.executemany)
+
+
+class GeventConnection(Connection):
+    CURSOR_FACTORY = GeventCursor
+
+    _in_critical_phase = None
+
+    def __init__(self, rs_db_filename, gevent, yield_interval,
+                 *args, **kwargs):
+        # PyPy3 calls commit() from early in __init__, and certain
+        # things aren't set up yet. Notably, set_progress_handler
+        # doesn't work.
+        self._at_transaction_end = lambda: None
+        self.yield_interval = yield_interval
+        self.gevent = gevent
+        Connection.__init__(self, rs_db_filename, *args, **kwargs)
+        del self._at_transaction_end
+        self.set_progress_handler(gevent.sleep, yield_interval)
+
+    def is_in_critical_phase(self):
+        return self._in_critical_phase
+
+    def _at_transaction_end(self): # pylint:disable=method-hidden
+        self.exit_critical_phase()
+
+    def enter_critical_phase_until_transaction_end(self):
+        self._in_critical_phase = True
+        self.set_progress_handler(None, 0)
+
+    def exit_critical_phase(self):
+        self._in_critical_phase = None
+        self.set_progress_handler(self.gevent.sleep, self.yield_interval)
+
+    @contextlib.contextmanager
+    def temp_critical_phase(self):
+        if self._in_critical_phase:
+            yield
+        else:
+            self.enter_critical_phase_until_transaction_end()
+            try:
+                yield
+            finally:
+                self.exit_critical_phase()
+
+    # Note that we don't commit or rollback on the threadpool. If the
+    # threadpool is full, we don't want to put an operation (releasing
+    # locks) that is needed for threadpool tasks (taking locks) on the
+    # back of the threadpool.
+
+
 @implementer(IDBDriverSupportsCritical)
 class Sqlite3GeventDriver(GeventDriverMixin,
                           Sqlite3Driver):
@@ -295,8 +656,9 @@ class Sqlite3GeventDriver(GeventDriverMixin,
     __name__ = 'gevent ' + Sqlite3Driver.MODULE_NAME
     _GEVENT_CAPABLE = True
     _GEVENT_NEEDS_SOCKET_PATCH = False
+    CONNECTION_FACTORY = GeventConnection
 
-    default_connect_args = {
+    DEFAULT_CONNECT_ARGS = {
         # Keep a large number of cached statements. Certain
         # data is tracked at the cached statement level. In our
         # case that's notably the number of virtual machine instructions
@@ -316,11 +678,12 @@ class Sqlite3GeventDriver(GeventDriverMixin,
             self.yield_to_gevent_instruction_interval = conf.gevent_yield_interval
 
     def _connect_to_file_or_uri(self, *args, **kwargs): # pylint:disable=arguments-differ
-        conn = super(Sqlite3GeventDriver, self)._connect_to_file_or_uri(*args, **kwargs)
-        conn.set_standard_progress_handler(self.gevent.sleep,
-                                           self.yield_to_gevent_instruction_interval)
-        conn.is_in_critical_phase = lambda: conn.get_progress_handler() is None
-        return conn
+        assert 'factory_args' not in kwargs
+        kwargs['factory_args'] = (
+            self.gevent,
+            self.yield_to_gevent_instruction_interval,
+        )
+        return super(Sqlite3GeventDriver, self)._connect_to_file_or_uri(*args, **kwargs)
 
     def enter_critical_phase_until_transaction_end(self, connection, cursor):
         connection.enter_critical_phase_until_transaction_end()
@@ -329,257 +692,7 @@ class Sqlite3GeventDriver(GeventDriverMixin,
         return connection.is_in_critical_phase()
 
     def exit_critical_phase(self, connection, cursor):
-        connection.ensure_standard_progress_handler()
-
-class UnableToConnect(sqlite3.OperationalError):
-    filename = None
-    def with_filename(self, f):
-        self.filename = f
-        return self
-
-    def __str__(self):
-        s = super(UnableToConnect, self).__str__()
-        if self.filename:
-            s += " (At: %r)" % self.filename
-        return s
-
-
-class Cursor(sqlite3.Cursor):
-    has_analyzed_temp = False
-
-    def execute(self, stmt, params=None):
-        # While we transition away from hardcoded SQL to the query
-        # objects, we still have some %s params out there. This papers
-        # over that.
-        if params is not None:
-            stmt = stmt.replace('%s', '?')
-            return sqlite3.Cursor.execute(self, stmt, params)
-
-        return sqlite3.Cursor.execute(self, stmt)
-
-    def executemany(self, stmt, params):
-        stmt = stmt.replace('%s', '?')
-        return sqlite3.Cursor.executemany(self, stmt, params)
-
-    def __repr__(self):
-        return '<Cursor at 0x%x from %r>' % (
-            id(self), self.connection
-        )
-
-    def close(self):
-        try:
-            sqlite3.Cursor.close(self)
-        except sqlite3.ProgrammingError:
-            pass
-
-
-class _ExplainCursor(DatabaseHelpersMixin): # pragma: no cover (A debugging aid)
-    def __init__(self, cur):
-        self.cur = cur
-
-    def __getattr__(self, name):
-        return getattr(self.cur, name)
-
-    def __iter__(self):
-        return iter(self.cur)
-
-    def execute(self, sql, *args):
-        if sql.strip().startswith(('INSERT', 'SELECT', 'DELETE', 'WITH')):
-            exp = 'EXPLAIN QUERY PLAN ' + sql.lstrip()
-            print(sql)
-            self.cur.execute(exp, *args)
-            print(self._rows_as_pretty_string(self.cur))
-        return self.cur.execute(sql, *args)
-
-
-class Connection(sqlite3.Connection):
-    # pylint:disable=assigning-non-slot
-    # Something about inheriting from an extension
-    # class seems to get pylint confused.
-    has_analyzed_temp = False
-    before_commit_functions = ()
-    _rs_has_closed = False
-    _rs_progress_handler = None
-    replica = None
-    standard_progress_handler = (None, 0)
-
-    def __init__(self, rs_db_filename, *args, **kwargs):
-        __traceback_info__ = args, kwargs
-        # PyPy3 calls self.commit() during __init__.
-        self.rs_db_filename = rs_db_filename
-        self.before_commit_functions = []
-
-        try:
-            super(Connection, self).__init__(*args, **kwargs)
-        except sqlite3.OperationalError as e:
-            raise UnableToConnect(e).with_filename(rs_db_filename)
-
-
-    def __repr__(self):
-        if not self.rs_db_filename:
-            return super(Connection, self).__repr__()
-        try:
-            in_tx = self.in_transaction
-        except sqlite3.ProgrammingError:
-            in_tx = 'closed'
-
-        return '<Connection at 0x%x to %r in_transaction=%s>' % (
-            id(self), self.rs_db_filename,
-            in_tx
-        )
-
-    if not PY3:
-        # This helpful attribute is Python 3 only.
-        assert not hasattr(sqlite3.Connection, 'in_transaction')
-        @property
-        def in_transaction(self):
-            return None
-
-    def set_progress_handler(self, func, interval):
-        super(Connection, self).set_progress_handler(func, interval)
-        self._rs_progress_handler = func
-
-    def set_standard_progress_handler(self, func, interval):
-        self.set_progress_handler(func, interval)
-        self.standard_progress_handler = (func, interval)
-
-    def ensure_standard_progress_handler(self):
-        self.set_progress_handler(*self.standard_progress_handler)
-
-    def get_progress_handler(self):
-        return self._rs_progress_handler
-
-    def enter_critical_phase_until_transaction_end(self):
-        self.set_progress_handler(None, 0)
-
-    def register_before_commit_cleanup(self, func):
-        self.before_commit_functions.append(func)
-
-    if 0: # pylint:disable=using-constant-test
-        def cursor(self):
-            return _ExplainCursor(sqlite3.Connection.cursor(self, Cursor))
-    else:
-        def cursor(self):
-            return sqlite3.Connection.cursor(self, Cursor)
-
-    def return_to_repeatable_read(self):
-        # See mover.py
-        # deliberately doesn't use self.commit()
-        sqlite3.Connection.commit(self)
-
-    def commit(self):
-        try:
-            for func in self.before_commit_functions:
-                func(self)
-            sqlite3.Connection.commit(self)
-        finally:
-            self.ensure_standard_progress_handler()
-
-    def rollback(self):
-        try:
-            sqlite3.Connection.rollback(self)
-            for func in self.before_commit_functions:
-                func(self, True)
-        finally:
-            self.ensure_standard_progress_handler()
-
-    _last_changed_settings = ()
-    _last_reported_settings = ()
-
-    @staticmethod
-    def __check_and_log(reported_values, changed_values):
-        reported_to_save = tuple(sorted(reported_values.items()))
-        changed_to_save = tuple(sorted(changed_values.items()))
-
-        if reported_to_save != Connection._last_reported_settings or (
-                changed_to_save != Connection._last_changed_settings):
-            Connection._last_changed_settings = changed_to_save
-            Connection._last_reported_settings = reported_to_save
-            logger.debug(
-                "Connected to sqlite3 version: %s. "
-                "Default connection settings: %s. "
-                "Custom connection settings: %s. ",
-                sqlite3.sqlite_version,
-                reported_values,
-                " ".join("(%s was %s; wanted %s; got %s)" % ((k,) + v)
-                         for k, v in changed_values.items()))
-
-    # PRAGMA statements don't allow ? placeholders
-    # when executed. This is probably a bug in the sqlite3
-    # module.
-    def _execute_pragma(self, name, value):
-        stmt = 'PRAGMA %s = %s' % (name, value)
-        cur = self.execute(stmt)
-        # On PyPy, it's important to traverse the cursor, even if
-        # you don't expect any results, because it still counts as
-        # a statement that's open and can cause 'OperationalError:
-        # can't commit with SQL operations active'.
-        return cur.fetchall()
-
-    def execute_pragmas(self, **kwargs):
-        report = {}
-        changed = {} # {setting: (original, desired, updated)}
-        if 'page_size' in kwargs:
-            # This has to happen before changing into WAL.
-            ps = kwargs.pop('page_size')
-            items = [('page_size', ps)]
-            items.extend(kwargs.items())
-        else:
-            items = kwargs.items()
-
-        for pragma, desired in items:
-            # Query, report, then change
-            stmt = 'PRAGMA %s' % (pragma,)
-            row, = self.execute(stmt).fetchall() or ((),)
-            orig_value = row[0] if row else None
-            if desired is not None and desired != orig_value:
-                self._execute_pragma(pragma, desired)
-                row = self.execute(stmt).fetchone()
-                new_value = row[0] if row else None
-                changed[pragma] = (orig_value, desired, new_value)
-            else:
-                report[pragma] = orig_value
-        self.__check_and_log(report, changed)
-
-    @log_timed
-    def close(self):
-        # If we're the only connection open to this database,
-        # and SQLITE_FCNTL_PERSIST_WAL is true (by default
-        # *most* places, but apparently not in the sqlite3
-        # 3.24 shipped with Apple in macOS 10.14.5), then when
-        # we close the database the wal file that was built up
-        # by any of the writes that have been done will be automatically
-        # combined with the database file, as if with
-        # "PRAGMA wal_checkpoint(RESTART)".
-        #
-        # This can be slow. It releases the GIL, so it could be done in another thread;
-        # but most often (aside from tests) we're closing connections because we're
-        # shutting down the process so spawning threads isn't really a good thing.
-        if self._rs_has_closed: # pragma: no cover
-            return
-
-        self._rs_has_closed = True
-        self.before_commit_functions = ()
-        # Recommended best practice is to OPTIMIZE the database for
-        # each closed connection. OPTIMIZE needs to run in each connection
-        # so it can see what tables and indexes were used. It's usually fast,
-        # but has the potential to be slow and lock the database. It cannot be executed
-        # on a read-only connection. We don't want to block too long just closing
-        # a connection, so reset the time we wait to get a lock
-        # (if needed) to a lower value (ms).
-        try:
-            self.executescript("""
-            PRAGMA busy_timeout = 3000;
-            PRAGMA query_only = 0;
-            PRAGMA optimize;
-            """)
-        except sqlite3.OperationalError:
-            logger.debug("Failed to optimize databas, probably in use", exc_info=True)
-        except sqlite3.DatabaseError:
-            # It's possible the file was removed.
-            logger.exception("Failed to optimize database; was it removed?")
-
-        super(Connection, self).close()
+        connection.exit_critical_phase()
 
 
 implement_db_driver_options(

@@ -233,7 +233,7 @@ class AbstractManagedConnection(object):
             if not can_reconnect:
                 raise
             logger.warning("Disconnected (%s) when running %s; attempting reconnect",
-                           e, f, self, exc_info=True)
+                           e, f, exc_info=True)
             self.drop()
             try:
                 self._open_connection()
