@@ -10,8 +10,21 @@
 
 - MySQL+gevent: Release the critical section a bit sooner. See :issue:`381`.
 
-- SQLite+gevent: Fix possible deadlocks with gevent if switchers
+- SQLite+gevent: Fix possible deadlocks with gevent if switches
   occurred at unexpected times. See :issue:`382`.
+
+- MySQL+gevent: Fix possible deadlocks with gevent if switches
+  occurred at unexpected times. See :issue:`385`.  This also included
+  some minor optimizations.
+
+  .. caution::
+
+     This introduces a change in a stored procedure that is not
+     compatible with older versions of RelStorage. When this version
+     is first deployed, if there are older versions of RelStorage
+     still running, they will be unable to commit. They will fail with
+     a transient conflict error; they may attempt retries, but wil not
+     succeed. Read-only transactions will continue to work.
 
 3.0.0 (2019-11-12)
 ==================

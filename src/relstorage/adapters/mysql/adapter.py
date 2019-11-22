@@ -65,6 +65,7 @@ from ..dbiter import HistoryFreeDatabaseIterator
 from ..dbiter import HistoryPreservingDatabaseIterator
 from ..interfaces import IRelStorageAdapter
 from ..interfaces import UnableToLockRowsToReadCurrentError
+from ..interfaces import UnableToLockRowsToModifyError
 from ..poller import Poller
 from ..scriptrunner import ScriptRunner
 from ..batch import RowBatcher
@@ -292,12 +293,12 @@ class MySQLAdapter(AbstractAdapter):
             # doesn't matter.
             read_current_param = json.dumps(list(read_current_oids.items()))
 
-        proc = 'lock_objects_and_detect_conflicts(%s)'
+        proc = 'lock_objects_and_detect_conflicts(%s, %s)'
         try:
             multi_results = self.driver.callproc_multi_result(
                 cursor,
                 proc,
-                (read_current_param,)
+                (read_current_param, 0)
             )
         except self.locker.lock_exceptions as e:
             # On MySQL 5.7, the time-based mechanism to determine that
@@ -313,39 +314,19 @@ class MySQLAdapter(AbstractAdapter):
                     self._describe_best_lock_objects_and_detect_conflicts(),
                     UnableToLockRowsToReadCurrentError
                 )
+            elif 'exclusive locks' in str(e):
+                self.locker.reraise_commit_lock_error(
+                    cursor,
+                    self._describe_best_lock_objects_and_detect_conflicts(),
+                    UnableToLockRowsToModifyError
+                )
             raise
 
         # There's always a useless last result, the result of the stored procedure itself.
         proc_result = multi_results.pop()
         assert not proc_result, proc_result
-
-        # With read_current_oids, the proc returns one or two results,
-        # either of which may be empty. If it returns one, that's
-        # because it detected a read conflict and aborted before
-        # trying to lock other rows. If it returns two, the first will
-        # always be empty because there was no read conflict.
-        #
-        # If we didn't have read_current_oids, it will only return a
-        # single result, the conflicts (which may be empty.)
-        # If these asserts fail, it's a good sign that we're running with an
-        # incompatible version of our stored procedures.
-
-        if read_current_oids:
-            if len(multi_results) == 1:
-                # We quit before we checked for conflicts. Must be
-                # a read conflict of length 1.
-                read_conflicts = multi_results[0]
-                assert len(read_conflicts) == 1, multi_results
-                assert read_conflicts[0][-1] is None, multi_results
-                conflicts = read_conflicts
-            else:
-                assert len(multi_results) == 2, multi_results
-                assert not multi_results[0], multi_results
-                conflicts = multi_results[1]
-        else:
-            # Only conflicts were checked and returned.
-            assert len(multi_results) == 1, multi_results
-            conflicts = multi_results[0]
+        assert len(multi_results) == 1, multi_results
+        conflicts = multi_results[0]
 
         return conflicts
 

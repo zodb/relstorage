@@ -389,6 +389,7 @@ except ImportError:
     GeventDriverMixin = _NoGeventDriverMixin
     GeventConnectionMixin = _NoGeventConnectionMixin
 else:
+    import select
     from gevent.socket import wait
     get_hub = gevent.get_hub
 
@@ -396,6 +397,65 @@ else:
         gevent = gevent
 
     class GeventConnectionMixin(_NoGeventConnectionMixin):
+        """
+        Helper for a connection that waits using gevent.
+
+        Subclasses must provide a ``fileno()`` method. The usual
+        pattern for executing a query would then be something like
+        this::
+
+            query = format_query_to_bytes(...)
+            self.gevent_wait_write()
+            self.send_query()
+
+            self.gevent_wait_read()
+            self.read_results()
+
+        It is important that ``send_query`` do nothing but put bytes
+        on the wire. It must not include any attempt to wait for a
+        response from the database, especially if that response could
+        take an arbitrary amount of time or block. (Of course, if
+        ``send_query`` and ``read_results`` can arrange to use gevent
+        waiting functions too, you'll have finer control. This example
+        is all-or-nothing. Sometimes its easy to handle
+        ``read_results`` in a looping function using a server-side
+        cursor.)
+
+        The ``gevent_wait_read`` and ``gevent_wait_write`` functions
+        are implemented using :func:`gevent.socket.wait`. That
+        function always takes a full iteration of the event loop to
+        determine whether a file descriptor is ready; it always yields
+        control to other greenlets immediately. gevent's own sockets
+        don't work that way; instead they try to read/write and catch
+        the resulting EAGAIN exception. Only after that do they yield
+        to the event loop. This is for good reason: eliminating
+        unnecessary switches can lead to higher throughput.
+
+        Here, a pass through the event loop can be risky. If we send a
+        request that establishes database locks that will require
+        further action from the greenlet to relinquish, those will
+        come into being (potentially blocking other greenlets in the
+        same or different processes) sometime between when
+        ``send_query`` is entered and when ``gevent_wait_read`` exits.
+        If, for any reason, a different greenlet runs while we have
+        yielded to the event loop and blocks on a resource we own that
+        is not gevent cooperative (a non-monkey-patched lock, a
+        different database) we'll never regain control. And thus we'll
+        never be able to make forward progress and release those
+        locks. Since they're shared locks, that could harm arbitrary
+        machines in the cluster.
+
+        Thus, we perform a similar optimization as gevent sockets: we
+        first check to see if the file descriptor is ready and only
+        yield to the event loop if it isn't. The cost is an extra
+        system call to ``select``. For write requests, we could be
+        able to assume that they are always ready (depending on the
+        nature of the protocol); if that's so, override
+        :meth:`gevent_check_write`. The same goes for
+        :meth:`gevent_check_read`. This doesn't eliminate the problem,
+        but it should substantially reduce the chances of it
+        happening.
+        """
         gevent_sleep = staticmethod(gevent.sleep)
 
         def close(self):
@@ -420,12 +480,24 @@ else:
                 self.gevent_write_watcher.close()
                 self.gevent_hub = None
 
+        def gevent_check_read(self,):
+            if select.select([self], (), (), 0)[0]:
+                return True
+            return False
+
         def gevent_wait_read(self):
-            self.__check_watchers()
-            wait(self.gevent_read_watcher,
-                 hub=self.gevent_hub)
+            if not self.gevent_check_read():
+                self.__check_watchers()
+                wait(self.gevent_read_watcher,
+                     hub=self.gevent_hub)
+
+        def gevent_check_write(self):
+            if select.select((), [self], (), 0)[1]:
+                return True
+            return False
 
         def gevent_wait_write(self):
-            self.__check_watchers()
-            wait(self.gevent_write_watcher,
-                 hub=self.gevent_hub)
+            if not self.gevent_check_write():
+                self.__check_watchers()
+                wait(self.gevent_write_watcher,
+                     hub=self.gevent_hub)

@@ -1,20 +1,27 @@
 CREATE PROCEDURE lock_objects_and_detect_conflicts(
-  read_current_oids_tids JSON
+  read_current_oids_tids JSON,
+  constant INT -- A version check to prevent older versions from running
 )
   COMMENT '{CHECKSUM}'
 label_proc:BEGIN
   DECLARE len INT;
   DECLARE i INT DEFAULT 0;
+  DECLARE con_oid BIGINT;
+  DECLARE con_tid BIGINT;
   DECLARE prev_timeout INT;
-  DECLARE EXIT HANDLER FOR 1205, 1213
+  DECLARE EXIT HANDLER FOR 1205, 1213, 3572
      BEGIN
-       -- For 'lock_timeout' or deadlock errors, restore the old timeout
+       -- 3572, ER_LOCK_NOWAIT, "Statement aborted because lock(s)
+       -- could not be acquired immediately and NOWAIT is set." is raised in MySQL 8
+       -- (at least 8.0.18) if we use FOR SHARE NOWAIT instead of the older syntax.
+
+       -- For 'lock_timeout' (1205) or deadlock errors (1213), restore the old timeout
        -- (if it was a shared lock that failed),
        -- completely rollback the transaction to drop any locks we do have,
        -- (important if we had already taken shared locks then timed out on
        -- exclusive locks.)
        -- and then reraise the exception.
-       SET @@innodb_lock_wait_timeout = prev_timeout;
+       SET SESSION innodb_lock_wait_timeout = prev_timeout;
        -- The server depends on these error messages.
        -- TODO: Write test cases that verify we rollback our shared locks if we
        -- can't get the exclusive locks.
@@ -64,6 +71,7 @@ label_proc:BEGIN
   IF read_current_oids_tids IS NOT NULL THEN
     -- We don't make the server do a round-trip to put this data
     -- into a temp table because we're specifically trying to limit round trips.
+    DELETE FROM temp_read_current;
     SET len = JSON_LENGTH(read_current_oids_tids);
     WHILE i < len DO
       INSERT INTO temp_read_current (zoid, tid)
@@ -71,8 +79,6 @@ label_proc:BEGIN
              JSON_EXTRACT(read_current_oids_tids, CONCAT('$[', i, '][1]'));
       SET i = i + 1;
     END WHILE;
-
-    -- SIGNAL SQLSTATE 'HY000' SET  MYSQL_ERRNO = 1205;
 
     -- The timeout only goes to 1; this procedure seems to always take roughtly 2s
     -- to actually detect a lock timeout problem, however.
@@ -92,21 +98,25 @@ label_proc:BEGIN
     ORDER BY t.zoid
     {FOR_SHARE};
 
-    SET @@innodb_lock_wait_timeout = prev_timeout;
+    SET SESSION innodb_lock_wait_timeout = prev_timeout;
     -- Signal that we handled shared locks, so any lock failure to come is exclusive locks.
     SET prev_timeout = NULL;
 
     -- Now return any such rows that we locked
-    -- that are in conflict. This forms its own result set.
+    -- that are in conflict.
     -- No point doing any more work taking exclusive locks, etc,
-    -- because we will immediately abort.
-    SELECT zoid, {CURRENT_OBJECT}.tid, NULL as prev_tid, NULL as state
+    -- because we will immediately abort, but we must be careful not to return
+    -- an extra result set that's empty: that intereferes with our socket IO
+    -- waiting for query results.
+    SELECT zoid, {CURRENT_OBJECT}.tid
+    INTO con_oid, con_tid
     FROM {CURRENT_OBJECT}
     INNER JOIN temp_read_current USING (zoid)
     WHERE temp_read_current.tid <> {CURRENT_OBJECT}.tid
     LIMIT 1;
 
-    IF FOUND_ROWS() > 0 THEN
+    IF con_oid IS NOT NULL THEN
+      SELECT con_oid, con_tid, NULL as prev_tid, NULL as state;
       ROLLBACK; -- release locks.
       LEAVE label_proc; -- return
     END IF;

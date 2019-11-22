@@ -1555,7 +1555,10 @@ class IRelStorageAdapter(Interface):
 class ReplicaClosedException(Exception):
     """The connection to the replica has been closed"""
 
-class UnableToAcquireCommitLockError(StorageError):
+class UnableToAcquireLockError(Exception):
+    "A lock cannot be acquired."
+
+class UnableToAcquireCommitLockError(StorageError, UnableToAcquireLockError):
     """
     The commit lock cannot be acquired due to a timeout.
 
@@ -1565,7 +1568,9 @@ class UnableToAcquireCommitLockError(StorageError):
     However, for historical reasons, this exception is not a ``TransientError``.
     """
 
-class UnableToLockRowsToModifyError(ConflictError):
+# TransientError -> ConflictError -> ReadConflictError
+
+class UnableToLockRowsToModifyError(ConflictError, UnableToAcquireLockError):
     """
     We were unable to lock one or more rows that we intend to modify
     due to a timeout.
@@ -1577,7 +1582,7 @@ class UnableToLockRowsToModifyError(ConflictError):
     This is a type of ``ConflictError``, which is a transient error.
     """
 
-class UnableToLockRowsToReadCurrentError(ReadConflictError):
+class UnableToLockRowsToReadCurrentError(ReadConflictError, UnableToAcquireLockError):
     """
     We were unable to lock one or more rows that belong to an object
     that ``Connection.readCurrent()`` was called on.
@@ -1589,7 +1594,7 @@ class UnableToLockRowsToReadCurrentError(ReadConflictError):
     This is a type of ``ReadConflictError``, which is a transient error.
     """
 
-class UnableToAcquirePackUndoLockError(StorageError):
+class UnableToAcquirePackUndoLockError(StorageError, UnableToAcquireLockError):
     """A pack or undo operation is in progress."""
 
 

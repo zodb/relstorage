@@ -253,7 +253,7 @@ class AbstractLocker(DatabaseHelpersMixin,
             logger.debug("Failed to acquire commit lock:\n%s", debug_info)
         message = "Acquiring a commit lock failed: %s%s" % (
             sys.exc_info()[1],
-            '\n' + debug_info if debug_info else ''
+            '\n' + debug_info if debug_info else '(No debug info.)'
         )
         six.reraise(
             kind,

@@ -28,8 +28,6 @@ from ..mover import metricmethod_sampled
 @implementer(IObjectMover)
 class MySQLObjectMover(AbstractObjectMover):
 
-    truncate_temp_tables = 'false'
-
     _create_temp_store = Schema.temp_store.create()
 
     @metricmethod_sampled
@@ -51,13 +49,9 @@ class MySQLObjectMover(AbstractObjectMover):
             # It's possible that the DDL lock that TRUNCATE takes can be a bottleneck
             # in some places, though?
 
-            # (Here, even though we don't actually expect any result, MySQLConnector
-            # likes to throw InterfaceError: No result set to fetch from, unlike
-            # every other driver that has a result for the proc. So we use, and ignore,
-            # callproc_multi_result)
-            self.driver.callproc_multi_result(
+            self.driver.callproc_no_result(
                 cursor,
-                "clean_temp_state(%s)" % (self.truncate_temp_tables,)
+                "clean_temp_state(false)"
             )
         else:
             # InnoDB tables benchmark much faster for concurrency=2
