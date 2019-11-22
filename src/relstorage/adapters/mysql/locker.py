@@ -169,10 +169,6 @@ class MySQLLocker(AbstractLocker):
         if restart:
             return
 
-        # MySQL 8 and above support NOWAIT on row locks.
-        # sys.version_major() is 5.7.9+, but we don't have execute
-        # permissions on that function by default, so we do it the old fashioned
-        # way with version()
         if self.supports_row_lock_nowait is None:
             self.supports_row_lock_nowait = self.version_detector.supports_nowait(cursor)
 
@@ -216,12 +212,27 @@ class MySQLLocker(AbstractLocker):
 
         try:
             # MySQL 8
-            cursor.execute('SELECT * FROM performance_schema.data_wait_locks')
+            cursor.execute("""
+            SELECT *
+            FROM performance_schema.events_transactions_current AS parent
+                INNER JOIN performance_schema.data_locks AS child
+                INNER JOIN performance_schema.data_lock_waits dlw on (child.engine_lock_id
+                    = dlw.blocking_engine_lock_id)
+            WHERE
+            parent.THREAD_ID = child.THREAD_ID
+            AND parent.EVENT_ID < child.EVENT_ID
+            AND (
+            child.EVENT_ID <= parent.END_EVENT_ID
+            OR parent.END_EVENT_ID IS NULL
+            )""")
             return 'Connection: ' + conn_id + '\n' + self._rows_as_pretty_string(cursor)
         except self.driver.driver_module.Error:
             # MySQL 5, or no permissions
             try:
-                cursor.execute('SELECT * from information_schema.innodb_locks')
+                cursor.execute("""
+                SELECT * from information_schema.innodb_locks l
+                INNER JOIN information_schema.INNODB_TRX x ON l.lock_trx_id = x.trx_id
+                """)
                 rows = self._rows_as_pretty_string(cursor)
             except self.driver.driver_module.Error:
                 # MySQL 8, and we had no permissions.

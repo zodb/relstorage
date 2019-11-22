@@ -78,7 +78,7 @@ class MySQLOIDAllocator(AbstractTableOIDAllocator):
         # Partly this is because MAX() is local to the current session.
         # We deal with this by using a stored procedure to efficiently make
         # multiple queries.
-        self.driver.callproc_multi_result(cursor, 'set_min_oid(%s)', (n,))
+        self.driver.callproc_no_result(cursor, 'set_min_oid(%s)', (n,))
 
    # Notes on new_oids:
 

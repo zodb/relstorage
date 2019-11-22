@@ -118,6 +118,7 @@ class GeventMySQLdbDriver(GeventDriverMixin,
         # direct call to our desired class.
         self._connect = self._get_connection_class()
         self._strict_cursor = self._connect.default_cursor
+        self._server_side_cursor = self._connect.default_cursor
 
     _Connection = None
 
@@ -135,7 +136,3 @@ class GeventMySQLdbDriver(GeventDriverMixin,
     def _get_connection_class(cls):
         from ._mysqldb_gevent import Connection
         return Connection
-
-    @Lazy
-    def _server_side_cursor(self):
-        return self._get_connection_class().default_cursor

@@ -181,6 +181,9 @@ class AbstractMySQLDriver(AbstractModuleDriver):
               ...
             ]
 
+        The last item in the list is the result of the stored procedure
+        itself.
+
         Note that, because 'CALL' potentially returns multiple result
         sets, there is potentially at least one extra database round
         trip involved when we call ``cursor.nextset()``. If the
@@ -216,6 +219,15 @@ class AbstractMySQLDriver(AbstractModuleDriver):
         while cursor.nextset():
             multi_results.append(cursor.fetchall())
         return multi_results
+
+    def callproc_no_result(self, cursor, proc, args=()):
+        """
+        An optimization for calling stored procedures that don't
+        produce any results, except for the null result of calling the
+        procedure itself.
+        """
+        cursor.execute('CALL ' + proc, args)
+        cursor.fetchall()
 
     def exit_critical_phase(self, connection, cursor):
         "Override if you implement critical phases."

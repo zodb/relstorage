@@ -333,6 +333,9 @@ class MySQLVersionDetector(DatabaseHelpersMixin):
         return self._version_info
 
     def supports_nowait(self, cursor):
+        """
+        Can we use ``FOR SHARE NOWAIT``?
+        """
         return self.get_major_version(cursor) >= 8
 
     def supports_transaction_isolation(self, cursor):

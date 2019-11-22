@@ -26,13 +26,20 @@ from . import IterateFetchmanyMixin
 
 class Cursor(IterateFetchmanyMixin,
              SSCursor):
-    # Internally this calls mysql_use_result(). The source
-    # code for that function has this comment: "There
-    # shouldn't be much processing per row because mysql
-    # server shouldn't have to wait for the client (and
-    # will not wait more than 30 sec/packet)." Empirically
-    # that doesn't seem to be true.
+    """
+    ``SSCursor.execute`` and ``SSCursor.callproc`` call
+    ``SSCursor._query``; ``self_query`` and ``self.nextset`` both call
+    ``self._get_result``. That produces a ``ResultObject``, the
+    constructor of which calls the libmysql function
+    ``mysql_use_result()`` and ``mysql_more_results``. The ``ResultObject`` is stored in
+    ``self._result`` and has a ``has_next`` property that's statically
+    determined (without reading from the network) saying whether
+    there is another result set to read by ``mysql_more_results``.
 
+    Before ``SSCursor.nextset()`` calls ``_get_result`` it calls
+    the Connection's ``next_result`` method to advance the connection
+    state. That method may block.
+    """
 
     # Somewhat surprisingly, if we just wait on read,
     # we end up blocking forever. This is because of the buffers
@@ -62,6 +69,16 @@ class Cursor(IterateFetchmanyMixin,
     # We do this *after* fetching results, not before, just in case
     # we only needed to make one fetch.
 
+    def execute(self, query, args=None):
+        # The super implementation likes to call nextset() in a loop to
+        # scroll through anything left dangling. But we promise not to do that
+        # so we can save some effort.
+        self.nextset = _noop # pylint:disable=attribute-defined-outside-init
+        try:
+            return SSCursor.execute(self, query, args)
+        finally:
+            del self.nextset
+
     def fetchall(self):
         if self.connection.is_in_critical_phase():
             return SSCursor.fetchall(self)
@@ -79,9 +96,10 @@ class Cursor(IterateFetchmanyMixin,
                 # Avoid a useless extra trip at the end.
                 break
             sleep()
+
         return result
 
-def _noop():
+def _noop(_duration=None):
     "Does nothing"
 
 class AbstractConnection(GeventConnectionMixin):
@@ -115,10 +133,10 @@ class AbstractConnection(GeventConnectionMixin):
     # potentially take some time.)
 
     def rollback(self):
-        self.query('rollback')
+        self.query(b'ROLLBACK')
 
     def commit(self):
-        self.query('commit')
+        self.query(b'COMMIT')
 
     ###
     # Critical sections
@@ -163,6 +181,59 @@ class AbstractConnection(GeventConnectionMixin):
 
 class Connection(AbstractConnection,
                  BaseConnection):
+    """
+    gevent (mostly) compatible connection.
+
+    .. rubric Blocking
+
+    Where, when, and how long we could block the event loop is complex
+    and depends on what we're doing.
+
+    "how long" is the easy part. That's the value of the
+    ``read_timeout`` constructor argument, times two (which must be >
+    0; 0 means infinite). libmysql automatically includes a retry
+    after an EAGAIN. If the timeout is set, then after the second try
+    mysqlclient will raise ``OperationalError: 2013, Lost Connection``
+    and the internal state of the connection is broken.
+
+    This retry is done using ``vio_io_wait``, which calls
+    select/epoll/kevent. We'd really like to hook into that and make
+    it use the gevent loop in all cases, but I couldn't find a way to
+    do that. Setting the socket to nonblocking mode does nothing
+    except lead to unexpected disconnects.
+
+    "Where" depends on the query and where it blocks. The server will
+    always wait to send us the first result set, so our ``query()``
+    function can successfully ``gevent_wait_read()`` to detect when
+    the first batch of results arrive. If the query is going to
+    produce multiple result sets (either because it contained multiple
+    statements like "SELECT ...; SELECT ...;" or because it was a
+    ``CALL``), the blocking (if any) will occur during
+    ``next_result``. It's not possible for this object to determine
+    whether the network IO done by ``next_result`` will block, or,
+    indeed, if it will even do any network IO.
+
+    You'd think it would be possible to predict whether it would need
+    to block or not, or do network IO, based on whether we have
+    statically determined that there's a next result set
+    (``ResultObject.has_next``). That turns out not to be correct. For
+    example, given a stored procedure that will return three result
+    sets (the first two from queries that may return no rows), after
+    executing the query, the initial ``ResultObject`` will have
+    ``has_next`` of ``False`` --- but ``self.next_result()`` returns
+    0, indicating that there are in fact more results (apparently
+    ``mysql_more_results`` is buggy). This next ``ResultObject`` will
+    have a correct value for ``has_next``, indicating a third result
+    is available, but ``gevent_wait_read`` will never return,
+    suggesting that the results have already been buffered.
+
+    The upshot is that stored procedures should either return no more
+    than one result set, or if there is going to be blocking, they
+    should block in the first result set. We can't properly deal with
+    blocking that occurs at the arbitrary time of ``next_result``
+    without the possibility of deadlocking. (See
+    ``GeventConnectionMixin``.)
+    """
 
     _direct_rollback = BaseConnection.rollback
     _direct_commit = BaseConnection.commit
@@ -174,3 +245,12 @@ class Connection(AbstractConnection,
             self.__dict__.pop(name)
         else:
             BaseConnection.__delattr__(self, name)
+
+    def gevent_check_write(self):
+        # This protocol is a request/reply nature, so reason dictates
+        # that we will *always* be able to write to the socket: We
+        # don't get control back until we've sent everything we need
+        # to send.
+        # Empirical testing backs that up. This is always true. So we
+        # can save the syscall and just go.
+        return True

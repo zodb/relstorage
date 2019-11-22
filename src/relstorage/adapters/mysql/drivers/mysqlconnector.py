@@ -208,6 +208,10 @@ class PyMySQLConnectorDriver(AbstractMySQLDriver):
                 break
         return multi_results
 
+    def callproc_no_result(self, cursor, proc, args=()):
+        # Again, weird. The call's empty result set seems to be consumed.
+        cursor.execute("CALL " + proc, args)
+
 class CMySQLConnectorDriver(PyMySQLConnectorDriver):
     __name__ = 'C ' + _base_name
 

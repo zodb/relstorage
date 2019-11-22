@@ -1090,8 +1090,10 @@ class GenericRelStorageTests(
         # we do get a failure it's due to a problem with us.
         # Unfortunately, tryResolveConflict hides all underlying exceptions
         # so we have to enable logging to see them.
+        from relstorage.adapters.interfaces import UnableToAcquireLockError
         from ZODB.ConflictResolution import logger as CRLogger
         from BTrees.Length import Length
+        import BTrees
         from six import reraise
 
         def log_err(*args, **kwargs): # pylint:disable=unused-argument
@@ -1103,14 +1105,28 @@ class GenericRelStorageTests(
 
         updates_per_thread = 50
         thread_count = 4
+        lock_errors = []
 
-
+        self.maxDiff = None
         db = DB(self._storage)
         try:
             c = db.open()
             try:
-                c.root()['length'] = Length()
+                root = c.root()
+                root['length'] = Length()
+                # XXX: Eww! On MySQL, if we try to take a shared lock on
+                # OID 0, and a write lock on OID 1, we fail with a deadlock
+                # error. It seems that taking the shared lock on 0 also takes a shared
+                # lock on 1 --- somehow. Because they're adjacent to each other?
+                # I don't know. We have to add some space between them to be sure
+                # that doesn't happen. On MySQL 5.7, just 10 extra items was enough.
+                # On MySQL 8, we had to add more.
+                for i in range(50):
+                    root[i] = BTrees.OOBTree.BTree()
                 transaction.commit()
+            except:
+                transaction.abort()
+                raise
             finally:
                 c.close()
 
@@ -1119,9 +1135,21 @@ class GenericRelStorageTests(
                     thread_c = db.open()
                     __traceback_info__ = thread_c._storage
                     try:
-                        thread_c.root()['length'].change(1)
+                        # Perform readCurrent on an object not being modified.
+                        # This adds stress to databases that use separate types of locking
+                        # for modified and current objects. It was used to discover
+                        # bugs in gevent+MySQL and plain MySQLdb against both 5.7 and 8.
+                        root = thread_c.root()
+                        root._p_activate() # unghost; only non-ghosts can readCurrent
+                        root._p_jar.readCurrent(root)
+                        root['length'].change(1)
                         time.sleep(random.random() * 0.05)
-                        transaction.commit()
+                        try:
+                            transaction.commit()
+                        except UnableToAcquireLockError as e:
+                            lock_errors.append((type(e), str(e)))
+                            transaction.abort()
+                            raise
                     finally:
                         thread_c.close()
 
@@ -1133,6 +1161,8 @@ class GenericRelStorageTests(
                 t.start()
             for t in threads:
                 t.join(120)
+
+            self.assertEqual(lock_errors, [])
 
             c = db.open()
             try:
