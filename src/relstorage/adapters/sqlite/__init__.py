@@ -18,7 +18,7 @@ sqlite3 adapter for RelStorage.
 General Design Notes
 ====================
 
-Sqlite3 ``INTEGER PRIMARY KEY`` values are always 64-bit unsigned
+Sqlite3 ``INTEGER PRIMARY KEY`` values are always 64-bit *signed*
 integers. If not given, they default to an unused integer (typically
 incrementing). If the ``AUTOINCREMENT`` keyword is provided, then they
 prevent reuse of values even after they are deleted via an auxiliary
@@ -76,6 +76,16 @@ essentially any time, even outside of the normal two-phase commit
 sequence (thanks to Connection.add()) and we cannot allow the main
 database to be locked like that.
 
+Because OIDs are signed 64-bit integers, they cannot store values
+larger than 2**63 - 1 (around nine quintillion)
+
+TIDs
+====
+
+Because TIDs are signed 64-bit integers, they cannot store values
+larger than 2**63 - 1, or nine quintillion transactions. Since TID is
+related to the current time, that suffices for values until the year 5908.
+
 Locks
 =====
 
@@ -86,3 +96,7 @@ and how they are taken and managed, see connmanager.py and locker.py
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
+
+import BTrees
+
+MAX_TID = BTrees.family64.maxint # Not maxuint

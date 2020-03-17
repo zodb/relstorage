@@ -115,7 +115,7 @@ class _TransactionRangeObjectIndex(OidTMap):
         min_stored_tid = self.min_stored_tid()
         hvt = self.highest_visible_tid
         assert max_stored_tid <= hvt, (max_stored_tid, hvt, self)
-        assert min_stored_tid > 0, min_stored_tid
+        assert min_stored_tid > 0, min_stored_tid # BTrees won't allow that, but dicts (pypy) could
         if initial:
             # This is only true at startup. Over time we can add older entries.
             assert self.complete_since_tid is None or min_stored_tid > self.complete_since_tid, (

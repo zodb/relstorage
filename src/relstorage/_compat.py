@@ -279,6 +279,9 @@ if _64bit_array and not PYPY:
 else:
     OidList = list
 TidList = OidList
+# The maximum theoretical TID (and OID, incidentally).
+# This is b"\xff\xff\xff\xff\xff\xff\xff\xff"
+# It requires an 8 byte unsigned integer to store.
 MAX_TID = BTrees.family64.maxuint
 
 def iteroiditems(d):

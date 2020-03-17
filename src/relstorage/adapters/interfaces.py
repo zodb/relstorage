@@ -908,6 +908,8 @@ class IOIDAllocator(Interface):
 class IPackUndo(Interface):
     """Perform pack and undo operations"""
 
+    MAX_TID = Attribute("The maximum TID that can be stored.")
+
     def verify_undoable(cursor, undo_tid):
         """Raise UndoError if it is not safe to undo the specified txn.
         """

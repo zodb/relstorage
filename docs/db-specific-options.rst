@@ -320,6 +320,12 @@ filesystem cache to serve that purpose.
 This adapter supports blobs, but you still must configure a
 ``blob-cache-dir``, or use a ``shared-blob-dir``.
 
+.. note::
+
+   SQLite is limited to 8-byte signed integers for OIDs and TIDs. If
+   you expect to go through more than nine quintillion objects, or use
+   the database past the year 5908, SQLite might not be the right choice.
+
 For more, see :doc:`faq`.
 
 There is one required setting:
