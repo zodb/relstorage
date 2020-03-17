@@ -521,7 +521,8 @@ class TestObjectIndex(TestCase):
                           data=[(1, 3)])
 
         # Too low
-        with self.assertRaises(AssertionError):
+        with self.assertRaises((AssertionError, OverflowError)):
+            # OverflowError is BTrees, AssertionError is dicts
             self._makeOne(highest_visible_tid=2,
                           data=[(1, -1)])
 

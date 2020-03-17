@@ -21,6 +21,7 @@ from functools import update_wrapper
 from functools import wraps
 
 from .._compat import intern
+from .._compat import MAX_TID
 
 from .._util import Lazy
 
@@ -142,6 +143,8 @@ ResultDescription = namedtuple(
 
 
 class DatabaseHelpersMixin(object):
+
+    MAX_TID = MAX_TID
 
     def _metadata_to_native_str(self, value):
         # Some drivers, in some configurations, notably older versions

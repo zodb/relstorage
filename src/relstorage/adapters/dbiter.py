@@ -18,15 +18,15 @@ from collections import namedtuple
 
 from zope.interface import implementer
 
-from relstorage._compat import MAX_TID
 from relstorage._compat import TidList
 from relstorage._util import Lazy
 
+from ._util import DatabaseHelpersMixin
 from .interfaces import IDatabaseIterator
 from .schema import Schema
 from .sql import it
 
-class DatabaseIterator(object):
+class DatabaseIterator(DatabaseHelpersMixin):
     """
     Abstract base class for database iteration.
     """
@@ -152,7 +152,7 @@ class HistoryPreservingDatabaseIterator(DatabaseIterator):
         """
         params = {
             'min_tid': start if start else 0,
-            'max_tid': stop if stop else MAX_TID
+            'max_tid': stop if stop else self.MAX_TID
         }
         self._iter_transactions_range_query.execute(cursor, params)
         return self._transaction_iterator(cursor)
@@ -254,7 +254,7 @@ class HistoryFreeDatabaseIterator(DatabaseIterator):
         """
         params = {
             'min_tid': start if start else 0,
-            'max_tid': stop if stop else MAX_TID
+            'max_tid': stop if stop else self.MAX_TID
         }
         self._iter_transactions_range_query.execute(cursor, params)
         return _HistoryFreeTransactionRange(TidList((tid for (tid,) in cursor)))

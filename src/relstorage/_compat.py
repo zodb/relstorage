@@ -133,7 +133,7 @@ if BTrees.LLBTree.LLBTree is not BTrees.LLBTree.LLBTreePy: # pylint:disable=no-m
     # Using these values and an OidSet of about 800,000 objects (from
     # a real cache file) results in 12,000 fewer LLSet objects being
     # created, and 2MB less memory being used.
-    class OID_TID_MAP_TYPE(BTrees.family64.II.BTree):
+    class OID_TID_MAP_TYPE(BTrees.family64.UU.BTree):
         __slots__ = ()
         # Since these are contiguous arrays, there *might* be some
         # benefit in keeping them within a virtual memory page
@@ -149,18 +149,18 @@ if BTrees.LLBTree.LLBTree is not BTrees.LLBTree.LLBTreePy: # pylint:disable=no-m
         # This is definitely 64 bits
         max_leaf_size = 4095 # under 32K, or 8 pages.
 
-    class OID_OBJECT_MAP_TYPE(BTrees.family64.IO.BTree):
+    class OID_OBJECT_MAP_TYPE(BTrees.family64.UO.BTree):
         __slots__ = ()
         max_internal_size = OID_TID_MAP_TYPE.max_internal_size
         max_leaf_size = OID_TID_MAP_TYPE.max_leaf_size
 
-    class OID_SET_TYPE(BTrees.family64.II.TreeSet):
+    class OID_SET_TYPE(BTrees.family64.UU.TreeSet):
         max_internal_size = OID_TID_MAP_TYPE.max_internal_size
         max_leaf_size = OID_TID_MAP_TYPE.max_leaf_size
 
-    OidTMap_difference = BTrees.family64.II.difference  # pylint:disable=no-member
-    OidTMap_multiunion = BTrees.family64.II.multiunion  # pylint:disable=no-member
-    OidTMap_intersection = BTrees.family64.II.intersection  # pylint:disable=no-member
+    OidTMap_difference = BTrees.family64.UU.difference  # pylint:disable=no-member
+    OidTMap_multiunion = BTrees.family64.UU.multiunion  # pylint:disable=no-member
+    OidTMap_intersection = BTrees.family64.UU.intersection  # pylint:disable=no-member
     OidSet_difference = OidTMap_difference
     def OidSet_discard(s, val):
         try:
@@ -279,7 +279,12 @@ if _64bit_array and not PYPY:
 else:
     OidList = list
 TidList = OidList
-MAX_TID = BTrees.family64.maxint
+# The maximum theoretical TID (and OID, incidentally).
+# This is b"\xff\xff\xff\xff\xff\xff\xff\xff"
+# It requires an 8 byte unsigned integer to store.
+MAX_TID = BTrees.family64.maxuint
+# The maximum TID if only signed values are allowed.
+MAX_S_TID = BTrees.family64.maxint
 
 def iteroiditems(d):
     # Could be either a BTree, which always has 'iteritems',

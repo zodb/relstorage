@@ -75,7 +75,11 @@ tests_require = [
     'nti.testing',
     'gevent >= 1.5a1; sys_platform != "win32"',
     'pyperf',
-    'psutil',
+    # Versions of PyPy2 prior to 7.4 (maybe?) are incompatible with
+    # psutil >= 5.6.4.
+    # https://github.com/giampaolo/psutil/issues/1659
+    'psutil; platform_python_implementation=="CPython" or python_version!="2.7"',
+    'psutil == 5.6.3; platform_python_implementation=="PyPy" and python_version=="2.7"',
 ] + memcache_require
 
 
@@ -128,6 +132,7 @@ setup(
         'zope.interface',
         'zope.dottedname',
         'zc.lockfile',
+        'BTrees >= 4.7.0', # unsigned btrees in 4.7+
         # These are the versions we're testing against. ZODB 5.2.2 is
         # when checkSecure() went away and IMVCCAfterCompletionStorage
         # was added, and 5.1.2 is when Connection.new_oid was added

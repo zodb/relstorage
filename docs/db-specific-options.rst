@@ -99,6 +99,9 @@ driver
      <http://initd.org/psycopg/docs/connection.html#connection.set_session>`_
      with certain configurations of connection load balancers.
 
+     This driver cannot handle OID and TID parameters greater than
+     nine quintillion (``2^63``).
+
 dsn
     Specifies the data source name for connecting to PostgreSQL.
     A PostgreSQL DSN is a list of parameters separated with
@@ -319,6 +322,12 @@ filesystem cache to serve that purpose.
 
 This adapter supports blobs, but you still must configure a
 ``blob-cache-dir``, or use a ``shared-blob-dir``.
+
+.. note::
+
+   SQLite is limited to 8-byte signed integers for OIDs and TIDs. If
+   you expect to go through more than nine quintillion objects, or use
+   the database past the year 5908, SQLite might not be the right choice.
 
 For more, see :doc:`faq`.
 

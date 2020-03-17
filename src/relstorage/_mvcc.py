@@ -50,7 +50,7 @@ class DetachableMVCCDatabaseCoordinator(object):
         # the set() in _registered_viewers to be atomic.
         self._lock = threading.RLock()
         # {tid: {viewer, ...}} of objects not detached and not None
-        self._by_tid = family64.IO.Bucket()
+        self._by_tid = family64.UO.Bucket()
         self._registered_viewers = set()
         self.is_registered = self._registered_viewers.__contains__
 

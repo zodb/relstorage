@@ -29,7 +29,6 @@ from ZODB.utils import p64 as int64_to_8bytes
 from ZODB.utils import u64 as bytes8_to_int64
 
 from relstorage._compat import OID_SET_TYPE
-from relstorage._compat import MAX_TID
 from relstorage._compat import metricmethod
 from .util import writable_storage_method
 
@@ -100,7 +99,7 @@ class Pack(object):
             # Packing for the current time or in the future means to pack
             # to the lastest commit in the database. This matters if not all
             # machine clocks are synchronized.
-            best_pack_tid_int = MAX_TID - 1
+            best_pack_tid_int = self.packundo.MAX_TID - 1
         else:
             # Find the latest commit before or at the pack time.
             # Note that several TIDs will fit in the resolution of a time.time(),

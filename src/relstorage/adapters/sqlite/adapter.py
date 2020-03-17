@@ -47,7 +47,6 @@ class Sqlite3Adapter(AbstractAdapter):
     driver_options = drivers
     WRITING_REQUIRES_EXCLUSIVE_LOCK = True
 
-
     def __init__(self, data_dir, pragmas,
                  options=None, oidallocator=None,
                  gevent_yield_interval=None):

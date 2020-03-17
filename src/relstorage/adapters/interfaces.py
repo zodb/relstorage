@@ -82,6 +82,8 @@ class IDBDriver(Interface):
     cursor_arraysize = Attribute(
         "The value to assign to each new cursor's ``arraysize`` attribute.")
 
+    supports_64bit_unsigned_id = Attribute("Can the driver handle 2**64 as a parameter?")
+
     connect = Attribute("""
     A callable to create and return a new connection object.
 
@@ -907,6 +909,8 @@ class IOIDAllocator(Interface):
 
 class IPackUndo(Interface):
     """Perform pack and undo operations"""
+
+    MAX_TID = Attribute("The maximum TID that can be stored.")
 
     def verify_undoable(cursor, undo_tid):
         """Raise UndoError if it is not safe to undo the specified txn.

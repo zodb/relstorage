@@ -3,7 +3,7 @@ import sys
 import time
 
 import transaction
-from BTrees.OOBTree import OOBTree  # pylint:disable=no-name-in-module
+from BTrees.OOBTree import OOBTree  # pylint:disable=no-name-in-module,import-error
 from ZODB.DB import DB
 
 from relstorage.adapters.postgresql import PostgreSQLAdapter
