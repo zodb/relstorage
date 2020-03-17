@@ -96,7 +96,3 @@ and how they are taken and managed, see connmanager.py and locker.py
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
-
-import BTrees
-
-MAX_TID = BTrees.family64.maxint # Not maxuint

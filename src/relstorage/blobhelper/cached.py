@@ -21,7 +21,7 @@ import time
 
 from binascii import hexlify
 
-import BTrees
+from BTrees import OOBTree # pylint:disable=no-name-in-module
 import zc.lockfile
 
 import ZODB.blob
@@ -594,7 +594,7 @@ class _BlobCacheSizeChecker(timer):
 
         blob_dir = self.blob_dir
         blob_suffix = ZODB.blob.BLOB_SUFFIX
-        files_by_atime = BTrees.OOBTree.BTree()
+        files_by_atime = OOBTree.BTree()
         size = 0
 
         # Use os.walk() instead of os.listdir(); on 3.5+ this is much faster

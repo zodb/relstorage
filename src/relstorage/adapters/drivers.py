@@ -129,6 +129,10 @@ class AbstractModuleDriver(object):
 
     DriverNotAvailableError = DriverNotAvailableError
 
+    # Can the driver support the full range of a 64-bit unsigned ID for
+    # OID and TID parameters?
+    supports_64bit_unsigned_id = True
+
     def __init__(self):
         if PYPY and not self.AVAILABLE_ON_PYPY:
             raise self.DriverNotAvailableError(self.__name__)

@@ -71,6 +71,7 @@ class PG8000Driver(AbstractPostgreSQLDriver):
 
     dialect = PG8000Dialect()
     supports_multiple_statement_execute = False
+    supports_64bit_unsigned_id = False
 
     def __init__(self):
         super(PG8000Driver, self).__init__()

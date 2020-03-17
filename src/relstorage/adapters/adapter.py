@@ -30,17 +30,19 @@ from ZODB.utils import u64 as bytes8_to_int64
 
 from relstorage.storage.interfaces import VoteReadConflictError
 from .._compat import metricmethod_sampled
+from .._compat import MAX_S_TID
 from .._util import timestamp_at_unixtime
 from .._util import TRACE
 from ..options import Options
 
+from ._util import DatabaseHelpersMixin
 from .drivers import _select_driver
 from .interfaces import UnableToLockRowsToModifyError
 from .interfaces import UnableToLockRowsToReadCurrentError
 
 logger = __import__('logging').getLogger(__name__)
 
-class AbstractAdapter(object):
+class AbstractAdapter(DatabaseHelpersMixin):
 
     keep_history = None # type: bool
     options = None # type: Options
@@ -50,6 +52,8 @@ class AbstractAdapter(object):
     mover = None # type: IObjectMover
     connmanager = None # type: IConnectionManager
     oidallocator = None # type: IOIDAllocator
+    dbiter = None # type: DatabaseIterator
+    packundo = None
 
     def __init__(self, options=None):
         if options is None:
@@ -61,6 +65,10 @@ class AbstractAdapter(object):
         self._binary = driver.Binary
 
         self._create()
+        if not driver.supports_64bit_unsigned_id:
+            self.packundo.MAX_TID = MAX_S_TID
+            self.MAX_TID = MAX_S_TID
+            self.dbiter.MAX_TID = MAX_S_TID
 
         self.connmanager.add_on_store_opened(self.mover.on_store_opened)
         self.connmanager.add_on_load_opened(self.mover.on_load_opened)

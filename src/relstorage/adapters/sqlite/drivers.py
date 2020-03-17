@@ -356,6 +356,7 @@ class Sqlite3Driver(MemoryViewBlobDriverMixin,
     CONNECTION_FACTORY = Connection
     DEFAULT_CONNECT_ARGS = {
     }
+    supports_64bit_unsigned_id = False
 
     def __init__(self):
         super(Sqlite3Driver, self).__init__()

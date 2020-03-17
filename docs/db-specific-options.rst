@@ -99,6 +99,9 @@ driver
      <http://initd.org/psycopg/docs/connection.html#connection.set_session>`_
      with certain configurations of connection load balancers.
 
+     This driver cannot handle OID and TID parameters greater than
+     nine quintillion (``2^63``).
+
 dsn
     Specifies the data source name for connecting to PostgreSQL.
     A PostgreSQL DSN is a list of parameters separated with

@@ -30,7 +30,6 @@ from ..packundo import HistoryFreePackUndo
 from ..packundo import HistoryPreservingPackUndo
 
 from . import drivers
-from . import MAX_TID
 from .batch import Sqlite3RowBatcher
 from .connmanager import Sqlite3ConnectionManager
 from .locker import Sqlite3Locker
@@ -47,7 +46,6 @@ from .scriptrunner import Sqlite3ScriptRunner
 class Sqlite3Adapter(AbstractAdapter):
     driver_options = drivers
     WRITING_REQUIRES_EXCLUSIVE_LOCK = True
-    MAX_TID = MAX_TID
 
     def __init__(self, data_dir, pragmas,
                  options=None, oidallocator=None,
@@ -139,8 +137,6 @@ class Sqlite3Adapter(AbstractAdapter):
             self.dbiter = HistoryFreeDatabaseIterator(
                 driver,
             )
-        self.packundo.MAX_TID = self.MAX_TID
-        self.dbiter.MAX_TID = self.MAX_TID
 
     def new_instance(self):
         inst = type(self)(

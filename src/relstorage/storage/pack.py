@@ -29,7 +29,6 @@ from ZODB.utils import p64 as int64_to_8bytes
 from ZODB.utils import u64 as bytes8_to_int64
 
 from relstorage._compat import OID_SET_TYPE
-from relstorage._compat import MAX_TID
 from relstorage._compat import metricmethod
 from .util import writable_storage_method
 

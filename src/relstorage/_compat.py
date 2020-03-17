@@ -283,6 +283,8 @@ TidList = OidList
 # This is b"\xff\xff\xff\xff\xff\xff\xff\xff"
 # It requires an 8 byte unsigned integer to store.
 MAX_TID = BTrees.family64.maxuint
+# The maximum TID if only signed values are allowed.
+MAX_S_TID = BTrees.family64.maxint
 
 def iteroiditems(d):
     # Could be either a BTree, which always has 'iteritems',
