@@ -372,6 +372,7 @@ class LockException(Exception):
     pass
 
 class MockDriver(object):
+    supports_64bit_unsigned_id = True
     cursor_arraysize = 64
     disconnected_exceptions = (DisconnectedException,)
     close_exceptions = (CloseException,)
