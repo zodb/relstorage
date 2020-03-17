@@ -2,10 +2,11 @@
  Changes
 =========
 
-3.0.2 (unreleased)
+3.1.0 (unreleased)
 ==================
 
-- Nothing changed yet.
+- Use unsigned BTrees for internal data structures to avoid wrapping
+  in large databases. Requires BTrees 4.7.0.
 
 
 3.0.1 (2019-11-22)
