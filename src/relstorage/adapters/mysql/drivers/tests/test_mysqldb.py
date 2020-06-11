@@ -25,7 +25,7 @@ class GeventMySQLdbDriver(mysqldb.GeventMySQLdbDriver):
                     fetchall = lambda self: []
                     nextset = lambda self: None
 
-                def __init__(self, *args, **kwargs):
+                def __init__(self, *args, **kwargs): # pylint:disable=super-init-not-called
                     self.connect_args = args
                     self.conect_kwargs = kwargs
 

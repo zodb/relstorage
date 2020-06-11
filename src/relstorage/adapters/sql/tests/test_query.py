@@ -54,6 +54,7 @@ class TestQuery(TestCase):
         inst = D()
 
         # Undo the effects of Python 3.6's __set_name__.
+        # pylint:disable=non-str-assignment-to-dunder-name,attribute-defined-outside-init
         D.q1.__name__ = None
         D.q2.__name__ = None
         D.q3.__name__ = None

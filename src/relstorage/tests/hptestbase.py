@@ -57,7 +57,7 @@ class HistoryPreservingRelStorageTests(GenericRelStorageTests,
     # pylint:disable=too-many-ancestors,abstract-method,too-many-locals,too-many-public-methods
     keep_history = True
 
-    def checkUndoMultipleConflictResolution(self, *_args, **_kwargs):
+    def checkUndoMultipleConflictResolution(self, *_args, **_kwargs): # pylint:disable=signature-differs
         # pylint:disable=arguments-differ
         # 4.2.3 and above add this. it's an exotic feature according to jimfulton.
         raise unittest.SkipTest("conflict-resolving undo not supported")

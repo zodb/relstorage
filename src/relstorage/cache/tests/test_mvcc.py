@@ -516,13 +516,18 @@ class TestObjectIndex(TestCase):
 
     def test_ctr_data(self):
         # Too high
-        with self.assertRaises(AssertionError):
+        with self.assertRaises(TypeError):
             self._makeOne(highest_visible_tid=2,
                           data=[(1, 3)])
 
         # Too low
-        with self.assertRaises((AssertionError, OverflowError)):
-            # OverflowError is BTrees, AssertionError is dicts
+        with self.assertRaises(TypeError):
+            # Prior to BTrees 4.7.2, this would be an OverflowError
+            # on CPython with C extensions but something else with
+            # pure-python mode. 4.7.2 cleaned that up to be TypeError
+            # always. Prior to adapting to that change, this hit an assertion
+            # error in the pure-python, dict-based case we used on PyPy
+            # Now we raise a specific error.
             self._makeOne(highest_visible_tid=2,
                           data=[(1, -1)])
 

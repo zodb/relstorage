@@ -137,7 +137,7 @@ class Upsert(Insert):
     def update_clause(self):
         return Update(EmptyExpression(), [
             AssignmentExpression(col, _ExcludedColumn(col.name))
-            for col in self.update_columns
+            for col in self.update_columns # pylint:disable=not-an-iterable
         ])
 
     def _visit_command(self, compiler):

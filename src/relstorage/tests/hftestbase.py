@@ -48,7 +48,7 @@ class HistoryFreeRelStorageTests(GenericRelStorageTests, ZODBTestCase):
     # This overrides certain tests so they work with a storage that
     # collects garbage but does not retain old versions.
 
-    def _dostore(self, *args, **kwargs): # pylint:disable=arguments-differ
+    def _dostore(self, *args, **kwargs): # pylint:disable=arguments-differ,signature-differs
         result = super(HistoryFreeRelStorageTests, self)._dostore(*args, **kwargs)
         # Finish the transaction and update our view of the database.
         self._storage.afterCompletion()
