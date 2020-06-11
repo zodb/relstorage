@@ -14,7 +14,7 @@ source `which virtualenvwrapper.sh`
 # and avoiding ccache or gcc that might have come from MacPorts (in
 # case of bad slopiness settings in the first and in case of ABI
 # issues in the second).
-export CFLAGS="-Ofast -pipe -flto -ffunction-sections"
+export CFLAGS="-Ofast -pipe -flto -ffunction-sections --stdlib=libc++"
 export CXXFLAGS="$CFLAGS -std=gnu++11"
 export LDFLAGS="-Wl,-dead_strip -Wl,-merge_zero_fill_sections -flto -Wl,-headerpad_max_install_names"
 unset CPPFLAGS
