@@ -364,7 +364,7 @@ class Sqlite3Driver(MemoryViewBlobDriverMixin,
         # sqlite3 throws ProgrammingError, which is not very helpful.
         # That should really only happen in tests, though, since
         # we're directly connected to the file on disk.
-        self.disconnected_exceptions += (self.driver_module.ProgrammingError,)
+        self.disconnected_exceptions += (self.driver_module.ProgrammingError,) # pylint:disable=no-member
         # Make our usual connect() method call our connect_to_file method instead of the
         # module's connect() method so we get our preferred goodies.
         self._connect = self.connect_to_file
@@ -678,7 +678,7 @@ class Sqlite3GeventDriver(GeventDriverMixin,
             conf = options.adapter.config
             self.yield_to_gevent_instruction_interval = conf.gevent_yield_interval
 
-    def _connect_to_file_or_uri(self, *args, **kwargs): # pylint:disable=arguments-differ
+    def _connect_to_file_or_uri(self, *args, **kwargs): # pylint:disable=arguments-differ,signature-differs
         assert 'factory_args' not in kwargs
         kwargs['factory_args'] = (
             self.gevent,
@@ -686,13 +686,13 @@ class Sqlite3GeventDriver(GeventDriverMixin,
         )
         return super(Sqlite3GeventDriver, self)._connect_to_file_or_uri(*args, **kwargs)
 
-    def enter_critical_phase_until_transaction_end(self, connection, cursor):
+    def enter_critical_phase_until_transaction_end(self, connection, cursor): # pylint:disable=unused-argument
         connection.enter_critical_phase_until_transaction_end()
 
-    def is_in_critical_phase(self, connection, cursor):
+    def is_in_critical_phase(self, connection, cursor): # pylint:disable=unused-argument
         return connection.is_in_critical_phase()
 
-    def exit_critical_phase(self, connection, cursor):
+    def exit_critical_phase(self, connection, cursor): # pylint:disable=unused-argument
         connection.exit_critical_phase()
 
 

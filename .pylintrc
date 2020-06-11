@@ -53,7 +53,8 @@ disable=
     useless-object-inheritance,
     chained-comparison,
     too-many-ancestors,
-    import-outside-toplevel
+    import-outside-toplevel,
+    relative-beyond-top-level
 #   undefined-all-variable
 
 

@@ -155,7 +155,7 @@ class AbstractTPCState(object):
         return "transaction=%r resources=%r" % (global_tx, resources)
 
 
-    def tpc_finish(self, transaction, f=None):
+    def tpc_finish(self, transaction, f=None): # pylint:disable=unused-argument
         # For the sake of some ZODB tests, we need to implement this everywhere,
         # even if it's not actually usable, and the first thing it needs to
         # do is check the transaction.
@@ -222,7 +222,7 @@ class NotInTransaction(AbstractTPCState):
         # Reset some things that need to go away.
         self.prepared_txn = None
 
-    def tpc_abort(self, *args, **kwargs): # pylint:disable=arguments-differ,unused-argument
+    def tpc_abort(self, *args, **kwargs): # pylint:disable=arguments-differ,unused-argument,signature-differs
         # Nothing to do
         return self
 

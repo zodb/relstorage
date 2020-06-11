@@ -439,7 +439,7 @@ class StorageCache(DetachableMVCCDatabaseViewer):
 
         cache = self.cache
         index = self.object_index
-        indexed_tid_int = index[oid_int] # Could be None
+        indexed_tid_int = index[oid_int] # Could be None pylint:disable=unsubscriptable-object
 
         key = (oid_int, indexed_tid_int)
         cache_data = cache[key]
@@ -461,7 +461,7 @@ class StorageCache(DetachableMVCCDatabaseViewer):
 
             # We may or may not have had an index entry, but make sure we do now.
             # Eventually this will age to be frozen again if needed.
-            index[oid_int] = actual_tid_int
+            index[oid_int] = actual_tid_int # pylint:disable=unsupported-assignment-operation
             cache[(oid_int, actual_tid_int)] = (state, actual_tid_int)
             return state, actual_tid_int
 
@@ -490,7 +490,7 @@ class StorageCache(DetachableMVCCDatabaseViewer):
         # going on.
         to_fetch = {oid_int
                     for oid_int in oid_ints
-                    if (oid_int, index[oid_int]) not in cache}
+                    if (oid_int, index[oid_int]) not in cache} # pylint:disable=unsubscriptable-object
 
         if not to_fetch:
             return
@@ -499,7 +499,7 @@ class StorageCache(DetachableMVCCDatabaseViewer):
             key = (oid, tid_int)
             self._check_tid_after_load(oid, tid_int, cursor=cursor)
             cache[key] = (state, tid_int)
-            index[oid] = tid_int
+            index[oid] = tid_int # pylint:disable=unsupported-assignment-operation
 
     def prefetch_for_conflicts(self, cursor, oid_tid_pairs):
         results = {}

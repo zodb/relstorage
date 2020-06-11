@@ -1122,7 +1122,7 @@ class GenericRelStorageTests(
                 # that doesn't happen. On MySQL 5.7, just 10 extra items was enough.
                 # On MySQL 8, we had to add more.
                 for i in range(50):
-                    root[i] = BTrees.OOBTree.BTree()
+                    root[i] = BTrees.OOBTree.BTree() # pylint:disable=no-member
                 transaction.commit()
             except:
                 transaction.abort()
