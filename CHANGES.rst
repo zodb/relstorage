@@ -6,7 +6,7 @@
 ==================
 
 - Use unsigned BTrees for internal data structures to avoid wrapping
-  in large databases. Requires BTrees 4.7.0.
+  in large databases. Requires BTrees 4.7.2.
 
 
 3.0.1 (2019-11-22)

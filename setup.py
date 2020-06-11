@@ -132,7 +132,7 @@ setup(
         'zope.interface',
         'zope.dottedname',
         'zc.lockfile',
-        'BTrees >= 4.7.0', # unsigned btrees in 4.7+
+        'BTrees >= 4.7.2', # unsigned btrees in 4.7+; correct errors in 4.7.2
         # These are the versions we're testing against. ZODB 5.2.2 is
         # when checkSecure() went away and IMVCCAfterCompletionStorage
         # was added, and 5.1.2 is when Connection.new_oid was added
