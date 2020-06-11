@@ -2,7 +2,7 @@
  Changes
 =========
 
-3.1.0 (unreleased)
+3.1.0 (2020-06-11)
 ==================
 
 - Use unsigned BTrees for internal data structures to avoid wrapping
