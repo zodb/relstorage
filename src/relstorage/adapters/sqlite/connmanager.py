@@ -103,6 +103,7 @@ class Sqlite3ConnectionManager(AbstractConnectionManager):
         }
         nice_to_have_pragmas.update(pragmas)
         self.pragmas = nice_to_have_pragmas
+        # XXX: Why do we override the default for this?
         self.pragmas['journal_size_limit'] = None
         super(Sqlite3ConnectionManager, self).__init__(options, driver)
 
