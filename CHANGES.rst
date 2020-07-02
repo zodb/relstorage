@@ -5,7 +5,7 @@
 3.1.1 (unreleased)
 ==================
 
-- Nothing changed yet.
+- Add support for pg8000 >= 1.15.3. Previously, a ``TypeError`` was raised.
 
 
 3.1.0 (2020-06-11)
