@@ -449,19 +449,11 @@ class AbstractVote(AbstractTPCState):
             # support doing that in a single operation, we need to go critical and
             # regain control ASAP so we can complete the operation.
             self.__enter_critical_phase_until_transaction_end()
-        if kwargs['commit']:
-            # If committing, terminate the load connection's transaction now.
-            # This allows any actions taken on commit, such as SQLite's auto-checkpoint,
-            # to see a state where this reader is not holding open old MVCC resources.
-            # See https://github.com/zodb/relstorage/issues/401
-            # XXX: This is temporary for testing with other databases. This should be formalized
-            # more (and we need a specific test case that it fixes the sqlite auto-checkpoint issue)
-            # example formalisms:
-            # - make the adapter responsible for doing this, if needed;
-            # - set it to None in this object now or otherwise mark it as unusable.
-            self.load_connection.rollback_quietly()
+
+        # Note that this may commit the load_connection and make it not
+        # viable for a historical view anymore.
         committing_tid_int, prepared_txn = self.adapter.lock_database_and_move(
-            self.store_connection,
+            self.store_connection, self.load_connection,
             self.blobhelper,
             self.ude,
             **kwargs

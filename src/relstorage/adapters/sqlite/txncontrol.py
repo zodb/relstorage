@@ -21,4 +21,11 @@ from ..txncontrol import GenericTransactionControl
 
 
 class Sqlite3TransactionControl(GenericTransactionControl):
-    pass
+
+    def commit_phase2(self, store_connection, txn, load_connection):
+        # When committing, terminate the load connection's transaction now.
+        # This allows any actions taken on commit, such as SQLite's auto-checkpoint,
+        # to see a state where this reader is not holding open old MVCC resources.
+        # See https://github.com/zodb/relstorage/issues/401
+        load_connection.rollback_quietly()
+        GenericTransactionControl.commit_phase2(self, store_connection, txn, load_connection)

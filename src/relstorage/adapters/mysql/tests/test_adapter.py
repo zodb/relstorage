@@ -51,7 +51,7 @@ class TestAdapter(test_adapter.AdapterTestBase):
         adapter.version_detector = MockVersionDetector()
 
         result = adapter.lock_database_and_move(
-            MockConnection(),
+            MockConnection(), None,
             None,
             (),
             commit=commit

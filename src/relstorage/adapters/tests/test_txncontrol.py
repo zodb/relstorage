@@ -91,7 +91,7 @@ class TestTransactionControl(TestCase):
     def test_commit_phase2(self):
         inst = self._makeOne()
         conn = MockConnection()
-        inst.commit_phase2(MockStoreConnection(conn), None)
+        inst.commit_phase2(MockStoreConnection(conn), None, None)
         self.assertTrue(conn.committed)
 
     def test_abort(self):

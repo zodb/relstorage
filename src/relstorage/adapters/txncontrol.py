@@ -38,7 +38,7 @@ class AbstractTransactionControl(ABC):
     def commit_phase1(self, store_connection, tid):
         return '-'
 
-    def commit_phase2(self, store_connection, txn):
+    def commit_phase2(self, store_connection, txn, load_connection):
         store_connection.commit()
 
     def abort(self, store_connection, txn=None):
