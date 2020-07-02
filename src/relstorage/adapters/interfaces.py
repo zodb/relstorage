@@ -1121,12 +1121,18 @@ class ITransactionControl(Interface):
         :param store_connection: An :class:`IManagedStoreConnection`
         """
 
-    def commit_phase2(store_connection, txn):
-        """Final transaction commit.
+    def commit_phase2(store_connection, txn, load_connection):
+        """
+        Final transaction commit.
 
-        *txn* is the name returned by commit_phase1.
+        *txn* is the name returned by :meth:`commit_phase1`.
 
         :param store_connection: An :class:`IManagedStoreConnection`
+           This is what must be committed.
+        :param load_connection: An :class:`IManagedLoadConnection`
+           corresponding to the store connection. If helpful to the database,
+           (for example, for resource reasons) implementations may rollback
+           the connection immediately before committing the store connection.
         """
 
     def abort(store_connection, txn=None):
@@ -1232,7 +1238,7 @@ class IRelStorageAdapter(Interface):
         """
 
     def lock_database_and_move(
-            store_connection,
+            store_connection, load_connection,
             blobhelper,
             ude,
             commit=True,
@@ -1286,6 +1292,17 @@ class IRelStorageAdapter(Interface):
         request has been sent, especially if only one
         communication with the database is required that may block for an arbitrary
         time to get the lock.
+
+        :param load_connection: The load connection corresponding to the store
+            connection. When *commit* is true, this **may** be rolled back
+            immediately before actually committing the *store_connection*, if
+            that assists the database (for example, with resource management).
+            If *commit* is not true, the load connection must not be changed.
+            Rolling back the load connection is optional.
+
+            Be careful to use the *store_connection* for all operations requiring
+            a current view of the database or any writes. The load connection
+            has a historical view and is not writable.
 
         :return: A tuple ``(committing_tid_int, prepared_txn_id)``;
                  the *prepared_txn_id* is irrelevant if *commit* was

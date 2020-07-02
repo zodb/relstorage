@@ -229,7 +229,7 @@ class MySQLAdapter(AbstractAdapter):
 
     @metricmethod_sampled
     def lock_database_and_move(self,
-                               store_connection,
+                               store_connection, load_connection,
                                blobhelper,
                                ude,
                                commit=True,
@@ -239,7 +239,7 @@ class MySQLAdapter(AbstractAdapter):
             # XXX: When can we drop this? Probably not until AppVeyor upgrades
             # MySQL past 5.7.12.
             return super(MySQLAdapter, self).lock_database_and_move(
-                store_connection,
+                store_connection, load_connection,
                 blobhelper,
                 ude,
                 commit=commit,

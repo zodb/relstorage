@@ -35,7 +35,8 @@ def Finish(vote_state, needs_store_commit=True):
         assert txn is not None
         vote_state.adapter.txncontrol.commit_phase2(
             vote_state.store_connection,
-            txn)
+            txn,
+            vote_state.load_connection)
 
     vote_state.committing_tid_lock.release_commit_lock(vote_state.store_connection.cursor)
     vote_state.cache.after_tpc_finish(vote_state.committing_tid_lock.tid,

@@ -34,6 +34,7 @@ class MockConnection(object):
 
     in_transaction = False
     in_critical_phase = True
+    rolled_back = False
 
     def execute(self, query, _args=()):
         if query.startswith('UPDATE'):
@@ -45,6 +46,9 @@ class MockConnection(object):
     def commit(self):
         self.in_transaction = False
         self.in_critical_phase = False
+
+    def rollback_quietly(self):
+        self.rolled_back = True
 
 class MockBlobHelper(object):
 
@@ -62,18 +66,21 @@ class TestAdapter(test_adapter.AdapterTestBase):
         options = Options()
         options.driver = 'gevent sqlite3'
         adapter = self._makeOne(None)
-        conn = MockConnection()
-        assert conn.in_critical_phase
+        store_conn = MockConnection()
+        load_conn = MockConnection()
+        assert store_conn.in_critical_phase
 
         result = adapter.lock_database_and_move(
-            conn,
+            store_conn,
+            load_conn,
             MockBlobHelper(),
             (b'username', b'desc', b'ext'),
             commit=commit
         )
 
         self.assertIsNotNone(result)
-        self.assertEqual(conn.in_critical_phase, not commit)
+        self.assertEqual(store_conn.in_critical_phase, not commit)
+        self.assertEqual(load_conn.rolled_back, commit)
 
     def test_lock_database_and_move_ends_critical_section_on_commit(self):
         self._test_lock_database_and_move_ends_critical_section_on_commit(True)

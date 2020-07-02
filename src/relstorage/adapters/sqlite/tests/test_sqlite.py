@@ -25,6 +25,7 @@ import unittest
 from relstorage.adapters.sqlite.adapter import Sqlite3Adapter
 from relstorage.options import Options
 
+from relstorage.tests import reltestbase
 from relstorage.tests.util import AbstractTestSuiteBuilder
 from relstorage.tests.util import RUNNING_ON_TRAVIS
 from relstorage.tests.util import RUNNING_ON_APPVEYOR
@@ -40,25 +41,32 @@ class Sqlite3AdapterMixin(object):
             db = self.base_dbname + '_hf'
         return db
 
-    def __get_adapter_options(self, dbname=None):
-        dbname = dbname or self.__get_db_name()
-        assert isinstance(dbname, str), (dbname, type(dbname))
+    def _get_data_dir(self):
         # Our layers tend to change the temporary directory,
         # and then destroy it when the layer is torn down.
         # So our files don't persist. This can show a different set of
         # bugs than re-using an existing schema that gets zapped.
+        # return "/tmp"
+        return tempfile.gettempdir()
+
+    DEFAULT_EXTRA_PRAGMAS = {}
+
+    def __get_adapter_options(self, dbname=None):
+        dbname = dbname or self.__get_db_name()
+        assert isinstance(dbname, str), (dbname, type(dbname))
         data_dir = os.path.join(
-            #"/tmp",
-            tempfile.gettempdir(),
-            dbname)
+            self._get_data_dir(),
+            dbname
+        )
 
         return {
             'data_dir': data_dir,
-            'pragmas': {}
+            'pragmas': self.DEFAULT_EXTRA_PRAGMAS.copy(),
         }
 
     def make_adapter(self, options, db=None):
-        return Sqlite3Adapter(
+
+        return self.get_adapter_class()(
             options=options,
             **self.__get_adapter_options(db)
         )
@@ -108,6 +116,73 @@ class Sqlite3AdapterMixin(object):
             conn.close()
 
 
+class TestSqlite3(Sqlite3AdapterMixin, reltestbase.RelStorageTestBase):
+
+    DEFAULT_EXTRA_PRAGMAS = {
+        # Checkpoint frequently so that we don't have to iterate too much.
+        # The default checkpoint is usually 4MB.
+        'wal_autocheckpoint': 2
+    }
+
+    def test_wal_does_not_grow(self):
+        # issue 401 https://github.com/zodb/relstorage/issues/401
+        import transaction
+        from ZODB import DB
+
+        def size_wal():
+            d = self._storage._adapter.data_dir
+            wal = os.path.join(d, 'main.sqlite3-wal')
+
+            #os.system('ls -lh ' + wal)
+            size = os.stat(wal).st_size
+            return size
+
+
+        def run_transaction(db):
+            tx = transaction.begin()
+            conn = db.open()
+            try:
+                root = conn.root()
+                root['key'] = 'abcd' * 1000
+                tx.commit()
+            except:
+                tx.abort()
+                raise
+            finally:
+                conn.close()
+
+        old_explicit = transaction.manager.explicit
+        transaction.manager.explicit = True
+        try:
+            db = self._closing(DB(self._storage))
+            # Open an isolated connection. If the transaction
+            # manager isn't in explicit mode, it really will talk to
+            # the database now, which will cause WAL to start accumulating.
+            # Use explicit transaction managers to prevent that from happening
+            # and keep a tight reign on transaction duration.
+            isolated_txm = transaction.TransactionManager()
+            isolated_txm.explicit = True # If this is commented out, the WAL grows without bound
+            c1 = db.open(isolated_txm)
+
+            try:
+                TX_COUNT = 100
+                RUNS = 3
+                # Prime it.
+                for _ in range(TX_COUNT):
+                    run_transaction(db)
+                wal_size = size_wal()
+
+                for _ in range(RUNS):
+                    for _ in range(TX_COUNT):
+                        run_transaction(db)
+                    self.assertEqual(wal_size, size_wal())
+            finally:
+                c1.close()
+                db.close()
+
+        finally:
+            transaction.manager.explicit = old_explicit
+
 class Sqlite3TestSuiteBuilder(AbstractTestSuiteBuilder):
 
     __name__ = 'Sqlite3'
@@ -118,7 +193,7 @@ class Sqlite3TestSuiteBuilder(AbstractTestSuiteBuilder):
         super(Sqlite3TestSuiteBuilder, self).__init__(
             drivers,
             Sqlite3AdapterMixin,
-            extra_test_classes=()
+            extra_test_classes=(TestSqlite3,)
         )
 
     def _compute_large_blob_size(self, use_small_blobs):

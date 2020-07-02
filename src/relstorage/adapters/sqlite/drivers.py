@@ -222,6 +222,7 @@ class Connection(sqlite3.Connection):
         finally:
             self._at_transaction_end()
 
+
     def rollback(self):
         try:
             sqlite3.Connection.rollback(self)
@@ -501,14 +502,13 @@ class Sqlite3Driver(MemoryViewBlobDriverMixin,
             # an exclusive lock. That could be at arbitrary times, so we don't want that.
             'cache_spill': 0,
 
-            # Disable auto-checkpoint so that commits have
+            # In the past, we considered disabling auto-checkpoint so that commits have
             # reliable duration; after commit, if it's a good time,
             # we can run 'PRAGMA wal_checkpoint'. (In most cases, the last
             # database connection that's open will essentially do that
-            # automatically.)
-            # XXX: Is that really worth it? We have seen some apparent corruptions,
-            # maybe due to that? It's also a balance between readers and writers.
-            # so we'le leave it at the default and just report it.
+            # automatically.) This is a balancing act, though, and
+            # we expose this setting to the end user to allow them to tune it.
+            # By default, use the compiled-in default and report what that is.
             'wal_autocheckpoint': None,
             # Things to query and report.
             'soft_heap_limit': None, # 0 means no limit

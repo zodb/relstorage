@@ -449,8 +449,11 @@ class AbstractVote(AbstractTPCState):
             # support doing that in a single operation, we need to go critical and
             # regain control ASAP so we can complete the operation.
             self.__enter_critical_phase_until_transaction_end()
+
+        # Note that this may commit the load_connection and make it not
+        # viable for a historical view anymore.
         committing_tid_int, prepared_txn = self.adapter.lock_database_and_move(
-            self.store_connection,
+            self.store_connection, self.load_connection,
             self.blobhelper,
             self.ude,
             **kwargs

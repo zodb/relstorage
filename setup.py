@@ -180,11 +180,14 @@ setup(
         # compile on windows for Python 2.7 (it doesn't support the
         # old Visual C) and is hard to compile for anything newer; it sometimes
         # has wheels but not always, so don't suggest it.
+        #
+        # Note that mysqlclient 2.0.0 has a crashing bug:
+        # https://github.com/PyMySQL/mysqlclient-python/issues/435
 
 
         # pylint:disable=line-too-long
         'mysql:platform_python_implementation=="CPython" and (sys_platform != "win32")': [
-            'mysqlclient >= 1.4',
+            'mysqlclient >= 1.4, != 2.0.0',
         ],
         'mysql:platform_python_implementation=="PyPy" or (sys_platform == "win32")': [
             'PyMySQL>=0.6.6',
@@ -236,7 +239,7 @@ setup(
             'PyMySQL >= 0.6.6; python_version == "3.6" or platform_python_implementation == "PyPy" or sys_platform == "win32"',
             # mysqlclient (binary) on all CPythons. It's the default,
             # except on old Windows. We get coverage from Travis.
-            'mysqlclient >= 1.4;platform_python_implementation=="CPython" and (sys_platform != "win32")',
+            'mysqlclient >= 1.4,!=2.0.0;platform_python_implementation=="CPython" and (sys_platform != "win32")',
             # mysql-connector-python on Python 3.7 for coverage on Travis and ensuring it works
             # on Windows, and PyPy for testing there, since it's one of two pure-python versions.
             'mysql-connector-python >= 8.0.16; python_version == "3.7" or platform_python_implementation == "PyPy"',

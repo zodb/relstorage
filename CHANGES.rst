@@ -5,7 +5,12 @@
 3.1.1 (unreleased)
 ==================
 
-- Nothing changed yet.
+- Add support for pg8000 >= 1.15.3. Previously, a ``TypeError`` was
+  raised.
+
+- SQLite: Committing a transaction releases some resources sooner.
+  This makes it more likely that auto-checkpointing of WAL files will be
+  able to reclaim space in some scenarios. See :issue:`401`.
 
 
 3.1.0 (2020-06-11)

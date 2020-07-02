@@ -199,7 +199,7 @@ class PostgreSQLAdapter(AbstractAdapter):
         return tid
 
     def lock_database_and_move(self,
-                               store_connection,
+                               store_connection, load_connection,
                                blobhelper, # pylint:disable=unused-argument
                                ude,
                                commit=True,
@@ -268,7 +268,7 @@ class PostgreSQLAdapter(AbstractAdapter):
             if self.driver.supports_multiple_statement_execute:
                 self.driver.sync_status_after_commit(store_connection.connection)
             else:
-                self.txncontrol.commit_phase2(store_connection, "-")
+                self.txncontrol.commit_phase2(store_connection, "-", load_connection)
         after_selecting_tid(tid_int)
         return tid_int, "-"
 

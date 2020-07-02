@@ -127,7 +127,7 @@ class AbstractAdapter(DatabaseHelpersMixin):
 
     @metricmethod_sampled
     def lock_database_and_move(self,
-                               store_connection,
+                               store_connection, load_connection,
                                blobhelper,
                                ude,
                                commit=True,
@@ -166,7 +166,7 @@ class AbstractAdapter(DatabaseHelpersMixin):
             store_connection, committing_tid_int)
 
         if commit:
-            self.txncontrol.commit_phase2(store_connection, prepared_txn_id)
+            self.txncontrol.commit_phase2(store_connection, prepared_txn_id, load_connection)
 
         return committing_tid_int, prepared_txn_id
 
