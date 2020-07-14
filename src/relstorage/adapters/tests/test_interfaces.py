@@ -28,11 +28,11 @@ class TestExceptions(unittest.TestCase):
         from relstorage.adapters.mysql import drivers
         name = 'auto'
 
-        ex = klass(name, drivers)
+        ex = klass(name, drivers, 'reason')
 
         for s in str(ex), repr(ex):
             self.assertIn(
-                "%s: Driver 'auto' is not available. Options: " % (
+                "%s: Driver 'auto' is not available (reason=reason). Options: " % (
                     klass.__name__,
                 ),
                 s

@@ -75,7 +75,8 @@ class TestAbstractDrivers(unittest.TestCase):
             drivers.select_driver()
 
         self.assertIn(
-            "Driver 'auto' is not available. "
+            "Driver 'auto' is not available "
+            "(reason={'BadDriver': \"DriverNotAvailableError: Driver 'Bad' is not available.\"}). "
             "Options: 'BadDriver' (Module: '<unknown>'; Available: False).",
             str(exc.exception))
 

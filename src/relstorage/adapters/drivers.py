@@ -50,21 +50,26 @@ def _select_driver_by_name(driver_name, driver_options):
     driver_name = casefold(driver_name)
     accept_any_driver = driver_name == 'auto'
     # XXX: For testing, we'd like to be able to prohibit the use of auto.
+    ex_strs = {} # {driver_name: ex}
     for factory in driver_options.known_driver_factories():
         exact_match = casefold(factory.driver_name) == driver_name
         if accept_any_driver or exact_match:
             try:
-                return factory()
+                result = factory()
             except DriverNotAvailableError as e:
                 if not accept_any_driver:
                     e.driver_options = driver_options
                     raise
+                ex_strs[factory.driver_name] = str(e)
+            else:
+                logger.debug("Using driver %s for requested name %r", result, driver_name)
+                return result
 
     # Well snap, no driver. Either we would take any driver,
     # and none were available, or we needed an exact driver that
     # wasn't found
     error = NoDriversAvailableError if accept_any_driver else UnknownDriverError
-    raise error(driver_name, driver_options)
+    raise error(driver_name, driver_options, ex_strs)
 
 class DriverNotImportableError(DriverNotAvailableError,
                                ImportError):
@@ -140,9 +145,9 @@ class AbstractModuleDriver(object):
             raise self.DriverNotAvailableError(self.__name__)
         try:
             self.driver_module = mod = self.get_driver_module()
-        except ImportError:
+        except ImportError as ex:
             logger.debug("Unable to import driver", exc_info=True)
-            raise DriverNotImportableError(self.__name__)
+            raise DriverNotImportableError(self.__name__, reason=str(ex))
 
 
         self.disconnected_exceptions = (mod.OperationalError,
