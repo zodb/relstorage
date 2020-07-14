@@ -2,7 +2,7 @@
  Changes
 =========
 
-3.1.2 (unreleased)
+3.1.2 (2020-07-14)
 ==================
 
 - Fix the psycopg2cffi driver inadvertently depending on the
