@@ -10,7 +10,9 @@
 - Make the error messages for unavailable drivers include more
   information on underlying causes.
 - Log a debug message when an "auto" driver is successfully resolved.
-
+- Add a ``--debug`` argument to the ``zodbconvert`` command line tool
+  to enable DEBUG level logging.
+- Add support for pg8000 1.16. Previously, a ``TypeError`` was raised.
 
 3.1.1 (2020-07-02)
 ==================

@@ -63,7 +63,7 @@ class Psycopg2cffiDriver(Psycopg2Driver):
         return mod.RSPsycopg2cffiConnection
 
     def _get_extension_module(self):
-        from psycopg2cffi import extensions
+        from psycopg2cffi import extensions # pylint:disable=no-name-in-module
         return extensions
 
     # as of psycopg2cffi 2.8.1 connection has no '.info' attribute.

@@ -100,12 +100,18 @@ def main(argv=None):
              "and resume copying from the last transaction. WARNING: no "
              "effort is made to verify that the destination holds the same "
              "transaction data before this point! Use at your own risk. ")
+    parser.add_argument(
+        '--debug', dest="debug", action='store_true',
+        default=False,
+        help="Set the logging level to DEBUG instead of the default of "
+             "INFO."
+    )
     parser.add_argument("config_file", type=argparse.FileType('r'))
 
     options = parser.parse_args(argv[1:])
 
     logging.basicConfig(
-        level=logging.INFO,
+        level=logging.DEBUG if options.debug else logging.INFO,
         format="%(asctime)s [%(name)s] %(levelname)s %(message)s"
     )
 
