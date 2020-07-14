@@ -130,6 +130,8 @@ class PG8000Driver(AbstractPostgreSQLDriver):
                     # that didn't have defaults or extra parameters, but the names
                     # were the same...except for `ssl` vs `ssl_context`: the latter
                     # is only in versions that run on Python 3.
+                    # We must retain support for older versions for Python 2.
+                    #
                     # We could probably do better than this
                     kwargs = dict(
                         user=user, host=host, unix_sock=unix_sock,
@@ -143,7 +145,12 @@ class PG8000Driver(AbstractPostgreSQLDriver):
                     if str is bytes: # PY2
                         del kwargs['ssl_context']
                         kwargs['ssl'] = ssl_context
-                    super(Connection, self).__init__(**kwargs)
+                    try:
+                        super(Connection, self).__init__(**kwargs)
+                    except TypeError:
+                        # 1.16.0 dropped the ``max_prepared_statements`` argument.
+                        del kwargs['max_prepared_statements']
+                        super(Connection, self).__init__(**kwargs)
 
                 def cursor(self):
                     return Cursor(self)

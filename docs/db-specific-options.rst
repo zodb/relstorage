@@ -61,6 +61,10 @@ driver
 
       This is the default and preferred driver everywhere except PyPy.
 
+      If psycopg2 has a wait callback installed, this driver will not
+      be available. If no driver is specified, the next choice for
+      'auto' in this case will be gevent psycopg2.
+
     gevent psycopg2
       The same as ``psycopg2``, but made to be gevent compatible
       through the use of a wait callback. If the system is
@@ -81,6 +85,12 @@ driver
 
       This driver forfeits use of the COPY protocol and use of the
       C-accelerated BLOBs.
+
+      This driver will only be available if psycopg2 has a wait
+      callback installed, which, as mentioned above, happens
+      automatically when gevent monkey-patches the system. No attempt
+      is made to check that the wait callback is actually
+      gevent-friendly in case it has been replaced.
 
     psycopg2cffi
       A C-based driver that requires the PostgreSQL client

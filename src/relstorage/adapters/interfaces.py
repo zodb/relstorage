@@ -230,16 +230,25 @@ class DriverNotAvailableError(Exception):
     #: The `IDBDriverOptions` that was asked for the driver.
     driver_options = None
 
-    def __init__(self, driver_name, driver_options=None):
+    #: The underlying reason string, for example, from an import error
+    #: if such is available.
+    reason = None
+
+    def __init__(self, driver_name, driver_options=None, reason=None):
         super(DriverNotAvailableError, self).__init__(driver_name)
         self.driver_name = driver_name
         self.driver_options = driver_options
+        self.reason = reason
 
     def _format_drivers(self):
         driver_factories = getattr(self.driver_options,
                                    'known_driver_factories',
                                    lambda: ())()
-        return ' '.join(
+        driver_factories = list(driver_factories)
+        if not driver_factories:
+            return ''
+
+        formatted = ' '.join(
             '%r (Module: %r; Available: %s)' % (
                 factory.driver_name,
                 # This attribute isn't in the interface,
@@ -249,10 +258,18 @@ class DriverNotAvailableError(Exception):
             )
             for factory in driver_factories
         )
+        return ' Options: %s.' % (formatted,)
 
     def __str__(self):
-        return '%s: Driver %r is not available. Options: %s.' % (
-            type(self).__name__, self.driver_name, self._format_drivers()
+        if self.reason:
+            reason = ' (reason=%s)' % (self.reason,)
+        else:
+            reason = ''
+
+        return '%s: Driver %r is not available%s.%s' % (
+            type(self).__name__, self.driver_name,
+            reason,
+            self._format_drivers()
         )
 
     __repr__ = __str__
@@ -269,8 +286,8 @@ class NoDriversAvailableError(DriverNotAvailableError):
     Raised when there are no drivers available.
     """
 
-    def __init__(self, driver_name='auto', driver_options=None):
-        super(NoDriversAvailableError, self).__init__(driver_name, driver_options)
+    def __init__(self, driver_name='auto', driver_options=None, reason=None):
+        super(NoDriversAvailableError, self).__init__(driver_name, driver_options, reason)
 
 
 class IDBDriverOptions(Interface):

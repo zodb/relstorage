@@ -22,7 +22,8 @@ from __future__ import print_function
 from .psycopg2 import Psycopg2Driver
 
 __all__ = [
-    'Psycopg2cffiDriver'
+    'Psycopg2cffiDriver',
+    # TODO: A gevent driver seems like it should be possible?
 ]
 
 class Psycopg2cffiDriver(Psycopg2Driver):
@@ -60,6 +61,10 @@ class Psycopg2cffiDriver(Psycopg2Driver):
             mod.RSPsycopg2cffiConnection = Connection
 
         return mod.RSPsycopg2cffiConnection
+
+    def _get_extension_module(self):
+        from psycopg2cffi import extensions # pylint:disable=no-name-in-module
+        return extensions
 
     # as of psycopg2cffi 2.8.1 connection has no '.info' attribute.
 

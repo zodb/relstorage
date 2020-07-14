@@ -32,6 +32,25 @@ __all__ = [
     'GeventPsycopg2Driver',
 ]
 
+class WaitCallbackStateError(ImportError):
+
+    def __init__(self, wait_callback_installed, need_wait_callback):
+        need_wait_callback = (
+            "needs a wait callback" if need_wait_callback
+            else "cannot have a wait callback"
+        )
+        wait_callback_installed = (
+            "a wait callback is installed"
+            if wait_callback_installed
+            else "no wait callback is installed"
+        )
+        ImportError.__init__(
+            self,
+            "The driver %s a wait callback but %s wait callback is installed" % (
+                "needs" if need_wait_callback else "cannot have",
+                "a" if wait_callback_installed else "no"
+            )
+        )
 
 @implementer(IDBDriver)
 class Psycopg2Driver(MemoryViewBlobDriverMixin,
@@ -76,11 +95,33 @@ class Psycopg2Driver(MemoryViewBlobDriverMixin,
 
         return mod.RSPsycopg2Connection
 
-    def _check_wait_callback(self):
-        from psycopg2 import extensions # pylint:disable=no-name-in-module
+    def _get_extension_module(self):
+        # Subclasses should override this method if they use a different
+        # DB-API module.
+        from psycopg2 import extensions
+        return extensions
 
-        if extensions.get_wait_callback() is not None: # pragma: no cover
-            raise ImportError("Wait callback installed")
+    _WANT_WAIT_CALLBACK = False
+
+    def _check_wait_callback(self):
+        # Subclasses may override this method if they have no concept of
+        # this.
+        extensions = self._get_extension_module()
+        callback = extensions.get_wait_callback()
+        # Truth table:
+        # callback is not None | Need callback    | pass?
+        # True                 | True             | Pass
+        # False                | False            | Pass
+        # True                 | False            | Fail
+        # False                | True             | Fail
+        #
+        # This is XNOR, exclusive nor, or iff. Note how it passes
+        # only when both conditions are the same.
+
+        callback_not_none = bool(callback is not None)
+        need_callback = bool(self._WANT_WAIT_CALLBACK)
+        if callback_not_none is not need_callback:
+            raise WaitCallbackStateError(callback_not_none, need_callback)
 
     def get_driver_module(self):
         self._check_wait_callback()
@@ -173,10 +214,8 @@ class GeventPsycopg2Driver(Psycopg2Driver):
         __import__('gevent')
         return super(GeventPsycopg2Driver, self).get_driver_module()
 
-    def _check_wait_callback(self):
-        from psycopg2 import extensions # pylint:disable=no-name-in-module
-        if extensions.get_wait_callback() is None: # pragma: no cover
-            raise ImportError("No wait callback installed")
+
+    _WANT_WAIT_CALLBACK = True
 
     # TODO: Implement enter_critical_phase_until_transaction_end
 
