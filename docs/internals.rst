@@ -1,0 +1,86 @@
+================
+Internal Details
+================
+
+.. caution:: This document is a reference for exploring the code base and
+             tracing errors. The details are subject to change.
+
+.. toctree::
+
+   relstorage.adapters.adapter
+   relstorage.adapters.batch
+   relstorage.adapters.connections
+   relstorage.adapters.connmanager
+   relstorage.adapters.dbiter
+   relstorage.adapters.drivers
+   relstorage.adapters.interfaces
+   relstorage.adapters.locker
+   relstorage.adapters.mover
+   relstorage.adapters.mysql.adapter
+   relstorage.adapters.mysql.connmanager
+   relstorage.adapters.mysql.locker
+   relstorage.adapters.mysql.mover
+   relstorage.adapters.mysql.oidallocator
+   relstorage.adapters.mysql.packundo
+   relstorage.adapters.mysql.schema
+   relstorage.adapters.mysql.stats
+   relstorage.adapters.mysql.txncontrol
+   relstorage.adapters.oidallocator
+   relstorage.adapters.oracle.adapter
+   relstorage.adapters.oracle.batch
+   relstorage.adapters.oracle.connmanager
+   relstorage.adapters.oracle.dialect
+   relstorage.adapters.oracle.drivers
+   relstorage.adapters.oracle.locker
+   relstorage.adapters.oracle.mover
+   relstorage.adapters.oracle.oidallocator
+   relstorage.adapters.oracle.packundo
+   relstorage.adapters.oracle.schema
+   relstorage.adapters.oracle.scriptrunner
+   relstorage.adapters.oracle.stats
+   relstorage.adapters.oracle.txncontrol
+   relstorage.adapters.packundo
+   relstorage.adapters.poller
+   relstorage.adapters.postgresql.adapter
+   relstorage.adapters.postgresql.batch
+   relstorage.adapters.postgresql.connmanager
+   relstorage.adapters.postgresql.locker
+   relstorage.adapters.postgresql.mover
+   relstorage.adapters.postgresql.oidallocator
+   relstorage.adapters.postgresql.schema
+   relstorage.adapters.postgresql.stats
+   relstorage.adapters.postgresql.txncontrol
+   relstorage.adapters.replica
+   relstorage.adapters.schema
+   relstorage.adapters.scriptrunner
+   relstorage.adapters.sqlite.adapter
+   relstorage.adapters.sqlite.batch
+   relstorage.adapters.sqlite.connmanager
+   relstorage.adapters.sqlite.dialect
+   relstorage.adapters.sqlite.drivers
+   relstorage.adapters.sqlite.locker
+   relstorage.adapters.sqlite.mover
+   relstorage.adapters.sqlite.oidallocator
+   relstorage.adapters.sqlite.poller
+   relstorage.adapters.sqlite.schema
+   relstorage.adapters.sqlite.scriptrunner
+   relstorage.adapters.sqlite.stats
+   relstorage.adapters.sqlite.txncontrol
+   relstorage.adapters.stats
+   relstorage.adapters.txncontrol
+   relstorage.cache.interfaces
+   relstorage.cache.local_client
+   relstorage.cache.local_database
+   relstorage.cache.memcache_client
+   relstorage.cache.mvcc
+   relstorage.cache.persistence
+   relstorage.cache.storage_cache
+   relstorage.cache.trace
+   relstorage.config
+   relstorage.interfaces
+   relstorage.options
+   relstorage.pylibmc_wrapper
+   relstorage.treemark
+   relstorage.zodbconvert
+   relstorage.zodbpack
+   relstorage.zodburi_resolver

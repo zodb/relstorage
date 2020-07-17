@@ -44,6 +44,9 @@ from .scriptrunner import Sqlite3ScriptRunner
 
 @implementer(IRelStorageAdapter)
 class Sqlite3Adapter(AbstractAdapter):
+    """
+    Adapter for sqlite.
+    """
     driver_options = drivers
     WRITING_REQUIRES_EXCLUSIVE_LOCK = True
 

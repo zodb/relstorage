@@ -85,7 +85,6 @@ API Reference
 
 .. toctree::
 
-   ../relstorage.cache
    ../relstorage.cache.interfaces
    ../relstorage.cache.local_client
    ../relstorage.cache.persistence

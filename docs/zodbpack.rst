@@ -1,6 +1,6 @@
-==========
- zodbpack
-==========
+==================================
+ Packing A ZODB Storage: zodbpack
+==================================
 .. highlight:: guess
 
 RelStorage also comes with a script named ``zodbpack`` that packs any

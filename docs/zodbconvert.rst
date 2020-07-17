@@ -1,6 +1,6 @@
-=============
- zodbconvert
-=============
+=================================================
+ Copying Data Between ZODB Storages: zodbconvert
+=================================================
 
 RelStorage comes with a script named ``zodbconvert`` that converts
 databases between formats. Use it to convert a FileStorage instance to

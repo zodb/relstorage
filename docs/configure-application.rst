@@ -1,6 +1,6 @@
-==============================
- Configuring Your Application
-==============================
+====================================
+ Configuring ZODB To Use RelStorage
+====================================
 
 Once RelStorage is installed together with the appropriate database
 adapter, and you have created a user and database to use with
@@ -180,6 +180,8 @@ with these values:
       or ``oracle``)
     * RelStorage options like ``cache-servers`` and ``poll-interval``
     * Adapter-specific options
+
+.. highlight:: ini
 
 An example::
 

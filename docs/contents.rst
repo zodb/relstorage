@@ -1,27 +1,27 @@
-========================================
+============================
  RelStorage's Documentation
-========================================
+============================
 
 Contents:
 
 .. toctree::
    :maxdepth: 2
 
-   install
-   configure-database
-   configure-application
-   relstorage-options
-   db-specific-options
-   zodbconvert
-   zodbpack
-   zodburi
-   cache-tracing
+   getting-started
+   command-line-utilities
+   supported-databases
+   configuration-reference
    faq
    performance
+
+.. toctree::
+   :maxdepth: 1
+
    migration
    developing
    changelog
    old_history
+   internals
 
 
 

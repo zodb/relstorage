@@ -367,6 +367,10 @@ intersphinx_mapping = {
     'https://docs.python.org/': None,
     'http://www.zodb.org/en/latest/': None,
     'https://zconfig.readthedocs.io/en/latest/': None,
+    'https://zodb-docs.readthedocs.io/en/latest/': None,
+    'https://persistent.readthedocs.io/en/latest/': None,
+    'https://btrees.readthedocs.io/en/latest/': None,
+
 }
 
 extlinks = {'issue': ('https://github.com/zodb/relstorage/issues/%s',
@@ -374,6 +378,12 @@ extlinks = {'issue': ('https://github.com/zodb/relstorage/issues/%s',
             'pr': ('https://github.com/zodb/relstorage/pull/%s',
                    'pull request #')}
 
-autodoc_default_flags = ['members', 'show-inheritance']
+# Sphinx 1.8+ prefers this to `autodoc_default_flags`. It's documented that
+# either True or None mean the same thing as just setting the flag, but
+# only None works in 1.8 (True works in 2.0)
+autodoc_default_options = {
+    'members': None,
+    'show-inheritance': None,
+}
+autodoc_member_order = 'groupwise'
 autoclass_content = 'both'
-autodoc_member_order = 'bysource'

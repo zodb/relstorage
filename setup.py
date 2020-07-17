@@ -221,6 +221,8 @@ setup(
             # temporary lob.
             'cx_Oracle>=6.0'
         ],
+        'sqlite': [],
+        'sqlite3': [],
         'memcache': memcache_require,
         'test': tests_require,
         'docs': [
