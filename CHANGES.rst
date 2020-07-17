@@ -5,7 +5,9 @@
 3.1.3 (unreleased)
 ==================
 
-- Nothing changed yet.
+- Source distributions: Fix installation when Cython isn't available.
+  Previously it incorrectly assumed a '.c' extension which lead to
+  compiler errors. See :issue:`405`.
 
 
 3.1.2 (2020-07-14)

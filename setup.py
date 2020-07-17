@@ -25,7 +25,7 @@ def _dummy_cythonize(extensions, **_kwargs):
         for sfile in extension.sources:
             path, ext = os.path.splitext(sfile)
             if ext in ('.pyx', '.py'):
-                ext = '.c'
+                ext = '.cpp' if extension.language == 'c++' else '.c'
                 sfile = path + ext
             sources.append(sfile)
         extension.sources[:] = sources
@@ -34,7 +34,7 @@ def _dummy_cythonize(extensions, **_kwargs):
 try:
     from Cython.Build import cythonize
 except ImportError:
-    # The .c files had better already exist.
+    # The generated source files had better already exist.
     cythonize = _dummy_cythonize
 
 
