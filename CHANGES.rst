@@ -9,6 +9,7 @@
   Previously it incorrectly assumed a '.c' extension which lead to
   compiler errors. See :issue:`405`.
 
+- Improve various log messages.
 
 3.1.2 (2020-07-14)
 ==================

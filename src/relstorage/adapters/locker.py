@@ -251,7 +251,7 @@ class AbstractLocker(DatabaseHelpersMixin,
         __traceback_info__ = lock_stmt, debug_info
         if debug_info:
             logger.debug("Failed to acquire commit lock:\n%s", debug_info)
-        message = "Acquiring a commit lock failed: %s%s" % (
+        message = "Acquiring a lock during commit failed: %s%s" % (
             sys.exc_info()[1],
             '\n' + debug_info if debug_info else '(No debug info.)'
         )

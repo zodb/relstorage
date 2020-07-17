@@ -146,7 +146,11 @@ class AbstractModuleDriver(object):
         try:
             self.driver_module = mod = self.get_driver_module()
         except ImportError as ex:
-            logger.debug("Unable to import driver", exc_info=True)
+            logger.debug(
+                "Attempting to load driver named %r from %r failed; if no driver was specified, "
+                "or the driver was set to 'auto', there may be more drivers to attempt.",
+                self.__name__, self.MODULE_NAME,
+                exc_info=True)
             raise DriverNotImportableError(self.__name__, reason=str(ex))
 
 
@@ -214,11 +218,13 @@ class AbstractModuleDriver(object):
     def get_messages(self, conn): # pragma: no cover pylint:disable=unused-argument
         return ()
 
+    message_logger = logger
+
     def __transaction_boundary(self, conn, meth):
         meth()
         messages = self.get_messages(conn)
         for msg in messages:
-            logger.debug(msg.strip())
+            self.message_logger.debug("Message from the RDBMS: %s", msg.strip())
 
     def commit(self, conn, cursor=None): #  pylint:disable=unused-argument
         self.__transaction_boundary(conn, conn.commit)

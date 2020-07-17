@@ -34,19 +34,11 @@ __all__ = [
 
 class WaitCallbackStateError(ImportError):
 
-    def __init__(self, wait_callback_installed, need_wait_callback):
-        need_wait_callback = (
-            "needs a wait callback" if need_wait_callback
-            else "cannot have a wait callback"
-        )
-        wait_callback_installed = (
-            "a wait callback is installed"
-            if wait_callback_installed
-            else "no wait callback is installed"
-        )
+    def __init__(self, driver_name, wait_callback_installed, need_wait_callback):
         ImportError.__init__(
             self,
-            "The driver %s a wait callback but %s wait callback is installed" % (
+            "The driver %r %s a wait callback but %s wait callback is installed" % (
+                driver_name,
                 "needs" if need_wait_callback else "cannot have",
                 "a" if wait_callback_installed else "no"
             )
@@ -121,7 +113,7 @@ class Psycopg2Driver(MemoryViewBlobDriverMixin,
         callback_not_none = bool(callback is not None)
         need_callback = bool(self._WANT_WAIT_CALLBACK)
         if callback_not_none is not need_callback:
-            raise WaitCallbackStateError(callback_not_none, need_callback)
+            raise WaitCallbackStateError(self.__name__, callback_not_none, need_callback)
 
     def get_driver_module(self):
         self._check_wait_callback()
