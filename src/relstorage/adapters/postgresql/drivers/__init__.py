@@ -41,6 +41,11 @@ class AbstractPostgreSQLDriver(AbstractModuleDriver):
     # Can we use the COPY command (copy_export)?
     supports_copy = True
 
+    # PostgreSQL is the database most likey to generate
+    # server-sent messages. Log those using a logger that
+    # includes that name.
+    message_logger = logger
+
     def connect_with_isolation(self, dsn,
                                isolation=None,
                                read_only=False,
