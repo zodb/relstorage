@@ -2,8 +2,14 @@
  Changes
 =========
 
-3.1.3 (unreleased)
+3.2.0 (unreleased)
 ==================
+
+- Make the ``gevent psycopg2`` driver support critical sections. This
+  reduces the amount of gevent switches that occur while database
+  locks are held under a carefully chosen set of circumstances that
+  attempt to balance overall throughput against latency. See
+  :issue:`407`.
 
 - Source distributions: Fix installation when Cython isn't available.
   Previously it incorrectly assumed a '.c' extension which lead to

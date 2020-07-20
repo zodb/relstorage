@@ -244,6 +244,7 @@ class PostgreSQLAdapter(AbstractAdapter):
             # (p_committing_tid, p_commit, p_user, p_desc, p_ext)
             proc = 'lock_and_choose_tid_and_move(%s, %s, %s, %s, %s)'
 
+        cursor = store_connection.cursor
         if commit and self.driver.supports_multiple_statement_execute:
             # Do this all in one trip to the database so that we don't need to
             # wake up to handle the commit. Unfortunately, though, this
@@ -256,17 +257,21 @@ class PostgreSQLAdapter(AbstractAdapter):
                 "COMMIT; "
                 "SELECT current_setting('rs.tid')"
             )
+            self.driver.execute_multiple_statement_with_hidden_commit(
+                store_connection.connection,
+                store_connection.cursor,
+                proc,
+                params
+            )
         else:
             proc = 'SELECT ' + proc
+            cursor.execute(proc, params)
 
-
-        cursor = store_connection.cursor
-        cursor.execute(proc, params)
         tid_int, = cursor.fetchone()
         tid_int = int(tid_int)
         if commit:
             if self.driver.supports_multiple_statement_execute:
-                self.driver.sync_status_after_commit(store_connection.connection)
+                self.driver.sync_status_after_hidden_commit(store_connection.connection)
             else:
                 self.txncontrol.commit_phase2(store_connection, "-", load_connection)
         after_selecting_tid(tid_int)

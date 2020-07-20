@@ -25,8 +25,8 @@ The PostgreSQL adapter accepts:
 driver
     All of these drivers use the name of the corresponding PyPI
     package. All drivers support uploading objects using PostgreSQL's
-    fast binary COPY protocol (except where noted). None of the gevent
-    drivers support RelStorage's critical commit section. The possible options are:
+    fast binary COPY protocol (except where noted). Only ``gevent psycopg2``
+    supports RelStorage's critical commit section. The possible options are:
 
     psycopg2
       A C-based driver that uses the C PostgreSQL client
@@ -57,7 +57,8 @@ driver
       connections in the same process outside of RelStorage, the wait
       callback RelStorage installs won't work for those other
       connections. You can install a more general callback at a slight
-      expense to the RelStorage connections, or you could use the
+      expense to the RelStorage connections (this will forfeit support
+      for the critical commit section), or you could use the
       RelStorage driver module to create the other connections.
 
       This driver forfeits use of the COPY protocol and use of the
@@ -68,6 +69,9 @@ driver
       automatically when gevent monkey-patches the system. No attempt
       is made to check that the wait callback is actually
       gevent-friendly in case it has been replaced.
+
+      .. versionchanged:: 3.2.0
+         Add support for the critical commit section.
 
     psycopg2cffi
       A C-based driver that requires the PostgreSQL client

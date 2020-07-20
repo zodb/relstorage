@@ -73,7 +73,7 @@ class AbstractPostgreSQLDriver(AbstractModuleDriver):
         cursor.execute('SET lock_timeout = %s', (timeout,))
 
     def get_messages(self, conn):
-        notices = conn.notices
+        notices = conn.notices or ()
         if notices:
             notices = list(notices)
             if isinstance(notices[0], dict):
@@ -88,6 +88,16 @@ class AbstractPostgreSQLDriver(AbstractModuleDriver):
 
     def synchronize_cursor_for_rollback(self, cursor):
         """Does nothing."""
+
+    def execute_multiple_statement_with_hidden_commit(self, conn, cursor, stmt, params):
+        # Exit the critical phase now. We don't have a fine-grained
+        # way of doing this between statements, so up front is the fastest we
+        # can exit. That's fine, Python isn't involved during releasing the locks; we're
+        # either going to get the commit lock and successfully commit, or we're going to
+        # fail. Either way, there's nothing we need to do to let other greenlets get going.
+        # This is just like how MySQL handles it in ``callproc_multi_result``.
+        self.exit_critical_phase(conn, cursor)
+        cursor.execute(stmt, params)
 
 database_type = 'postgresql'
 
