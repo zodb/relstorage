@@ -345,7 +345,7 @@ class AbstractConnectionManager(object):
         """Open a connection to be used for the pre-pack phase.
         Returns (conn, cursor).
         """
-        return self.open_for_store(application_name='RS prepack')
+        return self.open_for_store(application_name='RS: Prepack')
 
     def open_for_pack_lock(self):
         return self.open()
@@ -355,7 +355,7 @@ class AbstractConnectionManager(object):
         open_args['read_only'] = False
         open_args['deferrable'] = False
         if 'application_name' not in open_args:
-            open_args['application_name'] = 'RS store'
+            open_args['application_name'] = 'RS: Store'
         return self.open(**open_args)
 
     def _do_open_for_call(self, callback):
