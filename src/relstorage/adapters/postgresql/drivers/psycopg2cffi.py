@@ -79,5 +79,5 @@ class Psycopg2cffiDriver(Psycopg2Driver):
             return False
         return self.connection_may_need_rollback(conn)
 
-    def sync_status_after_commit(self, conn):
+    def sync_status_after_hidden_commit(self, conn):
         conn.status = self.STATUS_READY

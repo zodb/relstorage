@@ -21,7 +21,11 @@ from __future__ import print_function
 
 from zope.interface import implementer
 
+from relstorage.adapters.drivers import GeventConnectionMixin
+from relstorage.adapters.drivers import GeventDriverMixin
+
 from ...interfaces import IDBDriver
+from ...interfaces import IDBDriverSupportsCritical
 from ...drivers import MemoryViewBlobDriverMixin
 
 from . import AbstractPostgreSQLDriver
@@ -170,13 +174,18 @@ class Psycopg2Driver(MemoryViewBlobDriverMixin,
             return False
         return conn.info.transaction_status in self.TS_NEEDS_COMMIT
 
-    def sync_status_after_commit(self, conn):
+    def sync_status_after_hidden_commit(self, conn):
+        """
+        If you execute a multiple statement or function that commits,
+        *you must immediately* call this method.
+        """
         # Sadly we can't do anything except commit. The .status
         # variable is untouchable
         self.commit(conn)
 
 
-class GeventPsycopg2Driver(Psycopg2Driver):
+@implementer(IDBDriverSupportsCritical)
+class GeventPsycopg2Driver(GeventDriverMixin, Psycopg2Driver):
     __name__ = 'gevent ' + Psycopg2Driver.MODULE_NAME
 
     _GEVENT_CAPABLE = True
@@ -187,29 +196,73 @@ class GeventPsycopg2Driver(Psycopg2Driver):
     def _create_connection(self, mod, *extra_slots):
         if getattr(mod, 'RSGeventPsycopg2Connection', self) is self:
             Base = super(GeventPsycopg2Driver, self)._create_connection(mod, *extra_slots)
-            from relstorage.adapters.drivers import GeventConnectionMixin
 
             class RSGeventPsycopg2Connection(GeventConnectionMixin,
                                              LobConnectionMixin,
                                              Base):
                 RSDriverBinary = self.Binary
+                _in_critical_phase = False
 
+                def enter_critical_phase_until_transaction_end(self):
+                    self._in_critical_phase = True
+
+                def exit_critical_phase(self):
+                    self._in_critical_phase = False
+
+                def is_in_critical_phase(self):
+                    return self._in_critical_phase
+
+                def commit(self):
+                    try:
+                        super(RSGeventPsycopg2Connection, self).commit()
+                    finally:
+                        self._in_critical_phase = False
+
+                def rollback(self):
+                    try:
+                        super(RSGeventPsycopg2Connection, self).rollback()
+                    finally:
+                        self._in_critical_phase = False
 
             mod.RSGeventPsycopg2Connection = RSGeventPsycopg2Connection
 
         return mod.RSGeventPsycopg2Connection
 
-
     def get_driver_module(self):
         # Make sure we can use gevent; if we can't the ImportError
         # will prevent this driver from being used.
+        # TODO: Unify this better with inheritance.
         __import__('gevent')
         return super(GeventPsycopg2Driver, self).get_driver_module()
 
-
     _WANT_WAIT_CALLBACK = True
 
-    # TODO: Implement enter_critical_phase_until_transaction_end
+    ###
+    # Critical sections
+    ###
+
+    def enter_critical_phase_until_transaction_end(self, connection, cursor):
+        connection.enter_critical_phase_until_transaction_end()
+
+    def is_in_critical_phase(self, connection, cursor):
+        return connection.is_in_critical_phase()
+
+    def exit_critical_phase(self, connection, cursor):
+        connection.exit_critical_phase()
+
+    # Because we have no insight into each individual query that's
+    # run, and one of our queries commits in a single multi-statement,
+    # if we're in critical phase, we need to commit or rollback to
+    # revert that....except, the only time we do a multi-statement
+    # that executes a commit we immediately turn around and call
+    # ``sync_status_after_commit``, which in turn always calls
+    # ``commit()``. So that's the simplest way. We've made this more
+    # explicit with the
+    # ``execute_multiple_statement_with_hidden_commit`` API. This
+    # automatically ends a critical section.
+    #
+    # Previously, we briefly thought it necessary to override the
+    # ``may_need_rollback`` and ``may_need_commit`` APIs.
 
 
 class _GeventPsycopg2WaitCallback(object):
@@ -228,22 +281,27 @@ class _GeventPsycopg2WaitCallback(object):
         self.poll_read = POLL_READ
 
     def __call__(self, conn):
+        allow_switch = not conn._in_critical_phase
+        # Even though ``conn.poll()`` would appear to do this, we need
+        # to check at this level. Otherwise we can get strange hangs,
+        # and one connection can monopolize the whole thing. Note that
+        # this only applies when allow_switch is true.
+        poll = True
         while 1:
             state = conn.poll()
             if state == self.poll_ok:
                 return
 
             if state == self.poll_read:
-                conn.gevent_wait_read()
+                conn.gevent_generic_wait_read(allow_switch, poll)
             else:
-                conn.gevent_wait_write()
+                conn.gevent_generic_wait_write(allow_switch, poll)
 
 
 def _gevent_did_patch(_event):
     try:
         from psycopg2.extensions import set_wait_callback
     except ImportError:
-
         pass
     else:
         set_wait_callback(_GeventPsycopg2WaitCallback())

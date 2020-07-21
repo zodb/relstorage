@@ -404,9 +404,13 @@ except ImportError:
     GeventDriverMixin = _NoGeventDriverMixin
     GeventConnectionMixin = _NoGeventConnectionMixin
 else:
-    import select
+    from gevent.select import select as gselect
+    from gevent import monkey as gmonkey
     from gevent.socket import wait
     get_hub = gevent.get_hub
+
+    blocking_select = gmonkey.get_original('select', 'select')
+    del gmonkey
 
     class GeventDriverMixin(object):
         gevent = gevent
@@ -460,7 +464,7 @@ else:
         locks. Since they're shared locks, that could harm arbitrary
         machines in the cluster.
 
-        Thus, we perform a similar optimization as gevent sockets: we
+        Thus, by default we perform a similar optimization as gevent sockets: we
         first check to see if the file descriptor is ready and only
         yield to the event loop if it isn't. The cost is an extra
         system call to ``select``. For write requests, we could be
@@ -473,6 +477,9 @@ else:
         """
         gevent_sleep = staticmethod(gevent.sleep)
 
+        # We don't have a fileno() method ourself,
+        # because we're often mixed in at the first.
+
         def close(self):
             self.__close_watchers()
             super(GeventConnectionMixin, self).close()
@@ -484,6 +491,7 @@ else:
             if hub is not self.gevent_hub:
                 self.__close_watchers()
 
+                # XXX: Any db drivers that silently reconnect? That would change the fileno.
                 fileno = self.fileno()
                 hub = self.gevent_hub = get_hub()
                 self.gevent_read_watcher = hub.loop.io(fileno, 1)
@@ -496,23 +504,51 @@ else:
                 self.gevent_hub = None
 
         def gevent_check_read(self,):
-            if select.select([self], (), (), 0)[0]:
+            if gselect([self], (), (), 0)[0]:
+                # gselect inserts a call to gevent.sleep() to spin
+                # the event loop. If we don't do that, then one connection
+                # can monopolize the event loop.
                 return True
             return False
 
-        def gevent_wait_read(self):
-            if not self.gevent_check_read():
-                self.__check_watchers()
-                wait(self.gevent_read_watcher,
-                     hub=self.gevent_hub)
+        def gevent_wait_read(self, poll=True):
+            if poll and self.gevent_check_read():
+                return
+
+            self.__check_watchers()
+            wait(self.gevent_read_watcher,
+                 hub=self.gevent_hub)
+
+        def gevent_blocking_wait_read(self, poll=True): # pylint:disable=unused-argument
+            # poll is for compatibility with ``gevent_wait_read``.
+            # Note that there's no timeout here, other than what might be on the
+            # socket.
+            # XXX: Should there be?
+            blocking_select([self], (), ())
+
+        def gevent_generic_wait_read(self, allow_switch=True, poll=True):
+            """
+            *poll* only applies if *allow_switch* is True.
+            """
+            waiter = self.gevent_wait_read if allow_switch else self.gevent_blocking_wait_read
+            waiter(poll)
 
         def gevent_check_write(self):
-            if select.select((), [self], (), 0)[1]:
+            if gselect((), [self], (), 0)[1]:
                 return True
             return False
 
-        def gevent_wait_write(self):
-            if not self.gevent_check_write():
-                self.__check_watchers()
-                wait(self.gevent_write_watcher,
-                     hub=self.gevent_hub)
+        def gevent_wait_write(self, poll=True):
+            if poll and self.gevent_check_write():
+                return
+
+            self.__check_watchers()
+            wait(self.gevent_write_watcher,
+                 hub=self.gevent_hub)
+
+        def gevent_blocking_wait_write(self, poll=True): # pylint:disable=unused-argument
+            blocking_select((), [self], ())
+
+        def gevent_generic_wait_write(self, allow_switch=True, poll=True):
+            waiter = self.gevent_wait_write if allow_switch else self.gevent_blocking_wait_write
+            waiter(poll)
