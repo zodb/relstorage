@@ -5,7 +5,8 @@
 3.2.1 (unreleased)
 ==================
 
-- Nothing changed yet.
+- Improve the speed of loading large cache files by reducing the cost
+  of cache validation.
 
 
 3.2.0 (2020-07-20)

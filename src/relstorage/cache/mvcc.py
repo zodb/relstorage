@@ -969,27 +969,28 @@ class MVCCDatabaseCoordinator(DetachableMVCCDatabaseCoordinator):
     def __poll_old_oids_and_remove(self, adapter, local_client):
         from relstorage.adapters.connmanager import connection_callback
 
-        oids = OidSet(local_client.keys())
+        cached_oids = OidSet(local_client.keys())
         # In local tests, this function executes against PostgreSQL 11 in .78s
         # for 133,002 older OIDs; or, .35s for 57,002 OIDs against MySQL 5.7.
         # In one production environment of 800,000 OIDs with a 98% survival rate,
         # using MySQL 5.7 takes an average of about 11s.
-        logger.debug("Polling %d oids stored in cache", len(oids))
+        logger.debug("Polling %d oids stored in cache", len(cached_oids))
 
-        @connection_callback(isolation_level=adapter.connmanager.isolation_load, read_only=True)
-        def poll_old_oids(_conn, cursor):
-            return adapter.mover.current_object_tids(cursor, oids)
+        @connection_callback(isolation_level=adapter.connmanager.isolation_load,
+                             read_only=True)
+        def poll_cached_oids(_conn, cursor):
+            # type: (Any, Any) -> Dict[Int, Int]
+            """Return mapping of {oid_int: tid_int}"""
+            return adapter.mover.current_object_tids(cursor, cached_oids)
 
-        current_tids_for_oids = adapter.connmanager.open_and_call(poll_old_oids).get
+        current_tid = adapter.connmanager.open_and_call(poll_cached_oids).get
         polled_invalid_oids = OidSet()
-        peek = local_client._peek
+        cache_is_correct = local_client._cache.contains_oid_with_tid
 
-        for oid in oids:
-            current_tid = current_tids_for_oids(oid)
-            if (current_tid is None
-                    or peek(oid)[1] != current_tid):
-                polled_invalid_oids.add(oid)
+        for oid_int in cached_oids:
+            if not cache_is_correct(oid_int, current_tid(oid_int)):
+                polled_invalid_oids.add(oid_int)
 
         logger.debug("Polled %d older oids stored in cache; %d survived",
-                     len(oids), len(oids) - len(polled_invalid_oids))
+                     len(cached_oids), len(cached_oids) - len(polled_invalid_oids))
         local_client.remove_invalid_persistent_oids(polled_invalid_oids)
