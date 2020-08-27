@@ -42,6 +42,15 @@ from relstorage._compat import iteroiditems
 
 cdef extern from *:
     """
+    #ifdef __clang__
+    #pragma clang diagnostic push
+    /* Cython generates lots of unreachable code diagnostics that flood the output */
+    #pragma clang diagnostic ignored "-Wunreachable-code"
+    /* As of Cython 3.0a6 and CPython 3.8 (at least) Cython generates
+       deprecation warnings for tp_print */
+    #pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    #endif
+
     template <typename T>
     T* array_new(int n) {
         return new T[n];
@@ -341,10 +350,24 @@ cdef class PyCache:
         return self.get(key)
 
     cpdef object peek_item_with_tid(self, OID_t key, TID_t tid):
-        cdef TID_t native_tid = -1 if tid is None else tid
-        value = self.cache.peek(key, native_tid)
+        value = self.cache.peek(key, tid)
         if value:
             return python_from_entry_p(value)
+
+    cpdef bint contains_oid_with_tid(self, OID_t key, tid):
+        """
+        For use during cache validation. Can only be used when
+        the cache only contains SingleValue entries; failure
+        to do this will lead to memory leaks.
+        """
+        cdef TID_t native_tid = -1 if tid is None else tid
+        cdef SVCacheEntry* entry = self.cache.peek(key, native_tid)
+        if not entry:
+            return False
+        # We're guaranteed that entry is an existing object, not one we need
+        # to manage the lifetime of, because of the requirement that only
+        # single values can be in the cache at this time.
+        return True
 
     def __getitem__(self, OID_t key):
         return self.get(key)

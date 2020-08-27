@@ -17,7 +17,10 @@ from collections import defaultdict
 import itertools
 
 from relstorage._compat import iteritems
+from relstorage._compat import perf_counter
 from relstorage._util import parse_byte_size
+
+from .interfaces import AggregateOperationTimeoutError
 
 # A cache
 # {(placeholder, count): "string"}
@@ -33,6 +36,8 @@ class RowBatcher(object):
     Deleting needs to use ordered parameters. The placeholder
     can be set in the ``delete_placeholder`` attribute.
     """
+
+    perf_counter = perf_counter
 
     # How many total rows can be sent at once. Also used as
     # ``bind_limit`` if that is 0 or None.
@@ -143,7 +148,7 @@ class RowBatcher(object):
             _row_schemas[key] = p
             return p
 
-    def select_from(self, columns, table, suffix='', **kw):
+    def select_from(self, columns, table, suffix='', timeout=None, **kw):
         """
         Handles a query of the ``WHERE col IN (?, ?,)`` type::
 
@@ -151,13 +156,26 @@ class RowBatcher(object):
 
         The keyword arguments should be of length 1, containing an
         iterable of the values to check: ``col=(1, 2)`` or in the
-        dynamic case ``**{indirect_var: [1, 2]}``.
+        dynamic case ``**{indirect_var: [1, 2]}``::
+
+            batcher.select_from(('zoid', 'tid',), 'object_state',
+                                zoid=oids)
 
         The number of batches needed is determined by the length of
         the iterator divided by this object's ``bind_limit``,
         or, if that's not set, by the ``row_limit``.
 
-        Returns a iterator of matching rows.
+        Returns a iterator of matching rows. Matching rows are delivered
+        incrementally, so some number of rows may be delivered and then
+        an exception is raised.
+
+        :keyword float timeout: If given, provides a number of seconds
+           that is the approximate maximum amount of time this method will
+           be allowed to take.
+        :raises AggregateOperationTimeoutError: If *timeout* is given,
+           and the cumulative time taken to query and process
+           some subset of batches exceeds *timeout*. This is checked
+           after each individual batch.
         """
         assert len(kw) == 1
         filter_column, filter_values = kw.popitem()
@@ -168,14 +186,23 @@ class RowBatcher(object):
         chunk_size = self.bind_limit or self.row_limit
         chunk_size -= 1
 
+        begin = self.perf_counter() if timeout else None
+
         for head in filter_values:
             filter_subset = list(itertools.islice(filter_values, chunk_size))
             filter_subset.append(head)
 
             descriptor = [[(table, (filter_column,)), filter_subset]]
+
             self._do_batch(command, descriptor, rows_need_flattened=False, suffix=suffix)
+
             for row in self.cursor.fetchall():
                 yield row
+
+            if timeout and self.perf_counter() - begin >= timeout:
+                # TODO: It'd be nice not to do this if we had no more
+                # batches to do.
+                raise AggregateOperationTimeoutError
 
     def flush(self):
         if self.deletes:

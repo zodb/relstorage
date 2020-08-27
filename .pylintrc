@@ -33,6 +33,8 @@
 # chained-comparison: It wants you to rewrite `x > 2 and x < 3` using something like `2 < x < 3`,
 #   which I don't like, I find that less readable.
 # import-outside-toplevel: New in pylint 2.4. We have a large number of deferred imports.
+# super-with-arguments and raise-missing-from: New in pylint 2.7; we can't use them because
+#   we support Python 2.
 disable=
     invalid-name,
     missing-docstring,
@@ -54,7 +56,9 @@ disable=
     chained-comparison,
     too-many-ancestors,
     import-outside-toplevel,
-    relative-beyond-top-level
+    relative-beyond-top-level,
+    super-with-arguments,
+    raise-missing-from
 #   undefined-all-variable
 
 

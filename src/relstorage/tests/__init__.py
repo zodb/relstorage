@@ -316,7 +316,10 @@ class MockConnectionManager(object):
 
     def open_for_load(self):
         conn = MockConnection()
-        return conn, conn.cursor()
+        return conn, self.configure_cursor(conn.cursor())
+
+    def configure_cursor(self, cur):
+        return cur
 
     open_for_store = open_for_load
 
@@ -408,7 +411,8 @@ class MockObjectMover(object):
     def load_current(self, _cursor, oid_int):
         return self.data.get(oid_int, (None, None))
 
-    def current_object_tids(self, _cursor, oids):
+    def current_object_tids(self, _cursor, oids, timeout=None):
+        # pylint:disable=unused-argument
         return {
             oid: self.data[oid][1]
             for oid in oids

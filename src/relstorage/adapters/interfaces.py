@@ -767,11 +767,18 @@ class IObjectMover(Interface):
         Returns None if no later state exists.
         """
 
-    def current_object_tids(cursor, oids):
+    def current_object_tids(cursor, oids, timeout=None):
         """
-        Returns the current {oid_int: tid_int} for specified object ids.
+        Returns the current ``{oid_int: tid_int}`` for specified object ids.
 
         Note that this may be a BTree mapping, not a dictionary.
+
+        :param oids: An iterable of OID integers.
+        :keyword float timeout: If not None, this is an approximate upper bound
+           (in seconds) on how long this function will run.
+        :raises AggregateOperationTimeoutError: If the timeout was exceeded.
+           This will have one extra attribute set, ``partial_result``, which will be a
+           (partial) mapping of the results collected before the timeout.
         """
 
     def on_store_opened(cursor, restart=False):
@@ -1647,3 +1654,14 @@ class StaleConnectionError(ReadConflictError):
         return cls(
             "The database connection is stale: new_polled_tid=%d, "
             "prev_polled_tid=%d." % (new_polled_tid, prev_polled_tid))
+
+
+class AggregateOperationTimeoutError(Exception):
+    """
+    Raised when an aggregate operation in RelStorage detects
+    that it has exceeded a specified timeout.
+    """
+
+    #: If the function knows a useful, partial result, it may set this
+    #: attribute. Check it against the class value to see if it's been set.
+    partial_result = object()
