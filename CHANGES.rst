@@ -23,6 +23,10 @@
   making a load query for the first time in a particular connection.
   See :issue:`411`.
 
+- Add some DEBUG level logging around forced invalidations of
+  persistent object caches due to exceeding the cache MVCC limits. See
+  :issue:`338`.
+
 3.2.0 (2020-07-20)
 ==================
 
