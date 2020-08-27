@@ -18,6 +18,11 @@
   variable ``RS_CACHE_POLL_TIMEOUT`` to a number of seconds before
   importing RelStorage to use this.
 
+- Avoid an ``AttributeError`` if a persistent ``zope.component`` site
+  manager is installed as the current site, it's a ghost, and we're
+  making a load query for the first time in a particular connection.
+  See :issue:`411`.
+
 3.2.0 (2020-07-20)
 ==================
 
