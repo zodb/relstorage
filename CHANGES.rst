@@ -8,6 +8,15 @@
 - Improve the speed of loading large cache files by reducing the cost
   of cache validation.
 
+- The timing metrics for ``current_object_oids`` are always collected,
+  not just sampled. MySQL and PostgreSQL will only call this method
+  once at startup during persistent cache validation. Other databases
+  may call this method once during the commit process.
+
+- Add the ability to limit how long persistent cache validation will
+  spend polling the database for invalid OIDs. Set the environment
+  variable ``RS_CACHE_POLL_TIMEOUT`` to a number of seconds before
+  importing RelStorage to use this.
 
 3.2.0 (2020-07-20)
 ==================

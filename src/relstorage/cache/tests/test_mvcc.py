@@ -399,6 +399,87 @@ class TestMVCCDatabaseCorrdinator(TestCase):
         self.assertEqual(self.coord.minimum_highest_visible_tid, 5)
         self.assertEqual(self.coord.object_index.depth, 3)
 
+    def test_restore_timeout(self):
+        from relstorage.tests import mock
+        from relstorage.tests import MockOptions
+        from relstorage.adapters.mover import AbstractObjectMover
+        from relstorage.adapters.batch import RowBatcher
+        from relstorage.adapters.interfaces import AggregateOperationTimeoutError
+
+        mock_perf_counter = mock.Mock()
+        mock_perf_counter.side_effect = (
+            12345,
+            12346,
+            12347
+        )
+
+        # We'll poll for 10 oids, all of which will be present
+        oids = (1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
+        def configure_cursor(cur):
+            cur.many_results = [
+                [(oid, 1)]
+                for oid in oids
+            ]
+            return cur
+        # But we'll timeout after two batches,
+        # and the batches will be of size 1 (for simplicity)
+        timeout = 2
+        batch_size = 1
+
+        class MockRowBatcher(RowBatcher):
+            ex = None
+            def select_from(self, *args, **kwargs):
+                # pylint:disable=signature-differs
+                try:
+                    for x in RowBatcher.select_from(self, *args, **kwargs):
+                        yield x
+                except AggregateOperationTimeoutError as ex:
+                    MockRowBatcher.ex = ex
+                    raise
+
+        def batcher_factory(*args):
+            batch = MockRowBatcher(*args)
+            batch.bind_limit = batch_size
+            batch.perf_counter = mock_perf_counter
+            return batch
+
+
+        adapter = MockAdapter()
+        adapter.mover = AbstractObjectMover(None, MockOptions(), batcher_factory=batcher_factory)
+
+        adapter.connmanager.configure_cursor = configure_cursor
+
+        class MockCache(object):
+            def contains_oid_with_tid(self, oid, tid):
+                return oid is not None and tid is not None
+
+        class MockLocalClient(object):
+            _cache = MockCache()
+            invalid_oids = None
+            def restore(self):
+                return (1, 1)
+
+            def keys(self):
+                return oids
+
+            def remove_invalid_persistent_oids(self, oids):
+                self.invalid_oids = list(oids)
+
+        local_client = MockLocalClient()
+
+        coord = self._makeOne()
+        coord.restore(adapter, local_client, timeout=timeout)
+
+        self.assertIsNotNone(MockRowBatcher.ex)
+        self.assertEqual(
+            dict(MockRowBatcher.ex.partial_result),
+            {1: 1, 2: 1}
+        )
+        # Everything we didn't get returned from the database was
+        # considered invalid.
+        self.assertEqual(local_client.invalid_oids, [
+            3, 4, 5, 6, 7, 8, 9, 10
+        ])
 
 class TestTransactionRangeObjectIndex(TestCase):
 

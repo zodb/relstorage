@@ -70,6 +70,8 @@ __all__ = [
     'base64_decodebytes',
     'update_wrapper',
 
+    # Clocks
+    'perf_counter',
 ]
 
 PY3 = sys.version_info[0] == 3
@@ -78,6 +80,19 @@ PY2 = not PY3
 PYPY = platform.python_implementation() == 'PyPy'
 WIN = sys.platform.startswith('win')
 MAC = sys.platform.startswith('darwin')
+
+try:
+    # Python 3.3+ (PEP 418)
+    from time import perf_counter
+except ImportError:
+    import time
+
+    if sys.platform == "win32":
+        perf_counter = time.clock # pylint: disable=no-member
+    else:
+        perf_counter = time.time
+
+    del time
 
 # Dict support
 
@@ -292,13 +307,13 @@ def iteroiditems(d):
     return d.iteritems() if hasattr(d, 'iteritems') else d.items()
 
 # Types
+from perfmetrics import metricmethod # pylint:disable=wrong-import-position
+from perfmetrics import Metric # pylint:disable=wrong-import-position
 
 if PY3:
     string_types = (str,)
     number_types = (int, float)
     from io import StringIO as NStringIO
-    from perfmetrics import metricmethod
-    from perfmetrics import Metric
     from functools import wraps
 else:
     string_types = (basestring,) # pylint:disable=undefined-variable
@@ -317,10 +332,6 @@ else:
             replacement.__wrapped__ = self._orig
             return replacement
 
-    from perfmetrics import Metric
-
-    metricmethod = Metric(method=True)
-
 metricmethod_sampled = Metric(method=True, rate=0.1)
 
 IN_TESTRUNNER = (
@@ -331,7 +342,7 @@ IN_TESTRUNNER = (
 )
 
 
-if IN_TESTRUNNER:
+if IN_TESTRUNNER and os.environ.get('RS_TEST_DISABLE_METRICS'):
     # If we're running under the testrunner,
     # don't apply the metricmethod stuff. It makes
     # backtraces ugly and makes stepping in the

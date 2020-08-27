@@ -321,6 +321,44 @@ class RowBatcherTests(TestCase):
         self.test_select_multiple_many_batch(batch_limit_attr='bind_limit')
 
 
+    def test_select_from_timeout(self):
+        from relstorage.tests import mock
+        from relstorage.adapters.interfaces import AggregateOperationTimeoutError
+        cursor = MockCursor()
+        cursor.sort_sequence_params = True
+        cursor.many_results = [
+            [(1, 1)],
+            [(2, 1)],
+            [(3, 1)],
+            []
+        ]
+        batcher = self.getClass()(cursor)
+        batcher.bind_limit = 1
+        batcher.perf_counter = mock.Mock()
+        # These will be the time values returned from perf_counter()
+        batcher.perf_counter.side_effect = (
+            12345, # Begin
+            12346, # First batch
+            12347, # Second batch
+        )
+
+        gener = batcher.select_from(('zoid', 'tid',), 'object_state',
+                                    timeout=2,
+                                    oids=[1, 2, 3, 4, 5])
+        rows = []
+        with self.assertRaises(AggregateOperationTimeoutError):
+            for row in gener:
+                rows.append(row)
+
+        # We ran exactly twice before the perf_counter exceeded the timeout.
+        self.assertEqual(rows, [
+            (1, 1),
+            (2, 1),
+        ])
+
+
+
+
 class OracleRowBatcherTests(TestCase):
 
     def getClass(self):

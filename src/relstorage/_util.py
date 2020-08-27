@@ -45,6 +45,7 @@ from ZODB.loglevels import TRACE
 
 from relstorage._compat import wraps
 from relstorage._compat import update_wrapper
+from relstorage._compat import perf_counter
 
 logger = logging.getLogger(__name__)
 perf_logger = logger.getChild('timing')
@@ -71,6 +72,7 @@ __all__ = [
     'parse_boolean',
     'parse_byte_size',
     'positive_integer',
+    'get_time_from_environ',
 ]
 
 positive_integer = RangeCheckedConversion(integer, min=1)
@@ -108,18 +110,12 @@ def timestamp_at_unixtime(now):
     seconds = now % 60.0
     return TimeStamp(*(gmtime[:5] + (seconds,)))
 
-try:
-    from pyperf import perf_counter as _counter
-except ImportError: # pragma: no cover
-    _counter = time.time
-
-
 class timer(object):
     __begin = None
     __end = None
     duration = None
 
-    counter = _counter
+    counter = perf_counter
 
     def __enter__(self):
         self.__begin = self.counter()
@@ -129,10 +125,19 @@ class timer(object):
         self.__end = self.counter()
         self.duration = self.__end - self.__begin
 
+def get_time_from_environ(environ_name, default):
+    env_val = os.environ.get(environ_name, default)
+    try:
+        result = float(env_val)
+    except (ValueError, TypeError):
+        result = default
+    logger.debug('Using %s from environ %r=%r', result, environ_name, env_val)
+    return result
+
 
 def _get_log_time_level(level_int, default):
     level_name = logging.getLevelName(level_int)
-    val = os.environ.get('RS_PERF_LOG_%s_MIN' % level_name, default)
+    val = get_time_from_environ('RS_PERF_LOG_%s_MIN' % level_name, default)
     return (level_int, float(val))
 
 # A list of tuples (level_int, min_duration), ordered by increasing
@@ -221,7 +226,7 @@ def log_timed(func):
             func.__wrapped__ = None
         return func
 
-    counter = _counter
+    counter = perf_counter
     log = do_log_duration_info
     func_logger = logging.getLogger(func.__module__).getChild('timing')
 

@@ -34,6 +34,7 @@ from relstorage._compat import IN_TESTRUNNER
 from relstorage._util import log_timed
 from relstorage._util import positive_integer
 from relstorage._util import TRACE
+from relstorage._util import get_time_from_environ
 from relstorage._mvcc import DetachableMVCCDatabaseCoordinator
 from relstorage.options import Options
 from relstorage.interfaces import IMVCCDatabaseViewer
@@ -43,6 +44,12 @@ from .interfaces import IStorageCacheMVCCDatabaseCoordinator
 logger = __import__('logging').getLogger(__name__)
 
 DEBUG = __debug__ and IN_TESTRUNNER
+
+#: The maximum amount of time, in seconds, we will spend polling the
+#: database for OIDS when restoring the cache. If this time is exceeded,
+#: we will only partially use the cache. This is not set by default because
+#: doing so introduces a slight speed penalty to the polling process.
+POLL_TIMEOUT = get_time_from_environ('RS_CACHE_POLL_TIMEOUT', None)
 
 ###
 # Notes on in-process concurrency:
@@ -54,6 +61,8 @@ DEBUG = __debug__ and IN_TESTRUNNER
 # native dicts and this also holds true. On CPython if we used PURE_PYTHON
 # BTrees, this would *not* hold true, so we also use dicts.
 ###
+
+# pylint:disable=too-many-lines
 
 class _TransactionRangeObjectIndex(OidTMap):
     """
@@ -944,7 +953,7 @@ class MVCCDatabaseCoordinator(DetachableMVCCDatabaseCoordinator):
         return local_client.save(object_index=self.object_index.maps[0],
                                  checkpoints=checkpoints, **save_args)
 
-    def restore(self, adapter, local_client):
+    def restore(self, adapter, local_client, timeout=None):
         # This method is not thread safe
 
         # Note that there may have been an arbitrary amount of data in
@@ -963,25 +972,41 @@ class MVCCDatabaseCoordinator(DetachableMVCCDatabaseCoordinator):
             # We won't write them back out.
 
             self.object_index = _ObjectIndex(highest_visible_tid)
-            self.__poll_old_oids_and_remove(adapter, local_client)
+            self.__poll_old_oids_and_remove(adapter, local_client, timeout or POLL_TIMEOUT)
 
     @log_timed
-    def __poll_old_oids_and_remove(self, adapter, local_client):
+    def __poll_old_oids_and_remove(self, adapter, local_client, timeout):
         from relstorage.adapters.connmanager import connection_callback
+        from relstorage.adapters.interfaces import AggregateOperationTimeoutError
 
         cached_oids = OidSet(local_client.keys())
         # In local tests, this function executes against PostgreSQL 11 in .78s
         # for 133,002 older OIDs; or, .35s for 57,002 OIDs against MySQL 5.7.
         # In one production environment of 800,000 OIDs with a 98% survival rate,
         # using MySQL 5.7 takes an average of about 11s.
-        logger.debug("Polling %d oids stored in cache", len(cached_oids))
+        # However, it has been observed that in some cases, presumably when the database
+        # is under intense IO stress, this can take 400s for 500,000 OIDS:
+        # since the ``current_object_tids`` batches in groups of 1024, that works out to
+        # .75s per SQL query. Not good. Hence the ability to set a timeout.
+        logger.debug("Polling %d oids stored in cache with SQL timeout %r",
+                     len(cached_oids), timeout)
 
         @connection_callback(isolation_level=adapter.connmanager.isolation_load,
                              read_only=True)
         def poll_cached_oids(_conn, cursor):
             # type: (Any, Any) -> Dict[Int, Int]
             """Return mapping of {oid_int: tid_int}"""
-            return adapter.mover.current_object_tids(cursor, cached_oids)
+            try:
+                return adapter.mover.current_object_tids(cursor, cached_oids,
+                                                         timeout=timeout)
+            except AggregateOperationTimeoutError as ex:
+                # If we time out, we can at least validate the results we have
+                # so far.
+                logger.info(
+                    "Timed out polling the database for %s oids; will use %s partial results",
+                    len(cached_oids), len(ex.partial_result)
+                )
+                return ex.partial_result
 
         current_tid = adapter.connmanager.open_and_call(poll_cached_oids).get
         polled_invalid_oids = OidSet()

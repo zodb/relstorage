@@ -54,7 +54,8 @@ disable=
     chained-comparison,
     too-many-ancestors,
     import-outside-toplevel,
-    relative-beyond-top-level
+    relative-beyond-top-level,
+    super-with-arguments
 #   undefined-all-variable
 
 

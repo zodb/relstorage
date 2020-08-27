@@ -23,12 +23,14 @@ from zope.interface import implementer
 
 from .._compat import OID_TID_MAP_TYPE
 from .._compat import metricmethod_sampled
+from .._compat import metricmethod
 from ._util import noop_when_history_free
 from ._util import query_property as _query_property
 from ._util import DatabaseHelpersMixin
 from .._compat import ABC
 from .batch import RowBatcher
 from .interfaces import IObjectMover
+from .interfaces import AggregateOperationTimeoutError
 from .schema import Schema
 from .sql import it
 from .sql.schema import ColumnExpression
@@ -207,15 +209,30 @@ class AbstractObjectMover(DatabaseHelpersMixin, ABC):
 
     _current_object_tids_map_type = OID_TID_MAP_TYPE
 
-    @metricmethod_sampled
-    def current_object_tids(self, cursor, oids):
+    @metricmethod
+    def current_object_tids(self, cursor, oids, timeout=None):
         """Returns the current {oid: tid} for specified object ids."""
+        # This is a metricmethod, not a metricmethod_sampled because only databases that
+        # use composed lock_objects_and_detect_conflicts call it for every transaction,
+        # and even then they only call it once, so its like the tpc_* methods.
+        # Other databases use it only when restoring the cache at startup (just once) so its
+        # unlikely to get sampled (see relstorage.cache.mvcc).
         res = self._current_object_tids_map_type()
         columns, table, filter_column = self._current_object_tids_query
         batcher = self.make_batcher(cursor)
-        rows = batcher.select_from(columns, table, **{filter_column: oids})
-        res = self._current_object_tids_map_type(list(rows))
-
+        rows = batcher.select_from(columns, table, timeout=timeout, **{filter_column: oids})
+        if timeout:
+            # Do the collecting and iterating in Python so we can handle partial results
+            res = self._current_object_tids_map_type()
+            try:
+                for (oid, tid) in rows:
+                    res[oid] = tid
+            except AggregateOperationTimeoutError as ex:
+                ex.partial_result = res
+                raise
+        else:
+            # Do the collecting and iterating in C
+            res = self._current_object_tids_map_type(list(rows))
         return res
 
 
