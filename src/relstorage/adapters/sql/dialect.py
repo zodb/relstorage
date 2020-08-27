@@ -177,11 +177,21 @@ class Compiler(object):
     def _find_datatypes_for_prepared_query(self):
         # Deduce the datatypes based on the types of the columns
         # we're sending as params.
-        result = ()
-        param_provider = ITypedParams(self.root, None)
-        if param_provider is not None:
-            result = param_provider.datatypes_for_parameters() # pylint:disable=assignment-from-no-return
-        return result
+        root = self.root
+        if ITypedParams.providedBy(root):
+            # Don't call the interface to adapt; that uses adapter
+            # hooks, which may be persistent objects and thus result
+            # in calling back into this method (if the query we're
+            # compiling for the first time is the load object query,
+            # and the site manager itself is a ghost).
+            #
+            # Since we don't actually expect to have any adapters,
+            # just an object (Insert or a subclass) that already
+            # provides the interface, all we need to do is check to
+            # see if it's provided; we don't need to query an adapter.
+            # See https://github.com/zodb/relstorage/issues/411
+            return root.datatypes_for_parameters()
+        return ()
 
     def prepare(self):
         # This is correct for PostgreSQL. This needs moved to a dialect specific
