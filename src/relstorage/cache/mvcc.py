@@ -988,8 +988,8 @@ class MVCCDatabaseCoordinator(DetachableMVCCDatabaseCoordinator):
         # is under intense IO stress, this can take 400s for 500,000 OIDS:
         # since the ``current_object_tids`` batches in groups of 1024, that works out to
         # .75s per SQL query. Not good. Hence the ability to set a timeout.
-        logger.debug("Polling %d oids stored in cache with SQL timeout %r",
-                     len(cached_oids), timeout)
+        logger.info("Polling %d oids stored in cache with SQL timeout %r",
+                    len(cached_oids), timeout)
 
         @connection_callback(isolation_level=adapter.connmanager.isolation_load,
                              read_only=True)
@@ -1008,7 +1008,8 @@ class MVCCDatabaseCoordinator(DetachableMVCCDatabaseCoordinator):
                 )
                 return ex.partial_result
 
-        current_tid = adapter.connmanager.open_and_call(poll_cached_oids).get
+        current_tids = adapter.connmanager.open_and_call(poll_cached_oids)
+        current_tid = current_tids.get
         polled_invalid_oids = OidSet()
         cache_is_correct = local_client._cache.contains_oid_with_tid
 
@@ -1016,6 +1017,7 @@ class MVCCDatabaseCoordinator(DetachableMVCCDatabaseCoordinator):
             if not cache_is_correct(oid_int, current_tid(oid_int)):
                 polled_invalid_oids.add(oid_int)
 
-        logger.debug("Polled %d older oids stored in cache; %d survived",
-                     len(cached_oids), len(cached_oids) - len(polled_invalid_oids))
+        logger.info("Polled %d older oids stored in cache (%d found in database); %d survived",
+                    len(cached_oids), len(current_tids),
+                    len(cached_oids) - len(polled_invalid_oids))
         local_client.remove_invalid_persistent_oids(polled_invalid_oids)
