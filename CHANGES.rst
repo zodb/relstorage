@@ -2,7 +2,7 @@
  Changes
 =========
 
-3.2.1 (unreleased)
+3.2.1 (2020-08-28)
 ==================
 
 - Improve the speed of loading large cache files by reducing the cost
