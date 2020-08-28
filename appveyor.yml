@@ -116,7 +116,7 @@ install:
   # https://ci.appveyor.com/project/denik/gevent/builds/23810605/job/83aw4u67artt002b#L602
   # So we violate DRY and repeate some requirements in order to use
   # --no-build-isolation
-  - "%CMD_IN_ENV% %PYEXE% -m pip install -U pycparser wheel cython setuptools cffi"
+  - "%CMD_IN_ENV% %PYEXE% -m pip install -U pycparser wheel cython setuptools cffi twine"
 
 
 build_script:
