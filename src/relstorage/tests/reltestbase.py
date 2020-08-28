@@ -1385,6 +1385,39 @@ class GenericRelStorageTests(
         storage1.close()
         storage2.close()
 
+    ###
+    # IStorageCurrentRecordIteration tests
+    ###
+    # TODO: Need tests for:
+    #   - handling of next as oid
+    #   - Getting only one revision of an object (history-preserving)
+
+    def check_record_iternext_basic(self):
+        # Nearly copied from FileStorage tests
+        db = DB(self._storage)
+        conn = db.open()
+        conn.root()['abc'] = MinPO('abc')
+        conn.root()['xyz'] = MinPO('xyz')
+        transaction.commit()
+
+        storage2 = self._closing(self._storage.new_instance())
+
+        key = None
+        for x in (b'\000', b'\001', b'\002'):
+            oid, tid, data, next_oid = self._storage.record_iternext(key)
+            self.assertEqual(oid, (b'\000' * 7) + x)
+            key = next_oid
+            expected_data, expected_tid = storage2.load(oid)
+            self.assertEqual(expected_data, data)
+            self.assertEqual(expected_tid, tid)
+            if x == b'\002':
+                self.assertEqual(next_oid, None)
+            else:
+                self.assertNotEqual(next_oid, None)
+
+
+
+
 class AbstractRSZodbConvertTests(StorageCreatingMixin,
                                  FSZODBConvertTests,
                                  # This one isn't cooperative in
