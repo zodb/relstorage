@@ -11,9 +11,11 @@ mkdir /tmp/RelStorage/
 ./relstoragerel.sh /usr/local/bin/python2.7
 
 # 3.5 is a python.org build, builds a 10_6_intel wheel
-./relstoragerel.sh /usr/local/bin/python3.5
+# But that doesn't work on current macOS tool chains:
+#  clang: error: invalid deployment target for -stdlib=libc++ (requires OS X 10.7 or later)
+# ./relstoragerel.sh /usr/local/bin/python3.5
 
-# 3.6 is a python.org build, builds a 10_6_intel wheel
+# 3.6 is a python.org build, builds a 10_9_intel wheel
 ./relstoragerel.sh /usr/local/bin/python3.6
 
 # 3.7 is a python.org build, builds a 10_9_intel wheel

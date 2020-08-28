@@ -21,6 +21,7 @@ unset CPPFLAGS
 export CC=/usr/bin/clang
 export CXX=/usr/bin/clang++
 unset LDCXXSHARED
+unset LDSHARED
 
 
 BASE=`pwd`/../../
