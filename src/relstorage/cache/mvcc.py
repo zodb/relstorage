@@ -20,6 +20,7 @@ from __future__ import division
 from __future__ import print_function
 
 import os
+from logging import DEBUG as LDEBUG
 
 from zope.interface import implementer
 
@@ -33,7 +34,7 @@ from relstorage._compat import iteroiditems
 from relstorage._compat import IN_TESTRUNNER
 from relstorage._util import log_timed
 from relstorage._util import positive_integer
-from relstorage._util import TRACE
+from relstorage._util import TRACE as LTRACE
 from relstorage._util import get_time_from_environ
 from relstorage._mvcc import DetachableMVCCDatabaseCoordinator
 from relstorage.options import Options
@@ -671,7 +672,7 @@ class MVCCDatabaseCoordinator(DetachableMVCCDatabaseCoordinator):
         # So we do that now.
         change_iter = list(change_iter)
         self.log(
-            TRACE,
+            LTRACE,
             "Polled new tid %s since %s with %s changes",
             polled_tid, polling_since, len(change_iter)
         )
@@ -769,6 +770,10 @@ class MVCCDatabaseCoordinator(DetachableMVCCDatabaseCoordinator):
             # Whelp, it needs to invalidate all its cached objects (so
             # we must return None), but it can still use our index and
             # poll state going forward; we don't need to go backwards.
+            logger.debug(
+                "Invalidating all persistent objects for viewer %r (detached? %s)",
+                viewer, viewer.detached
+            )
             return None
 
         # Somewhere in the index is a map with the highest visible tid
@@ -839,12 +844,19 @@ class MVCCDatabaseCoordinator(DetachableMVCCDatabaseCoordinator):
                 object_index.depth > self.max_allowed_index_depth
                 or object_index.total_size > self.max_allowed_index_size
         ):
+            self.log(
+                LDEBUG,
+                "Detaching oldest viewers because depth (%s) > max depth (%s) "
+                "or total size (%s) > max size (%s)",
+                object_index.depth, self.max_allowed_index_depth,
+                object_index.total_size, self.max_allowed_index_size,
+            )
             self.detach_viewers_at_minimum()
 
         required_tid = self.minimum_highest_visible_tid # This won't change during our invocation
         local_client = cache.local_client
         self.log(
-            TRACE,
+            LTRACE,
             "Attempting vacuum from %s up to %s",
             object_index.minimum_highest_visible_tid,
             required_tid,
@@ -874,7 +886,7 @@ class MVCCDatabaseCoordinator(DetachableMVCCDatabaseCoordinator):
             in_both = OidTMap_intersection(newer_oids, obsolete_bucket)
 
             self.log(
-                TRACE,
+                LTRACE,
                 "Examining %d old OIDs to see if they've been replaced",
                 len(in_both)
             )
@@ -907,7 +919,7 @@ class MVCCDatabaseCoordinator(DetachableMVCCDatabaseCoordinator):
             # we do *not* remove the index entries; they're needed to keep
             # the CST in sync for newer transactions that might still be open.
             if obsolete_bucket:
-                self.log(TRACE, "Vacuum: Freezing %s old OIDs", len(obsolete_bucket))
+                self.log(LTRACE, "Vacuum: Freezing %s old OIDs", len(obsolete_bucket))
                 local_client.freeze(obsolete_bucket)
 
         if oids_tids_to_del:

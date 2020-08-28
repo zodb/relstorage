@@ -7,6 +7,7 @@ from __future__ import division
 from __future__ import print_function
 
 import threading
+from logging import DEBUG as LDEBUG
 
 from zope import interface
 
@@ -14,6 +15,8 @@ from BTrees import family64
 
 from .interfaces import IMVCCDatabaseCoordinator
 from .interfaces import IDetachableMVCCDatabaseViewer
+
+logger = __import__('logging').getLogger(__name__)
 
 @interface.implementer(IDetachableMVCCDatabaseViewer)
 class DetachableMVCCDatabaseViewer(object):
@@ -53,6 +56,7 @@ class DetachableMVCCDatabaseCoordinator(object):
         self._by_tid = family64.UO.Bucket()
         self._registered_viewers = set()
         self.is_registered = self._registered_viewers.__contains__
+        self.log = logger.log
 
     @property
     def _viewer_count_at_min(self):
@@ -204,7 +208,14 @@ class DetachableMVCCDatabaseCoordinator(object):
         """
         with self._lock:
             if self._by_tid:
-                at_min = self._by_tid.pop(self._by_tid.minKey())
-                for viewer in at_min:
-                    viewer.detached = True
+                min_tid = self._by_tid.minKey()
+                at_min = self._by_tid.pop(min_tid)
+                if at_min:
+                    self.log(
+                        LDEBUG,
+                        "Detaching %d viewers at oldest TID 0x%x",
+                        len(at_min), min_tid,
+                    )
+                    for viewer in at_min:
+                        viewer.detached = True
                 self.__set_tids()
