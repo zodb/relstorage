@@ -543,6 +543,74 @@ class RelStorage(LegacyMethodsMixin,
         return HistoryFreeTransactionIterator(
             self._adapter, self._load_connection, start, stop)
 
+    __next = next
+
+    def __record_iternext_gen(self, start_oid_int):
+        with self._load_connection.server_side_cursor() as ss_cursor:
+            for record in self._adapter.dbiter.iter_current_records(ss_cursor, start_oid_int):
+                yield record
+
+    def record_iternext(self, next=None):
+        """
+        Implementation of `ZODB.interfaces.IStorageCurrentRecordIteration`.
+
+        .. caution::
+
+           You must completely consume the iteration.
+        """
+        # The interface doesn't define any semantics for *next*; it's
+        # completely up to the storage and is just a magic cookie.
+        # However, zodbupdate assumes that the initial value for
+        # `next` is interpreted like FileStorage does: as an OID (8
+        # bytes) and uses that to specify an object id to start
+        # with. (inclusive)
+        #
+        # We need to detect the case that we're given an OID; that should only happen
+        # in the first call.
+        start_oid_int = 0
+        if isinstance(next, bytes):
+            import warnings
+            warnings.warn(
+                "There is no defined value for the *next* parameter. "
+                "RelStorage will rely on implementation-defined behaviour and treat it like "
+                "FileStorage does, while assuming that iteration is beginning from the start. "
+                "This may change in the future."
+            )
+            start_oid_int = bytes8_to_int64(next)
+            next = None
+
+        if next is None:
+            # Beginning.
+            cursor = self.__record_iternext_gen(start_oid_int)
+            # There *should* always be at least one object: the root.
+            # But if they passed a non-0 ``next`` value, that's not guaranteed.
+            # However, the protocol is not very good at expressing that possibility:
+            # The typical call looks like:
+            #    oid, tid, data, next = storage.record_iternext(next)
+            # Unpacking will raise if we return None; most processing of *data* is not expecting
+            # None (it's common to wrap it in ``io.BytesIO()`` immediately; that's what zodbupdate
+            # does). Thus, it's probably probably best to let getting the first value simply raise.
+            oid, tid, state = self.__next(cursor)
+            # After that, we can treat it like it was given to us in *next*
+            next = oid, tid, state, cursor
+
+
+        # Somewhere in the middle, possibly the end.
+        #
+        # We have to operate one ahead (keep one buffered) because
+        # we need to be able to tell the caller not to call back.
+        oid, tid, state, cursor = next
+
+        try:
+            new_oid, new_tid, new_state = self.__next(cursor)
+        except StopIteration:
+            # Signal not to call back.
+            new_next = None
+        else:
+            new_next = new_oid, new_tid, new_state, cursor
+
+        return oid, tid, state, new_next
+
 
     def afterCompletion(self):
         # Note that this method exists mainly to deal with read-only

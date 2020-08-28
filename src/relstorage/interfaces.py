@@ -227,6 +227,7 @@ class IRelStorage(
         ZODB.interfaces.IMultiCommitStorage,  # mandatory in ZODB5, returns tid from tpc_finish.
         ZODB.interfaces.IStorageRestoreable,  # tpc_begin(tid=) and restore()
         ZODB.interfaces.IStorageIteration,    # iterator()
+        ZODB.interfaces.IStorageCurrentRecordIteration, # record_iternext()
         ZODB.interfaces.ReadVerifyingStorage, # checkCurrentSerialInTransaction()
         IMVCCDatabaseViewer,
 ):

@@ -132,6 +132,7 @@ class HistoryPreservingTransactionIterator(_TransactionIterator):
             self._conn = None
             super(HistoryPreservingTransactionIterator, self).close()
 
+
 class HistoryFreeTransactionIterator(_TransactionIterator):
     """
     Uses the given load connection cursor. Does not close the
@@ -211,7 +212,7 @@ class RelStorageTransactionRecord(TransactionRecord):
         TransactionRecord.__init__(self, tid, status, user, description, extension)
 
     def __iter__(self):
-        return RecordIterator(self)
+        return TransactionRecordIterator(self)
 
     def __repr__(self):
         return '<%s at %x tid=%d status=%r user=%r description=%r>' % (
@@ -223,7 +224,7 @@ class RelStorageTransactionRecord(TransactionRecord):
             self.description
         )
 
-class RecordIterator(object):
+class TransactionRecordIterator(object):
     """Iterate over the objects in a transaction."""
 
     __slots__ = (

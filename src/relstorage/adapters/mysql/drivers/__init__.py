@@ -149,8 +149,9 @@ class AbstractMySQLDriver(AbstractModuleDriver):
 
     _server_side_cursor = None
 
-    def _make_cursor(self, conn, server_side=False):
+    def cursor(self, conn, server_side=False):
         if server_side:
+            assert self._server_side_cursor is not None
             cursor = conn.cursor(self._server_side_cursor)
             cursor.arraysize = self.cursor_arraysize
         else:
