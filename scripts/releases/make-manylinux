@@ -18,7 +18,7 @@ if [ -d /RelStorage -a -d /opt/python ]; then
         git clone /RelStorage RelStorage
         cd RelStorage
         $variant/bin/pip install -U pip
-        $variant/bin/pip install -U cython setuptools
+        $variant/bin/pip install -U 'cython>=3.0a6' setuptools
         PATH=$variant/bin:$PATH $variant/bin/python setup.py bdist_wheel
         auditwheel show dist/RelStorage*.whl
         auditwheel repair dist/RelStorage*.whl
