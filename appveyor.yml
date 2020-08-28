@@ -1,5 +1,16 @@
+clone_depth: 50
+max_jobs: 8
+shallow_clone: true
+build:
+  parallel: true
+  verbosity: minimal
+# The VS 2019 image doesn't have
+# the MSVC needed for Python 2.7.
+image: Visual Studio 2015
+
 environment:
   global:
+    APPVEYOR_SAVE_CACHE_ON_ERROR: "true"
     # SDK v7.0 MSVC Express 2008's SetEnv.cmd script will fail if the
     # /E:ON and /V:ON options are not enabled in the batch script interpreter
     # See: http://stackoverflow.com/a/13751649/163740
@@ -9,6 +20,18 @@ environment:
     MYSQL_PWD: "Password12!"
     PGPASSWORD: "Password12!"
     PGUSER: "postgres"
+    # Don't get warnings about Python 2 support being deprecated. We
+    # know.
+    PIP_NO_PYTHON_VERSION_WARNING: 1
+    PIP_UPGRADE_STRATEGY: eager
+    # Enable this if debugging a resource leak. Otherwise
+    # it slows things down.
+    # PYTHONTRACEMALLOC: 10
+    ##
+    # Upload settings for twine.
+    TWINE_USERNAME: "__token__"
+    TWINE_PASSWORD:
+      secure: uXZ6Juhz2hElaTsaJ2Hnero9s3xuqTVBK5B3yQoBeAYqcAdgBG54Edzxpkootm/o44FqBVYm0kAXYkV71PCrtm6uB/K3LS4ZUHxBUYnjGGKfelf1igdYjeMOqk6QrHGSaq9T70YovVYWyz6FQebySxT+aV/lhgq/WMwT+1tF/DaEP9BKF0j500bDZDDYd7+1Hm+Rffa6q5sEQl6IvGF0M7G+pwo6f66DdmCD4NwYhGHLuj9kNFfsl7YNCE++/Ww3gnWFy73MXxOtOE0KHJb3WA==
 
   matrix:
 
@@ -119,3 +142,9 @@ artifacts:
 cache:
   - "%TMP%\\py\\"
   - '%LOCALAPPDATA%\pip\Cache'
+
+
+deploy_script:
+  - ps: if ($env:APPVEYOR_REPO_TAG -eq $TRUE) { twine upload --skip-existing dist/RelStorage* }
+
+deploy: on
