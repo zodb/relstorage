@@ -60,6 +60,7 @@ script:
   - pip uninstall -y zope.schema && python -c 'import relstorage.interfaces, relstorage.adapters.interfaces, relstorage.cache.interfaces'
 after_success:
   - coverage combine
+  - coverage report -i --skip-covered
   - coveralls
 notifications:
   email: false
