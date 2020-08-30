@@ -10,7 +10,9 @@
   for things like packing and storage iteration.
 
 - Make RelStorage instances implement
-  ``IStorageCurrentRecordIteration``. See :issue:`389`.
+  ``IStorageCurrentRecordIteration``. This lets both
+  history-preserving and history-free storages work with
+  ``zodbupdate``. See :issue:`389`.
 
 
 3.2.1 (2020-08-28)
