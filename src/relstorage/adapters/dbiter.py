@@ -18,6 +18,8 @@ from collections import namedtuple
 
 from zope.interface import implementer
 
+from ZODB.utils import p64 as int64_to_8bytes
+
 from relstorage._compat import TidList
 from relstorage._util import Lazy
 
@@ -64,6 +66,34 @@ class DatabaseIterator(DatabaseHelpersMixin):
         for oid, state in cursor:
             state = as_state(state) # pylint:disable=too-many-function-args
             yield oid, state
+
+    _iter_current_records = Schema.all_current_object_state.select(
+        it.c.zoid,
+        it.c.tid,
+        it.c.state
+    ).where(
+        it.c.zoid >= it.bindparam('start_oid')
+    ).order_by(
+        it.c.zoid
+    )
+
+    def iter_current_records(self, cursor, start_oid_int=0):
+        """
+        Cause the *cursor* (which should be a server-side cursor)
+        to execute a query that will iterate over
+        ``(oid_int, tid_int, state_bytes)`` values for all the current objects.
+
+        Each current object is returned only once, at the transaction most recently
+        committed for it.
+
+        Returns a generator.
+        """
+        self._iter_current_records.execute(cursor, {'start_oid': start_oid_int})
+        i_b = int64_to_8bytes
+        s = self._as_state
+        for oid_int, tid_int, state_bytes in cursor:
+            yield i_b(oid_int), i_b(tid_int), s(state_bytes) # pylint:disable=too-many-function-args
+
 
 class _HistoryPreservingTransactionRecord(namedtuple(
         '_HistoryPreservingTransactionRecord',

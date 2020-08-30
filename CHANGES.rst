@@ -5,7 +5,12 @@
 3.2.2 (unreleased)
 ==================
 
-- Nothing changed yet.
+- The "MySQLdb" driver didn't properly use server-side cursors when
+  requested. This would result in unexpected increased memory usage
+  for things like packing and storage iteration.
+
+- Make RelStorage instances implement
+  ``IStorageCurrentRecordIteration``. See :issue:`389`.
 
 
 3.2.1 (2020-08-28)

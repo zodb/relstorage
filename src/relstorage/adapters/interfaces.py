@@ -668,6 +668,21 @@ class IDatabaseIterator(Interface):
         :raises KeyError: if the object does not exist
         """
 
+    def iter_current_records(cursor, start_oid_int=0):
+        """
+        Cause the *cursor* (which should be a server-side cursor)
+        to execute a query that will iterate over
+        ``(oid_int, tid_int, state_bytes)`` values for all the current objects.
+
+        Each current object is returned only once, at the transaction most recently
+        committed for it.
+
+        Returns a generator.
+
+        For compatibility with FileStorage, this must iterate in ascending
+        OID order; it must also accept an OID to begin with for compatibility with
+        zodbupdate.
+        """
 
 class ILocker(Interface):
     """Acquire and release the commit and pack locks."""

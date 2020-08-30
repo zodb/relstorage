@@ -43,6 +43,7 @@ from ZODB.POSException import ReadOnlyError
 from ZODB.serialize import referencesf
 from ZODB.utils import z64
 from ZODB.utils import u64 as bytes8_to_int64
+from ZODB.utils import p64 as int64_to_8bytes
 
 from ZODB.tests import BasicStorage
 from ZODB.tests import ConflictResolution
@@ -1384,6 +1385,66 @@ class GenericRelStorageTests(
 
         storage1.close()
         storage2.close()
+
+    ###
+    # IStorageCurrentRecordIteration tests
+    ###
+
+    def check_record_iternext_basic(self, start_oid_int=None):
+        # Based on code from FileStorage tests
+
+        db = DB(self._storage)
+        conn = db.open()
+        conn.root()['abc'] = MinPO('abc')
+        conn.root()['xyz'] = MinPO('xyz')
+        transaction.commit()
+
+        # Now, add some additional revisions. This proves that we iterate latest reconds,
+        # not all transactions.
+        conn.root()['abc'].value = 'def'
+        conn.root()['xyz'].value = 'ghi'
+        transaction.commit()
+        conn.close()
+
+        storage2 = self._closing(self._storage.new_instance())
+
+        # The special case: convert to byte OID
+        token = None if start_oid_int is None else int64_to_8bytes(start_oid_int)
+
+        # (0, 1, 2) by default, or, e.g, (1, 2)
+        expected_oids = range(start_oid_int or 0, 3)
+        if not expected_oids:
+            assert start_oid_int > 3
+            # Call at least once.
+            expected_oids = (0,)
+        record_count = 0
+        for x in expected_oids:
+            oid, tid, data, next_token = self._storage.record_iternext(token)
+            record_count += 1
+            self.assertEqual(oid, int64_to_8bytes(x))
+            token = next_token
+            expected_data, expected_tid = storage2.load(oid)
+            self.assertEqual(expected_data, data)
+            self.assertEqual(expected_tid, tid)
+            if x == 2:
+                check_token = self.assertIsNone
+            else:
+                check_token = self.assertIsNotNone
+            check_token(token)
+        self.assertEqual(len(expected_oids), record_count)
+
+    def check_record_iternext_token_0(self):
+        # Passing a starting token.
+        self.check_record_iternext_basic(0)
+
+    def check_record_iternext_token_1(self):
+        # Gets a subset.
+        self.check_record_iternext_basic(1)
+
+    def check_record_iternext_too_large_oid(self):
+        with self.assertRaises(StopIteration):
+            self.check_record_iternext_basic(10)
+
 
 class AbstractRSZodbConvertTests(StorageCreatingMixin,
                                  FSZODBConvertTests,
