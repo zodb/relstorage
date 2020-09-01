@@ -31,8 +31,15 @@ from transaction.interfaces import NoTransaction
 from transaction._transaction import rm_key
 from transaction import get as get_thread_local_transaction
 
+from zope.interface import implementer
+
 from ZODB.POSException import ReadOnlyError
 from ZODB.POSException import StorageTransactionError
+
+from ..interfaces import ITPCStateNotInTransaction
+from ..._util import Lazy
+
+from .temporary_storage import TemporaryStorage
 
 log = logging.getLogger("relstorage")
 
@@ -61,17 +68,105 @@ class _StorageFacade(object):
         self.cache = storage._cache
         self.read_only = storage._is_read_only
 
-class AbstractTPCState(object):
+class SharedTPCState(object):
+    """
+    Contains attributes marking resources that *might* be used during the commit
+    process. If any of them are, then the `abort` method takes care of cleaning them up.
+
+    Accessing a resource implicitly begins it, if needed.
+    """
+
+    prepared_txn = None
+    transaction = None
+    not_in_transaction_state = None
+    read_only = False # Or we wouldn't allocate this object.
+
+    def __init__(self, initial_state, storage, transaction):
+        self.initial_state = initial_state
+        self._storage = storage
+        self.transaction = transaction
+
+    @Lazy
+    def store_connection(self):
+        # TODO: This is where we'd check one out of the pool
+        conn = self._storage._store_connection
+        conn.restart()
+        conn.begin()
+        return conn
+
+    @Lazy
+    def load_connection(self):
+        return self._storage._load_connection
+
+    @Lazy
+    def blobhelper(self):
+        blobhelper = self._storage.blobhelper
+        blobhelper.begin()
+        return blobhelper
+
+    @Lazy
+    def cache(self):
+        return self._storage._cache
+
+    @Lazy
+    def adapter(self):
+        return self._storage._adapter
+
+    @Lazy
+    def temp_storage(self):
+        return TemporaryStorage()
+
+    def has_temp_data(self):
+        return 'temp_storage' in self.__dict__ and self.temp_storage
+
+    def abort(self, force=False):
+        # pylint:disable=no-member,using-constant-test
+        try:
+           # Drop locks first.
+            if 'store_connection' in self.__dict__:
+                store_connection = self.store_connection
+                if store_connection:
+                    # It's possible that this connection/cursor was
+                    # already closed if an error happened (which would
+                    # release the locks). Don't try to re-open it.
+                    self.adapter.locker.release_commit_lock(store_connection.cursor)
+
+                # Though, this might re-open it.
+                self.adapter.txncontrol.abort(
+                    store_connection,
+                    self.prepared_txn)
+
+                if force:
+                    store_connection.drop()
+            if 'load_connection' in self.__dict__:
+                if force:
+                    self.load_connection.drop()
+                else:
+                    self.load_connection.rollback_quietly()
+
+            if 'blobhelper' in self.__dict__:
+                self.blobhelper.abort()
+
+            if 'temp_storage' in self.__dict__:
+                self.temp_storage.close()
+        finally:
+            for attr in 'store_connection', 'load_connection', 'blobhelper', 'temp_storage':
+                self.__dict__.pop(attr, None)
+
+
+    def release(self):
+        # TODO: Release the store_connection back to the pool.
+        # pylint:disable=no-member
+        if 'temp_storage' in self.__dict__:
+            self.temp_storage.close()
+            del self.temp_storage
+
+
+
+class AbstractTPCStateDatabaseAvailable(object):
 
     __slots__ = (
-        'adapter',
-        'load_connection',
-        'store_connection',
-        'transaction',
-        'prepared_txn',
-        'blobhelper',
-        'cache',
-        'read_only',
+        'shared_state',
     )
 
     # - store
@@ -87,29 +182,17 @@ class AbstractTPCState(object):
     # read only, this needs to happen in the "not in transaction"
     # state.
 
-    @classmethod
-    def from_storage(cls, storage):
-        return cls(_StorageFacade(storage), None)
+    def __init__(self, shared_state):
+        self.shared_state = shared_state # type: SharedTPCState
 
-    def __init__(self, previous_state, transaction=None):
-        if 0: # pylint:disable=using-constant-test
-            # This block (elided from the bytecode)
-            # is for pylint static analysis
-            self.adapter = self.load_connection = self.store_connection = self.transaction = None
-            self.prepared_txn = self.blobhelper = None
-            self.cache = None # type: relstorage.cache.storage_cache.StorageCache
-            self.read_only = False
-        for attr in AbstractTPCState.__slots__:
-            val = getattr(previous_state, attr)
-            setattr(self, attr, val)
-
-        self.transaction = transaction
+    @property
+    def transaction(self):
+        return self.shared_state.transaction
 
     def __repr__(self):
-        result = "<%s at 0x%x blobhelper=%r stored_count=%s %s" % (
+        result = "<%s at 0x%x stored_count=%s %s" % (
             type(self).__name__,
             id(self),
-            self.blobhelper,
             len(getattr(self, 'temp_storage', ()) or ()),
             self._tpc_state_transaction_data(),
         )
@@ -154,8 +237,7 @@ class AbstractTPCState(object):
         resources = sorted(global_tx._resources, key=rm_key)
         return "transaction=%r resources=%r" % (global_tx, resources)
 
-
-    def tpc_finish(self, transaction, f=None): # pylint:disable=unused-argument
+    def tpc_finish(self, storage, transaction, f=None): # pylint:disable=unused-argument
         # For the sake of some ZODB tests, we need to implement this everywhere,
         # even if it's not actually usable, and the first thing it needs to
         # do is check the transaction.
@@ -163,46 +245,18 @@ class AbstractTPCState(object):
             raise StorageTransactionError('tpc_finish called with wrong transaction')
         raise NotImplementedError("tpc_finish not allowed in this state.")
 
+    def tpc_begin(self, _storage, transaction):
+        # Ditto as for tpc_finish
+        raise StorageTransactionError('tpc_begin not allowed in this state', type(self))
+
     def tpc_abort(self, transaction, force=False):
         if not force:
             if transaction is not self.transaction:
                 return self
 
-        try:
-            # Drop locks first.
-            if self.store_connection:
-                # It's possible that this connection/cursor was
-                # already closed if an error happened (which would
-                # release the locks). Don't try to re-open it.
-                self.adapter.locker.release_commit_lock(self.store_connection.cursor)
-            self.adapter.txncontrol.abort(
-                self.store_connection,
-                self.prepared_txn)
+        self.shared_state.abort(force)
+        return self.shared_state.initial_state
 
-            if force:
-                self.load_connection.drop()
-                self.store_connection.drop()
-            else:
-                self.load_connection.rollback_quietly()
-            self.blobhelper.abort()
-        finally:
-            self._clear_temp()
-        return NotInTransaction(self)
-
-    def _clear_temp(self):
-        """
-        Clear all attributes used for transaction commit.
-        Subclasses should override. Called on tpc_abort; subclasses
-        should call on other exit states.
-        """
-
-    def tpc_begin(self, transaction, begin_factory):
-        if transaction is self.transaction:
-            raise StorageTransactionError("Duplicate tpc_begin calls for same transaction.")
-        # XXX: Shouldn't we tpc_abort() first (well, not that exactly, because
-        # the transaction won't match, but logically)? The original storage
-        # code didn't do that, but it seems like it should.
-        return begin_factory(self, transaction)
 
     def no_longer_stale(self):
         return self
@@ -210,17 +264,23 @@ class AbstractTPCState(object):
     def stale(self, e):
         return Stale(self, e)
 
-
-class NotInTransaction(AbstractTPCState):
+@implementer(ITPCStateNotInTransaction)
+class NotInTransaction(object):
     # The default state, when the storage is not attached to a
     # transaction.
 
-    __slots__ = ()
+    __slots__ = (
+        'last_committed_tid_int',
+        'read_only',
+        'begin_factory',
+    )
 
-    def __init__(self, previous_state, transaction=None):
-        super(NotInTransaction, self).__init__(previous_state)
-        # Reset some things that need to go away.
-        self.prepared_txn = None
+    transaction = None
+
+    def __init__(self, begin_factory, read_only, committed_tid_int=0):
+        self.begin_factory = begin_factory
+        self.read_only = read_only
+        self.last_committed_tid_int = committed_tid_int
 
     def tpc_abort(self, *args, **kwargs): # pylint:disable=arguments-differ,unused-argument,signature-differs
         # Nothing to do
@@ -238,18 +298,28 @@ class NotInTransaction(AbstractTPCState):
 
     restore = deleteObject = undo = restoreBlob = store
 
-    def tpc_begin(self, transaction, begin_factory):
+    def tpc_begin(self,  storage, transaction): # XXX: Signature needs to change.
         if self.read_only:
             raise ReadOnlyError()
-        return super(NotInTransaction, self).tpc_begin(transaction, begin_factory)
+        if transaction is self.transaction: # Also handles None.
+            raise StorageTransactionError("Duplicate tpc_begin calls for same transaction.")
+        state = SharedTPCState(self, storage, transaction)
+        return self.begin_factory(state)
+
+    # def no_longer_stale(self):
+    #     return self
+
+    # def stale(self, e):
+    #     return Stale(self, e)
+
 
     # This object appears to be false.
     def __bool__(self):
         return False
     __nonzero__ = __bool__
 
-
-class Stale(AbstractTPCState):
+@implementer(ITPCStateNotInTransaction)
+class Stale(object):
     """
     An error that lets us know we are stale
     was encountered.
@@ -259,7 +329,6 @@ class Stale(AbstractTPCState):
     """
 
     def __init__(self, previous_state, stale_error):
-        super(Stale, self).__init__(previous_state, None)
         self.previous_state = previous_state
         self.stale_error = stale_error
 

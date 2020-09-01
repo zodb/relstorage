@@ -98,6 +98,7 @@ class _ClosedCache(object):
     stats = lambda s: {'closed': True}
     afterCompletion = lambda s, c: None
 
+
 @implementer(IRelStorage)
 class RelStorage(LegacyMethodsMixin,
                  ConflictResolution.ConflictResolvingStorage):
@@ -112,8 +113,8 @@ class RelStorage(LegacyMethodsMixin,
     _options = None
     _is_read_only = False
     _read_only_error = ReadOnlyError
-    # _ltid is the ID of the last transaction committed by this instance.
-    _ltid = z64
+    # ZODB TID of the last transaction committed by this instance.
+    _last_tid_i_committed_bytes = z64
 
     # _closed is True after self.close() is called.
     _closed = False
@@ -137,15 +138,15 @@ class RelStorage(LegacyMethodsMixin,
 
     _load_connection = ClosedConnection()
     _store_connection = ClosedConnection()
-    _tpc_begin_factory = None
+    #_tpc_begin_factory = None
 
     _oids = ReadOnlyOIDs()
 
-    # Attributes in our dictionary that shouldn't have stale()/no_longer_stale()
-    # called on them. At this writing, it's just the type object.
-    _STALE_IGNORED_ATTRS = (
-        '_tpc_begin_factory',
-    )
+    # # Attributes in our dictionary that shouldn't have stale()/no_longer_stale()
+    # # called on them. At this writing, it's just the type object.
+    # _STALE_IGNORED_ATTRS = (
+    #     '_tpc_begin_factory',
+    # )
 
     def __init__(self, adapter, name=None, create=None,
                  options=None, cache=None, blobhelper=None,
@@ -218,12 +219,12 @@ class RelStorage(LegacyMethodsMixin,
         else:
             self.blobhelper = BlobHelper(options=options, adapter=adapter)
 
-        self._tpc_begin_factory = HistoryPreserving if self._options.keep_history else HistoryFree
+        tpc_begin_factory = HistoryPreserving if self._options.keep_history else HistoryFree
 
         if hasattr(self._adapter.packundo, 'deleteObject'):
             interface.alsoProvides(self, ZODB.interfaces.IExternalGC)
 
-        self._tpc_phase = NotInTransaction.from_storage(self)
+        self._tpc_phase = NotInTransaction(tpc_begin_factory, self._is_read_only)
         if not self._is_read_only:
             self._oids = OIDs(self._adapter.oidallocator, self._store_connection)
 
@@ -333,7 +334,7 @@ class RelStorage(LegacyMethodsMixin,
     @property
     def highest_visible_tid(self):
         cache_tid = self._cache.highest_visible_tid or 0
-        committed_tid = bytes8_to_int64(self._ltid)
+        committed_tid = bytes8_to_int64(self._last_tid_i_committed_bytes)
         # In case we haven't polled yet.
         return max(cache_tid, committed_tid)
 
@@ -457,7 +458,7 @@ class RelStorage(LegacyMethodsMixin,
     @metricmethod
     def tpc_begin(self, transaction, tid=None, status=' '):
         try:
-            self._tpc_phase = self._tpc_phase.tpc_begin(transaction, self._tpc_begin_factory)
+            self._tpc_phase = self._tpc_phase.tpc_begin(self, transaction)
         except:
             # Could be a database (connection) error, could be a programming
             # bug. Either way, we're fine to roll everything back and hope
@@ -483,7 +484,7 @@ class RelStorage(LegacyMethodsMixin,
         # the object has changed during the commit process, due to
         # conflict resolution or undo.
         try:
-            next_phase = self._tpc_phase.tpc_vote(transaction, self)
+            next_phase = self._tpc_phase.tpc_vote(self, transaction)
         except:
             self.tpc_abort(transaction, _force=True)
             raise
@@ -494,7 +495,7 @@ class RelStorage(LegacyMethodsMixin,
     @metricmethod
     def tpc_finish(self, transaction, f=None):
         try:
-            next_phase, committed_tid = self._tpc_phase.tpc_finish(transaction, f)
+            next_phase = self._tpc_phase.tpc_finish(self, transaction, f)
         except:
             # OH NO! This isn't supposed to happen!
             # It's unlikely tpc_abort will get called...
@@ -503,7 +504,9 @@ class RelStorage(LegacyMethodsMixin,
         # The store connection is either committed or rolledback;
         # the load connection is now rolledback.
         self._tpc_phase = next_phase
-        self._ltid = committed_tid
+        # XXX: De-dup this
+        committed_tid = int64_to_8bytes(next_phase.last_committed_tid_int)
+        self._last_tid_i_committed_bytes = committed_tid
         return committed_tid
 
     @metricmethod
@@ -516,17 +519,18 @@ class RelStorage(LegacyMethodsMixin,
             if _force:
                 # We're here under unexpected circumstances. It's possible something
                 # might go wrong rolling back.
-                self._tpc_phase = NotInTransaction.from_storage(self)
+                self._tpc_phase = NotInTransaction(self._is_read_only, self.lastTransactionInt())
             raise
 
     def lastTransaction(self):
-        if self._ltid == z64 and self._cache.highest_visible_tid is None:
+        if self._last_tid_i_committed_bytes == z64 and self._cache.highest_visible_tid is None:
             # We haven't committed *or* polled for transactions,
             # so our MVCC state is "floating".
             # Read directly from the database to get the latest value,
             return int64_to_8bytes(self._adapter.txncontrol.get_tid(self._load_connection.cursor))
 
-        return max(self._ltid, int64_to_8bytes(self._cache.highest_visible_tid or 0))
+        return max(self._last_tid_i_committed_bytes,
+                   int64_to_8bytes(self._cache.highest_visible_tid or 0))
 
     def lastTransactionInt(self):
         return bytes8_to_int64(self.lastTransaction())
@@ -729,8 +733,8 @@ class RelStorage(LegacyMethodsMixin,
         replacements = {}
         my_ns = vars(self)
         for k, v in my_ns.items():
-            if k in self._STALE_IGNORED_ATTRS:
-                continue
+            # if k in self._STALE_IGNORED_ATTRS:
+            #     continue
             if callable(getattr(v, 'stale', None)):
                 new_v = v.stale(stale_error)
                 replacements[k] = new_v
@@ -759,8 +763,8 @@ class RelStorage(LegacyMethodsMixin,
         replacements = {
             k: v.no_longer_stale()
             for k, v in my_ns.items()
-            if k not in self._STALE_IGNORED_ATTRS
-            and callable(getattr(v, 'no_longer_stale', None))
+#            if k not in self._STALE_IGNORED_ATTRS
+            if callable(getattr(v, 'no_longer_stale', None))
         }
 
         my_ns.update(replacements)
@@ -786,8 +790,8 @@ class RelStorage(LegacyMethodsMixin,
         # by this connection, we don't want to ghost objects that we're sure
         # are up-to-date unless someone else has changed them.
         # Note that transactions can happen between us committing and polling.
-        if self._ltid is not None:
-            ignore_tid = bytes8_to_int64(self._ltid)
+        if self._last_tid_i_committed_bytes is not None:
+            ignore_tid = bytes8_to_int64(self._last_tid_i_committed_bytes)
         else:
             ignore_tid = None
 
@@ -853,7 +857,7 @@ class RelStorage(LegacyMethodsMixin,
                 # Hmm, ok, the Connection isn't polling us in a timely fashion.
                 # Maybe we're the root storage? Maybe our APIs are being used
                 # independently? At any rate, we're going to stop tracking now;
-                # if a connection eventually gets around to polling us, they'll
+                # if a Connection eventually gets around to polling us, they'll
                 # need to clear their whole cache
                 self.__queued_changes = None
 

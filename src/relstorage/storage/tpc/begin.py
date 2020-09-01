@@ -31,8 +31,7 @@ from relstorage._compat import metricmethod_sampled
 from relstorage._compat import OID_TID_MAP_TYPE
 from relstorage._util import to_utf8
 
-from . import AbstractTPCState
-from .temporary_storage import TemporaryStorage
+from . import AbstractTPCStateDatabaseAvailable
 from .vote import DatabaseLockedForTid
 from .vote import HistoryFree as HFVoteFactory
 from .vote import HistoryPreserving as HPVoteFactory
@@ -49,7 +48,7 @@ class _BadFactory(object):
     def enter(self, storage):
         raise NotImplementedError
 
-class AbstractBegin(AbstractTPCState):
+class AbstractBegin(AbstractTPCStateDatabaseAvailable):
     """
     The phase we enter after ``tpc_begin`` has been called.
     """
@@ -71,21 +70,21 @@ class AbstractBegin(AbstractTPCState):
         # OIDs of things we have deleted or undone.
         # Stored in their 8 byte form
         'invalidated_oids',
+
     )
 
     _DEFAULT_TPC_VOTE_FACTORY = _BadFactory # type: Callable[..., AbstractTPCState]
 
-    def __init__(self, previous_state, transaction):
-        super(AbstractBegin, self).__init__(previous_state, transaction)
+    def __init__(self, shared_state):
+        super(AbstractBegin, self).__init__(shared_state)
         self.invalidated_oids = ()
         # We'll replace this later with the right type when it's needed.
         self.required_tids = {} # type: Dict[int, int]
         self.tpc_vote_factory = self._DEFAULT_TPC_VOTE_FACTORY # type: ignore
-        self.temp_storage = TemporaryStorage()
 
-        user = to_utf8(transaction.user)
-        desc = to_utf8(transaction.description)
-        ext = transaction.extension
+        user = to_utf8(self.transaction.user)
+        desc = to_utf8(self.transaction.description)
+        ext = self.transaction.extension
 
         if ext:
             ext = dumps(ext, 1)
@@ -93,19 +92,20 @@ class AbstractBegin(AbstractTPCState):
             ext = b""
         self.ude = user, desc, ext
 
-        # In many cases we can defer this; we only need it
-        # if we do deleteObject() or store a blob (which we're not fully in
-        # control of)
-        self.store_connection.restart()
+        # self.adapter = storage._adapter
+        # self.cache = storage._cache
+        # # XXX: This is where we would open one from the pool
+        # self.store_connection = storage._store_connection
+        # self.blobhelper = storage.blobhelper
+        # # In many cases we can defer this; we only need it
+        # # if we do deleteObject() or store a blob (which we're not fully in
+        # # control of)
+        # self.store_connection.restart()
 
-        self.store_connection.begin()
-        self.blobhelper.begin()
+        # self.store_connection.begin()
+        # self.blobhelper.begin()
 
-    def _clear_temp(self):
-        # Clear all attributes used for transaction commit.
-        self.temp_storage.close()
-
-    def tpc_vote(self, transaction, storage):
+    def tpc_vote(self, storage, transaction):
         if transaction is not self.transaction:
             raise StorageTransactionError(
                 "tpc_vote called with wrong transaction")
@@ -136,7 +136,7 @@ class AbstractBegin(AbstractTPCState):
         # Save the data locally in a temporary place. Later, closer to commit time,
         # we'll send it all over at once. This lets us do things like use
         # COPY in postgres.
-        self.temp_storage.store_temp(oid_int, data, prev_tid_int)
+        self.shared_state.temp_storage.store_temp(oid_int, data, prev_tid_int)
 
 
     @metricmethod_sampled
@@ -216,16 +216,16 @@ class AbstractBegin(AbstractTPCState):
         # delete a specific verison? Etc.
         oid_int = bytes8_to_int64(oid)
         tid_int = bytes8_to_int64(oldserial)
-        self.cache.remove_cached_data(oid_int, tid_int)
+        self.shared_state.cache.remove_cached_data(oid_int, tid_int)
 
         # We delegate the actual operation to the adapter's packundo,
         # just like native pack
-        cursor = self.store_connection.cursor
+        cursor = self.shared_state.store_connection.cursor
         # When this is done, we get a tpc_vote,
         # and a tpc_finish.
         # The interface doesn't specify a return value, so for testing
         # we return the count of rows deleted (should be 1 if successful)
-        deleted = self.adapter.packundo.deleteObject(cursor, oid, oldserial)
+        deleted = self.shared_state.adapter.packundo.deleteObject(cursor, oid, oldserial)
         self._invalidated_oids(oid)
         return deleted
 
@@ -247,8 +247,8 @@ class HistoryPreserving(AbstractBegin):
 
     _DEFAULT_TPC_VOTE_FACTORY = HPVoteFactory
 
-    def __init__(self, storage, transaction):
-        AbstractBegin.__init__(self, storage, transaction)
+    def __init__(self, *args):
+        AbstractBegin.__init__(self, *args)
         self.committing_tid_lock = None
 
     def _obtain_commit_lock(self, cursor):
@@ -258,7 +258,7 @@ class HistoryPreserving(AbstractBegin):
             # because the database adapters also acquire in that
             # order during packing.
             tid_lock = DatabaseLockedForTid.lock_database_for_next_tid(
-                cursor, self.adapter, self.ude)
+                cursor, self.shared_state.adapter, self.ude)
             self.committing_tid_lock = tid_lock
 
     def deleteObject(self, oid, oldserial, transaction):
@@ -266,7 +266,7 @@ class HistoryPreserving(AbstractBegin):
         # theoretically these are unreachable? Our custom
         # vote stage just removes this transaction anyway; maybe it
         # can skip the committing.
-        self._obtain_commit_lock(self.store_connection.cursor)
+        self._obtain_commit_lock(self.shared_state.store_connection.cursor)
         # A transaction that deletes objects can *only* delete objects.
         # That way we don't need to store an entry in the transaction table
         # (and add extra bloat to the DB; that kind of defeats the point of
@@ -296,8 +296,8 @@ class HistoryPreserving(AbstractBegin):
         assert len(undo_tid) == 8
         undo_tid_int = bytes8_to_int64(undo_tid)
 
-        adapter = self.adapter
-        cursor = self.store_connection.cursor
+        adapter = self.shared_state.adapter
+        cursor = self.shared_state.store_connection.cursor
         assert cursor is not None
 
         adapter.locker.hold_pack_lock(cursor)
@@ -318,15 +318,15 @@ class HistoryPreserving(AbstractBegin):
             # we're probably just undoing the latest state. Still, play it
             # a bit safer.
             oid_ints = [oid_int for oid_int, _ in copied]
-            self.cache.remove_all_cached_data_for_oids(oid_ints)
+            self.shared_state.cache.remove_all_cached_data_for_oids(oid_ints)
 
             # Update the current object pointers immediately, so that
             # subsequent undo operations within this transaction will see
             # the new current objects.
             adapter.mover.update_current(cursor, self_tid_int)
 
-            self.blobhelper.copy_undone(copied,
-                                        self.committing_tid_lock.tid)
+            self.shared_state.blobhelper.copy_undone(copied,
+                                                     self.committing_tid_lock.tid)
 
             oids = [int64_to_8bytes(oid_int) for oid_int in oid_ints]
             self._invalidated_oids(*oids)

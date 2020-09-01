@@ -36,7 +36,7 @@ from relstorage._util import TRACE
 from ..interfaces import VoteReadConflictError
 
 from . import LOCK_EARLY
-from . import AbstractTPCState
+from . import AbstractTPCStateDatabaseAvailable
 from .finish import Finish
 
 
@@ -94,7 +94,7 @@ class DatabaseLockedForTid(object):
             self.local_allocation_time
         )
 
-class AbstractVote(AbstractTPCState):
+class AbstractVote(AbstractTPCStateDatabaseAvailable):
     """
     The state we're in following ``tpc_vote``.
 
@@ -106,15 +106,13 @@ class AbstractVote(AbstractTPCState):
     __slots__ = (
         # (user, description, extension) from the transaction. byte objects.
         'ude',
-        # The TemporaryStorage.
-        'temp_storage',
         # required_tids: {oid_int: tid_int}; confirms that certain objects
         # have not changed at commit. May be a BTree
         'required_tids',
         # The DatabaseLockedForTid object
         'committing_tid_lock',
         # {oid_bytes}: Things that get changed as part of the vote process
-        # and thus need to be invalidated.
+        # and thus need to be invalidated. TODO: Move to shared state?
         'invalidated_oids',
         # How many conflicts there were to resolve. None if we're not there yet.
         'count_conflicts',
@@ -130,10 +128,10 @@ class AbstractVote(AbstractTPCState):
         # If committing_tid is passed to this method, it means the
         # database has already been locked and the TID is locked in.
         # This is (only!) done when we're restoring transactions.
-        super(AbstractVote, self).__init__(begin_state, begin_state.transaction)
+        super(AbstractVote, self).__init__(begin_state.shared_state)
 
         self.required_tids = begin_state.required_tids or {} # type: Dict[int, int]
-        self.temp_storage = begin_state.temp_storage # type: .temporary_storage.TemporaryStorage
+        #self.temp_storage = begin_state.temp_storage # type: .temporary_storage.TemporaryStorage
         self.ude = begin_state.ude
         self.committing_tid_lock = committing_tid_lock # type: Optional[DatabaseLockedForTid]
         self.count_conflicts = None
@@ -141,10 +139,6 @@ class AbstractVote(AbstractTPCState):
 
         # Anything that we've undone or deleted is also invalidated.
         self.invalidated_oids = begin_state.invalidated_oids or set() # type: Set[bytes]
-
-    def _clear_temp(self):
-        # Clear all attributes used for transaction commit.
-        self.temp_storage.close()
 
     def _tpc_state_extra_repr_info(self):
         return {
@@ -160,13 +154,13 @@ class AbstractVote(AbstractTPCState):
 
     @log_timed
     def _flush_temps_to_db(self, cursor):
-        if self.temp_storage:
+        if self.shared_state.has_temp_data():
             # Don't bother if we're empty.
-            self.adapter.mover.store_temps(cursor, self.temp_storage)
+            self.shared_state.adapter.mover.store_temps(cursor, self.shared_state.temp_storage)
 
     def __enter_critical_phase_until_transaction_end(self):
-        self.load_connection.enter_critical_phase_until_transaction_end()
-        self.store_connection.enter_critical_phase_until_transaction_end()
+        self.shared_state.load_connection.enter_critical_phase_until_transaction_end()
+        self.shared_state.store_connection.enter_critical_phase_until_transaction_end()
 
 
     def _vote(self, storage):
@@ -185,10 +179,10 @@ class AbstractVote(AbstractTPCState):
         """
         # It is assumed that self._lock.acquire was called before this
         # method was called.
-        cursor = self.store_connection.cursor
-        __traceback_info__ = self.store_connection, cursor
+        cursor = self.shared_state.store_connection.cursor
+        __traceback_info__ = self.shared_state.store_connection, cursor
         assert cursor is not None
-        adapter = self.adapter
+        adapter = self.shared_state.adapter
 
         # execute all remaining batch store operations.
         # This exists as an extension point.
@@ -219,7 +213,7 @@ class AbstractVote(AbstractTPCState):
         # used, or whether we're updating existing objects and avoid a
         # bit more overhead, but benchmarking suggests that it's not
         # worth it in common cases.
-        storage._oids.set_min_oid(self.temp_storage.max_stored_oid)
+        storage._oids.set_min_oid(self.shared_state.temp_storage.max_stored_oid)
 
         # Lock objects being modified and those registered with
         # readCurrent(). This could raise ReadConflictError or locking
@@ -244,7 +238,7 @@ class AbstractVote(AbstractTPCState):
         invalidated_oid_ints = self.__check_and_resolve_conflicts(storage, conflicts)
 
         blobs_must_be_moved_now = False
-        blobhelper = self.blobhelper
+        blobhelper = self.shared_state.blobhelper # TODO: Don't access unless we need to
         committing_tid_bytes = None
         if self.committing_tid_lock:
             # We've already picked a TID. Must have called undo().
@@ -359,8 +353,8 @@ class AbstractVote(AbstractTPCState):
         # priority and regain control ASAP.
         self.__enter_critical_phase_until_transaction_end()
 
-        old_states_and_tids = self.cache.prefetch_for_conflicts(
-            self.load_connection.cursor,
+        old_states_and_tids = self.shared_state.cache.prefetch_for_conflicts(
+            self.shared_state.load_connection.cursor,
             old_states_to_prefetch
         )
 
@@ -368,9 +362,9 @@ class AbstractVote(AbstractTPCState):
             storage, old_states_and_tids
         ).tryToResolveConflict
 
-        adapter = self.adapter
-        read_temp = self.temp_storage.read_temp
-        store_temp = self.temp_storage.store_temp
+        adapter = self.shared_state.adapter
+        read_temp = self.shared_state.temp_storage.read_temp
+        store_temp = self.shared_state.temp_storage.store_temp
 
         # The conflicts can be very large binary strings, no need to include
         # them in traceback info. (Plus they could be sensitive.)
@@ -406,8 +400,8 @@ class AbstractVote(AbstractTPCState):
 
         # We resolved some conflicts, so we need to send them over to the database.
         adapter.mover.replace_temps(
-            self.store_connection.cursor,
-            self.temp_storage.iter_for_oids(invalidated_oid_ints)
+            self.shared_state.store_connection.cursor,
+            self.shared_state.temp_storage.iter_for_oids(invalidated_oid_ints)
         )
 
         return invalidated_oid_ints
@@ -426,9 +420,10 @@ class AbstractVote(AbstractTPCState):
         # a shared blob dir.
         #
         # Returns True if we also committed to the database.
-        if self.prepared_txn:
+        if self.shared_state.prepared_txn:
             # Already done; *should* have been vote_only.
-            assert self.committing_tid_lock, (self.prepared_txn, self.committing_tid_lock)
+            assert self.committing_tid_lock, (self.shared_state.prepared_txn,
+                                              self.committing_tid_lock)
             return False
 
         kwargs = {
@@ -438,11 +433,11 @@ class AbstractVote(AbstractTPCState):
             kwargs['committing_tid_int'] = self.committing_tid_lock.tid_int
         if vote_only:
             # Must be voting.
-            blob_meth = self.blobhelper.vote
+            blob_meth = self.shared_state.blobhelper.vote # TODO: Don't access if we don't need to
             kwargs['after_selecting_tid'] = lambda tid_int: blob_meth(int64_to_8bytes(tid_int))
             kwargs['commit'] = False
 
-        if vote_only or self.adapter.DEFAULT_LOCK_OBJECTS_AND_DETECT_CONFLICTS_INTERLEAVABLE:
+        if vote_only or self.shared_state.adapter.DEFAULT_LOCK_OBJECTS_AND_DETECT_CONFLICTS_INTERLEAVABLE:
             # If we're going to have to make two trips to the database, one to lock it and get a
             # tid and then one to commit and release locks, either because we're
             # just voting right now, not committing, or because the database doesn't
@@ -452,14 +447,14 @@ class AbstractVote(AbstractTPCState):
 
         # Note that this may commit the load_connection and make it not
         # viable for a historical view anymore.
-        committing_tid_int, prepared_txn = self.adapter.lock_database_and_move(
-            self.store_connection, self.load_connection,
-            self.blobhelper,
+        committing_tid_int, prepared_txn = self.shared_state.adapter.lock_database_and_move(
+            self.shared_state.store_connection, self.shared_state.load_connection,
+            self.shared_state.blobhelper, # TODO: Don't access this if we don't need to
             self.ude,
             **kwargs
         )
 
-        self.prepared_txn = prepared_txn
+        self.shared_state.prepared_txn = prepared_txn
         committing_tid_lock = self.committing_tid_lock
         assert committing_tid_lock is None or committing_tid_int == committing_tid_lock.tid_int, (
             committing_tid_int, committing_tid_lock)
@@ -469,7 +464,7 @@ class AbstractVote(AbstractTPCState):
             self.committing_tid_lock = DatabaseLockedForTid(
                 int64_to_8bytes(committing_tid_int),
                 committing_tid_int,
-                self.adapter
+                self.shared_state.adapter
             )
             log_msg = "Adapter locked database and allocated tid: %s"
 
@@ -478,7 +473,7 @@ class AbstractVote(AbstractTPCState):
         return kwargs['commit']
 
     @log_timed
-    def tpc_finish(self, transaction, f=None):
+    def tpc_finish(self, storage, transaction, f=None):
         if transaction is not self.transaction:
             raise StorageTransactionError(
                 "tpc_finish called with wrong transaction")
@@ -505,9 +500,10 @@ class AbstractVote(AbstractTPCState):
             # and commit, releasing any locks it can (some adapters do,
             # some don't). So we may or may not have a database lock at
             # this point.
-            assert not self.blobhelper.NEEDS_DB_LOCK_TO_FINISH
+            # TODO: Could optimize this call away by checking to see if we used the blobhelper.
+            assert not self.shared_state.blobhelper.NEEDS_DB_LOCK_TO_FINISH
             try:
-                self.blobhelper.finish(self.committing_tid_lock.tid)
+                self.shared_state.blobhelper.finish(self.committing_tid_lock.tid)
             except (IOError, OSError):
                 # If something failed to move, that's not really a problem:
                 # if we did any moving now, we're just a cache.
@@ -518,7 +514,7 @@ class AbstractVote(AbstractTPCState):
 
             if f is not None:
                 f(self.committing_tid_lock.tid)
-            next_phase = Finish(self, not did_commit)
+            next_phase = Finish(self, self.committing_tid_lock.tid_int, not did_commit)
             if not did_commit:
                 locks_released = time.time()
 
@@ -539,9 +535,9 @@ class AbstractVote(AbstractTPCState):
                 perf_logger
             )
 
-            return next_phase, self.committing_tid_lock.tid
+            return next_phase
         finally:
-            self._clear_temp()
+            self.shared_state.release()
 
 
 class HistoryFree(AbstractVote):
@@ -563,15 +559,15 @@ class HistoryPreservingDeleteOnly(HistoryPreserving):
     __slots__ = ()
 
     def _vote(self, storage):
-        if self.temp_storage and self.temp_storage.stored_oids:
+        if self.shared_state.temp_storage and self.shared_state.temp_storage.stored_oids:
             raise StorageTransactionError("Cannot store and delete at the same time.")
         # We only get here if we've deleted objects, meaning we hold their row locks.
         # We only delete objects once we hold the commit lock.
         assert self.committing_tid_lock
         # Holding the commit lock put an entry in the transaction table,
         # but we don't want to bump the TID or store that data.
-        self.adapter.txncontrol.delete_transaction(
-            self.store_connection.cursor,
+        self.shared_state.adapter.txncontrol.delete_transaction(
+            self.shared_state.store_connection.cursor,
             self.committing_tid_lock.tid_int
         )
         self.lock_and_vote_times[0] = time.time()
@@ -580,8 +576,8 @@ class HistoryPreservingDeleteOnly(HistoryPreserving):
     def _lock_and_move(self, vote_only=False):
         # We don't do the final commit,
         # we just prepare.
-        self.prepared_txn = self.adapter.txncontrol.commit_phase1(
-            self.store_connection,
+        self.shared_state.prepared_txn = self.shared_state.adapter.txncontrol.commit_phase1(
+            self.shared_state.store_connection,
             self.committing_tid_lock.tid_int
         )
         return False

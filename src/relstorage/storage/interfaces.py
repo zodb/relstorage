@@ -25,6 +25,7 @@ from __future__ import division
 from __future__ import print_function
 
 from zope.interface import Interface
+from zope.interface import Attribute
 
 from transaction.interfaces import TransientError
 from ZODB.POSException import StorageTransactionError
@@ -67,3 +68,114 @@ class VoteReadConflictError(ReadConflictError):
     A read conflict (from Connection.readCurrent()) that wasn't
     detected until the storage voted.
     """
+
+class ITPCState(Interface):
+    """
+    An object representing the current state (phase) of the two-phase commit protocol,
+    and how to transition between it and other phases.
+    """
+
+    transaction = Attribute("The *transaction* object from ZODB.")
+
+    def tpc_abort(storage, transaction, force=False):
+        """
+        Clear any used resources, and return the object
+        representing :class:`ITPCStateNotInTransaction`.
+
+        :param transaction: The transaction object from ZODB.
+           If this is not the current transaction, does nothing
+           unless *force* is true.
+        :keyword bool force: Whether to forcibly abort the transaction.
+           If this is true, then it doesn't matter if the *transaction* parameter
+           matches or not. Also, underlying RDBMS connections should also be closed
+           and discarded.
+        :return: The previous `ITPCStateNotInTransaction`.
+        """
+
+
+class ITPCStateNotInTransaction(ITPCState):
+    """
+    The "idle" state.
+
+    In this state, no store connection is available,
+    and the *transaction* is always `None`.
+
+    Because ZODB tests this, this method has to define
+    a bunch of methods that are also defined by various other states.
+    These methods should raise ``StorageTransactionError``, or
+    ``ReadOnlyError``, as appropriate.
+    """
+
+    last_committed_tid_int = Attribute(
+        """
+        The TID of the last transaction committed to get us to this state.
+
+        Initially, this is 0. In the value returned from :meth:`ITPCPhaseVoting.tpc_finish`,
+        it is the TID just committed.
+        """
+    )
+
+    def tpc_begin(storage, transaction):
+        """
+        Enter the two-phase commit protocol.
+
+        :return: An implementation of :class:`ITPCStateBegan`.
+        """
+
+    def tpc_finish(*args, **kwargs):
+        """
+        Raises ``StorageTranasctionError``
+        """
+
+    def tpc_vote(*args, **kwargs):
+        """
+        As for `tpc_finish`.
+        """
+
+    def store(*args, **kwargs):
+        """
+        Raises ``ReadOnlyError`` or ``StorageTranasctionError``
+        """
+
+    restore = deleteObject = undo = restoreBlob = store
+
+class ITPCStateDatabaseAvailable(ITPCState):
+    """
+    A state where the database connection is usually available.
+    """
+
+    store_connection = Attribute("The IManagedStoreConnection in use.")
+
+
+class ITPCStateBegan(ITPCStateDatabaseAvailable):
+    """
+    The first phase where the database is available for storage.
+
+    Storing objects, restoring objects, storing blobs, deleting objects,
+    all happen in this phase.
+    """
+
+    def tpc_vote(storage, transaction):
+        """
+        Enter the voting state.
+
+        :return: An implementation of :class:`ITPCStateVoting`
+        """
+
+class ITPCStateBeganHP(ITPCStateBegan):
+    """
+    The extra methods that are available for history-preserving
+    storages.
+    """
+
+class ITPCPhaseVoting(ITPCStateDatabaseAvailable):
+    """
+    The phase where voting happens. This follows the beginning phase.
+    """
+
+    def tpc_finish(storage, transaction, f=None):
+        """
+        Finish the transaction.
+
+        :return: The next implementation of :class:`ITPCPhaseNotInTransaction`
+        """

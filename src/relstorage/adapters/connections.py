@@ -213,7 +213,7 @@ class AbstractManagedConnection(object):
             The function may be called up to twice, if the *fresh_connection_p* is false
             on the first call and a disconnected exception is raised.
         :keyword bool can_reconnect: If True, then we will attempt to reconnect
-            the connection and try again if an exception is raised if *f*. If False,
+            the connection and try again if a disconnected exception is raised in *f*. If False,
             we let that exception propagate. For example, if a transaction is in progress,
             set this to false.
         """
@@ -269,6 +269,7 @@ class AbstractManagedConnection(object):
             self._cursor
         )
 
+
 @implementer(interfaces.IManagedLoadConnection)
 class LoadConnection(AbstractManagedConnection):
 
@@ -290,9 +291,11 @@ class StoreConnection(AbstractManagedConnection):
     def begin(self):
         self.connmanager.begin(*self.open_if_needed())
 
+
 class PrePackConnection(StoreConnection):
     __slots__ = ()
     _NEW_CONNECTION_NAME = 'open_for_pre_pack'
+
 
 @implementer(interfaces.IManagedDBConnection)
 class ClosedConnection(object):

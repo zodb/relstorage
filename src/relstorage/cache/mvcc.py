@@ -658,7 +658,7 @@ class MVCCDatabaseCoordinator(DetachableMVCCDatabaseCoordinator):
 
         if polled_tid == 0 or polled_tid < polling_since:
             assert change_iter is None
-            # Freshly zapped or empty database (tid==0) or stale and
+            # Freshly zapped or empty database (tid==0) or stale replica and
             # asked to revert (as opposed to raising
             # ReadConflictError). Mark not just this one, but all
             # other extent indexes as needing a full rebuild.
@@ -668,7 +668,8 @@ class MVCCDatabaseCoordinator(DetachableMVCCDatabaseCoordinator):
             return None
 
         # Ok cool, we got data to move us forward.
-        # We must be careful to always consume the iterator, even if we exit early.
+        # We must be careful to always consume the iterator, even if we exit early
+        # (because it could be a server-side cursor holding connection state).
         # So we do that now.
         change_iter = list(change_iter)
         self.log(
@@ -697,7 +698,8 @@ class MVCCDatabaseCoordinator(DetachableMVCCDatabaseCoordinator):
                 # it's older than our poll, we take control;
                 # but the history of the index must always move forward,
                 # so we build it starting from what's currently installed.
-                # There could be some overlap.
+                # There could be some overlap. Since we moved the index forward,
+                # we can vacuum.
                 change_index = self.object_index = installed_index.with_polled_changes(
                     polled_tid,
                     polling_since,

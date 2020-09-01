@@ -98,9 +98,10 @@ class TestLocking(TestCase):
         # still need.
         return obj1_oid, obj2_oid, obj1_tid, db
 
-    def __read_current_and_lock(self, storage, read_current_oid, lock_oid, tid):
-        tx = TransactionMetaData()
-        storage.tpc_begin(tx)
+    def __read_current_and_lock(self, storage, read_current_oid, lock_oid, tid, begin=True, tx=None):
+        tx = tx if tx is not None else TransactionMetaData()
+        if begin:
+            storage.tpc_begin(tx)
         if read_current_oid is not None:
             storage.checkCurrentSerialInTransaction(read_current_oid, tid, tx)
         storage.store(lock_oid, tid, b'bad pickle2', '', tx)
@@ -247,7 +248,7 @@ class TestLocking(TestCase):
         # on obj1. We should immediately get a read current error and not conflict with the
         # exclusive lock.
         with self.assertRaisesRegex(VoteReadConflictError, "serial this txn started"):
-            self.__read_current_and_lock(storageB, obj2_oid, obj1_oid, tid)
+            self.__read_current_and_lock(storageB, obj2_oid, obj1_oid, tid, begin=False, tx=txb)
 
         # Which is still held because we cannot lock it.
         with self.assertRaises(UnableToLockRowsToModifyError):
@@ -271,7 +272,7 @@ class TestLocking(TestCase):
         )
         # The NOWAIT lock should be very quick to fire.
         if self._storage._adapter.locker.supports_row_lock_nowait:
-            self.assertLessEqual(duration_blocking, commit_lock_timeout)
+            self.assertLessEqual(duration_blocking, commit_lock_timeout * 1.3)
         else:
             # Sigh. Old MySQL. Very slow. This takes around 4.5s to run both iterations.
             self.assertLessEqual(duration_blocking, commit_lock_timeout * 2.5)
