@@ -239,7 +239,7 @@ class RelStorage(LegacyMethodsMixin,
         # itself when it is created, from the storage it is wrapping.
         # Because of this, stale aware methods like history() do not
         # do the right thing when we're wrapped by zc.zlibstorage.
-        loader = Loader(self._adapter, self._load_connection, self._store_connection, self._cache)
+        loader = Loader(self._adapter, self._load_connection, self._cache)
         copy_storage_methods(self, loader)
         storer = Storer()
         copy_storage_methods(self, storer)

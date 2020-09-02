@@ -342,5 +342,5 @@ class Stale(object):
     def no_longer_stale(self):
         return self.previous_state
 
-    def stale(self, e):
+    def stale(self, _e):
         return self

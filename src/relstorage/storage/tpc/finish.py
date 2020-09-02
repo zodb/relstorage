@@ -38,7 +38,8 @@ def Finish(vote_state, committed_tid_int, needs_store_commit=True):
             txn,
             vote_state.shared_state.load_connection)
 
-    vote_state.committing_tid_lock.release_commit_lock(vote_state.shared_state.store_connection.cursor)
+    vote_state.committing_tid_lock.release_commit_lock(
+        vote_state.shared_state.store_connection.cursor)
     vote_state.shared_state.cache.after_tpc_finish(vote_state.committing_tid_lock.tid,
                                                    vote_state.shared_state.temp_storage)
 

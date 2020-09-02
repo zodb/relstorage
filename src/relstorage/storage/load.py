@@ -69,15 +69,13 @@ class Loader(object):
     __slots__ = (
         'adapter',
         'load_connection',
-        'store_connection',
         'cache',
         '__dict__',
     )
 
-    def __init__(self, adapter, load_connection, store_connection, cache):
+    def __init__(self, adapter, load_connection, cache):
         self.adapter = adapter
         self.load_connection = load_connection
-        self.store_connection = store_connection
         self.cache = cache
 
     def __load_using_method(self, load_cursor, meth, argument):
@@ -92,7 +90,6 @@ class Loader(object):
         defs = {
             'cache': self.cache,
             'load': self.load_connection,
-            'store': self.store_connection,
             'adapter': self.adapter,
         }
         defs.update(extra)
@@ -190,13 +187,18 @@ class Loader(object):
         if state:
             return state
 
-        state = self.adapter.mover.load_revision(
-            self.store_connection.cursor,
-            oid_int,
-            tid_int)
+        # Actually using the store_connection to pull into the future was
+        # removed as part of the pooling of store_connection. The above comments
+        # indicate that we really shouldn't need to get here, and no tests break
+        # with this commented out.
+        # state = self.adapter.mover.load_revision(
+        # XXX Was store_connection. Replace with temporary checkout from pool?
+        #     self.store_connection.cursor,
+        #     oid_int,
+        #     tid_int)
 
-        if state:
-            return state
+        # if state:
+        #     return state
 
         raise self.__pke(oid, tid_int=tid_int, state=state)
 
@@ -225,20 +227,23 @@ class Loader(object):
 
         # TODO: This makes three separate queries, and also bypasses the cache.
         # We should be able to fix at least the multiple queries.
-        if self.store_connection:
-            # Allow loading data from later transactions
-            # for conflict resolution.
+        # XXX: "Can we stop doing this?" Yeah, we're trying. The impetus was
+        # the pooling of the store_connection.
+        # if self.store_connection:
+        #     # Allow loading data from later transactions
+        #     # for conflict resolution.
 
-            # XXX: This doesn't seem to be used in conflict
-            # resolution. ZODB.ConflictResolution.tryToResolveConflict
-            # calls loadSerial(); About the only call in ZODB to
-            # loadBefore() is from BlobStorage.undo() (which
-            # RelStorage does not extend). Mixing and matching calls
-            # between connections using different isolation levels
-            # isn't great. Can we stop doing this?
-            cursor = self.store_connection.cursor
-        else:
-            cursor = self.load_connection.cursor
+        #     # XXX: This doesn't seem to be used in conflict
+        #     # resolution. ZODB.ConflictResolution.tryToResolveConflict
+        #     # calls loadSerial(); About the only call in ZODB to
+        #     # loadBefore() is from BlobStorage.undo() (which
+        #     # RelStorage does not extend). Mixing and matching calls
+        #     # between connections using different isolation levels
+        #     # isn't great. Can we stop doing this?
+        #     cursor = self.store_connection.cursor
+        # else:
+        #     cursor = self.load_connection.cursor
+        cursor = self.load_connection.cursor
         if not self.adapter.mover.exists(cursor, oid_int):
             raise self.__pke(oid, exists=False)
 

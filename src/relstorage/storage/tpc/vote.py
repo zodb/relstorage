@@ -437,7 +437,8 @@ class AbstractVote(AbstractTPCStateDatabaseAvailable):
             kwargs['after_selecting_tid'] = lambda tid_int: blob_meth(int64_to_8bytes(tid_int))
             kwargs['commit'] = False
 
-        if vote_only or self.shared_state.adapter.DEFAULT_LOCK_OBJECTS_AND_DETECT_CONFLICTS_INTERLEAVABLE:
+        if vote_only \
+           or self.shared_state.adapter.DEFAULT_LOCK_OBJECTS_AND_DETECT_CONFLICTS_INTERLEAVABLE:
             # If we're going to have to make two trips to the database, one to lock it and get a
             # tid and then one to commit and release locks, either because we're
             # just voting right now, not committing, or because the database doesn't
