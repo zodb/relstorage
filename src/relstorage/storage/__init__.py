@@ -258,7 +258,7 @@ class RelStorage(LegacyMethodsMixin,
             loader = BlobLoader(self._load_connection, self.blobhelper)
             copy_storage_methods(self, loader)
 
-            storer = BlobStorer(self.blobhelper, self._store_connection)
+            storer = BlobStorer()
             copy_storage_methods(self, storer)
 
     @property

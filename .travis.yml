@@ -47,7 +47,7 @@ env:
         - CCACHE_NOHASHDIR=true
         - CFLAGS="-g -pipe -std=gnu++11"
         - CXXFLAGS="-g -pipe -std=gnu++11"
-        - RS_TEST_CMD="-m zope.testrunner --test-path=src --auto-color --auto-progress"
+        - RS_TEST_CMD="-m zope.testrunner --test-path=src --auto-color --auto-progress -vvv --slow-test=3"
 
 script:
 # coverage slows PyPy down from 2minutes to 12+.

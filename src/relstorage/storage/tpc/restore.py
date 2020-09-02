@@ -123,8 +123,9 @@ class Restore(object):
 
         # Save the `data`.  Note that `data` can be None.
         # Note also that this doesn't go through the cache.
-        state.shared_state.temp_storage.max_restored_oid = max(state.shared_state.temp_storage.max_restored_oid,
-                                                               oid_int)
+        state.shared_state.temp_storage.max_restored_oid = max(
+            state.shared_state.temp_storage.max_restored_oid,
+            oid_int)
         # TODO: Make it go through the cache, or at least the same
         # sort of queing thing, so that we can do a bulk COPY.
         # The way we do it now complicates restoreBlob() and it complicates voting.
