@@ -364,12 +364,13 @@ class StoreConnectionPool(object):
 
     # MVCC protocol
     def new_instance(self):
-        self._count += 1
+        with self._lock:
+            self._count += 1
         return self
 
     def release(self):
-        self._count -= 1
         with self._lock:
+            self._count -= 1
             self._shrink()
 
     def close(self):
