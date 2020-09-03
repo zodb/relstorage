@@ -342,9 +342,9 @@ class RelStorage(LegacyMethodsMixin,
 
         Used by the test suite and the ZODBConvert script.
         """
-        self._adapter.schema.zap_all(**kwargs)
         self._load_connection.drop()
         self._store_connection_pool.drop_all()
+        self._adapter.schema.zap_all(**kwargs)
         self._cache.zap_all()
 
     def release(self):

@@ -93,10 +93,18 @@ class MySQLAdapter(AbstractAdapter):
 
     driver_options = drivers
 
-    def __init__(self, options=None, oidallocator=None, version_detector=None, **params):
+    def __init__(self, options=None, oidallocator=None,
+                 version_detector=None,
+                 connmanager=None,
+                 locker=None,
+                 mover=None,
+                 **params):
         self._params = params
         self.oidallocator = oidallocator
         self.version_detector = version_detector
+        self.connmanager = connmanager
+        self.locker = locker
+        self.mover = mover
         super(MySQLAdapter, self).__init__(options)
 
     def _create(self):
@@ -108,19 +116,20 @@ class MySQLAdapter(AbstractAdapter):
         if self.version_detector is None:
             self.version_detector = MySQLVersionDetector()
 
-        self.connmanager = MySQLdbConnectionManager(
-            driver,
-            params=params,
-            options=options,
-        )
+        if self.connmanager is None:
+            self.connmanager = MySQLdbConnectionManager(
+                driver,
+                params=params,
+                options=options,
+            )
+        if self.locker is None:
+            self.locker = MySQLLocker(
+                options=options,
+                driver=driver,
+                batcher_factory=RowBatcher,
+                version_detector=self.version_detector,
+            )
         self.runner = ScriptRunner()
-        self.locker = MySQLLocker(
-            options=options,
-            driver=driver,
-            batcher_factory=RowBatcher,
-            version_detector=self.version_detector,
-        )
-
         self.schema = MySQLSchemaInstaller(
             driver=driver,
             connmanager=self.connmanager,
@@ -128,10 +137,11 @@ class MySQLAdapter(AbstractAdapter):
             keep_history=self.keep_history,
             version_detector=self.version_detector,
         )
-        self.mover = MySQLObjectMover(
-            driver,
-            options=options,
-        )
+        if self.mover is None:
+            self.mover = MySQLObjectMover(
+                driver,
+                options=options,
+            )
 
         if self.oidallocator is None:
             self.oidallocator = MySQLOIDAllocator(driver)
@@ -187,6 +197,9 @@ class MySQLAdapter(AbstractAdapter):
             options=self.options,
             oidallocator=self.oidallocator.new_instance(),
             version_detector=self.version_detector,
+            connmanager=self.connmanager,
+            locker=self.locker,
+            mover=self.mover,
             **self._params
         )
 

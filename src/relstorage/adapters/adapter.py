@@ -64,15 +64,19 @@ class AbstractAdapter(DatabaseHelpersMixin):
         self.driver = driver = self._select_driver()
         self._binary = driver.Binary
 
+        # If it was already set, that means it shared with other
+        # instances, so no need to register the openings.
+        connmanager_was_set = self.connmanager is not None
         self._create()
         if not driver.supports_64bit_unsigned_id:
             self.packundo.MAX_TID = MAX_S_TID
             self.MAX_TID = MAX_S_TID
             self.dbiter.MAX_TID = MAX_S_TID
 
-        self.connmanager.add_on_store_opened(self.mover.on_store_opened)
-        self.connmanager.add_on_load_opened(self.mover.on_load_opened)
-        self.connmanager.add_on_store_opened(self.locker.on_store_opened)
+        if not connmanager_was_set:
+            self.connmanager.add_on_store_opened(self.mover.on_store_opened)
+            self.connmanager.add_on_load_opened(self.mover.on_load_opened)
+            self.connmanager.add_on_store_opened(self.locker.on_store_opened)
 
     def _create(self):
         raise NotImplementedError

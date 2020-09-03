@@ -266,14 +266,21 @@ class TestLocking(TestCase):
         # error. (We use the same two objects instead of a new object in transaction B to prove
         # shared locks are taken first.)
         from relstorage.adapters.interfaces import UnableToLockRowsToReadCurrentError
+        from relstorage.tests.util import RUNNING_ON_CI
         commit_lock_timeout = self.__tiny_commit_time
         duration_blocking = self.__do_check_error_with_conflicting_concurrent_read_current(
             UnableToLockRowsToReadCurrentError,
             commit_lock_timeout=commit_lock_timeout,
         )
         # The NOWAIT lock should be very quick to fire.
+        assert self._storage._adapter.locker.supports_row_lock_nowait is not None
         if self._storage._adapter.locker.supports_row_lock_nowait:
-            self.assertLessEqual(duration_blocking, commit_lock_timeout * 1.3)
+            multiplier = 1.3
+            if RUNNING_ON_CI and 'mysql' in type(self).__name__:
+                # On Travis CI, we observe MySQL 8.0.21 to be very slow at this
+                # for some reason.
+                multiplier = 2.1
+            self.assertLessEqual(duration_blocking, commit_lock_timeout * multiplier)
         else:
             # Sigh. Old MySQL. Very slow. This takes around 4.5s to run both iterations.
             self.assertLessEqual(duration_blocking, commit_lock_timeout * 2.5)
