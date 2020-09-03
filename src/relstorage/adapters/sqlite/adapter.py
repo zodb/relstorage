@@ -52,31 +52,38 @@ class Sqlite3Adapter(AbstractAdapter):
 
     def __init__(self, data_dir, pragmas,
                  options=None, oidallocator=None,
-                 gevent_yield_interval=None):
+                 locker=None,
+                 mover=None,
+                 connmanager=None):
         self.data_dir = os.path.abspath(data_dir)
         self.pragmas = pragmas
         self.oidallocator = oidallocator
-        self.gevent_yield_interval = gevent_yield_interval
+        self.locker = locker
+        self.mover = mover
+        self.connmanager = connmanager
         super(Sqlite3Adapter, self).__init__(options)
 
     def _create(self):
         driver = self.driver
         options = self.options
-        self.connmanager = Sqlite3ConnectionManager(
-            driver,
-            path=os.path.join(self.data_dir, 'main.sqlite3'),
-            pragmas=self.pragmas,
-            options=options
-        )
+        if self.connmanager is None:
+            self.connmanager = Sqlite3ConnectionManager(
+                driver,
+                path=os.path.join(self.data_dir, 'main.sqlite3'),
+                pragmas=self.pragmas,
+                options=options
+            )
 
-        self.mover = Sqlite3ObjectMover(
-            driver,
-            options=options,
-        )
-        self.locker = Sqlite3Locker(
-            options,
-            driver,
-            batcher_factory=Sqlite3RowBatcher)
+        if self.mover is None:
+            self.mover = Sqlite3ObjectMover(
+                driver,
+                options=options,
+            )
+        if self.locker is None:
+            self.locker = Sqlite3Locker(
+                options,
+                driver,
+                batcher_factory=Sqlite3RowBatcher)
 
         if not self.oidallocator:
             self.oidallocator = Sqlite3OIDAllocator(
@@ -146,5 +153,9 @@ class Sqlite3Adapter(AbstractAdapter):
             self.data_dir,
             self.pragmas,
             options=self.options,
-            oidallocator=self.oidallocator.new_instance())
+            oidallocator=self.oidallocator.new_instance(),
+            locker=self.locker,
+            mover=self.mover,
+            connmanager=self.connmanager,
+        )
         return inst
