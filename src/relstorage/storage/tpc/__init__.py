@@ -261,7 +261,6 @@ class AbstractTPCStateDatabaseAvailable(object):
         self.shared_state.abort(force)
         return self.shared_state.initial_state
 
-
     def no_longer_stale(self):
         return self
 

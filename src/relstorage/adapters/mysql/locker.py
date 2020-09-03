@@ -169,6 +169,8 @@ class MySQLLocker(AbstractLocker):
         if restart:
             return
 
+        # XXX: Setting state in an `on_store_opened` is no good. With pooling, it may never
+        # get executed.
         if self.supports_row_lock_nowait is None:
             self.supports_row_lock_nowait = self.version_detector.supports_nowait(cursor)
 

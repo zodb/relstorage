@@ -344,6 +344,7 @@ class RelStorage(LegacyMethodsMixin,
         """
         self._adapter.schema.zap_all(**kwargs)
         self._load_connection.drop()
+        self._store_connection_pool.drop_all()
         self._cache.zap_all()
 
     def release(self):
@@ -469,10 +470,12 @@ class RelStorage(LegacyMethodsMixin,
             # The allowed actions are carefully prescribed.
             # This argument is specified by IStorageRestoreable
             try:
-                self._tpc_phase = Restore(self._tpc_phase, tid, status)
+                next_phase = Restore(self._tpc_phase, tid, status)
             except:
                 self.tpc_abort(transaction, _force=True)
                 raise
+            else:
+                self._tpc_phase = next_phase
 
     @metricmethod
     def tpc_vote(self, transaction):

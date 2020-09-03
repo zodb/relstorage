@@ -27,6 +27,7 @@ from zope.interface import implementer
 
 from .._compat import wraps
 from .._util import Lazy
+from .._util import get_positive_integer_from_environ
 from . import interfaces
 
 logger = __import__('logging').getLogger(__name__)
@@ -338,7 +339,20 @@ class ClosedConnection(object):
 class StoreConnectionPool(object):
     """
     A thread-safe pool of `StoreConnection` objects.
+
+    Connections are opened on demand; opening a connection on demand
+    does not block.
+
+    By default, it will keep around a `StoreConnection` for every instance
+    of a RelStorage that has ever used one, which ordinarily corresponds to the
+    ZODB Connection pool size. It can be made to keep a smaller (but not larger)
+    number around by setting ``MAX_STORE_CONNECTIONS_IN_POOL``.
     """
+
+    MAX_STORE_CONNECTIONS_IN_POOL = get_positive_integer_from_environ(
+        'RS_MAX_POOLED_STORE_CONNECTIONS',
+        None
+    )
 
     def __init__(self, connmanager):
         import threading
@@ -378,13 +392,18 @@ class StoreConnectionPool(object):
             self._replace(conn, rollback)
 
     def borrow(self):
+        conn = None
         with self._lock:
             if self._connections:
                 conn = self._connections.pop()
-                conn.restart()
-                conn.begin()
-                return conn
-        return self._factory(self._connmanager)
+
+        if conn is None:
+            conn = self._factory(self._connmanager)
+        else:
+            conn.restart()
+
+        conn.begin()
+        return conn
 
     def replace(self, connection):
         self._replace(connection, True)
@@ -396,17 +415,30 @@ class StoreConnectionPool(object):
             clean_rollback = True
         if not clean_rollback:
             connection.drop()
-        with self._lock:
-            if clean_rollback:
+        else:
+            with self._lock:
                 self._connections.append(connection)
-            self._shrink()
+                self._shrink()
 
     def _shrink(self):
-        # Call while holding the lock.
-        while len(self._connections) > self._count and self._connections:
+        # Call while holding the lock, after putting a connection
+        # back in the pool.
+        # Limits the number of pooled connections to be no more than
+        # ``instance_count`` (i.e., one per open RelStorage), or ``MAX_STORE_CONNECTIONS_IN_POOL``,
+        # if set and if less than instance_count
+        keep_connections = min(self._count, self.MAX_STORE_CONNECTIONS_IN_POOL or self._count)
+
+        while len(self._connections) > keep_connections and self._connections:
             conn = self._connections.pop()
-            conn.drop()
-            conn.connmanager = None
+            conn.drop() # TODO: This could potentially be slow? Might
+                        # want to do this outside the lock.
+            conn.connmanager = None # It can't be opened again.
+
+    def drop_all(self):
+        with self._lock:
+            while self._connections:
+                conn = self._connections.pop()
+                conn.drop()
 
     def hard_close_all_connections(self):
         # Testing only.
@@ -434,6 +466,9 @@ class ClosedConnectionPool(object):
 
     release = new_instance
     close = release
+    drop_all = release
+
+    pooled_connection_count = instance_count = 0
 
 
 class SingleConnectionPool(object):
