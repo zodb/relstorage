@@ -636,7 +636,7 @@ class GenericRelStorageTests(
 
         # All of them are released, so we should be down to only one instance.
         self.assertEqual(1, self._storage._store_connection_pool.instance_count)
-        self.assertEqual(1, self._storage._store_connection_pool.pooled_connection_count)
+        self.assertLessEqual(self._storage._store_connection_pool.pooled_connection_count, 1)
 
         # They all have the desired length, and each one has no duplicates.
         self.assertEqual(
@@ -806,7 +806,7 @@ class GenericRelStorageTests(
         c2 = db.open()
         self.assertIs(c2, c1)
         self.assertEqual(store_pool.instance_count, 2)
-        self.assertEqual(store_pool.pooled_connection_count, 1)
+        self.assertLessEqual(store_pool.pooled_connection_count, 1)
 
         r = c2.root()
         self.assertEqual(r['alpha'], 1)
