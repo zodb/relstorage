@@ -47,8 +47,10 @@ from ..cache.interfaces import CacheConsistencyError
 from ..options import Options
 from ..interfaces import IRelStorage
 from ..adapters.connections import LoadConnection
-from ..adapters.connections import StoreConnection
+from ..adapters.connections import StoreConnectionPool
 from ..adapters.connections import ClosedConnection
+from ..adapters.connections import ClosedConnectionPool
+from ..adapters.connections import SingleConnectionPool
 from .._compat import clear_frames
 from .._compat import metricmethod
 from .._util import int64_to_8bytes
@@ -137,19 +139,13 @@ class RelStorage(LegacyMethodsMixin,
     _instances = ()
 
     _load_connection = ClosedConnection()
-    _store_connection = ClosedConnection()
-    #_tpc_begin_factory = None
+    _store_connection_pool = ClosedConnectionPool()
 
     _oids = ReadOnlyOIDs()
 
-    # # Attributes in our dictionary that shouldn't have stale()/no_longer_stale()
-    # # called on them. At this writing, it's just the type object.
-    # _STALE_IGNORED_ATTRS = (
-    #     '_tpc_begin_factory',
-    # )
-
     def __init__(self, adapter, name=None, create=None,
                  options=None, cache=None, blobhelper=None,
+                 store_connection_pool=None,
                  **kwoptions):
         # pylint:disable=too-many-branches, too-many-statements
         if options and kwoptions:
@@ -198,8 +194,10 @@ class RelStorage(LegacyMethodsMixin,
         self._load_connection = LoadConnection(self._adapter.connmanager)
         self._load_connection.on_first_use = self.__on_load_first_use
         self.__queued_changes = OID_SET_TYPE()
-        if not self._is_read_only:
-            self._store_connection = StoreConnection(self._adapter.connmanager)
+        if store_connection_pool is not None:
+            self._store_connection_pool = store_connection_pool
+        elif not self._is_read_only:
+            self._store_connection_pool = StoreConnectionPool(self._adapter.connmanager)
 
         if cache is not None:
             self._cache = cache
@@ -226,7 +224,7 @@ class RelStorage(LegacyMethodsMixin,
 
         self._tpc_phase = NotInTransaction(tpc_begin_factory, self._is_read_only)
         if not self._is_read_only:
-            self._oids = OIDs(self._adapter.oidallocator, self._store_connection)
+            self._oids = OIDs(self._adapter.oidallocator)
 
         # Now copy in a bunch of methods from our component objects.
         # Many of these are 'stale_aware', meaning that we can ask
@@ -288,7 +286,8 @@ class RelStorage(LegacyMethodsMixin,
         blobhelper = self.blobhelper.new_instance(adapter=adapter)
         other = type(self)(adapter=adapter, name=self.__name__,
                            create=False, options=options, cache=cache,
-                           blobhelper=blobhelper)
+                           blobhelper=blobhelper,
+                           store_connection_pool=self._store_connection_pool.new_instance())
         if before:
             other._read_only_error = ReadOnlyHistoryError
             other.tpc_begin = make_cannot_write(other, other.tpc_begin)
@@ -345,7 +344,6 @@ class RelStorage(LegacyMethodsMixin,
         """
         self._adapter.schema.zap_all(**kwargs)
         self._load_connection.drop()
-        self._store_connection.drop()
         self._cache.zap_all()
 
     def release(self):
@@ -360,14 +358,14 @@ class RelStorage(LegacyMethodsMixin,
         on other instances of the same base object).
         """
         self._load_connection.drop()
-        self._store_connection.drop()
+        self._store_connection_pool.release()
 
         self._cache.release()
         self._cache = _ClosedCache()
         self._tpc_phase = None
         self._oids = None
         self._load_connection = ClosedConnection()
-        self._store_connection = ClosedConnection()
+        self._store_connection_pool = ClosedConnectionPool()
         self._adapter.release()
         if not self._instances:
             self._closed = True
@@ -379,9 +377,9 @@ class RelStorage(LegacyMethodsMixin,
 
         self._closed = True
         self._load_connection.drop()
-        self._store_connection.drop()
+        self._store_connection_pool.close()
         self._load_connection = ClosedConnection()
-        self._store_connection = ClosedConnection()
+        self._store_connection_pool = ClosedConnectionPool()
 
         self.blobhelper.close()
         for wref in self._instances:
@@ -464,7 +462,6 @@ class RelStorage(LegacyMethodsMixin,
             # bug. Either way, we're fine to roll everything back and hope
             # for the best on a retry. Perhaps we need to raise a TransientError?
             self._load_connection.drop()
-            self._store_connection.drop()
             raise
 
         if tid is not None:
@@ -536,8 +533,17 @@ class RelStorage(LegacyMethodsMixin,
         return bytes8_to_int64(self.lastTransaction())
 
     def new_oid(self):
+        # This is called from ``Connection.add`` which can be called at any time
+        # by the application, so we don't know what state we're in. It is also called from
+        # ``Connection._commit``, which is called during TPC.
         # If we're committing, we can't restart the connection.
-        return self._oids.new_oid(bool(self._tpc_phase))
+        pool = self._store_connection_pool
+        commit_in_progress = False
+        if self._tpc_phase:
+            commit_in_progress = True
+            pool = SingleConnectionPool(self._tpc_phase.shared_state.store_connection)
+
+        return self._oids.new_oid(pool, commit_in_progress)
 
     def iterator(self, start=None, stop=None):
         # XXX: This is broken for purposes of copyTransactionsFrom() because

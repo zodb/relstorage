@@ -98,7 +98,8 @@ class TestLocking(TestCase):
         # still need.
         return obj1_oid, obj2_oid, obj1_tid, db
 
-    def __read_current_and_lock(self, storage, read_current_oid, lock_oid, tid, begin=True, tx=None):
+    def __read_current_and_lock(self, storage, read_current_oid, lock_oid, tid,
+                                begin=True, tx=None):
         tx = tx if tx is not None else TransactionMetaData()
         if begin:
             storage.tpc_begin(tx)
@@ -368,7 +369,7 @@ class TestLocking(TestCase):
         cond = threading.Condition()
         cond.acquire()
         def lock_shared(storage, notify=True):
-            cursor = storage._store_connection.cursor
+            cursor = storage._tpc_phase.shared_state.store_connection.cursor
             read_current_oids = storage._tpc_phase.required_tids.keys()
             if notify:
                 cond.acquire(5)

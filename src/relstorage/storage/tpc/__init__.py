@@ -88,11 +88,7 @@ class SharedTPCState(object):
 
     @Lazy
     def store_connection(self):
-        # TODO: This is where we'd check one out of the pool
-        conn = self._storage._store_connection
-        conn.restart()
-        conn.begin()
-        return conn
+        return self._storage._store_connection_pool.borrow()
 
     @Lazy
     def load_connection(self):
@@ -120,24 +116,28 @@ class SharedTPCState(object):
         return 'temp_storage' in self.__dict__ and self.temp_storage
 
     def abort(self, force=False):
-        # pylint:disable=no-member,using-constant-test
+        # pylint:disable=no-member,using-constant-test,too-many-branches
         try:
            # Drop locks first.
             if 'store_connection' in self.__dict__:
                 store_connection = self.store_connection
-                if store_connection:
-                    # It's possible that this connection/cursor was
-                    # already closed if an error happened (which would
-                    # release the locks). Don't try to re-open it.
-                    self.adapter.locker.release_commit_lock(store_connection.cursor)
+                try:
+                    if store_connection:
+                        # It's possible that this connection/cursor was
+                        # already closed if an error happened (which would
+                        # release the locks). Don't try to re-open it.
+                        self.adapter.locker.release_commit_lock(store_connection.cursor)
 
-                # Though, this might re-open it.
-                self.adapter.txncontrol.abort(
-                    store_connection,
-                    self.prepared_txn)
+                    # Though, this might re-open it.
+                    self.adapter.txncontrol.abort(
+                        store_connection,
+                        self.prepared_txn)
 
-                if force:
-                    store_connection.drop()
+                    if force:
+                        store_connection.drop()
+                finally:
+                    self._storage._store_connection_pool.replace(store_connection)
+
             if 'load_connection' in self.__dict__:
                 if force:
                     self.load_connection.drop()
@@ -157,6 +157,10 @@ class SharedTPCState(object):
     def release(self):
         # TODO: Release the store_connection back to the pool.
         # pylint:disable=no-member
+        if 'store_connection' in self.__dict__:
+            self._storage._store_connection_pool.replace(self.store_connection)
+            del self.store_connection
+
         if 'temp_storage' in self.__dict__:
             self.temp_storage.close()
             del self.temp_storage
@@ -304,7 +308,11 @@ class NotInTransaction(object):
         if transaction is self.transaction: # Also handles None.
             raise StorageTransactionError("Duplicate tpc_begin calls for same transaction.")
         state = SharedTPCState(self, storage, transaction)
-        return self.begin_factory(state)
+        try:
+            return self.begin_factory(state)
+        except:
+            state.abort()
+            raise
 
     # def no_longer_stale(self):
     #     return self

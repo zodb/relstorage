@@ -179,8 +179,9 @@ class AbstractVote(AbstractTPCStateDatabaseAvailable):
         """
         # It is assumed that self._lock.acquire was called before this
         # method was called.
-        cursor = self.shared_state.store_connection.cursor
-        __traceback_info__ = self.shared_state.store_connection, cursor
+        store_connection = self.shared_state.store_connection
+        cursor = store_connection.cursor
+        __traceback_info__ = store_connection, cursor
         assert cursor is not None
         adapter = self.shared_state.adapter
 
@@ -213,7 +214,9 @@ class AbstractVote(AbstractTPCStateDatabaseAvailable):
         # used, or whether we're updating existing objects and avoid a
         # bit more overhead, but benchmarking suggests that it's not
         # worth it in common cases.
-        storage._oids.set_min_oid(self.shared_state.temp_storage.max_stored_oid)
+        storage._oids.set_min_oid(
+            store_connection,
+            self.shared_state.temp_storage.max_stored_oid)
 
         # Lock objects being modified and those registered with
         # readCurrent(). This could raise ReadConflictError or locking

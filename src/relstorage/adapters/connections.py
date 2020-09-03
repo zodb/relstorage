@@ -322,3 +322,121 @@ class ClosedConnection(object):
 
     restart_and_call = isolated_connection
     enter_critical_phase_until_transaction_end = isolated_connection
+
+
+class StoreConnectionPool(object):
+    """
+    A thread-safe pool of `StoreConnection` objects.
+    """
+
+    def __init__(self, connmanager):
+        import threading
+        self._lock = threading.Lock()
+        self._connmanager = connmanager
+        self._connections = []
+        self._count = 1
+        self._factory = StoreConnection
+
+    # MVCC protocol
+    def new_instance(self):
+        self._count += 1
+        return self
+
+    def release(self):
+        self._count -= 1
+        with self._lock:
+            self._shrink()
+
+    def close(self):
+        with self._lock:
+            self._count = 0
+            self._factory = ClosedConnection
+            self._shrink()
+            self._connections = ()
+
+    @contextlib.contextmanager
+    def borrowing(self, commit=False):
+        rollback = True
+        try:
+            conn = self.borrow()
+            yield conn
+            if commit:
+                conn.commit()
+                rollback = False
+        finally:
+            self._replace(conn, rollback)
+
+    def borrow(self):
+        self._lock.acquire()
+        try:
+            if self._connections:
+                conn = self._connections.pop()
+                conn.restart()
+                conn.begin()
+                return conn
+        finally:
+            self._lock.release()
+        return self._factory(self._connmanager)
+
+    def replace(self, connection):
+        self._replace(connection, True)
+
+    def _replace(self, connection, needs_rollback):
+        if needs_rollback:
+            clean_rollback = connection.rollback_quietly()
+        else:
+            clean_rollback = True
+        if not clean_rollback:
+            connection.drop()
+        with self._lock:
+            if clean_rollback:
+                self._connections.append(connection)
+            self._shrink()
+
+    def _shrink(self):
+        # Call while holding the lock.
+        while len(self._connections) > self._count and self._connections:
+            conn = self._connections.pop()
+            conn.drop()
+            conn.connmanager = None
+
+    def hard_close_all_connections(self):
+        # Testing only.
+        for conn in self._connections:
+            conn.connection.close()
+
+    @property
+    def pooled_connection_count(self):
+        return len(self._connections)
+
+    @property
+    def instance_count(self):
+        return self._count
+
+class ClosedConnectionPool(object):
+
+    def borrow(self):
+        return ClosedConnection()
+
+    def replace(self, connection):
+        "Does Nothing"
+
+    def new_instance(self):
+        "Does nothing"
+
+    release = new_instance
+    close = release
+
+
+class SingleConnectionPool(object):
+    __slots__ = ('connection',)
+
+    def __init__(self, connection):
+        self.connection = connection
+
+    @contextlib.contextmanager
+    def borrowing(self, commit=False): # pylint:disable=unused-argument
+        """
+        The *commit* parameter is ignored
+        """
+        yield self.connection

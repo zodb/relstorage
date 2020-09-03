@@ -41,26 +41,25 @@ class AbstractOIDs(object):
     def no_longer_stale(self):
         return self
 
-    def new_oid(self, commit_in_progress):
+    def new_oid(self, store_connection_pool, commit_in_progress):
         raise NotImplementedError
 
-    def set_min_oid(self, max_observed_oid):
+    def set_min_oid(self, store_connection, max_observed_oid):
         raise NotImplementedError
 
 class OIDs(AbstractOIDs):
 
-    def __init__(self, oidallocator, store_connection):
+    def __init__(self, oidallocator):
         # From largest to smallest: [16, 15, 14, ..., 1]
         self.preallocated_oids = [] # type: list
         # The maximum OID we've handed out (or that has been observed)
         # A value of 0 is not legal for the oidallocator to produce.
         self.max_allocated_oid = 0 # type: int
         self.oidallocator = oidallocator
-        self.store_connection = store_connection # type: StoreConnection
         if hasattr(oidallocator, 'new_oids_no_cursor'):
             self.__preallocate_oids = self.__preallocate_oids_no_cursor
 
-    def set_min_oid(self, max_observed_oid):
+    def set_min_oid(self, store_connection, max_observed_oid):
         """
         Ensure that the next oid we produce is greater than *max_observed_oid*.
 
@@ -74,7 +73,7 @@ class OIDs(AbstractOIDs):
             # transactions from an external storage.
 
             # Set it in the database for everyone.
-            self.oidallocator.set_min_oid(self.store_connection.cursor,
+            self.oidallocator.set_min_oid(store_connection.cursor,
                                           max_observed_oid)
             # Then, set it in the storage for this thread
             # so we don't have to keep doing this if it only ever
@@ -90,7 +89,7 @@ class OIDs(AbstractOIDs):
             while preallocated_oids and preallocated_oids[-1] < max_observed_oid:
                 preallocated_oids.pop()
 
-    def new_oid(self, commit_in_progress):
+    def new_oid(self, store_connection_pool, commit_in_progress):
         # Prior to ZODB 5.1.2, this method was actually called on the
         # storage object of the DB, not the instance storage object of
         # a Connection. This meant that this method (and the oid
@@ -99,9 +98,9 @@ class OIDs(AbstractOIDs):
         # long-running transaction).
 
         # The DB.new_oid() method still exists, but shouldn't be used;
-        # if it is, we'll open a database connection and transaction that's
-        # going to sit there idle, possibly holding row locks. That's bad.
-        # But we don't take any counter measures.
+        # In the past, because that storage was never in a transaction, that meant that
+        # we could open a database transaction and never close it. RelStorage 3.3 and
+        # store connection pooling fixes this.
 
         # Connection.new_oid() can be called at just about any time
         # thanks to the Connection.add() API, which clients can use
@@ -111,7 +110,7 @@ class OIDs(AbstractOIDs):
         # Thus we may or may not have a store connection already open;
         # if we do, we can't restart it or drop it.
         if not self.preallocated_oids:
-            self.__preallocate_oids(commit_in_progress)
+            self.__preallocate_oids(store_connection_pool, commit_in_progress)
             # OIDs are monotonic, always increasing. It should never
             # go down or return equal to what we've already seen.
             self.max_allocated_oid = max(self.preallocated_oids[0], self.max_allocated_oid)
@@ -119,13 +118,14 @@ class OIDs(AbstractOIDs):
         oid_int = self.preallocated_oids.pop()
         return int64_to_8bytes(oid_int)
 
-    def __preallocate_oids(self, commit_in_progress): # pylint:disable=method-hidden
-        self.preallocated_oids = self.store_connection.call(
-            self.__new_oid_callback,
-            can_reconnect=not commit_in_progress
-        )
+    def __preallocate_oids(self, store_connection_pool, commit_in_progress): # pylint:disable=method-hidden
+        with store_connection_pool.borrowing(commit=True) as store_connection:
+            self.preallocated_oids = store_connection.call(
+                self.__new_oid_callback,
+                can_reconnect=not commit_in_progress
+            )
 
-    def __preallocate_oids_no_cursor(self, commit_in_progress):# pylint:disable=unused-argument
+    def __preallocate_oids_no_cursor(self, _store_connection, commit_in_progress):# pylint:disable=unused-argument
         self.preallocated_oids = self.oidallocator.new_oids_no_cursor()
 
     def __new_oid_callback(self, _store_conn, store_cursor, _fresh_connection):
@@ -138,10 +138,10 @@ class ReadOnlyOIDs(AbstractOIDs):
     __slots__ = (
     )
 
-    def new_oid(self, commit_in_progress):
+    def new_oid(self, store_connection_pool, commit_in_progress):
         raise ReadOnlyError
 
-    def set_min_oid(self, max_observed_oid):
+    def set_min_oid(self, store_connection, max_observed_oid):
         raise ReadOnlyError
 
 @implementer(IStaleAware)
@@ -162,8 +162,8 @@ class StaleOIDs(AbstractOIDs):
     def stale(self, ex):
         return self
 
-    def new_oid(self, commit_in_progress):
+    def new_oid(self, store_connection_pool, commit_in_progress):
         raise self.stale_error
 
-    def set_min_oid(self, max_observed_oid):
+    def set_min_oid(self, store_connection, max_observed_oid):
         raise self.stale_error
