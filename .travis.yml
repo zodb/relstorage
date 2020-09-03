@@ -87,6 +87,7 @@ cache:
   directories:
     - $HOME/.wheelhouse
     - $HOME/.ccache
+    - $HOME/.cache
 
 before_cache:
     - rm -f $HOME/.cache/pip/log/debug.log

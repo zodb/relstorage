@@ -258,6 +258,7 @@ class AbstractTPCStateDatabaseAvailable(object):
             if transaction is not self.transaction:
                 return self
 
+
         self.shared_state.abort(force)
         return self.shared_state.initial_state
 
@@ -266,6 +267,12 @@ class AbstractTPCStateDatabaseAvailable(object):
 
     def stale(self, e):
         return Stale(self, e)
+
+    def close(self):
+        if self.shared_state is not None:
+            self.tpc_abort(None, True)
+            self.shared_state = None
+
 
 @implementer(ITPCStateNotInTransaction)
 class NotInTransaction(object):
@@ -324,6 +331,9 @@ class NotInTransaction(object):
     def __bool__(self):
         return False
     __nonzero__ = __bool__
+
+    def close(self):
+        pass
 
 @implementer(ITPCStateNotInTransaction)
 class Stale(object):

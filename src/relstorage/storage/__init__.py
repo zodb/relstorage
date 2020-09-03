@@ -363,7 +363,8 @@ class RelStorage(LegacyMethodsMixin,
 
         self._cache.release()
         self._cache = _ClosedCache()
-        self._tpc_phase = None
+        self._tpc_phase.close()
+        self._tpc_phase = _ClosedCache()
         self._oids = None
         self._load_connection = ClosedConnection()
         self._store_connection_pool = ClosedConnectionPool()
@@ -391,8 +392,8 @@ class RelStorage(LegacyMethodsMixin,
         logger.debug("Closing storage cache with stats %s", self._cache.stats())
         self._cache.close()
         self._cache = _ClosedCache()
-
-        self._tpc_phase = None
+        self._tpc_phase.close()
+        self._tpc_phase = _ClosedCache()
         self._oids = None
         self._adapter.close()
 
