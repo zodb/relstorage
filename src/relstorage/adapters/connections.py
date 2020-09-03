@@ -153,12 +153,21 @@ class AbstractManagedConnection(object):
     def __noop(*args):
         "does nothing"
 
+    def _restart_connection(self):
+        "Restart just the connection when we have no cursor."
+
     def restart(self):
         """
         Restart the connection if there is any chance that it has any associated state.
         """
         if not self:
             assert not self.active, self.__dict__
+            if self.connection is not None: # But we have no cursor We
+                # do this so that if the connection has closed itself
+                # (or been closed by a unit test) we can detect that
+                # and restart automatically. We only actually do
+                # anything there for store connections.
+                self._restart_connection()
             return
 
         # If we've never accessed the cursor, we shouldn't have any
@@ -291,6 +300,8 @@ class StoreConnection(AbstractManagedConnection):
     def begin(self):
         self.connmanager.begin(*self.open_if_needed())
 
+    def _restart_connection(self):
+        self.rollback_quietly()
 
 class PrePackConnection(StoreConnection):
     __slots__ = ()
@@ -367,15 +378,12 @@ class StoreConnectionPool(object):
             self._replace(conn, rollback)
 
     def borrow(self):
-        self._lock.acquire()
-        try:
+        with self._lock:
             if self._connections:
                 conn = self._connections.pop()
                 conn.restart()
                 conn.begin()
                 return conn
-        finally:
-            self._lock.release()
         return self._factory(self._connmanager)
 
     def replace(self, connection):

@@ -39,6 +39,15 @@ class PostgreSQLRowBatcherStoreTemps(RowBatcherStoreTemps):
 @implementer(IObjectMover)
 class PostgreSQLObjectMover(AbstractObjectMover):
 
+    def __init__(self, *args, **kwargs):
+        super(PostgreSQLObjectMover, self).__init__(*args, **kwargs)
+        if not self.driver.supports_copy:
+            batcher = PostgreSQLRowBatcherStoreTemps(self.keep_history,
+                                                     self.driver.Binary,
+                                                     self.make_batcher)
+            self.replace_temps = batcher.replace_temps
+            self.store_temps = batcher.store_temps
+
     @metricmethod_sampled
     def on_store_opened(self, cursor, restart=False):
         """Create the temporary tables for storing objects"""
@@ -86,13 +95,6 @@ class PostgreSQLObjectMover(AbstractObjectMover):
             for stmt in ddl_stmts:
                 cursor.execute(stmt)
             cursor.connection.commit()
-
-            if not self.driver.supports_copy:
-                batcher = PostgreSQLRowBatcherStoreTemps(self.keep_history,
-                                                         self.driver.Binary,
-                                                         self.make_batcher)
-                self.replace_temps = batcher.replace_temps
-                self.store_temps = batcher.store_temps
 
         AbstractObjectMover.on_store_opened(self, cursor, restart)
 
