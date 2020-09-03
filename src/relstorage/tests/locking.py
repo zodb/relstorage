@@ -347,6 +347,7 @@ class TestLocking(TestCase):
 
     @skipIfNoConcurrentWriters
     def checkTL_InterleavedConflictingReadCurrentDeadlock(self):
+        # pylint:disable=too-many-statements
         # Like
         # ``checkTL_InterleavedConflictingReadCurrent``
         # except that we interleave both txA and txB: txA takes modify
