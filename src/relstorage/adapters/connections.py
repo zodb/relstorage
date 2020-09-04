@@ -417,6 +417,7 @@ class StoreConnectionPool(object):
         if not clean_rollback:
             connection.drop()
         else:
+            connection.exit_critical_phase()
             with self._lock:
                 self._connections.append(connection)
                 self._shrink()

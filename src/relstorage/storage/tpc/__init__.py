@@ -99,6 +99,7 @@ class _LazyResource(BaseLazy):
         self.release_function = func
         return self
 
+
 class SharedTPCState(object):
     """
     Contains attributes marking resources that *might* be used during the commit
@@ -160,11 +161,13 @@ class SharedTPCState(object):
             load_connection.drop()
         else:
             load_connection.rollback_quietly()
+        load_connection.exit_critical_phase()
         return _CLOSED_CONNECTION
 
     @load_connection.releaser
     def load_connection(self, _storage, load_connection):
         load_connection.rollback_quietly()
+        load_connection.exit_critical_phase()
         return _CLOSED_CONNECTION
 
     @_LazyResource
@@ -370,6 +373,13 @@ class NotInTransaction(object):
         self.begin_factory = begin_factory
         self.read_only = read_only
         self.last_committed_tid_int = committed_tid_int
+
+    def with_committed_tid_int(self, committed_tid_int):
+        return NotInTransaction(
+            self.begin_factory,
+            self.read_only,
+            committed_tid_int
+        )
 
     def tpc_abort(self, *args, **kwargs): # pylint:disable=arguments-differ,unused-argument,signature-differs
         # Nothing to do

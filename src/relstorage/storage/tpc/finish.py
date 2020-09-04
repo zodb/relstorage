@@ -17,8 +17,6 @@ The finishing states.
 from __future__ import absolute_import
 from __future__ import print_function
 
-from . import NotInTransaction
-
 def Finish(vote_state, committed_tid_int, needs_store_commit=True):
     """
     The state we enter with tpc_finish.
@@ -43,12 +41,9 @@ def Finish(vote_state, committed_tid_int, needs_store_commit=True):
     vote_state.shared_state.cache.after_tpc_finish(vote_state.committing_tid_lock.tid,
                                                    vote_state.shared_state.temp_storage)
 
-    # Make sure we're not holding any elevated privileges still;
-    # that would be a bug in the driver.
-    vote_state.shared_state.load_connection.exit_critical_phase()
-    vote_state.shared_state.store_connection.exit_critical_phase()
-    return NotInTransaction(
-        vote_state.shared_state.initial_state.begin_factory,
-        vote_state.shared_state.initial_state.read_only,
-        committed_tid_int,
+    # The vote caller is responsible for releasing the shared
+    # resources in vote_state.shared_state.
+    # XXX: Which may not make much sense?
+    return vote_state.initial_state.with_committed_tid_int(
+        committed_tid_int
     )
