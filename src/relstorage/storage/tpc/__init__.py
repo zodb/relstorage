@@ -57,20 +57,6 @@ _CLOSED_CONNECTION = ClosedConnection()
 #: it.
 LOCK_EARLY = os.environ.get('RELSTORAGE_LOCK_EARLY')
 
-class _StorageFacade(object):
-    # makes a storage look like a previous state for construction
-    # purposes
-
-    transaction = None
-    prepared_txn = None
-
-    def __init__(self, storage):
-        self.adapter = storage._adapter
-        self.load_connection = storage._load_connection
-        self.store_connection = storage._store_connection
-        self.blobhelper = storage.blobhelper
-        self.cache = storage._cache
-        self.read_only = storage._is_read_only
 
 class _LazyResource(BaseLazy):
 
@@ -183,6 +169,14 @@ class SharedTPCState(object):
     @blobhelper.releaser
     def blobhelper(self, _storage, blobhelper):
         blobhelper.clear_temp()
+
+    def has_blobs(self):
+        # pylint:disable=no-member
+        return (
+            'blobhelper' in self.__dict__
+            and self.blobhelper is not None
+            and self.blobhelper.txn_has_blobs
+        )
 
     @BaseLazy
     def cache(self):
@@ -340,7 +334,6 @@ class AbstractTPCStateDatabaseAvailable(object):
             if transaction is not self.transaction:
                 return self
 
-
         self.shared_state.abort(force)
         return self.initial_state
 
@@ -389,6 +382,7 @@ class NotInTransaction(object):
         raise StorageTransactionError("No transaction in progress")
 
     tpc_finish = tpc_vote = _no_transaction
+    checkCurrentSerialInTransaction = _no_transaction
 
     def store(self, *_args, **_kwargs):
         if self.read_only:
@@ -421,6 +415,7 @@ class NotInTransaction(object):
     def close(self):
         pass
 
+
 @implementer(ITPCStateNotInTransaction)
 class Stale(object):
     """
@@ -431,6 +426,9 @@ class Stale(object):
     re-raising that error.
     """
 
+    transaction = None
+    last_committed_tid_int = 0
+
     def __init__(self, previous_state, stale_error):
         self.previous_state = previous_state
         self.stale_error = stale_error
@@ -439,11 +437,22 @@ class Stale(object):
         raise self.stale_error
 
     store = restore = checkCurrentSerialInTransaction = _stale
-    undo = deleteObject = _stale
-    tpc_begin = _stale
+    undo = deleteObject = restoreBlob = _stale
+    tpc_begin = tpc_finish = tpc_vote = _stale
+
+    def tpc_abort(self, *args, **kwargs):
+        return self.previous_state.tpc_abort(*args, **kwargs)
+
+    @property
+    def initial_state(self):
+        return self.previous_state.initial_state
 
     def no_longer_stale(self):
         return self.previous_state
 
     def stale(self, _e):
         return self
+
+    def __bool__(self):
+        return False
+    __nonzero__ = __bool__

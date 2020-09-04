@@ -108,6 +108,9 @@ class ITPCStateNotInTransaction(ITPCState):
     a bunch of methods that are also defined by various other states.
     These methods should raise ``StorageTransactionError``, or
     ``ReadOnlyError``, as appropriate.
+
+    Implementations of this interface should be false in a boolean context
+    to easily permit testing whether a TPC phase is active or not.
     """
 
     last_committed_tid_int = Attribute(
@@ -144,7 +147,7 @@ class ITPCStateNotInTransaction(ITPCState):
     restore = deleteObject = undo = restoreBlob = store
 
 
-class ITPCStateDatabaseAvailable(ITPCState):
+class ITPCStateDatabaseAvailable(ITPCState, IStaleAware):
     """
     A state where the writable database connection is available.
     """
@@ -173,7 +176,7 @@ class ITPCStateBeganHP(ITPCStateBegan):
     storages.
     """
 
-class ITPCPhaseVoting(ITPCStateDatabaseAvailable):
+class ITPCStateVoting(ITPCStateDatabaseAvailable):
     """
     The phase where voting happens. This follows the beginning phase.
     """
