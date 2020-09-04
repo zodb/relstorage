@@ -388,8 +388,14 @@ class Lazy(object):
         func, name = self.data
         value = func(inst)
         inst.__dict__[name] = value
+        self._stored_value_for_name_in_inst(value, name, inst)
         return value
 
+    @staticmethod
+    def _stored_value_for_name_in_inst(value, name, inst):
+        """
+        Hook for subclasses.
+        """
 
 class CachedIn(object):
     """Cached method with given cache attribute."""

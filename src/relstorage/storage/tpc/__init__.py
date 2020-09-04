@@ -37,11 +37,15 @@ from ZODB.POSException import ReadOnlyError
 from ZODB.POSException import StorageTransactionError
 
 from ..interfaces import ITPCStateNotInTransaction
-from ..._util import Lazy
+from ..interfaces import ITPCStateDatabaseAvailable
+from ...adapters.connections import ClosedConnection
+from ..._util import Lazy as BaseLazy
 
 from .temporary_storage import TemporaryStorage
 
 log = logging.getLogger("relstorage")
+
+_CLOSED_CONNECTION = ClosedConnection()
 
 #: Set the ``RELSTORAGE_LOCK_EARLY`` environment variable if you
 #: experience deadlocks or failures to commit (``tpc_finish``). This
@@ -68,6 +72,33 @@ class _StorageFacade(object):
         self.cache = storage._cache
         self.read_only = storage._is_read_only
 
+class _LazyResource(BaseLazy):
+
+    # If not None, a callable ``(storage, resource, force)``
+    # that aborts the *resource*, possibly forcefully (*force*).
+    # The return value will be the new value in the object
+    # instance.
+    abort_function = None
+    # If not None, a callable ``(storage, resource)`` to clean up
+    # any use of the *resource* after success.
+    release_function = None
+
+    def _stored_value_for_name_in_inst(self, value, name, inst):
+        # type: (Any, str, SharedTPCState) -> None
+        if name == 'store_connection':
+            # Try to do this first
+            inst._used_resources.insert(0, self)
+        else:
+            inst._used_resources.append(self)
+
+    def aborter(self, func):
+        self.abort_function = func
+        return self
+
+    def releaser(self, func):
+        self.release_function = func
+        return self
+
 class SharedTPCState(object):
     """
     Contains attributes marking resources that *might* be used during the commit
@@ -75,6 +106,8 @@ class SharedTPCState(object):
 
     Accessing a resource implicitly begins it, if needed.
     """
+
+    # pylint:disable=method-hidden
 
     prepared_txn = None
     transaction = None
@@ -85,88 +118,126 @@ class SharedTPCState(object):
         self.initial_state = initial_state
         self._storage = storage
         self.transaction = transaction
+        self._used_resources = []
 
-    @Lazy
+    @_LazyResource
     def store_connection(self):
         return self._storage._store_connection_pool.borrow()
 
-    @Lazy
+    @store_connection.aborter
+    def store_connection(self, storage, store_connection, force):
+        try:
+            adapter = storage._adapter
+            if store_connection:
+                # It's possible that this connection/cursor was
+                # already closed if an error happened (which would
+                # release the locks). Don't try to re-open it.
+                adapter.locker.release_commit_lock(store_connection.cursor)
+
+                # Though, this might re-open it.
+                adapter.txncontrol.abort(
+                    store_connection,
+                    self.prepared_txn)
+
+                if force:
+                    store_connection.drop()
+        finally:
+            storage._store_connection_pool.replace(store_connection)
+        return _CLOSED_CONNECTION
+
+    @store_connection.releaser
+    def store_connection(self, storage, store_connection):
+        storage._store_connection_pool.replace(store_connection)
+        return _CLOSED_CONNECTION
+
+    @_LazyResource
     def load_connection(self):
         return self._storage._load_connection
 
-    @Lazy
+    @load_connection.aborter
+    def load_connection(self, _storage, load_connection, force):
+        if force:
+            load_connection.drop()
+        else:
+            load_connection.rollback_quietly()
+        return _CLOSED_CONNECTION
+
+    @load_connection.releaser
+    def load_connection(self, _storage, load_connection):
+        load_connection.rollback_quietly()
+        return _CLOSED_CONNECTION
+
+    @_LazyResource
     def blobhelper(self):
         blobhelper = self._storage.blobhelper
         blobhelper.begin()
         return blobhelper
 
-    @Lazy
+    @blobhelper.aborter
+    def blobhelper(self, _storage, blobhelper, _force):
+        blobhelper.abort()
+
+    @blobhelper.releaser
+    def blobhelper(self, _storage, blobhelper):
+        blobhelper.clear_temp()
+
+    @BaseLazy
     def cache(self):
         return self._storage._cache
 
-    @Lazy
+    @BaseLazy
     def adapter(self):
         return self._storage._adapter
 
-    @Lazy
+    @_LazyResource
     def temp_storage(self):
         return TemporaryStorage()
+
+    @temp_storage.aborter
+    def temp_storage(self, _storage, temp_storage, _force):
+        temp_storage.close()
+
+    @temp_storage.releaser
+    def temp_storage(self, _storage, temp_storage):
+        temp_storage.close()
 
     def has_temp_data(self):
         return 'temp_storage' in self.__dict__ and self.temp_storage
 
+    def __cleanup(self, method_name, method_args):
+        storage = self._storage
+        resources = self._used_resources
+        self._used_resources = () # No more opening resources.
+
+        exceptions = []
+
+        for resource in resources:
+            assert resource.__name__ in vars(self)
+
+            cleaner = getattr(resource, method_name)
+            if not cleaner:
+                setattr(self, resource.__name__, None)
+                continue
+
+            value = getattr(self, resource.__name__)
+            new_value = None
+            try:
+                new_value = cleaner(self, storage, value, *method_args)
+            except Exception as ex: # pylint:disable=broad-except
+                exceptions.append(ex)
+            setattr(self, resource.__name__, new_value)
+
+        if exceptions: # pragma: no cover
+            raise Exception("Failed to close one or more resources: %s" % (exceptions,))
+
     def abort(self, force=False):
-        # pylint:disable=no-member,using-constant-test,too-many-branches
-        try:
-           # Drop locks first.
-            if 'store_connection' in self.__dict__:
-                store_connection = self.store_connection
-                try:
-                    if store_connection:
-                        # It's possible that this connection/cursor was
-                        # already closed if an error happened (which would
-                        # release the locks). Don't try to re-open it.
-                        self.adapter.locker.release_commit_lock(store_connection.cursor)
-
-                    # Though, this might re-open it.
-                    self.adapter.txncontrol.abort(
-                        store_connection,
-                        self.prepared_txn)
-
-                    if force:
-                        store_connection.drop()
-                finally:
-                    self._storage._store_connection_pool.replace(store_connection)
-
-            if 'load_connection' in self.__dict__:
-                if force:
-                    self.load_connection.drop()
-                else:
-                    self.load_connection.rollback_quietly()
-
-            if 'blobhelper' in self.__dict__:
-                self.blobhelper.abort()
-
-            if 'temp_storage' in self.__dict__:
-                self.temp_storage.close()
-        finally:
-            for attr in 'store_connection', 'load_connection', 'blobhelper', 'temp_storage':
-                self.__dict__.pop(attr, None)
-
+        self.__cleanup('abort_function', (force,))
 
     def release(self):
-        # TODO: Release the store_connection back to the pool.
-        # pylint:disable=no-member
-        if 'store_connection' in self.__dict__:
-            self._storage._store_connection_pool.replace(self.store_connection)
-            del self.store_connection
-
-        if 'temp_storage' in self.__dict__:
-            self.temp_storage.close()
-            del self.temp_storage
+        self.__cleanup('release_function', ())
 
 
-
+@implementer(ITPCStateDatabaseAvailable)
 class AbstractTPCStateDatabaseAvailable(object):
 
     __slots__ = (
@@ -192,6 +263,14 @@ class AbstractTPCStateDatabaseAvailable(object):
     @property
     def transaction(self):
         return self.shared_state.transaction
+
+    @property
+    def initial_state(self):
+        return self.shared_state.initial_state
+
+    @property
+    def store_connection(self):
+        return self.shared_state.store_connection
 
     def __repr__(self):
         result = "<%s at 0x%x stored_count=%s %s" % (
@@ -260,7 +339,7 @@ class AbstractTPCStateDatabaseAvailable(object):
 
 
         self.shared_state.abort(force)
-        return self.shared_state.initial_state
+        return self.initial_state
 
     def no_longer_stale(self):
         return self
@@ -320,12 +399,9 @@ class NotInTransaction(object):
             state.abort()
             raise
 
-    # def no_longer_stale(self):
-    #     return self
-
-    # def stale(self, e):
-    #     return Stale(self, e)
-
+    @property
+    def initial_state(self):
+        return self
 
     # This object appears to be false.
     def __bool__(self):

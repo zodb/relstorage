@@ -73,11 +73,15 @@ class ITPCState(Interface):
     """
     An object representing the current state (phase) of the two-phase commit protocol,
     and how to transition between it and other phases.
+
+    The initial state is always :class:`ITPCStateNotInTransaction`
     """
 
     transaction = Attribute("The *transaction* object from ZODB.")
 
-    def tpc_abort(storage, transaction, force=False):
+    initial_state = Attribute("The ITPCStateNotInTransaction that started the process.")
+
+    def tpc_abort(transaction, force=False):
         """
         Clear any used resources, and return the object
         representing :class:`ITPCStateNotInTransaction`.
@@ -139,9 +143,10 @@ class ITPCStateNotInTransaction(ITPCState):
 
     restore = deleteObject = undo = restoreBlob = store
 
+
 class ITPCStateDatabaseAvailable(ITPCState):
     """
-    A state where the database connection is usually available.
+    A state where the writable database connection is available.
     """
 
     store_connection = Attribute("The IManagedStoreConnection in use.")
@@ -172,6 +177,14 @@ class ITPCPhaseVoting(ITPCStateDatabaseAvailable):
     """
     The phase where voting happens. This follows the beginning phase.
     """
+
+    invalidated_oids = Attribute(
+        """An iterable of OID bytes, returned from the storage's ``tpc_vote`` method.
+
+        The Connection will ghost all cached objects in this iterable. This includes
+        things things during conflict resolution or undo.
+        """
+    )
 
     def tpc_finish(storage, transaction, f=None):
         """

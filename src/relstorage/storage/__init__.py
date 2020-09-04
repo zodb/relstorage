@@ -491,7 +491,7 @@ class RelStorage(LegacyMethodsMixin,
             raise
         else:
             self._tpc_phase = next_phase
-            return self._tpc_phase.invalidated_oids
+            return next_phase.invalidated_oids
 
     @metricmethod
     def tpc_finish(self, transaction, f=None):
@@ -505,7 +505,10 @@ class RelStorage(LegacyMethodsMixin,
         # The store connection is either committed or rolledback;
         # the load connection is now rolledback.
         self._tpc_phase = next_phase
-        # XXX: De-dup this
+        # It might be nice to de-dup this so we're not storing it both
+        # in the phase and in self, but if it was needed during TPC,
+        # when our phase is not ``ITPCStateNotInTransaction``, we couldn't
+        # get it.
         committed_tid = int64_to_8bytes(next_phase.last_committed_tid_int)
         self._last_tid_i_committed_bytes = committed_tid
         return committed_tid
@@ -520,7 +523,7 @@ class RelStorage(LegacyMethodsMixin,
             if _force:
                 # We're here under unexpected circumstances. It's possible something
                 # might go wrong rolling back.
-                self._tpc_phase = NotInTransaction(self._is_read_only, self.lastTransactionInt())
+                self._tpc_phase = self._tpc_phase.initial_state
             raise
 
     def lastTransaction(self):
