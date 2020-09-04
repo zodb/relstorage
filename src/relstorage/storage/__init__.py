@@ -746,8 +746,6 @@ class RelStorage(LegacyMethodsMixin,
         replacements = {}
         my_ns = vars(self)
         for k, v in my_ns.items():
-            # if k in self._STALE_IGNORED_ATTRS:
-            #     continue
             if callable(getattr(v, 'stale', None)):
                 new_v = v.stale(stale_error)
                 replacements[k] = new_v
@@ -776,7 +774,6 @@ class RelStorage(LegacyMethodsMixin,
         replacements = {
             k: v.no_longer_stale()
             for k, v in my_ns.items()
-#            if k not in self._STALE_IGNORED_ATTRS
             if callable(getattr(v, 'no_longer_stale', None))
         }
 

@@ -131,7 +131,6 @@ class AbstractVote(AbstractTPCStateDatabaseAvailable):
         super(AbstractVote, self).__init__(begin_state.shared_state)
 
         self.required_tids = begin_state.required_tids or {} # type: Dict[int, int]
-        #self.temp_storage = begin_state.temp_storage # type: .temporary_storage.TemporaryStorage
         self.ude = begin_state.ude
         self.committing_tid_lock = committing_tid_lock # type: Optional[DatabaseLockedForTid]
         self.count_conflicts = None

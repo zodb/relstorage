@@ -190,13 +190,11 @@ class Loader(object):
         # Actually using the store_connection to pull into the future was
         # removed as part of the pooling of store_connection. The above comments
         # indicate that we really shouldn't need to get here, and no tests break
-        # with this commented out.
+        # with this commented out. What's a legitimate need for pulling into the future?
         # state = self.adapter.mover.load_revision(
-        # XXX Was store_connection. Replace with temporary checkout from pool?
         #     self.store_connection.cursor,
         #     oid_int,
         #     tid_int)
-
         # if state:
         #     return state
 
@@ -227,22 +225,19 @@ class Loader(object):
 
         # TODO: This makes three separate queries, and also bypasses the cache.
         # We should be able to fix at least the multiple queries.
-        # XXX: "Can we stop doing this?" Yeah, we're trying. The impetus was
-        # the pooling of the store_connection.
-        # if self.store_connection:
-        #     # Allow loading data from later transactions
-        #     # for conflict resolution.
 
-        #     # XXX: This doesn't seem to be used in conflict
-        #     # resolution. ZODB.ConflictResolution.tryToResolveConflict
-        #     # calls loadSerial(); About the only call in ZODB to
-        #     # loadBefore() is from BlobStorage.undo() (which
-        #     # RelStorage does not extend). Mixing and matching calls
-        #     # between connections using different isolation levels
-        #     # isn't great. Can we stop doing this?
-        #     cursor = self.store_connection.cursor
-        # else:
-        #     cursor = self.load_connection.cursor
+        # In the past, we would use the store connection (only if it was already open)
+        # to "allow leading dato from later transactions for conflict resolution".
+        # However, this doesn't seem to be used in conflict
+        # resolution. ZODB.ConflictResolution.tryToResolveConflict
+        # calls loadSerial(); About the only call in ZODB to
+        # loadBefore() is from BlobStorage.undo() (which
+        # RelStorage does not extend). Mixing and matching calls
+        # between connections using different isolation levels
+        # isn't great.
+        #
+        # We had it as a todo for a long time to stop doing that, and
+        # pooling store connections was a great time to try it.
         cursor = self.load_connection.cursor
         if not self.adapter.mover.exists(cursor, oid_int):
             raise self.__pke(oid, exists=False)
