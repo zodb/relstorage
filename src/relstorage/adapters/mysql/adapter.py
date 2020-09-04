@@ -244,7 +244,7 @@ class MySQLAdapter(AbstractAdapter):
     @metricmethod_sampled
     def lock_database_and_move(self,
                                store_connection, load_connection,
-                               blobhelper,
+                               transaction_has_blobs,
                                ude,
                                commit=True,
                                committing_tid_int=None,
@@ -254,7 +254,7 @@ class MySQLAdapter(AbstractAdapter):
             # MySQL past 5.7.12.
             return super(MySQLAdapter, self).lock_database_and_move(
                 store_connection, load_connection,
-                blobhelper,
+                transaction_has_blobs,
                 ude,
                 commit=commit,
                 committing_tid_int=committing_tid_int,

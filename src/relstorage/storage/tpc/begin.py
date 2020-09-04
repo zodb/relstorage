@@ -92,19 +92,6 @@ class AbstractBegin(AbstractTPCStateDatabaseAvailable):
             ext = b""
         self.ude = user, desc, ext
 
-        # self.adapter = storage._adapter
-        # self.cache = storage._cache
-        # # XXX: This is where we would open one from the pool
-        # self.store_connection = storage._store_connection
-        # self.blobhelper = storage.blobhelper
-        # # In many cases we can defer this; we only need it
-        # # if we do deleteObject() or store a blob (which we're not fully in
-        # # control of)
-        # self.store_connection.restart()
-
-        # self.store_connection.begin()
-        # self.blobhelper.begin()
-
     def tpc_vote(self, storage, transaction):
         if transaction is not self.transaction:
             raise StorageTransactionError(
@@ -137,7 +124,6 @@ class AbstractBegin(AbstractTPCStateDatabaseAvailable):
         # we'll send it all over at once. This lets us do things like use
         # COPY in postgres.
         self.shared_state.temp_storage.store_temp(oid_int, data, prev_tid_int)
-
 
     @metricmethod_sampled
     def checkCurrentSerialInTransaction(self, oid, required_tid, transaction):

@@ -213,7 +213,7 @@ class PostgreSQLAdapter(AbstractAdapter):
 
     def lock_database_and_move(self,
                                store_connection, load_connection,
-                               blobhelper, # pylint:disable=unused-argument
+                               transaction_has_blobs, # pylint:disable=unused-argument
                                ude,
                                commit=True,
                                committing_tid_int=None,

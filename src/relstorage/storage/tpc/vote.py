@@ -241,19 +241,20 @@ class AbstractVote(AbstractTPCStateDatabaseAvailable):
         invalidated_oid_ints = self.__check_and_resolve_conflicts(storage, conflicts)
 
         blobs_must_be_moved_now = False
-        blobhelper = self.shared_state.blobhelper # TODO: Don't access unless we need to
         committing_tid_bytes = None
         if self.committing_tid_lock:
             # We've already picked a TID. Must have called undo().
             committing_tid_bytes = self.committing_tid_lock.tid
 
-        try:
-            blobhelper.vote(committing_tid_bytes)
-        except StorageTransactionError:
-            # If this raises an STE, it must be a shared (non-db)
-            # blobhelper, and the TID must not be locked.
-            assert committing_tid_bytes is None
-            blobs_must_be_moved_now = True
+        if self.shared_state.has_blobs():
+            # Avoid accessing the actual blobhelper unless we need it
+            try:
+                self.shared_state.blobhelper.vote(committing_tid_bytes)
+            except StorageTransactionError:
+                # If this raises an STE, it must be a shared (non-db)
+                # blobhelper, and the TID must not be locked.
+                assert committing_tid_bytes is None
+                blobs_must_be_moved_now = True
 
         if blobs_must_be_moved_now or LOCK_EARLY:
             logger.log(TRACE, "Locking early (for blobs? %s)", blobs_must_be_moved_now)
@@ -436,9 +437,11 @@ class AbstractVote(AbstractTPCStateDatabaseAvailable):
             kwargs['committing_tid_int'] = self.committing_tid_lock.tid_int
         if vote_only:
             # Must be voting.
-            blob_meth = self.shared_state.blobhelper.vote # TODO: Don't access if we don't need to
-            kwargs['after_selecting_tid'] = lambda tid_int: blob_meth(int64_to_8bytes(tid_int))
             kwargs['commit'] = False
+            if self.shared_state.has_blobs():
+                # Avoid accessing the blobhelper unless we need it
+                blob_meth = self.shared_state.blobhelper.vote
+                kwargs['after_selecting_tid'] = lambda tid_int: blob_meth(int64_to_8bytes(tid_int))
 
         if vote_only \
            or self.shared_state.adapter.DEFAULT_LOCK_OBJECTS_AND_DETECT_CONFLICTS_INTERLEAVABLE:
@@ -453,7 +456,7 @@ class AbstractVote(AbstractTPCStateDatabaseAvailable):
         # viable for a historical view anymore.
         committing_tid_int, prepared_txn = self.shared_state.adapter.lock_database_and_move(
             self.shared_state.store_connection, self.shared_state.load_connection,
-            self.shared_state.blobhelper, # TODO: Don't access this if we don't need to
+            self.shared_state.has_blobs(),
             self.ude,
             **kwargs
         )
@@ -504,16 +507,17 @@ class AbstractVote(AbstractTPCStateDatabaseAvailable):
             # and commit, releasing any locks it can (some adapters do,
             # some don't). So we may or may not have a database lock at
             # this point.
-            # TODO: Could optimize this call away by checking to see if we used the blobhelper.
-            assert not self.shared_state.blobhelper.NEEDS_DB_LOCK_TO_FINISH
-            try:
-                self.shared_state.blobhelper.finish(self.committing_tid_lock.tid)
-            except (IOError, OSError):
-                # If something failed to move, that's not really a problem:
-                # if we did any moving now, we're just a cache.
-                logger.exception(
-                    "Failed to update blob-cache; ignoring (will re-download)"
-                )
+            if self.shared_state.has_blobs():
+                # Avoid accessing the actual blobhelper unless we need it
+                assert not self.shared_state.blobhelper.NEEDS_DB_LOCK_TO_FINISH
+                try:
+                    self.shared_state.blobhelper.finish(self.committing_tid_lock.tid)
+                except (IOError, OSError):
+                    # If something failed to move, that's not really a problem:
+                    # if we did any moving now, we're just a cache.
+                    logger.exception(
+                        "Failed to update blob-cache; ignoring (will re-download)"
+                    )
 
 
             if f is not None:
