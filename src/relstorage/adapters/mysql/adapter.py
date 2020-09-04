@@ -66,6 +66,7 @@ from ..dbiter import HistoryPreservingDatabaseIterator
 from ..interfaces import IRelStorageAdapter
 from ..interfaces import UnableToLockRowsToReadCurrentError
 from ..interfaces import UnableToLockRowsToModifyError
+from ..interfaces import UnableToAcquireCommitLockError
 from ..poller import Poller
 from ..scriptrunner import ScriptRunner
 from ..batch import RowBatcher
@@ -267,12 +268,19 @@ class MySQLAdapter(AbstractAdapter):
             # (p_committing_tid, p_commit, p_user, p_desc, p_ext)
             proc = 'lock_and_choose_tid_and_move(%s, %s, %s, %s, %s)'
 
-        multi_results = self.driver.callproc_multi_result(
-            store_connection.cursor,
-            proc,
-            params,
-            exit_critical_phase=commit
-        )
+        try:
+            multi_results = self.driver.callproc_multi_result(
+                store_connection.cursor,
+                proc,
+                params,
+                exit_critical_phase=commit
+            )
+        except self.driver.lock_exceptions:
+            self.locker.reraise_commit_lock_error(
+                store_connection.cursor,
+                proc,
+                UnableToAcquireCommitLockError,
+            )
 
         tid_int, = multi_results[0][0]
         after_selecting_tid(tid_int)
