@@ -2,7 +2,7 @@
  Changes
 =========
 
-3.2.2 (unreleased)
+3.3.0 (unreleased)
 ==================
 
 - The "MySQLdb" driver didn't properly use server-side cursors when
@@ -13,6 +13,16 @@
   ``IStorageCurrentRecordIteration``. This lets both
   history-preserving and history-free storages work with
   ``zodbupdate``. See :issue:`389`.
+
+- RelStorage instances now pool their storage connection. Depending on
+  the workload and ZODB configuration, this can result in requiring
+  fewer storage connections. See :issue:`409` and :pr:`417`.
+
+  There is a potential semantic change: Under some circumstances, the
+  ``loadBefore`` and ``loadSerial`` methods could be used to load
+  states from the future (not visible to the storage's load
+  connection) by using the store connection. This ability has been
+  removed.
 
 
 3.2.1 (2020-08-28)

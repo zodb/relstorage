@@ -23,6 +23,8 @@ from __future__ import print_function
 
 import time
 
+from zope.interface import implementer
+
 from ZODB.ConflictResolution import ConflictResolvingStorage
 from ZODB.POSException import ConflictError
 from ZODB.POSException import StorageTransactionError
@@ -34,6 +36,7 @@ from relstorage._util import log_timed_only_self
 from relstorage._util import do_log_duration_info
 from relstorage._util import TRACE
 from ..interfaces import VoteReadConflictError
+from ..interfaces import ITPCStateVoting
 
 from . import LOCK_EARLY
 from . import AbstractTPCStateDatabaseAvailable
@@ -547,10 +550,12 @@ class AbstractVote(AbstractTPCStateDatabaseAvailable):
             self.shared_state.release()
 
 
+@implementer(ITPCStateVoting)
 class HistoryFree(AbstractVote):
     __slots__ = ()
 
 
+@implementer(ITPCStateVoting)
 class HistoryPreserving(AbstractVote):
     __slots__ = ()
 

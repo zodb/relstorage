@@ -420,6 +420,11 @@ class MockObjectMover(object):
             if oid in self.data
         }
 
+class MockLocker(object):
+
+    def release_commit_lock(self, cursor):
+        pass
+
 class MockAdapter(object):
 
     def __init__(self):
@@ -429,3 +434,4 @@ class MockAdapter(object):
         self.oidallocator = MockOIDAllocator()
         self.poller = MockPoller(self.driver)
         self.mover = MockObjectMover()
+        self.locker = MockLocker()
