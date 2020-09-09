@@ -24,6 +24,10 @@
   connection) by using the store connection. This ability has been
   removed.
 
+- Add support for Python 3.9.
+
+- Drop support for Python 3.5.
+
 
 3.2.1 (2020-08-28)
 ==================

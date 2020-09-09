@@ -108,10 +108,10 @@ setup(
         "License :: OSI Approved :: Zope Public License",
         "Programming Language :: Python",
         "Programming Language :: Python :: 2.7",
-        "Programming Language :: Python :: 3.5",
         "Programming Language :: Python :: 3.6",
         "Programming Language :: Python :: 3.7",
         "Programming Language :: Python :: 3.8",
+        "Programming Language :: Python :: 3.9",
         "Programming Language :: Python :: Implementation :: CPython",
         "Programming Language :: Python :: Implementation :: PyPy",
         "Topic :: Database",
@@ -153,6 +153,10 @@ setup(
                     'src/relstorage/cache/c_cache.cpp',
                 ],
                 include_dirs=['include'],
+                # https://docs.microsoft.com/en-us/cpp/build/reference/eh-exception-handling-model
+                # /EHsc: `s`: enable stack unwinding, catch C++ exceptions in catch(...)
+                #        `c`: extern C functions never throw C++ exceptions.
+                # XXX: Why this flag or Python 2/Windows? /EHa (catch SEH and standard) seems better.
                 extra_compile_args=["/EHsc"] if WINDOWS and PY2 else [],
             ),
 

@@ -1,5 +1,5 @@
 language: python
-dist: xenial
+dist: bionic
 group: travis_latest
 services:
   - mysql
@@ -17,6 +17,7 @@ addons:
 
 matrix:
   include:
+    - python: 3.9-dev
     - python: 3.8
     - python: 2.7
     - python: pypy3
@@ -29,7 +30,6 @@ matrix:
         - docker pull mysql:8.0
         - docker run -d --publish 3306:3306 --rm --name mysqld -e MYSQL_ALLOW_EMPTY_PASSWORD=yes mysql:8.0
         - cp .travis/docker.cnf ~/.my.cnf
-    - python: 3.5
     - python: 3.6
     - python: pypy
 
@@ -58,6 +58,7 @@ script:
   # Make sure we can import without zope.schema, which is intended to
   # be a test dependency, and optional for production
   - pip uninstall -y zope.schema && python -c 'import relstorage.interfaces, relstorage.adapters.interfaces, relstorage.cache.interfaces'
+
 after_success:
   - coverage combine
   - coverage report -i --skip-covered
@@ -73,9 +74,9 @@ before_script:
 
 install:
   - pip install -U pip
-  - pip install -U setuptools wheel coveralls
+  - pip install -U setuptools wheel coveralls twine
   - pip install -U "pylint>=1.7.1"
-  - pip install -U cython
+  - pip install -U 'cython>=3.0a6'
   # Print debugging for the build
   - python setup.py build_ext -i
   - pip install -U -e ".[test,all_tested_drivers]"
