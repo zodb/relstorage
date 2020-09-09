@@ -131,7 +131,7 @@ class Cursor(sqlite3.Cursor):
     def __rs_connection(self):
         try:
             return self.connection
-        except sqlite3.ProgrammingError:
+        except sqlite3.ProgrammingError: # pragma: no cover
             return "<closed cursor>"
 
     def __repr__(self):
@@ -144,7 +144,7 @@ class Cursor(sqlite3.Cursor):
     def close(self):
         try:
             sqlite3.Cursor.close(self)
-        except sqlite3.ProgrammingError:
+        except sqlite3.ProgrammingError: # pragma: no cover
             # XXX: Where was this happening? Why are we doing this?
             # (I haven't seen it locally)
             pass
@@ -177,7 +177,12 @@ class Connection(sqlite3.Connection):
     _rs_progress_handler = None
     replica = None
     standard_progress_handler = (None, 0)
-    _begin_statement = None # For PyPy3.6-7.3.1
+    # For PyPy3.6-7.3.1. We connect with isolation_level=None, leaving
+    # sqlite in its own transaction management mode. But PyPy
+    # 3.6-7.3.1 has that broken prior to
+    # https://foss.heptapod.net/pypy/pypy/-/commit/fbbe06715eb48df1a03640672d99335695d3e47c.
+    # See also https://foss.heptapod.net/pypy/pypy/-/issues/3226
+    _begin_statement = None
 
     def __init__(self, rs_db_filename, *args, **kwargs):
         __traceback_info__ = args, kwargs
