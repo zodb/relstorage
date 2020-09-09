@@ -116,10 +116,29 @@ class Cursor(sqlite3.Cursor):
         stmt = stmt.replace('%s', '?')
         return sqlite3.Cursor.executemany(self, stmt, params)
 
+    # PyPy likes to throw `sqlite3.ProgrammingError: Cannot operate on a closed cursor`
+    # under various circumstances. Which ones depend on which version of PyPy.
+    # For example, upgrading from PyPy3.6 7.1 to PyPy3.6 7.3.1 started to do
+    # this in ``self.connection`` when printing ``__traceback_info__``
+    # on failures (""):
+    #
+    #  File "/opt/python/pypy3.6-7.3.1/lib_pypy/_sqlite3.py", line 884, in __execute
+    #     if self.__connection._begin_statement and self.__statement._is_dml:
+    #  AttributeError: 'Connection' object has no attribute '_begin_statement'
+    #
+
+    @property
+    def __rs_connection(self):
+        try:
+            return self.connection
+        except sqlite3.ProgrammingError:
+            return "<closed cursor>"
+
     def __repr__(self):
         return '<%s at 0x%x from %r>' % (
             type(self).__name__,
-            id(self), self.connection
+            id(self),
+            self.__rs_connection
         )
 
     def close(self):
@@ -158,6 +177,7 @@ class Connection(sqlite3.Connection):
     _rs_progress_handler = None
     replica = None
     standard_progress_handler = (None, 0)
+    _begin_statement = None # For PyPy3.6-7.3.1
 
     def __init__(self, rs_db_filename, *args, **kwargs):
         __traceback_info__ = args, kwargs
