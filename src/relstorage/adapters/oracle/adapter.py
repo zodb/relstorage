@@ -52,7 +52,11 @@ class OracleAdapter(AbstractAdapter):
                  password='relstoragetest',
                  dsn='192.168.1.131/orcl',
                  commit_lock_id=0,
-                 twophase=False, options=None):
+                 twophase=False, options=None,
+                 locker=None,
+                 mover=None,
+                 connmanager=None,
+                 ):
         """Create an Oracle adapter.
 
         The user, password, and dsn parameters are provided to
@@ -69,6 +73,9 @@ class OracleAdapter(AbstractAdapter):
         self._password = password
         self._dsn = dsn
         self._twophase = twophase
+        self.locker = locker
+        self.mover = mover
+        self.connmanager = connmanager
 
         super(OracleAdapter, self).__init__(options)
 
@@ -83,43 +90,46 @@ class OracleAdapter(AbstractAdapter):
         batcher_factory = lambda cursor, row_limit=None: OracleRowBatcher(
             cursor, inputsizes, row_limit
         )
-        self.connmanager = CXOracleConnectionManager(
-            driver,
-            user=user,
-            password=password,
-            dsn=dsn,
-            twophase=twophase,
-            options=options,
-        )
+        if self.connmanager is None:
+            self.connmanager = CXOracleConnectionManager(
+                driver,
+                user=user,
+                password=password,
+                dsn=dsn,
+                twophase=twophase,
+                options=options,
+            )
         self.runner = CXOracleScriptRunner(driver)
-        self.locker = OracleLocker(
-            options=self.options,
-            driver=driver,
-            inputsize_NUMBER=driver.NUMBER,
-            batcher_factory=batcher_factory,
-        )
+        if self.locker is None:
+            self.locker = OracleLocker(
+                options=self.options,
+                driver=driver,
+                inputsize_NUMBER=driver.NUMBER,
+                batcher_factory=batcher_factory,
+            )
         self.schema = OracleSchemaInstaller(
             connmanager=self.connmanager,
             runner=self.runner,
             keep_history=self.keep_history,
         )
-        inputsizes = {
-            'blobdata': driver.BLOB,
-            'rawdata': driver.BINARY,
-            'oid': driver.NUMBER,
-            'tid': driver.NUMBER,
-            'prev_tid': driver.NUMBER,
-            'chunk_num': driver.NUMBER,
-            'md5sum': driver.STRING,
-        }
-        self.mover = OracleObjectMover(
-            driver,
-            options=options,
-            runner=self.runner,
-            batcher_factory=batcher_factory,
-        )
-        self.mover.inputsizes = inputsizes
-        self.connmanager.add_on_store_opened(self.mover.on_store_opened)
+        if self.mover is None:
+            inputsizes = {
+                'blobdata': driver.BLOB,
+                'rawdata': driver.BINARY,
+                'oid': driver.NUMBER,
+                'tid': driver.NUMBER,
+                'prev_tid': driver.NUMBER,
+                'chunk_num': driver.NUMBER,
+                'md5sum': driver.STRING,
+            }
+            self.mover = OracleObjectMover(
+                driver,
+                options=options,
+                runner=self.runner,
+                batcher_factory=batcher_factory,
+            )
+            self.mover.inputsizes = inputsizes
+
         self.oidallocator = OracleOIDAllocator(
             connmanager=self.connmanager,
         )
@@ -182,6 +192,9 @@ class OracleAdapter(AbstractAdapter):
             dsn=self._dsn,
             twophase=self._twophase,
             options=self.options,
+            locker=self.locker,
+            mover=self.mover,
+            connmanager=self.connmanager,
         )
 
     def __str__(self):

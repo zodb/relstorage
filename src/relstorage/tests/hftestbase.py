@@ -364,12 +364,16 @@ class HistoryFreeRelStorageTests(GenericRelStorageTests, ZODBTestCase):
             oid = storage.new_oid()
             self.assertEqual(offset, I(oid))
 
-        storage._oids.set_min_oid(32768)
+        with storage._store_connection_pool.borrowing() as store_conn:
+            storage._oids.set_min_oid(store_conn, 32768)
+            store_conn.commit()
         oid = storage.new_oid()
         self.assertEqual(32769, I(oid))
 
         # Close to the 64-bit boundary.
-        storage._oids.set_min_oid(2 ** 62)
+        with storage._store_connection_pool.borrowing() as store_conn:
+            storage._oids.set_min_oid(store_conn, 2 ** 62)
+            store_conn.commit()
         # Iterate through several ranges. This has been a problem in the past.
         for offset in range(1, 50):
             self.assertEqual(2 ** 62 + offset, I(storage.new_oid()))

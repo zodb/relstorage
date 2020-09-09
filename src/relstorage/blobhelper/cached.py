@@ -381,6 +381,10 @@ class CacheBlobHelper(AbstractBlobHelper):
         self.upload_blob(cursor, oid, None, temp_path)
 
     def restoreBlob(self, cursor, oid, serial, blobfilename):
+        # This bypasses ``txn_has_blobs``. That shouldn't cause any problems
+        # because ``serial`` should not be none here, so we are avoiding the
+        # temp tables. The use of ``txn_has_blobs`` in tpc_vote() is to check if we need
+        # to move temporary blobs into place.
         self.upload_blob(cursor, oid, serial, blobfilename)
 
     def copy_undone(self, copied, tid):

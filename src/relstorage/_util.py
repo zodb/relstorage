@@ -77,6 +77,25 @@ __all__ = [
 
 positive_integer = RangeCheckedConversion(integer, min=1)
 
+def _setting_from_environ(converter, environ_name, default):
+    result = default
+    env_val = os.environ.get(environ_name, default)
+    if env_val is not default:
+        try:
+            result = converter(env_val)
+        except (ValueError, TypeError):
+            logger.exception("Failed to parse environment value %r for key %r",
+                             env_val, environ_name)
+            result = default
+
+    logger.debug('Using value %s from environ %r=%r (default=%r)',
+                 result, environ_name, env_val, default)
+    return result
+
+
+def get_positive_integer_from_environ(environ_name, default):
+    return _setting_from_environ(positive_integer, environ_name, default)
+
 def parse_boolean(val):
     if val == '0':
         return False
@@ -126,14 +145,7 @@ class timer(object):
         self.duration = self.__end - self.__begin
 
 def get_time_from_environ(environ_name, default):
-    env_val = os.environ.get(environ_name, default)
-    try:
-        result = float(env_val)
-    except (ValueError, TypeError):
-        result = default
-    logger.debug('Using %s from environ %r=%r', result, environ_name, env_val)
-    return result
-
+    return _setting_from_environ(float, environ_name, default)
 
 def _get_log_time_level(level_int, default):
     level_name = logging.getLevelName(level_int)
@@ -161,14 +173,16 @@ _LOG_TIMED_DEFAULT_DURATIONS.sort(key=lambda x: x[1])
 # The 'log_details_threshold' property of the function can be
 # assigned to make it different than the default.
 _LOG_TIMED_DEFAULT_DETAILS_THRESHOLD = logging.getLevelName(
-    os.environ.get('RS_PERF_LOG_DETAILS_LEVEL', 'WARN')
+    _setting_from_environ(str, 'RS_PERF_LOG_DETAILS_LEVEL', 'WARN')
 )
 
 
 # If this is true when a module is imported, timer decorations
 # are omitted.
-_LOG_TIMED_COMPILETIME_ENABLE = parse_boolean(
-    os.environ.get('RS_PERF_LOG_ENABLE', 'on')
+_LOG_TIMED_COMPILETIME_ENABLE = _setting_from_environ(
+    parse_boolean,
+    'RS_PERF_LOG_ENABLE',
+    'on'
 )
 
 def do_log_duration_info(basic_msg, func,
@@ -374,8 +388,14 @@ class Lazy(object):
         func, name = self.data
         value = func(inst)
         inst.__dict__[name] = value
+        self._stored_value_for_name_in_inst(value, name, inst)
         return value
 
+    @staticmethod
+    def _stored_value_for_name_in_inst(value, name, inst):
+        """
+        Hook for subclasses.
+        """
 
 class CachedIn(object):
     """Cached method with given cache attribute."""

@@ -47,13 +47,13 @@ env:
         - CCACHE_NOHASHDIR=true
         - CFLAGS="-g -pipe -std=gnu++11"
         - CXXFLAGS="-g -pipe -std=gnu++11"
-        - RS_TEST_CMD="-m zope.testrunner --test-path=src --auto-color --auto-progress"
+        - RS_TEST_CMD="-m zope.testrunner --test-path=src --auto-color -vvv --slow-test=3"
 
 script:
 # coverage slows PyPy down from 2minutes to 12+.
   - if [[ $TRAVIS_PYTHON_VERSION == 3.7 ]]; then pylint -j 0 --limit-inference-results=1 --rcfile=.pylintrc relstorage -f parseable -r n; fi
-  - if [[ $TRAVIS_PYTHON_VERSION != pypy* ]]; then coverage run -p --concurrency=greenlet .travis/zope_testrunner_gevent.py -t checkBTreesLengthStress -t check7 -t check2 -t BlobCache -t Switches --layer gevent; fi
-  - if [[ $TRAVIS_PYTHON_VERSION == pypy* ]]; then python $RS_TEST_CMD --layer "!gevent"; fi
+  - if [[ $TRAVIS_PYTHON_VERSION != pypy* ]]; then coverage run -p --concurrency=greenlet .travis/zope_testrunner_gevent.py -t checkBTreesLengthStress -t check7 -t check2 -t BlobCache -t Switches --layer gevent -vvv; fi
+  - if [[ $TRAVIS_PYTHON_VERSION == pypy* ]]; then PYTHONTRACEMALLOC=15 python $RS_TEST_CMD --layer "!gevent"; fi
   - if [[ $TRAVIS_PYTHON_VERSION != pypy* ]]; then coverage run -p --concurrency=thread  $RS_TEST_CMD --layer "!gevent"; fi
   # Make sure we can import without zope.schema, which is intended to
   # be a test dependency, and optional for production
@@ -87,6 +87,7 @@ cache:
   directories:
     - $HOME/.wheelhouse
     - $HOME/.ccache
+    - $HOME/.cache
 
 before_cache:
     - rm -f $HOME/.cache/pip/log/debug.log

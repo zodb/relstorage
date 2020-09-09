@@ -92,22 +92,24 @@ class TestBlobMerge(PostgreSQLAdapterMixin,
         # Insert some extra chunks. Get them big to be sure we loop
         # properly
         second_chunk = b'second chunk' * 800
-        cursor = conn._storage._store_connection.cursor
-        cursor.execute("""
-        INSERT INTO blob_chunk (zoid, chunk_num, tid, chunk)
-        SELECT zoid, 1, tid, lo_from_bytea(0, %s)
-        FROM blob_chunk WHERE chunk_num = 0;
-        """, (second_chunk,))
-        third_chunk = b'third chunk' * 900
-        cursor.execute("""
-        INSERT INTO blob_chunk (zoid, chunk_num, tid, chunk)
-        SELECT zoid, 2, tid, lo_from_bytea(0, %s)
-        FROM blob_chunk WHERE chunk_num = 0;
-        """, (third_chunk,))
+        with conn._storage._store_connection_pool.borrowing(commit=True) as store_connection:
+            cursor = store_connection.cursor
 
-        cursor.execute('SELECT COUNT(*) FROM blob_chunk')
-        self.assertEqual(3, cursor.fetchone()[0])
-        cursor.connection.commit()
+            cursor.execute("""
+            INSERT INTO blob_chunk (zoid, chunk_num, tid, chunk)
+            SELECT zoid, 1, tid, lo_from_bytea(0, %s)
+            FROM blob_chunk WHERE chunk_num = 0;
+            """, (second_chunk,))
+            third_chunk = b'third chunk' * 900
+            cursor.execute("""
+            INSERT INTO blob_chunk (zoid, chunk_num, tid, chunk)
+            SELECT zoid, 2, tid, lo_from_bytea(0, %s)
+            FROM blob_chunk WHERE chunk_num = 0;
+            """, (third_chunk,))
+
+            cursor.execute('SELECT COUNT(*) FROM blob_chunk')
+            self.assertEqual(3, cursor.fetchone()[0])
+
         # Now open again and find everything put together.
         # But we need to use a new blob dir, because
         # we changed data behind its back.

@@ -106,6 +106,5 @@ class Sqlite3AdapterFactory(BaseConfig):
             pragmas = {}
         return Sqlite3Adapter(
             self.config.data_dir,
-            gevent_yield_interval=self.config.gevent_yield_interval,
             pragmas=pragmas,
             options=options)

@@ -605,8 +605,9 @@ class GenericRelStorageTests(
         oids_by_thread = [list() for _ in range(thread_count)]
 
         def allocate_oids(thread_storage, thread_num):
+            conn_pool = thread_storage._store_connection_pool
+            store_conn = conn_pool.borrow()
             try:
-                store_conn = thread_storage._store_connection
                 allocator = thread_storage._oids
                 my_oids = oids_by_thread[thread_num]
                 for _ in range(segment_count):
@@ -616,10 +617,13 @@ class GenericRelStorageTests(
                     )
                     # Periodically call set_min_oid, like the storage does,
                     # to check for interference.
-                    allocator.set_min_oid(my_oids[-1])
-                    store_conn.commit()
+                    with conn_pool.borrowing() as store_conn:
+                        allocator.set_min_oid(store_conn, my_oids[-1])
+                        store_conn.commit()
             finally:
+                self.assertLessEqual(conn_pool.pooled_connection_count, len(threads))
                 thread_storage.release()
+
 
         threads = [threading.Thread(target=allocate_oids,
                                     args=(self._storage.new_instance(), i))
@@ -629,6 +633,10 @@ class GenericRelStorageTests(
 
         for t in threads:
             t.join(99)
+
+        # All of them are released, so we should be down to only one instance.
+        self.assertEqual(1, self._storage._store_connection_pool.instance_count)
+        self.assertLessEqual(self._storage._store_connection_pool.pooled_connection_count, 1)
 
         # They all have the desired length, and each one has no duplicates.
         self.assertEqual(
@@ -747,7 +755,10 @@ class GenericRelStorageTests(
 
         # Going behind its back.
         c1._storage._load_connection.connection.close()
-        c1._storage._store_connection.connection.close()
+        c1._storage._store_connection_pool.hard_close_all_connections()
+        store_pool = c1._storage._store_connection_pool
+        self.assertEqual(store_pool.instance_count, 2)
+        self.assertLessEqual(store_pool.pooled_connection_count, 1)
         # ZODB5 implicitly calls sync
         # immediately when a connection is opened;
         # fake that here for older releases.
@@ -757,7 +768,7 @@ class GenericRelStorageTests(
         r = c2.root()
         self.assertEqual(r['alpha'], 1)
         r['beta'] = PersistentMapping()
-        c2.add(r['beta'])
+        c2.add(r['beta']) # Calling new_oid outside of TPC
         transaction.commit()
         c2.close()
 
@@ -785,10 +796,17 @@ class GenericRelStorageTests(
         c1.close()
 
         c1._storage._load_connection.connection.close()
-        c1._storage._store_connection.connection.close()
+
+        c1._storage._store_connection_pool.hard_close_all_connections()
+        store_pool = c1._storage._store_connection_pool
+        self.assertEqual(store_pool.instance_count, 2)
+        self.assertLessEqual(store_pool.pooled_connection_count, 1)
+
 
         c2 = db.open()
         self.assertIs(c2, c1)
+        self.assertEqual(store_pool.instance_count, 2)
+        self.assertLessEqual(store_pool.pooled_connection_count, 1)
 
         r = c2.root()
         self.assertEqual(r['alpha'], 1)

@@ -47,8 +47,10 @@ from ..cache.interfaces import CacheConsistencyError
 from ..options import Options
 from ..interfaces import IRelStorage
 from ..adapters.connections import LoadConnection
-from ..adapters.connections import StoreConnection
+from ..adapters.connections import StoreConnectionPool
 from ..adapters.connections import ClosedConnection
+from ..adapters.connections import ClosedConnectionPool
+from ..adapters.connections import SingleConnectionPool
 from .._compat import clear_frames
 from .._compat import metricmethod
 from .._util import int64_to_8bytes
@@ -98,6 +100,7 @@ class _ClosedCache(object):
     stats = lambda s: {'closed': True}
     afterCompletion = lambda s, c: None
 
+
 @implementer(IRelStorage)
 class RelStorage(LegacyMethodsMixin,
                  ConflictResolution.ConflictResolvingStorage):
@@ -112,8 +115,8 @@ class RelStorage(LegacyMethodsMixin,
     _options = None
     _is_read_only = False
     _read_only_error = ReadOnlyError
-    # _ltid is the ID of the last transaction committed by this instance.
-    _ltid = z64
+    # ZODB TID of the last transaction committed by this instance.
+    _last_tid_i_committed_bytes = z64
 
     # _closed is True after self.close() is called.
     _closed = False
@@ -136,19 +139,13 @@ class RelStorage(LegacyMethodsMixin,
     _instances = ()
 
     _load_connection = ClosedConnection()
-    _store_connection = ClosedConnection()
-    _tpc_begin_factory = None
+    _store_connection_pool = ClosedConnectionPool()
 
     _oids = ReadOnlyOIDs()
 
-    # Attributes in our dictionary that shouldn't have stale()/no_longer_stale()
-    # called on them. At this writing, it's just the type object.
-    _STALE_IGNORED_ATTRS = (
-        '_tpc_begin_factory',
-    )
-
     def __init__(self, adapter, name=None, create=None,
                  options=None, cache=None, blobhelper=None,
+                 store_connection_pool=None,
                  **kwoptions):
         # pylint:disable=too-many-branches, too-many-statements
         if options and kwoptions:
@@ -197,8 +194,10 @@ class RelStorage(LegacyMethodsMixin,
         self._load_connection = LoadConnection(self._adapter.connmanager)
         self._load_connection.on_first_use = self.__on_load_first_use
         self.__queued_changes = OID_SET_TYPE()
-        if not self._is_read_only:
-            self._store_connection = StoreConnection(self._adapter.connmanager)
+        if store_connection_pool is not None:
+            self._store_connection_pool = store_connection_pool
+        elif not self._is_read_only:
+            self._store_connection_pool = StoreConnectionPool(self._adapter.connmanager)
 
         if cache is not None:
             self._cache = cache
@@ -218,14 +217,14 @@ class RelStorage(LegacyMethodsMixin,
         else:
             self.blobhelper = BlobHelper(options=options, adapter=adapter)
 
-        self._tpc_begin_factory = HistoryPreserving if self._options.keep_history else HistoryFree
+        tpc_begin_factory = HistoryPreserving if self._options.keep_history else HistoryFree
 
         if hasattr(self._adapter.packundo, 'deleteObject'):
             interface.alsoProvides(self, ZODB.interfaces.IExternalGC)
 
-        self._tpc_phase = NotInTransaction.from_storage(self)
+        self._tpc_phase = NotInTransaction(tpc_begin_factory, self._is_read_only)
         if not self._is_read_only:
-            self._oids = OIDs(self._adapter.oidallocator, self._store_connection)
+            self._oids = OIDs(self._adapter.oidallocator)
 
         # Now copy in a bunch of methods from our component objects.
         # Many of these are 'stale_aware', meaning that we can ask
@@ -238,7 +237,7 @@ class RelStorage(LegacyMethodsMixin,
         # itself when it is created, from the storage it is wrapping.
         # Because of this, stale aware methods like history() do not
         # do the right thing when we're wrapped by zc.zlibstorage.
-        loader = Loader(self._adapter, self._load_connection, self._store_connection, self._cache)
+        loader = Loader(self._adapter, self._load_connection, self._cache)
         copy_storage_methods(self, loader)
         storer = Storer()
         copy_storage_methods(self, storer)
@@ -257,7 +256,7 @@ class RelStorage(LegacyMethodsMixin,
             loader = BlobLoader(self._load_connection, self.blobhelper)
             copy_storage_methods(self, loader)
 
-            storer = BlobStorer(self.blobhelper, self._store_connection)
+            storer = BlobStorer()
             copy_storage_methods(self, storer)
 
     @property
@@ -287,7 +286,8 @@ class RelStorage(LegacyMethodsMixin,
         blobhelper = self.blobhelper.new_instance(adapter=adapter)
         other = type(self)(adapter=adapter, name=self.__name__,
                            create=False, options=options, cache=cache,
-                           blobhelper=blobhelper)
+                           blobhelper=blobhelper,
+                           store_connection_pool=self._store_connection_pool.new_instance())
         if before:
             other._read_only_error = ReadOnlyHistoryError
             other.tpc_begin = make_cannot_write(other, other.tpc_begin)
@@ -333,7 +333,7 @@ class RelStorage(LegacyMethodsMixin,
     @property
     def highest_visible_tid(self):
         cache_tid = self._cache.highest_visible_tid or 0
-        committed_tid = bytes8_to_int64(self._ltid)
+        committed_tid = bytes8_to_int64(self._last_tid_i_committed_bytes)
         # In case we haven't polled yet.
         return max(cache_tid, committed_tid)
 
@@ -342,9 +342,9 @@ class RelStorage(LegacyMethodsMixin,
 
         Used by the test suite and the ZODBConvert script.
         """
-        self._adapter.schema.zap_all(**kwargs)
         self._load_connection.drop()
-        self._store_connection.drop()
+        self._store_connection_pool.drop_all()
+        self._adapter.schema.zap_all(**kwargs)
         self._cache.zap_all()
 
     def release(self):
@@ -359,14 +359,15 @@ class RelStorage(LegacyMethodsMixin,
         on other instances of the same base object).
         """
         self._load_connection.drop()
-        self._store_connection.drop()
+        self._store_connection_pool.release()
 
         self._cache.release()
         self._cache = _ClosedCache()
-        self._tpc_phase = None
+        self._tpc_phase.close()
+        self._tpc_phase = _ClosedCache()
         self._oids = None
         self._load_connection = ClosedConnection()
-        self._store_connection = ClosedConnection()
+        self._store_connection_pool = ClosedConnectionPool()
         self._adapter.release()
         if not self._instances:
             self._closed = True
@@ -378,9 +379,9 @@ class RelStorage(LegacyMethodsMixin,
 
         self._closed = True
         self._load_connection.drop()
-        self._store_connection.drop()
+        self._store_connection_pool.close()
         self._load_connection = ClosedConnection()
-        self._store_connection = ClosedConnection()
+        self._store_connection_pool = ClosedConnectionPool()
 
         self.blobhelper.close()
         for wref in self._instances:
@@ -391,8 +392,8 @@ class RelStorage(LegacyMethodsMixin,
         logger.debug("Closing storage cache with stats %s", self._cache.stats())
         self._cache.close()
         self._cache = _ClosedCache()
-
-        self._tpc_phase = None
+        self._tpc_phase.close()
+        self._tpc_phase = _ClosedCache()
         self._oids = None
         self._adapter.close()
 
@@ -457,13 +458,12 @@ class RelStorage(LegacyMethodsMixin,
     @metricmethod
     def tpc_begin(self, transaction, tid=None, status=' '):
         try:
-            self._tpc_phase = self._tpc_phase.tpc_begin(transaction, self._tpc_begin_factory)
+            self._tpc_phase = self._tpc_phase.tpc_begin(self, transaction)
         except:
             # Could be a database (connection) error, could be a programming
             # bug. Either way, we're fine to roll everything back and hope
             # for the best on a retry. Perhaps we need to raise a TransientError?
             self._load_connection.drop()
-            self._store_connection.drop()
             raise
 
         if tid is not None:
@@ -471,10 +471,12 @@ class RelStorage(LegacyMethodsMixin,
             # The allowed actions are carefully prescribed.
             # This argument is specified by IStorageRestoreable
             try:
-                self._tpc_phase = Restore(self._tpc_phase, tid, status)
+                next_phase = Restore(self._tpc_phase, tid, status)
             except:
                 self.tpc_abort(transaction, _force=True)
                 raise
+            else:
+                self._tpc_phase = next_phase
 
     @metricmethod
     def tpc_vote(self, transaction):
@@ -483,18 +485,18 @@ class RelStorage(LegacyMethodsMixin,
         # the object has changed during the commit process, due to
         # conflict resolution or undo.
         try:
-            next_phase = self._tpc_phase.tpc_vote(transaction, self)
+            next_phase = self._tpc_phase.tpc_vote(self, transaction)
         except:
             self.tpc_abort(transaction, _force=True)
             raise
         else:
             self._tpc_phase = next_phase
-            return self._tpc_phase.invalidated_oids
+            return next_phase.invalidated_oids
 
     @metricmethod
     def tpc_finish(self, transaction, f=None):
         try:
-            next_phase, committed_tid = self._tpc_phase.tpc_finish(transaction, f)
+            next_phase = self._tpc_phase.tpc_finish(self, transaction, f)
         except:
             # OH NO! This isn't supposed to happen!
             # It's unlikely tpc_abort will get called...
@@ -503,7 +505,12 @@ class RelStorage(LegacyMethodsMixin,
         # The store connection is either committed or rolledback;
         # the load connection is now rolledback.
         self._tpc_phase = next_phase
-        self._ltid = committed_tid
+        # It might be nice to de-dup this so we're not storing it both
+        # in the phase and in self, but if it was needed during TPC,
+        # when our phase is not ``ITPCStateNotInTransaction``, we couldn't
+        # get it.
+        committed_tid = int64_to_8bytes(next_phase.last_committed_tid_int)
+        self._last_tid_i_committed_bytes = committed_tid
         return committed_tid
 
     @metricmethod
@@ -516,24 +523,34 @@ class RelStorage(LegacyMethodsMixin,
             if _force:
                 # We're here under unexpected circumstances. It's possible something
                 # might go wrong rolling back.
-                self._tpc_phase = NotInTransaction.from_storage(self)
+                self._tpc_phase = self._tpc_phase.initial_state
             raise
 
     def lastTransaction(self):
-        if self._ltid == z64 and self._cache.highest_visible_tid is None:
+        if self._last_tid_i_committed_bytes == z64 and self._cache.highest_visible_tid is None:
             # We haven't committed *or* polled for transactions,
             # so our MVCC state is "floating".
             # Read directly from the database to get the latest value,
             return int64_to_8bytes(self._adapter.txncontrol.get_tid(self._load_connection.cursor))
 
-        return max(self._ltid, int64_to_8bytes(self._cache.highest_visible_tid or 0))
+        return max(self._last_tid_i_committed_bytes,
+                   int64_to_8bytes(self._cache.highest_visible_tid or 0))
 
     def lastTransactionInt(self):
         return bytes8_to_int64(self.lastTransaction())
 
     def new_oid(self):
+        # This is called from ``Connection.add`` which can be called at any time
+        # by the application, so we don't know what state we're in. It is also called from
+        # ``Connection._commit``, which is called during TPC.
         # If we're committing, we can't restart the connection.
-        return self._oids.new_oid(bool(self._tpc_phase))
+        pool = self._store_connection_pool
+        commit_in_progress = False
+        if self._tpc_phase:
+            commit_in_progress = True
+            pool = SingleConnectionPool(self._tpc_phase.shared_state.store_connection)
+
+        return self._oids.new_oid(pool, commit_in_progress)
 
     def iterator(self, start=None, stop=None):
         # XXX: This is broken for purposes of copyTransactionsFrom() because
@@ -729,8 +746,6 @@ class RelStorage(LegacyMethodsMixin,
         replacements = {}
         my_ns = vars(self)
         for k, v in my_ns.items():
-            if k in self._STALE_IGNORED_ATTRS:
-                continue
             if callable(getattr(v, 'stale', None)):
                 new_v = v.stale(stale_error)
                 replacements[k] = new_v
@@ -759,8 +774,7 @@ class RelStorage(LegacyMethodsMixin,
         replacements = {
             k: v.no_longer_stale()
             for k, v in my_ns.items()
-            if k not in self._STALE_IGNORED_ATTRS
-            and callable(getattr(v, 'no_longer_stale', None))
+            if callable(getattr(v, 'no_longer_stale', None))
         }
 
         my_ns.update(replacements)
@@ -786,8 +800,8 @@ class RelStorage(LegacyMethodsMixin,
         # by this connection, we don't want to ghost objects that we're sure
         # are up-to-date unless someone else has changed them.
         # Note that transactions can happen between us committing and polling.
-        if self._ltid is not None:
-            ignore_tid = bytes8_to_int64(self._ltid)
+        if self._last_tid_i_committed_bytes is not None:
+            ignore_tid = bytes8_to_int64(self._last_tid_i_committed_bytes)
         else:
             ignore_tid = None
 
@@ -853,7 +867,7 @@ class RelStorage(LegacyMethodsMixin,
                 # Hmm, ok, the Connection isn't polling us in a timely fashion.
                 # Maybe we're the root storage? Maybe our APIs are being used
                 # independently? At any rate, we're going to stop tracking now;
-                # if a connection eventually gets around to polling us, they'll
+                # if a Connection eventually gets around to polling us, they'll
                 # need to clear their whole cache
                 self.__queued_changes = None
 

@@ -27,6 +27,7 @@ from zope.interface import implementer
 
 from .._compat import wraps
 from .._util import Lazy
+from .._util import get_positive_integer_from_environ
 from . import interfaces
 
 logger = __import__('logging').getLogger(__name__)
@@ -153,12 +154,21 @@ class AbstractManagedConnection(object):
     def __noop(*args):
         "does nothing"
 
+    def _restart_connection(self):
+        "Restart just the connection when we have no cursor."
+
     def restart(self):
         """
         Restart the connection if there is any chance that it has any associated state.
         """
         if not self:
             assert not self.active, self.__dict__
+            if self.connection is not None: # But we have no cursor We
+                # do this so that if the connection has closed itself
+                # (or been closed by a unit test) we can detect that
+                # and restart automatically. We only actually do
+                # anything there for store connections.
+                self._restart_connection()
             return
 
         # If we've never accessed the cursor, we shouldn't have any
@@ -213,7 +223,7 @@ class AbstractManagedConnection(object):
             The function may be called up to twice, if the *fresh_connection_p* is false
             on the first call and a disconnected exception is raised.
         :keyword bool can_reconnect: If True, then we will attempt to reconnect
-            the connection and try again if an exception is raised if *f*. If False,
+            the connection and try again if a disconnected exception is raised in *f*. If False,
             we let that exception propagate. For example, if a transaction is in progress,
             set this to false.
         """
@@ -269,6 +279,7 @@ class AbstractManagedConnection(object):
             self._cursor
         )
 
+
 @implementer(interfaces.IManagedLoadConnection)
 class LoadConnection(AbstractManagedConnection):
 
@@ -290,9 +301,13 @@ class StoreConnection(AbstractManagedConnection):
     def begin(self):
         self.connmanager.begin(*self.open_if_needed())
 
+    def _restart_connection(self):
+        self.rollback_quietly()
+
 class PrePackConnection(StoreConnection):
     __slots__ = ()
     _NEW_CONNECTION_NAME = 'open_for_pre_pack'
+
 
 @implementer(interfaces.IManagedDBConnection)
 class ClosedConnection(object):
@@ -319,3 +334,154 @@ class ClosedConnection(object):
 
     restart_and_call = isolated_connection
     enter_critical_phase_until_transaction_end = isolated_connection
+
+
+class StoreConnectionPool(object):
+    """
+    A thread-safe pool of `StoreConnection` objects.
+
+    Connections are opened on demand; opening a connection on demand
+    does not block.
+
+    By default, it will keep around a `StoreConnection` for every instance
+    of a RelStorage that has ever used one, which ordinarily corresponds to the
+    ZODB Connection pool size. It can be made to keep a smaller (but not larger)
+    number around by setting ``MAX_STORE_CONNECTIONS_IN_POOL``.
+    """
+
+    MAX_STORE_CONNECTIONS_IN_POOL = get_positive_integer_from_environ(
+        'RS_MAX_POOLED_STORE_CONNECTIONS',
+        None
+    )
+
+    def __init__(self, connmanager):
+        import threading
+        self._lock = threading.Lock()
+        self._connmanager = connmanager
+        self._connections = []
+        self._count = 1
+        self._factory = StoreConnection
+
+    # MVCC protocol
+    def new_instance(self):
+        with self._lock:
+            self._count += 1
+        return self
+
+    def release(self):
+        with self._lock:
+            self._count -= 1
+            self._shrink()
+
+    def close(self):
+        with self._lock:
+            self._count = 0
+            self._factory = ClosedConnection
+            self._shrink()
+            self._connections = ()
+
+    @contextlib.contextmanager
+    def borrowing(self, commit=False):
+        rollback = True
+        try:
+            conn = self.borrow()
+            yield conn
+            if commit:
+                conn.commit()
+                rollback = False
+        finally:
+            self._replace(conn, rollback)
+
+    def borrow(self):
+        conn = None
+        with self._lock:
+            if self._connections:
+                conn = self._connections.pop()
+
+        if conn is None:
+            conn = self._factory(self._connmanager)
+        else:
+            conn.restart()
+
+        conn.begin()
+        return conn
+
+    def replace(self, connection):
+        self._replace(connection, True)
+
+    def _replace(self, connection, needs_rollback):
+        if needs_rollback:
+            clean_rollback = connection.rollback_quietly()
+        else:
+            clean_rollback = True
+        if not clean_rollback:
+            connection.drop()
+        else:
+            connection.exit_critical_phase()
+            with self._lock:
+                self._connections.append(connection)
+                self._shrink()
+
+    def _shrink(self):
+        # Call while holding the lock, after putting a connection
+        # back in the pool.
+        # Limits the number of pooled connections to be no more than
+        # ``instance_count`` (i.e., one per open RelStorage), or ``MAX_STORE_CONNECTIONS_IN_POOL``,
+        # if set and if less than instance_count
+        keep_connections = min(self._count, self.MAX_STORE_CONNECTIONS_IN_POOL or self._count)
+
+        while len(self._connections) > keep_connections and self._connections:
+            conn = self._connections.pop()
+            conn.drop() # TODO: This could potentially be slow? Might
+                        # want to do this outside the lock.
+            conn.connmanager = None # It can't be opened again.
+
+    def drop_all(self):
+        with self._lock:
+            while self._connections:
+                conn = self._connections.pop()
+                conn.drop()
+
+    def hard_close_all_connections(self):
+        # Testing only.
+        for conn in self._connections:
+            conn.connection.close()
+
+    @property
+    def pooled_connection_count(self):
+        return len(self._connections)
+
+    @property
+    def instance_count(self):
+        return self._count
+
+class ClosedConnectionPool(object):
+
+    def borrow(self):
+        return ClosedConnection()
+
+    def replace(self, connection):
+        "Does Nothing"
+
+    def new_instance(self):
+        "Does nothing"
+
+    release = new_instance
+    close = release
+    drop_all = release
+
+    pooled_connection_count = instance_count = 0
+
+
+class SingleConnectionPool(object):
+    __slots__ = ('connection',)
+
+    def __init__(self, connection):
+        self.connection = connection
+
+    @contextlib.contextmanager
+    def borrowing(self, commit=False): # pylint:disable=unused-argument
+        """
+        The *commit* parameter is ignored
+        """
+        yield self.connection

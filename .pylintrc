@@ -114,6 +114,9 @@ max-locals=20
 # undefined-all-variable crash.
 unsafe-load-any-extension = yes
 
+property-classes=zope.cachedescriptors.property.Lazy,zope.cachedescriptors.property.Cached,relstorage._util.Lazy
+
+
 # Local Variables:
 # mode: conf-space
 # End:

@@ -66,6 +66,7 @@ from ..dbiter import HistoryPreservingDatabaseIterator
 from ..interfaces import IRelStorageAdapter
 from ..interfaces import UnableToLockRowsToReadCurrentError
 from ..interfaces import UnableToLockRowsToModifyError
+from ..interfaces import UnableToAcquireCommitLockError
 from ..poller import Poller
 from ..scriptrunner import ScriptRunner
 from ..batch import RowBatcher
@@ -93,10 +94,18 @@ class MySQLAdapter(AbstractAdapter):
 
     driver_options = drivers
 
-    def __init__(self, options=None, oidallocator=None, version_detector=None, **params):
+    def __init__(self, options=None, oidallocator=None,
+                 version_detector=None,
+                 connmanager=None,
+                 locker=None,
+                 mover=None,
+                 **params):
         self._params = params
         self.oidallocator = oidallocator
         self.version_detector = version_detector
+        self.connmanager = connmanager
+        self.locker = locker
+        self.mover = mover
         super(MySQLAdapter, self).__init__(options)
 
     def _create(self):
@@ -108,19 +117,20 @@ class MySQLAdapter(AbstractAdapter):
         if self.version_detector is None:
             self.version_detector = MySQLVersionDetector()
 
-        self.connmanager = MySQLdbConnectionManager(
-            driver,
-            params=params,
-            options=options,
-        )
+        if self.connmanager is None:
+            self.connmanager = MySQLdbConnectionManager(
+                driver,
+                params=params,
+                options=options,
+            )
+        if self.locker is None:
+            self.locker = MySQLLocker(
+                options=options,
+                driver=driver,
+                batcher_factory=RowBatcher,
+                version_detector=self.version_detector,
+            )
         self.runner = ScriptRunner()
-        self.locker = MySQLLocker(
-            options=options,
-            driver=driver,
-            batcher_factory=RowBatcher,
-            version_detector=self.version_detector,
-        )
-
         self.schema = MySQLSchemaInstaller(
             driver=driver,
             connmanager=self.connmanager,
@@ -128,10 +138,11 @@ class MySQLAdapter(AbstractAdapter):
             keep_history=self.keep_history,
             version_detector=self.version_detector,
         )
-        self.mover = MySQLObjectMover(
-            driver,
-            options=options,
-        )
+        if self.mover is None:
+            self.mover = MySQLObjectMover(
+                driver,
+                options=options,
+            )
 
         if self.oidallocator is None:
             self.oidallocator = MySQLOIDAllocator(driver)
@@ -187,6 +198,9 @@ class MySQLAdapter(AbstractAdapter):
             options=self.options,
             oidallocator=self.oidallocator.new_instance(),
             version_detector=self.version_detector,
+            connmanager=self.connmanager,
+            locker=self.locker,
+            mover=self.mover,
             **self._params
         )
 
@@ -230,7 +244,7 @@ class MySQLAdapter(AbstractAdapter):
     @metricmethod_sampled
     def lock_database_and_move(self,
                                store_connection, load_connection,
-                               blobhelper,
+                               transaction_has_blobs,
                                ude,
                                commit=True,
                                committing_tid_int=None,
@@ -240,7 +254,7 @@ class MySQLAdapter(AbstractAdapter):
             # MySQL past 5.7.12.
             return super(MySQLAdapter, self).lock_database_and_move(
                 store_connection, load_connection,
-                blobhelper,
+                transaction_has_blobs,
                 ude,
                 commit=commit,
                 committing_tid_int=committing_tid_int,
@@ -254,12 +268,19 @@ class MySQLAdapter(AbstractAdapter):
             # (p_committing_tid, p_commit, p_user, p_desc, p_ext)
             proc = 'lock_and_choose_tid_and_move(%s, %s, %s, %s, %s)'
 
-        multi_results = self.driver.callproc_multi_result(
-            store_connection.cursor,
-            proc,
-            params,
-            exit_critical_phase=commit
-        )
+        try:
+            multi_results = self.driver.callproc_multi_result(
+                store_connection.cursor,
+                proc,
+                params,
+                exit_critical_phase=commit
+            )
+        except self.driver.lock_exceptions:
+            self.locker.reraise_commit_lock_error(
+                store_connection.cursor,
+                proc,
+                UnableToAcquireCommitLockError,
+            )
 
         tid_int, = multi_results[0][0]
         after_selecting_tid(tid_int)

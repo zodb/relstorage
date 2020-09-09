@@ -64,15 +64,19 @@ class AbstractAdapter(DatabaseHelpersMixin):
         self.driver = driver = self._select_driver()
         self._binary = driver.Binary
 
+        # If it was already set, that means it shared with other
+        # instances, so no need to register the openings.
+        connmanager_was_set = self.connmanager is not None
         self._create()
         if not driver.supports_64bit_unsigned_id:
             self.packundo.MAX_TID = MAX_S_TID
             self.MAX_TID = MAX_S_TID
             self.dbiter.MAX_TID = MAX_S_TID
 
-        self.connmanager.add_on_store_opened(self.mover.on_store_opened)
-        self.connmanager.add_on_load_opened(self.mover.on_load_opened)
-        self.connmanager.add_on_store_opened(self.locker.on_store_opened)
+        if not connmanager_was_set:
+            self.connmanager.add_on_store_opened(self.mover.on_store_opened)
+            self.connmanager.add_on_load_opened(self.mover.on_load_opened)
+            self.connmanager.add_on_store_opened(self.locker.on_store_opened)
 
     def _create(self):
         raise NotImplementedError
@@ -128,7 +132,7 @@ class AbstractAdapter(DatabaseHelpersMixin):
     @metricmethod_sampled
     def lock_database_and_move(self,
                                store_connection, load_connection,
-                               blobhelper,
+                               transaction_has_blobs,
                                ude,
                                commit=True,
                                committing_tid_int=None,
@@ -155,9 +159,8 @@ class AbstractAdapter(DatabaseHelpersMixin):
         # TODO: Figure out how to do as much as possible of this before holding
         # the commit lock. For example, use a dummy TID that we later replace.
         # (This has FK issues in HP dbs).
-        txn_has_blobs = blobhelper.txn_has_blobs
 
-        self.mover.move_from_temp(cursor, committing_tid_int, txn_has_blobs)
+        self.mover.move_from_temp(cursor, committing_tid_int, transaction_has_blobs)
 
         after_selecting_tid(committing_tid_int)
 

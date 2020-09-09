@@ -80,8 +80,8 @@ class TestLocking(TestCase):
             return 0.1
         return 1
 
-    def __store_two_for_read_current_error(self):
-        db = self._closing(DB(self._storage))
+    def __store_two_for_read_current_error(self, release_extra_storage=False):
+        db = self._closing(DB(self._storage, pool_size=1))
         conn = db.open()
         root = conn.root()
         root['object1'] = MinPO('object1')
@@ -95,12 +95,17 @@ class TestLocking(TestCase):
 
         conn.close()
         # We can't close the DB, that will close the storage that we
-        # still need.
+        # still need. But we can release its storage, since we'll never use
+        # this again.
+        if release_extra_storage:
+            conn._normal_storage.release()
         return obj1_oid, obj2_oid, obj1_tid, db
 
-    def __read_current_and_lock(self, storage, read_current_oid, lock_oid, tid):
-        tx = TransactionMetaData()
-        storage.tpc_begin(tx)
+    def __read_current_and_lock(self, storage, read_current_oid, lock_oid, tid,
+                                begin=True, tx=None):
+        tx = tx if tx is not None else TransactionMetaData()
+        if begin:
+            storage.tpc_begin(tx)
         if read_current_oid is not None:
             storage.checkCurrentSerialInTransaction(read_current_oid, tid, tx)
         storage.store(lock_oid, tid, b'bad pickle2', '', tx)
@@ -135,7 +140,11 @@ class TestLocking(TestCase):
             storageB._adapter.force_lock_objects_and_detect_conflicts_interleavable = should_ileave
 
         # First, store the two objects in an accessible location.
-        obj1_oid, obj2_oid, tid, _ = self.__store_two_for_read_current_error()
+        obj1_oid, obj2_oid, tid, _db = self.__store_two_for_read_current_error(
+            release_extra_storage=True)
+        # XXX: We'd like to close the DB here, but the best we can do is to release the
+        # extra storage it made.
+
 
         # Now transaction A readCurrent 1 and modify 2
         # up through the vote phase
@@ -247,7 +256,7 @@ class TestLocking(TestCase):
         # on obj1. We should immediately get a read current error and not conflict with the
         # exclusive lock.
         with self.assertRaisesRegex(VoteReadConflictError, "serial this txn started"):
-            self.__read_current_and_lock(storageB, obj2_oid, obj1_oid, tid)
+            self.__read_current_and_lock(storageB, obj2_oid, obj1_oid, tid, begin=False, tx=txb)
 
         # Which is still held because we cannot lock it.
         with self.assertRaises(UnableToLockRowsToModifyError):
@@ -264,14 +273,21 @@ class TestLocking(TestCase):
         # error. (We use the same two objects instead of a new object in transaction B to prove
         # shared locks are taken first.)
         from relstorage.adapters.interfaces import UnableToLockRowsToReadCurrentError
+        from relstorage.tests.util import RUNNING_ON_CI
         commit_lock_timeout = self.__tiny_commit_time
         duration_blocking = self.__do_check_error_with_conflicting_concurrent_read_current(
             UnableToLockRowsToReadCurrentError,
             commit_lock_timeout=commit_lock_timeout,
         )
         # The NOWAIT lock should be very quick to fire.
+        assert self._storage._adapter.locker.supports_row_lock_nowait is not None
         if self._storage._adapter.locker.supports_row_lock_nowait:
-            self.assertLessEqual(duration_blocking, commit_lock_timeout)
+            multiplier = 1.3
+            if RUNNING_ON_CI and 'mysql' in type(self).__name__:
+                # On Travis CI, we observe MySQL 8.0.21 to be very slow at this
+                # for some reason.
+                multiplier = 2.1
+            self.assertLessEqual(duration_blocking, commit_lock_timeout * multiplier)
         else:
             # Sigh. Old MySQL. Very slow. This takes around 4.5s to run both iterations.
             self.assertLessEqual(duration_blocking, commit_lock_timeout * 2.5)
@@ -331,6 +347,7 @@ class TestLocking(TestCase):
 
     @skipIfNoConcurrentWriters
     def checkTL_InterleavedConflictingReadCurrentDeadlock(self):
+        # pylint:disable=too-many-statements
         # Like
         # ``checkTL_InterleavedConflictingReadCurrent``
         # except that we interleave both txA and txB: txA takes modify
@@ -340,10 +357,17 @@ class TestLocking(TestCase):
         #
         # We have to use a thread to do the shared locks because it blocks.
         from relstorage.adapters.interfaces import UnableToLockRowsToReadCurrentError
+        from relstorage.storage.tpc.vote import AbstractVote as VotePhase
+        from relstorage.storage.tpc import NotInTransaction
+
+        store_conn_pool = self._storage._store_connection_pool
+        self.assertEqual(store_conn_pool.instance_count, 1)
 
         storageA = self._closing(self._storage.new_instance())
         storageB = self._closing(self._storage.new_instance())
         storageA.last_error = storageB.last_error = None
+
+        self.assertEqual(store_conn_pool.instance_count, 3)
 
         storageA._adapter.locker.lock_current_objects = partial(
             self.__lock_rows_being_modified_only,
@@ -363,11 +387,15 @@ class TestLocking(TestCase):
             storageB=storageB,
             abort=False
         )
+        self.assertEqual(store_conn_pool.instance_count, 3)
+
+        self.assertIsInstance(storageA._tpc_phase, VotePhase)
+        self.assertIsInstance(storageB._tpc_phase, VotePhase)
 
         cond = threading.Condition()
         cond.acquire()
         def lock_shared(storage, notify=True):
-            cursor = storage._store_connection.cursor
+            cursor = storage._tpc_phase.shared_state.store_connection.cursor
             read_current_oids = storage._tpc_phase.required_tids.keys()
             if notify:
                 cond.acquire(5)
@@ -430,6 +458,19 @@ class TestLocking(TestCase):
 
         self.__assert_small_blocking_duration(storageA, duration_blocking)
         self.__assert_small_blocking_duration(storageB, duration_blocking)
+
+        storageA.tpc_abort(storageA._tpc_phase.transaction)
+        storageB.tpc_abort(storageB._tpc_phase.transaction)
+
+        self.assertIsInstance(storageA._tpc_phase, NotInTransaction)
+        self.assertIsInstance(storageB._tpc_phase, NotInTransaction)
+
+        self.assertEqual(store_conn_pool.instance_count, 3)
+        storageA.release()
+        storageB.release()
+
+        self.assertLessEqual(store_conn_pool.instance_count, 1)
+        self.assertLessEqual(store_conn_pool.pooled_connection_count, 1)
 
     def __is_oracle(self):
         # This is an anti-pattern. we really should subclass the tests

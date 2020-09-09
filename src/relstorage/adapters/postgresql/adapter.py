@@ -63,10 +63,17 @@ class PostgreSQLAdapter(AbstractAdapter):
 
     driver_options = drivers
 
-    def __init__(self, dsn='', options=None, oidallocator=None):
+    def __init__(self, dsn='', options=None, oidallocator=None,
+                 locker=None,
+                 mover=None,
+                 connmanager=None
+                 ):
         # options is a relstorage.options.Options or None
         self._dsn = dsn
         self.oidallocator = oidallocator
+        self.locker = locker
+        self.mover = mover
+        self.connmanager = connmanager
         super(PostgreSQLAdapter, self).__init__(options)
 
     def _create(self):
@@ -75,17 +82,19 @@ class PostgreSQLAdapter(AbstractAdapter):
         dsn = self._dsn
 
         self.version_detector = PostgreSQLVersionDetector()
-        self.connmanager = Psycopg2ConnectionManager(
-            driver,
-            dsn=dsn,
-            options=options,
-        )
+        if self.connmanager is None:
+            self.connmanager = Psycopg2ConnectionManager(
+                driver,
+                dsn=dsn,
+                options=options,
+            )
         self.runner = ScriptRunner()
-        self.locker = PostgreSQLLocker(
-            options,
-            driver,
-            PostgreSQLRowBatcher,
-        )
+        if self.locker is None:
+            self.locker = PostgreSQLLocker(
+                options,
+                driver,
+                PostgreSQLRowBatcher,
+            )
         self.schema = PostgreSQLSchemaInstaller(
             options=options,
             connmanager=self.connmanager,
@@ -93,13 +102,14 @@ class PostgreSQLAdapter(AbstractAdapter):
             locker=self.locker,
         )
 
-        self.mover = PostgreSQLObjectMover(
-            driver,
-            options=options,
-            runner=self.runner,
-            version_detector=self.version_detector,
-            batcher_factory=PostgreSQLRowBatcher,
-        )
+        if self.mover is None:
+            self.mover = PostgreSQLObjectMover(
+                driver,
+                options=options,
+                runner=self.runner,
+                version_detector=self.version_detector,
+                batcher_factory=PostgreSQLRowBatcher,
+            )
         if self.oidallocator is None:
             self.oidallocator = PostgreSQLOIDAllocator()
 
@@ -155,7 +165,10 @@ class PostgreSQLAdapter(AbstractAdapter):
         inst = type(self)(
             dsn=self._dsn,
             options=self.options,
-            oidallocator=self.oidallocator.new_instance()
+            oidallocator=self.oidallocator.new_instance(),
+            locker=self.locker,
+            mover=self.mover,
+            connmanager=self.connmanager,
         )
         return inst
 
@@ -200,7 +213,7 @@ class PostgreSQLAdapter(AbstractAdapter):
 
     def lock_database_and_move(self,
                                store_connection, load_connection,
-                               blobhelper, # pylint:disable=unused-argument
+                               transaction_has_blobs, # pylint:disable=unused-argument
                                ude,
                                commit=True,
                                committing_tid_int=None,

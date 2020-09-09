@@ -66,13 +66,7 @@ class Storer(object):
 class BlobStorer(object):
 
     __slots__ = (
-        'blobhelper',
-        'store_connection',
     )
-
-    def __init__(self, blobhelper, store_connection):
-        self.blobhelper = blobhelper
-        self.store_connection = store_connection
 
     @phase_dependent_aborts_early
     @writable_storage_method
@@ -91,9 +85,10 @@ class BlobStorer(object):
         assert not version
         # We used to flush the batcher here, for some reason.
         store_func = tpc_phase.store
-        cursor = self.store_connection.cursor
-        self.blobhelper.storeBlob(cursor, store_func,
-                                  oid, serial, data, blobfilename, version, txn)
+        cursor = tpc_phase.shared_state.store_connection.cursor
+        blobhelper = tpc_phase.shared_state.blobhelper
+        blobhelper.storeBlob(cursor, store_func,
+                             oid, serial, data, blobfilename, version, txn)
 
     @phase_dependent_aborts_early
     @writable_storage_method

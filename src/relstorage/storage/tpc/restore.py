@@ -51,10 +51,12 @@ class Restore(object):
         'tpc_vote',
         'tpc_abort',
         'no_longer_stale',
+        'shared_state',
     )
 
     def __init__(self, begin_state, committing_tid, status):
-        # type: (AbstractBegin, DatabaseLockedForTid, str) -> None
+        # type: (relstorage.storage.tpc.begin.AbstractBegin, DatabaseLockedForTid, str) -> None
+
         # This is an extension we use for copyTransactionsFrom;
         # it is not part of the IStorage API.
         assert committing_tid is not None
@@ -65,8 +67,8 @@ class Restore(object):
         # other than this transaction. We currently avoid the temp tables,
         # though, so if we do multiple things in a restore transaction,
         # we could still wind up with locking issues (I think?)
-        adapter = begin_state.adapter
-        cursor = begin_state.store_connection.cursor
+        adapter = begin_state.shared_state.adapter
+        cursor = begin_state.shared_state.store_connection.cursor
         packed = (status == 'p')
         try:
             committing_tid_lock = DatabaseLockedForTid.lock_database_for_given_tid(
@@ -74,7 +76,7 @@ class Restore(object):
                 cursor, adapter, begin_state.ude
             )
         except:
-            begin_state.store_connection.drop()
+            begin_state.shared_state.store_connection.drop()
             raise
 
         # This is now only used for restore()
@@ -94,13 +96,14 @@ class Restore(object):
         # the mover is unaware of it.
         factory = begin_state.tpc_vote_factory
         assert factory is HFVoteFactory or factory is HPVoteFactory
-        def tpc_vote_factory(state,
+        def tpc_vote_factory(begin_state,
                              _f=_HFVoteFactory if factory is HFVoteFactory else _HPVoteFactory,
                              _c=committing_tid_lock,
                              _b=batcher):
-            return _f(state, _c, _b)
+            return _f(begin_state, _c, _b)
         begin_state.tpc_vote_factory = tpc_vote_factory
-        begin_state.temp_storage = _TempStorageWrapper(begin_state.temp_storage)
+        begin_state.shared_state.temp_storage = _TempStorageWrapper(
+            begin_state.shared_state.temp_storage)
 
     def restore(self, oid, this_tid, data, prev_txn, transaction):
         # Similar to store() (see comments in FileStorage.restore for
@@ -113,16 +116,17 @@ class Restore(object):
         if transaction is not state.transaction:
             raise StorageTransactionError(self, transaction)
 
-        adapter = state.adapter
-        cursor = state.store_connection.cursor
+        adapter = state.shared_state.adapter
+        cursor = state.shared_state.store_connection.cursor
         assert cursor is not None
         oid_int = bytes8_to_int64(oid)
         tid_int = bytes8_to_int64(this_tid)
 
         # Save the `data`.  Note that `data` can be None.
         # Note also that this doesn't go through the cache.
-        state.temp_storage.max_restored_oid = max(state.temp_storage.max_restored_oid,
-                                                  oid_int)
+        state.shared_state.temp_storage.max_restored_oid = max(
+            state.shared_state.temp_storage.max_restored_oid,
+            oid_int)
         # TODO: Make it go through the cache, or at least the same
         # sort of queing thing, so that we can do a bulk COPY.
         # The way we do it now complicates restoreBlob() and it complicates voting.
@@ -139,8 +143,8 @@ class Restore(object):
         # (we'd prefer having DEFERRABLE INITIALLY DEFERRED FK
         # constraints, but as-of 8.0 MySQL doesn't support that.)
         self.batcher.flush()
-        cursor = state.store_connection.cursor
-        state.blobhelper.restoreBlob(cursor, oid, serial, blobfilename)
+        cursor = state.shared_state.store_connection.cursor
+        state.shared_state.blobhelper.restoreBlob(cursor, oid, serial, blobfilename)
 
 class _TempStorageWrapper(object):
 
@@ -169,9 +173,9 @@ class _TempStorageWrapper(object):
 class _VoteFactoryMixin(object):
     __slots__ = ()
 
-    def __init__(self, state, committing_tid_lock, batcher):
+    def __init__(self, begin_state, committing_tid_lock, batcher):
         # type: (Restore, Optional[DatabaseLockedForTid], Any) -> None
-        super(_VoteFactoryMixin, self).__init__(state)
+        super(_VoteFactoryMixin, self).__init__(begin_state)
         # pylint:disable=assigning-non-slot
         self.committing_tid_lock = committing_tid_lock
         self.batcher = batcher

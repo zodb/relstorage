@@ -119,10 +119,10 @@ class AbstractConnection(GeventConnectionMixin):
         # argument that could be used to do this, but it was removed.
         # So we implement it ourself.
         self.gevent_wait_write()
-        self.send_query(query)
+        self.send_query(query) # pylint:disable=no-member
 
         self.gevent_wait_read()
-        self.read_query_result()
+        self.read_query_result() # pylint:disable=no-member
 
     # The default implementations of 'rollback' and 'commit' use only
     # C API functions `mysql_rollback` and `mysql_commit`; it doesn't
@@ -168,13 +168,13 @@ class AbstractConnection(GeventConnectionMixin):
 
     def _critical_rollback(self):
         try:
-            self._direct_rollback()
+            self._direct_rollback() # pylint:disable=no-member
         finally:
             self.__exit_critical_phase()
 
     def _critical_commit(self):
         try:
-            self._direct_commit()
+            self._direct_commit() # pylint:disable=no-member
         finally:
             self.__exit_critical_phase()
 

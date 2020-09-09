@@ -251,30 +251,32 @@ class GenericMySQLTestsMixin(object):
 
         def assert_storage(storage):
             load_cur = storage._load_connection.cursor
-            store_cur = storage._store_connection.cursor
+
             version_detector = storage._adapter.version_detector
             if not version_detector.supports_transaction_isolation(load_cur):
                 raise unittest.SkipTest("Needs MySQL better than %s" % (
                     version_detector.get_version(load_cur)
                 ))
 
-            for cur, ex_iso, ex_ro, ex_timeout in (
-                    # Timeout for load is mysql default.
-                    [load_cur, 'REPEATABLE-READ', True, 50],
-                    [store_cur, 'READ-COMMITTED', False, self.DEFAULT_COMMIT_LOCK_TIMEOUT],
-            ):
-                cur.execute("""
-                SELECT @@transaction_isolation,
-                       @@transaction_read_only,
-                       @@innodb_lock_wait_timeout
-                """)
-                row, = cur.fetchall()
-                iso, ro, timeout = row
-                __traceback_info__ = row
-                iso = iso.decode('ascii') if not isinstance(iso, str) else iso
-                self.assertEqual(iso, ex_iso)
-                self.assertEqual(ro, ex_ro)
-                self.assertEqual(timeout, ex_timeout)
+            with storage._store_connection_pool.borrowing() as store_connection:
+                store_cur = store_connection.cursor
+                for cur, ex_iso, ex_ro, ex_timeout in (
+                        # Timeout for load is mysql default.
+                        [load_cur, 'REPEATABLE-READ', True, 50],
+                        [store_cur, 'READ-COMMITTED', False, self.DEFAULT_COMMIT_LOCK_TIMEOUT],
+                ):
+                    cur.execute("""
+                    SELECT @@transaction_isolation,
+                           @@transaction_read_only,
+                           @@innodb_lock_wait_timeout
+                    """)
+                    row, = cur.fetchall()
+                    iso, ro, timeout = row
+                    __traceback_info__ = row
+                    iso = iso.decode('ascii') if not isinstance(iso, str) else iso
+                    self.assertEqual(iso, ex_iso)
+                    self.assertEqual(ro, ex_ro)
+                    self.assertEqual(timeout, ex_timeout)
 
         # By default
         assert_storage(self._storage)

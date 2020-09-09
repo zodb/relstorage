@@ -1278,7 +1278,7 @@ class IRelStorageAdapter(Interface):
 
     def lock_database_and_move(
             store_connection, load_connection,
-            blobhelper,
+            transaction_has_blobs,
             ude,
             commit=True,
             committing_tid_int=None,

@@ -24,6 +24,8 @@ from relstorage.tests import MockDriver
 
 from .. import mover
 
+class PGMockDriver(MockDriver):
+    supports_copy = False
 
 @unittest.skip("Needs moved to test__sql")
 class TestFunctions(TestCase):
@@ -86,7 +88,7 @@ class TestPostgreSQLObjectMover(TestCase):
         return mover.PostgreSQLObjectMover
 
     def _makeOne(self, **options):
-        return self._getClass()(MockDriver(),
+        return self._getClass()(PGMockDriver(),
                                 MockOptions.from_args(**options))
 
     _expected_move_from_temp_hf_insert_query = 'EXECUTE move_from_temp(%s)'

@@ -169,6 +169,9 @@ class MySQLLocker(AbstractLocker):
         if restart:
             return
 
+        # Setting state in an `on_store_opened` is not good. With pooling, it may never
+        # get executed. We work around this in our adapter by being sure to only use one
+        # connmanager and one locker instance, shared among all the RelStorage instances.
         if self.supports_row_lock_nowait is None:
             self.supports_row_lock_nowait = self.version_detector.supports_nowait(cursor)
 

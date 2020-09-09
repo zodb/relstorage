@@ -23,14 +23,16 @@ if RUNNING_ON_APPVEYOR:
     skipOnAppveyor = unittest.skip
 else:
     skipOnAppveyor = _do_not_skip
-
+PYPY = platform.python_implementation() == 'PyPy'
 
 CACHE_SERVERS = None
 CACHE_MODULE_NAME = None
 
-if RUNNING_ON_TRAVIS:
+if RUNNING_ON_TRAVIS and not PYPY:
     # We expect to have access to a local memcache server
     # on travis. Use it if we can import drivers.
+    #
+    # This definitely leaks sockets on PyPy, and I don't think it's our fault.
     # pylint:disable=unused-import
     try:
         import pylibmc
