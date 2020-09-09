@@ -59,11 +59,6 @@ environment:
       PYTHON_ARCH: "64"
       PYTHON_EXE: python
 
-    - PYTHON: "C:\\Python35-x64"
-      PYTHON_VERSION: "3.5.x" # currently 3.5.2
-      PYTHON_ARCH: "64"
-      PYTHON_EXE: python
-
     ## 32-bit, wheel only (no testing)
 
     - PYTHON: "C:\\Python38"
@@ -80,12 +75,6 @@ environment:
 
     - PYTHON: "C:\\Python36"
       PYTHON_VERSION: "3.6.x" # currently 3.6.3
-      PYTHON_ARCH: "32"
-      PYTHON_EXE: python
-      GWHEEL_ONLY: true
-
-    - PYTHON: "C:\\Python35"
-      PYTHON_VERSION: "3.5.x" # currently 3.5.2
       PYTHON_ARCH: "32"
       PYTHON_EXE: python
       GWHEEL_ONLY: true
@@ -116,7 +105,7 @@ install:
   # https://ci.appveyor.com/project/denik/gevent/builds/23810605/job/83aw4u67artt002b#L602
   # So we violate DRY and repeate some requirements in order to use
   # --no-build-isolation
-  - "%CMD_IN_ENV% %PYEXE% -m pip install -U pycparser wheel cython setuptools cffi twine"
+  - "%CMD_IN_ENV% %PYEXE% -m pip install -U pycparser wheel \"cython>=3.0a6\" setuptools cffi twine"
 
 
 build_script:

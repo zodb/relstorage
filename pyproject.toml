@@ -1,8 +1,4 @@
 [build-system]
-# Our setup.py imports other things from this directory, meaning
-# in needs to be on sys.path. That's not guaranteed in a PEP517 world;
-# the __legacy__ build module makes that true. Ultimately we need to do that
-# ourself (and/or continue to simplify our build system).
 build-backend = "setuptools.build_meta"
 requires = [
      "setuptools >= 40.8.0",
@@ -12,6 +8,11 @@ requires = [
      # name to be created so that we can have both foo.py and _foo.so
      # at the same time. 0.29 fixes some issues with Python 3.7,
      # and adds the 3str mode for transition to Python 3. 0.29.12+ is
-     # required for Python 3.8
-     "Cython >= 0.29.13",
+     # required for Python 3.8. 3.0a2 introduced a change that prevented
+     # us from compiling (https://github.com/gevent/gevent/issues/1599)
+     # but once that was fixed, 3.0a4 led to all of our leak tests
+     # failing in Python 2 (https://travis-ci.org/github/gevent/gevent/jobs/683782800);
+     # This was fixed in 3.0a5 (https://github.com/cython/cython/issues/3578).
+     # 3.0 in general has improved language support.
+     "Cython >= 3.0a6",
 ]

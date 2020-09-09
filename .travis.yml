@@ -1,5 +1,5 @@
 language: python
-dist: xenial
+dist: bionic
 group: travis_latest
 services:
   - mysql
@@ -15,11 +15,12 @@ addons:
   postgresql: "9.6"
 # The default mysql is 5.7; we have a specific test for 8.0.
 
+# To get a recent PyPy, we still (as of bionic, 2020-09) must
+# give an exact version. Supported versions are listed at
+# https://docs.travis-ci.com/user/languages/python/#specifying-python-versions
 matrix:
   include:
-    - python: 3.8
-    - python: 2.7
-    - python: pypy3
+    # The 3.7 build runs the linter.
     - python: 3.7
       services:
         - docker
@@ -29,9 +30,12 @@ matrix:
         - docker pull mysql:8.0
         - docker run -d --publish 3306:3306 --rm --name mysqld -e MYSQL_ALLOW_EMPTY_PASSWORD=yes mysql:8.0
         - cp .travis/docker.cnf ~/.my.cnf
-    - python: 3.5
+    - python: pypy2.7-7.3.1
+    - python: 3.9-dev
+    - python: pypy3.6-7.3.1
+    - python: 3.8
+    - python: 2.7
     - python: 3.6
-    - python: pypy
 
 
 env:
@@ -47,17 +51,18 @@ env:
         - CCACHE_NOHASHDIR=true
         - CFLAGS="-g -pipe -std=gnu++11"
         - CXXFLAGS="-g -pipe -std=gnu++11"
-        - RS_TEST_CMD="-m zope.testrunner --test-path=src --auto-color -vvv --slow-test=3"
+        - RS_TEST_CMD="-m zope.testrunner --test-path=src --auto-color --auto-progress -vvv --slow-test=3"
 
 script:
-# coverage slows PyPy down from 2minutes to 12+.
+  # coverage slows PyPy down from 2minutes to 12+.
   - if [[ $TRAVIS_PYTHON_VERSION == 3.7 ]]; then pylint -j 0 --limit-inference-results=1 --rcfile=.pylintrc relstorage -f parseable -r n; fi
-  - if [[ $TRAVIS_PYTHON_VERSION != pypy* ]]; then coverage run -p --concurrency=greenlet .travis/zope_testrunner_gevent.py -t checkBTreesLengthStress -t check7 -t check2 -t BlobCache -t Switches --layer gevent -vvv; fi
-  - if [[ $TRAVIS_PYTHON_VERSION == pypy* ]]; then PYTHONTRACEMALLOC=15 python $RS_TEST_CMD --layer "!gevent"; fi
+  - if [[ $TRAVIS_PYTHON_VERSION != pypy* ]]; then coverage run -p --concurrency=greenlet .travis/zope_testrunner_gevent.py -t checkBTreesLengthStress -t check7 -t check2 -t BlobCache -t Switches --layer gevent; fi
+  - if [[ $TRAVIS_PYTHON_VERSION == pypy* ]]; then python $RS_TEST_CMD --layer "!gevent"; fi
   - if [[ $TRAVIS_PYTHON_VERSION != pypy* ]]; then coverage run -p --concurrency=thread  $RS_TEST_CMD --layer "!gevent"; fi
   # Make sure we can import without zope.schema, which is intended to
   # be a test dependency, and optional for production
   - pip uninstall -y zope.schema && python -c 'import relstorage.interfaces, relstorage.adapters.interfaces, relstorage.cache.interfaces'
+
 after_success:
   - coverage combine
   - coverage report -i --skip-covered
@@ -73,9 +78,9 @@ before_script:
 
 install:
   - pip install -U pip
-  - pip install -U setuptools wheel coveralls
+  - pip install -U setuptools wheel coveralls twine
   - pip install -U "pylint>=1.7.1"
-  - pip install -U cython
+  - pip install -U 'cython>=3.0a6'
   # Print debugging for the build
   - python setup.py build_ext -i
   - pip install -U -e ".[test,all_tested_drivers]"
