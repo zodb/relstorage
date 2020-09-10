@@ -114,24 +114,26 @@ shared-blob-dir
         in the relational database, and the blob directory holds a cache of
         blobs.
 
-        If true (**not** recommended), the blob directory
-        is assumed to be shared among all clients using NFS or
-        similar; blob data will be stored *only* on the filesystem and
-        not in the database. It is critical to have backups of this
-        directory, as this is the only source of blobs.
+        If true (**not** recommended), the blob directory is assumed
+        to be shared among all clients using NFS or similar (file
+        locks must also be supported); blob data will be stored *only*
+        on the filesystem and not in the database. It is critical to
+        have backups of this directory, as this is the only source of
+        blobs.
 
         .. warning::
 
            When this option is true, the ability to do parallel
            commits is reduced. It is highly recommended to set this
-           value to false.
+           value to false. The possible exception is SQLite, which
+           doesn't support parallel commit anyway.
 
         .. versionchanged:: 3.0a7
 
-           The default changed from true to fals.
+           The default changed from true to false.
 
 blob-cache-size
-        Maximum size of the blob cache, in bytes. If empty (the
+        Maximum size of the blob cache, in bytes. If not set (the
         default), the cache size isn't checked and the blob directory
         will grow without bounds. This should be either empty or
         significantly larger than the largest blob you store. At least
@@ -145,15 +147,15 @@ blob-cache-size
 
         This option allows suffixes such as "mb" or "gb".
 
-        This option is ignored if shared-blob-dir is true.
+        This option is ignored if ``shared-blob-dir`` is true.
 
 blob-cache-size-check
-        Blob cache check size as percent of blob-cache-size: "10"
+        Blob cache check size as percent of ``blob-cache-size``: "10"
         means "10%". The blob cache size will be checked when this
         many bytes have been loaded into the cache by any one process.
         Defaults to 10% of the blob cache size.
 
-        This option is ignored if shared-blob-dir is true.
+        This option is ignored if ``shared-blob-dir`` is true.
 
 blob-cache-size-check-external
         When this value is false (the default), the blob cache size
@@ -164,9 +166,8 @@ blob-cache-size-check-external
 
         For large blob caches, where checking the size takes
         measurable time, using an external process may improve
-        request response time for the application by reducing
-        contention for the GIL. It may also be helpful for gevent
-        applications.
+        response time for the application by reducing contention for
+        the GIL. It may also be helpful for gevent applications.
 
         This is not recommended on Windows, where opening a file from
         multiple processes can be a problem.
@@ -185,7 +186,7 @@ blob-chunk-size
            <https://dev.mysql.com/doc/refman/5.5/en/server-system-variables.html#sysvar_max_allowed_packet>`_
            setting. If blob chunks are larger than that, it won't be
            possible to upload them. If blob chunks are uploaded and
-           then that value is later reduced, it won't be possible to
+           then that setting is later reduced, it won't be possible to
            download blobs that exceed that value.
 
            The driver may also influence this.
@@ -196,7 +197,7 @@ blob-chunk-size
         The default is 1048576 (1 megabyte). This option allows
         suffixes such as "mb" or "gb".
 
-        This option has no effect if shared-blob-dir is true (because
+        This option has no effect if ``shared-blob-dir`` is true (because
         blobs are not stored on the server).
 
 Replication
@@ -371,8 +372,8 @@ outside of special circumstances this is not recommended.
 These options affect all caching operations.
 
 cache-prefix
-        The prefix for all keys in the cache; also used as part of
-        persistent cache names. All clients using a database should
+        The prefix for all keys in the remote shared cache; also used as part of
+        persistent cache file names. All clients using a database should
         use the same cache-prefix. Defaults to the database name. (For
         example, in PostgreSQL, the database name is determined by
         executing ``SELECT current_database()``.) Set this if you have
@@ -404,7 +405,7 @@ cache-local-object-max
         This option configures the maximum size of an object's pickle
         (in bytes) that can qualify for the "local" cache.  The size is
         measured after compression. Larger objects can still qualify
-        for memcache.
+        for the remote cache.
 
         The default is 16384 (1 << 14) bytes.
 
@@ -468,6 +469,8 @@ application warmup period.
    Raise a descriptive error if the ``sqlite3`` library is too old to
    be used by the local cache. RelStorage requires at least 3.8.3 but
    works better with 3.15 and best with 3.24 or newer.
+
+   This feature is no longer considered experimental.
 
 .. versionchanged:: 3.0a1
    The persistent file format and contents have been substantially
@@ -533,15 +536,19 @@ cache-local-dir
            performance comes with version 3.15 and the best
            performance is with 3.24 or higher.
 
+Deprecated Options
+++++++++++++++++++
+
+The following local cache options apply only to RelStorage 2.x. They
+are deprecated, ignored, and have no impact on RelStorage 3.0a1 or
+newer. RelStorage releases in 2021 will no longer accept them.
+
 cache-local-dir-count
         How many files that ``cache-local-dir`` will be allowed to
         contain before files start getting reused. Set this equal to
         the number of workers that will be sharing the directory.
 
         The default is 20.
-
-        .. versionchanged:: 3.0a1
-           This setting is now ignored and deprecated and a single file is used.
 
 cache-local-dir-compress
         Whether to compress the persistent cache files on disk. The
@@ -553,8 +560,6 @@ cache-local-dir-compress
 
         .. versionadded:: 2.0b5
 
-        .. versionchanged:: 3.0a1
-           This setting is now ignored and deprecated and no extra compression is applied.
 
 cache-local-dir-read-count
         The maximum number of files to read to populate the cache on
@@ -582,9 +587,6 @@ cache-local-dir-read-count
 
         .. versionadded:: 2.0b5
 
-        .. versionchanged:: 3.0a1
-           This setting is now ignored and deprecated and a single file is used.
-
 cache-local-dir-write-max-size
         The *approximate* maximum size of each individual cache file
         on disk. When not specified (the default), the maximum file
@@ -603,10 +605,6 @@ cache-local-dir-write-max-size
         .. versionadded:: 2.0b7
 
 
-        .. versionchanged:: 3.0a1
-           This setting is now ignored and up to ``cache-local-mb``
-           will be stored.
-
 Remote Caching
 --------------
 
@@ -621,6 +619,11 @@ useful if the ratio of writes to reads is extremely low (because they
 add substantial overhead to each write operation), and if the database
 server is behind a high-latency connection or otherwise responds
 slowly.
+
+.. important::
+
+   Remote caching is scheduled for removal with RelStorage releases
+   in 2021.
 
 cache-servers
         Specifies a list of memcached servers. Using memcached with

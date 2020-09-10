@@ -370,7 +370,8 @@ intersphinx_mapping = {
     'https://zodb-docs.readthedocs.io/en/latest/': None,
     'https://persistent.readthedocs.io/en/latest/': None,
     'https://btrees.readthedocs.io/en/latest/': None,
-
+    'https://transaction.readthedocs.io/en/latest/': None,
+    'https://ntitransactions.readthedocs.io/en/latest/': None,
 }
 
 extlinks = {'issue': ('https://github.com/zodb/relstorage/issues/%s',

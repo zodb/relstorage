@@ -7,4 +7,5 @@
    install
    configure-database
    configure-application
+   things-to-know
    zodburi

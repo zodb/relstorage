@@ -52,7 +52,7 @@ currently supported. RelStorage replaced the PGStorage project.
     due to an in-memory index of all objects, RelStorage starts
     quickly regardless of database size.
   * Capable of failover to replicated SQL databases.
-* Tested integration with `gevent`_ for PostgreSQL and MySQL.
+* Tested integration with `gevent`_ for PostgreSQL, MySQL, and SQLite.
 * There is a simple way (`zodbconvert`_) to (incrementally) convert
   FileStorage to RelStorage and back again. You can also convert a
   RelStorage instance to a different relational database. This is a
