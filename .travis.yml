@@ -57,8 +57,8 @@ jobs:
     - &upload-mac
       stage: upload
       os: osx
-      osx_image: xcode12u # newest at time of writing
-      language: c
+      osx_image: xcode12 # newest at time of writing
+      language: shell
       env: PYENV_VERSION=3.7
       services:
       install:
