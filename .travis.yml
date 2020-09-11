@@ -1,9 +1,7 @@
 language: python
 dist: bionic
 group: travis_latest
-os:
-  - linux
-  - osx
+
 osx_image: xcode11.4
 
 services:
@@ -36,33 +34,9 @@ stages:
 # https://docs.travis-ci.com/user/languages/python/#specifying-python-versions
 
 jobs:
-  exclude:
-    - os: osx
-      python: 3.7
-      stage: test
-    - os: osx
-      python: 3.9-dev
-      stage: test
-    - os: osx
-      python: 3.8
-      stage: test
-    - os: osx
-      python: 2.7
-      stage: test
-    - os: osx
-      python: 3.6
-      stage: test
-    - os: osx
-      python: pypy2.7-7.3.1
-      stage: test
-    - os: osx
-      python: pypy3.6-7.3.1
-      stage: test
-
   include:
     # The 3.7 build runs the linter.
-    - stage: test
-      name: Python 3.7 with MySQL 8.0 and Linting
+    - name: Python 3.7 with MySQL 8.0 and Linting
       python: 3.7
       services:
         - docker
@@ -72,8 +46,7 @@ jobs:
         - docker pull mysql:8.0
         - docker run -d --publish 3306:3306 --rm --name mysqld -e MYSQL_ALLOW_EMPTY_PASSWORD=yes mysql:8.0
         - cp .travis/docker.cnf ~/.my.cnf
-    - stage: test
-      name: 64-bit manylinux wheels (all Pythons)
+    - name: 64-bit manylinux wheels (all Pythons)
       language: python
       services: docker
       env: DOCKER_IMAGE=quay.io/pypa/manylinux2010_x86_64
