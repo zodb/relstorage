@@ -66,7 +66,7 @@ jobs:
         # make sure we have the latest python definitions (If we don't
         # push for new python versions, this is rarely necessary. it
         # takes a long time too.)
-        - brew update && brew upgrade pyenv
+        # - brew update && brew upgrade pyenv
         - eval "$(pyenv init -)"
         - unset CFLAGS CXXFLAGS
         - export CXX="ccache c++"
