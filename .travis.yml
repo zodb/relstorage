@@ -1,27 +1,49 @@
 language: python
 dist: bionic
 group: travis_latest
+
+
+
 services:
   - mysql
   - postgresql
   - memcached
 addons:
-# Use postgresql 9.3 to get commit-lock testing
-# Use postgresql 9.4 to get support for BLOB SQL functions for pg8000
-# Use postgresql 9.5 to get support for INSERT ON CONFLICT UPDATE
-# Use postgresql 9.6 ... just because
-# In Postgresql 10, you don't have to put the arguments after a
-# function name in things like COMMENT, if it's unique.
+  # Use postgresql 9.3 to get commit-lock testing
+  # Use postgresql 9.4 to get support for BLOB SQL functions for pg8000
+  # Use postgresql 9.5 to get support for INSERT ON CONFLICT UPDATE
+  # Use postgresql 9.6 ... just because
+  # In Postgresql 10, you don't have to put the arguments after a
+  # function name in things like COMMENT, if it's unique.
   postgresql: "9.6"
-# The default mysql is 5.7; we have a specific test for 8.0.
+  # The default mysql is 5.7; we have a specific test for 8.0.
+  homebrew:
+    packages:
+      - ccache
+
+stages:
+  - name: test
+    if: tag IS blank
+  - name: upload
+    # We can somewhat speed up each build by adding the following
+    # condition, which only runs it if we're building a tag; but the
+    # consequence is that if we break compiling in manylinux or macOS,
+    # we won't know until its too late. We have guards in the bash
+    # code that also check the tag, so its ok to run this always.
+
+    # if: tag IS present
+
+
 
 # To get a recent PyPy, we still (as of bionic, 2020-09) must
 # give an exact version. Supported versions are listed at
 # https://docs.travis-ci.com/user/languages/python/#specifying-python-versions
-matrix:
+
+jobs:
   include:
     # The 3.7 build runs the linter.
-    - python: 3.7
+    - name: Python 3.7 with MySQL 8.0 and Linting
+      python: 3.7
       services:
         - docker
         - postgresql
@@ -37,6 +59,68 @@ matrix:
     - python: 2.7
     - python: 3.6
 
+    - &upload-mac
+      stage: upload
+      os: osx
+      # newest at time of writing; xcode 12 doesn't have the 10.15 SDK needed to build extensions
+      osx_image: xcode11.6
+      language: shell
+      env: PYENV_VERSION=3.7.8
+      services:
+      before_install:
+        # make sure we have the latest python definitions (If we don't
+        # push for new python versions, this is rarely necessary. it
+        # takes a long time too.)
+        - ls -l ~/.pyenv/versions || true
+        - if [[ ! -d ~/.pyenv/versions/$PYENV_VERSION ]]; then brew update && brew upgrade pyenv; fi
+        - eval "$(pyenv init -)"
+        - unset CFLAGS CXXFLAGS CC
+        - pyenv install -s $PYENV_VERSION
+        - pyenv global $PYENV_VERSION
+        - python --version
+      install:
+        # Major problems getting ccache to work here for some reason.
+        - export CFLAGS="-Ofast -Wno-parentheses-equality -Wno-constant-logical-operand"
+        - export CC=/usr/bin/clang
+        - export CXX=/usr/bin/clang++
+        - pip install -U pip
+        - pip install -U setuptools wheel twine
+      script: pip wheel -w wheelhouse .
+      after_success: |
+        ls -l wheelhouse
+        if [[ $TRAVIS_TAG ]]; then
+          twine upload --skip-existing wheelhouse/RelStorage*
+        fi
+    - <<: *upload-mac
+      env: PYENV_VERSION=3.9-dev
+    - <<: *upload-mac
+      env: PYENV_VERSION=3.8.5
+    - <<: *upload-mac
+      env: PYENV_VERSION=3.6.10
+    - <<: *upload-mac
+      env: PYENV_VERSION=2.7.18
+    - name: 64-bit manylinux wheels (all Pythons)
+      stage: upload
+      language: python
+      services: docker
+      env: DOCKER_IMAGE=quay.io/pypa/manylinux2010_x86_64
+      install: docker pull $DOCKER_IMAGE
+      script: bash scripts/releases/make-manylinux
+      before_script:
+        - python -mpip install -U pip twine
+        - chmod a+w $HOME/.cache
+        - mkdir -p $HOME/.cache/pip
+        - chmod a+w $HOME/.cache/pip
+      after_success:
+        - |
+          if [[ -n "$DOCKER_IMAGE" ]]; then
+            ls -l wheelhouse
+            twine check wheelhouse/*
+            if [[ $TRAVIS_TAG ]]; then
+              twine upload --skip-existing wheelhouse/RelStorage*
+            fi
+          fi
+
 
 env:
     global:
@@ -45,13 +129,21 @@ env:
         # See https://github.com/lericson/pylibmc/issues/254
         # - PYTHONDEVMODE=1
         - PYTHONFAULTHANDLER=1
-        - CC="ccache gcc"
+        - CC="ccache cc"
         - CCACHE_NOCPP2=true
         - CCACHE_SLOPPINESS=file_macro,time_macros,include_file_ctime,include_file_mtime
         - CCACHE_NOHASHDIR=true
-        - CFLAGS="-g -pipe -std=gnu++11"
-        - CXXFLAGS="-g -pipe -std=gnu++11"
+        # Don't get warnings about Python 2 support being deprecated. We
+        # know. The env var works for pip 20.
+        - PIP_NO_PYTHON_VERSION_WARNING=1
+        - PIP_NO_WARN_SCRIPT_LOCATION=1
+        - CFLAGS="-pipe -std=gnu++11"
+        - CXXFLAGS="-pipe -std=gnu++11"
         - RS_TEST_CMD="-m zope.testrunner --test-path=src --auto-color --auto-progress -vvv --slow-test=3"
+        # Uploading built wheels for releases.
+        # TWINE_PASSWORD is encrypted and stored directly in the
+        # travis repo settings.
+        - TWINE_USERNAME="__token__"
 
 script:
   # coverage slows PyPy down from 2minutes to 12+.
@@ -64,9 +156,11 @@ script:
   - pip uninstall -y zope.schema && python -c 'import relstorage.interfaces, relstorage.adapters.interfaces, relstorage.cache.interfaces'
 
 after_success:
-  - coverage combine
-  - coverage report -i --skip-covered
-  - coveralls
+  - python -m coverage combine || true
+  - python -m coverage report -i --skip-covered || true
+  - python -m coveralls || true
+
+
 notifications:
   email: false
 
@@ -93,6 +187,8 @@ cache:
     - $HOME/.wheelhouse
     - $HOME/.ccache
     - $HOME/.cache
+    - $HOME/.pyenv/
+    - $HOME/Library/Caches/pip
 
 before_cache:
     - rm -f $HOME/.cache/pip/log/debug.log

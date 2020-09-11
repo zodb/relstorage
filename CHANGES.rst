@@ -28,6 +28,10 @@
 
 - Drop support for Python 3.5.
 
+- Build manylinux x86-64 and macOS wheels on Travis CI as part of the
+  release process. These join the Windows wheels in being
+  automatically uploaded to PyPI.
+
 
 3.2.1 (2020-08-28)
 ==================
