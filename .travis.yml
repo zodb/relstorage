@@ -188,6 +188,7 @@ cache:
     - $HOME/.ccache
     - $HOME/.cache
     - $HOME/.pyenv/
+    - $HOME/Library/Caches/pip
 
 before_cache:
     - rm -f $HOME/.cache/pip/log/debug.log
