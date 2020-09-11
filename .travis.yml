@@ -18,7 +18,7 @@ addons:
 # To get a recent PyPy, we still (as of bionic, 2020-09) must
 # give an exact version. Supported versions are listed at
 # https://docs.travis-ci.com/user/languages/python/#specifying-python-versions
-matrix:
+jobs:
   include:
     # The 3.7 build runs the linter.
     - python: 3.7
@@ -30,6 +30,18 @@ matrix:
         - docker pull mysql:8.0
         - docker run -d --publish 3306:3306 --rm --name mysqld -e MYSQL_ALLOW_EMPTY_PASSWORD=yes mysql:8.0
         - cp .travis/docker.cnf ~/.my.cnf
+    - stage: test
+      name: 64-bit manylinux wheels (all Pythons)
+      language: python
+      services: docker
+      env: DOCKER_IMAGE=quay.io/pypa/manylinux2010_x86_64
+      install: docker pull $DOCKER_IMAGE
+      script: bash scripts/releases/make-manylinux
+      before_script:
+        - python -mpip install -U pip twine
+        - chmod a+w $HOME/.cache
+        - mkdir -p $HOME/.cache/pip
+        - chmod a+w $HOME/.cache/pip
     - python: pypy2.7-7.3.1
     - python: 3.9-dev
     - python: pypy3.6-7.3.1
@@ -49,6 +61,10 @@ env:
         - CCACHE_NOCPP2=true
         - CCACHE_SLOPPINESS=file_macro,time_macros,include_file_ctime,include_file_mtime
         - CCACHE_NOHASHDIR=true
+        # Don't get warnings about Python 2 support being deprecated. We
+        # know. The env var works for pip 20.
+        - PIP_NO_PYTHON_VERSION_WARNING=1
+        - PIP_NO_WARN_SCRIPT_LOCATION=1
         - CFLAGS="-g -pipe -std=gnu++11"
         - CXXFLAGS="-g -pipe -std=gnu++11"
         - RS_TEST_CMD="-m zope.testrunner --test-path=src --auto-color --auto-progress -vvv --slow-test=3"
@@ -64,9 +80,18 @@ script:
   - pip uninstall -y zope.schema && python -c 'import relstorage.interfaces, relstorage.adapters.interfaces, relstorage.cache.interfaces'
 
 after_success:
-  - coverage combine
-  - coverage report -i --skip-covered
-  - coveralls
+  - python -m coverage combine || true
+  - python -m coverage report -i --skip-covered || true
+  - python -m coveralls || true
+  - |
+    if [[ -n "$DOCKER_IMAGE" ]]; then
+      ls -l wheelhouse
+      twine check wheelhouse/*
+      if [[ $TRAVIS_TAG ]]; then
+        twine upload --skip-existing wheelhouse/*
+      fi
+    fi
+
 notifications:
   email: false
 
