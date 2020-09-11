@@ -23,11 +23,16 @@ addons:
 
 stages:
   - name: test
-    if: false
-    # if: os = linux
+    if: tag IS blank
   - name: upload
-    #if: tag IS present AND os != linux
-    # if: os != linux
+    # We can somewhat speed up each build by adding the following
+    # condition, which only runs it if we're building a tag; but the
+    # consequence is that if we break compiling in manylinux or macOS,
+    # we won't know until its too late. We have guards in the bash
+    # code that also check the tag, so its ok to run this always.
+
+    # if: tag IS present
+
 
 
 # To get a recent PyPy, we still (as of bionic, 2020-09) must
@@ -68,12 +73,12 @@ jobs:
         # takes a long time too.)
         # - brew update && brew upgrade pyenv
         - eval "$(pyenv init -)"
-        # Major problems getting ccache to work here for some reason.
         - unset CFLAGS CXXFLAGS CC
         - pyenv install -s $PYENV_VERSION
         - pyenv global $PYENV_VERSION
         - python --version
       install:
+        # Major problems getting ccache to work here for some reason.
         - export CFLAGS="-Ofast -Wno-parentheses-equality -Wno-constant-logical-operand"
         - export CC=/usr/bin/clang
         - export CXX=/usr/bin/clang++
