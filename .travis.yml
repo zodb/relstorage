@@ -11,17 +11,17 @@ services:
   - postgresql
   - memcached
 addons:
-# Use postgresql 9.3 to get commit-lock testing
-# Use postgresql 9.4 to get support for BLOB SQL functions for pg8000
-# Use postgresql 9.5 to get support for INSERT ON CONFLICT UPDATE
-# Use postgresql 9.6 ... just because
-# In Postgresql 10, you don't have to put the arguments after a
-# function name in things like COMMENT, if it's unique.
-  - postgresql: "9.6"
-# The default mysql is 5.7; we have a specific test for 8.0.
-  - homebrew:
-      packages:
-        - ccache
+  # Use postgresql 9.3 to get commit-lock testing
+  # Use postgresql 9.4 to get support for BLOB SQL functions for pg8000
+  # Use postgresql 9.5 to get support for INSERT ON CONFLICT UPDATE
+  # Use postgresql 9.6 ... just because
+  # In Postgresql 10, you don't have to put the arguments after a
+  # function name in things like COMMENT, if it's unique.
+  postgresql: "9.6"
+  # The default mysql is 5.7; we have a specific test for 8.0.
+  homebrew:
+    packages:
+      - ccache
 
 stages:
   - name: test
@@ -45,6 +45,8 @@ python:
 
 jobs:
   exclude:
+    - os: linux
+      python: 3.7 # Because we do it below
     - os: osx
       python: 3.7
     - os: osx
@@ -62,7 +64,8 @@ jobs:
 
   include:
     # The 3.7 build runs the linter.
-    - python: 3.7
+    - name: Python 3.7 with MySQL 8.0 and Linting
+      python: 3.7
       services:
         - docker
         - postgresql
@@ -87,19 +90,23 @@ jobs:
     - &upload-mac
       stage: upload-mac
       os: osx
+      services:
+      install:
+        - pip install -U pip
+        - pip install -U setuptools wheel twine
       script: pip wheel -w wheelhouse .
       after_success: |
         ls -l wheelhouse
         if [[ $TRAVIS_TAG ]]; then
           twine upload --skip-existing wheelhouse/RelStorage*
         fi
-    - <<: &upload-mac
+    - <<: *upload-mac
       python: 3.9-dev
-    - <<: &upload-mac
+    - <<: *upload-mac
       python: 3.8
-    - <<: &upload-mac
+    - <<: *upload-mac
       python: 3.6
-    - <<: &upload-mac
+    - <<: *upload-mac
       python: 2.7
 
 env:
