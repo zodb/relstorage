@@ -5,7 +5,6 @@ os:
   - linux
   - osx
 osx_image: xcode11.4
-addons:
 
 services:
   - mysql
@@ -26,10 +25,10 @@ addons:
 
 stages:
   - name: test
-    if: os = linux
+    # if: os = linux
   - name: upload-mac
     #if: tag IS present AND os != linux
-    if: os != linux
+    # if: os != linux
 
 
 # To get a recent PyPy, we still (as of bionic, 2020-09) must
@@ -46,6 +45,16 @@ python:
 
 jobs:
   exclude:
+    - os: osx
+      python: 3.7
+    - os: osx
+      python: 3.9-dev
+    - os: osx
+      python: 3.8
+    - os: osx
+      python: 2.7
+    - os: osx
+      python: 3.6
     - os: osx
       python: pypy2.7-7.3.1
     - os: osx
@@ -76,7 +85,7 @@ jobs:
         - chmod a+w $HOME/.cache/pip
 
     - &upload-mac
-      stage: upload
+      stage: upload-mac
       os: osx
       script: pip wheel -w wheelhouse .
       after_success: |
