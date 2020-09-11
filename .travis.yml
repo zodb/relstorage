@@ -2,7 +2,7 @@ language: python
 dist: bionic
 group: travis_latest
 
-osx_image: xcode11.4
+
 
 services:
   - mysql
@@ -57,6 +57,8 @@ jobs:
     - &upload-mac
       stage: upload
       os: osx
+      osx_image: xcode12u # newest at time of writing
+      language: c
       env: PYENV_VERSION=3.7
       services:
       install:
