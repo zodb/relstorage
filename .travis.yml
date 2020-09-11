@@ -139,6 +139,10 @@ env:
         - CFLAGS="-pipe -std=gnu++11"
         - CXXFLAGS="-pipe -std=gnu++11"
         - RS_TEST_CMD="-m zope.testrunner --test-path=src --auto-color --auto-progress -vvv --slow-test=3"
+        # Uploading built wheels for releases.
+        # TWINE_PASSWORD is encrypted and stored directly in the
+        # travis repo settings.
+        - TWINE_USERNAME="__token__"
 
 script:
   # coverage slows PyPy down from 2minutes to 12+.
