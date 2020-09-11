@@ -34,20 +34,9 @@ stages:
 # To get a recent PyPy, we still (as of bionic, 2020-09) must
 # give an exact version. Supported versions are listed at
 # https://docs.travis-ci.com/user/languages/python/#specifying-python-versions
-python:
-  - 3.7
-  - pypy2.7-7.3.1
-  - 3.9-dev
-  - pypy3.6-7.3.1
-  - 3.8
-  - 2.7
-  - 3.6
 
 jobs:
   exclude:
-    - os: linux
-      python: 3.7 # Because we do it below
-      stage: test
     - os: osx
       python: 3.7
       stage: test
@@ -95,10 +84,17 @@ jobs:
         - chmod a+w $HOME/.cache
         - mkdir -p $HOME/.cache/pip
         - chmod a+w $HOME/.cache/pip
+    - python: pypy2.7-7.3.1
+    - python: 3.9-dev
+    - python: pypy3.6-7.3.1
+    - python: 3.8
+    - python: 2.7
+    - python: 3.6
 
     - &upload-mac
       stage: upload-mac
       os: osx
+      python: 3.7
       services:
       install:
         - pip install -U pip
