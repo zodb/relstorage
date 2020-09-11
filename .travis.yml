@@ -23,8 +23,9 @@ addons:
 
 stages:
   - name: test
+    if: false
     # if: os = linux
-  - name: upload-mac
+  - name: upload
     #if: tag IS present AND os != linux
     # if: os != linux
 
@@ -46,7 +47,38 @@ jobs:
         - docker pull mysql:8.0
         - docker run -d --publish 3306:3306 --rm --name mysqld -e MYSQL_ALLOW_EMPTY_PASSWORD=yes mysql:8.0
         - cp .travis/docker.cnf ~/.my.cnf
+    - python: pypy2.7-7.3.1
+    - python: 3.9-dev
+    - python: pypy3.6-7.3.1
+    - python: 3.8
+    - python: 2.7
+    - python: 3.6
+
+    - &upload-mac
+      stage: upload
+      os: osx
+      env: PYENV_VERSION=3.7
+      services:
+      install:
+        - eval "$(pyenv init -)"
+        - pip install -U pip
+        - pip install -U setuptools wheel twine
+      script: pip wheel -w wheelhouse .
+      after_success: |
+        ls -l wheelhouse
+        if [[ $TRAVIS_TAG ]]; then
+          twine upload --skip-existing wheelhouse/RelStorage*
+        fi
+    - <<: *upload-mac
+      env: PYENV_VERSION=3.9
+    - <<: *upload-mac
+      env: PYENV_VERSION=3.8
+    - <<: *upload-mac
+      env: PYENV_VERSION=3.6
+    - <<: *upload-mac
+      env: PYENV_VERSION=2.7
     - name: 64-bit manylinux wheels (all Pythons)
+      stage: upload
       language: python
       services: docker
       env: DOCKER_IMAGE=quay.io/pypa/manylinux2010_x86_64
@@ -57,35 +89,16 @@ jobs:
         - chmod a+w $HOME/.cache
         - mkdir -p $HOME/.cache/pip
         - chmod a+w $HOME/.cache/pip
-    - python: pypy2.7-7.3.1
-    - python: 3.9-dev
-    - python: pypy3.6-7.3.1
-    - python: 3.8
-    - python: 2.7
-    - python: 3.6
+      after_success:
+        - |
+          if [[ -n "$DOCKER_IMAGE" ]]; then
+            ls -l wheelhouse
+            twine check wheelhouse/*
+            if [[ $TRAVIS_TAG ]]; then
+              twine upload --skip-existing wheelhouse/RelStorage*
+            fi
+          fi
 
-    - &upload-mac
-      stage: upload-mac
-      os: osx
-      python: 3.7
-      services:
-      install:
-        - pip install -U pip
-        - pip install -U setuptools wheel twine
-      script: pip wheel -w wheelhouse .
-      after_success: |
-        ls -l wheelhouse
-        if [[ $TRAVIS_TAG ]]; then
-          twine upload --skip-existing wheelhouse/RelStorage*
-        fi
-    - <<: *upload-mac
-      python: 3.9-dev
-    - <<: *upload-mac
-      python: 3.8
-    - <<: *upload-mac
-      python: 3.6
-    - <<: *upload-mac
-      python: 2.7
 
 env:
     global:
@@ -120,14 +133,7 @@ after_success:
   - python -m coverage combine || true
   - python -m coverage report -i --skip-covered || true
   - python -m coveralls || true
-  - |
-    if [[ -n "$DOCKER_IMAGE" ]]; then
-      ls -l wheelhouse
-      twine check wheelhouse/*
-      if [[ $TRAVIS_TAG ]]; then
-        twine upload --skip-existing wheelhouse/RelStorage*
-      fi
-    fi
+
 
 notifications:
   email: false
