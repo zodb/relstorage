@@ -47,24 +47,33 @@ jobs:
   exclude:
     - os: linux
       python: 3.7 # Because we do it below
+      stage: test
     - os: osx
       python: 3.7
+      stage: test
     - os: osx
       python: 3.9-dev
+      stage: test
     - os: osx
       python: 3.8
+      stage: test
     - os: osx
       python: 2.7
+      stage: test
     - os: osx
       python: 3.6
+      stage: test
     - os: osx
       python: pypy2.7-7.3.1
+      stage: test
     - os: osx
       python: pypy3.6-7.3.1
+      stage: test
 
   include:
     # The 3.7 build runs the linter.
-    - name: Python 3.7 with MySQL 8.0 and Linting
+    - stage: test
+      name: Python 3.7 with MySQL 8.0 and Linting
       python: 3.7
       services:
         - docker
