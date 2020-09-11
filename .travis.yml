@@ -60,12 +60,13 @@ jobs:
       # newest at time of writing; xcode 12 doesn't have the 10.15 SDK needed to build extensions
       osx_image: xcode11.6
       language: shell
-      env: PYENV_VERSION=3.7
+      env: PYENV_VERSION=3.7.9
       services:
       before_install:
         - eval "$(pyenv init -)"
-        - pyenv global $PYENV_VERSION
         - unset CFLAGS CXXFLAGS
+        - pyenv install -s $PYENV_VERSION
+        - pyenv global $PYENV_VERSION
         - python --version
       install:
         - pip install -U pip
@@ -77,13 +78,13 @@ jobs:
           twine upload --skip-existing wheelhouse/RelStorage*
         fi
     - <<: *upload-mac
-      env: PYENV_VERSION=3.9
+      env: PYENV_VERSION=3.9.0rc1
     - <<: *upload-mac
-      env: PYENV_VERSION=3.8
+      env: PYENV_VERSION=3.8.5
     - <<: *upload-mac
-      env: PYENV_VERSION=3.6
+      env: PYENV_VERSION=3.6.12
     - <<: *upload-mac
-      env: PYENV_VERSION=2.7
+      env: PYENV_VERSION=2.7.18
     - name: 64-bit manylinux wheels (all Pythons)
       stage: upload
       language: python
@@ -168,6 +169,7 @@ cache:
     - $HOME/.wheelhouse
     - $HOME/.ccache
     - $HOME/.cache
+    - $HOME/.pyenv/
 
 before_cache:
     - rm -f $HOME/.cache/pip/log/debug.log
