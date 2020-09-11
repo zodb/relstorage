@@ -62,8 +62,12 @@ jobs:
       language: shell
       env: PYENV_VERSION=3.7
       services:
-      install:
+      before_install:
         - eval "$(pyenv init -)"
+        - pyenv global $PYENV_VERSION
+        - unset CFLAGS CXXFLAGS
+        - python --version
+      install:
         - pip install -U pip
         - pip install -U setuptools wheel twine
       script: pip wheel -w wheelhouse .
@@ -110,7 +114,7 @@ env:
         # See https://github.com/lericson/pylibmc/issues/254
         # - PYTHONDEVMODE=1
         - PYTHONFAULTHANDLER=1
-        - CC="ccache gcc"
+        - CC="ccache cc"
         - CCACHE_NOCPP2=true
         - CCACHE_SLOPPINESS=file_macro,time_macros,include_file_ctime,include_file_mtime
         - CCACHE_NOHASHDIR=true
@@ -118,8 +122,8 @@ env:
         # know. The env var works for pip 20.
         - PIP_NO_PYTHON_VERSION_WARNING=1
         - PIP_NO_WARN_SCRIPT_LOCATION=1
-        - CFLAGS="-g -pipe -std=gnu++11"
-        - CXXFLAGS="-g -pipe -std=gnu++11"
+        - CFLAGS="-pipe -std=gnu++11"
+        - CXXFLAGS="-pipe -std=gnu++11"
         - RS_TEST_CMD="-m zope.testrunner --test-path=src --auto-color --auto-progress -vvv --slow-test=3"
 
 script:
