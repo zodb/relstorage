@@ -74,6 +74,9 @@ jobs:
         - pyenv global $PYENV_VERSION
         - python --version
       install:
+        - export CFLAGS="-Ofast -Wno-parentheses-equality -Wno-constant-logical-operand"
+        - export CC=/usr/bin/clang
+        - export CXX=/usr/bin/clang++
         - pip install -U pip
         - pip install -U setuptools wheel twine
       script: pip wheel -w wheelhouse .
