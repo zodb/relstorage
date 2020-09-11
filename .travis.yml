@@ -57,7 +57,8 @@ jobs:
     - &upload-mac
       stage: upload
       os: osx
-      osx_image: xcode12 # newest at time of writing
+      # newest at time of writing; xcode 12 doesn't have the 10.15 SDK needed to build extensions
+      osx_image: xcode11.6
       language: shell
       env: PYENV_VERSION=3.7
       services:
