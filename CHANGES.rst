@@ -2,7 +2,7 @@
  Changes
 =========
 
-3.3.0 (unreleased)
+3.3.0 (2020-09-14)
 ==================
 
 - The "MySQLdb" driver didn't properly use server-side cursors when
