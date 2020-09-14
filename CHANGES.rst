@@ -2,7 +2,7 @@
  Changes
 =========
 
-3.3.1 (unreleased)
+3.3.1 (2020-09-14)
 ==================
 
 - Manylinux wheels: Do not specify the C++ standard to use when
