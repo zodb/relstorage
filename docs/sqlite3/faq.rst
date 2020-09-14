@@ -48,7 +48,7 @@ Q: Why is adding or updating new objects so slow?
    To combat this, RelStorage issues `PRAGMA OPTIMIZE
    <https://www.sqlite.org/pragma.html#pragma_optimize>`_ when
    connections are closed, but that doesn't always work (the database
-   may be locked by another connection``.
+   may be locked by another connection.
 
    RelStorage issues the ``ANALYZE`` command automatically when the
    database is packed.
@@ -149,3 +149,54 @@ Q: What's performance like?
 
    .. figure:: faq_sql_read_cold_objects.png
       :target: _images/faq_sql_read_cold_objects.png
+
+.. _backing-up-sqlite:
+
+Q: How do I perform backups of a SQLite RelStorage?
+
+   A: (This information is current for RelStorage 3.0 through at least
+   3.3.)
+
+   In general, the simplest and safest way to create a backup of a
+   SQLite RelStorage is to stop all applications that are using the
+   database. Then, simply copy the ``data-dir`` (and, if configured,
+   the ``shared-blob-dir``) contents.
+
+   If applications cannot be stopped and may be writing to the
+   database, then it's important to understand a bit about the
+   structure of the ``data-dir``. Inside it will be two SQLite3
+   databases: ``main`` and ``oids``. It's critical to first backup the
+   ``main`` database, and after that backup the ``oids``. If that's
+   not done, then using a restored database could result in
+   re-allocating already used OIDs; that can have many adverse
+   consequences including errors and data loss.
+
+   Transactions against the OID database are always atomic and always
+   run ahead of transactions against the main database, so an OID
+   database "from the future" is acceptable, but one from the past is
+   not. (The worst outcome of an OID database from the future is a gap
+   in OID values going forward.) Note that not all transactions will
+   use the OID database, so the timestamp on the file may not, in
+   fact, be ahead of the timestamp of the main files.
+
+   Backing up a SQLite database that's in use can be accomplished with
+   the ``VACUUM INTO ... <filename>`` SQL command `in SQLite 3.27 or later
+   <https://sqlite.org/backup.html>`_, or you may use
+   a tool that exposes the online backup API, such as the ``.backup``
+   command of the SQLite shell.
+
+   .. caution:: Attempting file-level copies of a database that's in
+                use may result in invalid copies, unless a filesystem
+                that can perform consistent snapshots is in use and
+                the backup is performed from such a snapshot.
+
+Q: What if I didn't back up the OID database?
+
+   The OID database, like the ``main`` database, is always
+   auto-created. If the OID database file is missing, or from the
+   past, and the main database is opened for write transactions, new
+   objects may get duplicate OIDs. It would be necessary to update the
+   OID database with the maximum used OID in the main database in
+   order to prevent this. This can be done by using ``zodbconvert`` to
+   copy the transactions to a new database, or it could be done
+   manually with SQL queries.

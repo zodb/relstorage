@@ -25,9 +25,10 @@ This adapter supports blobs, but you still must configure a
 
 .. note::
 
-   SQLite is limited to 8-byte signed integers for OIDs and TIDs. If
-   you expect to go through more than nine quintillion objects, or use
-   the database past the year 5908, SQLite might not be the right choice.
+   SQLite is limited to 8-byte *signed* integers for OIDs and TIDs
+   (other database use unsigned integers). If you expect to go through
+   more than nine quintillion objects, or use the database past the
+   year 5908, SQLite might not be the right choice.
 
 For more, see :doc:`faq`.
 
@@ -42,6 +43,9 @@ data-dir
     Several files will be created in this directory automatically by
     RelStorage. Some are persistent while others are transient. Do not
     remove them or data corruption may result.
+
+    For information on backing this directory up, see
+    :ref:`the FAQ about backing up SQLite <backing-up-sqlite>`.
 
 Optional settings include:
 

@@ -230,6 +230,7 @@ setup(
         'memcache': memcache_require,
         'test': tests_require,
         'docs': [
+            'sphinx',
             'sphinxcontrib-programoutput',
             'repoze.sphinx.autointerface',
             'sphinx_rtd_theme',
