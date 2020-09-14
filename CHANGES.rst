@@ -5,7 +5,9 @@
 3.3.1 (unreleased)
 ==================
 
-- Nothing changed yet.
+- Manylinux wheels: Do not specify the C++ standard to use when
+  compiling. This seemed to result in an incompatibility with
+  manylinux1 systems that was not caught by ``auditwheel``.
 
 
 3.3.0 (2020-09-14)
