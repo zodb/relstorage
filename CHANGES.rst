@@ -5,7 +5,9 @@
 3.3.2 (unreleased)
 ==================
 
-- Nothing changed yet.
+- Fix an ``UnboundLocalError`` in case a store connection could not be
+  opened. This error shadowed the original error opening the
+  connection. See :issue:`421`.
 
 
 3.3.1 (2020-09-14)

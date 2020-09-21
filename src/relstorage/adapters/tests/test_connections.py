@@ -19,6 +19,7 @@ from ..interfaces import IManagedDBConnection
 from ..connections import StoreConnection
 from ..connections import LoadConnection
 from ..connections import ClosedConnection
+from ..connections import StoreConnectionPool
 
 class TestConnectionCommon(TestCase):
 
@@ -131,3 +132,44 @@ class TestLoadConnection(TestConnection):
 class TestClosedConnection(TestConnectionCommon):
     klass = ClosedConnection
     iface = IManagedDBConnection
+
+
+
+class TestStoreConnectionPool(TestCase):
+
+    def test_borrowing_doesnt_leak_if_creating_raises_exception(self):
+        connmanager = MockConnectionManager()
+
+        class MyException(Exception):
+            pass
+
+        class StoreConnectionNoBegin(StoreConnection):
+            dropped = 0
+
+            def drop(self):
+                type(self).dropped += 1
+                StoreConnection.drop(self)
+
+            def begin(self):
+                raise MyException
+
+        def check(factory, ex):
+            pool = StoreConnectionPool(connmanager)
+
+            pool._factory = factory
+
+            with self.assertRaises(ex):
+                with pool.borrowing():
+                    pass
+            self.assertLength(pool._connections, 0)
+
+        check(StoreConnectionNoBegin, MyException)
+        self.assertEqual(StoreConnectionNoBegin.dropped, 1)
+
+        class MyBeginException(Exception):
+            pass
+
+        def factory(_):
+            raise MyBeginException
+
+        check(factory, MyBeginException)
