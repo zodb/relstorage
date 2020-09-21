@@ -35,6 +35,7 @@ logger = __import__('logging').getLogger(__name__)
 __all__ = [
     'LoadConnection',
     'StoreConnection',
+    'StoreConnectionPool',
 ]
 
 
@@ -382,9 +383,12 @@ class StoreConnectionPool(object):
 
     @contextlib.contextmanager
     def borrowing(self, commit=False):
+        # self.borrow() either correctly returns a Connection,
+        # or guarantees not to leak it in the event of on exception.
+        # We want such an exception to propagate.
+        conn = self.borrow()
         rollback = True
         try:
-            conn = self.borrow()
             yield conn
             if commit:
                 conn.commit()
@@ -393,17 +397,36 @@ class StoreConnectionPool(object):
             self._replace(conn, rollback)
 
     def borrow(self):
+        """
+        Returns a begun, not-None ``StoreConnection``, or raises an exception.
+
+        If it raises an exception, the internals are still consistent and
+        no connection is leaked.
+        """
         conn = None
         with self._lock:
             if self._connections:
+                # Can't rely on the GIL for this, need to do the two-step check
+                # because _shrink isn't atomic.
                 conn = self._connections.pop()
 
-        if conn is None:
-            conn = self._factory(self._connmanager)
-        else:
-            conn.restart()
+        try:
+            if conn is None:
+                conn = self._factory(self._connmanager)
+            else:
+                conn.restart()
 
-        conn.begin()
+            conn.begin()
+        except:
+            # Whether or not we took it from the pool,
+            # if we got an error restarting or beginning,
+            # just drop it; don't put it in the pool.
+            # conn could still be None if self._factory raised.
+            logger.exception("Failed to borrow a store connection: %s", conn)
+            if conn is not None:
+                conn.drop()
+            raise
+
         return conn
 
     def replace(self, connection):
