@@ -2,7 +2,7 @@
  Changes
 =========
 
-3.3.2 (unreleased)
+3.3.2 (2020-09-21)
 ==================
 
 - Fix an ``UnboundLocalError`` in case a store connection could not be
