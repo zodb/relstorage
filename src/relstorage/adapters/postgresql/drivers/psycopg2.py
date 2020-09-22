@@ -179,9 +179,45 @@ class Psycopg2Driver(MemoryViewBlobDriverMixin,
         If you execute a multiple statement or function that commits,
         *you must immediately* call this method.
         """
-        # Sadly we can't do anything except commit. The .status
-        # variable is untouchable
-        self.commit(conn)
+        # Sadly we can't do anything except commit (or rollback; it
+        # has the same issue). The .status variable is untouchable.
+        # This generates a notice from the server and presumably
+        # undesired database round trips. Sigh.
+        #
+        #   WARNING:  there is no transaction in progress\n
+        #
+        # So we attempt to filter it here to prevent logging it. This is the one place
+        # we expect to generate it. Coming from anywhere else, it needs looked into.
+        conn.notices = _FilteredNotices(conn.notices)
+        try:
+            self.commit(conn)
+        finally:
+            conn.notices = conn.notices.notices
+
+
+class _FilteredNotices(object):
+
+    __slots__ = ('notices',)
+
+    def __init__(self, notices):
+        # notices could be None
+        self.notices = notices
+
+    def __len__(self):
+        return len(self.notices or ())
+
+    def append(self, msg):
+        if msg != 'WARNING:  there is no transaction in progress\n':
+            print("append", repr(msg))
+            if self.notices is None:
+                self.notices = []
+            self.notices.append(msg)
+
+    def __delitem__(self, ix):
+        del self.notices[ix]
+
+    def __iter__(self):
+        return iter(self.notices or ())
 
 
 @implementer(IDBDriverSupportsCritical)

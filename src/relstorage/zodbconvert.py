@@ -24,6 +24,8 @@ from io import StringIO
 
 import ZConfig
 from persistent.timestamp import TimeStamp
+
+from ZODB import loglevels
 from ZODB.utils import p64
 from ZODB.utils import readable_tid_repr
 from ZODB.utils import u64
@@ -100,19 +102,26 @@ def main(argv=None):
              "and resume copying from the last transaction. WARNING: no "
              "effort is made to verify that the destination holds the same "
              "transaction data before this point! Use at your own risk. ")
-    parser.add_argument(
-        '--debug', dest="debug", action='store_true',
-        default=False,
-        help="Set the logging level to DEBUG instead of the default of "
-             "INFO."
+    log_group = parser.add_mutually_exclusive_group()
+    log_group.add_argument(
+        '--debug', dest="log_level", action='store_const',
+        const=logging.DEBUG,
+        default=logging.INFO,
+        help="Set the logging level to DEBUG instead of the default of INFO."
+    )
+    log_group.add_argument(
+        '--trace', dest="log_level", action='store_const',
+        const=loglevels.TRACE,
+        default=logging.INFO,
+        help="Set the logging level to TRACE instead of the default of INFO."
     )
     parser.add_argument("config_file", type=argparse.FileType('r'))
 
     options = parser.parse_args(argv[1:])
 
     logging.basicConfig(
-        level=logging.DEBUG if options.debug else logging.INFO,
-        format="%(asctime)s [%(name)s] %(levelname)s %(message)s"
+        level=options.log_level,
+        format="%(asctime)s [%(name)s] %(levelname)-6s %(message)s"
     )
 
     source, destination = open_storages(options)

@@ -83,6 +83,13 @@ MAC = sys.platform.startswith('darwin')
 
 try:
     # Python 3.3+ (PEP 418)
+
+    # The value (in fractional seconds) of a performance counter, i.e.
+    # a clock with the highest available resolution to measure a short
+    # duration. It does include time elapsed during sleep and is
+    # system-wide. The reference point of the returned value is
+    # undefined, so that only the difference between the results of
+    # consecutive calls is valid.
     from time import perf_counter
 except ImportError:
     import time
