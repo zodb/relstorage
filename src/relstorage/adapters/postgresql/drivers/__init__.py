@@ -81,7 +81,6 @@ class AbstractPostgreSQLDriver(AbstractModuleDriver):
                 notices = [d[b'M'] for d in notices]
                 conn.notices.clear()
             else:
-                notices = list(notices)
                 del conn.notices[:]
         return notices
 

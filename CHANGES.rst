@@ -5,7 +5,15 @@
 3.3.3 (unreleased)
 ==================
 
-- Nothing changed yet.
+- Improve the logging of ``zodbconvert``. The regular minute logging
+  contains more information and takes blob sizes into account, and
+  debug logging is more useful, logging about four times a minute.
+  Some extraneous logging was bumped down to trace.
+
+- Fix psycopg2 logging debug-level warnings from the PostgreSQL server
+  on transaction commit about not actually being in a transaction.
+  (Sadly this just squashes the warning, it doesn't eliminate the
+  round trip that generates it.)
 
 
 3.3.2 (2020-09-21)
