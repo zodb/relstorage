@@ -93,34 +93,45 @@ class RowBatcher(object):
         )
 
     def _flush_if_needed(self):
+        """
+        Return the number of rows updated.
+        """
         if self.rows_added >= self.row_limit:
             return self.flush()
         if self.bind_limit and self.bind_params_added >= self.bind_limit:
             return self.flush()
         if self.size_added >= self.size_limit:
             return self.flush()
+        return 0
 
     def _flush_if_would_exceed_bind(self, addition):
         # The bind limit is a hard limit we cannot exceed.
         # If adding *addition* params would cause us to exceed,
         # flush now.
         if self.bind_limit and self.bind_params_added + addition >= self.bind_limit:
-            self.flush()
-            return True
+            return self.flush() or True # This should always be at least one, right?
+        return 0
 
     def delete_from(self, table, **kw):
+        """
+        Returns the number of rows flushed as a result of this operation.
+        That can include inserts.
+        """
+        # XXX: When deleting a lot from a single table, a bulk function
+        # might be a lot faster.
         if not kw:
             raise AssertionError("Need at least one column value")
         columns = tuple(sorted(kw))
         key = (table, columns)
         row = tuple(kw[column] for column in columns)
         bind_params_added = len(row) if key not in self.deletes[key] else 0
-        self._flush_if_would_exceed_bind(bind_params_added)
+        count = self._flush_if_would_exceed_bind(bind_params_added)
 
         self.deletes[key].add(row)
         self.rows_added += 1
         self.bind_params_added += bind_params_added
-        self._flush_if_needed()
+        count += self._flush_if_needed()
+        return count
 
     def insert_into(self, header, row_schema, row, rowkey, size,
                     command='INSERT', suffix=''):
@@ -205,17 +216,28 @@ class RowBatcher(object):
                 raise AggregateOperationTimeoutError
 
     def flush(self):
+        """
+        Return the tetal number of rows deleted or inserted in this operation.
+        (This is the number requested, in the case of deletes, not the number
+        that actually matched.)
+
+        This can be treated as a boolean to discover if anything was flushed.
+        """
+        count = 0
         if self.deletes:
-            self.total_rows_deleted += self._do_deletes()
+            count += self._do_deletes()
+            self.total_rows_deleted += count
             self.deletes.clear()
         if self.inserts:
-            self.total_rows_inserted += self._do_inserts()
+            count += self._do_inserts()
+            self.total_rows_inserted += count
             self.inserts.clear()
         self.total_size_inserted += self.size_added
 
         self.rows_added = 0
         self.size_added = 0
         self.bind_params_added = 0
+        return count
 
     def _do_deletes(self):
         return self._do_batch('DELETE', sorted(iteritems(self.deletes)))

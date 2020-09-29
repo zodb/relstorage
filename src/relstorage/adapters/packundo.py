@@ -15,6 +15,7 @@
 """
 from __future__ import absolute_import
 from __future__ import print_function
+from __future__ import division
 
 import logging
 from contextlib import contextmanager
@@ -33,6 +34,7 @@ from ..treemark import TreeMarker
 
 from .schema import Schema
 from .connections import LoadConnection
+from .connections import StoreConnection
 from .connections import PrePackConnection
 from .interfaces import IPackUndo
 from ._util import DatabaseHelpersMixin
@@ -101,12 +103,15 @@ class PackUndo(DatabaseHelpersMixin):
         # enter it, then when we try to set values on it, we're setting them on the
         # generator, not the actual cursor, meaning it does no good.
         with load_connection.server_side_cursor() as ss_load_cursor:
-            ss_load_cursor.arraysize = self.cursor_arraysize
-            try:
-                ss_load_cursor.itersize = self.cursor_arraysize
-            except AttributeError:
-                pass
-            yield ss_load_cursor
+            yield self._set_cursor_sizes(ss_load_cursor)
+
+    def _set_cursor_sizes(self, cursor):
+        cursor.arraysize = self.cursor_arraysize
+        try:
+            cursor.itersize = self.cursor_arraysize
+        except AttributeError:
+            pass
+        return cursor
 
     # Subclasses (notably Oracle) can define this to provide hints
     # that affect graph traversal.
@@ -1445,6 +1450,23 @@ class HistoryFreePackUndo(PackUndo):
         # return None here
         return None
 
+    __find_zoid_to_delete_query = Schema.pack_object.select(
+        it.c.zoid
+    ).where(
+        it.c.keep == False # pylint:disable=singleton-comparison
+    ).order_by(
+        it.c.zoid
+    )
+
+    # This query is used to feed ``packed_func``, which is used
+    # to normalize the local cache.
+    __find_zoid_tid_to_delete_query = Schema.pack_object.select(
+        it.c.zoid, it.c.keep_tid
+    ).where(
+        it.c.keep == False # pylint:disable=singleton-comparison
+    ).order_by(
+        it.c.zoid
+    )
 
     @metricmethod
     def pack(self, pack_tid, packed_func=None):
@@ -1454,7 +1476,7 @@ class HistoryFreePackUndo(PackUndo):
         """
         # pylint:disable=too-many-locals
         # Read committed mode is sufficient.
-        conn, cursor = self.connmanager.open_for_store()
+        store_connection = StoreConnection(self.connmanager)
         try: # pylint:disable=too-many-nested-blocks
             try:
                 # On PostgreSQL, this uses the index
@@ -1466,85 +1488,110 @@ class HistoryFreePackUndo(PackUndo):
                 #
                 # Attempting to join these results against the
                 # object_state table and do the delete in one shot
-                # (60MM rows, half garbage) is taking 18 hours (and
-                # counting) against a remote PostgreSQL database, the
+                # (60MM rows, half garbage) took more than 24 hours
+                # against a remote PostgreSQL database (before I killed it), the
                 # same one that ran the above query in 40s. It appears
                 # to spend a lot of time checkpointing (each
                 # checkpoint takes an hour!) Even on a faster
                 # database, that's unlikely to be suitable for production.
-                stmt = """
-                SELECT zoid, keep_tid
-                FROM pack_object
-                WHERE keep = %(FALSE)s
-                ORDER BY zoid
-                """
-                self.runner.run_script_stmt(cursor, stmt)
-                to_remove = list(cursor)
+                #
+                # Breaking it into chunks, as below, took about an hour.
+                logger.debug("pack: Fetching objects to remove.")
+                with self._make_ss_load_cursor(store_connection) as cursor:
+                    with _Progress('execute') as progress:
+                        self.__find_zoid_to_delete_query.execute(cursor)
+                        progress.mark('download')
+                        to_remove = OidList(row[0] for row in cursor)
+                        # On postgres, with a regular cursor, fetching 32,502,545 objects to remove
+                        # took 56.7s (execute: 50.8s; download 5.8s; memory delta 1474.82 MB);
+                        # The second time took half of that.
+                        # Switching to a server side cursor brought that to
+                        # fetched 32,502,545 objects to remove in
+                        # 41.74s (execute: 0.00s; download 41.74s; memory delta 257.21 MB)
 
                 total = len(to_remove)
+                logger.debug(
+                    "pack: fetched %d objects to remove in %.2fs "
+                    "(execute: %.2fs; download %.2fs; memory delta %s)",
+                    total,
+                    progress.duration,
+                    progress.phase_duration('execute'),
+                    progress.phase_duration('download'),
+                    progress.total_memory_delta_display,
+                )
+
                 logger.info("pack: will remove %d object(s)", total)
 
-                # Hold the commit lock while packing to prevent deadlocks.
-                # Pack in small batches of transactions only after we are able
-                # to obtain a commit lock in order to minimize the
-                # interruption of concurrent write operations.
+                # We used to hold the commit lock and do this in small batches,
+                # but that's not important any longer since RelStorage 3.0
                 start = perf_counter()
-                packed_list = []
-                # We'll report on progress in at most .1% step increments
-                lastreport, reportstep = 0, max(total / 1000, 1)
 
-                while to_remove:
-                    # TODO: Use the row batcher for this,
-                    # or simply do a join against the table.
-                    items = to_remove[:100]
-                    del to_remove[:100]
-                    # XXX: History free. We shouldn't need to include the TID,
-                    # but that's probably there to protect against concurrent modification
-                    # of the object. With our row-level locking in 3.0 this may not strictly be
-                    # necessary?
-                    stmt = """
-                    DELETE FROM object_state
-                    WHERE zoid = %s AND tid = %s
-                    """
-                    self.runner.run_many(cursor, stmt, items)
-                    packed_list.extend(items)
+                store_batcher = self.locker.make_batcher(store_connection.cursor)
+                store_batcher.row_limit = max(store_batcher.row_limit, 4096)
+                removed = 0
 
-                    if perf_counter() >= start + self.options.pack_batch_timeout:
-                        self.connmanager.commit(conn, cursor)
-                        if packed_func is not None:
-                            for oid, tid in packed_list:
-                                packed_func(oid, tid)
-                        del packed_list[:]
-                        counter = total - len(to_remove)
-                        if counter >= lastreport + reportstep:
+                def maybe_commit_and_report(force=False):
+                    """Returns the time of the last log."""
+                    now = perf_counter()
+                    if force or now >= start + self.options.pack_batch_timeout:
+                        store_connection.commit()
+                        if removed and total:
+                            # XXX: storage.copy has a progress logger that could
+                            # easily be generalized to this, and do a better job.
                             logger.info("pack: removed %d (%.1f%%) state(s)",
-                                        counter, counter / float(total) * 100)
-                            lastreport = counter / reportstep * reportstep
-                        start = perf_counter()
+                                        removed, removed / total * 100)
+                        else:
+                            logger.info("pack: No objects to remove")
+                        return now
+                    return start
+
+                for oid in to_remove:
+                    # In the past, we used to include the TID in the delete statement,
+                    # but that shouldn't be necessary in a history-free database. It might have been
+                    # there to protect against object resurrection, but that's an application bug.
+                    # This way is faster and lets us take advantage of fast ANY row batching.
+                    removed += store_batcher.delete_from('object_state', zoid=oid)
+
+                    start = maybe_commit_and_report()
+
+                removed += store_batcher.flush()
+                maybe_commit_and_report(True)
+
+                to_remove = None # Drop memory usage
 
                 if packed_func is not None:
-                    for oid, tid in packed_list:
-                        packed_func(oid, tid)
-                packed_list = None
+                    logger.debug("pack: Passing removed objects and tids to %s.", packed_func)
+                    with self._make_ss_load_cursor(store_connection) as cursor:
+                        with _Progress('execute') as progress:
+                            self.__find_zoid_tid_to_delete_query.execute(cursor)
+                            progress.mark('iterate and call')
+                            for oid, tid in cursor:
+                                packed_func(oid, tid)
+                    logger.debug(
+                        "pack: Passed %d objects to to function in %.2fs "
+                        "(execute: %.2fs; iterate/call %.2fs; memory delta %s)",
+                        total,
+                        progress.duration,
+                        progress.phase_duration('execute'),
+                        progress.phase_duration('iterate and call'),
+                        progress.total_memory_delta_display,
+                    )
 
-                self._pack_cleanup(conn, cursor)
+                self._pack_cleanup(store_connection)
 
             except:
                 logger.exception("pack: failed")
-                self.connmanager.rollback_quietly(conn, cursor)
+                store_connection.rollback_quietly()
                 raise
 
             else:
                 logger.info("pack: finished successfully")
-                self.connmanager.commit(conn, cursor)
+                store_connection.commit()
         finally:
-            self.connmanager.close(conn, cursor)
+            store_connection.drop()
 
-
-    def _pack_cleanup(self, conn, cursor):
-        # commit the work done so far
-        self.connmanager.commit(conn, cursor)
-        self.locker.release_commit_lock(cursor)
+    def _pack_cleanup(self, store_connection):
+        # The work done so far must already be committed
         logger.info("pack: cleaning up")
 
         # This section does not need to hold the commit lock, as it only
@@ -1569,4 +1616,46 @@ class HistoryFreePackUndo(PackUndo):
 
         %(TRUNCATE)s pack_object
         """
-        self.runner.run_script(cursor, stmt)
+        self.runner.run_script(store_connection.cursor, stmt)
+
+
+class _Progress(object):
+
+    def __init__(self, name):
+        self.marks = [[
+            name,
+            -1, # Replaced in __enter__
+            get_memory_usage()
+        ]]
+
+    def __enter__(self):
+        self.marks[0][1] = perf_counter()
+        return self
+
+    def __exit__(self, t, v, tb):
+        self.mark('COMPLETE')
+
+    def mark(self, name):
+        self.marks.append((
+            name,
+            perf_counter(),
+            get_memory_usage()
+        ))
+
+    def phase_duration(self, name):
+        for i, mark in enumerate(self.marks):
+            phase_name, _, _ = mark
+            if name == phase_name:
+                _, begin, _ = mark
+                _, end, _ = self.marks[i + 1]
+                return end - begin
+
+    @property
+    def duration(self):
+        return self.marks[-1][1] - self.marks[0][1]
+
+    @property
+    def total_memory_delta_display(self):
+        return byte_display(
+            self.marks[-1][2] - self.marks[0][2]
+        )
