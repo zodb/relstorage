@@ -70,11 +70,6 @@ class _Sqlite3UpsertCompiler(DefaultCompiler):
             quoted = True
         super(_Sqlite3UpsertCompiler, self).emit_identifier(identifier, quoted)
 
-    if not SQ3_SUPPORTS_BOOL_KW:
-        def visit_boolean_literal_expression(self, value):
-            assert isinstance(value, bool)
-            self.emit('1' if value else '0')
-
     def _placeholder(self, key):
         if key == '?':
             return key
@@ -141,3 +136,8 @@ class Sqlite3Dialect(DefaultDialect):
 
     def compiler_class(self):
         return SqliteCompiler
+
+    if not SQ3_SUPPORTS_BOOL_KW:
+        def boolean_str(self, value):
+            assert isinstance(value, bool)
+            return '1' if value else '0'

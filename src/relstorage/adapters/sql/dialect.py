@@ -45,6 +45,9 @@ class DefaultDialect(object):
     STMT_TABLE_TRAILER = ''
     STMT_IF_NOT_EXISTS = ''
 
+    def boolean_str(self, value):
+        return str(value).upper()
+
     def bind(self, context):
         # The context will reference us most likely
         # (compiled statement in instance dictionary)
@@ -396,12 +399,17 @@ class Compiler(object):
             placeholder = self._placeholder_for_literal_param_value(value)
             self.emit(placeholder)
 
-    def visit_boolean_literal_expression(self, value):
+    def emit_boolean(self, value):
         # In the oracle dialect, this needs to be
         # either "'Y'" or "'N'". sqlite supports only 1 and 0,
         # prior to certain versions.
         assert isinstance(value, bool)
-        self.emit(str(value).upper())
+        value = self.dialect.boolean_str(value)
+
+        self.emit(value)
+
+    def visit_boolean_literal_expression(self, value):
+        self.emit_boolean(value)
 
     def visit_immediate_expression(self, value):
         # Like a literal, but never uses a placeholder.

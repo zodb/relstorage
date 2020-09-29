@@ -17,13 +17,14 @@ from __future__ import absolute_import
 from __future__ import print_function
 
 import logging
-import time
+from contextlib import contextmanager
 
 from ZODB.POSException import UndoError
 from ZODB.utils import u64
 from zope.interface import implementer
 
 from .._compat import metricmethod
+from .._compat import perf_counter
 from .._compat import OidList
 from .._util import byte_display
 from .._util import get_memory_usage
@@ -56,7 +57,7 @@ class PackUndo(DatabaseHelpersMixin):
     locker = None
     options = None
 
-    cursor_arraysize = 10000
+    cursor_arraysize = 4096
 
     def __init__(self, database_driver, connmanager, runner, locker, options):
         self.driver = database_driver
@@ -94,14 +95,18 @@ class PackUndo(DatabaseHelpersMixin):
         finally:
             self.connmanager.close(conn, cursor)
 
+    @contextmanager
     def _make_ss_load_cursor(self, load_connection):
-        ss_load_cursor = load_connection.server_side_cursor()
-        ss_load_cursor.arraysize = self.cursor_arraysize
-        try:
-            ss_load_cursor.itersize = self.cursor_arraysize
-        except AttributeError:
-            pass
-        return ss_load_cursor
+        # server_side_cursor() is a generator function. If we just call it and don't
+        # enter it, then when we try to set values on it, we're setting them on the
+        # generator, not the actual cursor, meaning it does no good.
+        with load_connection.server_side_cursor() as ss_load_cursor:
+            ss_load_cursor.arraysize = self.cursor_arraysize
+            try:
+                ss_load_cursor.itersize = self.cursor_arraysize
+            except AttributeError:
+                pass
+            yield ss_load_cursor
 
     # Subclasses (notably Oracle) can define this to provide hints
     # that affect graph traversal.
@@ -152,7 +157,7 @@ class PackUndo(DatabaseHelpersMixin):
         # *think* that ``pack_object.keep_tid`` is always going to be equal to
         # ``object_ref.tid``. We may get better behaviour if we join
         # against that table here
-        with load_connection.server_side_cursor() as ss_load_cursor:
+        with self._make_ss_load_cursor(load_connection) as ss_load_cursor:
             stmt = """
             SELECT {}
                 zoid, object_ref.to_zoid
@@ -164,6 +169,8 @@ class PackUndo(DatabaseHelpersMixin):
             ss_load_cursor.execute(stmt)
 
             while True:
+                # XXX: Why are we not just iterating the cursor?
+                # Does add_refs need an iterable (iterate many times?)
                 rows = ss_load_cursor.fetchmany(self.cursor_arraysize)
                 if not rows:
                     break
@@ -191,18 +198,16 @@ class PackUndo(DatabaseHelpersMixin):
         # in the DB, it will just take more queries and some temp tables.
         logger.info("pre_pack: traversing the object graph "
                     "to find reachable objects.")
-        with load_connection.server_side_cursor() as ss_load_cursor:
+        with self._make_ss_load_cursor(load_connection) as ss_load_cursor:
             stmt = """
             SELECT zoid
             FROM pack_object
             WHERE keep = %(TRUE)s
             """
             self.runner.run_script_stmt(ss_load_cursor, stmt)
-            while True:
-                rows = ss_load_cursor.fetchmany(self.cursor_arraysize)
-                if not rows:
-                    break
-                marker.mark(oid for (oid,) in rows)
+            # XXX: This used to use a loop around fetchmany(), but
+            # that shouldn't be needed with server-side cursor.
+            marker.mark(oid for (oid,) in ss_load_cursor)
 
         marker.free_refs()
 
@@ -532,7 +537,7 @@ class HistoryPreservingPackUndo(PackUndo):
             """
             self.runner.run_script_stmt(ss_load_cursor, stmt)
             tids = OidList((tid for (tid,) in ss_load_cursor))
-        log_at = time.time() + 60
+        log_at = perf_counter() + 60
         tid_count = len(tids)
         txns_done = 0
         self.on_filling_object_refs_added(tids=tids)
@@ -542,7 +547,7 @@ class HistoryPreservingPackUndo(PackUndo):
         for tid in tids:
             self._add_refs_for_tid(load_connection, store_connection, tid, get_references)
             txns_done += 1
-            now = time.time()
+            now = perf_counter()
             if now >= log_at:
                 # save the work done so far
                 store_connection.commit()
@@ -911,7 +916,7 @@ class HistoryPreservingPackUndo(PackUndo):
                 # Pack in small batches of transactions only after we are able
                 # to obtain a commit lock in order to minimize the
                 # interruption of concurrent write operations.
-                start = time.time()
+                start = perf_counter()
                 packed_list = []
                 counter, lastreport, statecounter = 0, 0, 0
                 # We'll report on progress in at most .1% step increments
@@ -922,7 +927,7 @@ class HistoryPreservingPackUndo(PackUndo):
                         cursor, pack_tid, tid, packed, has_removable,
                         packed_list)
                     counter += 1
-                    if time.time() >= start + self.options.pack_batch_timeout:
+                    if perf_counter() >= start + self.options.pack_batch_timeout:
                         self.connmanager.commit(conn, cursor)
                         if packed_func is not None:
                             for poid, ptid in packed_list:
@@ -935,7 +940,7 @@ class HistoryPreservingPackUndo(PackUndo):
                                         statecounter)
                             lastreport = counter / reportstep * reportstep
                         del packed_list[:]
-                        start = time.time()
+                        start = perf_counter()
                 if packed_func is not None:
                     for oid, tid in packed_list:
                         packed_func(oid, tid)
@@ -1058,13 +1063,13 @@ class HistoryFreePackUndo(PackUndo):
 
     # How often, in seconds, to commit work in progress.
     # This is a variable here for testing.
-    fill_object_refs_commit_frequency = 60
+    fill_object_refs_commit_frequency = 120
 
     # How many object states to find references in at any one time.
     # This is a control on the amount of memory used by the Python
     # process during packing, especially if the database driver
     # doesn't use server-side cursors.
-    fill_object_refs_batch_size = 100
+    fill_object_refs_batch_size = 1024
 
     _choose_pack_transaction_query = Schema.object_state.select(
         it.c.tid
@@ -1092,7 +1097,7 @@ class HistoryFreePackUndo(PackUndo):
     and tid = %(tid)s
     """
 
-    def on_fill_object_ref_batch(self, oid_batch, refs_found):
+    def on_fill_object_ref_batch(self, oid_batch, num_refs_found):
         """Hook for testing."""
 
     def verify_undoable(self, cursor, undo_tid):
@@ -1128,7 +1133,10 @@ class HistoryFreePackUndo(PackUndo):
         # Recall pre_pack can be run many times.
         # Ordering should be immaterial as we are in a read-only snapshot view
         # of the database; we shouldn't run into locking issues with other
-        # transactions.
+        # transactions. However, if objects are stored by OID on disk, which
+        # is likely, then ordering by OID may reduce the total amount of disk seeks
+        # done; however it makes this initial query much slower, so we
+        # do it in Python.
         with self._make_ss_load_cursor(load_connection) as ss_load_cursor:
             stmt = """
             SELECT zoid
@@ -1141,14 +1149,36 @@ class HistoryFreePackUndo(PackUndo):
             """
             ss_load_cursor.execute(stmt)
             logger.debug(
-                "pre_pack: Selected objects to examine (memory delta: %s)",
+                "pre_pack: Queried objects to examine (memory delta: %s)",
                 byte_display(get_memory_usage() - mem_begin)
             )
 
+            download_begin = perf_counter()
             oids = OidList((row[0] for row in ss_load_cursor))
+            sort_begin = perf_counter()
+            try:
+                # If we're using a list.
+                oids.sort()
+            except AttributeError:
+                oids = OidList(sorted(oids))
+            # If we're storing in an array.array, going to/from the list
+            # and doing the sort of 30MM rows takes 16s on my machine; given that the query
+            # itself takes 4 minutes (but much longer than that if
+            # we do it on the server; are indexes missing?), that's fine.
+            logger.debug(
+                "pre_pack: Downloaded objects to examine "
+                "(memory delta: %s; download time: %ss; sort time %ss)",
+                byte_display(get_memory_usage() - mem_begin),
+                sort_begin - download_begin, perf_counter() - sort_begin
+            )
 
-        log_at = time.time() + self.fill_object_refs_commit_frequency
+        log_at = perf_counter() + self.fill_object_refs_commit_frequency
         self.on_filling_object_refs_added(oids=oids)
+
+        load_batcher = self.locker.make_batcher(load_connection.cursor)
+        load_batcher.row_limit = self.fill_object_refs_batch_size
+        store_batcher = self.locker.make_batcher(store_connection.cursor)
+        store_batcher.row_limit = max(store_batcher.row_limit, 4096)
 
         oid_count = len(oids)
         oids_done = 0
@@ -1157,6 +1187,7 @@ class HistoryFreePackUndo(PackUndo):
         # server-side cursor on mysqlclient, the SELECT takes
         # negligible time and memory; transforming into the
         # array.array and pulling rows takes 5 minutes and a total of
+
         # 231MB with a batch size of 1024; that's about the resident
         # size of the process, too. Using a fetch size of 10000 didn't reduce
         # the time substantially though curiously it did report just 165.9MB
@@ -1201,47 +1232,80 @@ class HistoryFreePackUndo(PackUndo):
             batch = oids[oids_done:oids_done + self.fill_object_refs_batch_size]
             oids_done += len(batch)
 
-            refs_found = self._add_refs_for_oids(load_connection, store_connection,
+            refs_found = self._add_refs_for_oids(load_batcher, store_batcher,
                                                  batch, get_references)
-            num_refs_found += len(refs_found)
-            self.on_fill_object_ref_batch(oid_batch=batch, refs_found=refs_found)
+            num_refs_found += refs_found
+            self.on_fill_object_ref_batch(oid_batch=batch, num_refs_found=refs_found)
+            refs_found = None # release memory
 
-            now = time.time()
+            now = perf_counter()
             if now >= log_at:
                 # Save the work done so far.
+                store_batcher.flush()
                 store_connection.commit()
                 log_at = now + self.fill_object_refs_commit_frequency
                 logger.info(
                     "pre_pack: objects analyzed: %d/%d (%d total references)",
                     oids_done, oid_count, num_refs_found)
         # Those 30MM objects wound up with about 48,976,835 references.
+        store_batcher.flush()
         store_connection.commit()
         logger.info(
             "pre_pack: objects analyzed: %d/%d", oids_done, oid_count)
 
-    def _add_refs_for_oids(self, load_connection, store_connection,
+    def _add_refs_for_oids(self, load_batcher, store_batcher,
                            oids, get_references):
-        """Fill object_refs with the states for some objects.
+        """
+        Fill object_refs with the states for some objects.
 
         Returns the number of references added.
         """
-        # TODO: Use the row batcher's SELECT FROM
-        load_cursor = load_connection.cursor
-        oid_list = ','.join(str(oid) for oid in oids)
-        stmt = """
-            SELECT zoid, tid, state
-            FROM object_state
-            WHERE zoid IN (%s)
-            ORDER BY zoid
-            """ % oid_list
-        self.runner.run_script_stmt(load_cursor, stmt)
+        # oids should be a slice of an ``OidList``, which may be an
+        # ``array.array``; those are relatively slow to iterate.
 
-        add_objects = []
-        add_refs = []
+        # The batcher always does deletes before inserts, which is
+        # exactly what we want.
+        # In the past, we performed all deletes and then all inserts;
+        # now, things to batching, they could be interleaved, but
+        # because we process OID-by-OID, that should be fine.
+        # In the past, we also DELETED from object_refs_added and object_ref
+        # everything found in the ``oids`` parameter; now we only do a delete if
+        # we get back a row from object_state; again, that shouldn't matter, rows
+        # should be found in object_state.
+        object_ref_schema = store_batcher.row_schema_of_length(3)
+        object_refs_added_schema = store_batcher.row_schema_of_length(2)
 
-        for from_oid, tid, state in load_cursor:
+        # Use the batcher to get efficient ``= ANY()``
+        # queries, but go ahead and collect into a list at once
+        rows = list(load_batcher.select_from(
+            ('zoid', 'tid', 'state'),
+            'object_state',
+            suffix=' ORDER BY zoid ',
+            zoid=oids
+        ))
+
+        num_refs_found = 0
+
+        for from_oid, tid, state in rows:
             state = self.driver.binary_column_as_state_type(state)
-            add_objects.append((from_oid, tid))
+            row = (from_oid, tid)
+
+            store_batcher.insert_into(
+                'object_refs_added (zoid, tid)',
+                object_refs_added_schema,
+                row,
+                row,
+                size=2
+            )
+            store_batcher.delete_from(
+                'object_refs_added',
+                zoid=from_oid
+            )
+            store_batcher.delete_from(
+                'object_ref',
+                zoid=from_oid
+            )
+
             if state:
                 try:
                     to_oids = get_references(state)
@@ -1252,30 +1316,19 @@ class HistoryFreePackUndo(PackUndo):
                         from_oid, tid, len(state)
                     )
                     raise
+
                 for to_oid in to_oids:
-                    add_refs.append((from_oid, tid, to_oid))
-        if not add_objects:
-            assert not add_refs
-            return add_refs
+                    row = (from_oid, tid, to_oid)
+                    num_refs_found += 1
+                    store_batcher.insert_into(
+                        'object_ref (zoid, tid, to_zoid)',
+                        object_ref_schema,
+                        row,
+                        row,
+                        size=3
+                    )
 
-        # TODO: RowBatcher for all of these
-        store_cursor = store_connection.cursor
-        stmt = "DELETE FROM object_refs_added WHERE zoid IN (%s)" % oid_list
-        self.runner.run_script_stmt(store_cursor, stmt)
-        stmt = "DELETE FROM object_ref WHERE zoid IN (%s)" % oid_list
-        self.runner.run_script_stmt(store_cursor, stmt)
-
-        stmt = """
-        INSERT INTO object_ref (zoid, tid, to_zoid) VALUES (%s, %s, %s)
-        """
-        self.runner.run_many(store_cursor, stmt, add_refs)
-
-        stmt = """
-        INSERT INTO object_refs_added (zoid, tid) VALUES (%s, %s)
-        """
-        self.runner.run_many(store_cursor, stmt, add_objects)
-
-        return add_refs
+        return num_refs_found
 
     @metricmethod
     def pre_pack(self, pack_tid, get_references):
@@ -1358,7 +1411,8 @@ class HistoryFreePackUndo(PackUndo):
         # TEMPORARY TABLE AS' takes 173s; doing 'CREATE TABLE AS'
         # takes 277s.
         #
-        # On PostgreSQL we could use unlogged tables.
+        # On PostgreSQL we could use unlogged tables; this is somewhat faster
+        # in some tests (15 minutes vs 12?)
         logger.info("pre_pack: filling the pack_object table")
         stmt = """
         %(TRUNCATE)s pack_object;
@@ -1403,6 +1457,21 @@ class HistoryFreePackUndo(PackUndo):
         conn, cursor = self.connmanager.open_for_store()
         try: # pylint:disable=too-many-nested-blocks
             try:
+                # On PostgreSQL, this uses the index
+                # ``pack_object_keep_false`` So if there's lots of
+                # garbage, this only touches a small part of the table
+                # and is surprisingly fast (it doesn't even need to
+                # sort); between 40s (cached) and 2 minutes (uncached)
+                # on a pack_object containing 60MM rows.
+                #
+                # Attempting to join these results against the
+                # object_state table and do the delete in one shot
+                # (60MM rows, half garbage) is taking 18 hours (and
+                # counting) against a remote PostgreSQL database, the
+                # same one that ran the above query in 40s. It appears
+                # to spend a lot of time checkpointing (each
+                # checkpoint takes an hour!) Even on a faster
+                # database, that's unlikely to be suitable for production.
                 stmt = """
                 SELECT zoid, keep_tid
                 FROM pack_object
@@ -1419,7 +1488,7 @@ class HistoryFreePackUndo(PackUndo):
                 # Pack in small batches of transactions only after we are able
                 # to obtain a commit lock in order to minimize the
                 # interruption of concurrent write operations.
-                start = time.time()
+                start = perf_counter()
                 packed_list = []
                 # We'll report on progress in at most .1% step increments
                 lastreport, reportstep = 0, max(total / 1000, 1)
@@ -1440,7 +1509,7 @@ class HistoryFreePackUndo(PackUndo):
                     self.runner.run_many(cursor, stmt, items)
                     packed_list.extend(items)
 
-                    if time.time() >= start + self.options.pack_batch_timeout:
+                    if perf_counter() >= start + self.options.pack_batch_timeout:
                         self.connmanager.commit(conn, cursor)
                         if packed_func is not None:
                             for oid, tid in packed_list:
@@ -1451,7 +1520,7 @@ class HistoryFreePackUndo(PackUndo):
                             logger.info("pack: removed %d (%.1f%%) state(s)",
                                         counter, counter / float(total) * 100)
                             lastreport = counter / reportstep * reportstep
-                        start = time.time()
+                        start = perf_counter()
 
                 if packed_func is not None:
                     for oid, tid in packed_list:

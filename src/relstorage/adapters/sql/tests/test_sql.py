@@ -198,11 +198,11 @@ class TestTableSelect(TestCase):
             'USING (tid, zoid) WHERE (zoid = %(oid)s)'
         )
 
-        class H(object):
+        class HistoryFree(object):
             keep_history = False
             dialect = DefaultDialect()
 
-        stmt = stmt.bind(H())
+        stmt = stmt.bind(HistoryFree())
 
         self.assertEqual(
             str(stmt),
@@ -383,6 +383,24 @@ class TestTableSelect(TestCase):
             str(stmt),
             'SELECT tid FROM transaction WHERE (packed = FALSE) ORDER BY tid DESC'
         )
+
+        # Now bound to something that uses different values for TRUE and FALSE
+        class Dialect(DefaultDialect):
+            def boolean_str(self, value):
+                sql = "'Y'" if value else "'N'"
+                return sql
+
+        class Context(object):
+            keep_history = False
+            dialect = Dialect()
+
+        stmt = stmt.bind(Context())
+
+        self.assertEqual(
+            str(stmt),
+            "SELECT tid FROM transaction WHERE (packed = 'N') ORDER BY tid DESC"
+        )
+
 
     def test_literal_in_select(self):
         stmt = current_object.select(

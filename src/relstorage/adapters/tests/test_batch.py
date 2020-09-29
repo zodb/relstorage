@@ -191,7 +191,7 @@ class RowBatcherTests(TestCase):
             cursor.executed,
             [(
                 'INSERT INTO mytable (id, name) VALUES\n'
-                '(%s, id || %s),\n'
+                '(%s, id || %s), '
                 '(%s, id || %s)\n',
                 (1, 'a', 2, 'B'))
             ])
@@ -221,14 +221,16 @@ class RowBatcherTests(TestCase):
             rowkey=2,
             size=5,
             )
+        self.assertLength(cursor.executed, 1)
         self.assertEqual(
-            cursor.executed,
-            [(
-                'INSERT INTO mytable (id, name) VALUES\n'
-                '(%s, id || %s),\n'
-                '(%s, id || %s)\n',
-                (1, 'a', 2, 'B'))
-            ])
+            cursor.executed[0][0],
+            'INSERT INTO mytable (id, name) VALUES\n'
+            '(%s, id || %s), '
+            '(%s, id || %s)\n')
+        self.assertEqual(
+            cursor.executed[0][1],
+            (1, 'a', 2, 'B')
+            )
         self.assertEqual(batcher.rows_added, 0)
         self.assertEqual(batcher.size_added, 0)
         self.assertEqual(batcher.inserts, {})

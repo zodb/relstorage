@@ -287,7 +287,7 @@ class RowBatcher(object):
             params = list(itertools.chain.from_iterable(rows))
 
             stmt = "%s INTO %s VALUES\n%s\n%s" % (
-                command, header, ',\n'.join(values_template), suffix)
+                command, header, ', '.join(values_template), suffix)
             # e.g.,
             # INSERT INTO table(c1, c2)
             # VALUES (%s, %s), (%s, %s), (%s, %s)

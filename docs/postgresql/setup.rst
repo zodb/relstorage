@@ -36,3 +36,22 @@ PostgreSQL re-reads ``pg_hba.conf`` when you ask it to reload its
 configuration file::
 
     /etc/init.d/postgresql reload
+
+Configuration
+=============
+
+.. tip::
+
+   For packing large databases, a larger value of the PostgreSQL
+   configuration paramater ``work_mem`` is likely to yield improved
+   performance. The default is 4MB; try 16MB if packing performance is
+   unacceptable.
+
+.. tip::
+
+   For packing large databases, setting the ``pack_object``,
+   ``object_ref`` and ``object_refs_added`` tables to `UNLOGGED
+   <https://www.postgresql.org/docs/12/sql-createtable.html#SQL-CREATETABLE-UNLOGGED>`_
+   can provide a performance boost (if replication doesn't matter and
+   you don't care about the contents of these tables). This can be
+   done after the schema is created with ``ALTER TABLE table SET UNLOGGED``.

@@ -77,6 +77,13 @@ def main(argv=None):
         storage = s.open()
         logger.info("Packing %s.", name)
         if options.prepack or options.reuse_prepack:
+            # TODO: For RelStorages, add options to:
+            #
+            # - Reset the pre-pack state entirely (pack_object is always reset, but
+            #   what about object_ref and object_refs_added)?
+            # - Make the pack tables unlogged (ALTER TABLE table SET UNLOGGED on postgres.
+            #   Seems much faster?)
+            #
             storage.pack(t, ZODB.serialize.referencesf,
                          prepack_only=options.prepack,
                          skip_prepack=options.reuse_prepack)

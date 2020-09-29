@@ -190,10 +190,10 @@ class HistoryFreeTestPack(TestPackBase):
         # and we don't bother to look at it.
         expect_oids = self._create_initial_state()
 
-        def inject_changes(oid_batch, refs_found):
+        def inject_changes(oid_batch, num_refs_found):
             # We're examining the root and the first three objects
             self.assertEqual(sorted(oid_batch), sorted(self.OID_INITIAL_SET))
-            self.assertEqual(len(refs_found), 3)
+            self.assertEqual(num_refs_found, 3)
             # We're only called once: a single batch
             self.assertNotIn('D', expect_oids)
             self._mutate_state(expect_oids)
@@ -210,7 +210,7 @@ class HistoryFreeTestPack(TestPackBase):
         # We mutate just before we examine the state for the B object.
         expect_oids = self._create_initial_state()
         seen_oids = []
-        def inject_changes(oid_batch, refs_found): # pylint:disable=unused-argument
+        def inject_changes(oid_batch, num_refs_found): # pylint:disable=unused-argument
             oid_batch = list(oid_batch)
             seen_oids.extend(oid_batch)
             self.assertEqual(1, len(oid_batch))
