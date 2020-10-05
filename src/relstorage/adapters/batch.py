@@ -210,14 +210,18 @@ class RowBatcher(object):
         Rows are net expected to be returned, so the cursor is completely consumed between
         batches.
         """
-        for cursor in self.__select_like(
+        # We actually just consume the iteration of the cursor itself;
+        # we can't consume the cursor. Some drivers (pg8000) throw ProgrammingError
+        # if we try to iterate the cursor that has no rows.
+        consume(
+            self.__select_like(
                 update_set,
                 None, # table not used
                 '', # suffix not used,
                 timeout,
                 kw
-        ):
-            consume(cursor)
+        ))
+
         return self.__last_select_like_count
 
     __last_select_like_count = 0
