@@ -29,6 +29,8 @@ from .._compat import perf_counter
 from .._compat import OidList
 from .._util import byte_display
 from .._util import get_memory_usage
+from .._util import get_duration_from_environ
+from .._util import get_positive_integer_from_environ
 
 from ..treemark import TreeMarker
 
@@ -60,19 +62,28 @@ class PackUndo(DatabaseHelpersMixin):
     options = None
 
     ###
-    # Parameters.
-    # TODO: Environment variables for these. If useful, add to options.
+    # Parameters. Some are used by only history-free or history-preserving
+    # implementations.
     ###
-    cursor_arraysize = 4096
+    cursor_arraysize = get_positive_integer_from_environ('RS_PACK_CURSOR_ARRAYSIZE',
+                                                         4096)
+
+    # These are generally very small rows we're uploading (a few integers).
+    # Be generous.
+    store_batch_size = get_positive_integer_from_environ('RS_PACK_STORE_BATCH_SIZE', 4096)
+
     # How often, in seconds, to commit work in progress.
     # This is a variable here for testing.
-    fill_object_refs_commit_frequency = 120
+    fill_object_refs_commit_frequency = get_duration_from_environ('RS_PACK_COMMIT_FREQUENCY', 120)
 
     # How many object states to find references in at any one time.
     # This is a control on the amount of memory used by the Python
     # process during packing, especially if the database driver
     # doesn't use server-side cursors.
-    fill_object_refs_batch_size = 1024
+    fill_object_refs_batch_size = get_positive_integer_from_environ('RS_PACK_DOWNLOAD_BATCH_SIZE',
+                                                                    1024)
+
+
 
     def __init__(self, database_driver, connmanager, runner, locker, options):
         self.driver = database_driver
@@ -133,9 +144,8 @@ class PackUndo(DatabaseHelpersMixin):
 
     def _make_store_batcher(self, store_connection):
         store_batcher = self.locker.make_batcher(store_connection.cursor)
-        store_batcher.row_limit = max(store_batcher.row_limit, self.cursor_arraysize)
+        store_batcher.row_limit = max(store_batcher.row_limit, self.store_batch_size)
         return store_batcher
-
 
     # Subclasses (notably Oracle) can define this to provide hints
     # that affect graph traversal.
@@ -248,33 +258,17 @@ class PackUndo(DatabaseHelpersMixin):
             "pre_pack: marking objects reachable: %d",
             marker.reachable_count)
 
-        store_cursor = store_connection.cursor
-        batch = []
-        def upload_batch():
-            # This would be easily done in parallel.
-            # Marking 30 MM objects, even in batches, takes at least
-            # 30 minutes.
-            # XXX: No, this is very wrong. Use the RowBatcher
-            # Alternately, flush to a table and then join
-            # against that at the end.
-            # TODO: If we're batching, we need to log progress
-            oids_str = ','.join(str(oid) for oid in batch)
-            del batch[:]
-            stmt = """
-            UPDATE pack_object
-            SET keep = %%(TRUE)s,
-                visited = %%(TRUE)s
-            WHERE zoid IN (%s)
-            """ % oids_str
-            self.runner.run_script_stmt(store_cursor, stmt)
+        store_batcher = self._make_store_batcher(store_connection)
+        update_stmt = str(Schema.pack_object.update(
+            keep=True, visited=True
+        ).bind(self))
+        assert update_stmt.startswith("UPDATE")
+        num_rows_sent_to_db = store_batcher.update_set_static(
+            update_stmt,
+            zoid=marker.reachable
+        )
+        assert num_rows_sent_to_db == marker.reachable_count
 
-        batch_append = batch.append
-        for oid in marker.reachable:
-            batch_append(oid)
-            if len(batch) >= 1000:
-                upload_batch()
-        if batch:
-            upload_batch()
 
     # The only things to worry about are object_state and blob_chuck
     # and, in history-preserving, transaction. blob chunks are deleted
@@ -394,19 +388,23 @@ class HistoryPreservingPackUndo(PackUndo):
     # but that is no longer recommended or expected to be faster.
     # Also, it was postgres specific. Now we use a more standard syntax,
     # that lets us preserve order (in case that matters).
-    # pylint:disable=singleton-comparison.
-    # NOTE: The 1000 constant is also hardcoded below.
+
+    delete_empty_transactions_batch_size = get_positive_integer_from_environ(
+        'RS_PACK_HP_DELETE_BATCH_SIZE',
+        1000
+    )
+
     _delete_empty_transactions_batch_query = Schema.transaction.delete(
     ).where(
         it.c.tid.in_(Schema.transaction.select(
             it.c.tid
         ).where(
-            it.c.packed == True
+            it.c.packed == True # pylint:disable=singleton-comparison.
         ).and_(
-            it.c.is_empty == True
+            it.c.is_empty == True # pylint:disable=singleton-comparison.
         ).order_by(
             it.c.tid
-        ).limit(1000))
+        ).limit(delete_empty_transactions_batch_size))
     )
 
     _script_delete_object = """
@@ -910,8 +908,7 @@ class HistoryPreservingPackUndo(PackUndo):
         """Pack.  Requires the information provided by pre_pack."""
         # pylint:disable=too-many-locals
         # Read committed mode is sufficient.
-
-        conn, cursor = self.connmanager.open_for_store()
+        store_connection = StoreConnection(self.connmanager)
         try: # pylint:disable=too-many-nested-blocks
             try:
                 # If we have a transaction entry in ``pack_state_tid`` (that is,
@@ -933,15 +930,15 @@ class HistoryPreservingPackUndo(PackUndo):
                 ORDER BY tx.tid
                 """
                 self.runner.run_script_stmt(
-                    cursor, stmt, {'pack_tid': pack_tid})
-                tid_rows = list(cursor) # oldest first, sorted in SQL
+                    store_connection.cursor, stmt, {'pack_tid': pack_tid})
+                tid_rows = list(store_connection.cursor) # oldest first, sorted in SQL
 
                 total = len(tid_rows)
                 logger.info("pack: will pack %d transaction(s)", total)
 
                 stmt = self._script_create_temp_pack_visit
                 if stmt:
-                    self.runner.run_script(cursor, stmt)
+                    self.runner.run_script(store_connection.cursor, stmt)
 
                 # Lock and delete rows in the same order that
                 # new commits would in order to prevent deadlocks.
@@ -956,11 +953,11 @@ class HistoryPreservingPackUndo(PackUndo):
 
                 for tid, packed, has_removable in tid_rows:
                     self._pack_transaction(
-                        cursor, pack_tid, tid, packed, has_removable,
+                        store_connection.cursor, pack_tid, tid, packed, has_removable,
                         packed_list)
                     counter += 1
                     if perf_counter() >= start + self.options.pack_batch_timeout:
-                        self.connmanager.commit(conn, cursor)
+                        store_connection.commit()
                         if packed_func is not None:
                             for poid, ptid in packed_list:
                                 packed_func(poid, ptid)
@@ -978,20 +975,18 @@ class HistoryPreservingPackUndo(PackUndo):
                         packed_func(oid, tid)
                 packed_list = None
 
-                self._pack_cleanup(conn, cursor)
+                self._pack_cleanup(store_connection)
 
             except:
                 logger.exception("pack: failed")
-                self.connmanager.rollback_quietly(conn, cursor)
+                store_connection.rollback_quietly()
                 raise
 
             else:
                 logger.info("pack: finished successfully")
-                self.connmanager.commit(conn, cursor)
-
+                store_connection.commit()
         finally:
-            self.connmanager.close(conn, cursor)
-
+            store_connection.drop()
 
     def _pack_transaction(self, cursor, pack_tid, tid, packed,
                           has_removable, packed_list):
@@ -1053,36 +1048,38 @@ class HistoryPreservingPackUndo(PackUndo):
             tid, state, removed_objects, removed_states)
 
 
-    def _pack_cleanup(self, conn, cursor):
+    def _pack_cleanup(self, store_connection):
         """Remove unneeded table rows after packing"""
         # commit the work done so far, releasing row-level locks.
-        self.connmanager.commit(conn, cursor)
+        store_connection.commit()
         logger.info("pack: cleaning up")
 
         # This section does not need to hold the commit lock, as it only
         # touches pack-specific tables. We already hold a pack lock for that.
         logger.debug("pack: removing unused object references")
         stmt = self._script_pack_object_ref
-        self.runner.run_script(cursor, stmt)
+        self.runner.run_script(store_connection.cursor, stmt)
 
-        # We need a commit lock when touching the transaction table though.
-        # We'll do it in batches of 1000 rows.
+        # In the past, we needed an exclusive commit lock to
+        # touch the transaction table and remove empty transactions.
+        # For that reason, we explicitly batched it in 1000 rows.
+        # That's no longer the case.
+        # XXX: Stop batching.
         logger.debug("pack: removing empty packed transactions")
         while True:
             stmt = self._delete_empty_transactions_batch_query
-            stmt.execute(cursor)
-            deleted = cursor.rowcount
-            self.connmanager.commit(conn, cursor)
-            self.locker.release_commit_lock(cursor)
-            if deleted < 1000:
+            stmt.execute(store_connection.cursor)
+            deleted = store_connection.cursor.rowcount
+            store_connection.commit()
+            if deleted < self.delete_empty_transactions_batch_size:
                 # Last set of deletions complete
                 break
 
-        # perform cleanup that does not require the commit lock
         logger.debug("pack: clearing temporary pack state")
         for _table in ('pack_object', 'pack_state', 'pack_state_tid'):
             stmt = '%(TRUNCATE)s ' + _table
-            self.runner.run_script_stmt(cursor, stmt)
+            self.runner.run_script_stmt(store_connection.cursor, stmt)
+        store_connection.commit()
 
 
 @implementer(IPackUndo)

@@ -19,6 +19,7 @@ import itertools
 from relstorage._compat import iteritems
 from relstorage._compat import perf_counter
 from relstorage._util import parse_byte_size
+from relstorage._util import consume
 
 from .interfaces import AggregateOperationTimeoutError
 
@@ -188,32 +189,69 @@ class RowBatcher(object):
            some subset of batches exceeds *timeout*. This is checked
            after each individual batch.
         """
+        command = 'SELECT %s' % (','.join(columns),)
+
+        for cursor in self.__select_like(
+                command,
+                table,
+                suffix,
+                timeout,
+                kw
+        ):
+            for row in cursor.fetchall():
+                yield row
+
+    def update_set_static(self, update_set, timeout=None, **kw):
+        """
+        As for :meth:`select_from`, but the first parameter is
+        the complete static UPDATE statement. It must be uppercase,
+        and startwith "UPDATE".
+
+        Rows are net expected to be returned, so the cursor is completely consumed between
+        batches.
+        """
+        for cursor in self.__select_like(
+                update_set,
+                None, # table not used
+                '', # suffix not used,
+                timeout,
+                kw
+        ):
+            consume(cursor)
+        return self.__last_select_like_count
+
+    __last_select_like_count = 0
+
+    def __select_like(self, command, table, suffix, timeout, kw):
         assert len(kw) == 1
+        # filter_values may be a generic iterable or even a generator;
+        # be sure not to materialize the whole thing at any point. Never
+        # more than a chunk_size at a time.
         filter_column, filter_values = kw.popitem()
         filter_values = iter(filter_values)
-
-        command = 'SELECT %s' % (','.join(columns),)
 
         chunk_size = self.bind_limit or self.row_limit
         chunk_size -= 1
 
         begin = self.perf_counter() if timeout else None
 
+        count = 0
         for head in filter_values:
             filter_subset = list(itertools.islice(filter_values, chunk_size))
             filter_subset.append(head)
 
             descriptor = [[(table, (filter_column,)), filter_subset]]
 
-            self._do_batch(command, descriptor, rows_need_flattened=False, suffix=suffix)
+            count += self._do_batch(command, descriptor, rows_need_flattened=False, suffix=suffix)
 
-            for row in self.cursor.fetchall():
-                yield row
+            yield self.cursor
 
             if timeout and self.perf_counter() - begin >= timeout:
                 # TODO: It'd be nice not to do this if we had no more
                 # batches to do.
                 raise AggregateOperationTimeoutError
+
+        self.__last_select_like_count = count
 
     def flush(self):
         """
@@ -285,9 +323,14 @@ class RowBatcher(object):
                                   filter_column, filter_value,
                                   rows_need_flattened):
         placeholder_str = self._make_placeholder_list_of_length(len(filter_value))
-        stmt = "%s FROM %s WHERE %s IN (%s)" % (
-            command, table, filter_column, placeholder_str
-        )
+        if not command.startswith('UPDATE'):
+            stmt = "%s FROM %s WHERE %s IN (%s)" % (
+                command, table, filter_column, placeholder_str
+            )
+        else:
+            stmt = "%s WHERE %s IN (%s)" % (
+                command, filter_column, placeholder_str
+            )
         return stmt, filter_value, rows_need_flattened
 
     def _do_inserts(self):

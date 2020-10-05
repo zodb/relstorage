@@ -29,9 +29,14 @@ class PostgreSQLRowBatcher(RowBatcher):
     def _make_single_column_query(self, command, table,
                                   filter_column, filter_value,
                                   rows_need_flattened):
-        stmt = "%s FROM %s WHERE %s = ANY (%s)" % (
-            command, table, filter_column, self.delete_placeholder
-        )
+        if not command.startswith("UPDATE"):
+            stmt = "%s FROM %s WHERE %s = ANY (%s)" % (
+                command, table, filter_column, self.delete_placeholder
+            )
+        else:
+            stmt = '%s WHERE %s = ANY (%s)' % (
+                command, filter_column, self.delete_placeholder
+            )
         # We only pass a single parameter, and it doesn't need further
         # flattening.
         # It does have to be an actual list, though

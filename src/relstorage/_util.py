@@ -72,7 +72,7 @@ __all__ = [
     'parse_boolean',
     'parse_byte_size',
     'positive_integer',
-    'get_time_from_environ',
+    'get_duration_from_environ',
 ]
 
 positive_integer = RangeCheckedConversion(integer, min=1)
@@ -144,12 +144,44 @@ class timer(object):
         self.__end = self.counter()
         self.duration = self.__end - self.__begin
 
-def get_time_from_environ(environ_name, default):
-    return _setting_from_environ(float, environ_name, default)
+def get_duration_from_environ(environ_name, default):
+    """
+    Return a floating-point number of seconds from the environment *environ_name*,
+    or *default*.
+
+    Examples: ``1.24s``, ``3m``, ``1m 3.6s``::
+
+        >>> import os
+        >>> os.environ['RS_TEST_VAL'] = '2.3'
+        >>> get_duration_from_environ('RS_TEST_VAL', None)
+        2.3
+        >>> os.environ['RS_TEST_VAL'] = '5.4s'
+        >>> get_duration_from_environ('RS_TEST_VAL', None)
+        5.4
+        >>> os.environ['RS_TEST_VAL'] = '1m 3.2s'
+        >>> get_duration_from_environ('RS_TEST_VAL', None)
+        63.2
+        >>> os.environ['RS_TEST_VAL'] = 'Invalid' # No time specifier
+        >>> get_duration_from_environ('RS_TEST_VAL', 42)
+        42
+        >>> os.environ['RS_TEST_VAL'] = 'Invalids' # The 's' time specifier
+        >>> get_duration_from_environ('RS_TEST_VAL', 42)
+        42
+    """
+
+    def convert(val):
+        # The default time-interval accepts only integers; that's not fine
+        # grained enough for these durations.
+        if any(c in val for c in ' wdhms'):
+            delta = stock_datatypes['timedelta'](val)
+            return delta.total_seconds()
+        return float(val)
+
+    return _setting_from_environ(convert, environ_name, default)
 
 def _get_log_time_level(level_int, default):
     level_name = logging.getLevelName(level_int)
-    val = get_time_from_environ('RS_PERF_LOG_%s_MIN' % level_name, default)
+    val = get_duration_from_environ('RS_PERF_LOG_%s_MIN' % level_name, default)
     return (level_int, float(val))
 
 # A list of tuples (level_int, min_duration), ordered by increasing
