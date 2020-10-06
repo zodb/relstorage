@@ -139,3 +139,30 @@ maintain a registry of open databases. Here's an example using
 It might also be necessary to register a signal handler to perform the
 same operation in the event of unclean shutdowns. See :issue:`183` for
 more discussion.
+
+.. _to-know-about-pack:
+
+Packing A Database May Increase Disk Usage
+==========================================
+
+After packing a RelStorage, whether history-free or history-preserving,
+whether through the ZODB APIs or the command line tool
+:doc:`zodbpack`, you may find that the database disk usage has
+actually increased, sometimes by a substantial fraction of the main
+database size.
+
+RelStorage deliberately stores information in the database about the
+object references it discovered during packing. The next time a pack
+is run, this information is used for objects that haven't changed,
+making it unnecessary for RelStorage to discover it again. In turn,
+this makes subsequent packs substantially faster when there are many
+objects that haven't changed (which is typically the case for many
+applications.)
+
+A future version of RelStorage might provide the option to remove this
+data when a pack finishes.
+
+You can also use the ``multi-zodb-gc`` script provided by the
+``zc.zodbdgc`` project to pack a RelStorage. It does not store this
+persistent data, but it may be substantially slower than the native
+packing capabilities, especially on large databases.

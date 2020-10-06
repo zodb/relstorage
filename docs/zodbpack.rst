@@ -16,6 +16,8 @@ the storages to pack, in ZConfig format. An example configuration file::
     </mysql>
   </relstorage>
 
+When packing a RelStorage, please read :ref:`to-know-about-pack`.
+
 Options for ``zodbpack``
 ========================
 

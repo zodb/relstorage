@@ -15,6 +15,8 @@
   (Sadly this just squashes the warning, it doesn't eliminate the
   round trip that generates it.)
 
+- Improve the performance of packing databases, especially
+  history-free databases. See :issue:`275`.
 
 3.3.2 (2020-09-21)
 ==================

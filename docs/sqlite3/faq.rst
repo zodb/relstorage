@@ -81,6 +81,12 @@ parallel commits?
    database is locked as close to the end of the commit process as
    possible.
 
+   Note that packing a SQLite database makes no effort to reduce the
+   amount of time spent writing to the database. It's unlikely you'll
+   get meaningful parallel writes to happen while packing the
+   database. If you plan to deploy SQLite databases to production,
+   also plan to schedule downtime to pack them.
+
 Q: Should I disable RelStorage's cache when used with SQLite?
 
    A: Possibly (with ``cache-local-mb 0``). Let the operating system
