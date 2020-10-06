@@ -2,7 +2,7 @@
  Changes
 =========
 
-3.3.3 (unreleased)
+3.4.0 (unreleased)
 ==================
 
 - Improve the logging of ``zodbconvert``. The regular minute logging
@@ -17,6 +17,17 @@
 
 - Improve the performance of packing databases, especially
   history-free databases. See :issue:`275`.
+
+- Give ``zodbpack`` the ability to check for missing references in
+  RelStorages with the ``--check-refs-only`` argument. This will
+  perform a pre-pack with GC, and then report on any objects that
+  would be kept and refer to an object that does not exist. This can
+  be much faster than external scripts such as those provided by
+  ``zc.zodbdgc``, though it definitely only reports missing references
+  one level deep.
+
+  This is new functionality. Feedback, as always, is very welcome!
+
 
 3.3.2 (2020-09-21)
 ==================

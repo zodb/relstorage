@@ -56,15 +56,6 @@ class TestPackBase(RelStorageTestBase):
         #          0    1    2    3
         #   T1: root -> A -> B -> C
         #
-        # If a new transaction is committed such that the graph becomes:
-        #
-        #         0    1
-        #  T2: root -> A
-        #          \-> B -> D -> C
-        #              2    4    3
-        #
-        # That is, C is no longer referenced from B but a new object
-        # D, B is referenced not from A but from the root.
         txm = transaction.TransactionManager(explicit=True)
         conn = self.main_db.open(txm)
         txm.begin()
@@ -83,7 +74,30 @@ class TestPackBase(RelStorageTestBase):
 
         return oids
 
-    def _mutate_state(self, initial_oids, *_args, **_kwargs):
+    def _mutate_state(self, initial_oids, *_args, **kwargs):
+        # Transforms the state established in :meth:`_create_initial_state`
+        # to the following:
+
+        #        0    1
+        # T2: root -> A
+        #             B -> D -> C
+        #             2    4    3
+
+        # Note that the B -> D -> C chain is disconnected and unreachable.
+
+        # If the keyword argument *save_B* is set to True (not the default)
+        # then the reference to B is moved:
+
+        #          0    1
+        #   T2: root -> A
+        #           \-> B -> D -> C
+        #               2    4    3
+
+        # That is, C is no longer referenced from B but a new object
+        # D, B is referenced not from A but from the root.
+
+        # The keyword argument *before_commit* is called with the connection
+        # just before committing.
         txm = transaction.TransactionManager(explicit=True)
         conn = self.main_db.open(txm)
         txm.begin()
@@ -95,6 +109,11 @@ class TestPackBase(RelStorageTestBase):
         C = B['C']
         del B['C']
         D['C'] = C
+
+        if kwargs.get('save_B'):
+            conn.root.B = B
+
+        kwargs.get('before_commit', lambda _: None)(conn)
 
         txm.commit()
 
@@ -174,6 +193,57 @@ class TestPackBase(RelStorageTestBase):
 
         self._check_inject_changes(expect_oids,
                                    inject_changes)
+
+    def test_check_refs_nothing_missing(self):
+        expect_oids = self._create_initial_state()
+        self._mutate_state(expect_oids)
+
+        missing = self._storage.pack(None, referencesf, check_refs=True)
+        self.assertFalse(missing)
+
+        missing = self._storage.pack(None, referencesf, check_refs=True, skip_prepack=True)
+        self.assertFalse(missing)
+
+    def test_check_refs_missing_after_prepack(self):
+        from ZODB.Connection import TransactionMetaData
+        expect_oids = self._create_initial_state()
+
+        #         0    1
+        #  T2: root -> A
+        #          \-> B -> D -> C -> E
+        #              2    4    3    5
+        def hook(conn):
+            conn.root.B['D']['C']['E'] = PersistentMapping()
+
+
+        self._mutate_state(expect_oids, save_B=True, before_commit=hook)
+
+        # Even if pack_gc is off, we find the references.
+        self._storage._options.pack_gc = False
+
+        self._storage.pack(None, referencesf, prepack_only=True)
+
+        #         0    1
+        #  T2: root -> A
+        #          \-> B ->   -> C -> E
+        #              2    4    3    5
+        _state, tid = self._storage.load(expect_oids['D'], '')
+
+        txn_meta = TransactionMetaData()
+        self._storage.tpc_begin(txn_meta)
+        self._storage.deleteObject(expect_oids['D'], tid, txn_meta)
+        self._storage.tpc_vote(txn_meta)
+        self._storage.tpc_finish(txn_meta)
+
+        missing = self._storage.pack(None, referencesf, check_refs=True, skip_prepack=True)
+        self.assertTrue(missing)
+        # TODO: Define this data structure.
+        self.assertEqual([(2, 4)], missing)
+
+        missing = self._storage.pack(None, referencesf, check_refs=True)
+        self.assertTrue(missing)
+        self.assertEqual([(2, 4)], missing)
+
 
 class HistoryFreeTestPack(TestPackBase):
     # pylint:disable=abstract-method

@@ -83,8 +83,6 @@ class PackUndo(DatabaseHelpersMixin):
     fill_object_refs_batch_size = get_positive_integer_from_environ('RS_PACK_DOWNLOAD_BATCH_SIZE',
                                                                     1024)
 
-
-
     def __init__(self, database_driver, connmanager, runner, locker, options):
         self.driver = database_driver
         self.connmanager = connmanager
@@ -103,7 +101,14 @@ class PackUndo(DatabaseHelpersMixin):
             # object not captured in the constructor or options.
             # (checkPackWhileReferringObjectChanges)
             return self
-        return self.__class__(self.driver, self.connmanager, self.runner, self.locker, options)
+        result = self.__class__(self.driver, self.connmanager, self.runner, self.locker, options)
+        # Setting the MAX_TID is important for SQLite,
+        # as is the _lock_for_share.
+        # This should probably be handled directly in subclasses.
+        for k, v in vars(self).items():
+            if k != 'options' and getattr(result, k, None) is not v:
+                setattr(result, k, v)
+        return result
 
     def choose_pack_transaction(self, pack_point):
         """Return the transaction before or at the specified pack time.
@@ -112,6 +117,7 @@ class PackUndo(DatabaseHelpersMixin):
         """
         conn, cursor = self.connmanager.open()
         try:
+            __traceback_info__ = self, pack_point
             self._choose_pack_transaction_query.execute(cursor, {'tid': pack_point})
             rows = cursor.fetchall()
             if not rows:
@@ -263,12 +269,74 @@ class PackUndo(DatabaseHelpersMixin):
             keep=True, visited=True
         ).bind(self))
         assert update_stmt.startswith("UPDATE")
+
+        log_at = [perf_counter() + self.fill_object_refs_commit_frequency]
+        def batch_done_callback(total_count):
+            store_connection.commit()
+            if perf_counter() >= log_at[0]:
+                logger.debug(
+                    "pre_pack: marked %d/%d objects reachable",
+                    total_count, marker.reachable_count
+                )
+                log_at[0] = perf_counter() + self.fill_object_refs_commit_frequency
+
         num_rows_sent_to_db = store_batcher.update_set_static(
             update_stmt,
+            batch_done_callback=batch_done_callback,
             zoid=marker.reachable
         )
         assert num_rows_sent_to_db == marker.reachable_count
 
+    def check_refs(self, pack_tid):
+        """
+        Are there any objects we're *not* going to garbage collect that
+        point to an object that doesn't exist?
+        Note that this goes only one level deep. A whole subtree of objects
+        may be removed by a subsequent pack if the only reference them was from
+        a missing object.
+
+        Logs a warning for each discovered broken reference.
+
+        Returns a true object if there were broken references, a false
+        object otherwise.
+        """
+        load_connection = LoadConnection(self.connmanager)
+        try:
+            with _Progress('execute') as progress:
+                with self._make_ss_load_cursor(load_connection) as ss_load_cursor:
+                    stmt = """
+                    SELECT zoid, to_zoid
+                    FROM pack_object
+                    INNER JOIN object_ref USING (zoid)
+                    WHERE keep = %(TRUE)s
+                    AND NOT EXISTS (
+                        SELECT 1
+                        FROM object_state
+                        WHERE object_state.zoid = to_zoid
+                        AND object_state.state IS NOT NULL
+                    )
+                    """
+                    self.runner.run_script_stmt(ss_load_cursor, stmt)
+                    progress.mark('download')
+
+                    missing = []
+                    for zoid, to_zoid in ss_load_cursor:
+                        logger.warning(
+                            'check_refs: object %d references missing object %d',
+                            zoid, to_zoid
+                        )
+                        missing.append((zoid, to_zoid))
+            logger.info(
+                'check_refs: Found %d broken references '
+                "(memory delta: %s, query time: %.2f; download time: %.2f)",
+                len(missing),
+                progress.total_memory_delta_display,
+                progress.phase_duration('execute'),
+                progress.phase_duration('download')
+            )
+            return missing
+        finally:
+            load_connection.drop()
 
     # The only things to worry about are object_state and blob_chuck
     # and, in history-preserving, transaction. blob chunks are deleted
