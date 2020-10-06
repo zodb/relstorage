@@ -19,6 +19,7 @@ import itertools
 from relstorage._compat import iteritems
 from relstorage._compat import perf_counter
 from relstorage._util import parse_byte_size
+from relstorage._util import consume
 
 from .interfaces import AggregateOperationTimeoutError
 
@@ -93,34 +94,45 @@ class RowBatcher(object):
         )
 
     def _flush_if_needed(self):
+        """
+        Return the number of rows updated.
+        """
         if self.rows_added >= self.row_limit:
             return self.flush()
         if self.bind_limit and self.bind_params_added >= self.bind_limit:
             return self.flush()
         if self.size_added >= self.size_limit:
             return self.flush()
+        return 0
 
     def _flush_if_would_exceed_bind(self, addition):
         # The bind limit is a hard limit we cannot exceed.
         # If adding *addition* params would cause us to exceed,
         # flush now.
         if self.bind_limit and self.bind_params_added + addition >= self.bind_limit:
-            self.flush()
-            return True
+            return self.flush() or True # This should always be at least one, right?
+        return 0
 
     def delete_from(self, table, **kw):
+        """
+        Returns the number of rows flushed as a result of this operation.
+        That can include inserts.
+        """
+        # XXX: When deleting a lot from a single table, a bulk function
+        # might be a lot faster.
         if not kw:
             raise AssertionError("Need at least one column value")
         columns = tuple(sorted(kw))
         key = (table, columns)
         row = tuple(kw[column] for column in columns)
         bind_params_added = len(row) if key not in self.deletes[key] else 0
-        self._flush_if_would_exceed_bind(bind_params_added)
+        count = self._flush_if_would_exceed_bind(bind_params_added)
 
         self.deletes[key].add(row)
         self.rows_added += 1
         self.bind_params_added += bind_params_added
-        self._flush_if_needed()
+        count += self._flush_if_needed()
+        return count
 
     def insert_into(self, header, row_schema, row, rowkey, size,
                     command='INSERT', suffix=''):
@@ -177,45 +189,97 @@ class RowBatcher(object):
            some subset of batches exceeds *timeout*. This is checked
            after each individual batch.
         """
+        command = 'SELECT %s' % (','.join(columns),)
+
+        for cursor in self.__select_like(
+                command,
+                table,
+                suffix,
+                timeout,
+                kw
+        ):
+            for row in cursor.fetchall():
+                yield row
+
+    def update_set_static(self, update_set, timeout=None, **kw):
+        """
+        As for :meth:`select_from`, but the first parameter is
+        the complete static UPDATE statement. It must be uppercase,
+        and startwith "UPDATE".
+
+        Rows are net expected to be returned, so the cursor is completely consumed between
+        batches.
+        """
+        # We actually just consume the iteration of the cursor itself;
+        # we can't consume the cursor. Some drivers (pg8000) throw ProgrammingError
+        # if we try to iterate the cursor that has no rows.
+        consume(
+            self.__select_like(
+                update_set,
+                None, # table not used
+                '', # suffix not used,
+                timeout,
+                kw
+        ))
+
+        return self.__last_select_like_count
+
+    __last_select_like_count = 0
+
+    def __select_like(self, command, table, suffix, timeout, kw):
         assert len(kw) == 1
+        # filter_values may be a generic iterable or even a generator;
+        # be sure not to materialize the whole thing at any point. Never
+        # more than a chunk_size at a time.
         filter_column, filter_values = kw.popitem()
         filter_values = iter(filter_values)
-
-        command = 'SELECT %s' % (','.join(columns),)
 
         chunk_size = self.bind_limit or self.row_limit
         chunk_size -= 1
 
         begin = self.perf_counter() if timeout else None
 
+        count = 0
         for head in filter_values:
             filter_subset = list(itertools.islice(filter_values, chunk_size))
             filter_subset.append(head)
 
             descriptor = [[(table, (filter_column,)), filter_subset]]
 
-            self._do_batch(command, descriptor, rows_need_flattened=False, suffix=suffix)
+            count += self._do_batch(command, descriptor, rows_need_flattened=False, suffix=suffix)
 
-            for row in self.cursor.fetchall():
-                yield row
+            yield self.cursor
 
             if timeout and self.perf_counter() - begin >= timeout:
                 # TODO: It'd be nice not to do this if we had no more
                 # batches to do.
                 raise AggregateOperationTimeoutError
 
+        self.__last_select_like_count = count
+
     def flush(self):
+        """
+        Return the tetal number of rows deleted or inserted in this operation.
+        (This is the number requested, in the case of deletes, not the number
+        that actually matched.)
+
+        This can be treated as a boolean to discover if anything was flushed.
+        """
+        count = 0
         if self.deletes:
-            self.total_rows_deleted += self._do_deletes()
+            count += self._do_deletes()
+            self.total_rows_deleted += count
             self.deletes.clear()
         if self.inserts:
-            self.total_rows_inserted += self._do_inserts()
+            count += self._do_inserts()
+            self.total_rows_inserted += count
             self.inserts.clear()
         self.total_size_inserted += self.size_added
 
         self.rows_added = 0
         self.size_added = 0
         self.bind_params_added = 0
+        return count
 
     def _do_deletes(self):
         return self._do_batch('DELETE', sorted(iteritems(self.deletes)))
@@ -263,9 +327,14 @@ class RowBatcher(object):
                                   filter_column, filter_value,
                                   rows_need_flattened):
         placeholder_str = self._make_placeholder_list_of_length(len(filter_value))
-        stmt = "%s FROM %s WHERE %s IN (%s)" % (
-            command, table, filter_column, placeholder_str
-        )
+        if not command.startswith('UPDATE'):
+            stmt = "%s FROM %s WHERE %s IN (%s)" % (
+                command, table, filter_column, placeholder_str
+            )
+        else:
+            stmt = "%s WHERE %s IN (%s)" % (
+                command, filter_column, placeholder_str
+            )
         return stmt, filter_value, rows_need_flattened
 
     def _do_inserts(self):
@@ -287,7 +356,7 @@ class RowBatcher(object):
             params = list(itertools.chain.from_iterable(rows))
 
             stmt = "%s INTO %s VALUES\n%s\n%s" % (
-                command, header, ',\n'.join(values_template), suffix)
+                command, header, ', '.join(values_template), suffix)
             # e.g.,
             # INSERT INTO table(c1, c2)
             # VALUES (%s, %s), (%s, %s), (%s, %s)

@@ -44,6 +44,10 @@ class BooleanNode(LiteralNode):
 
     __slots__ = ()
 
+    def __compile_visit__(self, compiler):
+        compiler.emit_boolean(self.raw)
+
+
 class TextNode(LiteralNode):
     __slots__ = ()
 

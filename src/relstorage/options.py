@@ -42,6 +42,11 @@ class Options(object):
        Add the ``blob_cache_size_check_external`` option, defaulting to False.
 
        Change the default for ``shared_blob_dir`` to False.
+
+    .. versionchanged:: 3.3.3
+       Since packing no longer holds the commit lock, ``pack_batch_timeout`` is the interval
+       between committing deletions. Changed from 1.0s to 15s.
+       Note that this is not universally applied.
     """
 
     #: The adapter factory configuration.
@@ -90,8 +95,8 @@ class Options(object):
     pack_prepack_only = False
     #: Skip prepack
     pack_skip_prepack = False
-    #: Length of time to hold a lock.
-    pack_batch_timeout = 1.0
+    #: Amount of time between commits/log messages.
+    pack_batch_timeout = 15.0
 
     #: List of memcache servers
     cache_servers = ()  # ['127.0.0.1:11211']

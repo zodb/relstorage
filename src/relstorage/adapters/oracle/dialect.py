@@ -21,10 +21,6 @@ from ..sql.insert import _ExcludedColumn
 
 class OracleCompiler(Compiler):
 
-    def visit_boolean_literal_expression(self, value):
-        sql = "'Y'" if value else "'N'"
-        self.emit(sql)
-
     def can_prepare(self):
         # We haven't investigated preparing statements manually
         # with cx_Oracle. There's a chance that `cx_Oracle.Connection.stmtcachesize`
@@ -117,3 +113,7 @@ class OracleDialect(DefaultDialect):
 
     def compiler_class(self):
         return OracleCompiler
+
+    def boolean_str(self, value):
+        sql = "'Y'" if value else "'N'"
+        return sql

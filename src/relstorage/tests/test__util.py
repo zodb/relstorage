@@ -1,0 +1,33 @@
+# -*- coding: utf-8 -*-
+##############################################################################
+#
+# Copyright (c) 2020 Zope Foundation and Contributors.
+# All Rights Reserved.
+#
+# This software is subject to the provisions of the Zope Public License,
+# Version 2.1 (ZPL).  A copy of the ZPL should accompany this distribution.
+# THIS SOFTWARE IS PROVIDED "AS IS" AND ANY AND ALL EXPRESS OR IMPLIED
+# WARRANTIES ARE DISCLAIMED, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+# WARRANTIES OF TITLE, MERCHANTABILITY, AGAINST INFRINGEMENT, AND FITNESS
+# FOR A PARTICULAR PURPOSE.
+#
+##############################################################################
+
+"""
+Tests for _util.py
+
+"""
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+
+import unittest
+import doctest
+
+from relstorage import _util
+
+def test_suite():
+    # zope-testrunner specific test loading.
+    return unittest.TestSuite((
+        doctest.DocTestSuite(_util)
+    ))

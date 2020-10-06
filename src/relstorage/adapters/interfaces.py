@@ -41,6 +41,15 @@ class IDBDialect(Interface):
 
     # TODO: Fill this in.
 
+    def boolean_str(value):
+        """
+        Given exactly a `bool` (`True` or `False`) return the string the database
+        uses to represent that literal.
+
+        By default, this will be "TRUE" or "FALSE", but older versions of SQLite
+        need 1 or 0, while Oracle needs "'Y'" or "'N'".
+        """
+
 class IDBDriver(Interface):
     """
     An abstraction over the information needed for RelStorage to work

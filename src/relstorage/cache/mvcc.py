@@ -35,7 +35,7 @@ from relstorage._compat import IN_TESTRUNNER
 from relstorage._util import log_timed
 from relstorage._util import positive_integer
 from relstorage._util import TRACE as LTRACE
-from relstorage._util import get_time_from_environ
+from relstorage._util import get_duration_from_environ
 from relstorage._mvcc import DetachableMVCCDatabaseCoordinator
 from relstorage.options import Options
 from relstorage.interfaces import IMVCCDatabaseViewer
@@ -50,7 +50,7 @@ DEBUG = __debug__ and IN_TESTRUNNER
 #: database for OIDS when restoring the cache. If this time is exceeded,
 #: we will only partially use the cache. This is not set by default because
 #: doing so introduces a slight speed penalty to the polling process.
-POLL_TIMEOUT = get_time_from_environ('RS_CACHE_POLL_TIMEOUT', None)
+POLL_TIMEOUT = get_duration_from_environ('RS_CACHE_POLL_TIMEOUT', None)
 
 ###
 # Notes on in-process concurrency:

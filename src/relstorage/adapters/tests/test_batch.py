@@ -48,9 +48,12 @@ class RowBatcherTests(TestCase):
 
     IN_ROWS_FLATTENED = False
     delete_auto_flush = 'DELETE FROM mytable WHERE id IN (%s,%s)'
+    update_set_static_stmt = 'UPDATE pack_object SET foo=1 WHERE zoid IN (%s,%s)'
 
-    def _in(self, *params):
-        params = sorted(params)
+    def _in(self, *params, **kw):
+        do_sort = kw.pop("do_sort", True)
+        assert not kw
+        params = sorted(params) if do_sort else params
         if self.IN_ROWS_FLATTENED:
             l = list(params)
             return (l,)
@@ -76,6 +79,32 @@ class RowBatcherTests(TestCase):
         self.assertEqual(batcher.total_rows_inserted, 0)
         self.assertEqual(batcher.total_rows_deleted, 2)
         self.assertEqual(batcher.total_size_inserted, 0)
+
+    def test_update_set_static(self):
+        cursor = MockCursor()
+        batcher = self.getClass()(cursor, 2)
+        cnt = batcher.update_set_static(
+            'UPDATE pack_object SET foo=1',
+            zoid=iter((1, 2, 3, 4, 5, 6, 7))
+        )
+        self.assertEqual(cnt, 7)
+        self.assertEqual(
+            cursor.executed,
+            [
+                (self.update_set_static_stmt,
+                 self._in(2, 1, do_sort=False)
+                ),
+                (self.update_set_static_stmt,
+                 self._in(4, 3, do_sort=False)
+                ),
+                (self.update_set_static_stmt,
+                 self._in(6, 5, do_sort=False)
+                ),
+                (self.update_set_static_stmt.replace(',%s', ''),
+                 self._in(7)
+                ),
+            ])
+    maxDiff = None
 
     def test_insert_defer(self):
         cursor = MockCursor()
@@ -191,7 +220,7 @@ class RowBatcherTests(TestCase):
             cursor.executed,
             [(
                 'INSERT INTO mytable (id, name) VALUES\n'
-                '(%s, id || %s),\n'
+                '(%s, id || %s), '
                 '(%s, id || %s)\n',
                 (1, 'a', 2, 'B'))
             ])
@@ -221,14 +250,16 @@ class RowBatcherTests(TestCase):
             rowkey=2,
             size=5,
             )
+        self.assertLength(cursor.executed, 1)
         self.assertEqual(
-            cursor.executed,
-            [(
-                'INSERT INTO mytable (id, name) VALUES\n'
-                '(%s, id || %s),\n'
-                '(%s, id || %s)\n',
-                (1, 'a', 2, 'B'))
-            ])
+            cursor.executed[0][0],
+            'INSERT INTO mytable (id, name) VALUES\n'
+            '(%s, id || %s), '
+            '(%s, id || %s)\n')
+        self.assertEqual(
+            cursor.executed[0][1],
+            (1, 'a', 2, 'B')
+            )
         self.assertEqual(batcher.rows_added, 0)
         self.assertEqual(batcher.size_added, 0)
         self.assertEqual(batcher.inserts, {})
@@ -476,3 +507,4 @@ class PostgreSQLRowBatcherTests(RowBatcherTests):
     select_one = 'SELECT zoid,tid FROM object_state WHERE oids = ANY (%s)'
     select_multiple_one_batch = 'SELECT zoid,tid FROM object_state WHERE oids = ANY (%s)'
     select_multiple_many_batch = 'SELECT zoid,tid FROM object_state WHERE oids = ANY (%s)'
+    update_set_static_stmt = 'UPDATE pack_object SET foo=1 WHERE zoid = ANY (%s)'
