@@ -19,7 +19,6 @@ import itertools
 from relstorage._compat import iteritems
 from relstorage._compat import perf_counter
 from relstorage._util import parse_byte_size
-from relstorage._util import consume
 
 from .interfaces import AggregateOperationTimeoutError
 
@@ -191,7 +190,7 @@ class RowBatcher(object):
         """
         command = 'SELECT %s' % (','.join(columns),)
 
-        for cursor in self.__select_like(
+        for cursor, _count in self.__select_like(
                 command,
                 table,
                 suffix,
@@ -201,7 +200,9 @@ class RowBatcher(object):
             for row in cursor.fetchall():
                 yield row
 
-    def update_set_static(self, update_set, timeout=None, **kw):
+    def update_set_static(self, update_set, timeout=None,
+                          batch_done_callback=lambda total_count: None,
+                          **kw):
         """
         As for :meth:`select_from`, but the first parameter is
         the complete static UPDATE statement. It must be uppercase,
@@ -213,21 +214,20 @@ class RowBatcher(object):
         # We actually just consume the iteration of the cursor itself;
         # we can't consume the cursor. Some drivers (pg8000) throw ProgrammingError
         # if we try to iterate the cursor that has no rows.
-        consume(
-            self.__select_like(
+        total_count = 0
+        for _cursor, total_count in self.__select_like(
                 update_set,
                 None, # table not used
                 '', # suffix not used,
                 timeout,
                 kw
-        ))
+        ):
+            batch_done_callback(total_count)
 
-        return self.__last_select_like_count
-
-    __last_select_like_count = 0
+        return total_count
 
     def __select_like(self, command, table, suffix, timeout, kw):
-        assert len(kw) == 1
+        assert len(kw) == 1, kw
         # filter_values may be a generic iterable or even a generator;
         # be sure not to materialize the whole thing at any point. Never
         # more than a chunk_size at a time.
@@ -248,14 +248,13 @@ class RowBatcher(object):
 
             count += self._do_batch(command, descriptor, rows_need_flattened=False, suffix=suffix)
 
-            yield self.cursor
+            yield self.cursor, count
 
             if timeout and self.perf_counter() - begin >= timeout:
                 # TODO: It'd be nice not to do this if we had no more
                 # batches to do.
                 raise AggregateOperationTimeoutError
 
-        self.__last_select_like_count = count
 
     def flush(self):
         """

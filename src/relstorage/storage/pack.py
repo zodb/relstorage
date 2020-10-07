@@ -22,6 +22,7 @@ from __future__ import division
 from __future__ import print_function
 
 import time
+from contextlib import contextmanager
 
 from persistent.timestamp import TimeStamp
 
@@ -179,11 +180,22 @@ class Pack(object):
                            packed_func=invalidate_cached_data)
         self.cache.remove_all_cached_data_for_oids(oids_removed)
 
+    @contextmanager
+    def _holding_pack_lock(self):
+        lock_conn, lock_cursor = self.connmanager.open_for_pack_lock()
+        try:
+            self.locker.hold_pack_lock(lock_cursor)
+            try:
+                yield
+            finally:
+                self.locker.release_pack_lock(lock_cursor)
+        finally:
+            self.connmanager.rollback_and_close(lock_conn, lock_cursor)
+
     @writable_storage_method
     @metricmethod
     def pack(self, t, referencesf, prepack_only=False, skip_prepack=False):
         """Pack the storage. Holds the pack lock for the duration."""
-        # pylint:disable=too-many-branches,unused-argument
 
         prepack_only = prepack_only or self.options.pack_prepack_only
         skip_prepack = skip_prepack or self.options.pack_skip_prepack
@@ -191,21 +203,21 @@ class Pack(object):
         if prepack_only and skip_prepack:
             raise ValueError('Pick either prepack_only or skip_prepack.')
 
-        lock_conn, lock_cursor = self.connmanager.open_for_pack_lock()
-        try:
-            self.locker.hold_pack_lock(lock_cursor)
-            try:
-                if not skip_prepack:
-                    tid_int = self.__pre_pack(t, referencesf)
-                else:
-                    # Need to determine the tid_int from the pack_object table
-                    tid_int = self.packundo._find_pack_tid()
+        with self._holding_pack_lock():
+            if not skip_prepack:
+                tid_int = self.__pre_pack(t, referencesf)
+            else:
+                # Need to determine the tid_int from the pack_object table
+                tid_int = self.packundo._find_pack_tid()
 
-                if not prepack_only:
-                    self.__pack_to(tid_int)
-            finally:
-                self.locker.release_pack_lock(lock_cursor)
-        finally:
-            self.connmanager.rollback_and_close(lock_conn, lock_cursor)
+            if not prepack_only:
+                self.__pack_to(tid_int)
 
         self.stats.large_database_change()
+
+    @metricmethod
+    def check_refs(self, referencesf):
+        logger.info("pack: Beginning reference check.")
+        with self._holding_pack_lock():
+            tid_int = self.__pre_pack(None, referencesf)
+            return self.packundo.check_refs(tid_int)

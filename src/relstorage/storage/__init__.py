@@ -882,23 +882,31 @@ class RelStorage(LegacyMethodsMixin,
         Copy(self.blobhelper, self, self).copyTransactionsFrom(other)
         self._adapter.stats.large_database_change()
 
-    def pack(self, t, referencesf, prepack_only=False, skip_prepack=False):
-        pack = Pack(self._options, self._adapter, self.blobhelper, self._cache)
-        pack.pack(t, referencesf, prepack_only, skip_prepack)
-        if not self.keep_history:
-            # In a history free database, it's *possible*
-            # that the database's last transaction ID could now have actually
-            # gone backwards! I strongly suspect this only happens in fabricated
-            # test scenarios (e.g., the last transaction in the database is an object that
-            # was directly stored without any connection to the object graph starting from the
-            # root and hence was packed away). Not only do we need to restart our
-            # connection, we also need to restart our polling. Moreover, to prevent
-            # loadSerial() from finding cached data, we also need to flush our caches.
-            self._cache.clear(load_persistent=False)
+    def pack(self, t, referencesf, prepack_only=False, skip_prepack=False, check_refs=False):
+        # Force pack_gc to on while checking references; otherwise we don't traverse the
+        # tree and nothing happens.
+        options = self._options.copy(pack_gc=True) if check_refs else self._options
+        pack = Pack(options, self._adapter, self.blobhelper, self._cache)
+        if check_refs:
+            assert pack.options.pack_gc
+            result = pack.check_refs(referencesf)
+        else:
+            result = pack.pack(t, referencesf, prepack_only, skip_prepack)
+            if not self.keep_history:
+                # In a history free database, it's *possible*
+                # that the database's last transaction ID could now have actually
+                # gone backwards! I strongly suspect this only happens in fabricated
+                # test scenarios (e.g., the last transaction in the database is an object that
+                # was directly stored without any connection to the object graph starting from the
+                # root and hence was packed away). Not only do we need to restart our
+                # connection, we also need to restart our polling. Moreover, to prevent
+                # loadSerial() from finding cached data, we also need to flush our caches.
+                self._cache.clear(load_persistent=False)
 
-        self.sync()
+            self.sync()
 
-        self._pack_finished()
+            self._pack_finished()
+        return result
 
     def _pack_finished(self):
         "Hook for testing."
