@@ -28,6 +28,12 @@
 
   This is new functionality. Feedback, as always, is very welcome!
 
+- Avoid extra pickling operations of transaction meta data extensions
+  by using the new ``extension_bytes`` property introduced in ZODB
+  5.6. This results in higher-fidelity copies of storages, and may
+  slightly improve the speed of the process too. See :issue:`424`.
+
+- Require ZODB 5.6, up from ZODB 5.5. See :issue:`424`.
 
 3.3.2 (2020-09-21)
 ==================

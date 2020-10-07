@@ -26,7 +26,6 @@ from ZODB.utils import z64 as NO_PREV_TID
 
 
 from relstorage._compat import base64_decodebytes
-from relstorage._compat import dumps
 from relstorage._compat import metricmethod_sampled
 from relstorage._compat import OID_TID_MAP_TYPE
 from relstorage._util import to_utf8
@@ -53,7 +52,7 @@ class AbstractBegin(AbstractTPCStateDatabaseAvailable):
     The phase we enter after ``tpc_begin`` has been called.
     """
     __slots__ = (
-        # (user, description, extension) from the transaction.
+        # (user, description, extension_bytes) from the transaction.
         # byte objects.
         'ude',
         # The location of the temporary data.
@@ -84,12 +83,7 @@ class AbstractBegin(AbstractTPCStateDatabaseAvailable):
 
         user = to_utf8(self.transaction.user)
         desc = to_utf8(self.transaction.description)
-        ext = self.transaction.extension
-
-        if ext:
-            ext = dumps(ext, 1)
-        else:
-            ext = b""
+        ext = self.transaction.extension_bytes
         self.ude = user, desc, ext
 
     def tpc_vote(self, storage, transaction):

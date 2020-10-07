@@ -40,11 +40,6 @@ from relstorage.tests.reltestbase import GenericRelStorageTests
 from relstorage.tests.reltestbase import AbstractFromFileStorage
 from relstorage.tests.reltestbase import AbstractToFileStorage
 
-# Prior to https://github.com/zopefoundation/ZODB/pull/281, ZODB's
-# tests had some previous transaction ids as native strings, not
-# bytes. Correct that.
-RevisionStorage.ZERO = b'\0' * 8
-TransactionalUndoStorage.ZERO = b'\0' * 8
 
 class HistoryPreservingRelStorageTests(GenericRelStorageTests,
                                        TransactionalUndoStorage.TransactionalUndoStorage,
@@ -56,6 +51,10 @@ class HistoryPreservingRelStorageTests(GenericRelStorageTests,
                                        ZODBTestCase):
     # pylint:disable=too-many-ancestors,abstract-method,too-many-locals,too-many-public-methods
     keep_history = True
+
+    # Extension data stored and copied verbatim.
+    # https://github.com/zodb/relstorage/issues/424
+    use_extension_bytes = True
 
     def checkUndoMultipleConflictResolution(self, *_args, **_kwargs): # pylint:disable=signature-differs
         # pylint:disable=arguments-differ
@@ -83,7 +82,6 @@ class HistoryPreservingRelStorageTests(GenericRelStorageTests,
 
     def checkTransactionalUndoIterator(self):
         # this test overrides the broken version in TransactionalUndoStorage.
-
         s = self._storage
 
         BATCHES = 4
@@ -91,7 +89,7 @@ class HistoryPreservingRelStorageTests(GenericRelStorageTests,
 
         orig = []
         for i in range(BATCHES):
-            t = transaction.Transaction()
+            t = TransactionMetaData()
             tid = p64(i + 1)
             s.tpc_begin(t, tid)
             for j in range(OBJECTS):
@@ -115,7 +113,7 @@ class HistoryPreservingRelStorageTests(GenericRelStorageTests,
 
         def undo(i):
             info = s.undoInfo()
-            t = transaction.Transaction()
+            t = TransactionMetaData()
             s.tpc_begin(t)
             base = i * OBJECTS + i
             for j in range(OBJECTS):

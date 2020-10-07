@@ -136,8 +136,10 @@ setup(
         # These are the versions we're testing against. ZODB 5.2.2 is
         # when checkSecure() went away and IMVCCAfterCompletionStorage
         # was added, and 5.1.2 is when Connection.new_oid was added
-        # (https://github.com/zopefoundation/ZODB/issues/139)
-        'ZODB >= 5.5',
+        # (https://github.com/zopefoundation/ZODB/issues/139).
+        # 5.6 introduced TransactionMetaData.extension_bytes
+        # (https://github.com/zodb/relstorage/issues/424)
+        'ZODB >= 5.6.0',
         # We directly use this, and its a transient dep of ZODB.
         # version 2.0 is where things became text, and 2.1 partly
         # relaxed those requirements.

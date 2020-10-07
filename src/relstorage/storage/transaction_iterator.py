@@ -26,7 +26,6 @@ from ZODB.interfaces import StorageStopIteration
 from ZODB.utils import p64 as int64_to_8bytes
 from ZODB.utils import u64 as bytes8_to_int64
 
-from relstorage._compat import loads
 from relstorage.adapters.connections import LoadConnection
 
 logger = __import__('logging').getLogger(__name__)
@@ -204,12 +203,7 @@ class RelStorageTransactionRecord(TransactionRecord):
         status = 'p' if packed else ' '
         user = user or b''
         description = desc or b''
-        if ext:
-            extension = loads(ext)
-        else:
-            extension = {}
-
-        TransactionRecord.__init__(self, tid, status, user, description, extension)
+        TransactionRecord.__init__(self, tid, status, user, description, ext)
 
     def __iter__(self):
         return TransactionRecordIterator(self)

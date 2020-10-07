@@ -1399,7 +1399,6 @@ class HistoryFreePackUndo(PackUndo):
                 try:
                     to_oids = get_references(state)
                 except:
-                    print(repr(state))
                     logger.exception(
                         "pre_pack: can't unpickle "
                         "object %d in transaction %d; state length = %d",
