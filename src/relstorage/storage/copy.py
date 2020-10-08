@@ -84,8 +84,10 @@ class Copy(object):
     #   many times. Doing too much work.
 
     def copyTransactionsFrom(self, other):
-        other_has_record_iternext = IRecordIter.providedBy(other) or hasattr(other,
-                                                                             'record_iternext')
+        # Just the interface, not the attribute, in case we have a
+        # partial proxy.
+        other_has_record_iternext = IRecordIter.providedBy(other)
+
         copier_factory = _HistoryFreeCopier
         if self.tpc.keep_history or not other_has_record_iternext:
             copier_factory = _HistoryPreservingCopier

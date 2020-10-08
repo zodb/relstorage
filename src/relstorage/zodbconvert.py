@@ -25,12 +25,15 @@ from io import StringIO
 
 import ZConfig
 from zope.interface import providedBy
+from zope.interface import implementer
 from persistent.timestamp import TimeStamp
 
 from ZODB import loglevels
 from ZODB.utils import p64
 from ZODB.utils import readable_tid_repr
 from ZODB.utils import u64
+from ZODB.interfaces import IStorageIteration
+from ZODB.interfaces import IStorageCurrentRecordIteration
 
 schema_xml = u"""
 <schema>
@@ -58,12 +61,17 @@ def storage_has_data(storage):
         if hasattr(i, 'close'):
             i.close()
 
+@implementer(IStorageIteration)
 class _DefaultStartStorageIteration(object):
     # At IStorageIteration instance that keeps a default start value.
     # This is needed because RelStorage.iterator() does return an object with an
     # iterator() method, but that object returns itself, so it can only be iterated
     # once! This breaks some implementations of copyTransactionsFrom, notably
     # our own. See #22
+
+    # By having our own ``@implementer`` declaration, we get our own
+    # __providedBy__/__provides__ attributes. Otherwise, we would "inherit"
+    # the value from the source storage, and claim to implement things we really don't.
 
     def __init__(self, source, start):
         self.__source = source
@@ -167,10 +175,14 @@ def main(argv=None):
             # Compensate for the RelStorage bug(?) and get a reusable iterator
             # that starts where we want it to. There's no harm in wrapping it for
             # other sources like FileStorage too.
-            orig_source = source
+            #
+            # Note that this disables access to ``record_iternext``,
+            # defeating some of the optimizations our own copyTransactionsFrom
+            # would like to do.
+            # XXX: Figure out an incremental way to do this.
+
             source = _DefaultStartStorageIteration(source, next_tid)
-            for iface in providedBy(orig_source):
-                assert iface.providedBy(source)
+            assert not IStorageCurrentRecordIteration.providedBy(source)
             log.info("Resuming ZODB copy from %s", readable_tid_repr(next_tid))
 
 
