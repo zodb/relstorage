@@ -407,11 +407,12 @@ class TestBlobTransactionMixin(TestBlobMixin):
     def test_tpc_abort(self):
         # If a transaction is aborted in the middle of 2-phase commit, any data
         # stored are discarded.
+        from ZODB.Connection import TransactionMetaData
         blob_storage = self.blob_storage
         blob, conn = self._make_and_commit_blob(close=False)
 
         olddata, oldserial = blob_storage.load(blob._p_oid, '')
-        t = transaction.get()
+        t = TransactionMetaData()
         blob_storage.tpc_begin(t)
         with open('blobfile', 'wb') as file:
             file.write(b'This data should go away')

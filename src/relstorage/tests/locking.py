@@ -282,7 +282,7 @@ class TestLocking(TestCase):
         # The NOWAIT lock should be very quick to fire.
         assert self._storage._adapter.locker.supports_row_lock_nowait is not None
         if self._storage._adapter.locker.supports_row_lock_nowait:
-            multiplier = 1.3
+            multiplier = 1.5
             if RUNNING_ON_CI and 'mysql' in type(self).__name__:
                 # On Travis CI, we observe MySQL 8.0.21 to be very slow at this
                 # for some reason.

@@ -564,7 +564,7 @@ class GenericRelStorageTests(
         # to exercise possible buffer overfilling that the batching
         # code might cause.
         data = b'0123456789012345678' * 100
-        t = transaction.Transaction()
+        t = TransactionMetaData()
         self._storage.tpc_begin(t)
         oids = []
         for _ in range(99):
