@@ -52,6 +52,7 @@ class Restore(object):
         'tpc_abort',
         'no_longer_stale',
         'shared_state',
+        'close',
     )
 
     def __init__(self, begin_state, committing_tid, status):

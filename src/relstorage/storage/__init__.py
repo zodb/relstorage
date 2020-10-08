@@ -264,7 +264,7 @@ class RelStorage(LegacyMethodsMixin,
         return self._options.keep_history
 
     def __repr__(self):
-        return "<%s at %x keep_history=%s phase=%r blobhelper=%r cache=%r>" % (
+        return "<%s at 0x%x keep_history=%s phase=%r blobhelper=%r cache=%r>" % (
             self.__class__.__name__,
             id(self),
             self.keep_history,
@@ -431,7 +431,15 @@ class RelStorage(LegacyMethodsMixin,
                 # zc.zlibstorage has a custom copyTransactionsFrom that hides
                 # our own implementation. It just uses ZODb.blob.copyTransactionsFromTo.
                 # Use our implementation.
+                # XXX: This would seem to stop data from being compressed in the destination,
+                # doesn't it? Maybe we shouldn't do this? Or we need some way to handle this.
+                # Needs testing.
                 wrapper.copyTransactionsFrom = self.copyTransactionsFrom
+                # Since this only runs the first time we see a zlibstorage, we need to
+                # add ``copyTransactionsFrom`` to the list of methods it copies in the
+                # future.
+                if 'copyTransactionsFrom' not in type(wrapper).copied_methods:
+                    type(wrapper).copied_methods += ('copyTransactionsFrom',)
             else:
                 wrapper.new_instance = lambda s: type(wrapper)(self.new_instance())
 
@@ -563,6 +571,7 @@ class RelStorage(LegacyMethodsMixin,
     __next = next
 
     def __record_iternext_gen(self, start_oid_int):
+        # XXX: This needs to support __len__()
         with self._load_connection.server_side_cursor() as ss_cursor:
             for record in self._adapter.dbiter.iter_current_records(ss_cursor, start_oid_int):
                 yield record

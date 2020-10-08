@@ -20,9 +20,11 @@ from __future__ import print_function
 import argparse
 import logging
 import sys
+import traceback
 from io import StringIO
 
 import ZConfig
+from zope.interface import providedBy
 from persistent.timestamp import TimeStamp
 
 from ZODB import loglevels
@@ -64,14 +66,25 @@ class _DefaultStartStorageIteration(object):
     # our own. See #22
 
     def __init__(self, source, start):
-        self._source = source
-        self._start = start
+        self.__source = source
+        self.__start = start
+
+    def __len__(self):
+        return len(self.__source)
+
+    def __repr__(self):
+        return "<%s.%s object at 0x%x wrapping %r>" % (
+            type(self).__module__,
+            type(self).__name__,
+            id(self),
+            self.__source,
+        )
 
     def iterator(self, start=None, end=None):
-        return self._source.iterator(start or self._start, end)
+        return self.__source.iterator(start or self.__start, end)
 
     def __getattr__(self, name):
-        return getattr(self._source, name)
+        return getattr(self.__source, name)
 
 def open_storages(options):
     schema = ZConfig.loadSchemaFile(StringIO(schema_xml))
@@ -130,7 +143,7 @@ def main(argv=None):
         source.close()
         destination.close()
         if exit_msg:
-            sys.exit(msg)
+            sys.exit(exit_msg)
 
     log.info("Storages opened successfully.")
 
@@ -154,7 +167,10 @@ def main(argv=None):
             # Compensate for the RelStorage bug(?) and get a reusable iterator
             # that starts where we want it to. There's no harm in wrapping it for
             # other sources like FileStorage too.
+            orig_source = source
             source = _DefaultStartStorageIteration(source, next_tid)
+            for iface in providedBy(orig_source):
+                assert iface.providedBy(source)
             log.info("Resuming ZODB copy from %s", readable_tid_repr(next_tid))
 
 
@@ -184,8 +200,14 @@ def main(argv=None):
             msg = "Error: the destination storage has data.  Try --clear."
             cleanup_and_exit(msg)
 
-        destination.copyTransactionsFrom(source)
-        cleanup_and_exit()
+        try:
+            destination.copyTransactionsFrom(source)
+        except:
+            traceback.print_exc()
+            cleanup_and_exit(repr(sys.exc_info()[1]))
+            raise # Won't do anything, but keeps the linters happy
+        else:
+            cleanup_and_exit()
 
 
 if __name__ == '__main__':

@@ -172,6 +172,21 @@ class AbstractZODBConvertBase(unittest.TestCase):
         db.close()
         self.assertRaises(SystemExit, main, ['', self.cfgfile])
 
+
+    # XXX: Add tests for:
+    # - copying a blob
+    # - verifying that a state becomes compressed or uncompressed.
+    #
+    # Also:
+    # - when the destination keeps history: Verifying iteration
+    #   of all the records, including transaction metadata
+    # - verifying multiple states are saved when both keeps history
+    # - If destination doesn't keep history, verifying only the most recent state# is saved.
+    #
+    # Some of that is probably handled in the History[Free|Preserving][From|To]FileStorageTest,
+
+
+
 class FSZODBConvertTests(AbstractZODBConvertBase):
 
     def setUp(self):

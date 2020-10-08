@@ -74,7 +74,7 @@ class DatabaseIterator(DatabaseHelpersMixin):
     ).where(
         it.c.zoid >= it.bindparam('start_oid')
     ).order_by(
-        it.c.zoid
+        it.c.tid
     )
 
     def iter_current_records(self, cursor, start_oid_int=0):
@@ -85,6 +85,9 @@ class DatabaseIterator(DatabaseHelpersMixin):
 
         Each current object is returned only once, at the transaction most recently
         committed for it.
+
+        Objects are iterated from oldest transaction to newest transaction
+        for compatibility with the ``--incremental`` mode of zodbconvert.
 
         Returns a generator.
         """

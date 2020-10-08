@@ -1474,22 +1474,27 @@ class AbstractRSZodbConvertTests(StorageCreatingMixin,
     relstorage_name = 'destination'
     filestorage_file = None
 
+    # XXX: Needs tests for:
+    # - keep_history = False
+    # - verifying that the final serials match.
+
     def setUp(self):
         super(AbstractRSZodbConvertTests, self).setUp()
+
         cfg = """
         %%import relstorage
         %%import zc.zlibstorage
         <zlibstorage %s>
-        <filestorage>
-            path %s
-        </filestorage>
+          <filestorage>
+              path %s
+          </filestorage>
         </zlibstorage>
         <zlibstorage %s>
-        <relstorage>
-            %s
-            cache-prefix %s
-            cache-local-dir %s
-        </relstorage>
+          <relstorage>
+              %s
+              cache-prefix %s
+              cache-local-dir %s
+          </relstorage>
         </zlibstorage>
         """ % (
             self.filestorage_name,
