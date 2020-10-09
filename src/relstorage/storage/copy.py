@@ -291,7 +291,17 @@ class _RecordIternextIterator(object):
         if self.cookie is self:
             # First time in.
             self.cookie = None
-        oid, tid, state, self.cookie = self.storage.record_iternext(self.cookie)
+        try:
+            result = self.storage.record_iternext(self.cookie)
+        except ValueError:
+            # FileStorage can raise this if the underlying storage
+            # is completely empty.
+            # See https://github.com/zopefoundation/ZODB/issues/330
+            if self.cookie is None:
+                raise StopIteration
+            raise # pragma: no cover
+
+        oid, tid, state, self.cookie = result
         return oid, tid, state
 
     next = __next__ # Py2

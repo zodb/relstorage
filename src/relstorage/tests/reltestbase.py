@@ -27,6 +27,7 @@ import tempfile
 import time
 import threading
 import unittest
+from textwrap import dedent
 
 import transaction
 from persistent import Persistent
@@ -65,7 +66,7 @@ from . import StorageCreatingMixin
 from . import skipIfNoConcurrentWriters
 from .persistentcache import PersistentCacheStorageTests
 from .locking import TestLocking
-from .test_zodbconvert import FSZODBConvertTests
+from .test_zodbconvert import ZlibWrappedFSZODBConvertTests
 
 class RelStorageTestBase(StorageCreatingMixin,
                          TestCase,
@@ -1465,7 +1466,7 @@ class GenericRelStorageTests(
 
 
 class AbstractRSZodbConvertTests(StorageCreatingMixin,
-                                 FSZODBConvertTests,
+                                 ZlibWrappedFSZODBConvertTests,
                                  # This one isn't cooperative in
                                  # setUp(), so it needs to be last.
                                  ZODB.tests.util.TestCase):
@@ -1480,42 +1481,51 @@ class AbstractRSZodbConvertTests(StorageCreatingMixin,
 
     def setUp(self):
         super(AbstractRSZodbConvertTests, self).setUp()
-
-        cfg = """
-        %%import relstorage
-        %%import zc.zlibstorage
-        <zlibstorage %s>
-          <filestorage>
-              path %s
-          </filestorage>
-        </zlibstorage>
-        <zlibstorage %s>
-          <relstorage>
-              %s
-              cache-prefix %s
-              cache-local-dir %s
-          </relstorage>
-        </zlibstorage>
-        """ % (
-            self.filestorage_name,
-            self.filestorage_file,
-            self.relstorage_name,
-            self.get_adapter_zconfig(),
-            self.relstorage_name,
-            os.path.abspath('.'),
-        )
-        self._write_cfg(cfg)
-
+        # Zap the storage
         self.make_storage(zap=True).close()
 
-    def _wrap_storage(self, storage):
-        return self._closing(ZlibStorage(storage))
+    def make_storage(self, zap=True, **kw):
+        if kw:
+            raise TypeError("kwargs not supported")
+        if self.relstorage_name == 'source':
+            meth = self._create_src_storage
+        else:
+            meth = self._create_dest_storage
 
-    def _create_dest_storage(self):
-        return self._wrap_storage(super(AbstractRSZodbConvertTests, self)._create_dest_storage())
+        storage = meth()
+        if zap:
+            storage.zap_all(slow=self.zap_slow)
+        return storage
 
-    def _create_src_storage(self):
-        return self._wrap_storage(super(AbstractRSZodbConvertTests, self)._create_src_storage())
+
+    def _cfg_header(self):
+        return '%import relstorage\n' + super(AbstractRSZodbConvertTests, self)._cfg_header()
+
+    def _cfg_relstorage(self, name, _path, blob_dir):
+        cfg = dedent("""
+        <relstorage>
+              %(rs_config)s
+              keep-history %(rs_keep_history)s
+              blob-dir %(rs_blobs)s
+              cache-prefix %(rs_name)s
+              cache-local-dir %(rs_cache_path)s
+         </relstorage>
+        """ % {
+            'rs_name': name,
+            'rs_keep_history': 'true' if self.keep_history else 'false',
+            'rs_blobs': blob_dir,
+            'rs_config': self.get_adapter_zconfig(),
+            'rs_cache_path': os.path.abspath('.'),
+        })
+        return cfg
+
+    def _cfg_one(self, name, path, blob_dir):
+        if name == self.filestorage_name:
+            meth = self._cfg_filestorage
+        else:
+            assert name == self.relstorage_name
+            meth = self._cfg_relstorage
+        return meth(name, path, blob_dir)
 
     def test_new_instance_still_zlib(self):
         storage = self._closing(self.make_storage())
@@ -1529,28 +1539,32 @@ class AbstractRSZodbConvertTests(StorageCreatingMixin,
         self.assertIn('_crs_untransform_record_data', new_storage.base.__dict__)
         self.assertIn('_crs_transform_record_data', new_storage.base.__dict__)
 
-class AbstractRSDestZodbConvertTests(AbstractRSZodbConvertTests):
-
+class AbstractRSDestHPZodbConvertTests(AbstractRSZodbConvertTests):
+    keep_history = True
     zap_supported_by_dest = True
+    dest_db_needs_closed_before_zodbconvert = False
+    @property
+    def filestorage_file(self):
+        return self.srcfile
+
+class AbstractRSDestHFZodbConvertTests(AbstractRSZodbConvertTests):
+    keep_history = False
+    zap_supported_by_dest = True
+    dest_db_needs_closed_before_zodbconvert = False
 
     @property
     def filestorage_file(self):
         return self.srcfile
 
-    def _create_dest_storage(self):
-        return self._closing(self.make_storage(cache_prefix=self.relstorage_name, zap=False))
 
 class AbstractRSSrcZodbConvertTests(AbstractRSZodbConvertTests):
-
+    src_db_needs_closed_before_zodbconvert = False
     filestorage_name = 'destination'
     relstorage_name = 'source'
 
     @property
     def filestorage_file(self):
         return self.destfile
-
-    def _create_src_storage(self):
-        return self._closing(self.make_storage(cache_prefix=self.relstorage_name, zap=False))
 
 class AbstractIDBOptionsTest(unittest.TestCase):
 

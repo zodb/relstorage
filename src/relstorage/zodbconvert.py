@@ -20,11 +20,9 @@ from __future__ import print_function
 import argparse
 import logging
 import sys
-import traceback
 from io import StringIO
 
 import ZConfig
-from zope.interface import providedBy
 from zope.interface import implementer
 from persistent.timestamp import TimeStamp
 
@@ -214,11 +212,7 @@ def main(argv=None):
 
         try:
             destination.copyTransactionsFrom(source)
-        except:
-            traceback.print_exc()
-            cleanup_and_exit(repr(sys.exc_info()[1]))
-            raise # Won't do anything, but keeps the linters happy
-        else:
+        finally:
             cleanup_and_exit()
 
 

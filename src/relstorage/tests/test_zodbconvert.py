@@ -20,11 +20,15 @@ import os
 import tempfile
 import unittest
 from contextlib import contextmanager
+from textwrap import dedent
 
 import transaction
-from zc.zlibstorage import ZlibStorage
+
+from zope.testing.setupstack import rmtree
 from ZODB.DB import DB
 from ZODB.FileStorage import FileStorage
+from ZODB.blob import Blob
+from ZODB.tests.util import TestCase
 
 from relstorage.zodbconvert import main
 
@@ -37,7 +41,7 @@ def skipIfZapNotSupportedByDest(func):
         func(self)
     return test
 
-class AbstractZODBConvertBase(unittest.TestCase):
+class AbstractZODBConvertBase(TestCase):
     cfgfile = None
 
     # Set to True in a subclass if the destination can be zapped
@@ -46,8 +50,15 @@ class AbstractZODBConvertBase(unittest.TestCase):
     def setUp(self):
         super(AbstractZODBConvertBase, self).setUp()
         self._to_close = []
+        self.__src_db = None
+        self.__dest_db = None
+        # zodb.tests.util.TestCase takes us to a temporary directory
+        # as our working directory, and also sets it to tempfile.tempdir;
+        # but don't require subclasses to know that.
+        self.parent_temp_directory = tempfile.tempdir
 
     def tearDown(self):
+        self.flush_changes_before_zodbconvert()
         for i in self._to_close:
             i.close()
         self._to_close = []
@@ -69,6 +80,22 @@ class AbstractZODBConvertBase(unittest.TestCase):
         gc.collect()
         super(AbstractZODBConvertBase, self).tearDown()
 
+    src_db_needs_closed_before_zodbconvert = True
+    dest_db_needs_closed_before_zodbconvert = True
+
+    def flush_changes_before_zodbconvert(self):
+        for db_name in 'src_db', 'dest_db':
+            db_attr = '_' + AbstractZODBConvertBase.__name__ + '__' + db_name
+            db = getattr(self, db_attr)
+            needs_closed = getattr(self, db_name + '_needs_closed_before_zodbconvert')
+
+            if needs_closed and db is not None:
+                db.close()
+                setattr(self, db_attr, None)
+                if db in self._to_close:
+                    self._to_close.remove(db)
+
+
     def _closing(self, thing):
         self._to_close.append(thing)
         return thing
@@ -80,10 +107,14 @@ class AbstractZODBConvertBase(unittest.TestCase):
         raise NotImplementedError()
 
     def _create_src_db(self):
-        return self._closing(DB(self._closing(self._create_src_storage())))
+        if self.__src_db is None:
+            self.__src_db = self._closing(DB(self._create_src_storage()))
+        return self.__src_db
 
     def _create_dest_db(self):
-        return self._closing(DB(self._closing(self._create_dest_storage())))
+        if self.__dest_db is None:
+            self.__dest_db = self._closing(DB(self._create_dest_storage()))
+        return self.__dest_db
 
     @contextmanager
     def __conn(self, name):
@@ -93,7 +124,6 @@ class AbstractZODBConvertBase(unittest.TestCase):
             yield conn
         finally:
             conn.close()
-            db.close()
 
     def _src_conn(self):
         return self.__conn('src')
@@ -106,6 +136,16 @@ class AbstractZODBConvertBase(unittest.TestCase):
             conn.root()[key] = val
             transaction.commit()
 
+    def __check_value_of_key_in_db(self, val, key, db_conn_func):
+        with db_conn_func() as conn2:
+            db_val = conn2.root().get(key)
+            if isinstance(val, bytes):
+                self.assertIsInstance(db_val, Blob)
+                with db_val.open('r') as f:
+                    db_val = f.read()
+
+            self.assertEqual(db_val, val)
+
     def _write_value_for_key_in_src(self, x, key='x'):
         self.__write_value_for_key_in_db(x, key, self._src_conn)
 
@@ -113,40 +153,68 @@ class AbstractZODBConvertBase(unittest.TestCase):
         self.__write_value_for_key_in_db(x, key, self._dest_conn)
 
     def _check_value_of_key_in_dest(self, x, key='x'):
-        with self._dest_conn() as conn2:
-            db_x = conn2.root().get(key)
-            self.assertEqual(db_x, x)
+        self.__check_value_of_key_in_db(x, key, self._dest_conn)
+
+    def _check_value_of_key_in_src(self, x, key='x'):
+        self.__check_value_of_key_in_db(x, key, self._src_conn)
+
+    def run_zodbconvert(self, *args):
+        self.flush_changes_before_zodbconvert()
+        return main(*args)
 
     def test_convert(self):
         self._write_value_for_key_in_src(10)
-        main(['', self.cfgfile])
+        self.run_zodbconvert(['', self.cfgfile])
         self._check_value_of_key_in_dest(10)
-
 
     def test_dry_run(self):
         self._write_value_for_key_in_src(10)
-        main(['', '--dry-run', self.cfgfile])
+        self.run_zodbconvert(['', '--dry-run', self.cfgfile])
         self._check_value_of_key_in_dest(None)
 
-    def test_incremental(self):
+    def test_incremental_after_full_copy(self, first_convert_args=('',)):
+        from persistent.mapping import PersistentMapping
+        # Make sure to write new OIDs as well as new TIDs.
+        for i in range(9):
+            # Make sure to write new OIDs as well as new TIDs.
+            self._write_value_for_key_in_src(PersistentMapping(i=i), key=i)
+        self._write_value_for_key_in_src(Blob(b'abc'), 'the_blob')
+        self._write_value_for_key_in_src(Blob(b'def'), 'the_blob')
         self._write_value_for_key_in_src(10)
-        main(['', self.cfgfile])
-        self._check_value_of_key_in_dest(10)
+        self._check_value_of_key_in_src(PersistentMapping(i=2), 2)
 
+        self.run_zodbconvert(first_convert_args + (self.cfgfile,))
+        self._check_value_of_key_in_dest(10)
+        self._check_value_of_key_in_dest(PersistentMapping(i=2), 2)
+        self._check_value_of_key_in_dest(b'def', 'the_blob')
+
+        for i in reversed(range(9)):
+            # Make sure to write new OIDs as well as new TIDs,
+            # But this time in *reverse* of the order we wrote them before.
+            self._write_value_for_key_in_src(PersistentMapping(i=i**2), key=i)
+        self._write_value_for_key_in_src(Blob(b'123'), 'the_blob')
+        self._check_value_of_key_in_src(PersistentMapping(i=4), 2)
         self._write_value_for_key_in_src("hi")
-        main(['', '--incremental', self.cfgfile])
+        self.run_zodbconvert(['', '--incremental', self.cfgfile])
         self._check_value_of_key_in_dest("hi")
+        self._check_value_of_key_in_dest(PersistentMapping(i=4), 2)
+        self._check_value_of_key_in_dest(b'123', 'the_blob')
+
+    def test_incremental_after_incremental(self):
+        # In case they do the conversion in different orders
+        # depending on whether --incremental is specified or not.
+        self.test_incremental_after_full_copy(first_convert_args=('', '--incremental'))
 
     def test_incremental_empty_src_dest(self):
         # Should work and not raise a POSKeyError
-        main(['', '--incremental', self.cfgfile])
+        self.run_zodbconvert(['', '--incremental', self.cfgfile])
         self._check_value_of_key_in_dest(None)
 
     @skipIfZapNotSupportedByDest
     def test_clear_empty_dest(self):
         x = 10
         self._write_value_for_key_in_src(x)
-        main(['', '--clear', self.cfgfile])
+        self.run_zodbconvert(['', '--clear', self.cfgfile])
         self._check_value_of_key_in_dest(x)
 
     @skipIfZapNotSupportedByDest
@@ -159,24 +227,21 @@ class AbstractZODBConvertBase(unittest.TestCase):
         self._write_value_for_key_in_src(2, key='y')
         # omit z
 
-        main(['', '--clear', self.cfgfile])
+        self.run_zodbconvert(['', '--clear', self.cfgfile])
 
         self._check_value_of_key_in_dest(1, key='x')
         self._check_value_of_key_in_dest(2, key='y')
         self._check_value_of_key_in_dest(None, key='z')
 
     def test_no_overwrite(self):
-        db = self._create_src_db() # create the root object
-        db.close()
-        db = self._create_dest_db() # create the root object
-        db.close()
-        self.assertRaises(SystemExit, main, ['', self.cfgfile])
+        self._create_src_db() # create the root object
+        self._create_dest_db() # create the root object
 
+        with self.assertRaises(SystemExit) as exc:
+            self.run_zodbconvert(['', self.cfgfile])
 
-    # XXX: Add tests for:
-    # - copying a blob
-    # - verifying that a state becomes compressed or uncompressed.
-    #
+        self.assertIn('Try --clear', str(exc.exception))
+
     # Also:
     # - when the destination keeps history: Verifying iteration
     #   of all the records, including transaction metadata
@@ -184,61 +249,82 @@ class AbstractZODBConvertBase(unittest.TestCase):
     # - If destination doesn't keep history, verifying only the most recent state# is saved.
     #
     # Some of that is probably handled in the History[Free|Preserving][From|To]FileStorageTest,
-
+    # but I think that directly uses copyTransactionsFrom and doesn't have the other handling
+    # zodbconvert does (e.g., incremental)
 
 
 class FSZODBConvertTests(AbstractZODBConvertBase):
+    keep_history = True
 
     def setUp(self):
         super(FSZODBConvertTests, self).setUp()
 
-        fd, self.srcfile = tempfile.mkstemp()
+        fd, self.srcfile = tempfile.mkstemp('.fssource')
         os.close(fd)
         os.remove(self.srcfile)
+        self.src_blobs = tempfile.mkdtemp('.fssource')
 
-        fd, self.destfile = tempfile.mkstemp()
+        fd, self.destfile = tempfile.mkstemp('.fsdest')
         os.close(fd)
         os.remove(self.destfile)
+        self.dest_blobs = tempfile.mkdtemp('.fsdest')
 
         cfg = self._cfg_header() + self._cfg_source() + self._cfg_dest()
-        self._write_cfg(cfg)
+        self.cfgfile = self._write_cfg(cfg)
 
     def _cfg_header(self):
         return ""
 
-    def _cfg_source(self):
-        return """
-        <filestorage source>
+    def _cfg_filestorage(self, name, path, blob_dir):
+        return dedent("""
+        <filestorage %s>
             path %s
+            blob-dir %s
         </filestorage>
-        """ % self.srcfile
+        """ % (name, path, blob_dir))
+
+    def _cfg_one(self, name, path, blob_dir):
+        return self._cfg_filestorage(name, path, blob_dir)
+
+    def _cfg_source(self):
+        return self._cfg_one('source', self.srcfile, self.src_blobs)
 
     def _cfg_dest(self):
-        return """
-        <filestorage destination>
-            path %s
-        </filestorage>
-        """ % self.destfile
+        return self._cfg_one('destination', self.destfile, self.dest_blobs)
 
     def _write_cfg(self, cfg):
-        fd, self.cfgfile = tempfile.mkstemp()
+        fd, cfgfile = tempfile.mkstemp('.conf', 'zodbconvert-')
         os.write(fd, cfg.encode('ascii'))
         os.close(fd)
+        return cfgfile
 
     def tearDown(self):
-        if os.path.exists(self.destfile):
-            os.remove(self.destfile)
-        if os.path.exists(self.srcfile):
-            os.remove(self.srcfile)
-        if os.path.exists(self.cfgfile):
-            os.remove(self.cfgfile)
+        for fname in self.destfile, self.srcfile, self.cfgfile:
+            if os.path.exists(fname):
+                os.remove(fname)
+        self.destfile = self.srcfile = self.cfgfile = None
+        for dname in self.src_blobs, self.dest_blobs:
+            if os.path.exists(dname):
+                rmtree(dname)
+
         super(FSZODBConvertTests, self).tearDown()
 
+    def _load_zconfig(self):
+        from relstorage.zodbconvert import schema_xml
+        from relstorage.zodbconvert import StringIO
+        import ZConfig
+
+        schema = ZConfig.loadSchemaFile(StringIO(schema_xml))
+        conf, _ = ZConfig.loadConfig(schema, self.cfgfile)
+        return conf
+
     def _create_src_storage(self):
-        return FileStorage(self.srcfile)
+        conf = self._load_zconfig()
+        return conf.source.open()
 
     def _create_dest_storage(self):
-        return FileStorage(self.destfile)
+        conf = self._load_zconfig()
+        return conf.destination.open()
 
     def test_storage_has_data(self):
         from relstorage.zodbconvert import storage_has_data
@@ -248,32 +334,28 @@ class FSZODBConvertTests(AbstractZODBConvertBase):
         db.close()
         self.assertTrue(storage_has_data(src))
 
-class ZlibWrappedZODBConvertTests(FSZODBConvertTests):
+class ZlibWrappedFSZODBConvertTests(FSZODBConvertTests):
 
+    # XXX: Add tests for:
+    # - verifying that a state becomes compressed or uncompressed.
+    #
     def _cfg_header(self):
         return "%import zc.zlibstorage\n"
 
     def _cfg_source(self):
         return ("\n<zlibstorage source>"
-                + super(ZlibWrappedZODBConvertTests, self)._cfg_source()
+                + super(ZlibWrappedFSZODBConvertTests, self)._cfg_source()
                 + "</zlibstorage>")
 
     def _cfg_dest(self):
         return ("\n<zlibstorage destination>"
-                + super(ZlibWrappedZODBConvertTests, self)._cfg_dest()
+                + super(ZlibWrappedFSZODBConvertTests, self)._cfg_dest()
                 + "</zlibstorage>")
-
-    def _create_src_storage(self):
-        return ZlibStorage(super(ZlibWrappedZODBConvertTests, self)._create_src_storage())
-
-    def _create_dest_storage(self):
-        return ZlibStorage(super(ZlibWrappedZODBConvertTests, self)._create_dest_storage())
-
 
 def test_suite():
     suite = unittest.TestSuite()
     suite.addTest(unittest.makeSuite(FSZODBConvertTests))
-    suite.addTest(unittest.makeSuite(ZlibWrappedZODBConvertTests))
+    suite.addTest(unittest.makeSuite(ZlibWrappedFSZODBConvertTests))
     return suite
 
 if __name__ == '__main__':
