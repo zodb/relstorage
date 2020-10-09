@@ -164,10 +164,43 @@ class AbstractZODBConvertBase(TestCase):
         self.flush_changes_before_zodbconvert()
         return main(*args)
 
+    def __flatten_db_iternext(self, conn):
+        storage = conn._storage
+        if not hasattr(storage, 'record_iternext'):
+            # MVCCAdapter
+            storage = storage._storage
+
+        # [(oid, tid, state)]
+        result = []
+        cookie = None
+        while 1:
+            oid, tid, state, cookie = storage.record_iternext(cookie)
+            result.append((oid, tid, state))
+            if cookie is None:
+                break
+        # Iteration order is not guaranteed, although at this writing
+        # both FileStorage and RelStorage iterate by OID
+        result.sort()
+        return result
+
+
+    def deep_compare_current_states(self):
+        with self._src_conn() as c:
+            src_state = self.__flatten_db_iternext(c)
+        with self._dest_conn() as c:
+            dest_state = self.__flatten_db_iternext(c)
+        # The should both have something
+        self.assertTrue(src_state)
+        self.assertTrue(dest_state)
+        # And they should all be equal
+        self.assertEqual(src_state, dest_state)
+
+
     def test_convert(self):
         self._write_value_for_key_in_src(10)
         self.run_zodbconvert(['', self.cfgfile])
         self._check_value_of_key_in_dest(10)
+        self.deep_compare_current_states()
 
     def test_dry_run(self):
         self._write_value_for_key_in_src(10)
@@ -186,9 +219,11 @@ class AbstractZODBConvertBase(TestCase):
         self._check_value_of_key_in_src(PersistentMapping(i=2), 2)
 
         self.run_zodbconvert(first_convert_args + (self.cfgfile,))
+
         self._check_value_of_key_in_dest(10)
         self._check_value_of_key_in_dest(PersistentMapping(i=2), 2)
         self._check_value_of_key_in_dest(Blob(b'def'), 'the_blob')
+        self.deep_compare_current_states()
 
         for i in reversed(range(9)):
             # Make sure to write new OIDs as well as new TIDs,
@@ -203,6 +238,7 @@ class AbstractZODBConvertBase(TestCase):
         self._check_value_of_key_in_dest("hi")
         self._check_value_of_key_in_dest(PersistentMapping(i=4), 2)
         self._check_value_of_key_in_dest(Blob(b'123'), 'the_blob')
+        self.deep_compare_current_states()
 
     def test_incremental_after_incremental(self):
         # In case they do the conversion in different orders
