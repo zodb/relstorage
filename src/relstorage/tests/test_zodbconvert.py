@@ -139,8 +139,10 @@ class AbstractZODBConvertBase(TestCase):
     def __check_value_of_key_in_db(self, val, key, db_conn_func):
         with db_conn_func() as conn2:
             db_val = conn2.root().get(key)
-            if isinstance(val, bytes):
+            if isinstance(val, Blob):
                 self.assertIsInstance(db_val, Blob)
+                with val.open('r') as f:
+                    val = f.read()
                 with db_val.open('r') as f:
                     db_val = f.read()
 
@@ -186,7 +188,7 @@ class AbstractZODBConvertBase(TestCase):
         self.run_zodbconvert(first_convert_args + (self.cfgfile,))
         self._check_value_of_key_in_dest(10)
         self._check_value_of_key_in_dest(PersistentMapping(i=2), 2)
-        self._check_value_of_key_in_dest(b'def', 'the_blob')
+        self._check_value_of_key_in_dest(Blob(b'def'), 'the_blob')
 
         for i in reversed(range(9)):
             # Make sure to write new OIDs as well as new TIDs,
@@ -195,10 +197,12 @@ class AbstractZODBConvertBase(TestCase):
         self._write_value_for_key_in_src(Blob(b'123'), 'the_blob')
         self._check_value_of_key_in_src(PersistentMapping(i=4), 2)
         self._write_value_for_key_in_src("hi")
+
         self.run_zodbconvert(['', '--incremental', self.cfgfile])
+
         self._check_value_of_key_in_dest("hi")
         self._check_value_of_key_in_dest(PersistentMapping(i=4), 2)
-        self._check_value_of_key_in_dest(b'123', 'the_blob')
+        self._check_value_of_key_in_dest(Blob(b'123'), 'the_blob')
 
     def test_incremental_after_incremental(self):
         # In case they do the conversion in different orders

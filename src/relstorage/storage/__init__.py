@@ -572,6 +572,15 @@ class RelStorage(LegacyMethodsMixin,
 
     def __record_iternext_gen(self, start_oid_int):
         # XXX: This needs to support __len__()
+        # XXX: If this produces Blob records, the receiver will call
+        # ``openCommittedBlobFile()`` on us. That also uses the load connection
+        # (it has to, in order to be consistent). The problem is that one driver,
+        # PyMySQLConnector, can't handle a second query when this cursor is still active.
+        # It raises ``.InternalError: Unread result found``. This manifests in
+        # ``testSimpleBlobRecovery``. But, for some reason, that only happens when executing
+        # ``__on_load_first_use``. If we already had the cursor *open*, then it can be used fine,
+        # at least so it seems. So here we make sure to have the cursor open.
+        getattr(self._load_connection, 'cursor')
         with self._load_connection.server_side_cursor() as ss_cursor:
             for record in self._adapter.dbiter.iter_current_records(ss_cursor, start_oid_int):
                 yield record
@@ -616,6 +625,8 @@ class RelStorage(LegacyMethodsMixin,
             # Unpacking will raise if we return None; most processing of *data* is not expecting
             # None (it's common to wrap it in ``io.BytesIO()`` immediately; that's what zodbupdate
             # does). Thus, it's probably probably best to let getting the first value simply raise.
+            # In that scenario, FileStorage raises a ValueError:
+            # https://github.com/zopefoundation/ZODB/issues/330
             oid, tid, state = self.__next(cursor)
             # After that, we can treat it like it was given to us in *next*
             next = oid, tid, state, cursor
