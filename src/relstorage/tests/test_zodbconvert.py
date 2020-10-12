@@ -383,15 +383,22 @@ class FSZODBConvertTests(AbstractZODBConvertBase):
         return cfgfile
 
     def tearDown(self):
+        super(FSZODBConvertTests, self).tearDown() # Close files first.
+        def _rm(fname, meth):
+            try:
+                meth(fname)
+            except OSError:
+                import traceback
+                print("Failed to remove", fname)
+                traceback.print_exc()
+
         for fname in self.destfile, self.srcfile, self.cfgfile:
             if os.path.exists(fname):
-                os.remove(fname)
+                _rm(fname, os.remove)
         self.destfile = self.srcfile = self.cfgfile = None
         for dname in self.src_blobs, self.dest_blobs:
             if os.path.exists(dname):
-                rmtree(dname)
-
-        super(FSZODBConvertTests, self).tearDown()
+                _rm(dname, rmtree)
 
     def _load_zconfig(self):
         from relstorage.zodbconvert import schema_xml

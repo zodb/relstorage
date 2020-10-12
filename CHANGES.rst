@@ -35,6 +35,13 @@
 
 - Require ZODB 5.6, up from ZODB 5.5. See :issue:`424`.
 
+- Make ``zodbconvert`` *much faster* (around 5 times faster) when the
+  destination is a history-free RelStorage and the source supports
+  ``record_iternext()`` (like RelStorage and FileStorage do). This
+  also applies to the ``copyTransactionsFrom`` method. This is disabled
+  with the ``--incremental`` option, however. Be sure to read the
+  updated zodbconvert documentation.
+
 3.3.2 (2020-09-21)
 ==================
 
