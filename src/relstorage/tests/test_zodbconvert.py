@@ -57,7 +57,19 @@ class AbstractZODBConvertBase(TestCase):
         # but don't require subclasses to know that.
         self.parent_temp_directory = tempfile.tempdir
 
+        from relstorage.storage import copy
+        self._orig_should_minor = copy._ProgressLogger._should_minor_log
+        self._orig_should_major = copy._ProgressLogger._should_major_log
+        self._orig_debug_enabled = copy._ProgressLogger.debug_enabled
+        copy._ProgressLogger.debug_enabled = True
+        copy._ProgressLogger._should_minor_log = lambda *args: True
+        copy._ProgressLogger._should_major_log = lambda *args: True
+
     def tearDown(self):
+        from relstorage.storage import copy
+        copy._ProgressLogger._should_minor_log = self._orig_should_minor
+        copy._ProgressLogger._should_major_log = self._orig_should_major
+        copy._ProgressLogger.debug_enabled = self._orig_debug_enabled
         self.flush_changes_before_zodbconvert()
         for i in self._to_close:
             i.close()
@@ -308,6 +320,11 @@ class AbstractZODBConvertBase(TestCase):
             self.run_zodbconvert(['', self.cfgfile])
 
         self.assertIn('Try --clear', str(exc.exception))
+
+    def test_clear_dry_run(self):
+        with self.assertRaises(SystemExit) as exc:
+            self.run_zodbconvert(['', '--dry-run', '--clear', self.cfgfile])
+        self.assertIn('Cannot clear a storage during a dry-run', str(exc.exception))
 
     # Also:
     # - when the destination keeps history: Verifying iteration
