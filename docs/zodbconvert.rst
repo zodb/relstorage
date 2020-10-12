@@ -54,6 +54,71 @@ want to reverse the conversion, exchange the names "source" and
 "destination". All storage types and storage options available in
 zope.conf are also available in this configuration file.
 
+Tips
+====
+
+When using a storage wrapper, such as `zc.zlibstorage
+<https://pypi.org/project/zc.zlibstorage/>`_ to provide
+transformations of the stored data, it is not necessary to keep the
+wrapper when both the source and destination storage would use the
+same wrapper.
+
+In fact it is faster, to *remove the wrapper* on both the source and
+destination storage when performing the copy. This avoids the
+redundant decompressing and recompressing of the data as it is read
+from one storage and copied to the next.
+
+The exception, of course, is if you want the destination to feature a
+transformation (or untransformation) that the source does not have.
+
+For example, if you initially have a configuration like this::
+
+  <zlibstorage>
+    <filestorage>
+      path /zope/var/Data.fs
+    </filestorage>
+  </zlibstorage>
+
+The fastest way to create a compressed RelStorage copy will be to omit
+the storage wrapper::
+
+  <filestorage source>
+    path /zope/var/Data.fs
+  </filestorage>
+
+  <relstorage destination>
+    <mysql>
+      db zodb
+    </mysql>
+  </relstorage>
+
+
+To use the resulting RelStorage, you'll need to re-apply the wrapper::
+
+  <zlibstorage>
+    <relstorage>
+      <mysql>
+        db zodb
+      </mysql>
+    </relstorage>
+  </zlibstorage>
+
+
+In contrast, this configuration will produce an *uncompressed* RelStorage::
+
+  <zlibstorage>
+    <filestorage source>
+      path /zope/var/Data.fs
+    </filestorage>
+  </zlibstorage>
+
+  <relstorage destination>
+    <mysql>
+      db zodb
+    </mysql>
+  </relstorage>
+
+
 Options for ``zodbconvert``
 ===========================
 

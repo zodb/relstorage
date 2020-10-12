@@ -116,6 +116,14 @@ class AbstractZODBConvertBase(TestCase):
             self.__dest_db = self._closing(DB(self._create_dest_storage()))
         return self.__dest_db
 
+    def _src_storage_from_db(self):
+        # Do NOT close the returned storage
+        return self._create_src_db().storage
+
+    def _dest_storage_from_db(self):
+        # Do NOT close the returned storage
+        return self._create_dest_db().storage
+
     @contextmanager
     def __conn(self, name):
         db = getattr(self, '_create_' + name + '_db')()
@@ -164,12 +172,24 @@ class AbstractZODBConvertBase(TestCase):
         self.flush_changes_before_zodbconvert()
         return main(*args)
 
-    def __flatten_db_iternext(self, conn):
+    def _storage_from_connection(self, conn):
+        # Use a connection to get a storage so that you can be sure
+        # it's been through ``new_instance``, etc.
         storage = conn._storage
         if not hasattr(storage, 'record_iternext'):
             # MVCCAdapter
             storage = storage._storage
+        return storage
 
+    def _flatten_db_iternext_storage(self, storage):
+        # sync() to make sure the view is current, regardless of
+        # where the storage came from.
+        try:
+            s = storage.sync
+        except AttributeError:
+            pass
+        else:
+            s(force=True)
         # [(oid, tid, state)]
         result = []
         cookie = None
@@ -183,18 +203,25 @@ class AbstractZODBConvertBase(TestCase):
         result.sort()
         return result
 
-
     def deep_compare_current_states(self):
-        with self._src_conn() as c:
-            src_state = self.__flatten_db_iternext(c)
-        with self._dest_conn() as c:
-            dest_state = self.__flatten_db_iternext(c)
+        src_state = self._flatten_db_iternext_storage(self._src_storage_from_db())
+        dest_state = self._flatten_db_iternext_storage(self._src_storage_from_db())
         # The should both have something
         self.assertTrue(src_state)
         self.assertTrue(dest_state)
         # And they should all be equal
         self.assertEqual(src_state, dest_state)
 
+        with self._src_conn() as c:
+            src_from_conn = self._flatten_db_iternext_storage(
+                self._storage_from_connection(c)
+            )
+        with self._dest_conn() as c:
+            dest_from_conn = self._flatten_db_iternext_storage(
+                self._storage_from_connection(c)
+            )
+        self.assertEqual(src_from_conn, src_state)
+        self.assertEqual(dest_from_conn, dest_state)
 
     def test_convert(self):
         self._write_value_for_key_in_src(10)
@@ -376,9 +403,6 @@ class FSZODBConvertTests(AbstractZODBConvertBase):
 
 class ZlibWrappedFSZODBConvertTests(FSZODBConvertTests):
 
-    # XXX: Add tests for:
-    # - verifying that a state becomes compressed or uncompressed.
-    #
     def _cfg_header(self):
         return "%import zc.zlibstorage\n"
 
@@ -391,6 +415,24 @@ class ZlibWrappedFSZODBConvertTests(FSZODBConvertTests):
         return ("\n<zlibstorage destination>"
                 + super(ZlibWrappedFSZODBConvertTests, self)._cfg_dest()
                 + "</zlibstorage>")
+
+    def deep_compare_current_states(self):
+        super(ZlibWrappedFSZODBConvertTests, self).deep_compare_current_states()
+        from zc.zlibstorage import compress
+
+        # Verify that both source and destination were compressed.
+        src_raw = self._src_storage_from_db().base
+        dest_raw = self._dest_storage_from_db().base
+
+        src_states = self._flatten_db_iternext_storage(src_raw)
+        dest_states = self._flatten_db_iternext_storage(dest_raw)
+        for states in src_states, dest_states:
+            __traceback_info__ = 'src' if states is src_states else 'dest'
+            for _oid, _tid, state in states:
+                __traceback_info__ = (__traceback_info__, _oid,)
+                compressed = compress(state)
+                self.assertEqual(compressed, state)
+
 
 def test_suite():
     suite = unittest.TestSuite()

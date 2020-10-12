@@ -81,7 +81,7 @@ class Copy(object):
     # using the regular iterator():
     #
     # - We could copy and discard the state for a single object
-    #   many times. Doing too much work.
+    #   many times. Doing way too much work.
 
     def copyTransactionsFrom(self, other):
         # Just the interface, not the attribute, in case we have a
@@ -181,6 +181,9 @@ class _AbstractCopier(object):
                     oid, tid)
             except POSKeyError:
                 logger.exception("Failed to open blob to copy")
+
+        # We may not be able to read the data after this.
+        data = self.restore._crs_transform_record_data(data)
         if blobfile is not None:
             fd, name = tempfile.mkstemp(
                 suffix='.tmp',

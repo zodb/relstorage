@@ -1539,6 +1539,10 @@ class AbstractRSZodbConvertTests(StorageCreatingMixin,
         self.assertIn('_crs_untransform_record_data', new_storage.base.__dict__)
         self.assertIn('_crs_transform_record_data', new_storage.base.__dict__)
 
+        self.assertEqual(new_storage.copyTransactionsFrom,
+                         new_storage.base.copyTransactionsFrom)
+
+
 class AbstractRSDestHPZodbConvertTests(AbstractRSZodbConvertTests):
     keep_history = True
     zap_supported_by_dest = True

@@ -300,6 +300,9 @@ class RelStorage(LegacyMethodsMixin,
             # our children. Make sure any wrapper that needs to transform
             # records can do so.
             # See https://github.com/zodb/relstorage/issues/71
+            #
+            # NOTE: This is *probably* unnecessary now that we directly invoke the constructor
+            # for zc.zlibstorage in *its* ``new_instance`` method.
             other._crs_transform_record_data = self._crs_transform_record_data
             other._crs_untransform_record_data = self._crs_untransform_record_data
         return other
@@ -422,26 +425,24 @@ class RelStorage(LegacyMethodsMixin,
                 and not ZODB.interfaces.IDatabase.providedBy(wrapper)
                 and not hasattr(type(wrapper), 'new_instance')):
             # Fixes for https://github.com/zopefoundation/zc.zlibstorage/issues/2
-            # We special-case zlibstorage for speed
+            # We special-case zlibstorage because we know that just calling
+            # its type won't necessarily do the correct thing.
             if hasattr(wrapper, 'base') and hasattr(wrapper, 'copied_methods'):
                 type(wrapper).new_instance = _zlibstorage_new_instance
                 type(wrapper).pack = _zlibstorage_pack
                 from zc.zlibstorage import _Iterator
                 _Iterator.__len__ = _zlibstorage_Iterator_len
-                # zc.zlibstorage has a custom copyTransactionsFrom that hides
-                # our own implementation. It just uses ZODb.blob.copyTransactionsFromTo.
-                # Use our implementation.
-                # XXX: This would seem to stop data from being compressed in the destination,
-                # doesn't it? Maybe we shouldn't do this? Or we need some way to handle this.
-                # Needs testing.
-                wrapper.copyTransactionsFrom = self.copyTransactionsFrom
-                # Since this only runs the first time we see a zlibstorage, we need to
-                # add ``copyTransactionsFrom`` to the list of methods it copies in the
-                # future.
-                if 'copyTransactionsFrom' not in type(wrapper).copied_methods:
-                    type(wrapper).copied_methods += ('copyTransactionsFrom',)
             else:
                 wrapper.new_instance = lambda s: type(wrapper)(self.new_instance())
+
+        # zc.zlibstorage has a custom copyTransactionsFrom that hides
+        # our own implementation. It just uses ZODB.blob.copyTransactionsFromTo.
+        # Use our implementation. Note that we don't alter ``copied_methods``,
+        # because that would change this for all wrappers in the same process,
+        # e.g., around a FileStorage. This should be safe and correct to do for all
+        # wrappers because our copy method uses the standard _crs_transform_record_data
+        # method.
+        wrapper.copyTransactionsFrom = self.copyTransactionsFrom
 
         # Prior to ZODB 4.3.1, ConflictResolvingStorage would raise an AttributeError
         super(RelStorage, self).registerDB(wrapper)
@@ -932,17 +933,25 @@ class RelStorage(LegacyMethodsMixin,
         "Hook for testing."
 
 
+try:
+    from zc import zlibstorage
+except ImportError:
+    zlibstorage = None
+
 def _zlibstorage_new_instance(self):
-    new_self = type(self).__new__(type(self))
-    # Preserve _transform, etc
-    new_self.__dict__ = self.__dict__.copy()
-    new_self.base = self.base.new_instance()
-    # Because these are bound methods, we must re-copy
-    # them or ivars might be wrong, like _transaction
-    for name in self.copied_methods:
-        v = getattr(new_self.base, name, None)
-        if v is not None:
-            setattr(new_self, name, v)
+    # We have to work hard to preserve the `_transform`
+    # value. This is set based on the `compress` argument given to the
+    # constructor, but only captured in the value of the _transform
+    # attribute. This must be given to the constructor
+    # directly because it calls registerDB, which goes up the MRO and sets
+    # some attributes like _crs_transform_record_data, etc. (The argument is passed
+    # when opening the storage from ZConfig.)
+    #
+    # It's not a smart idea copying the dict directly, it contains mutable things like
+    # __provides__ that we don't want to share.
+    new_base = self.base.new_instance()
+    new_self = type(self)(new_base, compress=self._transform is zlibstorage.compress)
+
     return new_self
 
 def _zlibstorage_pack(self, pack_time, referencesf, *args, **kwargs):
