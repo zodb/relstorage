@@ -935,7 +935,7 @@ class RelStorage(LegacyMethodsMixin,
 
 try:
     from zc import zlibstorage
-except ImportError:
+except ImportError: # pragma: no cover
     zlibstorage = None
 
 def _zlibstorage_new_instance(self):

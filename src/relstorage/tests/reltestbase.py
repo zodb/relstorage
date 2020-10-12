@@ -1473,20 +1473,13 @@ class AbstractRSZodbConvertTests(StorageCreatingMixin,
     keep_history = True
     filestorage_name = 'source'
     relstorage_name = 'destination'
-    filestorage_file = None
-
-    # XXX: Needs tests for:
-    # - keep_history = False
-    # - verifying that the final serials match.
 
     def setUp(self):
         super(AbstractRSZodbConvertTests, self).setUp()
         # Zap the storage
         self.make_storage(zap=True).close()
 
-    def make_storage(self, zap=True, **kw):
-        if kw:
-            raise TypeError("kwargs not supported")
+    def make_storage(self, zap=True): # pylint:disable=arguments-differ
         if self.relstorage_name == 'source':
             meth = self._create_src_storage
         else:
@@ -1547,28 +1540,17 @@ class AbstractRSDestHPZodbConvertTests(AbstractRSZodbConvertTests):
     keep_history = True
     zap_supported_by_dest = True
     dest_db_needs_closed_before_zodbconvert = False
-    @property
-    def filestorage_file(self):
-        return self.srcfile
 
 class AbstractRSDestHFZodbConvertTests(AbstractRSZodbConvertTests):
     keep_history = False
     zap_supported_by_dest = True
     dest_db_needs_closed_before_zodbconvert = False
 
-    @property
-    def filestorage_file(self):
-        return self.srcfile
-
 
 class AbstractRSSrcZodbConvertTests(AbstractRSZodbConvertTests):
     src_db_needs_closed_before_zodbconvert = False
     filestorage_name = 'destination'
     relstorage_name = 'source'
-
-    @property
-    def filestorage_file(self):
-        return self.destfile
 
 class AbstractIDBOptionsTest(unittest.TestCase):
 

@@ -71,9 +71,7 @@ class AbstractZODBConvertBase(TestCase):
         copy._ProgressLogger._should_major_log = self._orig_should_major
         copy._ProgressLogger.debug_enabled = self._orig_debug_enabled
         self.flush_changes_before_zodbconvert()
-        for i in self._to_close:
-            i.close()
-        self._to_close = []
+        self.close_all_registered()
         # XXX: On PyPy with psycopg2cffi, running these two tests will
         # result in a hang:
         # HPPostgreSQLDestZODBConvertTests.test_clear_empty_dest
@@ -91,6 +89,11 @@ class AbstractZODBConvertBase(TestCase):
         gc.collect()
         gc.collect()
         super(AbstractZODBConvertBase, self).tearDown()
+
+    def close_all_registered(self):
+        for i in self._to_close:
+            i.close()
+        del self._to_close[:]
 
     src_db_needs_closed_before_zodbconvert = True
     dest_db_needs_closed_before_zodbconvert = True
@@ -383,11 +386,14 @@ class FSZODBConvertTests(AbstractZODBConvertBase):
         return cfgfile
 
     def tearDown(self):
-        super(FSZODBConvertTests, self).tearDown() # Close files first.
+        # Close files first so they can be removed on Windows.
+        self.flush_changes_before_zodbconvert()
+        self.close_all_registered()
+
         def _rm(fname, meth):
             try:
                 meth(fname)
-            except OSError:
+            except OSError: # pragma: no cover
                 import traceback
                 print("Failed to remove", fname)
                 traceback.print_exc()
@@ -399,6 +405,7 @@ class FSZODBConvertTests(AbstractZODBConvertBase):
         for dname in self.src_blobs, self.dest_blobs:
             if os.path.exists(dname):
                 _rm(dname, rmtree)
+        super(FSZODBConvertTests, self).tearDown()
 
     def _load_zconfig(self):
         from relstorage.zodbconvert import schema_xml

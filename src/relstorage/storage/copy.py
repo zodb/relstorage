@@ -40,7 +40,7 @@ logger = logging.getLogger(__name__)
 def close(it):
     try:
         c = it.close
-    except AttributeError:
+    except AttributeError: # pragma: no cover
         pass
     else:
         c()
@@ -175,7 +175,7 @@ class _AbstractCopier(object):
             try:
                 blobfile = self.storage.openCommittedBlobFile(
                     oid, tid)
-            except POSKeyError:
+            except POSKeyError: # pragma: no cover
                 logger.exception("Failed to open blob to copy")
 
         # We may not be able to read the data after this.
@@ -288,7 +288,7 @@ class _RecordIternextIterator(object):
         self.storage = storage
         self.cookie = self
 
-    def __iter__(self):
+    def __iter__(self): # pragma: no cover
         return self
 
     def __next__(self):
@@ -300,7 +300,7 @@ class _RecordIternextIterator(object):
             self.cookie = None
         try:
             result = self.storage.record_iternext(self.cookie)
-        except ValueError:
+        except ValueError:  # pragma: no cover
             # FileStorage can raise this if the underlying storage
             # is completely empty.
             # See https://github.com/zopefoundation/ZODB/issues/330
@@ -455,11 +455,11 @@ class _ProgressLogger(object):
             ))
 
             elapsed_total = now - self.begin_time
+            rate_mb = rate_units = 0.0
             if elapsed_total:
                 rate_mb = self.total_size / elapsed_total
                 rate_units = self.units_copied / elapsed_total
-            else:
-                rate_mb = rate_units = 0.0
+
             rate_mb_str = byte_display(rate_mb)
             rate_unit_str = '%1.2f' % rate_units
 
@@ -523,7 +523,8 @@ class _ProgressLogger(object):
         return total_units_copied % self.log_count and now >= self.log_at
 
     def _should_minor_log(self, now, total_units_copied, txn_byte_size, num_txn_records,
-                          copy_duration):
+                          copy_duration): # pragma: no cover
+        # This is mocked out by test_zodbconvert so we always try to log.
         if (total_units_copied % self.minor_log_count == 0 and now >= self.minor_log_at):
             return True
         if txn_byte_size >= self.minor_log_tx_size:

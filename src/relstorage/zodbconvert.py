@@ -74,7 +74,7 @@ class _DefaultStartStorageIteration(object):
         self.__source = source
         self.__start = start
 
-    def __len__(self):
+    def __len__(self): # pragma: no cover
         return len(self.__source)
 
     def __repr__(self):
@@ -159,7 +159,7 @@ def main(argv=None):
         log.info("Clearing old data...")
         if hasattr(destination, 'zap_all'):
             destination.zap_all()
-        else:
+        else: # pragma: no cover
             msg = ("Error: no API is known for clearing this type "
                    "of storage. Use another method.")
             cleanup_and_exit(msg)
