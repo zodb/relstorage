@@ -363,11 +363,14 @@ class AbstractTestSuiteBuilder(object):
         return classes
 
     def _make_zodbconvert_classes(self):
-        from .reltestbase import AbstractRSDestZodbConvertTests
+        from .reltestbase import AbstractRSDestHPZodbConvertTests
+        from .reltestbase import AbstractRSDestHFZodbConvertTests
         from .reltestbase import AbstractRSSrcZodbConvertTests
 
         classes = []
-        for base in (AbstractRSSrcZodbConvertTests, AbstractRSDestZodbConvertTests):
+        for base in (AbstractRSSrcZodbConvertTests,
+                     AbstractRSDestHPZodbConvertTests,
+                     AbstractRSDestHFZodbConvertTests):
             klass = type(
                 self.__name__ + base.__name__[8:],
                 (self.use_adapter, base),

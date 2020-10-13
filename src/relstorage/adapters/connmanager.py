@@ -184,6 +184,7 @@ class AbstractConnectionManager(object):
                 try:
                     obj.close()
                 except self._ignored_exceptions: # pylint:disable=catching-non-exception
+                    logger.debug("Exception closing %r", obj, exc_info=1)
                     clean = False
         return clean
 

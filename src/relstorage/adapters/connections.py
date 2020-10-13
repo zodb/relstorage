@@ -269,7 +269,7 @@ class AbstractManagedConnection(object):
         try:
             yield ss_cursor
         finally:
-            ss_cursor.close()
+            self.connmanager.close(cursor=ss_cursor)
 
     def __repr__(self):
         return "<%s at 0x%x active=%s, conn=%r cur=%r>" % (

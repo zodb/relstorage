@@ -23,12 +23,14 @@ import sys
 from io import StringIO
 
 import ZConfig
-from persistent.timestamp import TimeStamp
+from zope.interface import implementer
 
 from ZODB import loglevels
 from ZODB.utils import p64
 from ZODB.utils import readable_tid_repr
 from ZODB.utils import u64
+from ZODB.interfaces import IStorageIteration
+from ZODB.interfaces import IStorageCurrentRecordIteration
 
 schema_xml = u"""
 <schema>
@@ -56,6 +58,7 @@ def storage_has_data(storage):
         if hasattr(i, 'close'):
             i.close()
 
+@implementer(IStorageIteration)
 class _DefaultStartStorageIteration(object):
     # At IStorageIteration instance that keeps a default start value.
     # This is needed because RelStorage.iterator() does return an object with an
@@ -63,15 +66,30 @@ class _DefaultStartStorageIteration(object):
     # once! This breaks some implementations of copyTransactionsFrom, notably
     # our own. See #22
 
+    # By having our own ``@implementer`` declaration, we get our own
+    # __providedBy__/__provides__ attributes. Otherwise, we would "inherit"
+    # the value from the source storage, and claim to implement things we really don't.
+
     def __init__(self, source, start):
-        self._source = source
-        self._start = start
+        self.__source = source
+        self.__start = start
+
+    def __len__(self): # pragma: no cover
+        return len(self.__source)
+
+    def __repr__(self):
+        return "<%s.%s object at 0x%x wrapping %r>" % (
+            type(self).__module__,
+            type(self).__name__,
+            id(self),
+            self.__source,
+        )
 
     def iterator(self, start=None, end=None):
-        return self._source.iterator(start or self._start, end)
+        return self.__source.iterator(start or self.__start, end)
 
     def __getattr__(self, name):
-        return getattr(self._source, name)
+        return getattr(self.__source, name)
 
 def open_storages(options):
     schema = ZConfig.loadSchemaFile(StringIO(schema_xml))
@@ -130,9 +148,22 @@ def main(argv=None):
         source.close()
         destination.close()
         if exit_msg:
-            sys.exit(msg)
+            sys.exit(exit_msg)
 
     log.info("Storages opened successfully.")
+
+    if options.dry_run and options.clear:
+        cleanup_and_exit("Cannot clear a storage during a dry-run")
+
+    if options.clear:
+        log.info("Clearing old data...")
+        if hasattr(destination, 'zap_all'):
+            destination.zap_all()
+        else: # pragma: no cover
+            msg = ("Error: no API is known for clearing this type "
+                   "of storage. Use another method.")
+            cleanup_and_exit(msg)
+        log.info("Done clearing old data.")
 
     if options.incremental:
         assert hasattr(destination, 'lastTransaction'), (
@@ -140,9 +171,7 @@ def main(argv=None):
             "transaction of the destination storage. Aborting "
             "conversion.")
 
-        if not storage_has_data(destination):
-            log.warning("Destination empty, start conversion from the beginning.")
-        else:
+        if storage_has_data(destination):
             # This requires that the storage produce a valid (not z64) value before
             # anything is loaded with it.
             last_tid = destination.lastTransaction()
@@ -154,9 +183,23 @@ def main(argv=None):
             # Compensate for the RelStorage bug(?) and get a reusable iterator
             # that starts where we want it to. There's no harm in wrapping it for
             # other sources like FileStorage too.
-            source = _DefaultStartStorageIteration(source, next_tid)
+            #
+            # Note that this disables access to ``record_iternext``,
+            # defeating some of the optimizations our own copyTransactionsFrom
+            # would like to do.
+            # XXX: Figure out an incremental way to do this.
             log.info("Resuming ZODB copy from %s", readable_tid_repr(next_tid))
+        else:
+            log.warning("Destination empty; Forcing "
+                        "incremental conversion from the beginning. "
+                        "If the destination is a history-free RelStorage, this "
+                        "will take much longer.")
+            # Use the DefaultStartStorageIteration for its side-effect of disabling
+            # record_iternext
+            next_tid = None
 
+        source = _DefaultStartStorageIteration(source, next_tid)
+        assert not IStorageCurrentRecordIteration.providedBy(source)
 
     if options.dry_run:
         log.info("Dry run mode: not changing the destination.")
@@ -165,27 +208,19 @@ def main(argv=None):
         count = 0
         for txn in source.iterator():
             log.info('%s user=%s description=%s',
-                     TimeStamp(txn.tid), txn.user, txn.description)
+                     readable_tid_repr(txn.tid), txn.user, txn.description)
             count += 1
         log.info("Would copy %d transactions.", count)
         cleanup_and_exit()
     else:
-        if options.clear:
-            log.info("Clearing old data...")
-            if hasattr(destination, 'zap_all'):
-                destination.zap_all()
-            else:
-                msg = ("Error: no API is known for clearing this type "
-                       "of storage. Use another method.")
-                cleanup_and_exit(msg)
-            log.info("Done clearing old data.")
-
         if storage_has_data(destination) and not options.incremental:
             msg = "Error: the destination storage has data.  Try --clear."
             cleanup_and_exit(msg)
 
-        destination.copyTransactionsFrom(source)
-        cleanup_and_exit()
+        try:
+            destination.copyTransactionsFrom(source)
+        finally:
+            cleanup_and_exit()
 
 
 if __name__ == '__main__':

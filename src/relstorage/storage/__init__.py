@@ -264,7 +264,7 @@ class RelStorage(LegacyMethodsMixin,
         return self._options.keep_history
 
     def __repr__(self):
-        return "<%s at %x keep_history=%s phase=%r blobhelper=%r cache=%r>" % (
+        return "<%s at 0x%x keep_history=%s phase=%r blobhelper=%r cache=%r>" % (
             self.__class__.__name__,
             id(self),
             self.keep_history,
@@ -300,6 +300,9 @@ class RelStorage(LegacyMethodsMixin,
             # our children. Make sure any wrapper that needs to transform
             # records can do so.
             # See https://github.com/zodb/relstorage/issues/71
+            #
+            # NOTE: This is *probably* unnecessary now that we directly invoke the constructor
+            # for zc.zlibstorage in *its* ``new_instance`` method.
             other._crs_transform_record_data = self._crs_transform_record_data
             other._crs_untransform_record_data = self._crs_untransform_record_data
         return other
@@ -422,18 +425,24 @@ class RelStorage(LegacyMethodsMixin,
                 and not ZODB.interfaces.IDatabase.providedBy(wrapper)
                 and not hasattr(type(wrapper), 'new_instance')):
             # Fixes for https://github.com/zopefoundation/zc.zlibstorage/issues/2
-            # We special-case zlibstorage for speed
+            # We special-case zlibstorage because we know that just calling
+            # its type won't necessarily do the correct thing.
             if hasattr(wrapper, 'base') and hasattr(wrapper, 'copied_methods'):
                 type(wrapper).new_instance = _zlibstorage_new_instance
                 type(wrapper).pack = _zlibstorage_pack
                 from zc.zlibstorage import _Iterator
                 _Iterator.__len__ = _zlibstorage_Iterator_len
-                # zc.zlibstorage has a custom copyTransactionsFrom that hides
-                # our own implementation. It just uses ZODb.blob.copyTransactionsFromTo.
-                # Use our implementation.
-                wrapper.copyTransactionsFrom = self.copyTransactionsFrom
             else:
                 wrapper.new_instance = lambda s: type(wrapper)(self.new_instance())
+
+        # zc.zlibstorage has a custom copyTransactionsFrom that hides
+        # our own implementation. It just uses ZODB.blob.copyTransactionsFromTo.
+        # Use our implementation. Note that we don't alter ``copied_methods``,
+        # because that would change this for all wrappers in the same process,
+        # e.g., around a FileStorage. This should be safe and correct to do for all
+        # wrappers because our copy method uses the standard _crs_transform_record_data
+        # method.
+        wrapper.copyTransactionsFrom = self.copyTransactionsFrom
 
         # Prior to ZODB 4.3.1, ConflictResolvingStorage would raise an AttributeError
         super(RelStorage, self).registerDB(wrapper)
@@ -563,6 +572,16 @@ class RelStorage(LegacyMethodsMixin,
     __next = next
 
     def __record_iternext_gen(self, start_oid_int):
+        # XXX: This needs to support __len__()
+        # XXX: If this produces Blob records, the receiver will call
+        # ``openCommittedBlobFile()`` on us. That also uses the load connection
+        # (it has to, in order to be consistent). The problem is that one driver,
+        # PyMySQLConnector, can't handle a second query when this cursor is still active.
+        # It raises ``.InternalError: Unread result found``. This manifests in
+        # ``testSimpleBlobRecovery``. But, for some reason, that only happens when executing
+        # ``__on_load_first_use``. If we already had the cursor *open*, then it can be used fine,
+        # at least so it seems. So here we make sure to have the cursor open.
+        getattr(self._load_connection, 'cursor')
         with self._load_connection.server_side_cursor() as ss_cursor:
             for record in self._adapter.dbiter.iter_current_records(ss_cursor, start_oid_int):
                 yield record
@@ -607,6 +626,8 @@ class RelStorage(LegacyMethodsMixin,
             # Unpacking will raise if we return None; most processing of *data* is not expecting
             # None (it's common to wrap it in ``io.BytesIO()`` immediately; that's what zodbupdate
             # does). Thus, it's probably probably best to let getting the first value simply raise.
+            # In that scenario, FileStorage raises a ValueError:
+            # https://github.com/zopefoundation/ZODB/issues/330
             oid, tid, state = self.__next(cursor)
             # After that, we can treat it like it was given to us in *next*
             next = oid, tid, state, cursor
@@ -912,17 +933,25 @@ class RelStorage(LegacyMethodsMixin,
         "Hook for testing."
 
 
+try:
+    from zc import zlibstorage
+except ImportError: # pragma: no cover
+    zlibstorage = None
+
 def _zlibstorage_new_instance(self):
-    new_self = type(self).__new__(type(self))
-    # Preserve _transform, etc
-    new_self.__dict__ = self.__dict__.copy()
-    new_self.base = self.base.new_instance()
-    # Because these are bound methods, we must re-copy
-    # them or ivars might be wrong, like _transaction
-    for name in self.copied_methods:
-        v = getattr(new_self.base, name, None)
-        if v is not None:
-            setattr(new_self, name, v)
+    # We have to work hard to preserve the `_transform`
+    # value. This is set based on the `compress` argument given to the
+    # constructor, but only captured in the value of the _transform
+    # attribute. This must be given to the constructor
+    # directly because it calls registerDB, which goes up the MRO and sets
+    # some attributes like _crs_transform_record_data, etc. (The argument is passed
+    # when opening the storage from ZConfig.)
+    #
+    # It's not a smart idea copying the dict directly, it contains mutable things like
+    # __provides__ that we don't want to share.
+    new_base = self.base.new_instance()
+    new_self = type(self)(new_base, compress=self._transform is zlibstorage.compress)
+
     return new_self
 
 def _zlibstorage_pack(self, pack_time, referencesf, *args, **kwargs):

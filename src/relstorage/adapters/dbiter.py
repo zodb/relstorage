@@ -86,6 +86,8 @@ class DatabaseIterator(DatabaseHelpersMixin):
         Each current object is returned only once, at the transaction most recently
         committed for it.
 
+        Objects are iterated or order of their OID for compatibility with FileStorage.
+
         Returns a generator.
         """
         self._iter_current_records.execute(cursor, {'start_oid': start_oid_int})
