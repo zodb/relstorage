@@ -2,7 +2,7 @@
  Changes
 =========
 
-3.4.0 (unreleased)
+3.4.0 (2020-10-19)
 ==================
 
 - Improve the logging of ``zodbconvert``. The regular minute logging
