@@ -536,6 +536,9 @@ cache-local-dir
            performance comes with version 3.15 and the best
            performance is with 3.24 or higher.
 
+        .. warning::
+           When using SQLite as a RelStorage backend this setting is ignored.
+
 Deprecated Options
 ++++++++++++++++++
 
