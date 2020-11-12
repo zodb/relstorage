@@ -15,7 +15,7 @@ because it uses shared memory, those processes *must* all be on the
 same machine. The database files also should reside locally.
 
 Using a persistent cache file is not supported with this driver and
-will be automatically disabled. In some cases, it may be advantageous
+will be automatically disabled (``cache-local-dir`` has no effect). In some cases, it may be advantageous
 to also disable RelStorage's in-memory pickle cache
 altogether (``cache-local-mb 0``) and allow the operating system's
 filesystem cache to serve that purpose.
