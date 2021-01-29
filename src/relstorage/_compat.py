@@ -376,8 +376,8 @@ if PY3:
 else:
     xrange = xrange # pylint:disable=self-assigning-variable
     intern = intern # pylint:disable=self-assigning-variable
-    from base64 import encodestring as base64_encodebytes
-    from base64 import decodestring as base64_decodebytes
+    from base64 import encodestring as base64_encodebytes # pylint:disable=no-name-in-module
+    from base64 import decodestring as base64_decodebytes # pylint:disable=no-name-in-module
     casefold = str.lower
     def clear_frames(tb): # pylint:disable=unused-argument
         "Does nothing on Py2."
