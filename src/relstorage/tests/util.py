@@ -5,7 +5,9 @@ import unittest
 # ZODB >= 3.9.  The blob directory can be a private cache.
 shared_blob_dir_choices = (False, True)
 
-RUNNING_ON_TRAVIS = os.environ.get('TRAVIS')
+# We define GitHub actions to be similar to travis
+RUNNING_ON_GITHUB_ACTIONS = os.environ.get('GITHUB_ACTIONS')
+RUNNING_ON_TRAVIS = os.environ.get('TRAVIS') or RUNNING_ON_GITHUB_ACTIONS
 RUNNING_ON_APPVEYOR = os.environ.get('APPVEYOR')
 RUNNING_ON_CI = RUNNING_ON_TRAVIS or RUNNING_ON_APPVEYOR
 
