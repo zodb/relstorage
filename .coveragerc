@@ -4,6 +4,9 @@ omit =
      relstorage/cache/tests/benchmarks.py
      # Omit the main oracle adapter file since we don't test it at all
      relstorage/adapters/oracle.py
+# New in 5.0; required for the GHA coveralls submission.
+# Perhaps this obsoletes the source section in [paths]?
+relative_files = True
 
 [report]
 # Coverage is run on Linux under cPython 2 and 3,
@@ -24,3 +27,7 @@ exclude_lines =
     def oracle_
     class CXOracle
     class Oracle
+
+# Local Variables:
+# mode: conf
+# End:
