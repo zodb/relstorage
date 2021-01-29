@@ -130,11 +130,19 @@ jobs:
         # into /usr/local/lib as of 1.1
         run: |
           brew install mysql
+          brew services start mysql
           brew install postgresql
+          brew services start postgresql
           brew install libmemcached
           brew install openssl
           echo LDFLAGS=$LDFLAGS -L/usr/local/opt/openssl@1.1/lib >> $GITHUB_ENV
           echo CPPFLAGS=$CPPFLAGS -I/usr/local/opt/openssl@1.1/include >> $GITHUB_ENV
+      - name: Initialize Test Databases
+        # Just macOS now because that's all that I have set up for sure
+        if: startsWith(runner.os, 'macOS')
+        run: |
+          bash .travis/mysql.sh
+          bash .travis/postgres.sh
       ###
       # Caching.
       # This actually *restores* a cache and schedules a cleanup action
