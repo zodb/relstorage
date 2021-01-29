@@ -141,12 +141,13 @@ jobs:
         # Just macOS now because that's all that I have set up for sure
         if: startsWith(runner.os, 'macOS')
         run: |
-          # Wait for them to start up.
-          sleep 3
+          # XXX: mysql isn't currently starting. Why? So
+          # skip initializing it.
+          #
+          # Postgres uses the current username, apparently, instead of
+          # the standard "postgres" user as the root.
           brew services list
-          ps -eaf
-          bash .travis/postgres.sh
-          bash .travis/mysql.sh
+          RELSTORAGETEST_PG_UNAME=$USER .travis/postgres.sh
       ###
       # Caching.
       # This actually *restores* a cache and schedules a cleanup action
