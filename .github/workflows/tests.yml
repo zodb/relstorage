@@ -141,6 +141,9 @@ jobs:
         # Just macOS now because that's all that I have set up for sure
         if: startsWith(runner.os, 'macOS')
         run: |
+          # Wait for them to start up.
+          sleep 30
+          ps -eaf
           bash .travis/mysql.sh
           bash .travis/postgres.sh
       ###
