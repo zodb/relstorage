@@ -142,10 +142,11 @@ jobs:
         if: startsWith(runner.os, 'macOS')
         run: |
           # Wait for them to start up.
-          sleep 30
+          sleep 3
+          brew services list
           ps -eaf
-          bash .travis/mysql.sh
           bash .travis/postgres.sh
+          bash .travis/mysql.sh
       ###
       # Caching.
       # This actually *restores* a cache and schedules a cleanup action
