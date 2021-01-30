@@ -117,26 +117,6 @@ jobs:
           sudo apt-get install -y ccache libmemcached-dev
           echo CFLAGS=$CFLAGS -std=gnu++11 >> $GITHUB_ENV
           echo CXXFLAGS=$CXXCFLAGS -std=gnu++11 >> $GITHUB_ENV
-      - name: Install libmysqlclient.20
-        # Ubuntu 20 doesn't have libmysqlclient.20, but mysqlclient
-        # client binaries on PyPI are linked against that
-        if: startsWith( matrix.os, 'ubuntu-20')
-        run: |
-          sudo tee /etc/apt/sources.list.d/xenial.list > /dev/null <<EOF
-          deb http://dk.archive.ubuntu.com/ubuntu/ xenial main
-          deb http://dk.archive.ubuntu.com/ubuntu/ xenial universe
-          deb http://dk.archive.ubuntu.com/ubuntu/ xenial-updates universe
-          EOF
-          sudo apt-get update
-          sudo apt-get install -y libmysqlclient20
-          cp .travis/docker.cnf ~/.my.cnf
-          sudo ls -lR /etc/mysql
-          cat /etc/mysql/my.cnf
-          sudo tee /etc/mysql/my.cnf > /dev/null <<EOF
-          [mysqld]
-          ssl = 0
-          EOF
-
       - name: Install ccache, configure CFLAGS (macos)
         if: startsWith(runner.os, 'macOS')
         run: |
@@ -245,6 +225,17 @@ jobs:
         run: |
           twine upload --skip-existing dist/*
 
+      - name: Build mysqlclient
+        # Ubuntu 20 doesn't have libmysqlclient.20, but mysqlclient
+        # client binaries on PyPI are linked against that. We can install that,
+        # but then SSL breaks for an unknown reason, and we can't disable SSL
+        # because authentication requires it (maybe we could change the authentiaction plugin?)
+        # So instead we install the development sources and compile mysqlclient locally.
+        # The relevant package, libmysqlclient-dev, is already installed.
+        if: startsWith( matrix.os, 'ubuntu-20')
+        run: |
+          pip install --no-binary :all: mysqlclient
+
       - name: Install RelStorage
         # I'd prefer to install the wheel in non-editable mode, but that seems to
         # screw up coverage reporting.
@@ -267,9 +258,8 @@ jobs:
           coverage run -p --concurrency=greenlet .travis/zope_testrunner_gevent.py -t checkBTreesLengthStress -t check7 -t check2 -t BlobCache -t Switches --layer gevent
           # XXX: None of the tests except sqlite are running on ubuntu 20;
           # not even being skipped or discovered. Why? Well, the MySQL tests
-          # are reporting an SSL error (Unable to connect: (2026, 'SSL connection error: unknown error number'))
+          # were/are reporting an SSL error (Unable to connect: (2026, 'SSL connection error: unknown error number'))
           # but that doesn't explain why they don't still show up and get skipped.
-          python -m relstorage.tests.testmysql
           coverage run -p --concurrency=thread $RS_TEST_CMD --layer "!gevent"
       - name: "Tests: PyPy"
         if: ${{ startsWith(matrix.python-version, 'pypy')  }}
