@@ -161,8 +161,10 @@ jobs:
           sudo systemctl start mysql.service
           echo Configuring MySQL
           RELSTORAGETEST_MY_PW="--password=root" .travis/mysql.sh
-          echo Configuring PostgreSQL
-          .travis/postgres.sh
+          # XXX: Disabled: The software is installed, but isn't running by default,
+          # apparently. They *really* want you to use a docker service.
+          # echo Configuring PostgreSQL
+          # .travis/postgres.sh
 
       ###
       # Caching.

@@ -1,5 +1,4 @@
 #!/bin/bash
-set -v
 # To be able to successfully test against a MySQL on a different host,
 # it's best to set up a proxy: socat tcp-listen:3306,reuseaddr,fork tcp:192.168.99.100:3306
 # This can arise when running mysql in docker on macOS, which doesn't
@@ -14,8 +13,6 @@ DBNAME2_HF=${DBNAME}2_hf
 PW=$RELSTORAGETEST_MY_PW
 echo $DBNAME_hf
 echo $DBNAME2_hf
-echo Using host $HOST
-echo Using pass $PW
 mysql -uroot $PW $HOST -e "CREATE USER 'relstoragetest' IDENTIFIED BY 'relstoragetest';"
 mysql -uroot $PW $HOST -e "CREATE DATABASE $DBNAME;"
 mysql -uroot $PW $HOST -e "GRANT ALL ON $DBNAME.* TO 'relstoragetest';"
