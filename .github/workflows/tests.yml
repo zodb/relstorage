@@ -67,7 +67,7 @@ env:
   # TWINE_PASSWORD is encrypted and stored directly in the
   # travis repo settings.
   TWINE_USERNAME: __token__
-  RS_TEST_CMD: "-m zope.testrunner --test-path=src --auto-color --auto-progress -v --slow-test=3"
+  RS_TEST_CMD: "-m zope.testrunner --test-path=src --color --auto-progress -v --slow-test=3"
 
   ###
   # caching
@@ -117,6 +117,19 @@ jobs:
           sudo apt-get install -y ccache libmemcached-dev
           echo CFLAGS=$CFLAGS -std=gnu++11 >> $GITHUB_ENV
           echo CXXFLAGS=$CXXCFLAGS -std=gnu++11 >> $GITHUB_ENV
+      - name: Install libmysqlclient.20
+        # Ubuntu 20 doesn't have libmysqlclient.20, but mysqlclient
+        # client binaries on PyPI are linked against that
+        if: startsWith( matrix.os, 'ubuntu-20')
+        run: |
+          sudo tee /etc/apt/sources.list.d/xenial.list > /dev/null <<EOF
+          deb http://dk.archive.ubuntu.com/ubuntu/ xenial main
+          deb http://dk.archive.ubuntu.com/ubuntu/ xenial universe
+          deb http://dk.archive.ubuntu.com/ubuntu/ xenial-updates universe
+          EOF
+          sudo apt-get update
+          sudo apt-get install -y libmysqlclient20
+
       - name: Install ccache, configure CFLAGS (macos)
         if: startsWith(runner.os, 'macOS')
         run: |
