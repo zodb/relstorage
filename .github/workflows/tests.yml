@@ -129,6 +129,13 @@ jobs:
           EOF
           sudo apt-get update
           sudo apt-get install -y libmysqlclient20
+          cp .travis/docker.cnf ~/.my.cnf
+          sudo ls -lR /etc/mysql
+          cat /etc/mysql/my.cnf
+          sudo tee /etc/mysql/my.cnf > /dev/null <<EOF
+          [mysqld]
+          ssl = 0
+          EOF
 
       - name: Install ccache, configure CFLAGS (macos)
         if: startsWith(runner.os, 'macOS')
@@ -259,7 +266,9 @@ jobs:
           set -v
           coverage run -p --concurrency=greenlet .travis/zope_testrunner_gevent.py -t checkBTreesLengthStress -t check7 -t check2 -t BlobCache -t Switches --layer gevent
           # XXX: None of the tests except sqlite are running on ubuntu 20;
-          # not even being skipped or discovered. Why?
+          # not even being skipped or discovered. Why? Well, the MySQL tests
+          # are reporting an SSL error (Unable to connect: (2026, 'SSL connection error: unknown error number'))
+          # but that doesn't explain why they don't still show up and get skipped.
           python -m relstorage.tests.testmysql
           coverage run -p --concurrency=thread $RS_TEST_CMD --layer "!gevent"
       - name: "Tests: PyPy"
