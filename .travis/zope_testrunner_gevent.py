@@ -25,6 +25,7 @@ sys.argv[:] = [
     '--test-path=src',
     '-v',
     '--color',
+    '--keepbytecode',
 ] + sys.argv[1:]
 print(sys.argv)
 run()

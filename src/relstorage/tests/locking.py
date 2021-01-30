@@ -34,6 +34,7 @@ from ZODB.tests.MinPO import MinPO
 
 from relstorage.storage.interfaces import VoteReadConflictError
 
+from .util import RUNNING_ON_CI
 from . import TestCase
 from . import skipIfNoConcurrentWriters
 
@@ -203,8 +204,10 @@ class TestLocking(TestCase):
             commit_lock_timeout=commit_lock_timeout,
             identical_pattern_a_b=True
         )
-
-        self.assertLessEqual(duration_blocking, commit_lock_timeout * 3)
+        multiplier = 3
+        if RUNNING_ON_CI:
+            multiplier = 3.1
+        self.assertLessEqual(duration_blocking, commit_lock_timeout * multiplier)
 
     @WithAndWithoutInterleaving
     def checkTL_ReadCurrentConflict_DoesNotTakeExclusiveLocks(self):
@@ -273,7 +276,6 @@ class TestLocking(TestCase):
         # error. (We use the same two objects instead of a new object in transaction B to prove
         # shared locks are taken first.)
         from relstorage.adapters.interfaces import UnableToLockRowsToReadCurrentError
-        from relstorage.tests.util import RUNNING_ON_CI
         commit_lock_timeout = self.__tiny_commit_time
         duration_blocking = self.__do_check_error_with_conflicting_concurrent_read_current(
             UnableToLockRowsToReadCurrentError,

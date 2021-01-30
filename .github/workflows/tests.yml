@@ -67,7 +67,7 @@ env:
   # TWINE_PASSWORD is encrypted and stored directly in the
   # travis repo settings.
   TWINE_USERNAME: __token__
-  RS_TEST_CMD: "-m zope.testrunner --test-path=src --color --auto-progress -v --slow-test=3"
+  RS_TEST_CMD: "-m zope.testrunner --keepbytecode --test-path=src --color --auto-progress -v --slow-test=3"
 
   ###
   # caching
@@ -256,7 +256,11 @@ jobs:
       - name: "Tests: Coverage on CPython"
         if: ${{ !startsWith(matrix.python-version, 'pypy')  }}
         run: |
+          set -v
           coverage run -p --concurrency=greenlet .travis/zope_testrunner_gevent.py -t checkBTreesLengthStress -t check7 -t check2 -t BlobCache -t Switches --layer gevent
+          # XXX: None of the tests except sqlite are running on ubuntu 20;
+          # not even being skipped or discovered. Why?
+          python -m relstorage.tests.testmysql
           coverage run -p --concurrency=thread $RS_TEST_CMD --layer "!gevent"
       - name: "Tests: PyPy"
         if: ${{ startsWith(matrix.python-version, 'pypy')  }}
