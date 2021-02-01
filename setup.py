@@ -257,7 +257,8 @@ setup(
             # pure-python
             # pg8000 on Python 2.7 or PyPy. We get coverage from Travis, and we also
             # get Windows.
-            'pg8000 >= 1.11.0; python_version == "2.7" or platform_python_implementation == "PyPy"',
+            # 1.17 breaks us: https://github.com/zodb/relstorage/issues/438
+            'pg8000 >= 1.11.0, <1.17.0; python_version == "2.7" or platform_python_implementation == "PyPy"',
             # CFFI, runs on all implementations.
             # We get coverage from 3.5 on Travis and verification it works on Windows from Travis.
             # We get 2.7 testing from PyPy on Travis.
