@@ -8,7 +8,7 @@ inputs:
   testCommand:
     description: Do not modify.
     required: false
-    default: "-m zope.testrunner --keepbytecode --test-path=src --color --auto-progress -v --slow-test=3"
+    default: "-m zope.testrunner --path=src --test-path=src --color -vvvv --slow-test=3"
 runs:
   using: "composite"
   steps:
@@ -21,7 +21,7 @@ runs:
         if [ "${{ inputs.useCoverage }}" = "true" ]; then
           coverage run -p --concurrency=greenlet $CMD
         else
-          $CMD
+          python $CMD
         fi
         echo "::endgroup::"
     - name: Test non-gevent

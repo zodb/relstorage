@@ -67,7 +67,6 @@ env:
   # TWINE_PASSWORD is encrypted and stored directly in the
   # travis repo settings.
   TWINE_USERNAME: __token__
-  RS_TEST_CMD: "-m zope.testrunner --keepbytecode --test-path=src --color --auto-progress -v --slow-test=3"
 
   ###
   # caching
@@ -254,7 +253,6 @@ jobs:
           pip install -U coverage
           pip install -U 'faulthandler; python_version == "2.7" and platform_python_implementation == "CPython"'
           pip install -U  "`ls dist/RelStorage-*.whl`[test,all_tested_drivers]"
-
 
       - name: Initialize Test Databases
         if: startsWith(runner.os, 'macOS')
