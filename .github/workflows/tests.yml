@@ -148,7 +148,7 @@ jobs:
         run: |
           pip install -U pip
           pip install -U -q setuptools wheel twine
-          pip install -q -U 'cython>=3.0a6' coverage
+          pip install -q -U 'cython>=3.0a6'
           pip install 'greenlet>=1.0a1;platform_python_implementation=="CPython"'
 
       - name: Build RelStorage
@@ -251,7 +251,8 @@ jobs:
         # screw up coverage reporting.
         # XXX: So this may be broken now
         run: |
-          pip install -q -U 'faulthandler; python_version == "2.7" and platform_python_implementation == "CPython"'
+          pip install -U coverage
+          pip install -U 'faulthandler; python_version == "2.7" and platform_python_implementation == "CPython"'
           pip install -U  "`ls dist/RelStorage-*.whl`[test,all_tested_drivers]"
 
 
@@ -278,31 +279,10 @@ jobs:
           # apparently. They *really* want you to use a docker service.
           # echo Configuring PostgreSQL
           # .travis/postgres.sh
-      - name: "Tests: Coverage on CPython"
-        if: ${{ !startsWith(matrix.python-version, 'pypy')  }}
-        run: |
-          set -v
-          coverage run -p --concurrency=greenlet .travis/zope_testrunner_gevent.py -t checkBTreesLengthStress -t check7 -t check2 -t BlobCache -t Switches --layer gevent
-          # XXX: None of the tests except sqlite are running on ubuntu 20;
-          # not even being skipped or discovered. Why? Well, the MySQL tests
-          # were/are reporting an SSL error (Unable to connect: (2026, 'SSL connection error: unknown error number'))
-          # but that doesn't explain why they don't still show up and get skipped.
-          coverage run -p --concurrency=thread $RS_TEST_CMD --layer "!gevent"
-      - name: "Tests: PyPy"
-        if: ${{ startsWith(matrix.python-version, 'pypy')  }}
-        run: |
-          python $RS_TEST_CMD --layer "!gevent"
-      - name: "Test: No zope.schema"
-        # Make sure we can import without zope.schema, which is intended to
-        # be a test dependency, and optional for production
-        run: |
-         pip uninstall -y zope.schema && python -c 'import relstorage.interfaces, relstorage.adapters.interfaces, relstorage.cache.interfaces'
-
-      - name: Report coverage
-        if: ${{ !startsWith(matrix.python-version, 'pypy')  }}
-        run: |
-          python -m coverage combine || true
-          python -m coverage report -i || true
+      - name: Run tests and report coverage
+        uses: ./.github/actions/run-tests
+        with:
+          useCoverage: ${{ !startsWith(matrix.python-version, 'pypy')  }}
       - name: Submit to Coveralls
         # This is a container action, which only runs on Linux.
         if: ${{ !startsWith(matrix.python-version, 'pypy') && startsWith(runner.os, 'Linux') }}
@@ -358,7 +338,7 @@ jobs:
         run: |
           ls -l
           ls -l dist || true
-          pip install -U dist/RelStorage-*
+          pip install -U `ls dist/RelStorage-*`[test]
       - name: Lint
         # We only need to do this on one version, and it should be Python 3, because
         # pylint has stopped updating for Python 2.
