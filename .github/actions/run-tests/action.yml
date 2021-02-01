@@ -8,7 +8,7 @@ inputs:
   testCommand:
     description: Do not modify.
     required: false
-    default: "-m zope.testrunner --test-path=src --color -v --slow-test=3"
+    default: "-m zope.testrunner --package-path src/relstorage relstorage --color -v --slow-test=3"
 runs:
   using: "composite"
   steps:
