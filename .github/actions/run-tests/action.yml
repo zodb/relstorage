@@ -8,7 +8,7 @@ inputs:
   testCommand:
     description: Do not modify.
     required: false
-    default: "-m zope.testrunner --test-path=src --color -vvvv --slow-test=3"
+    default: "-m zope.testrunner --test-path=src --color -v --slow-test=3"
 runs:
   using: "composite"
   steps:
@@ -27,7 +27,8 @@ runs:
     - name: Test non-gevent
       shell: bash
       run: |
-        # Duplicating the --layer argument because the escaping was an issue.
+        # Duplicating the --layer argument because the escaping was an issue
+        # when I tried to put together a single command string
         echo "::group::non-gevent tests"
         if [ "${{ inputs.useCoverage }}" = "true" ]; then
           coverage run -p --concurrency=thread ${{ inputs.testCommand }} --layer "!gevent"

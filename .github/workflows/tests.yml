@@ -288,8 +288,84 @@ jobs:
         with:
           parallel: true
 
+  test-old-postgresql:
+    needs: build-relstorage
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        python-version: [2.7, 3.9, pypy-2.7, pypy-3.6]
+        os: [ubuntu-18.04]
+    services:
+      # Label used to access the service container
+      postgres:
+        # Docker Hub image
+        image: postgres:9.6
+        # Provide the password for postgres
+        env:
+          POSTGRES_PASSWORD: postgres
+        # Set health checks to wait until postgres has started
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - name: checkout
+        uses: actions/checkout@v2
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v2
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install ccache, configure CFLAGS (ubuntu)
+        uses: ./.github/actions/config-cc
+
+      - name: Cache ~/.ccache
+        uses: actions/cache@v2
+        with:
+          path: ~/.ccache/
+          key: ${{ runner.os }}-ccache2-${{ matrix.python-version }}
+
+      - name: Get pip cache dir
+        id: pip-cache
+        run: |
+          echo "::set-output name=dir::$(pip cache dir)"
+
+      - name: pip cache
+        uses: actions/cache@v2
+        with:
+          path: ${{ steps.pip-cache.outputs.dir }}
+          key: ${{ runner.os }}-pip-${{ matrix.python-version }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install native libs
+        uses: ./.github/actions/install-native-libs
+
+      - name: Download RelStorage wheel
+        uses: actions/download-artifact@v2
+        with:
+          name: RelStorage-${{ runner.os }}-${{ matrix.python-version }}.whl
+          path: dist/
+      - name: Install RelStorage
+        # I'd prefer to install the wheel in non-editable mode, but that seems to
+        # screw up coverage reporting.
+        # XXX: So this may be broken now
+        run: |
+          pip install -U coverage
+          pip install -U 'faulthandler; python_version == "2.7" and platform_python_implementation == "CPython"'
+          pip install -U  "`ls dist/RelStorage-*.whl`[test,all_tested_drivers]"
+      - name: Initialize Test Databases
+        run: |
+          PGPASSWORD=postgres RELSTORAGETEST_PG_DBNAME=postgres .travis/postgres.sh
+      - name: Run tests and report coverage
+        uses: ./.github/actions/run-tests
+      - name: Submit to Coveralls
+        uses: AndreMiras/coveralls-python-action@develop
+        with:
+          parallel: true
+
   coveralls_finish:
-    needs: test
+    needs: [test,test-old-postgresql]
     runs-on: ubuntu-latest
     steps:
     - name: Coveralls Finished

@@ -313,7 +313,7 @@ class CacheBlobHelper(AbstractBlobHelper):
         super(CacheBlobHelper, self).close()
         try:
             self.cache_checker.close()
-        except Exception: # pylint:disable=broad-except pragma: no cover
+        except Exception: # pragma: no cover pylint:disable=broad-except
             # On CI tests, we've rarely seen this raise
             # gevent.exceptions.LoopExit from
             # ``self._reduced_event.wait()``. That probably means
