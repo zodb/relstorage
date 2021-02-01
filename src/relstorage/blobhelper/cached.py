@@ -122,6 +122,10 @@ class _LimitedCacheSizeMonitor(_AbstractCacheSizeMonitor):
         try:
             if self._checker_thread is not None:
                 self.wait_for_checker()
+        except Exception: # pragma: no cover
+            logger.exception("When waiting on the checker thread %r",
+                             self._checker_thread)
+            raise
         finally:
             self._checker_thread = None
 
@@ -307,7 +311,17 @@ class CacheBlobHelper(AbstractBlobHelper):
 
     def close(self):
         super(CacheBlobHelper, self).close()
-        self.cache_checker.close()
+        try:
+            self.cache_checker.close()
+        except Exception: # pylint:disable=broad-except pragma: no cover
+            # On CI tests, we've rarely seen this raise
+            # gevent.exceptions.LoopExit from
+            # ``self._reduced_event.wait()``. That probably means
+            # another exception already occurred and we're in teardown.
+            # We don't want to raise this, there's no corrective action that
+            # can be taken.
+            logger.exception("When shutting down the cache_checker %r",
+                             self.cache_checker)
 
     def _loadBlobInternal(self, cursor, oid, serial, blob_lock=None):
         blob_filename = self._cachedLoadBlobInternal(oid, serial)

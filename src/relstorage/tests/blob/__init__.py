@@ -3,7 +3,11 @@
 It is especially useful for testing RelStorage + ZODB 3.8.
 """
 import os
+import traceback
+
 from nti.testing.time import MonotonicallyIncreasingTimeLayerMixin
+
+from gevent.exceptions import LoopExit
 
 from ZODB.DB import DB
 from ZODB.tests.util import setUp
@@ -29,7 +33,12 @@ class TestBlobMixin(object):
         self.database = DB(self.blob_storage)
 
     def tearDown(self):
-        self.database.close()
+        try:
+            self.database.close()
+        except LoopExit: # pragma: no cover
+            # This has been seen on CI, probably as the result of
+            # some other exception. Don't let it halt the teardown.
+            traceback.print_exc()
         self.blob_storage.close()
         self._timer.testTearDown()
         tearDown(self)
