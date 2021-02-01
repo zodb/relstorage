@@ -107,46 +107,18 @@ jobs:
     steps:
       - name: checkout
         uses: actions/checkout@v2
+      - name: Build RelStorage Wheel
+        uses: ./.github/actions/build-relstorage
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v2
         with:
           python-version: ${{ matrix.python-version }}
-      - name: Install ccache, configure CFLAGS (ubuntu)
-        if: startsWith(runner.os, 'Linux')
-        run: |
-          sudo apt-get install -y ccache libmemcached-dev
-          echo CFLAGS=$CFLAGS -std=gnu++11 >> $GITHUB_ENV
-          echo CXXFLAGS=$CXXCFLAGS -std=gnu++11 >> $GITHUB_ENV
-      - name: Install ccache, configure CFLAGS (macos)
-        if: startsWith(runner.os, 'macOS')
-        run: |
-          brew install ccache
-          echo CFLAGS=$CFLAGS -Wno-parentheses-equality -Wno-constant-logical-operand >> $GITHUB_ENV
-          echo CXXFLAGS=$CXXFLAGS -Wno-parentheses-equality -Wno-constant-logical-operand >> $GITHUB_ENV
-          echo CC=ccache /usr/bin/clang >> $GITHUB_ENV
-          echo CXX=ccache /usr/bin/clang++ >> $GITHUB_ENV
-          echo LDCXXSHARED=ccache /usr/bin/clang -bundle -undefined dynamic_lookup >> $GITHUB_ENV
-          echo LDSHARED=ccache /usr/bin/clang -bundle -undefined dynamic_lookup >> $GITHUB_ENV
-      - name: Install database clients
-        if: startsWith(runner.os, 'macOS')
-        # These are necessary to build binary drivers.
-        # "mysql" contains the client libraries, not "mysql-client"
-        # openssl is needed to build psycopg2 (-lssl) and isn't linked
-        # into /usr/local/lib as of 1.1
-        run: |
-          brew install mysql
-          brew services start mysql
-          # homebrew tends to get a current-ish version of PostgreSQL. At this writing,
-          # Jan 2021, it has PostgreSQL 13.1.
-          brew install postgresql
-          brew services start postgresql
-          brew install libmemcached
-          brew install openssl
-          echo LDFLAGS=$LDFLAGS -L/usr/local/opt/openssl@1.1/lib >> $GITHUB_ENV
-          echo CPPFLAGS=$CPPFLAGS -I/usr/local/opt/openssl@1.1/include >> $GITHUB_ENV
+
       - name: Initialize Test Databases
         if: startsWith(runner.os, 'macOS')
         run: |
+          brew services start mysql
+          brew services start postgresql
           # XXX: mysql isn't currently starting. Why? So
           # skip initializing it.
           #
@@ -165,65 +137,6 @@ jobs:
           # apparently. They *really* want you to use a docker service.
           # echo Configuring PostgreSQL
           # .travis/postgres.sh
-
-      ###
-      # Caching.
-      # This actually *restores* a cache and schedules a cleanup action
-      # to save the cache. So it must come before the thing we want to use
-      # the cache.
-      ###
-      - name: Cache ~/.ccache
-        uses: actions/cache@v2
-        with:
-          path: ~/.ccache/
-          key: ${{ runner.os }}-ccache2-${{ matrix.python-version }}
-
-      - name: Get pip cache dir
-        id: pip-cache
-        run: |
-          echo "::set-output name=dir::$(pip cache dir)"
-
-      - name: pip cache
-        uses: actions/cache@v2
-        with:
-          path: ${{ steps.pip-cache.outputs.dir }}
-          key: ${{ runner.os }}-pip-${{ matrix.python-version }}
-          restore-keys: |
-            ${{ runner.os }}-pip-
-
-      - name: Install dependencies
-        run: |
-          pip install -U pip
-          pip install -U -q setuptools wheel twine
-          pip install -q -U 'faulthandler; python_version == "2.7" and platform_python_implementation == "CPython"'
-          pip install -q -U 'cython>=3.0a6' coverage
-          pip install 'greenlet>=1.0a1;platform_python_implementation=="CPython"'
-
-      - name: Build RelStorage
-        run: |
-          # Next, build the wheel *in place*. This helps ccache, and also lets us cache the configure
-          # output (pip install uses a random temporary directory, making this difficult)
-          python setup.py build_ext -i
-          python setup.py bdist_wheel
-
-      - name: Check RelStorage build
-        run: |
-          ls -l dist
-          twine check dist/*
-      - name: Upload RelStorage wheel
-        uses: actions/upload-artifact@v2
-        with:
-          name: RelStorage-${{ runner.os }}-${{ matrix.python-version }}.whl
-          path: dist/*whl
-      - name: Publish package to PyPI (mac)
-        # We cannot 'uses: pypa/gh-action-pypi-publish@v1.4.1' because
-        # that's apparently a container action, and those don't run on
-        # the Mac.
-        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags') && startsWith(runner.os, 'Mac')
-        env:
-          TWINE_PASSWORD: ${{ secrets.TWINE_PASSWORD }}
-        run: |
-          twine upload --skip-existing dist/*
 
       - name: Build mysqlclient
         # Ubuntu 20 doesn't have libmysqlclient.20, but mysqlclient
