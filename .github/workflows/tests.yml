@@ -361,6 +361,9 @@ jobs:
           PGHOSTADDR=127.0.0.1 PGPASSWORD=postgres RELSTORAGETEST_PG_DBNAME=postgres .travis/postgres.sh
       - name: Run tests and report coverage
         uses: ./.github/actions/run-tests
+        with:
+          useCoverage: ${{ !startsWith(matrix.python-version, 'pypy')  }}
+
       - name: Submit to Coveralls
         uses: AndreMiras/coveralls-python-action@develop
         with:
