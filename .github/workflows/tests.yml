@@ -300,6 +300,8 @@ jobs:
       postgres:
         # Docker Hub image
         image: postgres:9.6
+        ports:
+          - 5432:5432
         # Provide the password for postgres
         env:
           POSTGRES_PASSWORD: postgres
