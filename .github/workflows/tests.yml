@@ -112,21 +112,7 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install ccache, configure CFLAGS (ubuntu)
-        if: startsWith(runner.os, 'Linux')
-        run: |
-          sudo apt-get install -y ccache libmemcached-dev
-          echo CFLAGS=$CFLAGS -std=gnu++11 >> $GITHUB_ENV
-          echo CXXFLAGS=$CXXCFLAGS -std=gnu++11 >> $GITHUB_ENV
-      - name: Install ccache, configure CFLAGS (macos)
-        if: startsWith(runner.os, 'macOS')
-        run: |
-          brew install ccache
-          echo CFLAGS=$CFLAGS -Wno-parentheses-equality -Wno-constant-logical-operand >> $GITHUB_ENV
-          echo CXXFLAGS=$CXXFLAGS -Wno-parentheses-equality -Wno-constant-logical-operand >> $GITHUB_ENV
-          echo CC=ccache /usr/bin/clang >> $GITHUB_ENV
-          echo CXX=ccache /usr/bin/clang++ >> $GITHUB_ENV
-          echo LDCXXSHARED=ccache /usr/bin/clang -bundle -undefined dynamic_lookup >> $GITHUB_ENV
-          echo LDSHARED=ccache /usr/bin/clang -bundle -undefined dynamic_lookup >> $GITHUB_ENV
+        uses: ./.github/actions/config-cc
       - name: Install database clients
         if: startsWith(runner.os, 'macOS')
         # These are necessary to build binary drivers.
