@@ -8,7 +8,7 @@ inputs:
   testCommand:
     description: Do not modify.
     required: false
-    default: "-m zope.testrunner --path=src --test-path=src --color -vvvv --slow-test=3"
+    default: "-m zope.testrunner --test-path=src --color -vvvv --slow-test=3"
 runs:
   using: "composite"
   steps:
@@ -27,13 +27,12 @@ runs:
     - name: Test non-gevent
       shell: bash
       run: |
-        CMD="${{ inputs.testCommand }} --layer \"!gevent\""
-        echo "Running $CMD"
+        # Duplicating the --layer argument because the escaping was an issue.
         echo "::group::non-gevent tests"
         if [ "${{ inputs.useCoverage }}" = "true" ]; then
-          coverage run -p --concurrency=thread $CMD
+          coverage run -p --concurrency=thread ${{ inputs.testCommand }} --layer "!gevent"
         else
-          python $CMD
+          python ${{ inputs.testCommand }} --layer "!gevent"
         fi
         # Make sure we can import without zope.schema, which is intended to
         # be a test dependency, and optional for production
