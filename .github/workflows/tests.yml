@@ -253,12 +253,17 @@ jobs:
           pip install -U coverage
           pip install -U 'faulthandler; python_version == "2.7" and platform_python_implementation == "CPython"'
           pip install -U  "`ls dist/RelStorage-*.whl`[test,all_tested_drivers]"
-
+          # Also unzip into src/ so that zope.testrunner can find the .so files
+          # when we ask it to load tests from that directory.
+          unzip -n dist/RelStorage-*whl -d src
       - name: Initialize Test Databases
         if: startsWith(runner.os, 'macOS')
         run: |
           brew services start mysql
           brew services start postgresql
+          # Make sure postgresql is accepting connections.
+          # TODO: Use pg_isready in a loop?
+          sleep 5
           # XXX: mysql isn't currently starting. Why? So
           # skip initializing it.
           #
@@ -356,6 +361,9 @@ jobs:
           pip install -U coverage
           pip install -U 'faulthandler; python_version == "2.7" and platform_python_implementation == "CPython"'
           pip install -U  "`ls dist/RelStorage-*.whl`[test,all_tested_drivers]"
+          # Also unzip into src/ so that zope.testrunner can find the .so files
+          # when we ask it to load tests from that directory.
+          unzip -n dist/RelStorage-*whl -d src
       - name: Initialize Test Databases
         run: |
           PGHOSTADDR=127.0.0.1 PGPASSWORD=postgres RELSTORAGETEST_PG_DBNAME=postgres .travis/postgres.sh
@@ -415,8 +423,6 @@ jobs:
           path: dist/
       - name: Install RelStorage
         run: |
-          ls -l
-          ls -l dist || true
           pip install -U `ls dist/RelStorage-*`[test]
       - name: Lint
         # We only need to do this on one version, and it should be Python 3, because
