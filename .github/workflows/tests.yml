@@ -354,3 +354,9 @@ jobs:
 
 # TODO:
 # * Use YAML syntax to share snippets, like the old .travis.yml did
+# Sadly, as of 2021-02-01, Github Actions does not support anchors at
+# all. Just having an anchor results in an error:
+#
+#   The workflow is not valid. .github/workflows/tests.yml: Anchors
+#   are not currently supported. Remove the anchor 'an-strategy'
+#
