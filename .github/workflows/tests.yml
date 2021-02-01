@@ -83,7 +83,9 @@ env:
 
 jobs:
 
-  test:
+  build-relstorage:
+    # Sigh. Note that the matrix must be kept in sync
+    # with `test`
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -113,45 +115,6 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - name: Install ccache, configure CFLAGS (ubuntu)
         uses: ./.github/actions/config-cc
-      - name: Install database clients
-        if: startsWith(runner.os, 'macOS')
-        # These are necessary to build binary drivers.
-        # "mysql" contains the client libraries, not "mysql-client"
-        # openssl is needed to build psycopg2 (-lssl) and isn't linked
-        # into /usr/local/lib as of 1.1
-        run: |
-          brew install mysql
-          brew services start mysql
-          # homebrew tends to get a current-ish version of PostgreSQL. At this writing,
-          # Jan 2021, it has PostgreSQL 13.1.
-          brew install postgresql
-          brew services start postgresql
-          brew install libmemcached
-          brew install openssl
-          echo LDFLAGS=$LDFLAGS -L/usr/local/opt/openssl@1.1/lib >> $GITHUB_ENV
-          echo CPPFLAGS=$CPPFLAGS -I/usr/local/opt/openssl@1.1/include >> $GITHUB_ENV
-      - name: Initialize Test Databases
-        if: startsWith(runner.os, 'macOS')
-        run: |
-          # XXX: mysql isn't currently starting. Why? So
-          # skip initializing it.
-          #
-          # brew postgres uses the current username, apparently, instead of
-          # the standard "postgres" user as the root. It still uses 'postgres'
-          # as the default database, though.
-          brew services list
-          RELSTORAGETEST_PG_UNAME=$USER RELSTORAGETEST_PG_DBNAME=postgres .travis/postgres.sh
-      - name: Initialize Test Databases
-        if: startsWith(runner.os, 'Linux')
-        run: |
-          sudo systemctl start mysql.service
-          echo Configuring MySQL
-          RELSTORAGETEST_MY_PW="--password=root" .travis/mysql.sh
-          # XXX: Disabled: The software is installed, but isn't running by default,
-          # apparently. They *really* want you to use a docker service.
-          # echo Configuring PostgreSQL
-          # .travis/postgres.sh
-
       ###
       # Caching.
       # This actually *restores* a cache and schedules a cleanup action
@@ -177,11 +140,14 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-pip-
 
-      - name: Install dependencies
+      - name: Install native libs
+        uses: ./.github/actions/install-native-libs
+
+
+      - name: Install Build Dependencies
         run: |
           pip install -U pip
           pip install -U -q setuptools wheel twine
-          pip install -q -U 'faulthandler; python_version == "2.7" and platform_python_implementation == "CPython"'
           pip install -q -U 'cython>=3.0a6' coverage
           pip install 'greenlet>=1.0a1;platform_python_implementation=="CPython"'
 
@@ -211,6 +177,60 @@ jobs:
         run: |
           twine upload --skip-existing dist/*
 
+  test:
+    needs: build-relstorage
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        python-version: [2.7, pypy-2.7, pypy-3.6, 3.6, 3.7, 3.8, 3.9]
+        # ubuntu 18.04 ships with mysql 5.7; ubuntu 20.04 ships with
+        # mysql 8.0
+        os: [ubuntu-18.04, macos-latest]
+        exclude:
+          - os: macos-latest
+            python-version: pypy-2.7
+          - os: macos-latest
+            python-version: pypy-3.6
+          - os: macos-latest
+            python-version: 3.5
+          - os: macos-latest
+            python-version: 3.6
+        include:
+          - os: ubuntu-20.04
+            python-version: 3.8
+
+    steps:
+      - name: checkout
+        uses: actions/checkout@v2
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v2
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install ccache, configure CFLAGS (ubuntu)
+        uses: ./.github/actions/config-cc
+
+      - name: Cache ~/.ccache
+        uses: actions/cache@v2
+        with:
+          path: ~/.ccache/
+          key: ${{ runner.os }}-ccache2-${{ matrix.python-version }}
+
+      - name: Get pip cache dir
+        id: pip-cache
+        run: |
+          echo "::set-output name=dir::$(pip cache dir)"
+
+      - name: pip cache
+        uses: actions/cache@v2
+        with:
+          path: ${{ steps.pip-cache.outputs.dir }}
+          key: ${{ runner.os }}-pip-${{ matrix.python-version }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install native libs
+        uses: ./.github/actions/install-native-libs
+
       - name: Build mysqlclient
         # Ubuntu 20 doesn't have libmysqlclient.20, but mysqlclient
         # client binaries on PyPI are linked against that. We can install that,
@@ -221,22 +241,43 @@ jobs:
         if: startsWith( matrix.os, 'ubuntu-20')
         run: |
           pip install --no-binary :all: mysqlclient
-
+      - name: Download RelStorage wheel
+        uses: actions/download-artifact@v2
+        with:
+          name: RelStorage-${{ runner.os }}-${{ matrix.python-version }}.whl
+          path: dist/
       - name: Install RelStorage
         # I'd prefer to install the wheel in non-editable mode, but that seems to
         # screw up coverage reporting.
+        # XXX: So this may be broken now
         run: |
-          pip install -U -e ".[test,all_tested_drivers]"
+          pip install -q -U 'faulthandler; python_version == "2.7" and platform_python_implementation == "CPython"'
+          pip install -U  "`ls dist/RelStorage-*.whl`[test,all_tested_drivers]"
 
-      - name: Lint (Python 3.9)
-        if: matrix.python-version == 3.9 && startsWith(runner.os, 'Linux')
-        # We only need to do this on one version, and it should be Python 3, because
-        # pylint has stopped updating for Python 2.
-        # We do this here rather than a separate job to avoid the compilation overhead.
-        # TODO: Revisit this when we have caching of that part.
+
+      - name: Initialize Test Databases
+        if: startsWith(runner.os, 'macOS')
         run: |
-          pip install -U pylint
-          python -m pylint --limit-inference-results=1 --rcfile=.pylintrc relstorage -f parseable -r n
+          brew services start mysql
+          brew services start postgresql
+          # XXX: mysql isn't currently starting. Why? So
+          # skip initializing it.
+          #
+          # brew postgres uses the current username, apparently, instead of
+          # the standard "postgres" user as the root. It still uses 'postgres'
+          # as the default database, though.
+          brew services list
+          RELSTORAGETEST_PG_UNAME=$USER RELSTORAGETEST_PG_DBNAME=postgres .travis/postgres.sh
+      - name: Initialize Test Databases
+        if: startsWith(runner.os, 'Linux')
+        run: |
+          sudo systemctl start mysql.service
+          echo Configuring MySQL
+          RELSTORAGETEST_MY_PW="--password=root" .travis/mysql.sh
+          # XXX: Disabled: The software is installed, but isn't running by default,
+          # apparently. They *really* want you to use a docker service.
+          # echo Configuring PostgreSQL
+          # .travis/postgres.sh
       - name: "Tests: Coverage on CPython"
         if: ${{ !startsWith(matrix.python-version, 'pypy')  }}
         run: |
@@ -278,6 +319,52 @@ jobs:
       with:
         parallel-finished: true
 
+
+  lint:
+    needs: build-relstorage
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        python-version: [3.9]
+        os: [ubuntu-18.04]
+
+    steps:
+      - name: checkout
+        uses: actions/checkout@v2
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v2
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Get pip cache dir
+        id: pip-cache
+        run: |
+          echo "::set-output name=dir::$(pip cache dir)"
+
+      - name: pip cache
+        uses: actions/cache@v2
+        with:
+          path: ${{ steps.pip-cache.outputs.dir }}
+          key: ${{ runner.os }}-pip-${{ matrix.python-version }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Download RelStorage wheel
+        uses: actions/download-artifact@v2
+        with:
+          name: RelStorage-${{ runner.os }}-${{ matrix.python-version }}.whl
+          path: dist/
+      - name: Install RelStorage
+        run: |
+          ls -l
+          ls -l dist || true
+          pip install -U dist/RelStorage-*
+      - name: Lint
+        # We only need to do this on one version, and it should be Python 3, because
+        # pylint has stopped updating for Python 2.
+        run: |
+          pip install -U pylint
+          python -m pylint --limit-inference-results=1 --rcfile=.pylintrc relstorage -f parseable -r n
 
   # manylinux_x86_64:
   #   runs-on: ubuntu-latest
