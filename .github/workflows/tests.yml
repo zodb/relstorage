@@ -135,9 +135,9 @@ jobs:
         uses: actions/cache@v2
         with:
           path: ${{ steps.pip-cache.outputs.dir }}
-          key: ${{ runner.os }}-pip-${{ matrix.python-version }}
+          key: ${{ runner.os }}-pip2-${{ matrix.python-version }}
           restore-keys: |
-            ${{ runner.os }}-pip-
+            ${{ runner.os }}-pip2-
 
       - name: Install native libs
         uses: ./.github/actions/install-native-libs
@@ -153,9 +153,11 @@ jobs:
       - name: Build RelStorage
         run: |
           # Next, build the wheel *in place*. This helps ccache, and also lets us cache the configure
-          # output (pip install uses a random temporary directory, making this difficult)
+          # output (pip install uses a random temporary directory, making this difficult).
           python setup.py build_ext -i
           python setup.py bdist_wheel
+          # Also install it, so that we get dependencies in the (pip) cache.
+          pip install .
 
       - name: Check RelStorage build
         run: |
@@ -223,9 +225,9 @@ jobs:
         uses: actions/cache@v2
         with:
           path: ${{ steps.pip-cache.outputs.dir }}
-          key: ${{ runner.os }}-pip-${{ matrix.python-version }}
+          key: ${{ runner.os }}-pip2-${{ matrix.python-version }}
           restore-keys: |
-            ${{ runner.os }}-pip-
+            ${{ runner.os }}-pip2-
 
       - name: Install native libs
         uses: ./.github/actions/install-native-libs
@@ -341,9 +343,9 @@ jobs:
         uses: actions/cache@v2
         with:
           path: ${{ steps.pip-cache.outputs.dir }}
-          key: ${{ runner.os }}-pip-${{ matrix.python-version }}
+          key: ${{ runner.os }}-pip2-${{ matrix.python-version }}
           restore-keys: |
-            ${{ runner.os }}-pip-
+            ${{ runner.os }}-pip2-
 
       - name: Install native libs
         uses: ./.github/actions/install-native-libs
@@ -412,9 +414,9 @@ jobs:
         uses: actions/cache@v2
         with:
           path: ${{ steps.pip-cache.outputs.dir }}
-          key: ${{ runner.os }}-pip-${{ matrix.python-version }}
+          key: ${{ runner.os }}-pip2-${{ matrix.python-version }}
           restore-keys: |
-            ${{ runner.os }}-pip-
+            ${{ runner.os }}-pip2-
 
       - name: Download RelStorage wheel
         uses: actions/download-artifact@v2
@@ -423,6 +425,8 @@ jobs:
           path: dist/
       - name: Install RelStorage
         run: |
+          pip install -U pip
+          pip install -U wheel
           pip install -U `ls dist/RelStorage-*`[test]
       - name: Lint
         # We only need to do this on one version, and it should be Python 3, because
