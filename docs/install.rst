@@ -2,8 +2,8 @@
  Installation
 ==============
 
-RelStorage 3.0 is supported on Python 2.7.9+, Python 3.5, 3.6, 3.7,
-and 3.8, as well as PyPy2 and PyPy 3 7.1 or later.
+RelStorage 3.0 is supported on Python 2.7.9+, Python 3.6, 3.7,
+3.8, and 3.9, as well as PyPy2 and PyPy 3 7.1 or later.
 
 .. seealso:: :doc:`supported-databases`
 
@@ -12,7 +12,7 @@ You can install RelStorage using pip::
     pip install RelStorage
 
 If you use a recent version of pip to install RelStorage on a
-supported platform (OS X, Windows or "manylinx"), you can get a
+supported platform (macOS, Windows or "manylinux"), you can get a
 pre-built binary wheel. If you install from source or on a different
 platform, you will need to have a functioning C/C++ compiler and the
 ability to compile `Cython extensions

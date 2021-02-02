@@ -145,17 +145,17 @@ RelStorage is hosted at GitHub:
 Continuous integration
 ======================
 
-A test suite is run for every push and pull request submitted. Travis
-CI is used to test on Linux, and AppVeyor runs the builds on
+A test suite is run for every push and pull request submitted. GitHub
+Actions is used to test on Linux and macOS, and AppVeyor runs the builds on
 Windows.
 
-.. image:: https://travis-ci.org/zodb/relstorage.svg?branch=master
-    :target: https://travis-ci.org/zodb/relstorage
+.. image:: https://github.com/zodb/relstorage/workflows/tests/badge.svg
+    :target: https://github.com/zodb/relstorage/actions
 
 .. image:: https://ci.appveyor.com/api/projects/status/pccddlgujdoqvl83?svg=true
    :target: https://ci.appveyor.com/project/jamadden/relstorage/branch/master
 
-Builds on Travis CI automatically submit updates to `coveralls.io`_ to
+Builds on CI automatically submit updates to `coveralls.io`_ to
 monitor test coverage.
 
 .. image:: https://coveralls.io/repos/zodb/relstorage/badge.svg?branch=master&service=github
