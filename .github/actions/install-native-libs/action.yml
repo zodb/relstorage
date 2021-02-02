@@ -1,0 +1,24 @@
+name: Install Needed Native Libraries
+description: Install Needed Native Libraries
+runs:
+  using: "composite"
+  steps:
+    - name: Install ccache, configure CFLAGS
+      shell: bash
+      run: |
+        if [ "`uname`" = "Darwin" ]; then
+          # These are necessary to build binary drivers.
+          # "mysql" contains the client libraries, not "mysql-client"
+          # openssl is needed to build psycopg2 (-lssl) and isn't linked
+          # into /usr/local/lib as of 1.1
+          brew install mysql
+          # homebrew tends to get a current-ish version of PostgreSQL. At this writing,
+          # Jan 2021, it has PostgreSQL 13.1.
+          brew install postgresql
+          brew install libmemcached
+          brew install openssl
+          echo LDFLAGS=$LDFLAGS -L/usr/local/opt/openssl@1.1/lib >> $GITHUB_ENV
+          echo CPPFLAGS=$CPPFLAGS -I/usr/local/opt/openssl@1.1/include >> $GITHUB_ENV
+        else
+          sudo apt-get install -y libmemcached-dev
+        fi

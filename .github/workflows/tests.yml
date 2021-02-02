@@ -1,0 +1,507 @@
+###
+# Initially copied from
+# https://github.com/actions/starter-workflows/blob/main/ci/python-package.yml
+# And later based on the version I (jamadden) updated at gevent/gevent
+#
+# Original comment follows.
+###
+###
+# This workflow will install Python dependencies, run tests and lint with a variety of Python versions
+# For more information see: https://help.github.com/actions/language-and-framework-guides/using-python-with-github-actions
+###
+
+###
+# Important notes on GitHub actions:
+#
+# - We only get 2,000 free minutes a month (private repos)
+# - We only get 500MB of artifact storage
+# - Cache storage is limited to 7 days and 5GB.
+# - macOS minutes are 10x as expensive as Linux minutes
+# - windows minutes are twice as expensive.
+#
+# So keep those workflows light.
+#
+# In December 2020, github only supports x86/64. If we wanted to test
+# on other architectures, we can use docker emulation, but there's no
+# native support.
+#
+# Another major downside: You can't just re-run the job for one part
+# of the matrix. So if there's a transient test failure that hit, say, 3.8,
+# to get a clean run every version of Python runs again. That's bad.
+# https://github.community/t/ability-to-rerun-just-a-single-job-in-a-workflow/17234/65
+
+name: tests
+
+
+# Triggers the workflow on push or pull request events
+on: [push, pull_request]
+# Limiting to particular branches might be helpful to conserve minutes.
+#on:
+  # push:
+  #   branches: [ $default-branch ]
+  # pull_request:
+  #   branches: [ $default-branch ]
+
+env:
+  # Weirdly, this has to be a top-level key, not ``defaults.env``
+  PYTHONHASHSEED: 8675309
+  PYTHONUNBUFFERED: 1
+  PYTHONDONTWRITEBYTECODE: 1
+  # PYTHONDEVMODE leads to crashes in pylibmc.
+  # See https://github.com/lericson/pylibmc/issues/254
+  # - PYTHONDEVMODE=1
+  PYTHONFAULTHANDLER: 1
+
+  PIP_UPGRADE_STRATEGY: eager
+  # Don't get warnings about Python 2 support being deprecated. We
+  # know. The env var works for pip 20.
+  PIP_NO_PYTHON_VERSION_WARNING: 1
+  PIP_NO_WARN_SCRIPT_LOCATION: 1
+
+  # Disable some warnings produced by libev especially and also some Cython generated code.
+  # These are shared between GCC and clang so it must be a minimal set.
+  # TODO: Figure out how to set env vars per platform without resorting to inline scripting.
+  CFLAGS: -Ofast -pipe
+  CXXFLAGS: -Ofast -pipe
+  # Uploading built wheels for releases.
+  # TWINE_PASSWORD is encrypted and stored directly in the
+  # travis repo settings.
+  TWINE_USERNAME: __token__
+
+  ###
+  # caching
+  ###
+  CCACHE_DIR: ~/.ccache
+  CC: "ccache gcc"
+  CCACHE_NOCPP2: true
+  CCACHE_SLOPPINESS: file_macro,time_macros,include_file_ctime,include_file_mtime
+  CCACHE_NOHASHDIR: true
+
+  #
+
+
+jobs:
+
+  build-relstorage:
+    # Sigh. Note that the matrix must be kept in sync
+    # with `test`
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        python-version: [2.7, pypy-2.7, pypy-3.6, 3.6, 3.7, 3.8, 3.9]
+        # ubuntu 18.04 ships with mysql 5.7; ubuntu 20.04 ships with
+        # mysql 8.0
+        os: [ubuntu-18.04, macos-latest]
+        exclude:
+          - os: macos-latest
+            python-version: pypy-2.7
+          - os: macos-latest
+            python-version: pypy-3.6
+          - os: macos-latest
+            python-version: 3.5
+          - os: macos-latest
+            python-version: 3.6
+        include:
+          - os: ubuntu-20.04
+            python-version: 3.8
+
+    steps:
+      - name: checkout
+        uses: actions/checkout@v2
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v2
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install ccache, configure CFLAGS (ubuntu)
+        uses: ./.github/actions/config-cc
+      ###
+      # Caching.
+      # This actually *restores* a cache and schedules a cleanup action
+      # to save the cache. So it must come before the thing we want to use
+      # the cache.
+      ###
+      - name: Cache ~/.ccache
+        uses: actions/cache@v2
+        with:
+          path: ~/.ccache/
+          key: ${{ runner.os }}-ccache2-${{ matrix.python-version }}
+
+      - name: Get pip cache dir
+        id: pip-cache
+        run: |
+          echo "::set-output name=dir::$(pip cache dir)"
+
+      - name: pip cache
+        uses: actions/cache@v2
+        with:
+          path: ${{ steps.pip-cache.outputs.dir }}
+          key: ${{ runner.os }}-pip3-${{ matrix.python-version }}
+          restore-keys: |
+            ${{ runner.os }}-pip3-
+
+      - name: Install native libs
+        uses: ./.github/actions/install-native-libs
+
+
+      - name: Install Build Dependencies
+        run: |
+          pip install -U pip
+          pip install -U -q setuptools wheel twine
+          pip install -q -U 'cython>=3.0a6'
+          pip install 'greenlet>=1.0a1;platform_python_implementation=="CPython"'
+
+      - name: Build RelStorage
+        run: |
+          # Next, build the wheel *in place*. This helps ccache, and also lets us cache the configure
+          # output (pip install uses a random temporary directory, making this difficult).
+          python setup.py build_ext -i
+          python setup.py bdist_wheel
+          # Also install it, so that we get dependencies in the (pip) cache.
+          pip install .[test]
+
+      - name: Check RelStorage build
+        run: |
+          ls -l dist
+          twine check dist/*
+      - name: Upload RelStorage wheel
+        uses: actions/upload-artifact@v2
+        with:
+          name: RelStorage-${{ runner.os }}-${{ matrix.python-version }}.whl
+          path: dist/*whl
+      - name: Publish package to PyPI (mac)
+        # We cannot 'uses: pypa/gh-action-pypi-publish@v1.4.1' because
+        # that's apparently a container action, and those don't run on
+        # the Mac.
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags') && startsWith(runner.os, 'Mac')
+        env:
+          TWINE_PASSWORD: ${{ secrets.TWINE_PASSWORD }}
+        run: |
+          twine upload --skip-existing dist/*
+
+  test:
+    needs: build-relstorage
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        python-version: [2.7, pypy-2.7, pypy-3.6, 3.6, 3.7, 3.8, 3.9]
+        # ubuntu 18.04 ships with mysql 5.7; ubuntu 20.04 ships with
+        # mysql 8.0
+        os: [ubuntu-18.04, macos-latest]
+        exclude:
+          - os: macos-latest
+            python-version: pypy-2.7
+          - os: macos-latest
+            python-version: pypy-3.6
+          - os: macos-latest
+            python-version: 3.5
+          - os: macos-latest
+            python-version: 3.6
+        include:
+          - os: ubuntu-20.04
+            python-version: 3.8
+
+    steps:
+      - name: checkout
+        uses: actions/checkout@v2
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v2
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install ccache, configure CFLAGS (ubuntu)
+        uses: ./.github/actions/config-cc
+
+      - name: Cache ~/.ccache
+        uses: actions/cache@v2
+        with:
+          path: ~/.ccache/
+          key: ${{ runner.os }}-ccache2-${{ matrix.python-version }}
+
+      - name: Get pip cache dir
+        id: pip-cache
+        run: |
+          echo "::set-output name=dir::$(pip cache dir)"
+
+      - name: pip cache
+        uses: actions/cache@v2
+        with:
+          path: ${{ steps.pip-cache.outputs.dir }}
+          key: ${{ runner.os }}-pip3-${{ matrix.python-version }}
+          restore-keys: |
+            ${{ runner.os }}-pip3-
+
+      - name: Install native libs
+        uses: ./.github/actions/install-native-libs
+
+      - name: Build mysqlclient
+        # Ubuntu 20 doesn't have libmysqlclient.20, but mysqlclient
+        # client binaries on PyPI are linked against that. We can install that,
+        # but then SSL breaks for an unknown reason, and we can't disable SSL
+        # because authentication requires it (maybe we could change the authentiaction plugin?)
+        # So instead we install the development sources and compile mysqlclient locally.
+        # The relevant package, libmysqlclient-dev, is already installed.
+        if: startsWith( matrix.os, 'ubuntu-20')
+        run: |
+          pip install --no-binary :all: mysqlclient
+      - name: Download RelStorage wheel
+        uses: actions/download-artifact@v2
+        with:
+          name: RelStorage-${{ runner.os }}-${{ matrix.python-version }}.whl
+          path: dist/
+      - name: Install RelStorage
+        # I'd prefer to install the wheel in non-editable mode, but that seems to
+        # screw up coverage reporting.
+        # XXX: So this may be broken now
+        run: |
+          pip install -U coverage
+          pip install -U 'faulthandler; python_version == "2.7" and platform_python_implementation == "CPython"'
+          pip install -U  "`ls dist/RelStorage-*.whl`[test,all_tested_drivers]"
+          # Also unzip into src/ so that zope.testrunner can find the .so files
+          # when we ask it to load tests from that directory.
+          unzip -n dist/RelStorage-*whl -d src
+      - name: Initialize Test Databases
+        if: startsWith(runner.os, 'macOS')
+        run: |
+          brew services start mysql
+          brew services start postgresql
+          # Make sure postgresql is accepting connections.
+          # TODO: Use pg_isready in a loop?
+          sleep 5
+          # XXX: mysql isn't currently starting. Why? So
+          # skip initializing it.
+          #
+          # brew postgres uses the current username, apparently, instead of
+          # the standard "postgres" user as the root. It still uses 'postgres'
+          # as the default database, though.
+          brew services list
+          RELSTORAGETEST_PG_UNAME=$USER RELSTORAGETEST_PG_DBNAME=postgres .travis/postgres.sh
+      - name: Initialize Test Databases
+        if: startsWith(runner.os, 'Linux')
+        run: |
+          sudo systemctl start mysql.service
+          echo Configuring MySQL
+          RELSTORAGETEST_MY_PW="--password=root" .travis/mysql.sh
+          # XXX: Disabled: The software is installed, but isn't running by default,
+          # apparently. They *really* want you to use a docker service.
+          # echo Configuring PostgreSQL
+          # .travis/postgres.sh
+      - name: Run tests and report coverage
+        uses: ./.github/actions/run-tests
+        with:
+          useCoverage: ${{ !startsWith(matrix.python-version, 'pypy')  }}
+      - name: Submit to Coveralls
+        # This is a container action, which only runs on Linux.
+        if: ${{ !startsWith(matrix.python-version, 'pypy') && startsWith(runner.os, 'Linux') }}
+        uses: AndreMiras/coveralls-python-action@develop
+        with:
+          parallel: true
+
+  test-old-postgresql:
+    needs: build-relstorage
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        python-version: [2.7, 3.9, pypy-2.7, pypy-3.6]
+        os: [ubuntu-18.04]
+    services:
+      # Label used to access the service container
+      postgres:
+        # Docker Hub image
+        image: postgres:9.6
+        ports:
+          - 5432:5432
+        # Provide the password for postgres
+        env:
+          POSTGRES_PASSWORD: postgres
+        # Set health checks to wait until postgres has started
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - name: checkout
+        uses: actions/checkout@v2
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v2
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install ccache, configure CFLAGS (ubuntu)
+        uses: ./.github/actions/config-cc
+
+      - name: Cache ~/.ccache
+        uses: actions/cache@v2
+        with:
+          path: ~/.ccache/
+          key: ${{ runner.os }}-ccache2-${{ matrix.python-version }}
+
+      - name: Get pip cache dir
+        id: pip-cache
+        run: |
+          echo "::set-output name=dir::$(pip cache dir)"
+
+      - name: pip cache
+        uses: actions/cache@v2
+        with:
+          path: ${{ steps.pip-cache.outputs.dir }}
+          key: ${{ runner.os }}-pip3-${{ matrix.python-version }}
+          restore-keys: |
+            ${{ runner.os }}-pip3-
+
+      - name: Install native libs
+        uses: ./.github/actions/install-native-libs
+
+      - name: Download RelStorage wheel
+        uses: actions/download-artifact@v2
+        with:
+          name: RelStorage-${{ runner.os }}-${{ matrix.python-version }}.whl
+          path: dist/
+      - name: Install RelStorage
+        # I'd prefer to install the wheel in non-editable mode, but that seems to
+        # screw up coverage reporting.
+        # XXX: So this may be broken now
+        run: |
+          pip install -U coverage
+          pip install -U 'faulthandler; python_version == "2.7" and platform_python_implementation == "CPython"'
+          pip install -U  "`ls dist/RelStorage-*.whl`[test,all_tested_drivers]"
+          # Also unzip into src/ so that zope.testrunner can find the .so files
+          # when we ask it to load tests from that directory.
+          unzip -n dist/RelStorage-*whl -d src
+      - name: Initialize Test Databases
+        run: |
+          PGHOSTADDR=127.0.0.1 PGPASSWORD=postgres RELSTORAGETEST_PG_DBNAME=postgres .travis/postgres.sh
+      - name: Run tests and report coverage
+        uses: ./.github/actions/run-tests
+        with:
+          useCoverage: ${{ !startsWith(matrix.python-version, 'pypy')  }}
+
+      - name: Submit to Coveralls
+        uses: AndreMiras/coveralls-python-action@develop
+        with:
+          parallel: true
+
+  coveralls_finish:
+    needs: [test,test-old-postgresql]
+    runs-on: ubuntu-latest
+    steps:
+    - name: Coveralls Finished
+      uses: AndreMiras/coveralls-python-action@develop
+      with:
+        parallel-finished: true
+
+
+  lint:
+    needs: build-relstorage
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        python-version: [3.9]
+        os: [ubuntu-18.04]
+
+    steps:
+      - name: checkout
+        uses: actions/checkout@v2
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v2
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Get pip cache dir
+        id: pip-cache
+        run: |
+          echo "::set-output name=dir::$(pip cache dir)"
+
+      - name: pip cache
+        uses: actions/cache@v2
+        with:
+          path: ${{ steps.pip-cache.outputs.dir }}
+          key: ${{ runner.os }}-pip3-${{ matrix.python-version }}
+          restore-keys: |
+            ${{ runner.os }}-pip3-
+
+      - name: Download RelStorage wheel
+        uses: actions/download-artifact@v2
+        with:
+          name: RelStorage-${{ runner.os }}-${{ matrix.python-version }}.whl
+          path: dist/
+      - name: Install RelStorage
+        run: |
+          pip install -U pip
+          pip install -U wheel
+          pip install -U `ls dist/RelStorage-*`[test]
+      - name: Lint
+        # We only need to do this on one version, and it should be Python 3, because
+        # pylint has stopped updating for Python 2.
+        run: |
+          pip install -U pylint
+          python -m pylint --limit-inference-results=1 --rcfile=.pylintrc relstorage -f parseable -r n
+
+  manylinux_x86_64:
+    runs-on: ubuntu-latest
+    # We use a regular Python matrix entry to share as much code as possible.
+    strategy:
+      matrix:
+        python-version: [3.9]
+
+    steps:
+      - name: checkout
+        uses: actions/checkout@v2
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v2
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Cache ~/.ccache
+        uses: actions/cache@v2
+        with:
+          path: ~/.ccache/
+          key: ${{ runner.os }}-ccache_manylinux2-${{ matrix.python-version }}
+      - name: Get pip cache dir
+        id: pip-cache
+        run: |
+          echo "::set-output name=dir::$(pip cache dir)"
+
+      - name: pip cache
+        uses: actions/cache@v2
+        with:
+          path: ${{ steps.pip-cache.outputs.dir }}
+          key: ${{ runner.os }}-pip_manylinux_x8664-${{ matrix.python-version }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Update pip
+        run: pip install -U pip
+      - name: Build RelStorage
+        # An alternate way to do this is to run the container directly with a uses:
+        # and then the script runs inside it. That may work better with caching.
+        # See https://github.com/pyca/bcrypt/blob/f6b5ee2eda76d077c531362ac65e16f045cf1f29/.github/workflows/wheel-builder.yml
+        # The 2010 image is the last one that comes with Python 2.7.
+        env:
+          DOCKER_IMAGE: quay.io/pypa/manylinux2010_x86_64
+        run: scripts/releases/make-manylinux
+      - name: Upload RelStorage wheels
+        uses: actions/upload-artifact@v2
+        with:
+          path: wheelhouse/*whl
+          name: manylinux_x86_64_wheels.zip
+      - name: Restore pip cache permissions
+        run: sudo chown -R $(whoami) ${{ steps.pip-cache.outputs.dir }}
+      - name: Publish package to PyPI
+        uses: pypa/gh-action-pypi-publish@v1.4.1
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags')
+        with:
+          user: __token__
+          password: ${{ secrets.TWINE_PASSWORD }}
+          skip_existing: true
+          packages_dir: wheelhouse/
+
+# TODO:
+# * Use YAML syntax to share snippets, like the old .travis.yml did
+# Sadly, as of 2021-02-01, Github Actions does not support anchors at
+# all. Just having an anchor results in an error:
+#
+#   The workflow is not valid. .github/workflows/tests.yml: Anchors
+#   are not currently supported. Remove the anchor 'an-strategy'
+#
+# The alternative of using composite actions doesn't work either,
+# because composite actions are limited to running shell scripts.
+# Steps in them can't call other actions with `uses:`, and nor can
+# they be conditional with `if:`.

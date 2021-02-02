@@ -1,0 +1,51 @@
+name: Run RelStorage Tests
+description: Run RelStorage Tests
+inputs:
+  useCoverage:
+    description: The boolean true or false as a string.
+    required: false
+    default: 'true'
+  testCommand:
+    description: Do not modify.
+    required: false
+    default: "-m zope.testrunner --package relstorage --path src --color -v --slow-test=3"
+runs:
+  using: "composite"
+  steps:
+    - name: Test gevent concurrency
+      shell: bash
+      run: |
+        echo "Using coverage? ${{ inputs.useCoverage }}"
+        echo "::group::gevent concurrency"
+        CMD=".travis/zope_testrunner_gevent.py -t checkBTreesLengthStress -t check7 -t check2 -t BlobCache -t Switches --layer gevent"
+        if [ "${{ inputs.useCoverage }}" = "true" ]; then
+          coverage run -p --concurrency=greenlet $CMD
+        else
+          python $CMD
+        fi
+        echo "::endgroup::"
+    - name: Test non-gevent
+      shell: bash
+      run: |
+        # Duplicating the --layer argument because the escaping was an issue
+        # when I tried to put together a single command string
+        echo "::group::non-gevent tests"
+        if [ "${{ inputs.useCoverage }}" = "true" ]; then
+          coverage run -p --concurrency=thread ${{ inputs.testCommand }} --layer "!gevent"
+        else
+          python ${{ inputs.testCommand }} --layer "!gevent"
+        fi
+        # Make sure we can import without zope.schema, which is intended to
+        # be a test dependency, and optional for production
+        pip uninstall -y zope.schema
+        python -c 'import relstorage.interfaces, relstorage.adapters.interfaces, relstorage.cache.interfaces'
+        echo "::endgroup::"
+    - name: Report Coverage
+      shell: bash
+      run: |
+        echo "::group::Coverage Report"
+        if [ "${{ inputs.useCoverage }}" = "true" ]; then
+          python -m coverage combine || true
+          python -m coverage report -i || true
+        fi
+        echo "::endgroup::"

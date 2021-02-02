@@ -4,6 +4,10 @@ omit =
      relstorage/cache/tests/benchmarks.py
      # Omit the main oracle adapter file since we don't test it at all
      relstorage/adapters/oracle.py
+# New in 5.0; required for the GHA coveralls submission.
+# Perhaps this obsoletes the source section in [paths]?
+# Probably not since we're now installing in non-editable mode.
+relative_files = True
 
 [report]
 # Coverage is run on Linux under cPython 2 and 3,
@@ -24,3 +28,17 @@ exclude_lines =
     def oracle_
     class CXOracle
     class Oracle
+
+[paths]
+# Combine source and paths from the CI installs so they all get
+# collapsed during combining. Otherwise, coveralls.io reports
+# many different files (/lib/pythonX.Y/site-packages/gevent/...) and we don't
+# get a good aggregate number.
+source =
+     src/
+     */lib/*/site-packages/
+     */pypy*/site-packages/
+
+# Local Variables:
+# mode: conf
+# End:

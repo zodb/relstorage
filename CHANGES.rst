@@ -5,7 +5,11 @@
 3.4.1 (unreleased)
 ==================
 
-- Nothing changed yet.
+- RelStorage has moved from Travis CI to `GitHub Actions
+  <https://github.com/zodb/relstorage/actions>`_ for macOS and Linux
+  tests and manylinux wheel building. See :issue:`437`.
+- RelStorage is now tested with PostgreSQL 13.1. See :issue:`427`.
+- RelStorage is now tested with PyMySQL 1.0. See :issue:`434`.
 
 
 3.4.0 (2020-10-19)

@@ -20,7 +20,9 @@ This test is only for the non-shared (aka, "cached") case.
 from __future__ import absolute_import
 from __future__ import print_function
 
+import sys
 import threading
+import traceback
 
 import random2
 
@@ -71,7 +73,13 @@ class TestBlobCacheMixin(TestBlobMixin):
         # Do this only once, at the end.
         to_join = set(threading.enumerate()) - set(self._old_threads)
         for t in to_join:
-            t.join(10)
+            try:
+                t.join(10)
+            except RuntimeError: # pragma: no cover
+                # If the thread wasn't actually started; if we got some random exception,
+                # this might happen.
+                print("Joining unstarted thread", t, file=sys.stderr)
+                traceback.print_exc()
         self._wait_for_all_spawned_threads_to_finish = lambda: None
 
     def tearDown(self):
