@@ -135,9 +135,9 @@ jobs:
         uses: actions/cache@v2
         with:
           path: ${{ steps.pip-cache.outputs.dir }}
-          key: ${{ runner.os }}-pip2-${{ matrix.python-version }}
+          key: ${{ runner.os }}-pip3-${{ matrix.python-version }}
           restore-keys: |
-            ${{ runner.os }}-pip2-
+            ${{ runner.os }}-pip3-
 
       - name: Install native libs
         uses: ./.github/actions/install-native-libs
@@ -157,7 +157,7 @@ jobs:
           python setup.py build_ext -i
           python setup.py bdist_wheel
           # Also install it, so that we get dependencies in the (pip) cache.
-          pip install .
+          pip install .[test]
 
       - name: Check RelStorage build
         run: |
@@ -225,9 +225,9 @@ jobs:
         uses: actions/cache@v2
         with:
           path: ${{ steps.pip-cache.outputs.dir }}
-          key: ${{ runner.os }}-pip2-${{ matrix.python-version }}
+          key: ${{ runner.os }}-pip3-${{ matrix.python-version }}
           restore-keys: |
-            ${{ runner.os }}-pip2-
+            ${{ runner.os }}-pip3-
 
       - name: Install native libs
         uses: ./.github/actions/install-native-libs
@@ -343,9 +343,9 @@ jobs:
         uses: actions/cache@v2
         with:
           path: ${{ steps.pip-cache.outputs.dir }}
-          key: ${{ runner.os }}-pip2-${{ matrix.python-version }}
+          key: ${{ runner.os }}-pip3-${{ matrix.python-version }}
           restore-keys: |
-            ${{ runner.os }}-pip2-
+            ${{ runner.os }}-pip3-
 
       - name: Install native libs
         uses: ./.github/actions/install-native-libs
@@ -414,9 +414,9 @@ jobs:
         uses: actions/cache@v2
         with:
           path: ${{ steps.pip-cache.outputs.dir }}
-          key: ${{ runner.os }}-pip2-${{ matrix.python-version }}
+          key: ${{ runner.os }}-pip3-${{ matrix.python-version }}
           restore-keys: |
-            ${{ runner.os }}-pip2-
+            ${{ runner.os }}-pip3-
 
       - name: Download RelStorage wheel
         uses: actions/download-artifact@v2
