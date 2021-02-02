@@ -73,7 +73,7 @@ tests_require = [
     'zc.zlibstorage',
     'zope.testrunner',
     'nti.testing',
-    'gevent >= 1.5a1; sys_platform != "win32"',
+    'gevent >= 1.5a1',
     'pyperf',
     # Versions of PyPy2 prior to 7.4 (maybe?) are incompatible with
     # psutil >= 5.6.4.

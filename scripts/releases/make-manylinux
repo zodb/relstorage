@@ -92,5 +92,5 @@ if [ ! -d $HOME/.ccache ]; then
     mkdir $HOME/.ccache
 fi
 
-docker run --rm -ti -v "$(pwd):/RelStorage" -v "$LCACHE:/cache" -v "$HOME/.ccache:/ccache" quay.io/pypa/manylinux2010_x86_64 /RelStorage/scripts/releases/$(basename $0)
+docker run --rm -e GITHUB_ACTIONS -e DOCKER_IMAGE -v "$(pwd):/RelStorage" -v "$LCACHE:/cache" -v "$HOME/.ccache:/ccache" ${DOCKER_IMAGE:-quay.io/pypa/manylinux2010_x86_64} /RelStorage/scripts/releases/$(basename $0)
 ls -l wheelhouse

@@ -431,63 +431,63 @@ jobs:
           pip install -U pylint
           python -m pylint --limit-inference-results=1 --rcfile=.pylintrc relstorage -f parseable -r n
 
-  # manylinux_x86_64:
-  #   runs-on: ubuntu-latest
-  #   # We use a regular Python matrix entry to share as much code as possible.
-  #   strategy:
-  #     matrix:
-  #       python-version: [3.9]
+  manylinux_x86_64:
+    runs-on: ubuntu-latest
+    # We use a regular Python matrix entry to share as much code as possible.
+    strategy:
+      matrix:
+        python-version: [3.9]
 
-  #   steps:
-  #     - name: checkout
-  #       uses: actions/checkout@v2
-  #     - name: Set up Python ${{ matrix.python-version }}
-  #       uses: actions/setup-python@v2
-  #       with:
-  #         python-version: ${{ matrix.python-version }}
-  #     - name: Cache ~/.ccache
-  #       uses: actions/cache@v2
-  #       with:
-  #         path: ~/.ccache/
-  #         key: ${{ runner.os }}-ccache_manylinux2-${{ matrix.python-version }}
-  #     - name: Get pip cache dir
-  #       id: pip-cache
-  #       run: |
-  #         echo "::set-output name=dir::$(pip cache dir)"
+    steps:
+      - name: checkout
+        uses: actions/checkout@v2
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v2
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Cache ~/.ccache
+        uses: actions/cache@v2
+        with:
+          path: ~/.ccache/
+          key: ${{ runner.os }}-ccache_manylinux2-${{ matrix.python-version }}
+      - name: Get pip cache dir
+        id: pip-cache
+        run: |
+          echo "::set-output name=dir::$(pip cache dir)"
 
-  #     - name: pip cache
-  #       uses: actions/cache@v2
-  #       with:
-  #         path: ${{ steps.pip-cache.outputs.dir }}
-  #         key: ${{ runner.os }}-pip_manylinux_x8664-${{ matrix.python-version }}
-  #         restore-keys: |
-  #           ${{ runner.os }}-pip-
+      - name: pip cache
+        uses: actions/cache@v2
+        with:
+          path: ${{ steps.pip-cache.outputs.dir }}
+          key: ${{ runner.os }}-pip_manylinux_x8664-${{ matrix.python-version }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
 
-  #     - name: Update pip
-  #       run: pip install -U pip
-  #     - name: Build and test gevent
-  #       # An alternate way to do this is to run the container directly with a uses:
-  #       # and then the script runs inside it. That may work better with caching.
-  #       # See https://github.com/pyca/bcrypt/blob/f6b5ee2eda76d077c531362ac65e16f045cf1f29/.github/workflows/wheel-builder.yml
-  #       # The 2010 image is the last one that comes with Python 2.7.
-  #       env:
-  #         DOCKER_IMAGE: quay.io/pypa/manylinux2010_x86_64
-  #       run: scripts/releases/make-manylinux
-  #     - name: Upload gevent wheels
-  #       uses: actions/upload-artifact@v2
-  #       with:
-  #         path: wheelhouse/*whl
-  #         name: manylinux_x86_64_wheels.zip
-  #     - name: Restore pip cache permissions
-  #       run: sudo chown -R $(whoami) ${{ steps.pip-cache.outputs.dir }}
-  #     - name: Publish package to PyPI
-  #       uses: pypa/gh-action-pypi-publish@v1.4.1
-  #       if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags')
-  #       with:
-  #         user: __token__
-  #         password: ${{ secrets.TWINE_PASSWORD }}
-  #         skip_existing: true
-  #         packages_dir: wheelhouse/
+      - name: Update pip
+        run: pip install -U pip
+      - name: Build RelStorage
+        # An alternate way to do this is to run the container directly with a uses:
+        # and then the script runs inside it. That may work better with caching.
+        # See https://github.com/pyca/bcrypt/blob/f6b5ee2eda76d077c531362ac65e16f045cf1f29/.github/workflows/wheel-builder.yml
+        # The 2010 image is the last one that comes with Python 2.7.
+        env:
+          DOCKER_IMAGE: quay.io/pypa/manylinux2010_x86_64
+        run: scripts/releases/make-manylinux
+      - name: Upload RelStorage wheels
+        uses: actions/upload-artifact@v2
+        with:
+          path: wheelhouse/*whl
+          name: manylinux_x86_64_wheels.zip
+      - name: Restore pip cache permissions
+        run: sudo chown -R $(whoami) ${{ steps.pip-cache.outputs.dir }}
+      - name: Publish package to PyPI
+        uses: pypa/gh-action-pypi-publish@v1.4.1
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags')
+        with:
+          user: __token__
+          password: ${{ secrets.TWINE_PASSWORD }}
+          skip_existing: true
+          packages_dir: wheelhouse/
 
 # TODO:
 # * Use YAML syntax to share snippets, like the old .travis.yml did
