@@ -1,3 +1,7 @@
+====================
+ Readme For Include
+====================
+
 This is a partial copy of boost 1.71.0.
 
 The "intrusive" directory was copied in its entirety, even though, at
@@ -16,3 +20,14 @@ catch everything. In particular, it misses
 ``boost/config/pragma_message.hpp`` and
 ``boost/config/stdlib/dinkumware.hpp`` (yes, apparently that's the
 stdlib that `is shipped with Visual Studio <https://devblogs.microsoft.com/cppblog/c1114-stl-features-fixes-and-breaking-changes-in-vs-2013/>`_).
+
+1.75
+====
+
+In Feb 2020 this was updated to boost 1.75 in preparation for using
+boost::interprocess.
+
+A one liner to update from a boost distribution unpacked beside this
+boost/ directory::
+
+    for i in  `find . -type f`; do gcp -f ../boost_1_75_0/boost/${i:2} $i; done
