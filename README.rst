@@ -62,9 +62,9 @@ currently supported. RelStorage replaced the PGStorage project.
 * Supports `zodburi`_ .
 * Free, open source (ZPL 2.1)
 
-.. _gevent: http://gevent.org_
-.. _zodbconvert: https://relstorage.readthedocs.io/en/latest/zodbconvert.html_
-.. _zodbpack: https://relstorage.readthedocs.io/en/latest/zodbpack.html_
+.. _gevent: http://gevent.org
+.. _zodbconvert: https://relstorage.readthedocs.io/en/latest/zodbconvert.html
+.. _zodbpack: https://relstorage.readthedocs.io/en/latest/zodbpack.html
 .. _zodburi: https://relstorage.readthedocs.io/en/latest/zodburi.html
 
 Features Supported by Databases
