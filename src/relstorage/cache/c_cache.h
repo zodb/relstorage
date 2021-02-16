@@ -136,7 +136,7 @@ namespace cache {
     template <class T>
     struct PythonAllocator : public std::allocator<T> {
         // As a reminder: the `delete` expression first executes
-        // the descrutors, and then it calls the static ``operator delete``
+        // the destructors, and then it calls the static ``operator delete``
         // on the type to release the storage. That's what our dispose()
         // mimics.
         PythonAllocator(const PythonAllocator& other)
@@ -185,7 +185,7 @@ namespace cache {
     class _StateOperations {
     public:
         // We don't provide any declarations here for earlier
-        // cerognition of issues.
+        // recognition of issues.
         /** Return a StoredType that you now own (e.g., increment ref count) */
         //static const StoredType as_state(PyObject*const & p);
         /** Return a PyObject* that you now own. */

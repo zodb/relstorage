@@ -488,7 +488,7 @@ class LocalClient(object):
         del keys_and_values # For memory reporting.
         mem_usage_after = get_memory_usage()
         logger.info(
-            "Examined %d and stored %d items from %s in %s using %s. "
+            "Bulk update of empty cache: Examined %d and stored %d items from %s in %s using %s. "
             "(%s local) (%s)",
             log_count, stored, getattr(source, 'name', source),
             then - now,
@@ -619,7 +619,7 @@ class LocalClient(object):
 
         removed_entry_count = matching_tid_count
         logger.info(
-            "Examined %d entries and rejected %d "
+            "Storing persistent cache: Examined %d entries and rejected %d "
             "(already in db: %d) in %s",
             all_entries_len, removed_entry_count,
             matching_tid_count,
