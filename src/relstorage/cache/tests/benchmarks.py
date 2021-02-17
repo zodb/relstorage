@@ -293,9 +293,9 @@ def local_benchmark(runner):
             for oid, (state, tid) in all_data:
                 client[(oid, tid)] = (state, tid)
             duration += perf_counter() - begin
-            all_data = None
             report(client, duration, extra=" (Loop " + str(loop) + ") ")
 
+        all_data = None
         report(init_client, duration, extra=" (Final ) ")
         return duration
 
@@ -321,20 +321,26 @@ def local_benchmark(runner):
         report(init_client, duration, extra=" (Final ) ")
         return duration
 
-    def read(loops):
+    def read(loops, client_and_keys=None):
         # This is basically the worst-case scenario for a basic
         # segmented LRU: A repeating sequential scan, where no new
         # keys are added and all existing keys fit in the two parts of the
         # cache. Thus, entries just keep bouncing back and forth between
         # probation and protected. It so happens that this is our slowest
         # case.
-        client = makeOne(populate=True)
-        key_groups = _make_key_groups(KEY_GROUP_SIZE)
+        if client_and_keys is None:
+            client = makeOne(populate=True)
+            key_groups = _make_key_groups(KEY_GROUP_SIZE)
+        else:
+            client, key_groups = client_and_keys
+
         begin = perf_counter()
         duration = 0
 
         for _ in range(loops):
-            client = makeOne(populate=True)
+            if client_and_keys is None:
+                client = makeOne(populate=True)
+
             begin = perf_counter()
             for keys in key_groups:
                 for oid in keys:
@@ -346,7 +352,7 @@ def local_benchmark(runner):
                         continue
                     assert res[0] == random_data
             duration += (perf_counter() - begin)
-        print("Hit ratio: ", client.stats()['ratio'])
+        # print("Hit ratio: ", client.stats()['ratio'])
 
         duration = perf_counter() - begin
         key_groups = None
@@ -359,12 +365,41 @@ def local_benchmark(runner):
         # print("Probation demotes", client._bucket0._probation.demote_count)
         # print("Probation removes", client._bucket0._probation.remove_count)
 
-    def mixed(loops):
-        key_groups = _make_key_groups(KEY_GROUP_SIZE)
-        duration = 0
-        hot_keys = key_groups[0]
+    def _do_contended(loops, func):
+        import threading
+        THREAD_COUNT = 5
 
         client = makeOne(populate=True)
+        key_groups = _make_key_groups(KEY_GROUP_SIZE)
+
+        class Thread(threading.Thread):
+            duration = None
+            def run(self):
+                self.duration = func(loops, (client, key_groups))
+
+        threads = [Thread() for _ in range(THREAD_COUNT)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        # This means the number isn't directly comparable to `read`,
+        # but gets better stddev?
+        return sum(t.duration for t in threads)
+
+    def read_contended(loops):
+        return _do_contended(loops, read)
+
+    def mixed(loops, client_and_keys=None):
+        if client_and_keys is None:
+            key_groups = _make_key_groups(KEY_GROUP_SIZE)
+            client = makeOne(populate=True)
+        else:
+            client, key_groups = client_and_keys
+
+        hot_keys = key_groups[0]
+
+        duration = 0
         i = 0
         miss_count = 0
 
@@ -388,6 +423,10 @@ def local_benchmark(runner):
 
         report(client, duration, extra="(Final)")
         return duration
+
+    def mixed_contended(loops):
+        return _do_contended(loops, mixed)
+
     # def mixed_for_stats():
     #     # This is a trivial function that simulates the way
     #     # new keys can come in over time as we reset our checkpoints.
@@ -406,7 +445,7 @@ def local_benchmark(runner):
     #     print("Hit ratio", client.stats()['ratio'])
 
     groups = {}
-    for name in ('CFFI',):
+    for name in ('',):
         benchmarks = run_and_report_funcs(
             runner,
             (
@@ -415,7 +454,9 @@ def local_benchmark(runner):
                 (name + ' pop_ne', populate_not_equal),
                 (name + ' epop', populate_empty),
                 (name + ' read', read),
+                (name + ' read_cont', read_contended),
                 (name + ' mix ', mixed),
+                (name + ' mix_cont ', mixed_contended),
             ))
         group = {
             k[len(name) + 1:]: v for k, v in benchmarks.items()
