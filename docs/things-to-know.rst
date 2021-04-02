@@ -166,3 +166,9 @@ You can also use the ``multi-zodb-gc`` script provided by the
 ``zc.zodbdgc`` project to pack a RelStorage. It does not store this
 persistent data, but it may be substantially slower than the native
 packing capabilities, especially on large databases.
+
+Use ``readCurrent(ob)`` Judiciously
+===================================
+
+At least on PostgreSQL, this involves disk I/O. See
+:doc:`postgresql/index` for more.

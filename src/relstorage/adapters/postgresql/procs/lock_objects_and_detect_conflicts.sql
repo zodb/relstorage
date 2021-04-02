@@ -35,6 +35,11 @@ BEGIN
     -- query, even if we use that keyword, and I don't know if the
     -- keyword alone would be enough to fool it (the plan doesn't
     -- change on 11 when we use the keyword)).
+
+    -- XXX: SELECT FOR SHARE does disk I/O! This can become expensive
+    -- and possibly lead to database issues.
+    -- See https://buttondown.email/nelhage/archive/22ab771c-25b4-4cd9-b316-31a86f737acc
+    -- We document this in docs/postgresql/index.rst
     RETURN QUERY
       WITH locked AS (
         SELECT {CURRENT_OBJECT}.zoid, {CURRENT_OBJECT}.tid, t.tid AS desired
