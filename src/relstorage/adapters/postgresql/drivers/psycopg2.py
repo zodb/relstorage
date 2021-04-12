@@ -94,7 +94,7 @@ class Psycopg2Driver(MemoryViewBlobDriverMixin,
     def _get_extension_module(self):
         # Subclasses should override this method if they use a different
         # DB-API module.
-        from psycopg2 import extensions # pylint:disable=no-name-in-module
+        from psycopg2 import extensions # pylint:disable=no-name-in-module,import-error
         return extensions
 
     _WANT_WAIT_CALLBACK = False

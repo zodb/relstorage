@@ -11,6 +11,9 @@
 - RelStorage is now tested with PostgreSQL 13.1. See :issue:`427`.
 - RelStorage is now tested with PyMySQL 1.0. See :issue:`434`.
 - Update the bundled boost C++ library from 1.71 to 1.75.
+- Improve the way store connections are managed to make it less likely
+  a "stale" store connection that hasn't actually been checked for
+  liveness gets used.
 
 3.4.0 (2020-10-19)
 ==================

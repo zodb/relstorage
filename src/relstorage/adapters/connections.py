@@ -357,8 +357,9 @@ class StoreConnectionPool(object):
 
     def __init__(self, connmanager):
         import threading
-        self._lock = threading.Lock()
+        self._lock = threading.Lock() # Not RLock, cheaper that way
         self._connmanager = connmanager
+        # LIFO of connections: Next to use is at the right end.
         self._connections = []
         self._count = 1
         self._factory = StoreConnection
@@ -442,7 +443,10 @@ class StoreConnectionPool(object):
         else:
             connection.exit_critical_phase()
             with self._lock:
-                self._connections.append(connection)
+                if  connection.connection is not None:
+                    # If it's been dropped, don't add it; better just start
+                    # fresh.
+                    self._connections.append(connection)
                 self._shrink()
 
     def _shrink(self):
@@ -454,7 +458,17 @@ class StoreConnectionPool(object):
         keep_connections = min(self._count, self.MAX_STORE_CONNECTIONS_IN_POOL or self._count)
 
         while len(self._connections) > keep_connections and self._connections:
-            conn = self._connections.pop()
+            # Pop off the oldest connection to eliminate.
+            #
+            # Because of the MVCC protocol, we will have an instance
+            # of this class for the "root" object associated with the
+            # ZODB.DB, that is usually never actually used in a
+            # transaction, plus one for every extent ZODB
+            # Connection/RelStorage instance. That first index might be a very old
+            # connection indeed, and could continue to exist even if all
+            # ZODB Connection objects have been closed. To mitigate the risk of that
+            # causing a problem, remove starting with the oldest.
+            conn = self._connections.pop(0)
             conn.drop() # TODO: This could potentially be slow? Might
                         # want to do this outside the lock.
             conn.connmanager = None # It can't be opened again.
@@ -477,6 +491,7 @@ class StoreConnectionPool(object):
     @property
     def instance_count(self):
         return self._count
+
 
 class ClosedConnectionPool(object):
 
