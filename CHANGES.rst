@@ -2,7 +2,7 @@
  Changes
 =========
 
-3.4.1 (unreleased)
+3.4.1 (2021-04-12)
 ==================
 
 - RelStorage has moved from Travis CI to `GitHub Actions
