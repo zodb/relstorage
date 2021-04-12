@@ -126,8 +126,8 @@ class SharedTPCState(object):
                     store_connection,
                     self.prepared_txn)
 
-                if force:
-                    store_connection.drop()
+            if force:
+                store_connection.drop()
         finally:
             storage._store_connection_pool.replace(store_connection)
         return _CLOSED_CONNECTION

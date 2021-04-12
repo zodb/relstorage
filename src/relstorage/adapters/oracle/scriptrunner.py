@@ -175,7 +175,7 @@ class CXOracleScriptRunner(OracleScriptRunner):
             try:
                 cursor.execute(stmt + ' ', args)
                 rows = [
-                    tuple([self._read_lob(x) for x in row])
+                    tuple(self._read_lob(x) for x in row)
                     for row in cursor
                 ]
             finally:

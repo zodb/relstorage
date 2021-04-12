@@ -3,10 +3,11 @@ description: Configure ccache and CFLAGS
 runs:
   using: "composite"
   steps:
-    - name: Install ccache, configure CFLAGS
+    - name: Install ccache, configure CFLAGS, update brew
       shell: bash
       run: |
         if [ "`uname`" = "Darwin" ]; then
+          brew update
           brew install ccache
           echo CFLAGS=$CFLAGS -Wno-parentheses-equality -Wno-constant-logical-operand >> $GITHUB_ENV
           echo CXXFLAGS=$CXXFLAGS -Wno-parentheses-equality -Wno-constant-logical-operand >> $GITHUB_ENV

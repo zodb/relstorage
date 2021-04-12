@@ -296,14 +296,18 @@ class MockOptions(Options):
 class MockConnectionManager(object):
 
     isolation_load = 'SERIALIZABLE'
+    clean_rollback = None
 
-    def __init__(self, driver=None):
+    def __init__(self, driver=None, clean_rollback=None):
         if driver is None:
             self.driver = MockDriver()
+        if clean_rollback is not None:
+            self.clean_rollback = clean_rollback
 
     def rollback_quietly(self, conn, cursor): # pylint:disable=unused-argument
         if hasattr(conn, 'rollback'):
             conn.rollback()
+        return self.clean_rollback
 
     rollback_store_quietly = rollback_quietly
 

@@ -173,3 +173,33 @@ class TestStoreConnectionPool(TestCase):
             raise MyBeginException
 
         check(factory, MyBeginException)
+
+    def test_shrinking_removes_at_beginning(self):
+        connmanager = MockConnectionManager(clean_rollback=True)
+        connmanager.begin = lambda *_args: None
+
+        pool = StoreConnectionPool(connmanager)
+
+        borrowed = [pool.new_instance().borrow() for _ in range(10)]
+
+        for c in borrowed:
+            pool.replace(c)
+
+        self.assertEqual(borrowed, pool._connections)
+
+        pool.MAX_STORE_CONNECTIONS_IN_POOL = 5
+        remaining = pool._connections[5:]
+        pool._shrink()
+        self.assertEqual(remaining, pool._connections)
+
+    def test_returning_dropped_does_not_add_to_pool(self):
+        connmanager = MockConnectionManager(clean_rollback=True)
+        connmanager.begin = lambda *_args: None
+
+        pool = StoreConnectionPool(connmanager)
+        conn = pool.borrow()
+        assert conn.connection is not None
+        conn.drop()
+        assert conn.connection is None
+        pool.replace(conn)
+        self.assertEqual(0, pool.pooled_connection_count)
