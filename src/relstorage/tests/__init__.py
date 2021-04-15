@@ -14,6 +14,7 @@ from ZODB.tests.util import clear_transaction_syncs
 from relstorage._compat import ABC
 from relstorage.options import Options
 from relstorage.adapters.sql import DefaultDialect
+from relstorage.adapters.interfaces import ReplicaClosedException
 
 try:
     from unittest import mock as _mock
@@ -297,12 +298,14 @@ class MockConnectionManager(object):
 
     isolation_load = 'SERIALIZABLE'
     clean_rollback = None
+    _ignored_exceptions = (ReplicaClosedException,)
 
     def __init__(self, driver=None, clean_rollback=None):
         if driver is None:
             self.driver = MockDriver()
         if clean_rollback is not None:
             self.clean_rollback = clean_rollback
+        self._ignored_exceptions = (ReplicaClosedException,) + self.driver.disconnected_exceptions
 
     def rollback_quietly(self, conn, cursor): # pylint:disable=unused-argument
         if hasattr(conn, 'rollback'):
@@ -407,7 +410,8 @@ class MockDriver(object):
         conn.rollback()
 
     def synchronize_cursor_for_rollback(self, cursor):
-        cursor.fetchall()
+        if cursor is not None:
+            cursor.fetchall()
 
 class MockObjectMover(object):
     def __init__(self):

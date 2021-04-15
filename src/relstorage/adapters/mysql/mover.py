@@ -48,7 +48,6 @@ class MySQLObjectMover(AbstractObjectMover):
             #
             # It's possible that the DDL lock that TRUNCATE takes can be a bottleneck
             # in some places, though?
-
             self.driver.callproc_no_result(
                 cursor,
                 "clean_temp_state(false)"

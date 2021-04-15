@@ -80,8 +80,8 @@ class Sqlite3ObjectMover(AbstractObjectMover):
         # connection is usually meant to be in auto-commit mode and shouldn't take
         # exclusive locks until tpc_vote time. Prior to Python 3.6, if we were
         # in a transaction this would commit it. but we shouldn't be in a transaction.
-        assert not cursor.connection.in_transaction
         if not restart:
+            assert not cursor.connection.in_transaction, cursor
             Sqlite3ScriptRunner().run_script(cursor, self.__on_store_opened_script)
             assert not cursor.connection.in_transaction
             cursor.connection.register_before_commit_cleanup(self._before_commit)
