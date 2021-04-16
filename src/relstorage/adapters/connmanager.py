@@ -86,6 +86,7 @@ class AbstractConnectionManager(object):
     # take this as the union of the driver's close exceptions and disconnected
     # exceptions (drivers aren't required to organize them to overlap, but
     # in practice they should.)
+    # TODO: Promote to public, connections.py is using this.
     _ignored_exceptions = ()
 
     # Subclasses should set these to get semantics as close

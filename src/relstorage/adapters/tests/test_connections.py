@@ -27,13 +27,14 @@ class TestConnectionCommon(TestCase):
     iface = IManagedStoreConnection
 
     def _makeArgument(self):
-        return MockConnectionManager()
+        return MockConnectionManager(clean_rollback=False)
 
     def _makeOne(self):
         return self.klass(self._makeArgument())
 
     def test_provides(self):
         assert_that(self._makeOne(), validly_provides(self.iface))
+
 
 class TestConnection(TestConnectionCommon):
 
@@ -203,3 +204,96 @@ class TestStoreConnectionPool(TestCase):
         assert conn.connection is None
         pool.replace(conn)
         self.assertEqual(0, pool.pooled_connection_count)
+
+    def _makeSemiConnManager(self):
+        """
+        Return a real conn manager, with minimal mocking.
+        """
+        from ..connmanager import AbstractConnectionManager
+        from relstorage.tests import MockOptions
+        from relstorage.tests import MockDriver
+        from relstorage.tests import MockConnection
+
+        class ConnManager(AbstractConnectionManager):
+            def __init__(self, options=None, driver=None):
+                super(ConnManager, self).__init__(options or MockOptions(),
+                                                  driver or MockDriver())
+
+                self.begin_count = 0
+                self.restart_count = 0
+
+            def restart_store(self, *_args, **_kwargs):
+                self.restart_count += 1
+                super(ConnManager, self).restart_store(*_args, **_kwargs)
+
+            def begin(self, conn, cursor):
+                self.begin_count += 1
+                super(ConnManager, self).begin(conn, cursor)
+
+            def open(self, *_args, **_kwargs):
+                conn = MockConnection()
+                return conn, conn.cursor()
+
+            def _do_open_for_load(self, *_args, **_kwargs):
+                raise NotImplementedError
+        return ConnManager
+
+    def test_borrow_calls_on_opened_restart(self):
+        on_opened_count = []
+        def do_on_store_opened(_cursor, restart=None):
+            on_opened_count.append(restart)
+
+        connmanager = self._makeSemiConnManager()()
+        connmanager.add_on_store_opened(do_on_store_opened)
+
+        pool = StoreConnectionPool(connmanager)
+
+        # restart isn't called to borrow the connection
+        store_conn = pool.borrow()
+        self.assertEqual(1, connmanager.begin_count)
+        self.assertEqual(0, connmanager.restart_count)
+        # nor to open it,
+        store_conn.open_if_needed()
+        # nor to get the cursor, making it active.
+        getattr(store_conn, 'cursor')
+        self.assertTrue(store_conn)
+        self.assertTrue(store_conn.active)
+        self.assertEqual(1, connmanager.begin_count)
+        self.assertEqual(0, connmanager.restart_count)
+        self.assertEqual(on_opened_count, [False])
+
+        pool.replace(store_conn)
+        self.assertFalse(store_conn)
+        self.assertFalse(store_conn.active)
+
+        # Begin is called on borrowing,
+        # and so is restart
+        store_conn2 = pool.borrow()
+        self.assertIs(store_conn, store_conn2)
+        self.assertEqual(2, connmanager.begin_count)
+        self.assertEqual(1, connmanager.restart_count)
+        self.assertEqual(on_opened_count, [False, True])
+
+    def test_restart_handles_replica_closed(self):
+        class MockReplicaSelector(object):
+            def current(self):
+                return 1
+
+        connmanager = self._makeSemiConnManager()()
+        assert hasattr(connmanager, 'replica_selector')
+        connmanager.replica_selector = MockReplicaSelector()
+        pool = StoreConnectionPool(connmanager)
+
+        store_conn = pool.borrow()
+        orig_raw_conn = store_conn.connection
+
+        store_conn.open_if_needed()
+        getattr(store_conn, 'cursor')
+        pool.replace(store_conn)
+
+        store_conn2 = pool.borrow()
+        # Same object,
+        self.assertIs(store_conn, store_conn2)
+        del store_conn
+        # But different internals
+        self.assertIsNot(store_conn2.connection, orig_raw_conn)

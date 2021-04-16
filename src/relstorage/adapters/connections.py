@@ -53,6 +53,8 @@ class AbstractManagedConnection(object):
         self._new_connection = getattr(connmanager, self._NEW_CONNECTION_NAME)
         self._restart = getattr(connmanager, self._RESTART_NAME)
         self._rollback = getattr(connmanager, self._ROLLBACK_NAME)
+        # TODO: connmanager has this private, promote to public.
+        self._closed_exceptions = connmanager._ignored_exceptions
 
     # Hook functions
     on_opened = staticmethod(lambda conn, cursor: None)
@@ -131,13 +133,18 @@ class AbstractManagedConnection(object):
         cur = self._cursor
         self.__dict__.pop('cursor', None) # force on_first_use to be called.
         clean_rollback = self._rollback(conn, cur)
+        assert clean_rollback is not None
         if not clean_rollback:
             self.drop()
+            assert self.connection is None and self._cursor is None
 
         self.on_rolledback(self.connection, self._cursor)
         return clean_rollback
 
     def open_if_needed(self):
+        # XXX: This bypasses putting _cursor into self.__dict__
+        # as cursor, so that this object appears true.
+        # That's a bit surprising. Should it be this way?
         if self.connection is None or self._cursor is None:
             self.drop()
             self._open_connection()
@@ -161,25 +168,25 @@ class AbstractManagedConnection(object):
     def restart(self):
         """
         Restart the connection if there is any chance that it has any associated state.
+
+        If the connection has been disconnected, this may drop it.
         """
-        if not self:
-            assert not self.active, self.__dict__
-            if self.connection is not None: # But we have no cursor We
-                # do this so that if the connection has closed itself
-                # (or been closed by a unit test) we can detect that
-                # and restart automatically. We only actually do
-                # anything there for store connections.
-                self._restart_connection()
-            return
+        try:
+            if not self:
+                assert not self.active, self.__dict__
+                if self.connection is not None: # But we have no cursor
+                    # We do this so that if the connection has closed
+                    # itself (or been closed by a unit test) we can detect
+                    # that and restart automatically. We only actually do
+                    # anything there for store connections.
+                    self._restart_connection()
+                return
 
-        # If we've never accessed the cursor, we shouldn't have any
-        # state to restart.
-        if not self.active and 'cursor' not in self.__dict__:
-            return
-
-        self.active = False
-        self.restart_and_call(self.__noop)
-
+            self.active = False
+            self.restart_and_call(self.__noop)
+        except self._closed_exceptions:
+            # Uh-oh, the thing we wanted went away.
+            self.drop()
 
     def restart_and_call(self, f, *args, **kw):
         """
@@ -239,7 +246,7 @@ class AbstractManagedConnection(object):
 
         try:
             return f(self.connection, self._cursor, fresh_connection, *args, **kwargs)
-        except self.connmanager.driver.disconnected_exceptions as e:
+        except self._closed_exceptions as e:
             # XXX: This feels like it's factored wrong.
             if not can_reconnect:
                 raise
@@ -303,7 +310,13 @@ class StoreConnection(AbstractManagedConnection):
         self.connmanager.begin(*self.open_if_needed())
 
     def _restart_connection(self):
-        self.rollback_quietly()
+        if self.rollback_quietly():
+            # If we failed to rollback, we dropped the connection,
+            # so there's no restarting.
+            self.connmanager.restart_store(self.connection,
+                                           self._cursor,
+                                           needs_rollback=False)
+
 
 class PrePackConnection(StoreConnection):
     __slots__ = ()

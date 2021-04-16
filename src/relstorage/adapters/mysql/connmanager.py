@@ -136,9 +136,12 @@ class MySQLdbConnectionManager(AbstractConnectionManager):
         # MySQL leaks state in temporary tables across
         # transactions, so if we don't drop the connection,
         # we need to clean up temp tables (if they exist!)
-        if self.rollback_quietly(conn, cur):
+        clean = self.rollback_quietly(conn, cur)
+        if clean:
             try:
                 cur.execute('CALL clean_temp_state(true)')
                 cur.fetchall()
             except self.driver.driver_module.Error:
                 log.debug("Failed to clean temp state; maybe not exists yet?")
+                # But we still consider it a clean rollback
+        return clean

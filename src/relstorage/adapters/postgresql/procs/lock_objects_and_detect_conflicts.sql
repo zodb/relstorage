@@ -40,7 +40,7 @@ BEGIN
     -- and possibly lead to database issues.
     -- See https://buttondown.email/nelhage/archive/22ab771c-25b4-4cd9-b316-31a86f737acc
     -- We document this in docs/postgresql/index.rst
-    RETURN QUERY
+    RETURN QUERY -- This just adds to the result table; a final bare ``RETURN`` actually ends execution
       WITH locked AS (
         SELECT {CURRENT_OBJECT}.zoid, {CURRENT_OBJECT}.tid, t.tid AS desired
         FROM {CURRENT_OBJECT}
@@ -59,7 +59,8 @@ BEGIN
 
   -- Unlike MySQL, we can simply do the SELECT (with PERFORM) for its
   -- side effects to lock the rows.
-  -- This one will block.
+  -- This one will block. (We set the PG configuration variable ``lock_timeout``
+  -- from the ``commit-lock-timeout`` configuration variable to determine how long.)
 
   -- A note on the query: PostgreSQL will typcially choose a
   -- sequential scan on the temp_store table and do a nested loop join

@@ -5,7 +5,8 @@
 3.4.2 (unreleased)
 ==================
 
-- Nothing changed yet.
+- Fix write replica selection after a disconnect, and generally
+  further improve handling of unexpectedly closed store connections.
 
 
 3.4.1 (2021-04-12)
